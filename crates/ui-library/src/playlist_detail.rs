@@ -540,18 +540,15 @@ impl CatalogUi {
                 position,
             );
         });
-        let showcase = collection_detail_showcase(
-            self,
-            CollectionDetailShowcase {
-                view: showcase_view.clone(),
-                initial_width: width,
-                compact_spacing: 20,
-                wide_spacing: 28,
-                cover: cover.clone(),
-                cover_controls: controls,
-                context_menu: Some(context_menu),
-            },
-        );
+        let showcase = collection_detail_showcase(CollectionDetailShowcase {
+            view: showcase_view.clone(),
+            initial_width: width,
+            compact_spacing: 20,
+            wide_spacing: 28,
+            cover: cover.clone(),
+            cover_controls: controls,
+            context_menu: Some(context_menu),
+        });
         wrapper.append(&library_route_inset(showcase));
         wrapper.append(&tracks_widget);
 

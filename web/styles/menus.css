@@ -1,4 +1,5 @@
-#track-menu {
+#track-menu,
+.media-menu {
   position: fixed;
   inset: auto;
   margin: 0;
@@ -88,4 +89,17 @@
 
 #track-menu {
   background: var(--popover, var(--sidebar));
+}
+
+.media-menu,
+html:not(.enhanced) #track-menu {
+  inset: auto;
+  margin: 4px;
+  width: max-content;
+  height: max-content;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+  position-area: bottom span-left;
+  position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
 }

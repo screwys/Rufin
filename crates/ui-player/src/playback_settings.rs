@@ -1,4 +1,3 @@
-use crate::outputs::audio_output_dropdown;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
@@ -49,13 +48,17 @@ fn playback_settings_popover(
     ui_shared::objects!(builder, resource, {
         popover: gtk::Popover,
         settings_group: adw::PreferencesGroup,
-        output_row: adw::ActionRow,
         lyrics: adw::SwitchRow,
         visualizer: adw::SwitchRow,
+        audio_output: adw::ActionRow,
     });
     if !local_output {
         settings_group.set_description(Some(&tr("Audio processing is unavailable while casting")));
     }
+    let device = crate::outputs::audio_output_dropdown(shell, 180);
+    audio_output.add_suffix(&device);
+    audio_output.set_activatable_widget(Some(&device));
+    audio_output.set_sensitive(local_output);
     let crossfade_row = crossfade_duration_row(
         shell,
         playback.crossfade_seconds,
@@ -88,12 +91,6 @@ fn playback_settings_popover(
     let preserve_pitch = preserve_pitch_row(shell, playback.preserve_pitch);
     preserve_pitch.set_sensitive(local_output);
     settings_group.add(&preserve_pitch);
-
-    let output_dropdown = audio_output_dropdown(&shell, PLAYBACK_SETTINGS_SCALE_WIDTH);
-    output_row.add_suffix(&output_dropdown);
-    output_row.set_activatable_widget(Some(&output_dropdown));
-    output_row.set_sensitive(local_output);
-    settings_group.add(&output_row);
 
     let volume_scale_shell = Rc::clone(shell);
     let volume_scale_row = selection_row(

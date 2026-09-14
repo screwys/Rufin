@@ -79,7 +79,8 @@ pub fn primary_route_scroll_adjustment(root: &gtk::Widget) -> Option<gtk::Adjust
 
 pub fn route_boundary(view: gtk::Widget) -> gtk::Widget {
     let scroller = gtk::ScrolledWindow::new();
-    configure_fill_width_clip(&scroller, gtk::PolicyType::Never);
+    // Oversized route headers must scroll instead of raising the window's minimum height.
+    configure_fill_width_clip(&scroller, gtk::PolicyType::Automatic);
     scroller.set_propagate_natural_height(false);
     scroller.set_hexpand(true);
     scroller.set_vexpand(true);

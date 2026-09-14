@@ -1692,6 +1692,9 @@ msgstr ""
 msgid "Open release notes"
 msgstr ""
 
+msgid "Open settings"
+msgstr ""
+
 msgid "OpenSubsonic"
 msgstr ""
 
@@ -2498,6 +2501,9 @@ msgid "Source"
 msgstr ""
 
 msgid "Sources"
+msgstr ""
+
+msgid "Sponsor"
 msgstr ""
 
 msgid "Start minimized"

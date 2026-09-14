@@ -1,5 +1,4 @@
 import { messages } from "/translations.js";
-import { token } from "./connection.js";
 
 export function tr(message, values = {}) {
   let text = messages[message] || message;
@@ -102,7 +101,10 @@ function initDialogs() {
   }
 }
 
-let savedAppearance = { theme: "System", accent: "System", colors: {} };
+const initialAppearance = document.documentElement.dataset.appearance
+  ? JSON.parse(document.documentElement.dataset.appearance)
+  : { theme: "System", accent: "System", colors: {} };
+let savedAppearance = initialAppearance;
 
 function applyColors(colors) {
   if (!Object.keys(colors).length) return;
@@ -154,7 +156,6 @@ async function cover(node, uri, signal) {
     `/api/artwork?${new URLSearchParams(typeof uri === "string" ? { uri } : uri)}`,
     {
       signal,
-      headers: { Authorization: `Bearer ${token}` },
     },
   );
   if (!response.ok) return;
@@ -222,22 +223,26 @@ function initLayout() {
     resize(Number(divider.getAttribute("aria-valuenow")) + step);
   });
 
-  $("toggle-right").addEventListener("click", () => {
+  $("toggle-right").addEventListener("click", (event) => {
+    event.preventDefault();
     const hidden = $("app").classList.toggle("right-hidden");
     $("toggle-right").setAttribute("aria-expanded", String(!hidden));
     $("toggle-right").firstElementChild.dataset.icon = hidden
       ? "expand-right"
       : "collapse-right";
   });
-  $("close-right").addEventListener("click", () => {
+  $("close-right").addEventListener("click", (event) => {
+    event.preventDefault();
     $("app").classList.add("right-hidden");
     $("toggle-right").setAttribute("aria-expanded", "false");
     $("toggle-right").firstElementChild.dataset.icon = "expand-right";
   });
-  $("open-navigation").addEventListener("click", () => {
+  $("open-navigation").addEventListener("click", (event) => {
+    event.preventDefault();
     $("navigation").classList.add("open");
   });
-  $("close-navigation").addEventListener("click", () => {
+  $("close-navigation").addEventListener("click", (event) => {
+    event.preventDefault();
     $("navigation").classList.remove("open");
   });
   document.addEventListener("pointerdown", (event) => {
@@ -341,6 +346,7 @@ export {
   showFavorite,
   time,
   applyAppearance,
+  initialAppearance,
   applyColors,
   cover,
   coverGroup,

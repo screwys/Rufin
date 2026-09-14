@@ -7,11 +7,14 @@
     <property name="developer-name">screwy</property>
     <property name="developers">screwy &lt;screwygit@proton.me&gt;</property>
     <property name="website">https://github.com/screwys/Rufin</property>
-    <property name="support-url">https://github.com/sponsors/screwys</property>
     <property name="issue-url">https://github.com/screwys/Rufin/issues</property>
     <property name="copyright">© 2026 screwy</property>
     <property name="license-type">custom</property>
     <property name="license">This application comes with absolutely no warranty and is licensed under GNU General Public Licence, version 3 or later.</property>
     <property name="comments" translatable="yes">Thank you for trying out Rufin! If you have problems or suggestions, please open an issue in Github.</property>
+  </object>
+  <object class="GtkLinkButton" id="sponsor">
+    <property name="label" translatable="yes">Sponsor</property>
+    <property name="uri">https://github.com/sponsors/screwys</property>
   </object>
 </interface>

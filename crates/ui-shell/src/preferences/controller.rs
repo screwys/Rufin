@@ -13,22 +13,17 @@ pub(super) fn bind(
     resource: &str,
 ) {
     ui_shared::objects!(builder, resource, {
-        web_enabled: adw::SwitchRow,
         web_allow_remote: adw::SwitchRow,
         web_port: adw::SpinRow,
         web_regenerate: gtk::Button,
         web_copy_token: gtk::Button,
         web_copy_token_icon: gtk::Image,
-        web_copy_link: gtk::Button,
-        web_copy_link_icon: gtk::Image,
         web_status: adw::ActionRow,
-        web_open: gtk::Button,
     });
     let config = shell.settings.persistence.load().web_controller;
-    web_enabled.set_active(config.enabled);
     web_allow_remote.set_active(!config.address.is_loopback());
     web_port.set_value(f64::from(config.port));
-    let access_token = Rc::new(RefCell::new(String::new()));
+    let access_token = bind_controls(shell, page.upcast_ref(), builder, resource);
     let token = access_token.clone();
     let copy_token = copy_action(web_copy_token.upcast_ref(), &web_copy_token_icon);
     web_copy_token.connect_clicked(move |_| {
@@ -80,13 +75,6 @@ pub(super) fn bind(
 
     let weak = Rc::downgrade(shell);
     let status = web_status.downgrade();
-    web_enabled.connect_active_notify(move |row| {
-        if let (Some(shell), Some(status)) = (weak.upgrade(), status.upgrade()) {
-            save(&shell, &status, |config| config.enabled = row.is_active());
-        }
-    });
-    let weak = Rc::downgrade(shell);
-    let status = web_status.downgrade();
     web_allow_remote.connect_active_notify(move |row| {
         if let (Some(shell), Some(status)) = (weak.upgrade(), status.upgrade()) {
             save(&shell, &status, |config| {
@@ -106,7 +94,61 @@ pub(super) fn bind(
             save(&shell, &status, |config| config.port = row.value() as u16);
         }
     });
+}
 
+pub(crate) fn bind_popover(shell: &Rc<Shell>, button: &gtk::MenuButton) {
+    let weak = Rc::downgrade(shell);
+    button.set_create_popup_func(move |button| {
+        let Some(shell) = weak.upgrade() else {
+            return;
+        };
+        let resource = crate::ui_resource::CONTROLLER_POPOVER_RESOURCE;
+        let builder = ui_shared::ui_resource::builder(resource);
+        let popover: gtk::Popover = ui_shared::ui_resource::object(&builder, resource, "popover");
+        let open_settings: gtk::Button =
+            ui_shared::ui_resource::object(&builder, resource, "open_settings");
+        let weak = Rc::downgrade(&shell);
+        let popup = popover.downgrade();
+        open_settings.connect_clicked(move |_| {
+            if let Some(popover) = popup.upgrade() {
+                popover.popdown();
+            }
+            if let Some(shell) = weak.upgrade() {
+                super::present_preferences_dialog_with_page(
+                    &shell,
+                    super::PreferencesPageKind::Integrations,
+                    false,
+                    false,
+                );
+            }
+        });
+        bind_controls(&shell, popover.upcast_ref(), &builder, resource);
+        button.set_popover(Some(&popover));
+    });
+}
+
+fn bind_controls(
+    shell: &Rc<Shell>,
+    surface: &gtk::Widget,
+    builder: &gtk::Builder,
+    resource: &str,
+) -> Rc<RefCell<String>> {
+    ui_shared::objects!(builder, resource, {
+        web_enabled: adw::SwitchRow,
+        web_status: adw::ActionRow,
+        web_copy_link: gtk::Button,
+        web_copy_link_icon: gtk::Image,
+        web_open: gtk::Button,
+    });
+    web_enabled.set_active(shell.settings.persistence.load().web_controller.enabled);
+    let access_token = Rc::new(RefCell::new(String::new()));
+    let weak = Rc::downgrade(shell);
+    let status = web_status.downgrade();
+    web_enabled.connect_active_notify(move |row| {
+        if let (Some(shell), Some(status)) = (weak.upgrade(), status.upgrade()) {
+            save(&shell, &status, |config| config.enabled = row.is_active());
+        }
+    });
     bind_address_action(
         shell,
         &web_status,
@@ -135,10 +177,10 @@ pub(super) fn bind(
     let updates = shell.web_controller.status();
     let settings = shell.settings.persistence.clone();
     let status = web_status.downgrade();
-    let token = access_token;
+    let token = access_token.clone();
     let copy = web_copy_link.downgrade();
     let open = web_open.downgrade();
-    page.connect_map(move |_| {
+    surface.connect_map(move |_| {
         let (Some(status), Some(copy), Some(open)) =
             (status.upgrade(), copy.upgrade(), open.upgrade())
         else {
@@ -170,11 +212,12 @@ pub(super) fn bind(
             }
         }));
     });
-    page.connect_unmap(move |_| {
+    surface.connect_unmap(move |_| {
         if let Some(task) = task.borrow_mut().take() {
             task.abort();
         }
     });
+    access_token
 }
 
 fn bind_address_action(
@@ -186,7 +229,7 @@ fn bind_address_action(
     let weak = Rc::downgrade(shell);
     let status = status.downgrade();
     let action = Rc::new(action);
-    button.connect_clicked(move |_| {
+    button.connect_clicked(move |button| {
         let (Some(shell), Some(status)) = (weak.upgrade(), status.upgrade()) else {
             return;
         };
@@ -206,21 +249,64 @@ fn bind_address_action(
             action(&format!("http://{address}/#token={}", state.token));
             return;
         }
-        let resource = crate::ui_resource::INTEGRATIONS_RESOURCE;
+        let resource = crate::ui_resource::CONTROLLER_POPOVER_RESOURCE;
         let builder = ui_shared::ui_resource::builder(resource);
-        let dialog: adw::AlertDialog =
-            ui_shared::ui_resource::object(&builder, resource, "controller_addresses");
-        for address in addresses {
-            let address = address.to_string();
-            dialog.add_response(&address, &address);
-        }
-        let action = action.clone();
-        dialog.connect_response(None, move |_, address| {
-            if address != "cancel" {
-                action(&format!("http://{address}/#token={}", state.token));
-            }
+        let popover: gtk::Popover =
+            ui_shared::ui_resource::object(&builder, resource, "addresses_popover");
+        let list: gtk::Box = ui_shared::ui_resource::object(&builder, resource, "addresses");
+        popover.set_parent(button);
+        let dismiss = button.ancestor(gtk::Popover::static_type()).map(|parent| {
+            // Keep the Controller popover's grab while its address chooser is open.
+            popover.set_autohide(false);
+            let click = gtk::GestureClick::new();
+            click.set_button(0);
+            click.set_propagation_phase(gtk::PropagationPhase::Capture);
+            click.set_propagation_limit(gtk::PropagationLimit::SameNative);
+            let chooser = popover.downgrade();
+            click.connect_pressed(move |_, _, _, _| {
+                if let Some(chooser) = chooser.upgrade() {
+                    chooser.popdown();
+                }
+            });
+            parent.add_controller(click.clone());
+            (parent.downgrade(), click)
         });
-        ui_shared::popup::present_light_dismiss_dialog(&dialog, &shell.chrome.window);
+        for address in addresses {
+            let row = gtk::Button::with_label(&address.to_string());
+            row.add_css_class("flat");
+            let link = format!("http://{address}/#token={}", state.token);
+            let action = action.clone();
+            let weak_popover = popover.downgrade();
+            row.connect_clicked(move |_| {
+                action(&link);
+                if let Some(popover) = weak_popover.upgrade() {
+                    popover.popdown();
+                }
+            });
+            list.append(&row);
+        }
+        let handler = RefCell::new(Some(ui_shared::interactions::popdown_on_anchor_unmap(
+            button, &popover,
+        )));
+        let anchor = button.downgrade();
+        popover.connect_closed(move |popover| {
+            if let (Some(anchor), Some(handler)) = (anchor.upgrade(), handler.borrow_mut().take()) {
+                anchor.disconnect(handler);
+                if anchor.is_mapped() {
+                    anchor.grab_focus();
+                }
+            }
+            if let Some((parent, click)) = &dismiss
+                && let Some(parent) = parent.upgrade()
+            {
+                parent.remove_controller(click);
+            }
+            // GTK still uses the parent chain after emitting closed.
+            let popover = popover.clone();
+            gtk::glib::idle_add_local_once(move || popover.unparent());
+        });
+        popover.popup();
+        popover.child_focus(gtk::DirectionType::TabForward);
     });
 }
 

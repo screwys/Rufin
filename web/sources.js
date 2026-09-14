@@ -218,6 +218,7 @@ function sourceFields() {
 }
 
 function init() {
+  $("source-menu-button").removeAttribute("popovertarget");
   $("source-menu-button").addEventListener("click", () =>
     run(async () => {
       updateSources(await api("/sources"));

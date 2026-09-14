@@ -12,14 +12,6 @@
       <response id="regenerate" appearance="destructive" translatable="yes">Regenerate access token</response>
     </responses>
   </object>
-  <object class="AdwAlertDialog" id="controller_addresses">
-    <property name="heading" translatable="yes">Choose an address</property>
-    <property name="default-response">cancel</property>
-    <property name="close-response">cancel</property>
-    <responses>
-      <response id="cancel" translatable="yes">Cancel</response>
-    </responses>
-  </object>
 
   <object class="AdwPreferencesPage" id="integrations_page">
     <property name="title" translatable="yes">Integrations</property>

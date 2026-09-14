@@ -21,16 +21,17 @@
             <property name="margin-top">2</property><property name="margin-bottom">2</property>
             <property name="margin-start">2</property><property name="margin-end">2</property>
             <property name="width-request">400</property>
-            <child><object class="AdwPreferencesGroup" id="settings_group"/></child>
+            <child><object class="AdwPreferencesGroup" id="settings_group">
+              <child><object class="AdwActionRow" id="audio_output">
+                <property name="title" translatable="yes">Audio output</property>
+              </object></child>
+            </object></child>
           </object>
         </property>
       </object>
     </property>
   </object>
 
-  <object class="AdwActionRow" id="output_row">
-    <property name="title" translatable="yes">Audio output</property>
-  </object>
   <object class="AdwSwitchRow" id="lyrics">
     <property name="title" translatable="yes">Show lyrics</property>
   </object>

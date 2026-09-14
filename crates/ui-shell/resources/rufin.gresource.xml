@@ -5,7 +5,6 @@
   <gresource prefix="/io/github/screwys/Rufin/ui">
     <file alias="showcase.css" compressed="true">../../../data/showcase.css</file>
     <file compressed="true">application/about.ui</file>
-    <file compressed="true">application/windows_title.ui</file>
     <file compressed="true">player/random_play.ui</file>
     <file compressed="true">preferences/appearance.ui</file>
     <file compressed="true">preferences/dialog.ui</file>
@@ -34,6 +33,8 @@
     <file compressed="true">shell/diagnostics.ui</file>
     <file compressed="true">shell/content_chrome.ui</file>
     <file compressed="true">shell/navigation.ui</file>
+    <file compressed="true">shell/topbar.ui</file>
+    <file compressed="true">shell/controller.ui</file>
     <file compressed="true">shell/root.ui</file>
     <file compressed="true">shell/shortcuts.ui</file>
     <file compressed="true">style.css</file>

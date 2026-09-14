@@ -1757,6 +1757,11 @@ msgstr "Открыть на сервере"
 msgid "Open release notes"
 msgstr "Открыть примечания к выпуску"
 
+#, fuzzy
+#| msgid "App settings"
+msgid "Open settings"
+msgstr "Настройки приложения"
+
 msgid "OpenSubsonic"
 msgstr "OpenSubsonic"
 
@@ -2566,6 +2571,9 @@ msgstr "Источник"
 
 msgid "Sources"
 msgstr "Источники"
+
+msgid "Sponsor"
+msgstr ""
 
 msgid "Start minimized"
 msgstr "Запускать в свернутом виде"

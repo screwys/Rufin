@@ -226,15 +226,23 @@ pub(crate) fn application_window(
     title: &str,
     default_width: i32,
     default_height: i32,
-    content: &impl IsA<gtk::Widget>,
+    content: &gtk::Box,
+    header: &gtk::HeaderBar,
     preview: Option<WindowBarPreview>,
 ) -> gtk::ApplicationWindow {
     if let Some(platform) = platform_window_bar(preview) {
+        content.remove(header);
         let window = gtk_application_window(app, title, default_width, default_height, content);
-        install_platform_window_bar(&window, platform, preview.is_some());
+        header.set_use_native_controls(platform == WindowBarPreview::Macos && preview.is_none());
+        if preview.is_some() {
+            header.set_decoration_layout(Some(match platform {
+                WindowBarPreview::Macos => "close,minimize,maximize:",
+                WindowBarPreview::Windows => ":minimize,maximize,close",
+            }));
+        }
+        window.set_titlebar(Some(header));
         return window;
     }
-
     adw::ApplicationWindow::builder()
         .application(app)
         .title(title)
@@ -242,7 +250,7 @@ pub(crate) fn application_window(
         .default_height(default_height)
         .content(content)
         .build()
-        .upcast::<gtk::ApplicationWindow>()
+        .upcast()
 }
 
 pub(crate) fn platform_window_bar(preview: Option<WindowBarPreview>) -> Option<WindowBarPreview> {
@@ -279,85 +287,17 @@ fn gtk_application_window(
     window
 }
 
-fn install_platform_window_bar(
-    window: &gtk::ApplicationWindow,
-    platform: WindowBarPreview,
-    preview: bool,
-) {
-    let titlebar = gtk::HeaderBar::new();
-    titlebar.add_css_class("platform-window-bar");
-    titlebar.set_show_title_buttons(!preview || platform == WindowBarPreview::Windows);
-    titlebar.set_use_native_controls(platform == WindowBarPreview::Macos && !preview);
-    match platform {
-        WindowBarPreview::Macos => {
-            titlebar.set_title_widget(Some(&bound_window_title(
-                window,
-                "platform-window-bar-title",
-            )));
-            if preview {
-                titlebar.pack_start(&macos_preview_controls());
-            }
-        }
-        WindowBarPreview::Windows => {
-            titlebar.add_css_class("windows-window-bar");
-            let resource = crate::ui_resource::WINDOWS_TITLE_RESOURCE;
-            let builder = ui_shared::ui_resource::builder(resource);
-            ui_shared::objects!(builder, resource, {
-                title_placeholder: gtk::Box,
-                title_content: gtk::Box,
-                title: gtk::Label,
-            });
-            titlebar.set_title_widget(Some(&title_placeholder));
-            titlebar.pack_start(&title_content);
-            window
-                .bind_property("title", &title, "label")
-                .sync_create()
-                .build();
-            if preview {
-                titlebar.set_decoration_layout(Some(":minimize,maximize,close"));
-            }
-        }
-    }
-
-    window.set_titlebar(Some(&titlebar));
-}
-
-fn bound_window_title(window: &gtk::ApplicationWindow, css_class: &str) -> gtk::Label {
-    let title = gtk::Label::new(None);
-    title.add_css_class("heading");
-    title.add_css_class(css_class);
-    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    title.set_single_line_mode(true);
-    window
-        .bind_property("title", &title, "label")
-        .sync_create()
-        .build();
-    title
-}
-
-fn macos_preview_controls() -> gtk::Box {
-    let controls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    controls.add_css_class("macos-window-bar-preview-controls");
-    controls.set_valign(gtk::Align::Center);
-    for class in ["close", "minimize", "maximize"] {
-        let control = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        control.add_css_class("macos-window-bar-preview-control");
-        control.add_css_class(class);
-        control.set_size_request(12, 12);
-        control.set_halign(gtk::Align::Center);
-        control.set_valign(gtk::Align::Center);
-        controls.append(&control);
-    }
-    controls
-}
-
 fn present_startup_error(app: &adw::Application, error: &str, preview: Option<WindowBarPreview>) {
     let status = adw::StatusPage::builder()
         .icon_name(STABLE_APP_ID)
         .title(DISPLAY_NAME)
         .description(error)
         .build();
-    let window = application_window(app, DISPLAY_NAME, 480, 320, &status, preview);
+    let header = gtk::HeaderBar::new();
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    content.append(&header);
+    content.append(&status);
+    let window = application_window(app, DISPLAY_NAME, 480, 320, &content, &header, preview);
     present_window(&window);
 }
 

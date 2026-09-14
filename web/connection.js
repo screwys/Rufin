@@ -2,6 +2,7 @@ import { showQueue } from "./queue.js";
 import { tr } from "./ui.js";
 import {
   applyAppearance,
+  initialAppearance,
   applyColors,
   coverUrls,
   $,
@@ -9,7 +10,7 @@ import {
   run,
 } from "./ui.js";
 
-import { disposeHome, loadView, viewRequest } from "./library.js";
+import { disposeHome, loadView, restoreView, viewRequest } from "./library.js";
 
 import { closeMenus } from "./menus.js";
 
@@ -24,13 +25,34 @@ let token =
   "";
 
 let session = null;
+let initialPage = true;
+let leavingPage = false;
+let csrf = document.querySelector('meta[name="rufin-csrf"]').content;
+
+async function login() {
+  if (!token) return;
+  const response = await fetch("/session", {
+    method: "POST",
+    headers: { Accept: "application/json" },
+    body: new URLSearchParams({ token }),
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error);
+  csrf = result.csrf;
+  token = "";
+  sessionStorage.removeItem("rufin-token");
+}
+
+function browserHeaders() {
+  return { "X-Rufin-CSRF": csrf };
+}
 
 async function api(path, method = "GET", data, signal = session?.signal) {
   const response = await fetch(`/api${path}`, {
     method,
     signal,
     headers: {
-      Authorization: `Bearer ${token}`,
+      ...browserHeaders(),
       ...(data === undefined ? {} : { "Content-Type": "application/json" }),
     },
     body: data === undefined ? undefined : JSON.stringify(data),
@@ -109,20 +131,29 @@ function disconnect() {
 }
 
 async function connect() {
+  const rendered = initialPage && $("content").dataset.rendered === "true";
   session?.abort();
   session = new AbortController();
+  await login();
   const [configured, appearance] = await Promise.all([
     api("/sources"),
-    api("/appearance"),
+    rendered ? initialAppearance : api("/appearance"),
   ]);
   applyAppearance(appearance);
-  sessionStorage.setItem("rufin-token", token);
   $("token").value = "";
   $("login-error").textContent = "";
   $("login-dialog").close();
   $("app").inert = false;
   updateSources(configured);
-  await loadView();
+  if (initialPage) {
+    restoreView();
+    if (rendered) {
+      state.source = $("content").dataset.source;
+      state.selectedLibrary = $("content").dataset.folder || null;
+    }
+    initialPage = false;
+  }
+  await loadView(rendered);
   stream(
     "/events",
     (value) => {
@@ -144,7 +175,7 @@ async function stream(path, receive, signal) {
     try {
       const response = await fetch(`/api${path}`, {
         signal,
-        headers: { Authorization: `Bearer ${token}` },
+        headers: browserHeaders(),
       });
       if (response.status === 401) {
         disconnect();
@@ -153,6 +184,7 @@ async function stream(path, receive, signal) {
       if (response.status === 429)
         retryAfter = Number(response.headers.get("Retry-After")) * 1000 || 1500;
       if (!response.ok) throw new Error(tr("Could not receive live updates"));
+      leavingPage = false;
       if (interrupted) {
         state.randomSource = null;
         run(async () => {
@@ -183,7 +215,8 @@ async function stream(path, receive, signal) {
       interrupted = true;
     } catch (error) {
       if (signal.aborted) return;
-      if (!interrupted) notice(tr("Connection lost. Reconnecting..."));
+      if (!interrupted && !leavingPage)
+        notice(tr("Connection lost. Reconnecting..."));
       interrupted = true;
     }
     if (!signal.aborted)
@@ -200,11 +233,21 @@ async function stream(path, receive, signal) {
 }
 
 function init() {
+  // Firefox can reject the old stream before the replacement page is ready.
+  window.addEventListener("beforeunload", () => {
+    leavingPage = true;
+  });
+  window.addEventListener("pageshow", () => {
+    leavingPage = false;
+  });
+  document.addEventListener("submit", (event) => {
+    if (event.target.matches("[data-enhanced-form]")) event.preventDefault();
+  });
   htmx.config.allowEval = false;
   htmx.config.allowScriptTags = false;
   htmx.config.historyCacheSize = 0;
   document.addEventListener("htmx:configRequest", (event) => {
-    event.detail.headers.Authorization = `Bearer ${token}`;
+    Object.assign(event.detail.headers, browserHeaders());
   });
   document.addEventListener("htmx:responseError", (event) => {
     if (event.detail.xhr.status === 401) disconnect();
@@ -227,9 +270,22 @@ function init() {
     event.preventDefault(),
   );
   $("disconnect").addEventListener("click", () => {
-    if (confirm(tr("Disconnect from Rufin?"))) disconnect();
+    if (confirm(tr("Disconnect from Rufin?")))
+      run(async () => {
+        const response = await fetch("/session/logout", {
+          method: "POST",
+          body: new URLSearchParams({ csrf }),
+        });
+        if (!response.ok && response.status !== 401)
+          throw new Error(
+            tr("Request failed ({status})", { status: response.status }),
+          );
+        csrf = "";
+        disconnect();
+      });
   });
-  if (token)
+  $("login-dialog").close();
+  if (token || csrf)
     connect().catch((error) => {
       if (!session?.signal.aborted) {
         $("login-error").textContent = error.message;
@@ -237,6 +293,8 @@ function init() {
       }
     });
   else $("login-dialog").showModal();
+  document.documentElement.classList.add("enhanced");
+  $("app").hidden = false;
 }
 
 const state = {
@@ -248,4 +306,4 @@ const state = {
   randomSource: null,
 };
 
-export { init, api, fragment, session, token, state };
+export { init, api, fragment, session, state };

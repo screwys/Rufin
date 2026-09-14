@@ -148,6 +148,7 @@ impl RouteStack {
         &self.current
     }
 
+    #[cfg(test)]
     pub(crate) fn can_back(&self) -> bool {
         !self.back.is_empty()
     }

@@ -24,73 +24,46 @@ pub struct RightPanelParts {
     pub lyrics_host: gtk::Box,
 }
 
-pub fn build_right_panel(
-    end_window_controls: &impl IsA<gtk::Widget>,
-    visualizer_area: &gtk::DrawingArea,
-) -> RightPanelParts {
+pub fn build_right_panel(visualizer_area: &gtk::DrawingArea) -> RightPanelParts {
     let resource = crate::ui_resource::RIGHT_PANEL_RESOURCE;
     let builder = ui_shared::ui_resource::builder(resource);
     ui_shared::objects!(builder, resource, {
         queue_loading: adw::Spinner,
         root: gtk::Box,
         queue_lyrics_overlay: gtk::Overlay,
-        queue_layout: gtk::Box,
-        queue_fixed_top: gtk::Box,
+        queue_region: gtk::Overlay,
         queue_header_host: gtk::Box,
         queue_panel: gtk::Box,
         queue_search: gtk::SearchEntry,
         queue_clear_button: gtk::Button,
-        window_controls_host: gtk::Box,
         queue_lyrics_split: gtk::Paned,
         lyrics_surface: gtk::Box,
         media_overlay: gtk::Overlay,
         lyrics_host: gtk::Box,
     });
-    queue_layout.remove(&queue_fixed_top);
-    let queue_header = ui_shared::controls::window_drag_handle(&queue_fixed_top);
-    queue_header.set_valign(gtk::Align::Start);
-    window_controls_host.append(end_window_controls);
     media_overlay.add_overlay(visualizer_area);
     media_overlay.set_measure_overlay(visualizer_area, false);
     media_overlay.add_overlay(&lyrics_host);
     media_overlay.set_measure_overlay(&lyrics_host, false);
-    queue_lyrics_overlay.remove_overlay(&queue_panel);
-    queue_lyrics_overlay.add_overlay(&queue_panel);
-    queue_lyrics_overlay.set_measure_overlay(&queue_panel, false);
-    queue_lyrics_overlay.set_measure_overlay(&queue_lyrics_split, false);
-    queue_lyrics_overlay.add_overlay(&queue_header);
-    queue_lyrics_overlay.set_measure_overlay(&queue_header, true);
-    let positioned_queue = queue_panel.clone();
-    let positioned_top = queue_fixed_top.clone();
-    let positioned_split = queue_lyrics_split.clone();
+    let region = queue_region.clone();
+    let split = queue_lyrics_split.clone();
     queue_lyrics_overlay.connect_get_child_position(move |overlay, child| {
-        if child != positioned_queue.upcast_ref::<gtk::Widget>() {
+        if child != region.upcast_ref::<gtk::Widget>() {
             return None;
         }
-        let top = positioned_top.height().max(0);
-        let bottom = if positioned_split
-            .end_child()
-            .is_some_and(|child| child.is_visible())
-        {
-            positioned_split.position()
+        let height = if split.end_child().is_some_and(|child| child.is_visible()) {
+            split.position().clamp(0, overlay.height())
         } else {
             overlay.height()
         };
-        Some(gtk::gdk::Rectangle::new(
-            0,
-            top,
-            overlay.width().max(0),
-            bottom.saturating_sub(top).max(0),
-        ))
+        Some(gtk::gdk::Rectangle::new(0, 0, overlay.width(), height))
     });
-    let allocate_queue = queue_lyrics_overlay.downgrade();
+    let overlay = queue_lyrics_overlay.downgrade();
     queue_lyrics_split.connect_position_notify(move |_| {
-        if let Some(overlay) = allocate_queue.upgrade() {
+        if let Some(overlay) = overlay.upgrade() {
             overlay.queue_allocate();
         }
     });
-    root.append(&queue_lyrics_overlay);
-
     RightPanelParts {
         queue_loading,
         root,

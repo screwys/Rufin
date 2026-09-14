@@ -3,6 +3,7 @@ pub(crate) mod chrome;
 mod diagnostics;
 pub(crate) mod layout;
 pub(crate) mod navigation;
+mod topbar;
 use std::cell::Cell;
 use std::rc::Rc;
 

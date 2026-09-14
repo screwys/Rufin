@@ -22,8 +22,8 @@ use ui_shared::mounted_route::MountedRoute;
 use super::collections::library_route_inset;
 use super::detail_showcase::{
     DetailShowcaseView, MediaShowcase, album_external_links, detail_genre_pill_button,
-    detail_playback_controls, detail_radio_button, detail_showcase_frame_with_back,
-    fit_detail_text, media_cover_projection, media_showcase,
+    detail_playback_controls, detail_radio_button, detail_showcase_frame, fit_detail_text,
+    media_cover_projection, media_showcase,
 };
 use crate::release_kind::album_release_kind_label;
 use crate::route_layout::{
@@ -91,12 +91,7 @@ impl CatalogUi {
         );
         let showcase_view = DetailShowcaseView::new(
             "album-detail-showcase",
-            album
-                .object_id
-                .bytes()
-                .fold(2_166_136_261_u32, |hash, byte| {
-                    hash.wrapping_mul(16_777_619) ^ u32::from(byte)
-                }),
+            ui_shared::artwork::presentation::stable_seed(&album.object_id),
             album_release_kind_label(&album),
             true,
             &album.title,
@@ -191,17 +186,14 @@ impl CatalogUi {
             });
 
         showcase_view.replace_external_links(album_external_links(self, &album));
-        let showcase = detail_showcase_frame_with_back(
-            self,
-            media_showcase(MediaShowcase {
-                view: showcase_view.clone(),
-                initial_width: inner_content_width,
-                cover: cover.clone(),
-                cover_controls,
-                context_menu: Some(context_menu),
-                actions_min_cover_size: None,
-            }),
-        );
+        let showcase = detail_showcase_frame(media_showcase(MediaShowcase {
+            view: showcase_view.clone(),
+            initial_width: inner_content_width,
+            cover: cover.clone(),
+            cover_controls,
+            context_menu: Some(context_menu),
+            actions_min_cover_size: None,
+        }));
         wrapper.append(&library_route_inset(showcase));
         wrapper.append(&tracks_widget);
         let item_navigation = track_projection.item_navigation();
