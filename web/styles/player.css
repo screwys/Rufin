@@ -12,7 +12,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  padding: 17px 10px 12px;
+  padding: var(--pane-header-top) 10px 12px;
   flex-shrink: 0;
 }
 
@@ -445,7 +445,7 @@ button.lyric-line:hover {
 @media (max-width: 680px) {
   .player {
     --volume-width: min(195px, 45%);
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(184px, 1fr);
     grid-template-rows: 58px 22px;
     gap: 0 8px;
     padding: 8px;
@@ -464,10 +464,16 @@ button.lyric-line:hover {
     display: contents;
   }
   .transport-buttons {
+    display: flex;
     grid-column: 2;
     grid-row: 1;
     gap: 0;
   }
+  .transport-buttons .icon-button { width: 24px; }
+  .transport-buttons .play-button { width: 40px; height: 40px; }
+  .volume .icon-button { width: 24px; flex-shrink: 0; }
+  .player .without-js { padding: 3px 4px; font-size: 12px; }
+  html:not(.enhanced) .volume input { min-width: 18px; }
   .seek-row {
     grid-column: 1 / -1;
     grid-row: 2;
@@ -489,15 +495,26 @@ button.lyric-line:hover {
   .player {
     --volume-width: min(160px, 45%);
   }
-  #current-favorite {
-    display: none;
-  }
 }
 
 @media (max-width: 380px) {
   .player {
     --volume-width: min(151px, 45%);
   }
+}
+
+.player-title-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 2px;
+}
+.player-title-row strong { min-width: 0; }
+#player-menu {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  padding: 4px;
 }
 
 .player-track .metadata-link {

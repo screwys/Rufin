@@ -200,3 +200,7 @@
 .icon[data-icon="calendar"] {
   mask-image: url("/icons/rufin-x-office-calendar-symbolic.svg");
 }
+
+.icon[data-icon="player-more"] {
+  mask-image: url("/icons/rufin-player-more-symbolic.svg");
+}

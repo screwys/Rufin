@@ -10,7 +10,6 @@ use ui_shared::media_drag::{
     MediaDragPreviewBinding, MediaDragSource, media_drag_content_provider, media_drag_source,
 };
 
-use crate::preferences::source::selector::source_submenu;
 use rufin_core::playback::PlaybackTarget;
 use ui_shared::cover_controls::cover_play_only_hover_controls;
 use ui_shared::media_menus::{
@@ -27,8 +26,7 @@ use playback::QueuePlacement;
 use tracing::warn;
 use ui_shared::interactions::{
     CONTEXT_MENU_HOVER_HELD_CLASS, CONTEXT_MENU_HOVER_OWNER_CLASS, install_context_menu_openers,
-    keep_parent_grab_for_nested_native_menus, popdown_native_menu, replace_native_menu_checkmarks,
-    show_native_menu_icons,
+    replace_native_menu_checkmarks, show_native_menu_icons,
 };
 use ui_shared::library_fields::{playlist_artwork, smart_playlist_display_name};
 use ui_shared::route::{CollectionCategory, Route};
@@ -50,7 +48,6 @@ const COMPACT_RAIL_LABEL_WIDTH_CHARS: i32 = 8;
 const NAV_SELECTED_CLASS: &str = "selected";
 const SIDEBAR_PINS_HEADING_CLASS: &str = "sidebar-pins-heading";
 const SIDEBAR_SPACER_CLASS: &str = "sidebar-spacer";
-const LEFT_OPENING_PRIMARY_MENU_CLASS: &str = "left-opening-primary-menu";
 const SIDEBAR_PIN_ROW_CLASS: &str = "sidebar-pin-row";
 const SIDEBAR_PIN_PLAYING_CLASS: &str = "playing";
 const SIDEBAR_PIN_COVER_SIZE: i32 = 40;
@@ -78,27 +75,14 @@ impl NavigationState {
     }
 }
 
-pub(super) struct PrimaryMenuWidgets {
-    pub(super) button: gtk::Button,
-    pub(super) popover: RefCell<Option<gtk::PopoverMenu>>,
-}
-
-pub(super) struct NormalPrimaryMenuWidgets {
-    pub(super) button: gtk::MenuButton,
-    pub(super) popover: RefCell<Option<gtk::PopoverMenu>>,
-}
-
 pub(crate) struct NavigationWidgets {
+    pub(super) sidebar_modes: gtk::Stack,
     pub(super) split_view: adw::OverlaySplitView,
     pub(super) left_resize_handle: gtk::Box,
     pub(super) normal_nav_panel: gtk::Box,
-    pub(super) compact_nav_slot: gtk::Box,
-    pub(super) tiny_nav_button: gtk::Button,
     pub(super) normal_nav_routes: adw::Sidebar,
     pub(super) normal_nav_pins: gtk::Box,
     pub(super) compact_nav: gtk::Box,
-    pub(super) normal_main_menu: NormalPrimaryMenuWidgets,
-    pub(super) compact_main_menu: PrimaryMenuWidgets,
 }
 
 pub(super) fn build_normal_navigation(shell: &Rc<Shell>) {
@@ -122,11 +106,6 @@ pub(super) fn build_normal_navigation(shell: &Rc<Shell>) {
 }
 
 pub(super) fn build_compact_navigation(shell: &Rc<Shell>) {
-    primary_menu_button(
-        &shell.navigation_view.compact_main_menu.button,
-        &shell.navigation_view.compact_main_menu.popover,
-        shell,
-    );
     for entry in shell
         .settings
         .current
@@ -149,14 +128,7 @@ pub(super) fn rebuild_navigation(shell: &Rc<Shell>) {
     request_sidebar_pins(shell);
     shell.navigation_view.normal_nav_routes.remove_all();
     clear_box(&shell.navigation_view.normal_nav_pins);
-    while let Some(widget) = shell
-        .navigation_view
-        .compact_main_menu
-        .button
-        .next_sibling()
-    {
-        shell.navigation_view.compact_nav.remove(&widget);
-    }
+    clear_box(&shell.navigation_view.compact_nav);
     build_normal_navigation(shell);
     build_compact_navigation(shell);
     update_navigation_selection(shell.as_ref());
@@ -354,19 +326,6 @@ fn sidebar_pin_context_matches(pin_context_id: &str, playback_context_id: &str) 
         }
 }
 
-fn initialize_primary_menu_button(
-    button: &gtk::Button,
-    popover_slot: &RefCell<Option<gtk::PopoverMenu>>,
-    shell: &Rc<Shell>,
-) {
-    let existing = popover_slot.borrow().clone();
-    if let Some(popover) = existing.as_ref() {
-        refresh_primary_menu(popover, shell);
-    } else {
-        update_primary_menu_popover(button, popover_slot, primary_menu_popover(shell), shell);
-    }
-}
-
 fn clear_box(container: &gtk::Box) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
@@ -486,107 +445,22 @@ fn nav_button_icon(widget: &gtk::Widget) -> Option<gtk::Image> {
         .and_then(|child| child.downcast::<gtk::Image>().ok())
 }
 
-fn primary_menu_button(
-    button: &gtk::Button,
-    popover_slot: &RefCell<Option<gtk::PopoverMenu>>,
-    shell: &Rc<Shell>,
-) -> gtk::Button {
-    initialize_primary_menu_button(button, popover_slot, shell);
-    button.clone()
-}
-
-fn update_primary_menu_popover(
-    button: &gtk::Button,
-    popover_slot: &RefCell<Option<gtk::PopoverMenu>>,
-    popover: gtk::PopoverMenu,
-    shell: &Rc<Shell>,
-) {
-    *popover_slot.borrow_mut() = Some(popover.clone());
-    popover.set_parent(button);
-    let row_popover = popover.clone();
-    let row_shell = Rc::downgrade(shell);
-    button.connect_clicked(move |_| {
-        if let Some(shell) = row_shell.upgrade() {
-            refresh_primary_menu(&row_popover, &shell);
-            row_popover.popup();
+pub(super) fn install_primary_menu(button: &gtk::MenuButton, shell: &Rc<Shell>) {
+    let popover = primary_menu_popover(shell);
+    let weak = Rc::downgrade(shell);
+    popover.connect_map(move |popover| {
+        if let Some(shell) = weak.upgrade() {
+            refresh_primary_menu(popover, &shell);
         }
     });
-    ui_shared::interactions::popdown_on_anchor_unmap(button, &popover);
-}
-
-pub(super) fn normal_primary_menu_button(
-    button: &gtk::MenuButton,
-    popover_slot: &RefCell<Option<gtk::PopoverMenu>>,
-    shell: &Rc<Shell>,
-) -> gtk::MenuButton {
-    if popover_slot.borrow().is_none() {
-        let popover = primary_menu_popover(shell);
-        let row_shell = Rc::downgrade(shell);
-        popover.connect_map(move |popover| {
-            if let Some(shell) = row_shell.upgrade() {
-                refresh_primary_menu(popover, &shell);
-            }
-        });
-        button.set_popover(Some(&popover));
-        popover_slot.replace(Some(popover));
-    }
-    button.clone()
+    button.set_popover(Some(&popover));
 }
 
 pub(super) fn popup_primary_menu(shell: &Rc<Shell>) {
-    match shell.left_sidebar_mode() {
-        ResolvedLeftSidebarMode::Compact => popup_compact_primary_menu(shell),
-        _ => popup_normal_primary_menu(shell),
-    }
+    shell.chrome.topbar.menu.popup();
 }
-
-fn popup_compact_primary_menu(shell: &Rc<Shell>) {
-    if let Some(popover) = shell
-        .navigation_view
-        .compact_main_menu
-        .popover
-        .borrow()
-        .as_ref()
-    {
-        refresh_primary_menu(popover, shell);
-        popover.popup();
-    }
-}
-
-fn popup_normal_primary_menu(shell: &Rc<Shell>) {
-    if shell
-        .navigation_view
-        .normal_main_menu
-        .popover
-        .borrow()
-        .as_ref()
-        .is_some()
-    {
-        shell.navigation_view.normal_main_menu.button.popup();
-    }
-}
-
 pub(crate) fn popdown_primary_menu(shell: &Shell) {
-    if shell
-        .navigation_view
-        .normal_main_menu
-        .popover
-        .borrow()
-        .as_ref()
-        .is_some_and(gtk::prelude::WidgetExt::is_visible)
-    {
-        shell.navigation_view.normal_main_menu.button.popdown();
-    }
-    if let Some(popover) = shell
-        .navigation_view
-        .compact_main_menu
-        .popover
-        .borrow()
-        .as_ref()
-        && popover.is_visible()
-    {
-        popdown_native_menu(popover);
-    }
+    shell.chrome.topbar.menu.popdown();
 }
 
 fn refresh_primary_menu(popover: &gtk::PopoverMenu, shell: &Rc<Shell>) {
@@ -601,7 +475,7 @@ fn refresh_primary_menu(popover: &gtk::PopoverMenu, shell: &Rc<Shell>) {
 fn primary_menu_popover(shell: &Rc<Shell>) -> gtk::PopoverMenu {
     let menu = gio::Menu::new();
     replace_primary_menu_model(&menu, shell);
-    let popover = gtk::PopoverMenu::from_model_full(&menu, gtk::PopoverMenuFlags::NESTED);
+    let popover = gtk::PopoverMenu::from_model_full(&menu, gtk::PopoverMenuFlags::empty());
     popover.set_autohide(true);
     popover.set_position(gtk::PositionType::Bottom);
     popover.set_halign(gtk::Align::Start);
@@ -613,38 +487,10 @@ fn style_primary_menu(popover: &gtk::PopoverMenu) {
     popover.add_css_class(PRIMARY_MENU_CLASS);
     show_native_menu_icons(popover);
     replace_native_menu_checkmarks(popover);
-    keep_parent_grab_for_nested_native_menus(popover);
-    if popover.has_css_class(LEFT_OPENING_PRIMARY_MENU_CLASS) {
-        mirror_primary_menu_cascade(popover);
-    }
-}
-
-fn mirror_primary_menu_cascade(popover: &gtk::PopoverMenu) {
-    popover.set_halign(gtk::Align::End);
-    mirror_nested_primary_menus(popover.upcast_ref());
-}
-
-fn mirror_nested_primary_menus(widget: &gtk::Widget) {
-    let mut child = widget.first_child();
-    while let Some(current) = child {
-        child = current.next_sibling();
-        if let Some(submenu) = current.downcast_ref::<gtk::PopoverMenu>() {
-            submenu.add_css_class(LEFT_OPENING_PRIMARY_MENU_CLASS);
-            submenu.set_position(gtk::PositionType::Left);
-        }
-        mirror_nested_primary_menus(&current);
-    }
 }
 
 fn replace_primary_menu_model(menu: &gio::Menu, shell: &Rc<Shell>) {
     menu.remove_all();
-
-    let source = gio::Menu::new();
-    let (source_name, source_icon_name, source_menu) = source_submenu(shell);
-    let source_item = gio::MenuItem::new_submenu(Some(&source_name), &source_menu);
-    source_item.set_icon(&gio::ThemedIcon::new(source_icon_name));
-    source.append_item(&source_item);
-    menu.append_section(None, &source);
 
     let preferences = gio::Menu::new();
     append_menu_action(

@@ -6,7 +6,8 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    Discoverer, Metadata, ensure_gstreamer_initialized, gst, image_from_info, metadata_from_info,
+    Discoverer, DiscovererResult, Metadata, ensure_gstreamer_initialized, gst, image_from_info,
+    metadata_from_info,
 };
 use crate::{ImageBytes, SourceError};
 
@@ -19,6 +20,7 @@ struct Request<'a> {
 #[derive(Serialize, Deserialize)]
 pub(super) enum Reply {
     Metadata(Option<Box<Metadata>>),
+    TimedOut,
     Image {
         length: usize,
         content_type: Option<String>,
@@ -98,6 +100,12 @@ impl Client {
             ));
         }
         let mut reply = serde_json::from_str(&line)?;
+        if matches!(reply, Reply::TimedOut) {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Media discovery timed out",
+            ));
+        }
         if let Reply::Image { length, bytes, .. } = &mut reply {
             bytes.resize(*length, 0);
             self.output.read_exact(bytes)?;
@@ -129,6 +137,7 @@ pub fn run_worker(timeout_seconds: u64) -> io::Result<()> {
         let request: Request<'_> = serde_json::from_str(&line)?;
         let info = discoverer.discover_uri(request.uri).ok();
         let response = match (info, request.picture_index) {
+            (Some(info), _) if info.result() == DiscovererResult::Timeout => Reply::TimedOut,
             (Some(info), Some(index)) => match image_from_info(&info, index) {
                 Ok(ImageBytes {
                     bytes,
@@ -235,14 +244,57 @@ mod tests {
         let text = directory.path().join("license.txt");
         fs::write(&text, b"Creative Commons\nThis is a license, not audio.\n").unwrap();
         // Old GStreamer crashes; fixed versions return a normal rejection.
+        let text_result = read_media(&mut worker, text, None);
         assert!(matches!(
-            read_media(&mut worker, text, None),
+            text_result,
             MediaRead::Rejected | MediaRead::Unreadable
         ));
-        assert!(matches!(
-            read_media(&mut worker, audio, None),
-            MediaRead::Accepted(_)
-        ));
+        let audio_result = read_media(&mut worker, audio, None);
+        assert!(
+            matches!(audio_result, MediaRead::Accepted(_)),
+            "Audio after text probe: {audio_result:?}; text probe: {text_result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn discovery_timeout_does_not_reject_the_next_audio_stream() {
+        use std::time::Duration;
+        use wiremock::matchers::path;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let mut frame = vec![0; 417];
+        frame[..4].copy_from_slice(&[0xff, 0xfb, 0x90, 0x00]);
+        let bytes = frame.repeat(40);
+        Mock::given(path("/slow"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_bytes(bytes.clone())
+                    .set_delay(Duration::from_secs(3)),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(path("/audio"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_bytes(bytes.clone())
+                    .set_delay(Duration::from_secs(2)),
+            )
+            .mount(&server)
+            .await;
+        let slow_uri = format!("{}/slow", server.uri());
+        let audio_uri = format!("{}/audio", server.uri());
+        tokio::task::spawn_blocking(move || {
+            let mut reader = Reader::network();
+            let network_timeout = reader.timeout_seconds.replace(1);
+            let mut input = std::io::Cursor::new(bytes);
+            let error = reader.read_input(&mut input, &slow_uri).unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+            reader.timeout_seconds = network_timeout;
+            assert!(reader.read_input(&mut input, &audio_uri).unwrap().is_some());
+        })
+        .await
+        .unwrap();
     }
 
     #[tokio::test]

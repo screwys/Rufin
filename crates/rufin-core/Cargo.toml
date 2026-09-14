@@ -21,6 +21,7 @@ app-identity.workspace = true
 metadata-lookup.workspace = true
 async-channel.workspace = true
 bytes.workspace = true
+blake3.workspace = true
 futures-util.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true

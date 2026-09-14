@@ -1846,6 +1846,11 @@ msgstr "在 Navidrome 上打開"
 msgid "Open release notes"
 msgstr "開啟更新記錄"
 
+#, fuzzy
+#| msgid "App settings"
+msgid "Open settings"
+msgstr "應用程式設定"
+
 msgid "OpenSubsonic"
 msgstr "OpenSubsonic"
 
@@ -2711,6 +2716,9 @@ msgid "Source"
 msgstr "無來源"
 
 msgid "Sources"
+msgstr ""
+
+msgid "Sponsor"
 msgstr ""
 
 msgid "Start minimized"

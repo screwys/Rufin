@@ -1897,6 +1897,11 @@ msgstr "Otevřít v Navidrome"
 msgid "Open release notes"
 msgstr "Otevřít poznámky k verzi"
 
+#, fuzzy
+#| msgid "App settings"
+msgid "Open settings"
+msgstr "Nastavení aplikace"
+
 msgid "OpenSubsonic"
 msgstr "OpenSubsonic"
 
@@ -2775,6 +2780,9 @@ msgstr "Zdroje"
 
 msgid "Sources"
 msgstr "Zdroje"
+
+msgid "Sponsor"
+msgstr ""
 
 msgid "Start minimized"
 msgstr "Spustit v minimalizovaném režimu"

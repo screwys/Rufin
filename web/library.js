@@ -63,8 +63,9 @@ let readRange = async () => [];
 let selectionRequest;
 let selectionPending = Promise.resolve();
 
-async function loadLibrary(path, parameters, signal) {
+async function loadLibrary(path, parameters, signal, initialPage = null) {
   const content = $("content"),
+    scroller = $("main"),
     pages = [];
   let busy = false,
     end = false;
@@ -87,14 +88,15 @@ async function loadLibrary(path, parameters, signal) {
   const fill = () => {
     if (signal.aborted || busy) return;
     if (
-      content.scrollHeight - content.scrollTop - content.clientHeight <
-        content.clientHeight / 2 &&
+      scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <
+        scroller.clientHeight / 2 &&
       !end
     )
       run(() => loadMore());
     else if (
-      content.scrollTop < content.clientHeight / 2 &&
-      pages[0]?.start > 0
+      pages[0]?.start > 0 &&
+      pages[0].node.getBoundingClientRect().top >
+        scroller.getBoundingClientRect().top - scroller.clientHeight / 2
     )
       run(() => loadMore(-1));
   };
@@ -114,10 +116,12 @@ async function loadLibrary(path, parameters, signal) {
     const start =
       direction < 0
         ? pages[0].start - pageSize
-        : (pages.at(-1)?.start ?? -pageSize) + pageSize;
+        : (pages.at(-1)?.start ?? offset - pageSize) + pageSize;
     if (start < 0) return;
     busy = true;
-    const node = el("section", "library-page");
+    const existing = initialPage;
+    initialPage = null;
+    const node = existing || el("section", "library-page");
     node.setAttribute("hx-sync", "this:replace");
     node.setAttribute("aria-busy", "true");
     const lifetime = new AbortController();
@@ -129,13 +133,15 @@ async function loadLibrary(path, parameters, signal) {
       node.remove();
       releaseCovers();
     };
-    if (direction < 0) pages[0].node.before(node);
-    else content.append(node);
+    if (!existing) {
+      if (direction < 0) pages[0].node.before(node);
+      else content.append(node);
+    }
     try {
       const query = new URLSearchParams(parameters);
       query.set("offset", start);
-      await fragment(`/api${path}?${query}`, node, lifetime.signal);
-      const count = Number(node.querySelector("[data-count]").dataset.count);
+      if (!existing) await fragment(`/api${path}?${query}`, node, lifetime.signal);
+      const count = Number(node.dataset.count ?? node.querySelector("[data-count]").dataset.count);
       const table = node.querySelector(".track-list");
       if (table) {
         content.setAttribute("role", "grid");
@@ -149,6 +155,7 @@ async function loadLibrary(path, parameters, signal) {
           content.prepend(header);
         }
       }
+      node.classList.add("library-page");
       if (direction > 0) end = count < pageSize;
       if (!count && pages.length) {
         remove();
@@ -157,7 +164,7 @@ async function loadLibrary(path, parameters, signal) {
       const page = { node, start, remove };
       if (direction < 0) {
         pages.unshift(page);
-        content.scrollTop += node.getBoundingClientRect().height;
+        scroller.scrollTop += node.getBoundingClientRect().height;
       } else pages.push(page);
       syncRows();
       if (node.querySelector(".track-list"))
@@ -169,7 +176,7 @@ async function loadLibrary(path, parameters, signal) {
       while (pages.length > 3) {
         const candidate = direction > 0 ? pages[0] : pages.at(-1);
         const rect = candidate.node.getBoundingClientRect(),
-          viewport = content.getBoundingClientRect();
+          viewport = scroller.getBoundingClientRect();
         if (
           direction > 0
             ? rect.bottom > viewport.top
@@ -181,7 +188,7 @@ async function loadLibrary(path, parameters, signal) {
         candidate.remove();
         if (direction > 0) {
           pages.shift();
-          content.scrollTop -= rect.height;
+          scroller.scrollTop -= rect.height;
         } else {
           pages.pop();
           end = false;
@@ -198,11 +205,39 @@ async function loadLibrary(path, parameters, signal) {
     }
   };
   await loadMore();
-  content.addEventListener("scroll", fill, { signal, passive: true });
+  scroller.addEventListener("scroll", fill, { signal, passive: true });
   const resize = new ResizeObserver(fill);
-  resize.observe(content);
+  resize.observe(scroller);
   signal.addEventListener("abort", () => resize.disconnect(), { once: true });
   fill();
+}
+
+function restoreView() {
+  const parameters = new URLSearchParams(location.search);
+  const view = parameters.get("view") || "home";
+  const collections = {
+    album: "albums",
+    artist: "artists",
+    genre: "genres",
+    playlist: "playlists",
+    "smart-playlist": "smart-playlists",
+  };
+  route = Object.hasOwn(collections, view) ? collections[view] : (Object.hasOwn(titles, view) ? view : "home");
+  if (Object.hasOwn(collections, view) && parameters.has("id")) {
+    const id = parameters.get("id");
+    detail = { id: /^-?\d+$/.test(id) ? Number(id) : id, title: parameters.get("title") };
+  }
+  if (parameters.has("source")) state.source = parameters.get("source");
+  if (parameters.has("folder")) state.selectedLibrary = parameters.get("folder");
+  offset = Math.max(0, Number(parameters.get("offset")) || 0);
+  setSort();
+  $("search").value = parameters.get("q") || "";
+  if (parameters.has("sort")) $("sort").value = parameters.get("sort");
+  $("descending").setAttribute("aria-pressed", String(parameters.get("descending") === "true"));
+  document.querySelectorAll("[data-route]").forEach((node) => {
+    if (node.dataset.route === route) node.setAttribute("aria-current", "page");
+    else node.removeAttribute("aria-current");
+  });
 }
 
 function navigate(next, selected = null) {
@@ -312,7 +347,7 @@ function empty(title, description, action) {
   $("content").replaceChildren(node);
 }
 
-async function loadView() {
+async function loadView(initial = false) {
   run(refreshPins);
   for (const name of ["role", "aria-label", "aria-multiselectable"])
     $("content").removeAttribute(name);
@@ -324,10 +359,12 @@ async function loadView() {
   viewRequest?.abort();
   viewRequest = new AbortController();
   const signal = AbortSignal.any([session.signal, viewRequest.signal]);
-  $("content").setAttribute("aria-busy", "true");
-  $("content").inert = true;
-  $("content").replaceChildren(el("p", "empty-note", tr("Loading...")));
-  releaseCovers();
+  if (!initial) {
+    $("content").setAttribute("aria-busy", "true");
+    $("content").inert = true;
+    $("content").replaceChildren(el("p", "empty-note", tr("Loading...")));
+    releaseCovers();
+  }
   $("title").textContent = detail?.title || detail?.name || titles[route];
   $("source-name").textContent =
     sources.find((item) => item.id === state.source)?.name || tr("Library");
@@ -346,6 +383,10 @@ async function loadView() {
       return;
     }
     if (!state.source && !["playlists", "smart-playlists"].includes(route)) {
+      if (initial) {
+        $("content").querySelector("[data-open-source]")?.addEventListener("click", () => $("source-dialog").showModal());
+        return;
+      }
       empty(
         tr("Your music belongs here"),
         tr("Add a music source to start listening."),
@@ -361,14 +402,16 @@ async function loadView() {
     )
       path += "/tracks";
     if (route === "playlists" && detail) path += "/entries";
-    $("content").replaceChildren();
-    $("content").scrollTop = 0;
+    if (!initial) {
+      $("content").replaceChildren();
+      $("main").scrollTop = 0;
+    }
     selectedTracks.clear();
     selectionAnchor = 0;
     if (route === "home") {
-      await fragment(`/api${path}?${params}`, $("content"), signal);
+      if (!initial) await fragment(`/api${path}?${params}`, $("content"), signal);
       bindHome(signal);
-    } else await loadLibrary(path, params, signal);
+    } else await loadLibrary(path, params, signal, initial ? $("content").querySelector("[data-page]") : null);
   } catch (error) {
     if (!signal.aborted) empty(tr("Could not load this page"), error.message);
     throw error;
@@ -547,14 +590,17 @@ function bindTracks(host, start, signal) {
       "click",
       (event) => {
         const button = event.target.closest("[data-action]");
-        if (button)
+        if (button) {
+          event.preventDefault();
           run(() => {
             const action = button.dataset.action;
+            if (action === "replace") return playSelection(row);
+            if (action === "next" || action === "append") return playUris([row.uri], action);
             if (action === "favorite") return setFavorite([row]);
             if (action === "menu") return showTrackMenu(index, row, button);
             return goToMedia(row, action, button);
           });
-        else if (event.detail < 2) selectTrack(index, event);
+        } else if (event.detail < 2) selectTrack(index, event);
       },
       { signal },
     );
@@ -671,11 +717,15 @@ function init() {
   document
     .querySelectorAll("[data-route]")
     .forEach((node) =>
-      node.addEventListener("click", () => navigate(node.dataset.route)),
+      node.addEventListener("click", (event) => {
+        event.preventDefault();
+        navigate(node.dataset.route);
+      }),
     );
-  $("back").addEventListener("click", () =>
-    navigate(route === "genres" ? "home" : route),
-  );
+  $("back").addEventListener("click", (event) => {
+    event.preventDefault();
+    navigate(route === "genres" ? "home" : route);
+  });
   $("search").addEventListener("input", () => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
@@ -799,6 +849,7 @@ function bindCards(host) {
     card.addEventListener("click", (event) => {
       const button = event.target.closest("[data-action]");
       if (!button) return;
+      event.preventDefault();
       const action = button.dataset.action;
       run(() => {
         if (action === "open") return open();
@@ -893,13 +944,7 @@ function bindHome(signal) {
     }
     let offset = 0;
     const layout = () => {
-      const columns = Math.max(
-        1,
-        Math.min(
-          Math.ceil(body.clientWidth / 210),
-          Math.max(1, Math.floor(body.clientWidth / 138)),
-        ),
-      );
+      const columns = getComputedStyle(body.firstElementChild).gridTemplateColumns.split(" ").length;
       const cards = body.querySelectorAll(".album-card");
       offset = Math.min(
         offset,
@@ -908,7 +953,6 @@ function bindHome(signal) {
       cards.forEach((card, index) => {
         card.hidden = index < offset || index >= offset + columns;
       });
-      body.firstElementChild.style.gridTemplateColumns = `repeat(${columns},minmax(0,1fr))`;
       section.querySelector('[data-action="previous-home"]').disabled =
         offset === 0;
       section.querySelector('[data-action="next-home"]').disabled =
@@ -971,6 +1015,7 @@ function disposeHome() {
 }
 
 export {
+  restoreView,
   openMediaLink,
   init,
   goToMedia,

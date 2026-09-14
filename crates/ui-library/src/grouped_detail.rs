@@ -138,18 +138,15 @@ impl CatalogUi {
                 present(target, position, Rc::clone(&play));
             }) as ui_shared::interactions::ContextMenuOpen
         });
-        let showcase = collection_detail_showcase(
-            self,
-            CollectionDetailShowcase {
-                view: showcase_view,
-                initial_width: content_width,
-                compact_spacing: 22,
-                wide_spacing: 22,
-                cover: cover.clone(),
-                cover_controls,
-                context_menu,
-            },
-        );
+        let showcase = collection_detail_showcase(CollectionDetailShowcase {
+            view: showcase_view,
+            initial_width: content_width,
+            compact_spacing: 22,
+            wide_spacing: 22,
+            cover: cover.clone(),
+            cover_controls,
+            context_menu,
+        });
         wrapper.append(&library_route_inset(showcase));
 
         let track_section = gtk::Box::new(gtk::Orientation::Vertical, 10);

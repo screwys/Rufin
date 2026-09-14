@@ -51,7 +51,7 @@ impl Shell {
                 .session()
                 .map(|session| Rc::clone(&session.favorites)),
             window: self.chrome.window.downgrade(),
-            can_back: self.navigation.routes.borrow().can_back(),
+            global_search: self.chrome.topbar.search.clone(),
             current: RefCell::new(None),
             current_track_selections: RefCell::new(Vec::new()),
             track_selections: RefCell::new(Vec::new()),
@@ -102,23 +102,7 @@ impl Shell {
                     })
                 })
             },
-            reserve_window_controls: {
-                let weak = Rc::downgrade(self);
-                Rc::new(move |host, spacing| {
-                    if let Some(shell) = weak.upgrade() {
-                        let reservation = shell.chrome.window_controls.end_width_reservation();
-                        reservation.set_margin_start(spacing);
-                        host.append(&reservation);
-                        shell
-                            .right_panel
-                            .right_panel_slot
-                            .bind_property("visible", host, "visible")
-                            .sync_create()
-                            .invert_boolean()
-                            .build();
-                    }
-                })
-            },
+
             refresh_home_section: {
                 Rc::new(move |kind| {
                     if let Some(operations) = &operations {
@@ -132,14 +116,7 @@ impl Shell {
                     }
                 })
             },
-            go_back: {
-                let weak = Rc::downgrade(self);
-                Rc::new(move || {
-                    if let Some(shell) = weak.upgrade() {
-                        shell.go_back();
-                    }
-                })
-            },
+
             reconcile: {
                 let weak = Rc::downgrade(self);
                 Rc::new(move || {

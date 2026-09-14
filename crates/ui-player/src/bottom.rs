@@ -63,7 +63,7 @@ pub const BOTTOM_PLAYER_IDENTITY_COMPACT_MIN_WIDTH: i32 = BOTTOM_PLAYER_EDGE_PAD
         + BOTTOM_PLAYER_NOW_PLAYING_SPACING
         + BOTTOM_PLAYER_IDENTITY_MIN_WIDTH)
         * 2;
-pub const BOTTOM_PLAYER_VOLUME_GROUP_MIN_WIDTH: i32 = BOTTOM_PLAYER_ACTION_BUTTON_SIZE * 3
+pub const BOTTOM_PLAYER_VOLUME_GROUP_MIN_WIDTH: i32 = BOTTOM_PLAYER_ACTION_BUTTON_SIZE * 2
     + BOTTOM_PLAYER_VOLUME_SPACING * 2
     + BOTTOM_PLAYER_VOLUME_SLOT_LAYOUT_WIDTH;
 pub const BOTTOM_PLAYER_ACTIONS_COMPACT_MIN_WIDTH: i32 = BOTTOM_PLAYER_EDGE_PADDING * 2
@@ -1338,7 +1338,7 @@ pub fn present_output_popover(anchor: &gtk::Button, shell: &Rc<crate::PlayerUi>)
     let popover = gtk::Popover::new();
     popover.add_css_class("playback-output-popover");
     popover.set_autohide(true);
-    popover.set_position(gtk::PositionType::Top);
+    popover.set_position(gtk::PositionType::Bottom);
     popover.set_parent(anchor);
 
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);

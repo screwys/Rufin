@@ -10,7 +10,7 @@
     color-mix(in srgb, var(--window-bg-color) 62%, var(--showcase-tertiary)));
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--window-fg-color) 10%, transparent),
-    0 18px 42px rgba(0, 0, 0, 0.2);
+    0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
 .seeded-gradient-palette-0 {
@@ -116,4 +116,3 @@
 .seeded-gradient-showcase .eyebrow {
   color: color-mix(in srgb, var(--accent-color) 72%, var(--window-fg-color));
 }
-

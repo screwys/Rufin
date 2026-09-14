@@ -53,16 +53,6 @@ pub fn set_repeat_button_icon(button: &gtk::Button, repeat_mode: RepeatMode) {
     }
 }
 
-pub fn set_icon_source(area: &gtk::DrawingArea, context: &gtk::cairo::Context) {
-    let color = area.color();
-    context.set_source_rgba(
-        f64::from(color.red()),
-        f64::from(color.green()),
-        f64::from(color.blue()),
-        f64::from(color.alpha()),
-    );
-}
-
 pub fn widget_icon_button(label: &str, icon: &impl IsA<gtk::Widget>) -> gtk::Button {
     let button = gtk::Button::new();
     button.add_css_class("icon-button");
@@ -132,51 +122,6 @@ pub fn volume_icon_button(label: &str) -> (gtk::Button, gtk::Image, Rc<Cell<Volu
     button.set_tooltip_text(Some(&tr(label)));
     button.set_child(Some(&icon));
     (button, icon, state)
-}
-
-pub fn lyrics_icon_area(open: Rc<Cell<bool>>) -> gtk::DrawingArea {
-    let icon = gtk::DrawingArea::new();
-    icon.set_content_width(TRANSPORT_ICON_SIZE);
-    icon.set_content_height(TRANSPORT_ICON_SIZE);
-    icon.set_halign(gtk::Align::Center);
-    icon.set_valign(gtk::Align::Center);
-    icon.set_draw_func(move |area, context, width, height| {
-        set_icon_source(area, context);
-        context.set_line_width(1.7);
-        context.set_line_cap(gtk::cairo::LineCap::Round);
-        context.set_line_join(gtk::cairo::LineJoin::Round);
-
-        let width = f64::from(width);
-        let height = f64::from(height);
-        let left = width * 0.25;
-        let right = width * 0.75;
-        let top = height * 0.25;
-        let bottom = height * 0.66;
-        let radius = width * 0.09;
-
-        context.move_to(left + radius, top);
-        context.line_to(right - radius, top);
-        context.curve_to(right, top, right, top, right, top + radius);
-        context.line_to(right, bottom - radius);
-        context.curve_to(right, bottom, right, bottom, right - radius, bottom);
-        context.line_to(width * 0.45, bottom);
-        context.line_to(width * 0.32, height * 0.79);
-        context.line_to(width * 0.34, bottom);
-        context.line_to(left + radius, bottom);
-        context.curve_to(left, bottom, left, bottom, left, bottom - radius);
-        context.line_to(left, top + radius);
-        context.curve_to(left, top, left, top, left + radius, top);
-        let _ = context.stroke();
-
-        if open.get() {
-            context.move_to(width * 0.36, height * 0.42);
-            context.line_to(width * 0.64, height * 0.42);
-            context.move_to(width * 0.36, height * 0.54);
-            context.line_to(width * 0.58, height * 0.54);
-            let _ = context.stroke();
-        }
-    });
-    icon
 }
 
 pub fn auto_dj_icon_button(label: &str) -> gtk::Button {

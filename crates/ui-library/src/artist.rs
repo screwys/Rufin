@@ -21,7 +21,7 @@ use ui_shared::mounted_route::MountedRoute;
 use super::artist_releases::{ArtistReleaseProjections, ArtistReleaseRoutePreamble};
 use super::detail_showcase::{
     DetailShowcaseView, MediaCoverProjection, MediaShowcase, detail_playback_controls,
-    detail_radio_button, detail_showcase_frame_with_back, media_cover_projection, media_showcase,
+    detail_radio_button, detail_showcase_frame, media_cover_projection, media_showcase,
 };
 use super::routes::SearchableTrackOptions;
 use crate::route_layout::PRIMARY_ROUTE_MARGIN_START;
@@ -1166,17 +1166,14 @@ fn artist_detail_header_restored(
         artist,
         album_artist,
     ));
-    let root = detail_showcase_frame_with_back(
-        shell,
-        media_showcase(MediaShowcase {
-            view: showcase.clone(),
-            initial_width: width,
-            cover: cover.clone(),
-            cover_controls: controls,
-            context_menu: Some(context_menu),
-            actions_min_cover_size: None,
-        }),
-    );
+    let root = detail_showcase_frame(media_showcase(MediaShowcase {
+        view: showcase.clone(),
+        initial_width: width,
+        cover: cover.clone(),
+        cover_controls: controls,
+        context_menu: Some(context_menu),
+        actions_min_cover_size: None,
+    }));
     ArtistDetailHeaderProjection {
         album_artist,
         root,
@@ -1227,7 +1224,7 @@ fn artist_subroute_header(
     header.append(&title);
     header.append(&summary);
     let resize = header.clone();
-    let frame = super::detail_showcase::detail_showcase_frame_with_back(shell, header.upcast());
+    let frame = super::detail_showcase::detail_showcase_frame(header.upcast());
     width_allocation_owner(&frame, move |width| {
         if width < 520 {
             resize.add_css_class("detail-showcase-tiny");

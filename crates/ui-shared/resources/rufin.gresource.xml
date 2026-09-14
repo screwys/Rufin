@@ -97,6 +97,10 @@
     <file>hicolor/scalable/actions/rufin-media-playback-start-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-network-server-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-network-workgroup-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-phonelink-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-queue-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-library-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-speaker-front-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-non-starred-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-object-select-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-open-menu-symbolic.svg</file>
@@ -122,6 +126,10 @@
     <file>hicolor/scalable/actions/rufin-x-office-calendar-symbolic.svg</file>
     <file>hicolor/scalable/apps/io.github.screwys.Rufin.svg</file>
     <file>hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-sliders-vertical-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-sound-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-waves-and-screen-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-text-justify-center-symbolic.svg</file>
   </gresource>
   <gresource prefix="/io/github/screwys/Rufin/ui">
     <file compressed="true">preferences/source/manage_server.ui</file>

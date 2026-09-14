@@ -42,7 +42,7 @@ select {
   cursor: pointer;
 }
 
-button {
+button, a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -355,7 +355,7 @@ dialog textarea {
   --player: #f8f8fa;
 }
 
-:root[data-theme="light"] nav button[aria-current="page"] {
+:root[data-theme="light"] nav :is(button, a)[aria-current="page"] {
   background: #0000000c;
 }
 
@@ -365,19 +365,6 @@ dialog textarea {
 
 .primary {
   color: var(--accent-foreground, white);
-}
-
-@media (max-width: 540px) {
-  #auto-dj {
-    display: none;
-  }
-}
-
-@media (max-width: 400px) {
-  #shuffle,
-  #repeat {
-    display: none;
-  }
 }
 
 #volume {
@@ -421,4 +408,22 @@ dialog textarea {
   height: 7px;
   opacity: 0;
   border: 0;
+}
+
+/* Forms and links work before the interactive controls start. */
+.enhanced .without-js { display: none !important; }
+.page-navigation { display: flex; gap: 16px; padding: 16px; }
+html:not(.enhanced) .album-card:is(:hover, :focus-within) .cover-controls { opacity: 1; }
+html:not(.enhanced) .album-card:is(:hover, :focus-within) .cover-controls button { pointer-events: auto; }
+html:not(.enhanced) #navigation:target { display: flex; }
+html:not(.enhanced) #login-dialog[open] { position: fixed; inset: 15vh 0 auto; }
+#transport-form { display: none; }
+.track-list .actions form { display: inline; }
+a { color: inherit; text-decoration: none; }
+
+.track-list .favorite form { display: inline; }
+
+@media (max-width: 860px) {
+  html:not(.enhanced) #right-panel { display: none; }
+  html:not(.enhanced) #right-panel:target { display: flex; }
 }
