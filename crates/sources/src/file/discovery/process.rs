@@ -127,13 +127,7 @@ pub fn run_worker(timeout_seconds: u64) -> io::Result<()> {
             return Ok(());
         }
         let request: Request<'_> = serde_json::from_str(&line)?;
-        let info = discoverer.discover_uri(request.uri);
-        #[cfg(test)]
-        eprintln!(
-            "Discovery result: {:?}",
-            info.as_ref().map(|info| info.result())
-        );
-        let info = info.ok();
+        let info = discoverer.discover_uri(request.uri).ok();
         let response = match (info, request.picture_index) {
             (Some(info), Some(index)) => match image_from_info(&info, index) {
                 Ok(ImageBytes {
@@ -180,9 +174,6 @@ mod tests {
         };
         writeln!(std::io::stdout().lock(), "\ndiscovery worker ready").unwrap();
         let result = super::run_worker(timeout.parse().unwrap());
-        if let Err(error) = &result {
-            eprintln!("Discovery worker failed: {error}");
-        }
         std::process::exit(if result.is_ok() { 0 } else { 1 });
     }
 
