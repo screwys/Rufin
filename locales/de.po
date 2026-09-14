@@ -1832,6 +1832,11 @@ msgstr "In Navidrome öffnen"
 msgid "Open release notes"
 msgstr "Versionshinweise öffnen"
 
+#, fuzzy
+#| msgid "App settings"
+msgid "Open settings"
+msgstr "App-Einstellungen"
+
 msgid "OpenSubsonic"
 msgstr "OpenSubsonic"
 
@@ -2671,6 +2676,9 @@ msgstr "Quelle"
 
 msgid "Sources"
 msgstr "Quellen"
+
+msgid "Sponsor"
+msgstr ""
 
 msgid "Start minimized"
 msgstr "Minimiert starten"

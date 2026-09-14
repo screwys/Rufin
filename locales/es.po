@@ -1736,6 +1736,11 @@ msgstr ""
 msgid "Open release notes"
 msgstr ""
 
+#, fuzzy
+#| msgid "App settings"
+msgid "Open settings"
+msgstr "Ajustes de la aplicación"
+
 msgid "OpenSubsonic"
 msgstr ""
 
@@ -2546,6 +2551,9 @@ msgid "Source"
 msgstr ""
 
 msgid "Sources"
+msgstr ""
+
+msgid "Sponsor"
 msgstr ""
 
 msgid "Start minimized"
