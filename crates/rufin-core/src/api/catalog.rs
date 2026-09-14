@@ -42,12 +42,13 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/api/smart-playlists/tracks", get(smart_tracks))
 }
 
-async fn appearance(State(products): State<ProductHandles>) -> Result<Response<Body>, Error> {
+pub(super) fn appearance_data(products: &ProductHandles) -> Value {
     let settings = products.source.shared.settings.load().ui;
-    Ok(json_response(
-        StatusCode::OK,
-        json!({"theme":settings.theme_preference,"accent":settings.accent_preference,"colors":*products.appearance.borrow()}),
-    ))
+    json!({"theme":settings.theme_preference,"accent":settings.accent_preference,"colors":*products.appearance.borrow()})
+}
+
+async fn appearance(State(products): State<ProductHandles>) -> Result<Response<Body>, Error> {
+    Ok(json_response(StatusCode::OK, appearance_data(&products)))
 }
 
 async fn refresh_home(
@@ -92,7 +93,7 @@ fn home_rows(rows: &library::HomeSectionRows) -> Vec<Value> {
         .collect()
 }
 
-async fn home(
+pub(super) async fn home(
     State(products): State<ProductHandles>,
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,
@@ -145,7 +146,7 @@ async fn home(
     web::page(&headers, &parameters, json!({"sections":sections}))
 }
 
-async fn genre_tracks(
+pub(super) async fn genre_tracks(
     State(products): State<ProductHandles>,
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,
@@ -182,7 +183,7 @@ async fn genre_tracks(
     )
 }
 
-async fn artists(
+pub(super) async fn artists(
     State(products): State<ProductHandles>,
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,
@@ -227,7 +228,7 @@ async fn artists(
     )
 }
 
-async fn artist_tracks(
+pub(super) async fn artist_tracks(
     State(products): State<ProductHandles>,
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,
@@ -276,7 +277,7 @@ pub(super) fn now() -> i64 {
         .map_or(0, |elapsed| elapsed.as_secs() as i64)
 }
 
-async fn smart_playlists(
+pub(super) async fn smart_playlists(
     State(products): State<ProductHandles>,
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,
@@ -322,7 +323,7 @@ async fn smart_playlists(
     )
 }
 
-async fn smart_tracks(
+pub(super) async fn smart_tracks(
     State(products): State<ProductHandles>,
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,
@@ -356,7 +357,7 @@ async fn smart_tracks(
     )
 }
 
-async fn albums(
+pub(super) async fn albums(
     State(products): State<ProductHandles>,
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,
@@ -413,7 +414,7 @@ async fn albums(
     )
 }
 
-async fn album_tracks(
+pub(super) async fn album_tracks(
     State(products): State<ProductHandles>,
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,

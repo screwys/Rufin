@@ -41,7 +41,7 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
     ))
 }
 
-async fn select_library(
+pub(super) async fn select_library(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
@@ -157,7 +157,7 @@ async fn update(
     Ok(json_response(StatusCode::OK, json!({"updated":true})))
 }
 
-async fn select(
+pub(super) async fn select(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {

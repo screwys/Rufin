@@ -311,6 +311,7 @@ function showPlaylistOwner() {
 }
 
 function init() {
+  $("track-menu").setAttribute("popover", "manual");
   $("playlist-owner").addEventListener("click", () => {
     const owner = $("playlist-owner");
     owner.setAttribute(

@@ -977,6 +977,9 @@ async fn exercise_http_api(
     assert_eq!(after_drop["state"], previous_playback["state"]);
     assert_eq!(after_drop["current"], first_drop["current"]);
 
+    exercise_browser(&format!("http://{address}"), token, &sources[1], uri).await;
+    exercise_browser_restart(products.clone()).await;
+
     for id in &sources {
         let response = client
             .delete(format!("{base}/sources"))
@@ -1053,5 +1056,295 @@ async fn playback_event(response: &mut reqwest::Response) -> serde_json::Value {
                 .unwrap();
             return serde_json::from_str(json).unwrap();
         }
+    }
+}
+
+async fn exercise_browser(origin: &str, token: &str, source: &str, uri: &str) {
+    use reqwest::StatusCode;
+    use serde_json::{Value, json};
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let page = client
+        .get(format!("{origin}/"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains("method=\"post\" action=\"/session\""));
+    assert!(page.contains("id=\"app\" inert hidden"));
+    assert!(!page.contains(token));
+    let rejected = client
+        .post(format!("{origin}/session"))
+        .header("Origin", "http://other.example")
+        .header("Accept", "application/json")
+        .form(&[("token", "wrong")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
+    let logged_in = client
+        .post(format!("{origin}/session"))
+        .header("Origin", origin)
+        .form(&[("token", token)])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(logged_in.status(), StatusCode::SEE_OTHER);
+    let cookie = logged_in.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert!(cookie.contains("HttpOnly; SameSite=Lax"));
+    assert!(!cookie.contains(token));
+    let cookie = cookie.split(';').next().unwrap();
+    let page = client
+        .get(format!("{origin}/"))
+        .header("Cookie", cookie)
+        .query(&[("view", "tracks"), ("source", source)])
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let csrf = page
+        .split("name=\"rufin-csrf\" content=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    assert!(!csrf.is_empty());
+    assert_eq!(page.matches("data-row=").count(), 48);
+    assert!(page.contains("random-000"));
+    assert!(
+        !page
+            .split("<main id=\"main\">")
+            .nth(1)
+            .unwrap()
+            .split("</main>")
+            .next()
+            .unwrap()
+            .contains("random-048")
+    );
+    assert!(page.contains("offset=48"));
+    assert!(!page.contains(token));
+    let next = client
+        .get(format!("{origin}/"))
+        .header("Cookie", cookie)
+        .query(&[("view", "tracks"), ("source", source), ("offset", "48")])
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(next.contains("random-048"));
+    assert!(
+        !next
+            .split("<main id=\"main\">")
+            .nth(1)
+            .unwrap()
+            .split("</main>")
+            .next()
+            .unwrap()
+            .contains("random-000")
+    );
+    let searched = client
+        .get(format!("{origin}/"))
+        .header("Cookie", cookie)
+        .query(&[("view", "tracks"), ("source", source), ("q", "random-149")])
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(searched.matches("data-row=").count(), 1);
+    assert!(searched.contains("random-149"));
+    for (csrf_field, status) in [
+        ("wrong", StatusCode::FORBIDDEN),
+        (csrf, StatusCode::SEE_OTHER),
+    ] {
+        let response = client
+            .post(format!("{origin}/action"))
+            .header("Cookie", cookie)
+            .form(&[
+                ("csrf", csrf_field),
+                ("action", "volume"),
+                ("volume", "0.37"),
+            ])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status);
+    }
+    assert_eq!(
+        client
+            .post(format!("{origin}/api/playback/pause"))
+            .header("Cookie", cookie)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        client
+            .post(format!("{origin}/api/playback/pause"))
+            .header("Cookie", cookie)
+            .header("X-Rufin-CSRF", csrf)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    let selection = json!({"kind":"track", "uris":[uri]}).to_string();
+    assert_eq!(
+        client
+            .post(format!("{origin}/action"))
+            .header("Cookie", cookie)
+            .form(&[
+                ("csrf", csrf),
+                ("action", "replace"),
+                ("selection", &selection)
+            ])
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::SEE_OTHER
+    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let queue: Value = client
+                .get(format!("{origin}/api/queue"))
+                .header("Cookie", cookie)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if queue["total"] == 1 && queue["window"][0]["track"]["uri"] == uri {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    // Script login uses the same endpoint and issues a fresh signed cookie.
+    let login: reqwest::Response = client
+        .post(format!("{origin}/session"))
+        .header("Cookie", cookie)
+        .header("Origin", origin)
+        .header("Accept", "application/json")
+        .form(&[("token", token)])
+        .send()
+        .await
+        .unwrap();
+    let new_cookie = login.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let login: Value = login.json().await.unwrap();
+    assert_ne!(cookie, new_cookie);
+    let response = client
+        .post(format!("{origin}/session/logout"))
+        .header("Cookie", &new_cookie)
+        .form(&[("csrf", login["csrf"].as_str().unwrap())])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert!(
+        response.headers()["set-cookie"]
+            .to_str()
+            .unwrap()
+            .contains("Max-Age=0")
+    );
+    assert_eq!(
+        client
+            .get(format!("{origin}/api/playback"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+async fn exercise_browser_restart(products: rufin_core::runtime::ProductHandles) {
+    use reqwest::StatusCode;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let origin = format!("http://{address}");
+    let mut listener = Some(listener);
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let mut cookie = String::new();
+    for (token, expected) in [
+        ("persistent", StatusCode::OK),
+        ("persistent", StatusCode::OK),
+        ("changed", StatusCode::UNAUTHORIZED),
+    ] {
+        let socket = match listener.take() {
+            Some(socket) => socket,
+            None => tokio::net::TcpListener::bind(address).await.unwrap(),
+        };
+        let server = tokio::spawn(rufin_core::api::serve(
+            socket,
+            products.clone(),
+            token.into(),
+        ));
+        if cookie.is_empty() {
+            let response = client
+                .post(format!("{origin}/session"))
+                .form(&[("token", token)])
+                .send()
+                .await
+                .unwrap();
+            let set_cookie = response.headers()["set-cookie"].to_str().unwrap();
+            assert!(!set_cookie.contains("Max-Age="));
+            cookie = set_cookie.split(';').next().unwrap().to_owned();
+        }
+        assert_eq!(
+            client
+                .get(format!("{origin}/api/playback"))
+                .header("Cookie", &cookie)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            expected
+        );
+        let mut tampered = cookie.clone();
+        let last = tampered.pop().unwrap();
+        tampered.push(if last == '0' { '1' } else { '0' });
+        assert_eq!(
+            client
+                .get(format!("{origin}/api/playback"))
+                .header("Cookie", tampered)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
     }
 }

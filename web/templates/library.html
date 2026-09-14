@@ -12,8 +12,15 @@
         <td role="gridcell"><span class="track-title">{{ row.title() }}</span><button type="button" class="metadata-link track-artist" data-action="artists">{{ row.text("artist") }}</button></td>
         <td role="gridcell"><button type="button" class="metadata-link" data-action="albums">{{ row.text("album") }}</button></td>
         <td role="gridcell" class="duration">{{ row.duration() }}</td>
-        <td role="gridcell" class="favorite">{% call m::favorite(row, "icon-button") %}{% endcall %}</td>
-        <td role="gridcell" class="actions">{% call m::action(localization::tr("More actions"), "more", "menu", "icon-button") %}{% endcall %}</td>
+        <td role="gridcell" class="favorite">{% call m::favorite(row, "icon-button", false) %}{% endcall %}</td>
+        <td role="gridcell" class="actions"><form method="post" action="/action" data-enhanced-form>
+          <input type="hidden" name="csrf" value="{{ row.csrf }}" />
+          <input type="hidden" name="return" value="{{ row.return_to() }}" />
+          <input type="hidden" name="selection" value="{{ row.selection("track") }}" />
+          <button name="action" value="replace" data-action="replace" class="icon-button" aria-label="{{ localization::tr("Play") }}">{% call m::icon("play") %}{% endcall %}</button>
+          {% call m::menu_button(row, "icon-button") %}{% endcall %}
+          {% call m::media_menu(row, "track") %}{% endcall %}
+        </form></td>
       </tr>
     {% endfor %}</tbody>
   </table>

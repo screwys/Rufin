@@ -1,5 +1,6 @@
 //! Optional HTTP access to the same product owners used by native clients.
 
+mod browser;
 mod catalog;
 mod controller;
 mod media;
@@ -50,14 +51,16 @@ pub async fn serve(
             "An API token is required",
         ));
     }
-    let authorization = Arc::new(Authorization {
-        token: format!("Bearer {token}"),
-        failures: Mutex::new(VecDeque::new()),
-    });
+    let authorization = Arc::new(Authorization::new(&token));
     let router = routes()
         .merge(media::routes())
-        .route_layer(middleware::from_fn_with_state(authorization, authorize))
+        .route_layer(middleware::from_fn_with_state(
+            authorization.clone(),
+            authorize,
+        ))
         .merge(web::routes())
+        .merge(browser::routes())
+        .layer(Extension(authorization))
         .with_state(products);
     let mut connections = JoinSet::new();
     loop {
@@ -666,6 +669,7 @@ fn error(status: StatusCode, message: impl std::fmt::Display) -> Error {
 struct Authorization {
     token: String,
     failures: Mutex<VecDeque<(IpAddr, Instant, u8)>>,
+    browser_key: [u8; 32],
 }
 
 #[cfg(test)]
@@ -674,10 +678,7 @@ mod authentication_tests {
 
     #[test]
     fn failed_attempts_expire_and_are_separate_for_each_address() {
-        let authorization = Authorization {
-            token: "Bearer valid".into(),
-            failures: Mutex::new(VecDeque::new()),
-        };
+        let authorization = Authorization::new("valid");
         let address = "127.0.0.1".parse().unwrap();
         let now = Instant::now();
         for _ in 0..10 {
@@ -712,10 +713,7 @@ mod authentication_tests {
 
     #[test]
     fn successful_authentication_clears_previous_failures() {
-        let authorization = Authorization {
-            token: "Bearer valid".into(),
-            failures: Mutex::new(VecDeque::new()),
-        };
+        let authorization = Authorization::new("valid");
         let address = "127.0.0.1".parse().unwrap();
         let now = Instant::now();
         for _ in 0..2 {
@@ -738,6 +736,14 @@ mod authentication_tests {
 }
 
 impl Authorization {
+    fn new(token: &str) -> Self {
+        Self {
+            token: format!("Bearer {token}"),
+            failures: Mutex::new(VecDeque::new()),
+            browser_key: blake3::derive_key("Rufin browser authentication v1", token.as_bytes()),
+        }
+    }
+
     fn check(
         &self,
         address: IpAddr,
@@ -798,6 +804,20 @@ async fn authorize(
         .headers()
         .get(hyper::header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok());
+    if token.is_none() {
+        if let Some(csrf) = browser::session(&authorization, request.headers()) {
+            if !matches!(*request.method(), hyper::Method::GET | hyper::Method::HEAD)
+                && request
+                    .headers()
+                    .get("x-rufin-csrf")
+                    .and_then(|v| v.to_str().ok())
+                    != Some(csrf.as_str())
+            {
+                return error(StatusCode::FORBIDDEN, "Invalid form token").into_response();
+            }
+            return next.run(request).await;
+        }
+    }
     if let Err(response) = authorization.check(peer.ip(), token, Instant::now()) {
         return *response;
     }

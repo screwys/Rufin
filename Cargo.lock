@@ -5629,6 +5629,7 @@ dependencies = [
  "audio-processing",
  "axum",
  "backup",
+ "blake3",
  "bytes",
  "desktop-integration",
  "directories",

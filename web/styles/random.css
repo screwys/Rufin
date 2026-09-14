@@ -166,8 +166,3 @@
   mask: url("/icons/rufin-go-next-symbolic.svg") center / contain no-repeat;
   transform: rotate(90deg);
 }
-@media (max-width: 540px) {
-  #random {
-    display: none;
-  }
-}

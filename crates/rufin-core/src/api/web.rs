@@ -39,15 +39,69 @@ async fn translations() -> Response<Body> {
 
 #[derive(Template)]
 #[template(path = "index.html")]
-struct Index {
-    version: &'static str,
+pub(super) struct Index<'a> {
+    pub version: &'static str,
+    pub page: &'a browser::Page,
 }
 
 struct Row<'a> {
     data: &'a Value,
+    parameters: &'a HashMap<String, String>,
+    csrf: &'a str,
+    menu_id: String,
 }
 
 impl Row<'_> {
+    fn href(&self, kind: &str) -> String {
+        let mut query = self.parameters.clone();
+        query.remove("offset");
+        query.remove("q");
+        query.remove("sort");
+        query.insert("title".into(), self.title().into());
+        query.insert("view".into(), kind.into());
+        query.insert(
+            "id".into(),
+            self.data["id"].to_string().trim_matches('"').into(),
+        );
+        browser::link(&query)
+    }
+    fn artwork(&self, kind: &str) -> String {
+        let mut query = HashMap::new();
+        match kind {
+            "playlist" => {
+                query.insert("playlist".to_owned(), self.data["id"].to_string());
+            }
+            "smart-playlist" => {
+                query = self.parameters.clone();
+                query.insert("smart_playlist".into(), self.data["id"].to_string());
+            }
+            _ => {
+                query.insert("uri".into(), self.text("uri").into());
+            }
+        }
+        format!(
+            "/api/artwork?{}",
+            url::form_urlencoded::Serializer::new(String::new())
+                .extend_pairs(query)
+                .finish()
+        )
+    }
+    fn return_to(&self) -> String {
+        browser::link(self.parameters)
+    }
+    fn selection(&self, kind: &str) -> String {
+        let mut value = json!({"kind":kind,"id":self.data["id"],"uri":self.data["uri"],"favorite":!self.favorite()});
+        if kind == "track" {
+            value["uris"] = json!([self.data["uri"]]);
+        }
+        for field in ["source", "folder"] {
+            if let Some(text) = self.parameters.get(field) {
+                value[field] = json!(text);
+            }
+        }
+        value.to_string()
+    }
+
     fn track_count(&self) -> String {
         localization::track_count_text(self.number("track_count"))
     }
@@ -168,6 +222,93 @@ struct Home<'a> {
     sections: Vec<Section<'a>>,
 }
 
+pub(super) fn render(
+    parameters: &HashMap<String, String>,
+    value: &Value,
+    csrf: &str,
+) -> Result<String, Error> {
+    let html = if let Some(sections) = value["sections"].as_array() {
+        Home {
+            sections: sections
+                .iter()
+                .enumerate()
+                .map(|(section_index, section)| Section {
+                    block: section["block"].as_str().unwrap_or_default(),
+                    title: section["title"].as_str().unwrap_or_default(),
+                    items: section["items"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .enumerate()
+                        .map(|(index, data)| Row {
+                            data,
+                            parameters,
+                            csrf,
+                            menu_id: format!(
+                                "media-menu-home-{}-{index}",
+                                section["block"]
+                                    .as_str()
+                                    .filter(|block| !block.is_empty())
+                                    .map(str::to_owned)
+                                    .unwrap_or_else(|| format!("provider-{section_index}"))
+                            ),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
+        .render()
+    } else {
+        let offset = number(parameters, "offset", 0)?;
+        let (field, kind) = [
+            ("tracks", "track"),
+            ("entries", "track"),
+            ("albums", "album"),
+            ("artists", "artist"),
+            ("playlists", "playlist"),
+            ("smart_playlists", "smart-playlist"),
+        ]
+        .into_iter()
+        .find(|(field, _)| value[*field].is_array())
+        .ok_or_else(|| internal("Missing library rows"))?;
+        Library {
+            rows: value[field]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .map(|(index, data)| Row {
+                    data,
+                    parameters,
+                    csrf,
+                    menu_id: format!("media-menu-library-{}", offset + index),
+                })
+                .collect(),
+            kind,
+            offset,
+            album_tracks: value["album_tracks"].as_bool().unwrap_or(false),
+            disc_headers: value["disc_sections"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|section| {
+                    let start = section[0].as_u64()? as usize;
+                    let disc = section[1].as_i64()?;
+                    let title = if disc > 0 {
+                        localization::tr("Disc {number}").replace("{number}", &disc.to_string())
+                    } else {
+                        localization::tr("Unknown disc")
+                    };
+                    Some((start, title))
+                })
+                .collect(),
+        }
+        .render()
+    }
+    .map_err(internal)?;
+    Ok(html)
+}
+
 pub(super) fn page(
     headers: &hyper::HeaderMap,
     parameters: &HashMap<String, String>,
@@ -177,64 +318,11 @@ pub(super) fn page(
         .get("HX-Request")
         .is_some_and(|value| value == "true")
     {
-        let html = if let Some(sections) = value["sections"].as_array() {
-            Home {
-                sections: sections
-                    .iter()
-                    .map(|section| Section {
-                        block: section["block"].as_str().unwrap_or_default(),
-                        title: section["title"].as_str().unwrap_or_default(),
-                        items: section["items"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .map(|data| Row { data })
-                            .collect(),
-                    })
-                    .collect(),
-            }
-            .render()
-        } else {
-            let (field, kind) = [
-                ("tracks", "track"),
-                ("entries", "track"),
-                ("albums", "album"),
-                ("artists", "artist"),
-                ("playlists", "playlist"),
-                ("smart_playlists", "smart-playlist"),
-            ]
-            .into_iter()
-            .find(|(field, _)| value[*field].is_array())
-            .ok_or_else(|| internal("Missing library rows"))?;
-            Library {
-                rows: value[field]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .map(|data| Row { data })
-                    .collect(),
-                kind,
-                offset: number(parameters, "offset", 0)?,
-                album_tracks: value["album_tracks"].as_bool().unwrap_or(false),
-                disc_headers: value["disc_sections"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|section| {
-                        let start = section[0].as_u64()? as usize;
-                        let disc = section[1].as_i64()?;
-                        let title = if disc > 0 {
-                            localization::tr("Disc {number}").replace("{number}", &disc.to_string())
-                        } else {
-                            localization::tr("Unknown disc")
-                        };
-                        Some((start, title))
-                    })
-                    .collect(),
-            }
-            .render()
-        }
-        .map_err(internal)?;
+        let csrf = headers
+            .get("x-rufin-csrf")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default();
+        let html = render(parameters, &value, csrf)?;
         axum::response::Html(html).into_response()
     } else {
         json_response(StatusCode::OK, value)
@@ -251,7 +339,6 @@ pub(super) fn page(
 pub(super) fn routes() -> Router<ProductHandles> {
     Router::new()
         .route("/translations.js", get(translations))
-        .route("/", get(index))
         .route(
             "/showcase.css",
             get(|| async {
@@ -402,20 +489,6 @@ async fn source_icon(
     })
 }
 
-async fn index() -> Result<Response<Body>, Error> {
-    let html = Index {
-        version: env!("CARGO_PKG_VERSION"),
-    }
-    .render()
-    .map_err(internal)?;
-    Ok(Response::builder()
-        .header("content-type", "text/html; charset=utf-8")
-        .header("cache-control", "no-store")
-        .header("referrer-policy", "same-origin")
-        .body(Body::from(html))
-        .expect("page headers"))
-}
-
 fn asset(kind: &'static str, bytes: &'static [u8]) -> Response<Body> {
     Response::builder()
         .header("content-type", kind)
@@ -494,6 +567,7 @@ async fn icon(
         icon!("rufin-sidebar-hide-symbolic.svg"),
         icon!("rufin-sidebar-collapse-right-symbolic.svg"),
         icon!("rufin-view-more-symbolic.svg"),
+        icon!("rufin-player-more-symbolic.svg"),
         icon!("rufin-media-playback-start-symbolic.svg"),
         icon!("rufin-media-playback-pause-symbolic.svg"),
         icon!("rufin-media-skip-backward-symbolic.svg"),

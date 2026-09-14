@@ -88,7 +88,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
         )
 }
 
-async fn list(
+pub(super) async fn list(
     State(products): State<ProductHandles>,
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,
@@ -143,7 +143,7 @@ async fn list(
     )
 }
 
-async fn entries(
+pub(super) async fn entries(
     State(products): State<ProductHandles>,
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,

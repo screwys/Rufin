@@ -156,7 +156,9 @@
   min-width: 0;
 }
 
-.album-card > button {
+.album-card > button,
+.album-card > a,
+.album-card .collection-title {
   display: block;
   width: 100%;
   padding: 0;
@@ -436,7 +438,7 @@
     inset 0 0 0 1px rgb(0 0 0 / 14%);
 }
 
-#content {
+#main {
   overflow-anchor: none;
 }
 .library-page {
@@ -527,8 +529,8 @@
 }
 
 .showcase-cover .collection-title,
-.showcase-cover article > .metadata-link,
-.showcase-cover article > p {
+.showcase-cover .metadata-link,
+.showcase-cover article p {
   display: none;
 }
 
@@ -598,4 +600,13 @@
   position: relative;
   transform: scale(var(--cover-scale));
   transition: transform 120ms ease-out;
+}
+
+.home-row { padding-bottom: 8px; }
+.home-row .album-grid {
+  grid-template-rows: max-content;
+  grid-auto-rows: 0;
+  row-gap: 0;
+  padding-bottom: 0;
+  overflow: hidden;
 }
