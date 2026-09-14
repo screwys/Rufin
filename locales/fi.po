@@ -1758,6 +1758,11 @@ msgstr "Avaa palvelimella"
 msgid "Open release notes"
 msgstr "Avaa julkaisutiedot"
 
+#, fuzzy
+#| msgid "App settings"
+msgid "Open settings"
+msgstr "Sovelluksen asetukset"
+
 msgid "OpenSubsonic"
 msgstr "OpenSubsonic"
 
@@ -2589,6 +2594,9 @@ msgstr "Lähde"
 
 msgid "Sources"
 msgstr "Lähteet"
+
+msgid "Sponsor"
+msgstr ""
 
 msgid "Start minimized"
 msgstr "Käynnistä pienennettynä"

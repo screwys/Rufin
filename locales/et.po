@@ -1857,6 +1857,11 @@ msgstr "Serverit pole"
 msgid "Open release notes"
 msgstr "Vaata versiooniteavet"
 
+#, fuzzy
+#| msgid "App settings"
+msgid "Open settings"
+msgstr "Rakenduse seadistused"
+
 msgid "OpenSubsonic"
 msgstr "OpenSubsonic"
 
@@ -2712,6 +2717,9 @@ msgstr "Allikas"
 
 msgid "Sources"
 msgstr "Allikad"
+
+msgid "Sponsor"
+msgstr ""
 
 msgid "Start minimized"
 msgstr "Käivita minimeerituna"

@@ -1870,6 +1870,11 @@ msgstr "Nav servera"
 msgid "Open release notes"
 msgstr "Atvērt izdevuma piezīmes"
 
+#, fuzzy
+#| msgid "App settings"
+msgid "Open settings"
+msgstr "Lietotnes iestatījumi"
+
 msgid "OpenSubsonic"
 msgstr "OpenSubsonic"
 
@@ -2728,6 +2733,9 @@ msgstr "Avots"
 
 msgid "Sources"
 msgstr "Avoti"
+
+msgid "Sponsor"
+msgstr ""
 
 msgid "Start minimized"
 msgstr "Sākt minimizētu"
