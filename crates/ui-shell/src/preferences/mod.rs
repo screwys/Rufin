@@ -19,13 +19,13 @@ use ui_shared::layout::{
 use ui_shared::popup::present_light_dismiss_dialog;
 
 mod context_menu;
+pub(crate) mod controller;
 pub(crate) mod dialogs;
 mod general;
 mod layout;
 mod library;
 pub(crate) mod persistence;
 pub(crate) mod source;
-mod web_controller;
 
 use general::{ScrobblingCredentialDrafts, appearance_page, playback_page, scrobbling_page};
 

@@ -12,8 +12,8 @@ use ui_player::bottom::NOW_PLAYING_RAIL_WIDTH;
 use super::Shell;
 
 pub(super) const COMPACT_RAIL_WIDTH: i32 = NOW_PLAYING_RAIL_WIDTH;
-pub(super) const LEFT_PANE_SEPARATOR_WIDTH: i32 = 1;
-pub(super) const RIGHT_PANE_SEPARATOR_WIDTH: i32 = 1;
+pub(super) const LEFT_PANE_SEPARATOR_WIDTH: i32 = 8;
+pub(super) const RIGHT_PANE_SEPARATOR_WIDTH: i32 = 8;
 pub(super) const NORMAL_SIDEBAR_WIDTH: i32 = crate::DEFAULT_LEFT_SIDEBAR_WIDTH;
 pub(crate) const MIN_APP_WINDOW_WIDTH: i32 = 450;
 pub(crate) const MIN_USEFUL_MAIN_WIDTH: i32 = MIN_APP_WINDOW_WIDTH;
@@ -415,12 +415,18 @@ pub(crate) fn route_content_width(shell: &Shell) -> i32 {
 
 impl Shell {
     pub(crate) fn left_sidebar_mode(&self) -> ResolvedLeftSidebarMode {
-        if !self.navigation_view.split_view.is_collapsed() {
-            ResolvedLeftSidebarMode::Full
-        } else if self.navigation_view.compact_nav_slot.get_visible() {
+        if self.navigation_view.split_view.is_collapsed() {
+            ResolvedLeftSidebarMode::Hidden
+        } else if self
+            .navigation_view
+            .sidebar_modes
+            .visible_child_name()
+            .as_deref()
+            == Some("compact")
+        {
             ResolvedLeftSidebarMode::Compact
         } else {
-            ResolvedLeftSidebarMode::Hidden
+            ResolvedLeftSidebarMode::Full
         }
     }
 
@@ -459,15 +465,8 @@ impl Shell {
         let previous_right_visible = self.right_sidebar_visible();
 
         let app_active = true;
-        let full_sidebar = resolved.left_sidebar == ResolvedLeftSidebarMode::Full;
         let hidden_sidebar = resolved.left_sidebar == ResolvedLeftSidebarMode::Hidden;
         let right_visible = app_active && resolved.right_sidebar.is_visible();
-        self.chrome
-            .window_controls
-            .set_full_controls_allowed(!app_active || full_sidebar, !app_active || right_visible);
-        self.chrome.window_controls.set_compact_start_alignment(
-            app_active && resolved.left_sidebar == ResolvedLeftSidebarMode::Compact,
-        );
         let overlay_sidebar_width = if hidden_sidebar {
             self.settings
                 .current
@@ -490,8 +489,15 @@ impl Shell {
         }
         self.apply_fullscreen_topology(app_active);
 
-        let collapsed = !app_active || !full_sidebar;
-        let show_sidebar = app_active && full_sidebar;
+        self.navigation_view.sidebar_modes.set_visible_child_name(
+            if resolved.left_sidebar == ResolvedLeftSidebarMode::Compact {
+                "compact"
+            } else {
+                "full"
+            },
+        );
+        let collapsed = !app_active || hidden_sidebar;
+        let show_sidebar = app_active && !hidden_sidebar;
         if show_sidebar {
             if !self.navigation_view.split_view.shows_sidebar() {
                 self.navigation_view.split_view.set_show_sidebar(true);
@@ -501,7 +507,7 @@ impl Shell {
             }
         } else {
             // While the responsive presentation is hidden, show-sidebar is
-            // transient overlay state owned by the floating button and
+            // transient overlay state owned by the header button and
             // libadwaita. Rewriting it during allocation cancels its reveal.
             if (!app_active || !hidden_sidebar) && self.navigation_view.split_view.shows_sidebar() {
                 self.navigation_view.split_view.set_show_sidebar(false);
@@ -512,18 +518,11 @@ impl Shell {
         }
         set_widget_visible(&self.navigation_view.normal_nav_panel, app_active);
         set_widget_visible(
-            &self.navigation_view.compact_nav_slot,
-            app_active && resolved.left_sidebar == ResolvedLeftSidebarMode::Compact,
-        );
-        set_widget_visible(
-            &self.navigation_view.tiny_nav_button,
-            app_active && hidden_sidebar,
-        );
-        set_widget_visible(
             &self.navigation_view.left_resize_handle,
             app_active && !hidden_sidebar,
         );
         let right_visibility_changed = previous_right_visible != right_visible;
+        self.chrome.topbar.update_sidebar(self.left_sidebar_mode());
         set_widget_visible(&self.right_panel.right_panel_slot, right_visible);
         set_widget_visible(&self.player_ui.right_panel.root, right_visible);
         set_widget_visible(&self.right_panel.right_resize_handle, right_visible);
@@ -650,7 +649,8 @@ impl Shell {
     }
 
     pub(crate) fn preview_left_sidebar_width(&self, width: i32) {
-        let width = width.max(1);
+        // The split view allocates the sidebar content and its gutter together.
+        let width = width.max(1) + LEFT_PANE_SEPARATOR_WIDTH;
         self.navigation_view
             .split_view
             .set_min_sidebar_width(f64::from(width));
@@ -661,17 +661,17 @@ impl Shell {
     }
 
     fn sync_left_resize_handle_to_allocation(&self) {
-        let width = match self.left_sidebar_mode() {
-            ResolvedLeftSidebarMode::Full => self.navigation_view.normal_nav_panel.width(),
-            ResolvedLeftSidebarMode::Compact => self.navigation_view.compact_nav_slot.width(),
-            ResolvedLeftSidebarMode::Hidden => 0,
+        let width = if self.left_sidebar_mode() == ResolvedLeftSidebarMode::Hidden {
+            0
+        } else {
+            self.navigation_view.sidebar_modes.width()
         };
         position_left_resize_handle(&self.navigation_view.left_resize_handle, width);
     }
 }
 
 fn position_left_resize_handle(handle: &gtk::Box, sidebar_width: i32) {
-    handle.set_margin_start((sidebar_width - 4).max(0));
+    handle.set_margin_start((sidebar_width - LEFT_PANE_SEPARATOR_WIDTH).max(0));
 }
 
 fn set_widget_visible(widget: &impl IsA<gtk::Widget>, visible: bool) {
@@ -956,8 +956,7 @@ fn connect_right_sidebar_resize(shell: &Rc<Shell>) {
 }
 
 fn position_right_resize_handle(handle: &gtk::Box, position: i32) {
-    // Keep the locked four-pixel target, including the visible one-pixel
-    // separator and three transparent pixels inside the right pane.
+    // The resize target fills the gutter without covering either pane.
     handle.set_margin_start(position.max(0));
 }
 
@@ -1061,7 +1060,7 @@ mod tests {
     }
 
     #[test]
-    fn right_resize_target_is_four_pixels_including_the_visible_separator() {
+    fn right_resize_target_covers_the_eight_pixel_gutter() {
         let separator_position = 450;
         let handle_start = f64::from(separator_position);
         let handle_width = super::super::chrome::RIGHT_RESIZE_HANDLE_WIDTH;
@@ -1079,12 +1078,12 @@ mod tests {
         assert!(right_sidebar_handle_hit(
             handle_start,
             handle_width,
-            handle_start + 3.9
+            handle_start + 7.9
         ));
         assert!(!right_sidebar_handle_hit(
             handle_start,
             handle_width,
-            handle_start + 4.0
+            handle_start + 8.0
         ));
     }
 
@@ -1099,11 +1098,11 @@ mod tests {
 
         let expanded =
             right_sidebar_width_after_drag_update(&settings, 968, None, 300.0, 0.0, -200.0);
-        assert_eq!(expanded, 440.0);
+        assert_eq!(expanded, 426.0);
 
         let reversed =
             right_sidebar_width_after_drag_update(&settings, 968, None, expanded, -200.0, -199.0);
-        assert_eq!(reversed, 439.0);
+        assert_eq!(reversed, 425.0);
     }
 
     #[test]
@@ -1162,7 +1161,7 @@ mod tests {
 
         assert_eq!(
             right_sidebar_width_after_drag_update(&settings, 968, None, 500.0, 0.0, 1.0),
-            439.0
+            425.0
         );
     }
 
@@ -1187,7 +1186,7 @@ mod tests {
             false,
         );
         let fitted =
-            resolve_left_sidebar_drag_preview(&settings, 948, LeftSidebarMode::Full, 246, false);
+            resolve_left_sidebar_drag_preview(&settings, 948, LeftSidebarMode::Full, 232, false);
         let (overshot_width, hide_right) = fitted_left_sidebar_drag_width(&settings, 948, 400)
             .expect("a full left sidebar fits beside both usable panes");
         let overshot = resolve_left_sidebar_drag_preview(
@@ -1201,13 +1200,13 @@ mod tests {
         assert_eq!(compact.left_sidebar, ResolvedLeftSidebarMode::Compact);
         assert_eq!(compact.right_sidebar, RightSidebarMode::Visible);
         assert_eq!(compact.right_sidebar_width, 300);
-        assert_eq!(fitted.left_sidebar_width, 246);
+        assert_eq!(fitted.left_sidebar_width, 232);
         assert_eq!(fitted.right_sidebar_width, MIN_RIGHT_SIDEBAR_WIDTH);
         assert_eq!(fitted.main_width, MIN_USEFUL_MAIN_WIDTH);
-        assert_eq!(overshot_width, 246);
+        assert_eq!(overshot_width, 232);
         assert!(!hide_right);
         assert_eq!(overshot.left_sidebar, ResolvedLeftSidebarMode::Full);
-        assert_eq!(overshot.left_sidebar_width, 246);
+        assert_eq!(overshot.left_sidebar_width, 232);
         assert_eq!(overshot.right_sidebar, RightSidebarMode::Visible);
         assert_eq!(overshot.right_sidebar_width, MIN_RIGHT_SIDEBAR_WIDTH);
 
@@ -1257,14 +1256,14 @@ mod tests {
 
         settings.preferred_right_sidebar_width = 334;
         let preferred = resolve_layout(&settings, 1_144);
-        assert_eq!(preferred.main_width, 809);
+        assert_eq!(preferred.main_width, 802);
         assert_eq!(preferred.right_sidebar_width, 334);
-        assert_eq!(right_sidebar_allocation_position(1_144, 334), Some(809));
+        assert_eq!(right_sidebar_allocation_position(1_144, 334), Some(802));
 
         settings.preferred_right_sidebar_width = 500;
         let constrained = resolve_layout(&settings, 900);
         assert_eq!(constrained.main_width, MIN_USEFUL_MAIN_WIDTH);
-        assert_eq!(constrained.right_sidebar_width, 449);
+        assert_eq!(constrained.right_sidebar_width, 442);
         assert_eq!(
             right_sidebar_allocation_position(900, 500),
             Some(MIN_USEFUL_MAIN_WIDTH)
@@ -1281,7 +1280,7 @@ mod tests {
 
         assert_eq!(
             right_sidebar_allocation_position(1_144, desired_width),
-            Some(643)
+            Some(636)
         );
         assert_eq!(
             right_sidebar_allocation_position(900, desired_width),
@@ -1317,7 +1316,7 @@ mod tests {
 
         assert_eq!(resolved.left_sidebar, ResolvedLeftSidebarMode::Compact);
         assert_eq!(resolved.left_sidebar_width, COMPACT_RAIL_WIDTH);
-        assert_eq!(resolved.right_sidebar_width, 496);
+        assert_eq!(resolved.right_sidebar_width, 482);
         assert_eq!(resolved.main_width, MIN_USEFUL_MAIN_WIDTH);
     }
 

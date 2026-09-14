@@ -346,10 +346,7 @@ impl MediaShowcasePresentation {
     }
 }
 
-pub fn collection_detail_showcase(
-    shell: &Rc<CatalogUi>,
-    config: CollectionDetailShowcase,
-) -> gtk::Widget {
+pub fn collection_detail_showcase(config: CollectionDetailShowcase) -> gtk::Widget {
     let view = config.view;
     view.set_collection_layout(config.wide_spacing);
     view.attach_cover(&showcase_cover_overlay(
@@ -368,7 +365,7 @@ pub fn collection_detail_showcase(
     };
     presentation.apply_viewport_width(config.initial_width);
     presentation.resize_cover(config.initial_width);
-    let frame = detail_showcase_frame_with_back(shell, view.upcast());
+    let frame = detail_showcase_frame(view.upcast());
     width_allocation_owner(&frame, move |width| {
         presentation.apply_viewport_width(width);
         presentation.resize_cover(width);
@@ -637,30 +634,6 @@ pub fn detail_showcase_frame(header: gtk::Widget) -> gtk::Widget {
     header.set_halign(gtk::Align::Fill);
     header.set_width_request(1);
     header
-}
-
-pub fn detail_showcase_frame_with_back(shell: &Rc<CatalogUi>, header: gtk::Widget) -> gtk::Widget {
-    let frame = detail_showcase_frame(header);
-    let overlay = gtk::Overlay::new();
-    overlay.set_hexpand(true);
-    overlay.set_halign(gtk::Align::Fill);
-    overlay.set_width_request(1);
-    overlay.set_child(Some(&frame));
-
-    let back = icon_button("rufin-go-previous-symbolic", "Back");
-    back.add_css_class("detail-back-button");
-    back.set_halign(gtk::Align::Start);
-    back.set_valign(gtk::Align::Start);
-    back.set_margin_top(1);
-    back.set_margin_start(4);
-    back.set_sensitive(shell.can_back);
-    {
-        let shell = Rc::clone(shell);
-        back.connect_clicked(move |_| (shell.go_back)());
-    }
-    overlay.add_overlay(&back);
-    overlay.set_measure_overlay(&back, false);
-    ui_shared::controls::window_drag_handle(&overlay).upcast()
 }
 
 fn update_tiny_detail_showcase(widget: &impl IsA<gtk::Widget>, width: i32) {

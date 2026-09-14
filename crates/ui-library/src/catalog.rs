@@ -21,12 +21,10 @@ pub struct CatalogUi {
     pub window: gtk::glib::WeakRef<gtk::ApplicationWindow>,
     pub route_width: Rc<dyn Fn() -> i32>,
     pub is_current: Rc<dyn Fn() -> bool>,
-    pub can_back: bool,
-    pub go_back: Rc<dyn Fn()>,
+    pub global_search: gtk::SearchEntry,
     pub reconcile: Rc<dyn Fn()>,
     pub refresh: Rc<dyn Fn()>,
     pub refresh_catalog: Rc<dyn Fn()>,
-    pub reserve_window_controls: Rc<dyn Fn(&gtk::Box, i32)>,
     pub present_full_artwork: Rc<dyn Fn(artwork::ArtworkBinding)>,
     pub present_selected_dialog: Rc<dyn Fn(&adw::Dialog)>,
     pub playlist_context_menu: Rc<

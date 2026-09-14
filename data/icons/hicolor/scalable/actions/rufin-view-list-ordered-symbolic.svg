@@ -1,4 +1,24 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
- <path fill="currentColor" d="M 2 2 H 3 V 6 H 2 V 5 H 2.5 V 3 H 2 Z M 5 3 H 14 V 4 H 5 Z M 5 6 H 14 V 7 H 5 Z M 2 9 H 5 V 10 H 3 V 11 H 5 V 14 H 2 V 13 H 4 V 12 H 2 Z M 6 10 H 14 V 11 H 6 Z M 6 13 H 14 V 14 H 6 Z"/>
+<?xml version='1.0' encoding='utf-8'?>
+<svg gpa:rendering="symbolic" xmlns="http://www.w3.org/2000/svg" xmlns:cc="http://creativecommons.org/ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:gpa="https://www.gtk.org/grappa" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" width="16" height="16" gpa:version="1" gpa:state="0" gpa:state-names="outline state8 empty">
+<path d="M 5 13 L 14 13 M 5 8 L 14 8 M 5 3 L 14 3" id="path3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke="rgb(0,0,0)" fill="none" class="foreground-stroke transparent-fill" gpa:states="outline state8" gpa:stroke="foreground" gpa:stroke-minwidth="25%" gpa:stroke-maxwidth="150%" >
+    </path>
+  <path d="M 1 12 L 3 12 L 2 13 L 2.5 13 C 3.5015552 13, 3.49035811 14.4827595, 2.5 14.4827595 L 1 14.4827595 M 1.2758621 7 L 2 7 C 3 7, 3.28965521 8, 2.5999999 8.59310341 L 1 10 L 3 10 M 1 2 L 2 2 L 2 5" id="path4" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" stroke="rgb(0,0,0)" fill="none" class="foreground-stroke transparent-fill" gpa:states="outline state8" gpa:stroke="foreground" gpa:stroke-minwidth="25%" gpa:stroke-maxwidth="200%" >
+    </path>
+  <metadata>
+    <rdf:RDF>
+      <cc:Work>
+        <cc:license rdf:resource="https://creativecommons.org/publicdomain/zero/1.0/" />
+        <dc:subject>
+          <rdf:Bag>
+            <rdf:li>view-list-ordered numbered</rdf:li>
+          </rdf:Bag>
+        </dc:subject>
+        <dc:creator>
+          <cc:Agent>
+            <dc:title>Jakub Steiner</dc:title>
+          </cc:Agent>
+        </dc:creator>
+      </cc:Work>
+    </rdf:RDF>
+  </metadata>
 </svg>

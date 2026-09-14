@@ -21,7 +21,6 @@ use rufin_core::runtime::SelectedLibrary;
 use ui_shared::artwork::{ArtworkTile, LARGE_COVER_SIZE};
 use ui_shared::favorites::{favorite_button_is_active, set_favorite_button_active};
 use ui_shared::interactions::install_context_menu_openers;
-use ui_shared::localization::bind_search_placeholder;
 use ui_shared::mounted_route::{MountedRoute, MountedRouteItemNavigation};
 
 use super::cards;
@@ -449,6 +448,7 @@ struct SearchRouteProjection {
     shell: Weak<CatalogUi>,
     selected: SelectedLibrary,
     search: gtk::SearchEntry,
+    search_handler: RefCell<Option<glib::SignalHandlerId>>,
     status: gtk::Stack,
     results: adw::ViewStack,
     result_page: gtk::Stack,
@@ -484,10 +484,7 @@ ui_shared::composite_box!(
 impl SearchRouteProjection {
     fn new(shell: &Rc<CatalogUi>, selected: &SelectedLibrary) -> Rc<Self> {
         let wrapper = SearchRouteView::new();
-        let search = gtk::SearchEntry::new();
-        search.set_hexpand(true);
-        search.set_width_request(1);
-        bind_search_placeholder(&search, "Search");
+        let search = shell.global_search.clone();
 
         let models = CollectionCategory::ALL.map(|_| gio::ListStore::new::<SparseObjectItem>());
         let category_pages =
@@ -504,6 +501,7 @@ impl SearchRouteProjection {
             shell: Rc::downgrade(shell),
             selected: selected.clone(),
             search,
+            search_handler: RefCell::new(None),
             status,
             results,
             result_page,
@@ -518,12 +516,16 @@ impl SearchRouteProjection {
         projection.connect();
         projection.mount_category(CollectionCategory::default());
         projection.register_now_playing(shell);
+        let query = projection.search.text().trim().to_owned();
+        if !query.is_empty() {
+            projection.submit(query);
+        }
         projection
     }
 
     fn connect(self: &Rc<Self>) {
         let weak = Rc::downgrade(self);
-        self.search.connect_search_changed(move |entry| {
+        let handler = self.search.connect_text_notify(move |entry| {
             let Some(projection) = weak.upgrade() else {
                 return;
             };
@@ -548,6 +550,7 @@ impl SearchRouteProjection {
                     },
                 )));
         });
+        self.search_handler.replace(Some(handler));
         let weak = Rc::downgrade(self);
         self.results.connect_visible_child_notify(move |results| {
             let Some(projection) = weak.upgrade() else {
@@ -567,9 +570,6 @@ impl SearchRouteProjection {
             return;
         }
         if let Some(previous) = self.active.borrow_mut().take() {
-            if let Some(search_host) = self.search.parent().and_downcast::<gtk::Box>() {
-                search_host.remove(&self.search);
-            }
             self.toolbar_host.remove(&previous.toolbar.widget());
             self.result_page
                 .remove(&previous.collection.scrolling_widget());
@@ -586,7 +586,7 @@ impl SearchRouteProjection {
         );
         let toolbar = shell.library_toolbar_projection_without_detail(
             category.key(),
-            self.search.clone(),
+            None,
             category.sort_fields(),
         );
         let presentation = SearchPresentation {
@@ -766,6 +766,9 @@ impl SearchRouteProjection {
 
 impl Drop for SearchRouteProjection {
     fn drop(&mut self) {
+        if let Some(handler) = self.search_handler.get_mut().take() {
+            self.search.disconnect(handler);
+        }
         if let Some(source) = self.debounce.get_mut().take() {
             source.remove();
         }
