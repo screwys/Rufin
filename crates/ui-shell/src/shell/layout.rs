@@ -166,7 +166,7 @@ pub(crate) enum ResolvedLeftSidebarMode {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ResolvedLayout {
     pub(crate) profile: ActiveLayoutProfile,
-    pub(super) left_sidebar: ResolvedLeftSidebarMode,
+    pub(crate) left_sidebar: ResolvedLeftSidebarMode,
     pub(super) left_sidebar_width: i32,
     pub(super) right_sidebar: RightSidebarMode,
     pub(super) right_sidebar_width: i32,
