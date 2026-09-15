@@ -79,20 +79,33 @@ impl Shell {
     }
 
     pub(crate) fn set_active_left_sidebar_mode(self: &Rc<Self>, mode: LeftSidebarMode) {
+        let window_width = self.layout_width();
         let active_profile =
-            resolve_layout(&self.settings.current.borrow().layout, self.layout_width()).profile;
+            resolve_layout(&self.settings.current.borrow().layout, window_width).profile;
         if self
             .settings
             .update_app_settings("left sidebar setting", |settings| {
+                let mut requested = settings.layout.clone();
                 let profile = match active_profile {
-                    ActiveLayoutProfile::Default => &mut settings.layout.default_profile,
-                    ActiveLayoutProfile::Narrow => &mut settings.layout.narrow_profile,
+                    ActiveLayoutProfile::Default => &mut requested.default_profile,
+                    ActiveLayoutProfile::Narrow => &mut requested.narrow_profile,
                 };
-                if profile.left_sidebar == mode {
+                profile.left_sidebar = mode;
+                if mode == LeftSidebarMode::Full
+                    && resolve_layout(&requested, window_width).left_sidebar
+                        != ResolvedLeftSidebarMode::Full
+                {
+                    let profile = match active_profile {
+                        ActiveLayoutProfile::Default => &mut requested.default_profile,
+                        ActiveLayoutProfile::Narrow => &mut requested.narrow_profile,
+                    };
+                    profile.right_sidebar = RightSidebarMode::Hidden;
+                }
+                requested.sanitize();
+                if settings.layout == requested {
                     return false;
                 }
-                profile.left_sidebar = mode;
-                settings.layout.sanitize();
+                settings.layout = requested;
                 true
             })
             .is_none()
