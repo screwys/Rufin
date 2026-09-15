@@ -23,7 +23,7 @@ mod freedesktop {
     const TRAY_ICON_SIZES: [i32; 5] = [16, 22, 24, 32, 48];
     const APP_ICON_BYTES: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png"
+        "/../../data/icons/hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg"
     ));
 
     pub struct Tray {
