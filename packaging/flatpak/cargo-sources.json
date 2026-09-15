@@ -184,6 +184,19 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/apple-cf/apple-cf-0.10.0.crate",
+        "sha256": "ae3bd5e625b0ddf7228c93f0e68859b6381697e98c824d1acaf10d78289a3972",
+        "dest": "cargo/vendor/apple-cf-0.10.0"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"ae3bd5e625b0ddf7228c93f0e68859b6381697e98c824d1acaf10d78289a3972\", \"files\": {}}",
+        "dest": "cargo/vendor/apple-cf-0.10.0",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/apple-native-keyring-store/apple-native-keyring-store-1.0.2.crate",
         "sha256": "2b350bfd03649e07aa05c0a81b3e15934374e585c98204a57e20b9d49f49bb9a",
         "dest": "cargo/vendor/apple-native-keyring-store-1.0.2"
@@ -1908,6 +1921,19 @@
         "type": "inline",
         "contents": "{\"package\": \"c801f6c2a0db1a1909d89fc395b9dccc594de9ef599659fbde9bb3b55ef67f9f\", \"files\": {}}",
         "dest": "cargo/vendor/doom-fish-utils-0.3.3",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/doom-fish-utils/doom-fish-utils-0.4.0.crate",
+        "sha256": "02899420fa4eefbe3bf778ba507a3bbb062917fe4797d065a2972d6521a748d5",
+        "dest": "cargo/vendor/doom-fish-utils-0.4.0"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"02899420fa4eefbe3bf778ba507a3bbb062917fe4797d065a2972d6521a748d5\", \"files\": {}}",
+        "dest": "cargo/vendor/doom-fish-utils-0.4.0",
         "dest-filename": ".cargo-checksum.json"
     },
     {
