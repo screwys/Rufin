@@ -4500,14 +4500,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/mdns-sd/mdns-sd-0.21.2.crate",
-        "sha256": "9823c1afc7140b27e22103d37786df2156de7cbc03c39dd4ac7d8247a673f5e4",
-        "dest": "cargo/vendor/mdns-sd-0.21.2"
+        "url": "https://static.crates.io/crates/mdns-sd/mdns-sd-0.21.3.crate",
+        "sha256": "a63c9b854b5ad0812ac5969f8db92a59f28b45d0a5ae599b9a45b84c5c8a08e8",
+        "dest": "cargo/vendor/mdns-sd-0.21.3"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"9823c1afc7140b27e22103d37786df2156de7cbc03c39dd4ac7d8247a673f5e4\", \"files\": {}}",
-        "dest": "cargo/vendor/mdns-sd-0.21.2",
+        "contents": "{\"package\": \"a63c9b854b5ad0812ac5969f8db92a59f28b45d0a5ae599b9a45b84c5c8a08e8\", \"files\": {}}",
+        "dest": "cargo/vendor/mdns-sd-0.21.3",
         "dest-filename": ".cargo-checksum.json"
     },
     {
