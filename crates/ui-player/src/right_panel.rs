@@ -3,7 +3,6 @@ use std::cell::Cell;
 pub struct RightPanelWidgets {
     pub queue_loading: adw::Spinner,
     pub root: gtk::Box,
-    pub queue_header_host: gtk::Box,
     pub queue_panel: gtk::Box,
     pub queue_search: gtk::SearchEntry,
     pub queue_clear_button: gtk::Button,
@@ -15,7 +14,6 @@ pub struct RightPanelWidgets {
 pub struct RightPanelParts {
     pub queue_loading: adw::Spinner,
     pub root: gtk::Box,
-    pub queue_header_host: gtk::Box,
     pub queue_panel: gtk::Box,
     pub queue_search: gtk::SearchEntry,
     pub queue_clear_button: gtk::Button,
@@ -32,7 +30,6 @@ pub fn build_right_panel(visualizer_area: &gtk::DrawingArea) -> RightPanelParts 
         root: gtk::Box,
         queue_lyrics_overlay: gtk::Overlay,
         queue_region: gtk::Overlay,
-        queue_header_host: gtk::Box,
         queue_panel: gtk::Box,
         queue_search: gtk::SearchEntry,
         queue_clear_button: gtk::Button,
@@ -67,7 +64,6 @@ pub fn build_right_panel(visualizer_area: &gtk::DrawingArea) -> RightPanelParts 
     RightPanelParts {
         queue_loading,
         root,
-        queue_header_host,
         queue_panel,
         queue_search,
         queue_clear_button,

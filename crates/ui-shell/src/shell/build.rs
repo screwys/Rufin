@@ -233,7 +233,6 @@ pub async fn build(
     let visualizer = build_visualizer();
     let right_panel_parts = build_right_panel(&visualizer.sidebar_area);
     let right_panel = right_panel_parts.root;
-    let queue_header_host = right_panel_parts.queue_header_host;
     let queue_panel = right_panel_parts.queue_panel;
     let queue_search = right_panel_parts.queue_search;
     let queue_clear_button = right_panel_parts.queue_clear_button;
@@ -267,10 +266,14 @@ pub async fn build(
         if child != &fullscreen_overlay {
             return None;
         }
-        // The main child already has this layout pass's allocation; the overlay's cached size may
-        // still describe the preceding startup pass.
-        let content = overlay.child()?;
-        let (width, height) = (content.width(), content.height());
+        let (width, height) = (
+            overlay
+                .width()
+                .max(overlay.child().map_or(0, |c| c.width())),
+            overlay
+                .height()
+                .max(overlay.child().map_or(0, |c| c.height())),
+        );
         (width > 0 && height > 0)
             .then(|| gtk::gdk::Rectangle::new(0, fullscreen_slide_offset.get(), width, height))
     });
@@ -313,7 +316,6 @@ pub async fn build(
     let player_right_panel = ui_player::right_panel::RightPanelWidgets {
         queue_loading: right_panel_parts.queue_loading,
         root: right_panel,
-        queue_header_host,
         queue_panel,
         queue_search,
         queue_clear_button,
@@ -449,6 +451,25 @@ pub async fn build(
                                 favorite,
                                 Some(button),
                             );
+                        }
+                    })
+                },
+                {
+                    let weak = weak.clone();
+                    Rc::new(move |rows| {
+                        let Some(shell) = weak.upgrade() else {
+                            return gtk::Box::default().upcast();
+                        };
+                        let route = shell.navigation.routes.borrow().current().clone();
+                        let catalog = shell.build_catalog(&route, None);
+                        catalog.related_tracks_view(rows)
+                    })
+                },
+                {
+                    let weak = weak.clone();
+                    Rc::new(move |artwork| {
+                        if let Some(shell) = weak.upgrade() {
+                            shell.present_full_artwork(artwork);
                         }
                     })
                 },

@@ -242,13 +242,8 @@ impl crate::PlayerUi {
 
     pub fn sync_visualizer_state(self: &Rc<Self>) {
         let fullscreen_visible = self.fullscreen_player_visible()
-            && self
-                .views
-                .fullscreen_player
-                .stack
-                .visible_child_name()
-                .as_deref()
-                == Some("visualizer");
+            && self.views.fullscreen_player.experience_visible()
+            && self.views.fullscreen_player.visualizer_enabled.get();
         let sidebar_visible = !self.fullscreen_player_visible()
             && self.right_sidebar_visible()
             && self.right_panel.visualizer_visible.get();

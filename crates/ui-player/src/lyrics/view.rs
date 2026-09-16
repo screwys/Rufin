@@ -20,8 +20,6 @@ const DEFAULT_LYRICS_SCROLL_ANIMATION_MS: u64 = 300;
 const MIN_LYRICS_SCROLL_ANIMATION_MS: u64 = 80;
 const LYRICS_SCROLL_MS: u64 = 200;
 const LYRICS_USER_SCROLL_PAUSE_MS: u64 = 3_000;
-const LYRICS_SCROLL_READY_RETRY_MS: u64 = 32;
-const LYRICS_SCROLL_READY_RETRIES: u8 = 12;
 
 mod karaoke_text {
     use std::cell::{Cell, RefCell};
@@ -1074,13 +1072,12 @@ impl LyricsPane {
         let generation = self.scroll_generation.get().saturating_add(1);
         self.scroll_generation.set(generation);
         let scroll_generation = Rc::clone(&self.scroll_generation);
-        scroll_row_into_view_when_ready(
+        scroll_row_into_view_after_layout(
             scroller,
             row,
             duration_millis,
             scroll_generation,
             generation,
-            LYRICS_SCROLL_READY_RETRIES,
         );
     }
 }
@@ -1206,68 +1203,66 @@ fn last_lyrics_scroll_surface(widget: &gtk::Widget) -> Option<gtk::Widget> {
         .find_map(|child| last_lyrics_scroll_surface(&child))
 }
 
-fn scroll_row_into_view_when_ready(
+fn scroll_row_into_view_after_layout(
     scroller: gtk::ScrolledWindow,
     row: gtk::Widget,
     duration_millis: u64,
     scroll_generation: Rc<Cell<u64>>,
     generation: u64,
-    retries_left: u8,
 ) {
-    glib::idle_add_local_once(move || {
+    // Tick callbacks run before allocation. Read the row bounds after this frame's
+    // layout, so changing panes does not first center using the old viewport.
+    scroller.add_tick_callback(move |scroller, clock| {
         if scroll_generation.get() != generation {
-            return;
+            return glib::ControlFlow::Break;
         }
-
-        let first_surface = first_lyrics_scroll_surface(&row).unwrap_or_else(|| row.clone());
-        let last_surface = last_lyrics_scroll_surface(&row).unwrap_or_else(|| row.clone());
-        let first_bounds = first_surface.compute_bounds(&scroller);
-        let last_bounds = last_surface.compute_bounds(&scroller);
-        let adjustment = scroller.vadjustment();
-        let ready = first_bounds.is_some()
-            && last_bounds.is_some()
-            && scroller.height() > 1
-            && adjustment.page_size() > 1.0;
-        if !ready && retries_left > 0 {
-            glib::timeout_add_local_once(
-                Duration::from_millis(LYRICS_SCROLL_READY_RETRY_MS),
-                move || {
-                    scroll_row_into_view_when_ready(
-                        scroller,
-                        row,
-                        duration_millis,
-                        scroll_generation,
-                        generation,
-                        retries_left - 1,
-                    );
-                },
+        let scroller = scroller.downgrade();
+        let row = row.downgrade();
+        let scroll_generation = Rc::clone(&scroll_generation);
+        let handler = Rc::new(RefCell::new(None));
+        let disconnect = Rc::clone(&handler);
+        *handler.borrow_mut() = Some(clock.connect_local("layout", true, move |values| {
+            let clock = values[0].get::<gtk::gdk::FrameClock>().unwrap();
+            clock.disconnect(disconnect.take().unwrap());
+            if scroll_generation.get() != generation {
+                return None;
+            }
+            let (Some(scroller), Some(row)) = (scroller.upgrade(), row.upgrade()) else {
+                return None;
+            };
+            let first_surface = first_lyrics_scroll_surface(&row).unwrap_or_else(|| row.clone());
+            let last_surface = last_lyrics_scroll_surface(&row).unwrap_or_else(|| row.clone());
+            let first_bounds = first_surface.compute_bounds(&scroller);
+            let last_bounds = last_surface.compute_bounds(&scroller);
+            let adjustment = scroller.vadjustment();
+            let (Some(first_bounds), Some(last_bounds)) = (first_bounds, last_bounds) else {
+                return None;
+            };
+            let viewport_height = f64::from(scroller.height().max(1));
+            let surface_top = f64::from(first_bounds.y().min(last_bounds.y()));
+            let surface_bottom = f64::from(
+                (first_bounds.y() + first_bounds.height())
+                    .max(last_bounds.y() + last_bounds.height()),
             );
-            return;
-        }
-
-        let (Some(first_bounds), Some(last_bounds)) = (first_bounds, last_bounds) else {
-            return;
-        };
-        let viewport_height = f64::from(scroller.height().max(1));
-        let surface_top = f64::from(first_bounds.y().min(last_bounds.y()));
-        let surface_bottom = f64::from(
-            (first_bounds.y() + first_bounds.height()).max(last_bounds.y() + last_bounds.height()),
-        );
-        let upper = adjustment.upper() - adjustment.page_size();
-        let target = centered_scroll_target(
-            surface_top,
-            surface_bottom,
-            adjustment.value(),
-            viewport_height,
-        )
-        .clamp(adjustment.lower(), upper.max(adjustment.lower()));
-        animate_lyrics_scroll(
-            adjustment,
-            target,
-            duration_millis,
-            scroll_generation,
-            generation,
-        );
+            let upper = adjustment.upper() - adjustment.page_size();
+            let target = centered_scroll_target(
+                surface_top,
+                surface_bottom,
+                adjustment.value(),
+                viewport_height,
+            )
+            .clamp(adjustment.lower(), upper.max(adjustment.lower()));
+            animate_lyrics_scroll(
+                adjustment,
+                target,
+                duration_millis,
+                Rc::clone(&scroll_generation),
+                generation,
+            );
+            None
+        }));
+        clock.request_phase(gtk::gdk::FrameClockPhase::LAYOUT);
+        glib::ControlFlow::Break
     });
 }
 

@@ -28,10 +28,15 @@ tooltip.background label {
 
 .table-header,
 columnview > header > button > box {
+  font-family: "Adwaita Sans", sans-serif;
   font-size: 100%;
   font-weight: 400;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--window-fg-color) 90%, var(--window-bg-color));
+}
+
+columnview > header {
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
 }
 
 .playlist-drag-preview {
@@ -323,7 +328,8 @@ overlay-split-view > .sidebar-pane {
 
 scrolledwindow.route-scroll-owner scrollbar.vertical,
 scrolledwindow.sidebar-scroller scrollbar.vertical,
-.right-panel scrolledwindow.right-panel-scroller scrollbar.vertical {
+.right-panel scrolledwindow.right-panel-scroller scrollbar.vertical,
+.fullscreen-player scrolledwindow scrollbar.vertical {
   min-width: 9px;
   opacity: 1;
   background: transparent;
@@ -336,7 +342,9 @@ scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough,
 scrolledwindow.sidebar-scroller scrollbar.vertical > range,
 scrolledwindow.sidebar-scroller scrollbar.vertical > range > trough,
 .right-panel scrolledwindow.right-panel-scroller scrollbar.vertical > range,
-.right-panel scrolledwindow.right-panel-scroller scrollbar.vertical > range > trough {
+.right-panel scrolledwindow.right-panel-scroller scrollbar.vertical > range > trough,
+.fullscreen-player scrolledwindow scrollbar.vertical > range,
+.fullscreen-player scrolledwindow scrollbar.vertical > range > trough {
   min-width: 9px;
   margin: 0;
   padding: 0;
@@ -356,7 +364,8 @@ scrolledwindow:not(:hover) scrollbar.overlay-indicator:not(.hovering):not(:focus
 
 scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider,
 scrolledwindow.sidebar-scroller scrollbar.vertical > range > trough > slider,
-.right-panel scrolledwindow.right-panel-scroller scrollbar.vertical > range > trough > slider {
+.right-panel scrolledwindow.right-panel-scroller scrollbar.vertical > range > trough > slider,
+.fullscreen-player scrolledwindow scrollbar.vertical > range > trough > slider {
   min-width: 7px;
   min-height: 42px;
   margin: 0 1px;
@@ -372,7 +381,9 @@ scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider:a
 scrolledwindow.sidebar-scroller scrollbar.vertical > range > trough > slider:hover,
 scrolledwindow.sidebar-scroller scrollbar.vertical > range > trough > slider:active,
 .right-panel scrolledwindow.right-panel-scroller scrollbar.vertical > range > trough > slider:hover,
-.right-panel scrolledwindow.right-panel-scroller scrollbar.vertical > range > trough > slider:active {
+.right-panel scrolledwindow.right-panel-scroller scrollbar.vertical > range > trough > slider:active,
+.fullscreen-player scrolledwindow scrollbar.vertical > range > trough > slider:hover,
+.fullscreen-player scrolledwindow scrollbar.vertical > range > trough > slider:active {
   background: color-mix(in srgb, var(--window-fg-color) 56%, transparent);
 }
 
@@ -381,7 +392,9 @@ scrolledwindow.route-scroll-owner overshoot,
 scrolledwindow.sidebar-scroller undershoot,
 scrolledwindow.sidebar-scroller overshoot,
 .right-panel scrolledwindow.right-panel-scroller undershoot,
-.right-panel scrolledwindow.right-panel-scroller overshoot {
+.right-panel scrolledwindow.right-panel-scroller overshoot,
+.fullscreen-player scrolledwindow undershoot,
+.fullscreen-player scrolledwindow overshoot {
   background: transparent;
   background-image: none;
   border: none;
@@ -1971,7 +1984,6 @@ listview.queue-list row:hover .row-favorite-button:not(.active-toggle),
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
 }
 
-.queue-list row,
 listview.queue-list row {
   padding: 0;
   background: transparent;
@@ -1997,7 +2009,8 @@ listview.queue-list row {
   opacity: 1;
 }
 
-.lyrics-controls .icon-button {
+.lyrics-controls .icon-button,
+.fullscreen-focus-button {
   min-width: 30px;
   min-height: 30px;
   padding: 0;
@@ -2088,27 +2101,50 @@ entry.lyrics-offset-value.flat:focus-within {
 }
 
 .fullscreen-player {
-  background: var(--view-bg-color);
+  background: var(--window-bg-color);
   color: var(--view-fg-color);
 }
 
-.fullscreen-player-close-button {
-  margin-top: 0;
+.fullscreen-player.artwork-background .wide-sidebar-slot {
+  background: color-mix(in srgb, var(--view-bg-color) 20%, transparent);
 }
 
-.fullscreen-player-body {
-  padding: 0;
+.fullscreen-artwork-bars headerbar.shared-topbar,
+.fullscreen-artwork-bars .bottom-player {
+  background: color-mix(in srgb, var(--window-bg-color) 88%, var(--fullscreen-artwork-color));
+  transition: background 600ms ease;
+}
+
+.fullscreen-player .lyrics-top-controls,
+.fullscreen-focus-button {
+  margin-top: 8px;
+}
+
+.fullscreen-focus-button {
+  opacity: 0;
+  transition: opacity 160ms ease-out;
+}
+
+.fullscreen-player-experience:hover .fullscreen-focus-button,
+.fullscreen-focus-button:focus-visible {
+  opacity: 1;
+}
+
+.fullscreen-focus-button:checked:not(:hover):not(:active) {
+  background: transparent;
+  box-shadow: none;
 }
 
 .fullscreen-player-hero {
-  margin: 12px 24px 0;
   min-width: 0;
 }
 
+.fullscreen-player-tabs {
+  padding-top: 12px;
+}
+
 .fullscreen-player-cover {
-  box-shadow:
-    0 18px 42px rgba(0, 0, 0, 0.26),
-    inset 0 0 0 1px color-mix(in srgb, var(--window-fg-color) 12%, transparent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 .fullscreen-player-details {
@@ -2125,7 +2161,7 @@ entry.lyrics-offset-value.flat:focus-within {
 
 .fullscreen-player-title {
   color: var(--window-fg-color);
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 800;
 }
 
@@ -2146,22 +2182,17 @@ entry.lyrics-offset-value.flat:focus-within {
   font-size: 12px;
 }
 
-.fullscreen-player-tab-bar {
-  min-height: 40px;
-  margin-top: 0;
-}
-
 .fullscreen-player-pane {
-  margin: 0 36px 6px;
+  margin: 0 0 12px 12px;
 }
 
 .fullscreen-player-visualizer {
   margin: 0;
-  min-height: 220px;
+  min-height: 0;
 }
 
 .fullscreen-player-visualizer-area {
-  min-height: 220px;
+  min-height: 0;
 }
 
 .sidebar-visualizer-area {
@@ -2170,7 +2201,7 @@ entry.lyrics-offset-value.flat:focus-within {
 }
 
 .fullscreen-player-equalizer-scroller {
-  margin: 0 12px 6px;
+  margin: 0 0 6px 12px;
   min-height: 0;
 }
 
@@ -2222,8 +2253,7 @@ scale.equalizer-surface-scale trough {
 }
 
 .fullscreen-player .lyrics-panel {
-  margin-top: 0;
-  margin-bottom: 0;
+  margin: 0;
 }
 
 .fullscreen-player .lyrics-lines {

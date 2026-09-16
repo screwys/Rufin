@@ -647,6 +647,9 @@ msgstr ""
 msgid "Copy"
 msgstr ""
 
+msgid "Could not load related tracks"
+msgstr ""
+
 msgid "Could not load this page"
 msgstr ""
 
@@ -832,6 +835,9 @@ msgstr ""
 msgid "Duration"
 msgstr ""
 
+msgid "Dynamic background"
+msgstr ""
+
 msgid "EBU R128 reference level"
 msgstr ""
 
@@ -880,6 +886,9 @@ msgstr ""
 msgid "Enable automatic backups"
 msgstr ""
 
+msgid "Enable background image"
+msgstr ""
+
 msgid "Enable equalizer"
 msgstr ""
 
@@ -914,6 +923,9 @@ msgid "Equalizer"
 msgstr ""
 
 msgid "Everything, including new tracks"
+msgstr ""
+
+msgid "Expand lyrics and visualizer"
 msgstr ""
 
 msgid "Expand sidebar"
@@ -1254,6 +1266,9 @@ msgstr ""
 msgid "ListenBrainz"
 msgstr ""
 
+msgid "Loading related tracks..."
+msgstr ""
+
 msgid "Loading..."
 msgstr ""
 
@@ -1564,6 +1579,9 @@ msgid "No network address available"
 msgstr ""
 
 msgid "No network devices found"
+msgstr ""
+
+msgid "No related tracks found"
 msgstr ""
 
 msgid "No results"
@@ -1987,6 +2005,9 @@ msgstr ""
 msgid "Regenerate access token?"
 msgstr ""
 
+msgid "Related"
+msgstr ""
+
 msgid "Release date"
 msgstr ""
 
@@ -2097,6 +2118,9 @@ msgid "Resource not found"
 msgstr ""
 
 msgid "Restore User State"
+msgstr ""
+
+msgid "Restore player layout"
 msgstr ""
 
 msgid "Restore"
@@ -2358,6 +2382,9 @@ msgstr ""
 msgid "Show Rufin"
 msgstr ""
 
+msgid "Show artwork"
+msgstr ""
+
 msgid "Show downloaded badge"
 msgstr ""
 
@@ -2528,6 +2555,9 @@ msgid "Switch Search/Favorites tabs"
 msgstr ""
 
 msgid "Switch between layouts"
+msgstr ""
+
+msgid "Switch pane"
 msgstr ""
 
 msgid "Switching library..."
@@ -2752,9 +2782,6 @@ msgid "View"
 msgstr ""
 
 msgid "Visible"
-msgstr ""
-
-msgid "Visualizer"
 msgstr ""
 
 msgid "Volume Down"

@@ -3,14 +3,13 @@ pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     PLAYBACK_SETTINGS_POPOVER_RESOURCE,
     LYRICS_COLOR_CHOOSER_RESOURCE,
     LYRICS_SETTINGS_RESOURCE,
-    QUEUE_FULLSCREEN_ROW_RESOURCE,
-    QUEUE_SIDEBAR_ROW_RESOURCE,
     RIGHT_PANEL_RESOURCE,
     LYRICS_SEARCH_RESOURCE,
     LYRICS_EDIT_RESOURCE,
     LYRICS_DICTIONARY_RESOURCE,
     EQUALIZER_RESOURCE,
     FULLSCREEN_PLAYER_RESOURCE,
+    FULLSCREEN_SETTINGS_RESOURCE,
     BOTTOM_PLAYER_RESOURCE,
     LYRICS_PANE_RESOURCE,
 ];
@@ -18,6 +17,8 @@ pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
 pub const BOTTOM_PLAYER_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/bottom.ui";
 
 pub const FULLSCREEN_PLAYER_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/fullscreen.ui";
+pub const FULLSCREEN_SETTINGS_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/player/fullscreen_settings.ui";
 
 pub const EQUALIZER_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/equalizer.ui";
 
@@ -29,12 +30,6 @@ pub const LYRICS_EDIT_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/lyric
 pub const LYRICS_SEARCH_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/lyrics/search.ui";
 
 pub const RIGHT_PANEL_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/right_panel.ui";
-
-pub const QUEUE_SIDEBAR_ROW_RESOURCE: &str =
-    "/io/github/screwys/Rufin/ui/player/queue_sidebar_row.ui";
-
-pub const QUEUE_FULLSCREEN_ROW_RESOURCE: &str =
-    "/io/github/screwys/Rufin/ui/player/queue_fullscreen_row.ui";
 
 pub const LYRICS_SETTINGS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/lyrics/settings.ui";
 

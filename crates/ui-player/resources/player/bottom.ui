@@ -138,11 +138,20 @@
           <object class="GtkLabel" id="duration">
             <property name="label">0:00</property>
             <property name="width-chars">4</property>
+            <property name="xalign">0</property>
             <style><class name="muted"/><class name="player-timestamp"/></style>
           </object>
         </child>
       </object>
     </child>
+  </object>
+
+  <object class="GtkSizeGroup">
+    <property name="mode">horizontal</property>
+    <widgets>
+      <widget name="elapsed"/>
+      <widget name="duration"/>
+    </widgets>
   </object>
 
   <object class="GtkScale" id="progress">
@@ -166,7 +175,7 @@
         <property name="halign">end</property><property name="valign">center</property>
         <child>
           <object class="GtkMenuButton" id="settings_button">
-            <property name="icon-name">rufin-music-queue-symbolic</property><property name="direction">up</property><property name="has-frame">false</property><property name="valign">center</property>
+            <property name="icon-name">rufin-mixer-sliders-symbolic</property><property name="direction">up</property><property name="has-frame">false</property><property name="valign">center</property>
             <style><class name="icon-button"/><class name="flat"/><class name="circular"/><class name="player-settings-button"/></style>
           </object>
         </child>

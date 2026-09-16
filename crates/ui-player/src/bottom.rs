@@ -121,6 +121,7 @@ pub struct PlayerControls {
     pub waveform_key: RefCell<Option<CurrentMediaId>>,
     pub waveform_peak_count: Cell<usize>,
     pub duration: gtk::Label,
+    pub timestamp_size_group: gtk::SizeGroup,
     pub actions: gtk::Overlay,
     pub action_buttons: gtk::Box,
     pub mute_button: gtk::Button,
@@ -158,6 +159,7 @@ pub struct TransportControls {
     pub progress: gtk::Scale,
     pub waveform: WaveformSeekBar,
     pub duration: gtk::Label,
+    pub timestamp_size_group: gtk::SizeGroup,
 }
 
 pub struct PlayerActionControls {
@@ -470,6 +472,7 @@ pub fn build_bottom_player() -> PlayerControls {
         progress,
         waveform,
         duration,
+        timestamp_size_group,
     } = build_transport_controls(&builder, resource);
 
     now_playing_wall.append(&now_playing);
@@ -543,6 +546,7 @@ pub fn build_bottom_player() -> PlayerControls {
         waveform_key: RefCell::new(None),
         waveform_peak_count: Cell::new(0),
         duration,
+        timestamp_size_group,
         actions,
         action_buttons,
         mute_button,
@@ -642,6 +646,11 @@ pub fn build_transport_controls(builder: &gtk::Builder, resource: &str) -> Trans
     progress_row.set_spacing(BOTTOM_PLAYER_PROGRESS_SPACING);
     progress.set_width_request(BOTTOM_PLAYER_PROGRESS_WIDTH);
     progress_stack.set_size_request(BOTTOM_PLAYER_PROGRESS_WIDTH, BOTTOM_PLAYER_WAVEFORM_HEIGHT);
+    elapsed.set_xalign(1.0);
+    duration.set_xalign(0.0);
+    let timestamp_size_group = gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal);
+    timestamp_size_group.add_widget(&elapsed);
+    timestamp_size_group.add_widget(&duration);
 
     let dj_button = auto_dj_icon_button("Auto DJ");
     let previous_button = skip_icon_button(false, "Previous");
@@ -731,6 +740,7 @@ pub fn build_transport_controls(builder: &gtk::Builder, resource: &str) -> Trans
         progress,
         waveform,
         duration,
+        timestamp_size_group,
     }
 }
 
@@ -844,14 +854,16 @@ pub fn bottom_player_content_width(player_width: i32) -> i32 {
 }
 
 pub fn bottom_player_progress_width(player_width: i32) -> i32 {
-    if player_width >= BOTTOM_PLAYER_FULL_PROGRESS_WIDTH {
-        return BOTTOM_PLAYER_PROGRESS_WIDTH;
+    if player_width < BOTTOM_PLAYER_COMPACT_MIN_WIDTH {
+        BOTTOM_PLAYER_PROGRESS_MIN_WIDTH
+    } else if player_width <= BOTTOM_PLAYER_FULL_PROGRESS_WIDTH {
+        let span = BOTTOM_PLAYER_FULL_PROGRESS_WIDTH - BOTTOM_PLAYER_COMPACT_MIN_WIDTH;
+        let width_span = BOTTOM_PLAYER_PROGRESS_WIDTH - BOTTOM_PLAYER_PROGRESS_MIN_WIDTH;
+        let progress = player_width - BOTTOM_PLAYER_COMPACT_MIN_WIDTH;
+        BOTTOM_PLAYER_PROGRESS_MIN_WIDTH + width_span * progress / span
+    } else {
+        BOTTOM_PLAYER_PROGRESS_WIDTH + (player_width - BOTTOM_PLAYER_FULL_PROGRESS_WIDTH) / 3
     }
-
-    let span = BOTTOM_PLAYER_FULL_PROGRESS_WIDTH - BOTTOM_PLAYER_COMPACT_MIN_WIDTH;
-    let width_span = BOTTOM_PLAYER_PROGRESS_WIDTH - BOTTOM_PLAYER_PROGRESS_MIN_WIDTH;
-    let progress = (player_width - BOTTOM_PLAYER_COMPACT_MIN_WIDTH).clamp(0, span);
-    BOTTOM_PLAYER_PROGRESS_MIN_WIDTH + width_span * progress / span
 }
 
 pub fn centered_progress_width(
@@ -962,6 +974,9 @@ impl crate::PlayerUi {
         let controls = &self.views.player_controls;
         let displayed_seconds = self.seek_preview_seconds().unwrap_or(position_seconds);
         self.controls.updating_controls.set(true);
+        let time_chars = (format_duration(duration_seconds).chars().count() as i32).max(4);
+        controls.elapsed.set_width_chars(time_chars);
+        controls.duration.set_width_chars(time_chars);
         controls
             .elapsed
             .set_text(&format_duration(displayed_seconds));
@@ -1034,6 +1049,9 @@ impl crate::PlayerUi {
             .repeat_button
             .set_tooltip_text(Some(&repeat_label(repeat_mode)));
 
+        let time_chars = (format_duration(duration_seconds).chars().count() as i32).max(4);
+        controls.elapsed.set_width_chars(time_chars);
+        controls.duration.set_width_chars(time_chars);
         let preview_seconds = self.seek_preview_seconds();
         let displayed_seconds = preview_seconds.unwrap_or(position_seconds);
         controls
@@ -1954,6 +1972,33 @@ mod tests {
     }
 
     #[test]
+    fn bottom_player_progress_width_scales_with_window_size() {
+        assert_eq!(
+            super::bottom_player_progress_width(super::BOTTOM_PLAYER_COMPACT_MIN_WIDTH - 50),
+            super::BOTTOM_PLAYER_PROGRESS_MIN_WIDTH
+        );
+        assert_eq!(
+            super::bottom_player_progress_width(super::BOTTOM_PLAYER_COMPACT_MIN_WIDTH),
+            super::BOTTOM_PLAYER_PROGRESS_MIN_WIDTH
+        );
+        assert_eq!(
+            super::bottom_player_progress_width(super::BOTTOM_PLAYER_FULL_PROGRESS_WIDTH),
+            super::BOTTOM_PLAYER_PROGRESS_WIDTH
+        );
+        assert!(
+            super::bottom_player_progress_width(1024)
+                > super::bottom_player_progress_width(super::BOTTOM_PLAYER_FULL_PROGRESS_WIDTH)
+        );
+        assert!(
+            super::bottom_player_progress_width(1920) > super::bottom_player_progress_width(1024)
+        );
+        assert_eq!(
+            super::bottom_player_progress_width(super::BOTTOM_PLAYER_FULL_PROGRESS_WIDTH + 300),
+            super::BOTTOM_PLAYER_PROGRESS_WIDTH + 100
+        );
+    }
+
+    #[test]
     fn centered_progress_budget_preserves_both_side_allocations() {
         for desired_width in (1..=512).step_by(17) {
             for action_width in (0..=320).step_by(11) {
@@ -2037,6 +2082,22 @@ mod tests {
 
 pub fn connect_player_controls(shell: &Rc<crate::PlayerUi>) {
     connect_bottom_player_resize(shell);
+    let fullscreen = &shell.views.fullscreen_player;
+    for (label, binding) in [
+        (&fullscreen.artist, &fullscreen.artist_links),
+        (&fullscreen.album, &fullscreen.album_links),
+    ] {
+        let weak = Rc::downgrade(shell);
+        binding.replace(Some(DetailLinkBinding::new(
+            label,
+            Rc::new(move |route| {
+                if let Some(shell) = weak.upgrade() {
+                    shell.close_fullscreen_player();
+                    (shell.navigate)(route);
+                }
+            }),
+        )));
+    }
     let controls = &shell.views.player_controls;
     controls.artist_links.replace(Some(DetailLinkBinding::new(
         &controls.artist,
@@ -2285,6 +2346,13 @@ impl crate::PlayerUi {
         set_favorite_button_active(&controls.favorite_button, favorite);
         controls.rating.set_rating(rating, half_stars);
         if let Some((artist, album)) = links {
+            let fullscreen = &self.views.fullscreen_player;
+            if let Some(binding) = fullscreen.artist_links.borrow().as_ref() {
+                binding.bind(artist.clone());
+            }
+            if let Some(binding) = fullscreen.album_links.borrow().as_ref() {
+                binding.bind(album.clone());
+            }
             if let Some(binding) = controls.artist_links.borrow().as_ref() {
                 binding.bind(artist);
             }

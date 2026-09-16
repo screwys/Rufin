@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <path fill="none" stroke="rgb(0,0,0)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+    d="M 1 5 L 3 5 M 7 5 L 15 5 M 1 11 L 9 11 M 13 11 L 15 11
+       M 7 5 C 7 6.10457 6.10457 7 5 7 C 3.89543 7 3 6.10457 3 5 C 3 3.89543 3.89543 3 5 3 C 6.10457 3 7 3.89543 7 5 Z
+       M 13 11 C 13 12.1046 12.1046 13 11 13 C 9.89543 13 9 12.1046 9 11 C 9 9.89543 9.89543 9 11 9 C 12.1046 9 13 9.89543 13 11 Z"
+    class="foreground-stroke transparent-fill" />
+</svg>

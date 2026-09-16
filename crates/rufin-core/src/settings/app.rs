@@ -201,6 +201,14 @@ pub struct Settings {
     pub lyrics_panel_visible: bool,
     #[serde(default)]
     pub visualizer_panel_visible: bool,
+    #[serde(default = "default_lyrics_panel_visible")]
+    pub fullscreen_lyrics_visible: bool,
+    #[serde(default)]
+    pub fullscreen_visualizer_visible: bool,
+    #[serde(default)]
+    pub fullscreen_dynamic_background: bool,
+    #[serde(default = "default_lyrics_panel_visible")]
+    pub fullscreen_background_image: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_lyrics_height: Option<i32>,
     #[serde(default)]
@@ -256,6 +264,10 @@ impl Default for Settings {
             window_height: None,
             lyrics_panel_visible: true,
             visualizer_panel_visible: false,
+            fullscreen_lyrics_visible: true,
+            fullscreen_visualizer_visible: false,
+            fullscreen_dynamic_background: false,
+            fullscreen_background_image: true,
             queue_lyrics_height: None,
             library_lists: default_library_list_settings(),
         }
@@ -474,6 +486,48 @@ fn sanitize_downloads(downloads: &mut Vec<SourceDownloadSettings>) {
 #[cfg(test)]
 mod tests {
     use super::Settings;
+
+    #[test]
+    fn fullscreen_display_defaults_and_choices_survive_settings_reload() {
+        let mut old = serde_json::to_value(Settings::default()).unwrap();
+        for key in [
+            "fullscreen_lyrics_visible",
+            "fullscreen_visualizer_visible",
+            "fullscreen_dynamic_background",
+            "fullscreen_background_image",
+        ] {
+            old.as_object_mut().unwrap().remove(key);
+        }
+        let restored: Settings = serde_json::from_value(old).unwrap();
+        assert!(restored.fullscreen_lyrics_visible);
+        assert!(!restored.fullscreen_visualizer_visible);
+        assert!(!restored.fullscreen_dynamic_background);
+        for choice in 0..16 {
+            let settings = Settings {
+                fullscreen_lyrics_visible: choice & 1 != 0,
+                fullscreen_visualizer_visible: choice & 2 != 0,
+                fullscreen_dynamic_background: choice & 4 != 0,
+                fullscreen_background_image: choice & 8 != 0,
+                ..Settings::default()
+            };
+            let restored: Settings =
+                serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
+            assert_eq!(
+                (
+                    restored.fullscreen_lyrics_visible,
+                    restored.fullscreen_visualizer_visible,
+                    restored.fullscreen_dynamic_background,
+                    restored.fullscreen_background_image
+                ),
+                (
+                    settings.fullscreen_lyrics_visible,
+                    settings.fullscreen_visualizer_visible,
+                    settings.fullscreen_dynamic_background,
+                    settings.fullscreen_background_image
+                )
+            );
+        }
+    }
 
     #[test]
     fn release_check_interval_defaults_for_existing_settings_and_round_trips_choices() {

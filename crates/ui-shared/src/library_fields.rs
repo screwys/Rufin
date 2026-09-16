@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use ::library::{AlbumRow, ArtistRow, PlaylistRow, SmartPlaylistRow, TrackRow};
+use ::library::{AlbumRow, ArtistRow, PlaylistRow, QueuePageRow, SmartPlaylistRow, TrackRow};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 use gtk::glib;
@@ -151,6 +151,58 @@ impl TrackPresentation for library::SmartPlaylistTrackRow {
                 .map(|value| value.to_string())
                 .unwrap_or_default(),
             LibraryField::TrackNumber => optional_track_number(self.disc_number, self.track_number),
+            LibraryField::Duration => {
+                crate::format_duration((self.duration_millis.max(0) / 1_000) as u32)
+            }
+            LibraryField::Favorite => favorite_text(self.favorite),
+            _ => String::new(),
+        }
+    }
+}
+
+impl TrackPresentation for QueuePageRow {
+    fn media_uri(&self) -> &str {
+        &self.media_uri
+    }
+    fn title(&self) -> &str {
+        &self.title
+    }
+    fn artist(&self) -> &str {
+        &self.artist
+    }
+    fn artwork(&self) -> Option<&[u8]> {
+        self.artwork_binding.as_deref()
+    }
+    fn favorite(&self) -> bool {
+        self.favorite
+    }
+    fn set_favorite(&mut self, value: bool) {
+        self.favorite = value;
+    }
+    fn downloaded(&self) -> bool {
+        false
+    }
+    fn set_downloaded(&mut self, _value: bool) {}
+    fn track_number(&self) -> Option<i64> {
+        Some(self.position + 1)
+    }
+    fn links(&self, field: LibraryField) -> crate::detail_links::DetailLinks {
+        match field {
+            LibraryField::Artist => crate::detail_links::DetailLinks::route(
+                &self.artist,
+                self.primary_artist_media_uri
+                    .clone()
+                    .map(crate::route::Route::ArtistDetail),
+            ),
+            _ => crate::detail_links::DetailLinks::text(&self.field(field)),
+        }
+    }
+    fn field(&self, field: LibraryField) -> String {
+        match field {
+            LibraryField::Title | LibraryField::TitleMerged => self.title.clone(),
+            LibraryField::Artist => self.artist.clone(),
+            LibraryField::Album => self.album.clone(),
+            LibraryField::Year => optional_year(self.year),
             LibraryField::Duration => {
                 crate::format_duration((self.duration_millis.max(0) / 1_000) as u32)
             }

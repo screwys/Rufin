@@ -3,6 +3,7 @@ use std::path::Path;
 
 pub fn build(include_icons: bool, output: &str) {
     println!("cargo:rerun-if-changed=resources");
+    println!("cargo:rerun-if-changed=resources/rufin.gresource.xml");
     println!("cargo:rerun-if-changed=../ui-shared/build_support.rs");
     verify_ui_resources();
     let mut roots = vec!["resources"];

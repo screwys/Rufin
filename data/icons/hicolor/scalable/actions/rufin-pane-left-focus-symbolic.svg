@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <path d="M 1 4 L 1 12 C 1 13.1046, 1.89543 14, 3 14 L 13 14 C 14.1046 14, 15 13.1046, 15 12 L 15 4 C 15 2.89543, 14.1046 2, 13 2 L 3 2 C 1.89543 2, 1 2.89543, 1 4 Z M 8 2 L 8 14" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke="rgb(0,0,0)" fill="none" class="foreground-stroke transparent-fill" />
+  <!-- Left active fill -->
+  <path d="M 8 2 L 8 14 L 3 14 C 1.89543 14, 1 13.1046, 1 12 L 1 4 C 1 2.89543, 1.89543 2, 3 2 Z" fill="rgb(0,0,0)" fill-opacity="0.35" stroke="none" class="foreground-fill" />
+  <path d="M 3 6 L 6 6 M 3 9 L 6 9" stroke-width="2" stroke-linecap="butt" stroke-linejoin="round" stroke="rgb(0,0,0)" fill="none" class="foreground-stroke transparent-fill" />
+  <path d="M 10 6 L 13 6 M 10 9 L 13 9" stroke-width="2" stroke-linecap="butt" stroke-linejoin="round" stroke-opacity="0.3" stroke="rgb(0,0,0)" fill="none" class="foreground-stroke transparent-fill" />
+</svg>

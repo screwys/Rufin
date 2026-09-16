@@ -9,42 +9,98 @@ use std::{
 use ui_shared::artwork::ArtworkTile;
 pub const FULLSCREEN_PLAYER_OPEN_TRANSITION_MS: u32 = 420;
 pub const FULLSCREEN_PLAYER_CLOSE_TRANSITION_MS: u32 = 320;
-pub const FULLSCREEN_PLAYER_DEFAULT_COVER_SIZE: i32 = 320;
-pub const FULLSCREEN_PLAYER_MIN_COVER_SIZE: i32 = 140;
-pub const FULLSCREEN_PLAYER_MAX_COVER_SIZE: i32 = 320;
-pub const FULLSCREEN_PLAYER_FALLBACK_HORIZONTAL_RESERVED: i32 = 186;
-pub const FULLSCREEN_PLAYER_HERO_SPACING: i32 = 18;
-pub const FULLSCREEN_PLAYER_PANE_RESERVED_HEIGHT: i32 = 260;
-pub const FULLSCREEN_PLAYER_TINY_COVER_SIZE: i32 = 64;
-pub const FULLSCREEN_PLAYER_MIN_SIDE_DETAILS_WIDTH: i32 = 120;
-pub const FULLSCREEN_PLAYER_HERO_LINE_SPACING: i32 = 12;
+pub const FULLSCREEN_PLAYER_DEFAULT_COVER_SIZE: i32 = 96;
+
+#[derive(Clone, Copy, Default)]
+enum PaneLayout {
+    #[default]
+    Both,
+    First,
+    Second,
+}
+
+impl PaneLayout {
+    fn next(self, collapsed: bool) -> Self {
+        match self {
+            Self::Both if collapsed => Self::Second,
+            Self::Both => Self::First,
+            Self::First => Self::Second,
+            Self::Second if collapsed => Self::First,
+            Self::Second => Self::Both,
+        }
+    }
+
+    fn visibility(self, collapsed: bool) -> (bool, bool) {
+        match self {
+            Self::Both => (true, !collapsed),
+            Self::First => (true, false),
+            Self::Second => (false, true),
+        }
+    }
+
+    fn icon_name(self) -> &'static str {
+        match self {
+            Self::Both => "rufin-view-dual-symbolic",
+            Self::First => "rufin-pane-left-focus-symbolic",
+            Self::Second => "rufin-pane-right-focus-symbolic",
+        }
+    }
+}
+
 pub struct FullscreenPlayerParts {
     pub root: gtk::Overlay,
     pub visible: Cell<bool>,
     pub animation_tick: RefCell<Option<gtk::TickCallbackId>>,
     pub slide_offset: Rc<Cell<i32>>,
     pub close_button: gtk::Button,
-    pub inline_close_button: gtk::Button,
-    pub hero: gtk::Box,
-    pub hero_content: adw::WrapBox,
-    pub details: gtk::Box,
+    left_pane: gtk::Box,
+    right_pane: gtk::Box,
+    hero: gtk::Box,
+    hero_content: gtk::Box,
+    details: gtk::Box,
+    details_scroll: gtk::ScrolledWindow,
+    pub lyrics_enabled: Rc<Cell<bool>>,
+    pub visualizer_enabled: Rc<Cell<bool>>,
+    focus_button: gtk::ToggleButton,
+    focus_labels: [gtk::Label; 2],
+    background: crate::fullscreen_background::FullscreenBackground,
+    bar_tint: gtk::CssProvider,
+    bar_color: Cell<Option<[f32; 3]>>,
+    experience: gtk::Overlay,
+    cover_button: gtk::Button,
+    collapsed: Cell<bool>,
+    pane_layout: Cell<PaneLayout>,
+    pub pane_button: gtk::Button,
+    customize_button: gtk::MenuButton,
+    visualizer_panel: gtk::Box,
     pub cover: ArtworkTile,
-    pub cover_size: Cell<i32>,
     pub title: gtk::Label,
     pub artist: gtk::Label,
     pub album: gtk::Label,
+    pub artist_links: RefCell<Option<ui_shared::detail_links::DetailLinkBinding>>,
+    pub album_links: RefCell<Option<ui_shared::detail_links::DetailLinkBinding>>,
     pub meta: gtk::FlowBox,
     pub stack: adw::ViewStack,
-    pub tabs: Vec<(gtk::ToggleButton, gtk::Label)>,
-    pub switcher: gtk::Box,
-    pub inline_start: gtk::Box,
-    pub inline_end: gtk::Box,
-    pub tabs_labeled_width: Rc<Cell<i32>>,
     pub lyrics_host: gtk::Box,
-    pub queue_header: gtk::Widget,
     pub queue_panel: gtk::Box,
     pub queue_loading: adw::Spinner,
     pub equalizer: EqualizerSurface,
+    related_list: gtk::Box,
+    related_status: gtk::Label,
+    related_retry: gtk::Button,
+    related_empty: gtk::Label,
+    related_error: gtk::Label,
+    related_loading: gtk::Label,
+    related_seed: RefCell<Option<String>>,
+    related_task: RefCell<Option<tokio::task::AbortHandle>>,
+}
+
+impl Drop for FullscreenPlayerParts {
+    fn drop(&mut self) {
+        if let Some(task) = self.related_task.get_mut().take() {
+            task.abort();
+        }
+    }
 }
 
 impl FullscreenPlayerParts {
@@ -55,6 +111,66 @@ impl FullscreenPlayerParts {
             parent.queue_allocate();
         }
     }
+
+    pub fn has_experience(&self) -> bool {
+        self.lyrics_enabled.get() || self.visualizer_enabled.get()
+    }
+
+    pub fn experience_visible(&self) -> bool {
+        self.has_experience()
+            && (self.focus_button.is_active()
+                || self.pane_layout.get().visibility(self.collapsed.get()).0)
+    }
+
+    fn apply_mode(&self) {
+        let has_experience = self.has_experience();
+        self.experience.set_visible(has_experience);
+        self.lyrics_host.set_visible(self.lyrics_enabled.get());
+        self.visualizer_panel
+            .set_visible(self.visualizer_enabled.get());
+        self.visualizer_panel
+            .set_opacity(if self.lyrics_enabled.get() { 0.25 } else { 1.0 });
+        self.update_hero_layout();
+    }
+
+    pub fn update_hero_layout(&self) {
+        let has_experience = self.has_experience();
+        if has_experience {
+            self.hero_content
+                .set_orientation(gtk::Orientation::Horizontal);
+            self.hero_content.set_halign(gtk::Align::Fill);
+            self.hero_content.set_valign(gtk::Align::Fill);
+            self.cover_button.set_halign(gtk::Align::Start);
+            self.cover_button.set_valign(gtk::Align::Center);
+            self.details.set_halign(gtk::Align::Fill);
+            self.details.set_valign(gtk::Align::Center);
+            self.details_scroll.set_vexpand(true);
+            self.details_scroll.set_valign(gtk::Align::Fill);
+            for label in [&self.title, &self.artist, &self.album] {
+                label.set_halign(gtk::Align::Start);
+                label.set_xalign(0.0);
+                label.set_justify(gtk::Justification::Left);
+            }
+            self.meta.set_halign(gtk::Align::Start);
+        } else {
+            self.hero_content
+                .set_orientation(gtk::Orientation::Vertical);
+            self.hero_content.set_halign(gtk::Align::Center);
+            self.hero_content.set_valign(gtk::Align::Center);
+            self.cover_button.set_halign(gtk::Align::Center);
+            self.cover_button.set_valign(gtk::Align::Center);
+            self.details.set_halign(gtk::Align::Center);
+            self.details.set_valign(gtk::Align::Center);
+            self.details_scroll.set_vexpand(false);
+            self.details_scroll.set_valign(gtk::Align::Center);
+            for label in [&self.title, &self.artist, &self.album] {
+                label.set_halign(gtk::Align::Center);
+                label.set_xalign(0.5);
+                label.set_justify(gtk::Justification::Center);
+            }
+            self.meta.set_halign(gtk::Align::Center);
+        }
+    }
 }
 
 pub fn build_fullscreen_player(visualizer_area: &gtk::DrawingArea) -> FullscreenPlayerParts {
@@ -63,116 +179,139 @@ pub fn build_fullscreen_player(visualizer_area: &gtk::DrawingArea) -> Fullscreen
     ui_shared::objects!(builder, resource, {
         root: gtk::Overlay,
         close_button: gtk::Button,
-        inline_close_button: gtk::Button,
+        left_pane: gtk::Box,
+        right_pane: gtk::Box,
+        focus_button: gtk::ToggleButton,
+        focus_expand_label: gtk::Label,
+        focus_restore_label: gtk::Label,
+        body: gtk::Box,
+        cover_button: gtk::Button,
+        pane_button: gtk::Button,
+        customize_button: gtk::MenuButton,
+        experience: gtk::Overlay,
         hero: gtk::Box,
-        hero_content: adw::WrapBox,
+        hero_content: gtk::Box,
         details: gtk::Box,
+        details_scroll: gtk::ScrolledWindow,
         title: gtk::Label,
         artist: gtk::Label,
         album: gtk::Label,
         meta: gtk::FlowBox,
         stack: adw::ViewStack,
-        switcher_bar: gtk::Overlay,
-        switcher: gtk::Box,
         queue_tab: gtk::ToggleButton,
-        queue_tab_label: gtk::Label,
-        lyrics_tab: gtk::ToggleButton,
-        lyrics_tab_label: gtk::Label,
-        visualizer_tab: gtk::ToggleButton,
-        visualizer_tab_label: gtk::Label,
+        related_tab: gtk::ToggleButton,
         equalizer_tab: gtk::ToggleButton,
-        equalizer_tab_label: gtk::Label,
-        inline_start: gtk::Box,
-        inline_end: gtk::Box,
         queue_panel: gtk::Box,
         queue_loading: adw::Spinner,
-        fullscreen_queue_header: gtk::Box,
-        fullscreen_queue_album: gtk::Label,
-        fullscreen_queue_year: gtk::Label,
         lyrics_host: gtk::Box,
         visualizer_panel: gtk::Box,
         equalizer_panel: gtk::ScrolledWindow,
+        related_panel: gtk::Box,
+        related_list: gtk::Box,
+        related_status: gtk::Label,
+        related_retry: gtk::Button,
+        related_empty: gtk::Label,
+        related_error: gtk::Label,
+        related_loading: gtk::Label,
     });
-    hero.set_spacing(FULLSCREEN_PLAYER_HERO_SPACING);
-    hero_content.set_child_spacing(FULLSCREEN_PLAYER_HERO_SPACING);
-    hero.append(&close_button);
-
+    let background = crate::fullscreen_background::FullscreenBackground::new();
+    root.set_child(None::<&gtk::Widget>);
+    root.set_child(Some(&background));
+    root.add_overlay(&body);
+    root.set_measure_overlay(&body, true);
+    background.set_visible(false);
     let cover = ArtworkTile::new(FULLSCREEN_PLAYER_DEFAULT_COVER_SIZE);
     cover.area.add_css_class("fullscreen-player-cover");
-    cover.area.set_halign(gtk::Align::End);
-    cover.area.set_valign(gtk::Align::Center);
-    hero_content.prepend(&cover.area);
+    cover.area.set_valign(gtk::Align::Start);
+    cover_button.set_child(Some(&cover.area));
+    let lyrics_enabled = Rc::new(Cell::new(true));
+    let visualizer_enabled = Rc::new(Cell::new(false));
     hero.append(&hero_content);
-    let queue_header = super::queue::fullscreen_queue_column_owner(
-        &fullscreen_queue_header,
-        super::queue::QueueFullscreenColumnWidgets {
-            album: fullscreen_queue_album.upcast(),
-            year: fullscreen_queue_year.upcast(),
-        },
-    );
-    queue_header.set_visible(false);
-    queue_panel.prepend(&queue_header);
     stack.add_titled(&queue_panel, Some("queue"), &tr("Queue"));
-    stack.add_titled(&lyrics_host, Some("lyrics"), &tr("Lyrics"));
-    visualizer_panel.append(visualizer_area);
-    stack.add_titled(&visualizer_panel, Some("visualizer"), &tr("Visualizer"));
-
+    stack.add_titled(&related_panel, Some("related"), &tr("Related"));
     let equalizer = EqualizerSurface::new(&EqualizerSettings::default());
+    equalizer.root.set_valign(gtk::Align::Center);
+    equalizer.set_band_height_request(500);
     equalizer_panel.set_child(Some(&equalizer.root));
     stack.add_titled(&equalizer_panel, Some("equalizer"), &tr("Equalizer"));
-    stack.set_visible_child_name("lyrics");
-
-    inline_start.append(&inline_close_button);
-    let tabs = connect_fullscreen_player_switcher(
+    stack.set_visible_child_name("queue");
+    visualizer_panel.append(visualizer_area);
+    let experience_base = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    experience_base.set_hexpand(true);
+    experience_base.set_vexpand(true);
+    experience.set_child(Some(&experience_base));
+    experience.add_overlay(&visualizer_panel);
+    experience.set_measure_overlay(&visualizer_panel, false);
+    experience.add_overlay(&lyrics_host);
+    experience.set_measure_overlay(&lyrics_host, false);
+    experience.remove_overlay(&focus_button);
+    experience.add_overlay(&focus_button);
+    experience.set_measure_overlay(&focus_button, false);
+    connect_fullscreen_player_switcher(
         &stack,
         [
-            (queue_tab, queue_tab_label, "queue"),
-            (lyrics_tab, lyrics_tab_label, "lyrics"),
-            (visualizer_tab, visualizer_tab_label, "visualizer"),
-            (equalizer_tab, equalizer_tab_label, "equalizer"),
+            (queue_tab, "queue"),
+            (related_tab, "related"),
+            (equalizer_tab, "equalizer"),
         ],
     );
-    switcher_bar.set_measure_overlay(&inline_start, false);
-    switcher_bar.set_measure_overlay(&inline_end, false);
-    let tabs_labeled_width = Rc::new(Cell::new(0));
-
-    FullscreenPlayerParts {
+    let parts = FullscreenPlayerParts {
         root,
         visible: Cell::new(false),
         animation_tick: RefCell::new(None),
         slide_offset: Rc::new(Cell::new(0)),
         close_button,
-        inline_close_button,
+        left_pane,
+        right_pane,
         hero,
         hero_content,
         details,
+        details_scroll,
+        focus_button,
+        background,
+        bar_tint: gtk::CssProvider::new(),
+        bar_color: Cell::new(None),
+        focus_labels: [focus_expand_label, focus_restore_label],
+        lyrics_enabled,
+        visualizer_enabled,
+        experience,
+        cover_button,
+        collapsed: Cell::new(false),
+        pane_layout: Cell::new(PaneLayout::default()),
+        pane_button,
+        customize_button,
+        visualizer_panel,
         cover,
-        cover_size: Cell::new(FULLSCREEN_PLAYER_DEFAULT_COVER_SIZE),
         title,
         artist,
         album,
+        artist_links: RefCell::new(None),
+        album_links: RefCell::new(None),
         meta,
         stack,
-        tabs,
-        switcher,
-        inline_start,
-        inline_end,
-        tabs_labeled_width,
         lyrics_host,
-        queue_header,
         queue_panel,
         queue_loading,
         equalizer,
-    }
+        related_list,
+        related_status,
+        related_retry,
+        related_empty,
+        related_error,
+        related_loading,
+        related_seed: RefCell::new(None),
+        related_task: RefCell::new(None),
+    };
+    parts.apply_mode();
+    parts
 }
 
-pub fn connect_fullscreen_player_switcher(
+fn connect_fullscreen_player_switcher(
     stack: &adw::ViewStack,
-    tabs: [(gtk::ToggleButton, gtk::Label, &'static str); 4],
-) -> Vec<(gtk::ToggleButton, gtk::Label)> {
-    let mut selection = Vec::with_capacity(4);
-    let mut labels = Vec::with_capacity(4);
-    for (button, label, page) in tabs {
+    tabs: [(gtk::ToggleButton, &'static str); 3],
+) {
+    let mut selection = Vec::new();
+    for (button, page) in tabs {
         let page_stack = stack.downgrade();
         button.connect_clicked(move |_| {
             if let Some(stack) = page_stack.upgrade() {
@@ -180,23 +319,75 @@ pub fn connect_fullscreen_player_switcher(
             }
         });
         selection.push((button.downgrade(), page));
-        labels.push((button, label));
     }
     stack.connect_visible_child_name_notify(move |stack| {
-        let page = stack.visible_child_name();
         for (button, name) in &selection {
             if let Some(button) = button.upgrade() {
-                button.set_active(page.as_deref() == Some(*name));
+                button.set_active(stack.visible_child_name().as_deref() == Some(*name));
             }
         }
     });
-    labels
 }
 
 use crate::{bottom::BOTTOM_PLAYER_HEIGHT, state::NowPlayingPresentation};
 use gtk::glib;
-use std::time::Duration;
 use ui_shared::artwork::cover_fetch_size_for_display;
+
+fn fullscreen_settings_popover(shell: &Rc<crate::PlayerUi>) -> gtk::Popover {
+    let resource = crate::ui_resource::FULLSCREEN_SETTINGS_RESOURCE;
+    let builder = ui_shared::ui_resource::builder(resource);
+    ui_shared::objects!(builder, resource, {
+        popover: gtk::Popover,
+        lyrics: adw::SwitchRow,
+        visualizer: adw::SwitchRow,
+        dynamic_background: adw::SwitchRow,
+        background_image: adw::SwitchRow,
+    });
+    let settings = shell.settings.current.borrow();
+    let active = [
+        settings.fullscreen_lyrics_visible,
+        settings.fullscreen_visualizer_visible,
+        settings.fullscreen_dynamic_background,
+        settings.fullscreen_background_image,
+    ];
+    drop(settings);
+    background_image.set_sensitive(active[2]);
+    let image_row = background_image.downgrade();
+    dynamic_background.connect_active_notify(move |row| {
+        if let Some(image_row) = image_row.upgrade() {
+            image_row.set_sensitive(row.is_active());
+        }
+    });
+    for (index, row) in [lyrics, visualizer, dynamic_background, background_image]
+        .into_iter()
+        .enumerate()
+    {
+        row.set_active(active[index]);
+        let weak = Rc::downgrade(shell);
+        row.connect_active_notify(move |row| {
+            let Some(shell) = weak.upgrade() else {
+                return;
+            };
+            shell
+                .settings
+                .update_app_settings("fullscreen display", |settings| {
+                    let value = match index {
+                        0 => &mut settings.fullscreen_lyrics_visible,
+                        1 => &mut settings.fullscreen_visualizer_visible,
+                        2 => &mut settings.fullscreen_dynamic_background,
+                        _ => &mut settings.fullscreen_background_image,
+                    };
+                    if *value == row.is_active() {
+                        return false;
+                    }
+                    *value = row.is_active();
+                    true
+                });
+            shell.apply_fullscreen_display_settings();
+        });
+    }
+    popover
+}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FullscreenPlaybackRefresh {
     None,
@@ -221,22 +412,117 @@ pub fn fullscreen_playback_refresh(
 }
 
 pub fn connect_fullscreen_player_controls(shell: &Rc<crate::PlayerUi>) {
-    let close_shell = Rc::clone(shell);
+    if let Some(window) = shell.window.upgrade() {
+        gtk::style_context_add_provider_for_display(
+            &gtk::prelude::WidgetExt::display(&window),
+            &shell.views.fullscreen_player.bar_tint,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
+    let weak = Rc::downgrade(shell);
+    shell
+        .views
+        .fullscreen_player
+        .related_retry
+        .connect_clicked(move |_| {
+            if let Some(shell) = weak.upgrade() {
+                shell
+                    .views
+                    .fullscreen_player
+                    .related_seed
+                    .borrow_mut()
+                    .take();
+                shell.refresh_related_tracks();
+            }
+        });
+    let close_shell = Rc::downgrade(shell);
     shell
         .views
         .fullscreen_player
         .close_button
-        .connect_clicked(move |_| close_shell.close_fullscreen_player());
-    let close_shell = Rc::clone(shell);
+        .connect_clicked(move |_| {
+            if let Some(shell) = close_shell.upgrade() {
+                shell.close_fullscreen_player();
+            }
+        });
+
+    let weak = Rc::downgrade(shell);
     shell
         .views
         .fullscreen_player
-        .inline_close_button
-        .connect_clicked(move |_| close_shell.close_fullscreen_player());
+        .customize_button
+        .set_create_popup_func(move |button| {
+            if let Some(shell) = weak.upgrade() {
+                button.set_popover(Some(&fullscreen_settings_popover(&shell)));
+            }
+        });
+    let weak = Rc::downgrade(shell);
+    shell
+        .views
+        .fullscreen_player
+        .focus_button
+        .connect_toggled(move |button| {
+            button.set_icon_name(if button.is_active() {
+                "rufin-view-restore-corners-symbolic"
+            } else {
+                "rufin-view-fullscreen-corners-symbolic"
+            });
+            let Some(shell) = weak.upgrade() else {
+                return;
+            };
+            let label =
+                shell.views.fullscreen_player.focus_labels[usize::from(button.is_active())].text();
+            button.set_tooltip_text(Some(&label));
+            button.update_property(&[gtk::accessible::Property::Label(&label)]);
+            shell.apply_fullscreen_responsive_layout();
+            shell.sync_fullscreen_surfaces();
+        });
+    let weak = Rc::downgrade(shell);
+    shell
+        .views
+        .fullscreen_player
+        .cover
+        .drag_paintable_source()
+        .connect_paintable_notify(move |_| {
+            if let Some(shell) = weak.upgrade() {
+                shell.refresh_fullscreen_background();
+            }
+        });
+    shell.apply_fullscreen_display_settings();
+    let weak = Rc::downgrade(shell);
+    shell
+        .views
+        .fullscreen_player
+        .pane_button
+        .connect_clicked(move |_| {
+            if let Some(shell) = weak.upgrade() {
+                let parts = &shell.views.fullscreen_player;
+                parts
+                    .pane_layout
+                    .set(parts.pane_layout.get().next(parts.collapsed.get()));
+                shell.apply_fullscreen_responsive_layout();
+                shell.sync_fullscreen_surfaces();
+            }
+        });
+    let weak = Rc::downgrade(shell);
+    shell
+        .views
+        .fullscreen_player
+        .cover_button
+        .connect_clicked(move |_| {
+            if let Some(shell) = weak.upgrade() {
+                let presentation =
+                    NowPlayingPresentation::new(shell.selected_playback().as_deref());
+                (shell.present_full_artwork)(presentation.artwork);
+            }
+        });
 
-    let key_shell = Rc::clone(shell);
+    let key_shell = Rc::downgrade(shell);
     let key = gtk::EventControllerKey::new();
     key.connect_key_pressed(move |_, key, _, _| {
+        let Some(key_shell) = key_shell.upgrade() else {
+            return glib::Propagation::Proceed;
+        };
         if key == gtk::gdk::Key::Escape && key_shell.fullscreen_player_visible() {
             key_shell.close_fullscreen_player();
             glib::Propagation::Stop
@@ -248,36 +534,33 @@ pub fn connect_fullscreen_player_controls(shell: &Rc<crate::PlayerUi>) {
         window.add_controller(key);
     }
 
-    let queue_tab_shell = Rc::clone(shell);
+    let queue_tab_shell = Rc::downgrade(shell);
     shell
         .views
         .fullscreen_player
         .stack
         .connect_visible_child_name_notify(move |stack| {
+            let Some(queue_tab_shell) = queue_tab_shell.upgrade() else {
+                return;
+            };
             if !queue_tab_shell.fullscreen_player_visible() {
                 return;
             }
-            match stack.visible_child_name().as_deref() {
-                Some("queue") => queue_tab_shell.schedule_queue_panel_render(),
-                Some("lyrics") => {
-                    queue_tab_shell.sync_visible_lyrics_surfaces();
-                    queue_tab_shell.refresh_fullscreen_lyrics_position();
-                }
-                Some("equalizer") => queue_tab_shell.refresh_fullscreen_player_layout(),
-                _ => {}
+            if stack.visible_child_name().as_deref() == Some("queue") {
+                queue_tab_shell.schedule_queue_panel_render();
             }
-            if stack.visible_child_name().as_deref() != Some("lyrics") {
-                queue_tab_shell.update_lyrics_highlight();
-            }
-            queue_tab_shell.sync_visualizer_state();
+            queue_tab_shell.refresh_related_tracks();
         });
 
-    let equalizer_shell = Rc::clone(shell);
+    let equalizer_shell = Rc::downgrade(shell);
     shell
         .views
         .fullscreen_player
         .equalizer
         .connect_changed(move |equalizer| {
+            let Some(equalizer_shell) = equalizer_shell.upgrade() else {
+                return;
+            };
             equalizer_shell.update_playback_settings(|settings| {
                 settings.equalizer = equalizer.clone();
             });
@@ -285,6 +568,131 @@ pub fn connect_fullscreen_player_controls(shell: &Rc<crate::PlayerUi>) {
 }
 
 impl crate::PlayerUi {
+    fn refresh_related_tracks(self: &Rc<Self>) {
+        let parts = &self.views.fullscreen_player;
+        if !self.fullscreen_player_visible()
+            || parts.stack.visible_child_name().as_deref() != Some("related")
+            || !parts.right_pane.is_visible()
+        {
+            return;
+        }
+        let seed = self.selected_playback().and_then(|player| {
+            player
+                .transport
+                .current
+                .as_ref()
+                .map(|track| track.media_uri.clone())
+        });
+        if *parts.related_seed.borrow() == seed {
+            return;
+        }
+        if let Some(task) = parts.related_task.borrow_mut().take() {
+            task.abort();
+        }
+        *parts.related_seed.borrow_mut() = seed.clone();
+        while let Some(child) = parts.related_list.first_child() {
+            parts.related_list.remove(&child);
+        }
+        parts.related_status.set_visible(true);
+        parts.related_retry.set_visible(false);
+        let Some(seed) = seed else {
+            parts.related_status.set_text(&parts.related_empty.text());
+            return;
+        };
+        parts.related_status.set_text(&parts.related_loading.text());
+        let candidates = self
+            .playback_handles
+            .radio
+            .candidates(library::RadioSeed::Track(seed.clone()), 20);
+        let database = self.database.clone();
+        let task = self.runtime.spawn(async move {
+            let uris = candidates.await?;
+            database
+                .track_rows_by_uri(&uris, &library::ReadCancellation::new())
+                .await
+                .map_err(|error| error.to_string())
+        });
+        *parts.related_task.borrow_mut() = Some(task.abort_handle());
+        let task_id = task.id();
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let result = task.await;
+            let Some(shell) = weak.upgrade() else {
+                return;
+            };
+            let parts = &shell.views.fullscreen_player;
+            if parts
+                .related_task
+                .borrow()
+                .as_ref()
+                .map(tokio::task::AbortHandle::id)
+                != Some(task_id)
+            {
+                return;
+            }
+            parts.related_task.borrow_mut().take();
+            match result {
+                Ok(Ok(items)) => {
+                    parts.related_status.set_text(&parts.related_empty.text());
+                    parts.related_status.set_visible(items.is_empty());
+                    if !items.is_empty() {
+                        let view = (shell.related_tracks_view)(items);
+                        parts.related_list.append(&view);
+                    }
+                }
+                _ => {
+                    parts.related_status.set_text(&parts.related_error.text());
+                    parts.related_retry.set_visible(true);
+                }
+            }
+        });
+    }
+
+    fn apply_fullscreen_display_settings(self: &Rc<Self>) {
+        let settings = self.settings.current.borrow();
+        let parts = &self.views.fullscreen_player;
+        parts.lyrics_enabled.set(settings.fullscreen_lyrics_visible);
+        parts
+            .visualizer_enabled
+            .set(settings.fullscreen_visualizer_visible);
+        drop(settings);
+        parts.apply_mode();
+        self.apply_fullscreen_responsive_layout();
+        self.refresh_fullscreen_background();
+        self.sync_fullscreen_surfaces();
+    }
+
+    fn refresh_fullscreen_background(&self) {
+        let settings = self.settings.current.borrow();
+        let parts = &self.views.fullscreen_player;
+        let dynamic = settings.fullscreen_dynamic_background;
+        parts.background.set_visible(dynamic);
+        if dynamic {
+            parts.root.add_css_class("artwork-background");
+            parts.background.update(
+                parts.cover.drag_paintable_source().paintable(),
+                settings.fullscreen_background_image,
+            );
+        } else {
+            parts.root.remove_css_class("artwork-background");
+        }
+        if let Some(window) = self.window.upgrade() {
+            if dynamic && self.fullscreen_player_visible() {
+                let color = parts.background.color();
+                if parts.bar_color.replace(Some(color)) != Some(color) {
+                    let [r, g, b] = color;
+                    parts.bar_tint.load_from_string(&format!(
+                        "window {{ --fullscreen-artwork-color: {}; }}",
+                        gtk::gdk::RGBA::new(r, g, b, 1.0)
+                    ));
+                }
+                window.add_css_class("fullscreen-artwork-bars");
+            } else if !self.fullscreen_player_visible() && parts.animation_tick.borrow().is_none() {
+                window.remove_css_class("fullscreen-artwork-bars");
+            }
+        }
+    }
+
     pub fn open_fullscreen_player(self: &Rc<Self>) {
         let Some(player) = self.selected_playback().as_deref().cloned() else {
             return;
@@ -293,48 +701,14 @@ impl crate::PlayerUi {
             return;
         }
         self.views.fullscreen_player.visible.set(true);
+        self.apply_fullscreen_display_settings();
         self.animate_fullscreen_player(true);
         let presentation = NowPlayingPresentation::new(Some(&player));
         self.apply_fullscreen_now_playing_text(&presentation);
         self.apply_fullscreen_responsive_layout();
         self.apply_fullscreen_now_playing_cover(&presentation);
-        if self
-            .views
-            .fullscreen_player
-            .stack
-            .visible_child_name()
-            .as_deref()
-            == Some("queue")
-        {
-            let queue_shell = Rc::clone(self);
-            glib::timeout_add_local_once(
-                Duration::from_millis(u64::from(FULLSCREEN_PLAYER_OPEN_TRANSITION_MS)),
-                move || {
-                    if queue_shell.fullscreen_player_visible()
-                        && queue_shell
-                            .views
-                            .fullscreen_player
-                            .stack
-                            .visible_child_name()
-                            .as_deref()
-                            == Some("queue")
-                    {
-                        queue_shell.render_queue_panel();
-                    }
-                },
-            );
-        }
-        if self
-            .views
-            .fullscreen_player
-            .stack
-            .visible_child_name()
-            .as_deref()
-            == Some("lyrics")
-        {
-            self.sync_visible_lyrics_surfaces();
-        }
-        self.sync_visualizer_state();
+        self.schedule_queue_panel_render();
+        self.sync_fullscreen_surfaces();
         let _focused = self.views.fullscreen_player.close_button.grab_focus();
     }
 
@@ -359,6 +733,7 @@ impl crate::PlayerUi {
         if !self.fullscreen_player_visible() {
             return;
         }
+        self.refresh_related_tracks();
         self.apply_fullscreen_now_playing_text(presentation);
         self.apply_fullscreen_responsive_layout();
         self.apply_fullscreen_now_playing_cover(presentation);
@@ -372,118 +747,72 @@ impl crate::PlayerUi {
         self.apply_fullscreen_responsive_layout();
     }
 
-    fn apply_fullscreen_responsive_layout(&self) {
-        self.apply_fullscreen_responsive_layout_for_size(
-            self.window.upgrade().map_or(0, |window| window.width()),
-            self.window.upgrade().map_or(0, |window| window.height()),
-        );
-    }
-
-    pub fn apply_fullscreen_responsive_layout_for_size(&self, width: i32, height: i32) {
-        let fullscreen = &self.views.fullscreen_player;
-        let hero_content_width = fullscreen_hero_content_fallback(width);
-        let hero_capacity = fullscreen_hero_capacity(height);
-        let normal_cover_size = fullscreen_artwork_size_for(hero_content_width);
-        let details = &fullscreen.details;
-        details.set_width_request(1);
-        details.set_height_request(-1);
-        self.apply_fullscreen_details_alignment(false);
-        let side_cover_size = normal_cover_size.min(hero_capacity.max(1));
-        let side_details_width = hero_content_width
-            .saturating_sub(side_cover_size)
-            .saturating_sub(FULLSCREEN_PLAYER_HERO_SPACING)
-            .max(1);
-        let side_text_exceeds_line_budget =
-            fullscreen_label_exceeds_lines(&fullscreen.title, side_details_width, 4)
-                || fullscreen_label_exceeds_lines(&fullscreen.artist, side_details_width, 2)
-                || fullscreen_label_exceeds_lines(&fullscreen.album, side_details_width, 2);
-        let (_, side_details_height, _, _) =
-            details.measure(gtk::Orientation::Vertical, side_details_width);
-        let details_below = fullscreen_details_below_cover(
-            side_details_width,
-            side_details_height,
-            side_cover_size,
-            side_text_exceeds_line_budget,
-        );
-        let window_allows_hero = fullscreen_window_allows_hero(width, height);
-        let (cover_size, hero_fits) = if details_below {
-            details.set_width_request(hero_content_width);
-            self.apply_fullscreen_details_alignment(true);
-            fullscreen
-                .hero_content
-                .set_wrap_policy(adw::WrapPolicy::Natural);
-            let (_, details_height, _, _) =
-                details.measure(gtk::Orientation::Vertical, hero_content_width);
-            match fullscreen_below_cover_size(hero_capacity, details_height, normal_cover_size) {
-                Some(cover_size) => (cover_size, true),
-                None => (FULLSCREEN_PLAYER_TINY_COVER_SIZE, false),
+    fn apply_fullscreen_responsive_layout(self: &Rc<Self>) {
+        let (width, height) = {
+            let root = &self.views.fullscreen_player.root;
+            if root.width() > 0 && root.height() > 0 {
+                (root.width(), root.height())
+            } else {
+                (
+                    self.window.upgrade().map_or(0, |window| window.width()),
+                    self.window.upgrade().map_or(0, |window| window.height()),
+                )
             }
-        } else {
-            fullscreen
-                .hero_content
-                .set_wrap_policy(adw::WrapPolicy::Minimum);
-            (
-                side_cover_size,
-                side_cover_size >= FULLSCREEN_PLAYER_TINY_COVER_SIZE
-                    && side_cover_size.max(side_details_height) <= hero_capacity,
-            )
         };
-        let show_hero = window_allows_hero && hero_fits;
-        fullscreen.close_button.set_visible(show_hero);
-        fullscreen.inline_close_button.set_visible(!show_hero);
-        fullscreen.hero.set_visible(show_hero);
-        fullscreen
-            .cover
-            .set_square_size(cover_size.max(FULLSCREEN_PLAYER_TINY_COVER_SIZE));
-        fullscreen
-            .cover_size
-            .set(cover_size.max(FULLSCREEN_PLAYER_TINY_COVER_SIZE));
+        self.apply_fullscreen_responsive_layout_for_size(width, height);
+    }
 
-        let labeled_width = fullscreen_labeled_switcher_natural_width(fullscreen);
-        let (start_width, end_width) = if show_hero {
-            (0, 0)
+    pub fn apply_fullscreen_responsive_layout_for_size(self: &Rc<Self>, width: i32, height: i32) {
+        let parts = &self.views.fullscreen_player;
+        let collapsed = width < 800;
+        let changed = parts.collapsed.replace(collapsed) != collapsed;
+        let (first, second) = parts.pane_layout.get().visibility(collapsed);
+        let has_experience = parts.has_experience();
+        let focused = parts.focus_button.is_active() && has_experience;
+        parts
+            .pane_button
+            .set_icon_name(parts.pane_layout.get().icon_name());
+        parts.left_pane.set_visible(focused || first);
+        parts.right_pane.set_visible(!focused && second);
+        parts.hero.set_visible(!focused);
+        parts.experience.set_visible(has_experience);
+        parts.update_hero_layout();
+        let pane_width = if first && second && !focused {
+            width.saturating_sub(24) / 2
         } else {
-            let (_, start_width, _, _) = fullscreen
-                .inline_start
-                .measure(gtk::Orientation::Horizontal, -1);
-            let (_, end_width, _, _) = fullscreen
-                .inline_end
-                .measure(gtk::Orientation::Horizontal, -1);
-            (start_width, end_width)
+            width.saturating_sub(16)
         };
-        let show_tab_labels =
-            !fullscreen_tabs_compact_for(show_hero, width, labeled_width, start_width, end_width);
-        for (_, label) in &fullscreen.tabs {
-            label.set_visible(show_tab_labels);
+        if has_experience {
+            parts.hero.set_vexpand(false);
+            let hero_height = ((height - BOTTOM_PLAYER_HEIGHT).max(1) * 42 / 100).clamp(96, 544);
+            if parts.hero.height_request() != hero_height {
+                parts.hero.set_height_request(hero_height);
+            }
+            let max_w = (pane_width.saturating_sub(48) * 40) / 100;
+            let max_h = hero_height.saturating_sub(32);
+            let cover_size = max_w.min(max_h).clamp(48, 340);
+            parts.cover.set_square_size(cover_size);
+        } else {
+            parts.hero.set_vexpand(true);
+            parts.hero.set_height_request(-1);
+            let max_cover_from_height = height.saturating_sub(BOTTOM_PLAYER_HEIGHT + 228);
+            let max_cover_from_width = pane_width.saturating_sub(48);
+            let cover_size = max_cover_from_height
+                .min(max_cover_from_width)
+                .min((height * 50) / 100)
+                .clamp(96, 480);
+            parts.cover.set_square_size(cover_size);
+        }
+        if changed {
+            self.sync_fullscreen_surfaces();
         }
     }
 
-    fn apply_fullscreen_details_alignment(&self, centered: bool) {
-        let align = if centered {
-            gtk::Align::Fill
-        } else {
-            gtk::Align::Start
-        };
-        let xalign = if centered { 0.5 } else { 0.0 };
-        let justification = if centered {
-            gtk::Justification::Center
-        } else {
-            gtk::Justification::Left
-        };
-        for label in [
-            &self.views.fullscreen_player.title,
-            &self.views.fullscreen_player.artist,
-            &self.views.fullscreen_player.album,
-        ] {
-            label.set_halign(align);
-            label.set_xalign(xalign);
-            label.set_justify(justification);
-        }
-        self.views.fullscreen_player.meta.set_halign(if centered {
-            gtk::Align::Center
-        } else {
-            gtk::Align::Start
-        });
+    fn sync_fullscreen_surfaces(self: &Rc<Self>) {
+        self.sync_visible_lyrics_surfaces();
+        self.refocus_fullscreen_lyrics_position();
+        self.sync_visualizer_state();
+        self.refresh_related_tracks();
     }
 
     fn apply_fullscreen_now_playing_cover(self: &Rc<Self>, presentation: &NowPlayingPresentation) {
@@ -493,11 +822,11 @@ impl crate::PlayerUi {
             .cover
             .set_square_size(cover_size);
         if presentation.current {
-            let fetch_size = cover_fetch_size_for_display(cover_size);
+            let fetch_size = cover_fetch_size_for_display(512);
             self.artwork.bind_playback_artwork_tile(
                 &self.views.fullscreen_player.cover,
                 presentation.artwork.clone(),
-                cover_size,
+                512,
                 fetch_size,
             );
         } else {
@@ -518,6 +847,18 @@ impl crate::PlayerUi {
             .fullscreen_player
             .album
             .set_text(&presentation.album);
+        let controls = &self.views.player_controls;
+        let fullscreen = &self.views.fullscreen_player;
+        for (source, target) in [
+            (&controls.artist_links, &fullscreen.artist_links),
+            (&controls.album_links, &fullscreen.album_links),
+        ] {
+            if let (Some(source), Some(target)) =
+                (source.borrow().as_ref(), target.borrow().as_ref())
+            {
+                target.bind(source.links());
+            }
+        }
         self.views
             .fullscreen_player
             .title
@@ -538,7 +879,12 @@ impl crate::PlayerUi {
     }
 
     fn fullscreen_player_cover_size(&self) -> i32 {
-        self.views.fullscreen_player.cover_size.get()
+        self.views
+            .fullscreen_player
+            .cover
+            .area
+            .width_request()
+            .max(1)
     }
 
     pub fn clear_fullscreen_player_cover(self: &Rc<Self>) {
@@ -546,39 +892,8 @@ impl crate::PlayerUi {
             .clear_artwork_tile(&self.views.fullscreen_player.cover);
     }
 
-    fn refresh_fullscreen_lyrics_position(self: &Rc<Self>) {
-        if !self.fullscreen_player_visible()
-            || self
-                .views
-                .fullscreen_player
-                .stack
-                .visible_child_name()
-                .as_deref()
-                != Some("lyrics")
-        {
-            return;
-        }
-        self.refocus_fullscreen_lyrics_position();
-        let idle_shell = Rc::clone(self);
-        glib::idle_add_local_once(move || {
-            idle_shell.refocus_fullscreen_lyrics_position();
-        });
-        let settle_shell = Rc::clone(self);
-        glib::timeout_add_local_once(Duration::from_millis(80), move || {
-            settle_shell.refocus_fullscreen_lyrics_position();
-        });
-    }
-
     fn refocus_fullscreen_lyrics_position(&self) {
-        if !self.fullscreen_player_visible()
-            || self
-                .views
-                .fullscreen_player
-                .stack
-                .visible_child_name()
-                .as_deref()
-                != Some("lyrics")
-        {
+        if !self.fullscreen_lyrics_surface_visible() {
             return;
         }
         let lyrics = self.visible_lyrics();
@@ -648,6 +963,10 @@ impl crate::PlayerUi {
                 } else {
                     tick_shell.views.fullscreen_player.set_slide_offset(0);
                     root.set_opacity(0.0);
+                    if let Some(window) = tick_shell.window.upgrade() {
+                        window.remove_css_class("fullscreen-artwork-bars");
+                    }
+                    tick_shell.refresh_fullscreen_background();
                 }
                 root.set_visible(opening);
                 tick_shell
@@ -692,151 +1011,6 @@ fn update_fullscreen_meta_row(row: &gtk::FlowBox, parts: &[String]) {
         label.add_css_class("fullscreen-player-meta-pill");
         label.set_xalign(0.5);
         row.insert(&label, -1);
-    }
-}
-
-fn fullscreen_hero_content_fallback(surface_width: i32) -> i32 {
-    surface_width
-        .saturating_sub(FULLSCREEN_PLAYER_FALLBACK_HORIZONTAL_RESERVED)
-        .max(1)
-}
-
-fn fullscreen_artwork_size_for(content_width: i32) -> i32 {
-    let width_limit = content_width
-        .saturating_sub(FULLSCREEN_PLAYER_HERO_SPACING)
-        .max(1)
-        / 2;
-    width_limit.clamp(
-        FULLSCREEN_PLAYER_MIN_COVER_SIZE,
-        FULLSCREEN_PLAYER_MAX_COVER_SIZE,
-    )
-}
-
-fn fullscreen_details_below_cover(
-    side_details_width: i32,
-    side_details_height: i32,
-    cover_size: i32,
-    text_exceeds_line_budget: bool,
-) -> bool {
-    side_details_width < FULLSCREEN_PLAYER_MIN_SIDE_DETAILS_WIDTH
-        || side_details_height > cover_size
-        || text_exceeds_line_budget
-}
-
-fn fullscreen_label_exceeds_lines(label: &gtk::Label, width: i32, maximum_lines: i32) -> bool {
-    let layout = label.layout().copy();
-    layout.set_width(width.max(1) * gtk::pango::SCALE);
-    layout.set_height(-1);
-    layout.set_wrap(gtk::pango::WrapMode::WordChar);
-    layout.set_ellipsize(gtk::pango::EllipsizeMode::None);
-    layout.line_count() > maximum_lines
-}
-
-fn fullscreen_below_cover_size(
-    hero_height: i32,
-    details_height: i32,
-    normal_cover_size: i32,
-) -> Option<i32> {
-    let available_cover_height = hero_height
-        .saturating_sub(FULLSCREEN_PLAYER_HERO_LINE_SPACING)
-        .saturating_sub(details_height);
-    (available_cover_height >= FULLSCREEN_PLAYER_TINY_COVER_SIZE)
-        .then(|| normal_cover_size.min(available_cover_height))
-}
-
-fn fullscreen_hero_capacity(height: i32) -> i32 {
-    height
-        .saturating_sub(BOTTOM_PLAYER_HEIGHT)
-        .saturating_sub(FULLSCREEN_PLAYER_PANE_RESERVED_HEIGHT)
-        .clamp(0, 560)
-}
-
-fn fullscreen_window_allows_hero(width: i32, height: i32) -> bool {
-    let minimum_content_width = FULLSCREEN_PLAYER_TINY_COVER_SIZE
-        + FULLSCREEN_PLAYER_HERO_SPACING
-        + FULLSCREEN_PLAYER_MIN_SIDE_DETAILS_WIDTH;
-    fullscreen_hero_capacity(height) >= FULLSCREEN_PLAYER_TINY_COVER_SIZE
-        && fullscreen_hero_content_fallback(width) >= minimum_content_width
-}
-
-fn fullscreen_labeled_switcher_natural_width(fullscreen: &FullscreenPlayerParts) -> i32 {
-    let cached = fullscreen.tabs_labeled_width.get();
-    if cached > 0 {
-        return cached;
-    }
-    for (_, label) in &fullscreen.tabs {
-        label.set_visible(true);
-    }
-    let (_, natural, _, _) = fullscreen
-        .switcher
-        .measure(gtk::Orientation::Horizontal, -1);
-    fullscreen.tabs_labeled_width.set(natural);
-    natural
-}
-
-fn fullscreen_tabs_compact_for(
-    show_hero: bool,
-    width: i32,
-    labeled_width: i32,
-    start_width: i32,
-    end_width: i32,
-) -> bool {
-    labeled_width > width
-        || (!show_hero
-            && width < labeled_width.saturating_add(start_width.max(end_width).saturating_mul(2)))
-}
-
-#[cfg(test)]
-mod layout_tests {
-    use super::*;
-
-    #[test]
-    fn fullscreen_artwork_shares_narrow_hero_width_with_metadata() {
-        assert_eq!(fullscreen_hero_content_fallback(450), 264);
-        assert_eq!(
-            fullscreen_artwork_size_for(fullscreen_hero_content_fallback(450)),
-            FULLSCREEN_PLAYER_MIN_COVER_SIZE
-        );
-        assert_eq!(
-            fullscreen_artwork_size_for(fullscreen_hero_content_fallback(900)),
-            FULLSCREEN_PLAYER_MAX_COVER_SIZE
-        );
-        assert_eq!(
-            fullscreen_artwork_size_for(fullscreen_hero_content_fallback(1_440)),
-            FULLSCREEN_PLAYER_MAX_COVER_SIZE
-        );
-    }
-
-    #[test]
-    fn fullscreen_hero_uses_side_and_below_presentations() {
-        assert!(!fullscreen_details_below_cover(300, 100, 140, false));
-        assert!(fullscreen_details_below_cover(100, 80, 140, false));
-        assert!(fullscreen_details_below_cover(300, 100, 140, true));
-        assert!(fullscreen_details_below_cover(300, 141, 140, false));
-        assert_eq!(fullscreen_below_cover_size(560, 220, 320), Some(320));
-        assert_eq!(fullscreen_below_cover_size(400, 220, 320), Some(168));
-        assert_eq!(fullscreen_below_cover_size(280, 220, 320), None);
-        assert_eq!(fullscreen_hero_capacity(679), 322);
-        assert_eq!(fullscreen_hero_capacity(900), 543);
-    }
-
-    #[test]
-    fn fullscreen_hero_visibility_depends_only_on_window_space() {
-        assert!(fullscreen_window_allows_hero(388, 421));
-        assert!(!fullscreen_window_allows_hero(387, 421));
-        assert!(!fullscreen_window_allows_hero(900, 420));
-    }
-
-    #[test]
-    fn fullscreen_tabs_compact_when_labels_exceed_the_window() {
-        assert!(fullscreen_tabs_compact_for(true, 339, 340, 50, 60));
-        assert!(!fullscreen_tabs_compact_for(true, 340, 340, 50, 60));
-    }
-
-    #[test]
-    fn fullscreen_tabs_add_side_clearance_on_the_shared_top_row() {
-        assert!(!fullscreen_tabs_compact_for(false, 460, 340, 50, 60));
-        assert!(fullscreen_tabs_compact_for(false, 459, 340, 50, 60));
     }
 }
 
