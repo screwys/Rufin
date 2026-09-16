@@ -1,16 +1,17 @@
 <h1>
   Rufin
+</h1>
+  <a href="https://matrix.to/#/#rufin:matrix.org"><img alt="Matrix" src="https://img.shields.io/badge/matrix-%23rufin-red?logo=matrix"></a>
   <a href="Cargo.toml"><img alt="Rust 1.95+" src="https://img.shields.io/badge/rust-1.95%2B-f74c00?logo=rust"></a>
   <a href="LICENSE"><img alt="License: GPL-3.0+" src="https://img.shields.io/badge/license-GPL--3.0%2B-blue.svg"></a>
   <a href="https://gitlab.gnome.org/GNOME/libadwaita/"><img alt="GTK 4 libadwaita" src="https://img.shields.io/badge/GTK%204-libadwaita-3584E4?logo=gnome&amp;logoColor=white&amp;labelColor=2E3436"></a>
   <a href="https://flathub.org/apps/io.github.screwys.Rufin"><img alt="Flathub installs" src="https://img.shields.io/flathub/downloads/io.github.screwys.Rufin?logo=flathub&amp;label=flathub&amp;color=4A86CF"></a>
   <a href="https://aur.archlinux.org/packages/rufin-bin"><img alt="AUR version" src="https://img.shields.io/aur/version/rufin-bin?logo=archlinux&amp;label=AUR&amp;color=1793D1"></a>
   <a href="https://hosted.weblate.org/projects/rufin/"><img alt="Translate Rufin on Weblate" src="https://img.shields.io/badge/translate-Weblate-2ECCAA?logo=weblate&amp;logoColor=white"></a>
-</h1>
+  
 
-<img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="108"> Rufin is a powerful, fast and easy to use native music player for local/remote folders and music servers, available on [multiple platforms](#installation). You can bring music from any combination of sources into a single listening session with app-wide playlists and smart playlists. Rufin offers a rich library browsing and management experience while making the most of each source's unique features. It can be run headless, scripted, or controlled from its Web UI.
 
-<br clear="left">
+<img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="128">Rufin is a powerful, fast and easy to use native music player for local/remote folders and music servers, available on [multiple platforms](#installation). You can bring music from any combination of sources into a single listening session with app-wide playlists and smart playlists. Rufin offers a rich library browsing and management experience while making the most of each source's unique features. It can be run headless, scripted, or controlled from its Web UI.
 
 ![Rufin](data/screenshots/Rufin_full.png)
 
@@ -77,12 +78,12 @@
 - Secure storage for server credentials and API secrets by default
 - Casting support for UPnP and Chromecast, plus Plex Companion queue control and playback handoff in both directions
 
-## 🛰️ Headless mode and Controller
+## 🛰️ Headless/Controller
 
 - Run release binaries without the desktop interface with `rufin --headless`; use `cargo run -p rufin-controller` for the separate GTK-free build
 - Enable the Controller for browser access or scripting through the HTTP API, inside the app or from terminal with: 
 ```bash
-export RUFIN_API_TOKEN="$(openssl rand -hex 32)"
+export RUFIN_API_TOKEN="your_token"  
 rufin --headless --listen
 ```
 - Control playback, browse your library, manage sources and playlists, and view the queue & lyrics from a browser
