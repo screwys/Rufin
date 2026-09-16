@@ -739,6 +739,11 @@ msgstr "Kopēt"
 
 #, fuzzy
 #| msgid "Couldn't load this folder"
+msgid "Could not load related tracks"
+msgstr "Nevarēja ielādēt šo mapi"
+
+#, fuzzy
+#| msgid "Couldn't load this folder"
 msgid "Could not load this page"
 msgstr "Nevarēja ielādēt šo mapi"
 
@@ -933,6 +938,9 @@ msgstr "Pārvelciet, lai mainītu secību"
 msgid "Duration"
 msgstr "Ilgums"
 
+msgid "Dynamic background"
+msgstr ""
+
 msgid "EBU R128 reference level"
 msgstr "EBU R128 references līmenis"
 
@@ -987,6 +995,9 @@ msgstr "Ieslēgt EBU R128 analīzi?"
 msgid "Enable automatic backups"
 msgstr ""
 
+msgid "Enable background image"
+msgstr ""
+
 msgid "Enable equalizer"
 msgstr "Iespējot ekvalaizeru"
 
@@ -1022,6 +1033,9 @@ msgstr "Ekvalaizers"
 
 msgid "Everything, including new tracks"
 msgstr "Viss, ieskaitot jaunās dziesmas"
+
+msgid "Expand lyrics and visualizer"
+msgstr ""
 
 msgid "Expand sidebar"
 msgstr "Izvērst sānu paneli"
@@ -1392,6 +1406,11 @@ msgid "ListenBrainz"
 msgstr "ListenBrainz"
 
 #, fuzzy
+#| msgid "Loading folders..."
+msgid "Loading related tracks..."
+msgstr "Ielādē mapes…"
+
+#, fuzzy
 #| msgid "Saving..."
 msgid "Loading..."
 msgstr "Saglabāšana..."
@@ -1727,6 +1746,11 @@ msgstr "Tīkla ierīces nav atrastas"
 
 msgid "No network devices found"
 msgstr "Tīkla ierīces nav atrastas"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No related tracks found"
+msgstr "Nav atrasts neviens atbilstošs celiņš"
 
 #, fuzzy
 #| msgid "results"
@@ -2188,6 +2212,11 @@ msgstr ""
 msgid "Regenerate access token?"
 msgstr ""
 
+#, fuzzy
+#| msgid "Slate"
+msgid "Related"
+msgstr "Pelēks"
+
 msgid "Release date"
 msgstr "Izdošanas datums"
 
@@ -2303,6 +2332,11 @@ msgstr ""
 #, fuzzy
 #| msgid "Restore Default"
 msgid "Restore User State"
+msgstr "Atjaunot noklusējuma iestatījumus"
+
+#, fuzzy
+#| msgid "Restore Default"
+msgid "Restore player layout"
 msgstr "Atjaunot noklusējuma iestatījumus"
 
 msgid "Restore"
@@ -2584,6 +2618,9 @@ msgstr "Slepenā atslēga"
 msgid "Show Rufin"
 msgstr "Rādīt Rufin"
 
+msgid "Show artwork"
+msgstr ""
+
 msgid "Show downloaded badge"
 msgstr "Rādīt lejupielādes ikonu"
 
@@ -2762,6 +2799,9 @@ msgstr "Pārslēgt starp meklēšanas un izlases cilnēm"
 
 msgid "Switch between layouts"
 msgstr "Pārslēgt starp izkārtojumiem"
+
+msgid "Switch pane"
+msgstr ""
 
 msgid "Switching library..."
 msgstr "Pārslēdz bibliotēku…"
@@ -3000,9 +3040,6 @@ msgstr "Skats"
 msgid "Visible"
 msgstr "Redzams"
 
-msgid "Visualizer"
-msgstr "Vizualizācija"
-
 msgid "Volume Down"
 msgstr "Skaļuma samazināšana"
 
@@ -3237,6 +3274,9 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
 
+#~ msgid "Visualizer"
+#~ msgstr "Vizualizācija"
+
 #~ msgid ""
 #~ "This uses Jellyfin API for play radio, necessary if you want "
 #~ "recommendation plugins to work"
@@ -3310,9 +3350,6 @@ msgstr ""
 #~ "Pieskarieties ierakstam, lai ielādētu dziesmas tekstu un saglabātu to "
 #~ "lietotnes kešatmiņā; noklikšķiniet uz «Saglabāt», ja vēlaties to saglabāt "
 #~ "arī savā mūzikas mapē"
-
-#~ msgid "Loading folders..."
-#~ msgstr "Ielādē mapes…"
 
 #~ msgid "Reset equalizer"
 #~ msgstr "Atiestatīt ekvalaizeru"

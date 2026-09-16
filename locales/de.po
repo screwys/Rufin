@@ -698,6 +698,11 @@ msgstr "Link kopieren"
 msgid "Copy"
 msgstr "Kopie"
 
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Could not load related tracks"
+msgstr "Diese Seite konnte nicht geladen werden"
+
 msgid "Could not load this page"
 msgstr "Diese Seite konnte nicht geladen werden"
 
@@ -878,6 +883,9 @@ msgstr "Zum Sortieren ziehen"
 msgid "Duration"
 msgstr "Dauer"
 
+msgid "Dynamic background"
+msgstr ""
+
 msgid "EBU R128 reference level"
 msgstr "EBU-R128-Referenzpegel"
 
@@ -926,6 +934,9 @@ msgstr "EBU-R128-Analyse aktivieren?"
 msgid "Enable automatic backups"
 msgstr "Automatische Sicherungen aktivieren"
 
+msgid "Enable background image"
+msgstr ""
+
 msgid "Enable equalizer"
 msgstr "Equalizer einschalten"
 
@@ -963,6 +974,9 @@ msgstr "Equalizer"
 
 msgid "Everything, including new tracks"
 msgstr "Alles, einschließlich neuer Titel"
+
+msgid "Expand lyrics and visualizer"
+msgstr ""
 
 msgid "Expand sidebar"
 msgstr "Seitenleiste ausklappen"
@@ -1310,6 +1324,11 @@ msgstr "ListenBrainz scrobbling"
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
 
+#, fuzzy
+#| msgid "Loading folders..."
+msgid "Loading related tracks..."
+msgstr "Lade Ordner..."
+
 msgid "Loading..."
 msgstr "Lädt …"
 
@@ -1624,6 +1643,11 @@ msgstr "Keine Netzwerkadresse verfügbar"
 
 msgid "No network devices found"
 msgstr "Keine Netzwerkgeräte gefunden"
+
+#, fuzzy
+#| msgid "No matching tracks found"
+msgid "No related tracks found"
+msgstr "Keine passenden Titel gefunden"
 
 msgid "No results"
 msgstr "Keine Ergebnisse"
@@ -2051,6 +2075,11 @@ msgstr "Zugriffstoken neu generieren"
 msgid "Regenerate access token?"
 msgstr "Zugriffstoken neu generieren?"
 
+#, fuzzy
+#| msgid "Slate"
+msgid "Related"
+msgstr "Schiefergrau"
+
 msgid "Release date"
 msgstr "Veröffentlichungsdatum"
 
@@ -2160,6 +2189,11 @@ msgid "Resource not found"
 msgstr "Ressource nicht gefunden"
 
 msgid "Restore User State"
+msgstr "Benutzerstatus wiederherstellen"
+
+#, fuzzy
+#| msgid "Restore User State"
+msgid "Restore player layout"
 msgstr "Benutzerstatus wiederherstellen"
 
 msgid "Restore"
@@ -2417,6 +2451,11 @@ msgstr "Shared Secret"
 msgid "Show Rufin"
 msgstr "Rufin anzeigen"
 
+#, fuzzy
+#| msgid "Artwork"
+msgid "Show artwork"
+msgstr "Artwork"
+
 msgid "Show downloaded badge"
 msgstr "Heruntergeladen-Symbol anzeigen"
 
@@ -2587,6 +2626,9 @@ msgstr "Zwischen „Suche“ und „Favoriten“ wechseln"
 
 msgid "Switch between layouts"
 msgstr "Zwischen Layouts wechseln"
+
+msgid "Switch pane"
+msgstr ""
 
 msgid "Switching library..."
 msgstr "Bibliothek wird gewechselt..."
@@ -2813,9 +2855,6 @@ msgstr "Ansicht"
 
 msgid "Visible"
 msgstr "Sichtbar"
-
-msgid "Visualizer"
-msgstr "Visualisierung"
 
 msgid "Volume Down"
 msgstr "Lautstärke verringern"
@@ -3053,6 +3092,9 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
 
+#~ msgid "Visualizer"
+#~ msgstr "Visualisierung"
+
 #~ msgid ""
 #~ "This uses Jellyfin API for play radio, necessary if you want "
 #~ "recommendation plugins to work"
@@ -3123,9 +3165,6 @@ msgstr "Willkommen beim Rufin-Setup"
 #~ "Tippe auf den Eintrag, um die Songtexte zu laden und im App-Cache zu "
 #~ "speichern. Klicke nur dann auf Speichern, wenn du sie auch in deinem "
 #~ "Musikordner speichern möchtest"
-
-#~ msgid "Loading folders..."
-#~ msgstr "Lade Ordner..."
 
 #~ msgid "Reset equalizer"
 #~ msgstr "Equalizer zurücksetzen"

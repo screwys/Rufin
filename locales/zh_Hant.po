@@ -711,6 +711,11 @@ msgstr "複製"
 
 #, fuzzy
 #| msgid "Couldn't load this folder"
+msgid "Could not load related tracks"
+msgstr "無法載入此資料夾"
+
+#, fuzzy
+#| msgid "Couldn't load this folder"
 msgid "Could not load this page"
 msgstr "無法載入此資料夾"
 
@@ -907,6 +912,9 @@ msgstr "拖曳以重新排序"
 msgid "Duration"
 msgstr "時長"
 
+msgid "Dynamic background"
+msgstr ""
+
 msgid "EBU R128 reference level"
 msgstr ""
 
@@ -969,6 +977,9 @@ msgstr ""
 msgid "Enable automatic backups"
 msgstr ""
 
+msgid "Enable background image"
+msgstr ""
+
 msgid "Enable equalizer"
 msgstr "啟用等化器"
 
@@ -1004,6 +1015,9 @@ msgstr "等化器"
 
 msgid "Everything, including new tracks"
 msgstr "所有內容，包含新曲目"
+
+msgid "Expand lyrics and visualizer"
+msgstr ""
 
 msgid "Expand sidebar"
 msgstr "展開側邊欄"
@@ -1364,6 +1378,11 @@ msgid "ListenBrainz"
 msgstr "ListenBrainz"
 
 #, fuzzy
+#| msgid "Loading folders..."
+msgid "Loading related tracks..."
+msgstr "資料夾載入中..."
+
+#, fuzzy
 #| msgid "Saving..."
 msgid "Loading..."
 msgstr "正在儲存..."
@@ -1702,6 +1721,11 @@ msgstr "找不到網路裝置"
 
 msgid "No network devices found"
 msgstr "找不到網路裝置"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No related tracks found"
+msgstr "無匹配的曲目"
 
 #, fuzzy
 #| msgid "{count} result"
@@ -2166,6 +2190,9 @@ msgstr ""
 msgid "Regenerate access token?"
 msgstr ""
 
+msgid "Related"
+msgstr ""
+
 msgid "Release date"
 msgstr "發行日期"
 
@@ -2281,6 +2308,9 @@ msgid "Resource not found"
 msgstr ""
 
 msgid "Restore User State"
+msgstr ""
+
+msgid "Restore player layout"
 msgstr ""
 
 msgid "Restore"
@@ -2562,6 +2592,9 @@ msgstr ""
 msgid "Show Rufin"
 msgstr "顯示 Rufin"
 
+msgid "Show artwork"
+msgstr ""
+
 msgid "Show downloaded badge"
 msgstr "顯示已下載圖示"
 
@@ -2745,6 +2778,9 @@ msgid "Switch Search/Favorites tabs"
 msgstr ""
 
 msgid "Switch between layouts"
+msgstr ""
+
+msgid "Switch pane"
 msgstr ""
 
 msgid "Switching library..."
@@ -2978,9 +3014,6 @@ msgstr ""
 msgid "Visible"
 msgstr ""
 
-msgid "Visualizer"
-msgstr "視覺效果"
-
 msgid "Volume Down"
 msgstr ""
 
@@ -3197,6 +3230,9 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
 
+#~ msgid "Visualizer"
+#~ msgstr "視覺效果"
+
 #~ msgid "Add server"
 #~ msgstr "新增伺服器"
 
@@ -3211,9 +3247,6 @@ msgstr ""
 
 #~ msgid "Remove prefix"
 #~ msgstr "移除前綴"
-
-#~ msgid "Loading folders..."
-#~ msgstr "資料夾載入中..."
 
 #~ msgid "Reset equalizer"
 #~ msgstr "重置等化器"

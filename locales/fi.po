@@ -686,6 +686,11 @@ msgstr "Kopioi"
 
 #, fuzzy
 #| msgid "Couldn't load this folder"
+msgid "Could not load related tracks"
+msgstr "Tätä kansiota ei voitu ladata"
+
+#, fuzzy
+#| msgid "Couldn't load this folder"
 msgid "Could not load this page"
 msgstr "Tätä kansiota ei voitu ladata"
 
@@ -874,6 +879,9 @@ msgstr "Vedä järjestääksesi uudelleen"
 msgid "Duration"
 msgstr "Kesto"
 
+msgid "Dynamic background"
+msgstr ""
+
 msgid "EBU R128 reference level"
 msgstr ""
 
@@ -926,6 +934,9 @@ msgstr ""
 msgid "Enable automatic backups"
 msgstr "Ota automaattiset varmuuskopiot käyttöön"
 
+msgid "Enable background image"
+msgstr ""
+
 msgid "Enable equalizer"
 msgstr ""
 
@@ -960,6 +971,9 @@ msgid "Equalizer"
 msgstr "Taajuuskorjain"
 
 msgid "Everything, including new tracks"
+msgstr ""
+
+msgid "Expand lyrics and visualizer"
 msgstr ""
 
 msgid "Expand sidebar"
@@ -1305,6 +1319,11 @@ msgid "ListenBrainz"
 msgstr "ListenBrainz"
 
 #, fuzzy
+#| msgid "Only played tracks"
+msgid "Loading related tracks..."
+msgstr "Vain toistetut kappaleet"
+
+#, fuzzy
 #| msgid "Saving..."
 msgid "Loading..."
 msgstr "Tallennetaan..."
@@ -1626,6 +1645,11 @@ msgstr "Verkkolaitteita ei löytynyt"
 
 msgid "No network devices found"
 msgstr "Verkkolaitteita ei löytynyt"
+
+#, fuzzy
+#| msgid "Nothing in this folder"
+msgid "No related tracks found"
+msgstr "Tässä kansiossa ei ole mitään"
 
 #, fuzzy
 #| msgid "{count} result"
@@ -2066,6 +2090,11 @@ msgstr ""
 msgid "Regenerate access token?"
 msgstr ""
 
+#, fuzzy
+#| msgid "Template"
+msgid "Related"
+msgstr "Mallipohja"
+
 msgid "Release date"
 msgstr "Julkaisupäivä"
 
@@ -2175,6 +2204,9 @@ msgid "Resource not found"
 msgstr "Resurssia ei löytynyt"
 
 msgid "Restore User State"
+msgstr ""
+
+msgid "Restore player layout"
 msgstr ""
 
 msgid "Restore"
@@ -2443,6 +2475,9 @@ msgstr "Jaettu salaisuus"
 msgid "Show Rufin"
 msgstr "Näytä Rufin"
 
+msgid "Show artwork"
+msgstr ""
+
 msgid "Show downloaded badge"
 msgstr ""
 
@@ -2623,6 +2658,9 @@ msgstr "Vaihda Hae/Suosikit-välilehtiä"
 
 msgid "Switch between layouts"
 msgstr "Vaihda asettelujen välillä"
+
+msgid "Switch pane"
+msgstr ""
 
 msgid "Switching library..."
 msgstr "Vaihdetaan kirjastoa..."
@@ -2853,9 +2891,6 @@ msgstr "Näkymä"
 msgid "Visible"
 msgstr "Näkyvissä"
 
-msgid "Visualizer"
-msgstr "Visualisointi"
-
 msgid "Volume Down"
 msgstr ""
 
@@ -3084,3 +3119,6 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#~ msgid "Visualizer"
+#~ msgstr "Visualisointi"
