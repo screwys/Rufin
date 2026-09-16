@@ -555,6 +555,7 @@ pub fn track_collection_projection<T: TrackPresentation>(
                         detail: false,
                         context_id: context_id.clone(),
                         content_inset,
+                        fields: None,
                     },
                     selection.clone(),
                 ))
@@ -567,6 +568,7 @@ pub struct TrackTableOptions {
     pub detail: bool,
     pub context_id: String,
     pub content_inset: i32,
+    pub fields: Option<Vec<LibraryField>>,
 }
 
 pub fn album_grid(
@@ -930,6 +932,59 @@ where
     (table, width_fit, navigation)
 }
 
+impl CatalogUi {
+    pub fn related_tracks_view(self: &Rc<Self>, rows: Vec<TrackRow>) -> gtk::Widget {
+        let key = LibraryListKey::Tracks;
+        let settings = self.settings.current.borrow().library_list(key);
+        let order = rows.iter().map(|row| row.media_uri.clone()).collect();
+        let model = TrackCollectionModel::new(
+            self.library.clone(),
+            self.runtime.clone(),
+            order,
+            0,
+            rows,
+            settings,
+        );
+        let selection = TrackSelection::new(model.clone());
+        self.register_current_route_track_selection_owner(selection.clone());
+        let table = track_table(
+            self,
+            model.clone(),
+            key,
+            TrackTableOptions {
+                detail: false,
+                context_id: "related".into(),
+                content_inset: 0,
+                fields: Some(vec![
+                    LibraryField::RowIndex,
+                    LibraryField::TitleMerged,
+                    LibraryField::Duration,
+                    LibraryField::Favorite,
+                ]),
+            },
+            selection,
+        );
+        let scroller = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vscrollbar_policy(gtk::PolicyType::Automatic)
+            .hexpand(true)
+            .vexpand(true)
+            .child(&table.widget())
+            .build();
+        scroller.add_css_class("sidebar-scroller");
+        scroller.add_css_class("right-panel-scroller");
+        ui_shared::layout::configure_fill_width_clip(&scroller, gtk::PolicyType::Automatic);
+        let weak = scroller.downgrade();
+        let root = allocation_owner(&scroller, move |width, _| {
+            if let Some(scroller) = weak.upgrade() {
+                table.fit_scroller_allocation(&scroller, width);
+            }
+        });
+        model.resume_initial_demand();
+        root.upcast()
+    }
+}
+
 pub fn track_table<T: TrackPresentation>(
     shell: &Rc<CatalogUi>,
     model: TrackCollectionModel<T>,
@@ -960,7 +1015,9 @@ pub fn track_table<T: TrackPresentation>(
         current_playing_state.set_paused(current.is_some_and(|current| current.paused));
         true
     }));
-    let fields = if options.detail {
+    let fields = if let Some(fields) = options.fields {
+        fields
+    } else if options.detail {
         shell
             .settings
             .current

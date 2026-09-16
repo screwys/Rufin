@@ -26,6 +26,8 @@ pub struct PlayerUi {
     refresh_current_controls: Rc<dyn Fn()>,
     open_queue_menu: QueueMenu,
     set_track_favorite: TrackFavorite,
+    related_tracks_view: Rc<dyn Fn(Vec<library::TrackRow>) -> gtk::Widget>,
+    present_full_artwork: Rc<dyn Fn(artwork::ArtworkBinding)>,
     content_stack: gtk::glib::WeakRef<gtk::Stack>,
     pub settings: Rc<ui_shared::settings::SettingsState>,
     pub playback_handles: playback::PlaybackHandles,
@@ -61,6 +63,8 @@ impl PlayerUi {
         refresh_current_controls: Rc<dyn Fn()>,
         open_queue_menu: QueueMenu,
         set_track_favorite: TrackFavorite,
+        related_tracks_view: Rc<dyn Fn(Vec<library::TrackRow>) -> gtk::Widget>,
+        present_full_artwork: Rc<dyn Fn(artwork::ArtworkBinding)>,
         content_stack: &gtk::Stack,
     ) -> Self {
         Self {
@@ -72,6 +76,8 @@ impl PlayerUi {
             refresh_current_controls,
             open_queue_menu,
             set_track_favorite,
+            related_tracks_view,
+            present_full_artwork,
             content_stack: content_stack.downgrade(),
             settings,
             playback_handles,
@@ -169,6 +175,7 @@ pub fn register_resources() -> Result<(), String> {
 pub mod bottom;
 pub mod equalizer;
 pub mod fullscreen;
+mod fullscreen_background;
 mod icons;
 mod progress;
 pub mod visualizer;

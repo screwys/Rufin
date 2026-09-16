@@ -882,6 +882,23 @@ impl QueueCommandPort for PlaybackOwner {
 }
 
 impl RadioCommandPort for PlaybackOwner {
+    fn candidates(
+        &self,
+        seed: library::RadioSeed,
+        requested: usize,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<String>, String>> + Send>>
+    {
+        let database = self.database.clone();
+        let source = self
+            .source
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        Box::pin(
+            async move { crate::radio::radio_candidates(&database, source, seed, requested).await },
+        )
+    }
+
     fn play_random(&self, request: RandomPlayRequest) {
         if self.random_plex(&request) {
             return;

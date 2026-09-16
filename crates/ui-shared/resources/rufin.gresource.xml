@@ -130,6 +130,17 @@
     <file>hicolor/scalable/actions/rufin-sound-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-waves-and-screen-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-text-justify-center-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-view-switch-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-compass-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-sliders-2-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-view-restore-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-view-restore-corners-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-view-fullscreen-corners-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-toggle-group-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-mixer-sliders-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-view-dual-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-pane-left-focus-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-pane-right-focus-symbolic.svg</file>
   </gresource>
   <gresource prefix="/io/github/screwys/Rufin/ui">
     <file compressed="true">preferences/source/manage_server.ui</file>

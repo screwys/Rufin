@@ -54,7 +54,7 @@
             </child>
             <child>
               <object class="GtkButton" id="configure">
-                <property name="icon-name">rufin-more-symbolic</property>
+                <property name="icon-name">rufin-sliders-2-symbolic</property>
                 <style>
                   <class name="library-toolbar-icon-button"/>
                 </style>

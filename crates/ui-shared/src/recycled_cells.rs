@@ -280,6 +280,15 @@ impl RecycledMergedCell {
         cell
     }
 
+    pub fn without_downloads(navigate: Rc<dyn Fn(Route)>, cover_size: i32) -> Self {
+        let cell: Self = glib::Object::new();
+        let imp = cell.imp();
+        imp.cover.artwork().set_square_size(cover_size);
+        imp.links
+            .replace(Some(DetailLinkBinding::new(&imp.subtitle, navigate)));
+        cell
+    }
+
     pub fn cover(&self) -> ArtworkTile {
         self.imp().cover.artwork()
     }
@@ -378,4 +387,47 @@ impl RecycledFolderCell {
     pub fn label(&self) -> gtk::Label {
         self.imp().label.get()
     }
+}
+
+pub fn track_row_index_cell(text: &str) -> gtk::Overlay {
+    let cell = gtk::Overlay::new();
+    cell.add_css_class("track-row-index-cell");
+    cell.set_hexpand(true);
+    cell.set_halign(gtk::Align::Fill);
+
+    let label = gtk::Label::new(Some(text));
+    label.add_css_class("muted");
+    label.add_css_class("track-row-index-number");
+    label.set_xalign(0.5);
+    label.set_halign(gtk::Align::Fill);
+    label.set_hexpand(true);
+    label.set_single_line_mode(true);
+    cell.set_child(Some(&label));
+
+    let playing = gtk::Image::from_icon_name("rufin-media-playback-start-symbolic");
+    playing.add_css_class("track-row-index-playing");
+    playing.set_pixel_size(14);
+    playing.set_halign(gtk::Align::Center);
+    playing.set_valign(gtk::Align::Center);
+    playing.set_margin_start(2);
+    cell.add_overlay(&playing);
+
+    let paused = gtk::Image::from_icon_name("rufin-media-playback-pause-symbolic");
+    paused.add_css_class("track-row-index-paused");
+    paused.set_pixel_size(14);
+    paused.set_halign(gtk::Align::Center);
+    paused.set_valign(gtk::Align::Center);
+    paused.set_margin_start(2);
+    cell.add_overlay(&paused);
+    cell
+}
+
+pub fn set_track_row_index_text(cell: &gtk::Overlay, text: &str) {
+    let Some(label) = cell
+        .child()
+        .and_then(|child| child.downcast::<gtk::Label>().ok())
+    else {
+        return;
+    };
+    label.set_text(text);
 }

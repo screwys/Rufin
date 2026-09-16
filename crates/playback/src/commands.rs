@@ -126,6 +126,11 @@ pub trait QueueCommandPort: Send + Sync {
 }
 
 pub trait RadioCommandPort: Send + Sync {
+    fn candidates(
+        &self,
+        seed: RadioSeed,
+        requested: usize,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<String>, String>> + Send>>;
     fn play_random(&self, request: RandomPlayRequest);
     fn play_radio(&self, request: RadioPlayRequest);
 }

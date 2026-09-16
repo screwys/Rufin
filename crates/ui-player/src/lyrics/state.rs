@@ -25,6 +25,7 @@ impl SelectedLyricsState {
         let right_pane = LyricsPane::new();
         right_pane.use_right_panel_scrollbar();
         let fullscreen_pane = LyricsPane::new();
+        fullscreen_pane.use_right_panel_scrollbar();
         fullscreen_pane
             .widget()
             .add_css_class("fullscreen-player-pane");
@@ -62,13 +63,8 @@ impl PlayerUi {
 
     pub fn fullscreen_lyrics_surface_visible(&self) -> bool {
         self.fullscreen_player_visible()
-            && self
-                .views
-                .fullscreen_player
-                .stack
-                .visible_child_name()
-                .as_deref()
-                == Some("lyrics")
+            && self.views.fullscreen_player.experience_visible()
+            && self.views.fullscreen_player.lyrics_enabled.get()
     }
 
     pub fn lyrics_surface_visible(&self) -> bool {
@@ -173,10 +169,6 @@ impl PlayerUi {
         }
         if changed {
             self.refocus_current_lyrics_highlight();
-            let shell = Rc::clone(self);
-            glib::idle_add_local_once(move || {
-                shell.refocus_current_lyrics_highlight();
-            });
         }
     }
 

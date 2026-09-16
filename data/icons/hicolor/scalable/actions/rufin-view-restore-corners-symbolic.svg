@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <path fill="none" stroke="rgb(0,0,0)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+    d="M 2 6 L 6 6 L 6 2
+       M 14 6 L 10 6 L 10 2
+       M 2 10 L 6 10 L 6 14
+       M 14 10 L 10 10 L 10 14"
+    class="foreground-stroke transparent-fill" />
+</svg>

@@ -27,24 +27,25 @@
             <child><object class="GtkBox" id="preset_host"><property name="orientation">horizontal</property><property name="valign">center</property></object></child>
           </object>
         </child>
-        <child><object class="GtkButton" id="reset_button"><property name="label" translatable="yes">Reset</property><style><class name="destructive-action"/></style></object></child>
+        <child>
+          <object class="GtkButton" id="reset_button">
+            <property name="icon-name">edit-undo-symbolic</property>
+            <property name="tooltip-text" translatable="yes">Reset</property>
+            <property name="valign">center</property>
+            <style>
+              <class name="flat"/>
+              <class name="circular"/>
+            </style>
+          </object>
+        </child>
       </object>
     </child>
     <child>
       <object class="GtkBox" id="band_row">
-        <property name="orientation">horizontal</property><property name="spacing">0</property>
+        <property name="orientation">horizontal</property><property name="spacing">16</property>
         <property name="halign">fill</property><property name="valign">fill</property>
         <property name="hexpand">true</property><property name="vexpand">true</property>
         <property name="width-request">1</property><property name="margin-bottom">6</property>
-        <child>
-          <object class="AdwClamp">
-            <property name="maximum-size">658</property><property name="tightening-threshold">560</property>
-            <property name="hexpand">true</property><property name="vexpand">true</property>
-            <property name="child">
-              <object class="GtkBox">
-                <property name="orientation">horizontal</property><property name="spacing">16</property>
-                <property name="halign">fill</property><property name="valign">fill</property>
-                <property name="hexpand">true</property><property name="vexpand">true</property><property name="width-request">1</property>
                 <child>
                   <object class="GtkBox">
                     <property name="orientation">vertical</property><property name="spacing">0</property><property name="width-request">48</property><property name="valign">fill</property><property name="vexpand">true</property>
@@ -78,10 +79,6 @@
                     <child><object class="GtkBox"><property name="orientation">vertical</property><property name="height-request">50</property></object></child>
                   </object>
                 </child>
-              </object>
-            </property>
-          </object>
-        </child>
       </object>
     </child>
   </object>

@@ -178,6 +178,10 @@ impl DetailLinkBinding {
         }
     }
 
+    pub fn links(&self) -> DetailLinks {
+        self.links.borrow().clone()
+    }
+
     pub fn bind(&self, links: DetailLinks) {
         let has_links = !links.links.is_empty();
         let text = if has_links {

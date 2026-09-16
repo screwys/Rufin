@@ -518,13 +518,17 @@ fn replace_primary_menu_model(menu: &gio::Menu, shell: &Rc<Shell>) {
         &window,
         &tr("Toggle Fullscreen"),
         "win.toggle-fullscreen",
-        "rufin-view-fullscreen-symbolic",
+        if shell.chrome.window.is_fullscreen() {
+            "rufin-view-restore-symbolic"
+        } else {
+            "rufin-view-fullscreen-symbolic"
+        },
     );
     append_menu_action(
         &window,
         &primary_menu_sidebar_toggle_label(shell.as_ref()),
         "win.toggle-left-sidebar",
-        primary_menu_sidebar_toggle_icon(shell.as_ref()),
+        "rufin-sidebar-show-symbolic",
     );
     menu.append_section(None, &window);
 
@@ -561,14 +565,6 @@ fn primary_menu_sidebar_toggle_label(shell: &Shell) -> String {
         tr("Collapse sidebar")
     } else {
         tr("Expand sidebar")
-    }
-}
-
-fn primary_menu_sidebar_toggle_icon(shell: &Shell) -> &'static str {
-    if shell.left_sidebar_mode() == ResolvedLeftSidebarMode::Full {
-        "rufin-sidebar-hide-symbolic"
-    } else {
-        "rufin-sidebar-show-symbolic"
     }
 }
 

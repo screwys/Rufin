@@ -182,7 +182,7 @@ impl PreferencesPageKind {
             Self::Appearance => "rufin-preferences-desktop-appearance-symbolic",
             Self::Integrations => INTEGRATIONS_ICON_NAME,
             Self::Playback => "rufin-music-queue-symbolic",
-            Self::Library => "rufin-library-music-symbolic",
+            Self::Library => "rufin-library-symbolic",
         }
     }
 

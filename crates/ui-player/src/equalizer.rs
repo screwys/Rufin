@@ -160,6 +160,7 @@ pub struct EqualizerSurface {
 pub struct EqualizerControls {
     pub enabled: gtk::Switch,
     pub preset: gtk::DropDown,
+    reset: gtk::Button,
     pub scales: Vec<gtk::Scale>,
     pub syncing: Rc<Cell<bool>>,
 }
@@ -206,10 +207,11 @@ impl EqualizerSurface {
         let surface = Self {
             root,
             band_row,
-            reset: reset_button,
+            reset: reset_button.clone(),
             controls: Rc::new(EqualizerControls {
                 enabled,
                 preset,
+                reset: reset_button,
                 scales,
                 syncing: Rc::new(Cell::new(false)),
             }),
@@ -240,6 +242,10 @@ impl EqualizerSurface {
                 row.set_state(enabled);
                 let mut settings = controls.settings();
                 settings.enabled = enabled;
+                if !enabled {
+                    settings.selected_preset = "Flat".to_string();
+                    settings.bands = equalizer_default_preset_bands("Flat");
+                }
                 controls.set_settings(&settings);
                 switch_changed(settings);
                 glib::Propagation::Stop
@@ -297,7 +303,8 @@ impl EqualizerSurface {
                 return;
             };
             let mut settings = controls.settings();
-            settings.bands = equalizer_default_preset_bands(&settings.selected_preset);
+            settings.selected_preset = "Flat".to_string();
+            settings.bands = equalizer_default_preset_bands("Flat");
             settings.sanitize();
             controls.set_settings(&settings);
             changed(settings);
@@ -316,6 +323,8 @@ impl EqualizerSurface {
 impl EqualizerControls {
     pub fn set_settings(&self, settings: &EqualizerSettings) {
         self.syncing.set(true);
+        self.reset
+            .set_visible(settings.selected_preset == CUSTOM_PRESET);
         self.enabled.set_active(settings.enabled);
         self.preset
             .set_selected(equalizer_preset_position(&equalizer_selected_preset(

@@ -12,6 +12,9 @@
         <property name="vscrollbar-policy">automatic</property>
         <property name="hexpand">true</property>
         <property name="vexpand">true</property>
+        <style>
+          <class name="sidebar-scroller" />
+        </style>
         <property name="child">
           <object class="GtkBox" id="body">
             <property name="orientation">vertical</property>
