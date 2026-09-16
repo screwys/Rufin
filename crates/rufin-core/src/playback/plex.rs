@@ -87,6 +87,7 @@ impl PlexPlayback {
         target: Option<playback::QueueReorderTarget>,
         placement: playback::QueuePlacement,
         anchor: usize,
+        shuffled: Option<u64>,
     ) -> Result<(), String> {
         self.current().await?;
         let page = self
@@ -95,6 +96,7 @@ impl PlexPlayback {
                 input: Box::new(input),
                 anchor_index: anchor,
                 random_start: None,
+                shuffled,
             })
             .await
             .map_err(string_error)?;
@@ -582,7 +584,7 @@ impl PlexPlayback {
                     .await?;
             }
             SessionCommand::Insert { input, target } => {
-                self.insert(input, Some(target), playback::QueuePlacement::Last, 0)
+                self.insert(input, Some(target), playback::QueuePlacement::Last, 0, None)
                     .await?
             }
             SessionCommand::Clear { include_current } => {
@@ -598,8 +600,14 @@ impl PlexPlayback {
                 self.remove(&ids).await?;
             }
             SessionCommand::ApplyBatch { batch, placement } => {
-                self.insert(batch.input().clone(), None, placement, 0)
-                    .await?
+                self.insert(
+                    batch.input().clone(),
+                    None,
+                    placement,
+                    0,
+                    batch.shuffled_seed(),
+                )
+                .await?
             }
             _ => return Ok(()),
         }
@@ -982,6 +990,7 @@ impl PlaybackOwner {
                     None,
                     playback::QueuePlacement::Last,
                     0,
+                    None,
                 )
                 .await
             }
@@ -1015,6 +1024,7 @@ impl PlaybackOwner {
                     None,
                     request.placement,
                     0,
+                    None,
                 )
                 .await
             }
@@ -1063,6 +1073,7 @@ impl PlaybackOwner {
                     None,
                     request.placement,
                     0,
+                    None,
                 )
                 .await
             }
@@ -1553,15 +1564,17 @@ impl PlaybackOwner {
         let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return false;
         };
-        let request = request.clone();
+        let anchor = request.anchor_index;
+        let (batch, placement) = request.clone().compact_batch(super::random_u64());
         self.runtime.spawn(async move {
             let _guard = plex.commands.lock().await;
             if let Err(error) = plex
                 .insert(
-                    request.batch.input().clone(),
+                    batch.input().clone(),
                     None,
-                    request.placement,
-                    request.anchor_index,
+                    placement,
+                    anchor,
+                    batch.shuffled_seed(),
                 )
                 .await
             {

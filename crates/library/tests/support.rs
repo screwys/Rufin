@@ -282,6 +282,7 @@ pub async fn resolve_queue(
             input: Box::new(input),
             anchor_index,
             random_start: None,
+            shuffled: None,
         })
         .await
         .unwrap();

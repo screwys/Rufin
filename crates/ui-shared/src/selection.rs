@@ -226,19 +226,22 @@ pub struct TrackSelectionSnapshot {
     pub media_uris: Arc<[String]>,
 }
 impl TrackSelectionSnapshot {
-    pub fn play(&self, queue: &playback::QueueHandle, placement: QueuePlacement) {
+    pub fn play(&self, queue: &playback::QueueHandle, placement: QueuePlacement, shuffled: bool) {
         if self.media_uris.is_empty() {
             return;
         }
-        queue.play(playback::PlayRequest::ordered(
-            library::QueueInput::MediaUris {
-                order: self.media_uris.clone(),
-                provenance: library::QueueProvenance::Manual,
-            },
-            0,
-            placement,
-            false,
-        ));
+        queue.play(
+            playback::PlayRequest::ordered(
+                library::QueueInput::MediaUris {
+                    order: self.media_uris.clone(),
+                    provenance: library::QueueProvenance::Manual,
+                },
+                0,
+                placement,
+                false,
+            )
+            .shuffled(shuffled),
+        );
     }
 
     pub fn download_subject(&self) -> downloads::DownloadSubject {
@@ -267,16 +270,19 @@ impl PlaylistEntrySelectionSnapshot {
         Ok(media_uris)
     }
 
-    pub fn play(&self, queue: &playback::QueueHandle, placement: QueuePlacement) {
-        queue.play(playback::PlayRequest::ordered(
-            library::QueueInput::PlaylistEntries {
-                order: self.entries.clone(),
-                context_id: format!("playlist-selection:{}", self.playlist).into(),
-            },
-            0,
-            placement,
-            false,
-        ));
+    pub fn play(&self, queue: &playback::QueueHandle, placement: QueuePlacement, shuffled: bool) {
+        queue.play(
+            playback::PlayRequest::ordered(
+                library::QueueInput::PlaylistEntries {
+                    order: self.entries.clone(),
+                    context_id: format!("playlist-selection:{}", self.playlist).into(),
+                },
+                0,
+                placement,
+                false,
+            )
+            .shuffled(shuffled),
+        );
     }
 }
 pub fn selected_values<T: Clone>(order: &[T], positions: &gtk::Bitset) -> Vec<T> {

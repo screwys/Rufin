@@ -495,7 +495,7 @@ fn connect_collection_play(
     play: CollectionPlay,
     placement: playback::QueuePlacement,
 ) {
-    button.connect_clicked(move |_| play(placement));
+    button.connect_clicked(move |_| play(placement, false));
 }
 
 pub fn detail_genre_pill_button(label: &str) -> gtk::Button {

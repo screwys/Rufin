@@ -223,6 +223,7 @@ async fn source_items(
             input: Box::new(input),
             anchor_index: 0,
             random_start: None,
+            shuffled: None,
         })
         .await
         .unwrap();
@@ -509,6 +510,7 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
                 )])),
                 anchor_index: 0,
                 random_start: None,
+                shuffled: None,
             })
             .await
             .unwrap();
@@ -763,6 +765,7 @@ async fn coalesced_replacements_retire_snapshots_without_rewriting_them_on_order
                 )),
                 anchor_index: 0,
                 random_start: None,
+                shuffled: None,
             })
             .await
             .unwrap();
@@ -917,6 +920,7 @@ async fn repeated_large_source_starts_resolve_only_the_selected_window() {
                 }),
                 anchor_index: 0,
                 random_start: Some(activation * 7919),
+                shuffled: None,
             })
             .await
             .unwrap();

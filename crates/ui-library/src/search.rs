@@ -218,6 +218,7 @@ impl SearchItem {
             (shell.media_menus.play_target)(
                 &PlaybackTarget::Track(row.media_uri.clone()),
                 placement,
+                false,
             );
             return;
         }

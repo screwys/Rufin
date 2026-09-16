@@ -135,8 +135,13 @@ impl CatalogUi {
         let play_controller = self.queue.clone();
         let play_tracks = track_projection.clone();
         let play_context_id = context_id.clone();
-        let play: CollectionPlay = Rc::new(move |placement| {
-            play_tracks.play_source(play_controller.clone(), placement, play_context_id.clone());
+        let play: CollectionPlay = Rc::new(move |placement, shuffled| {
+            play_tracks.play_source(
+                play_controller.clone(),
+                placement,
+                play_context_id.clone(),
+                shuffled,
+            );
         });
         let cover_controls = detail_playback_controls(
             &actions,

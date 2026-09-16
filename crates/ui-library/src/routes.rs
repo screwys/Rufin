@@ -94,8 +94,10 @@ impl<T: TrackPresentation> TrackListProjection<T> {
         queue: playback::QueueHandle,
         placement: playback::QueuePlacement,
         context_id: String,
+        shuffled: bool,
     ) {
-        self.model.play_source(queue, placement, context_id);
+        self.model
+            .play_source(queue, placement, context_id, shuffled);
     }
 
     pub fn projection_request(&self) -> TrackProjectionRequest {

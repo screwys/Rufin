@@ -65,8 +65,13 @@ pub struct PlaylistEntriesView {
 }
 
 impl PlaylistEntriesView {
-    pub fn play(&self, queue: playback::QueueHandle, placement: playback::QueuePlacement) {
-        self.model.play(0, queue, placement, true);
+    pub fn play(
+        &self,
+        queue: playback::QueueHandle,
+        placement: playback::QueuePlacement,
+        shuffled: bool,
+    ) {
+        self.model.play(0, queue, placement, true, shuffled);
     }
 
     pub fn widget(&self) -> gtk::Widget {
