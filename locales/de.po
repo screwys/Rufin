@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-15 16:51+0000\n"
+"PO-Revision-Date: 2026-09-16 19:05+0000\n"
 "Last-Translator: Sebastian <sevachka@users.noreply.hosted.weblate.org>\n"
 "Language-Team: German <https://hosted.weblate.org/projects/rufin/app/de/>\n"
 "Language: de\n"
@@ -698,10 +698,8 @@ msgstr "Link kopieren"
 msgid "Copy"
 msgstr "Kopie"
 
-#, fuzzy
-#| msgid "Could not load this page"
 msgid "Could not load related tracks"
-msgstr "Diese Seite konnte nicht geladen werden"
+msgstr "Verwandte Titel konnten nicht geladen werden"
 
 msgid "Could not load this page"
 msgstr "Diese Seite konnte nicht geladen werden"
@@ -884,7 +882,7 @@ msgid "Duration"
 msgstr "Dauer"
 
 msgid "Dynamic background"
-msgstr ""
+msgstr "Dynamischer Hintergrund"
 
 msgid "EBU R128 reference level"
 msgstr "EBU-R128-Referenzpegel"
@@ -935,7 +933,7 @@ msgid "Enable automatic backups"
 msgstr "Automatische Sicherungen aktivieren"
 
 msgid "Enable background image"
-msgstr ""
+msgstr "Hintergrundbild aktivieren"
 
 msgid "Enable equalizer"
 msgstr "Equalizer einschalten"
@@ -976,7 +974,7 @@ msgid "Everything, including new tracks"
 msgstr "Alles, einschließlich neuer Titel"
 
 msgid "Expand lyrics and visualizer"
-msgstr ""
+msgstr "Liedtexte und Visualisierung erweitern"
 
 msgid "Expand sidebar"
 msgstr "Seitenleiste ausklappen"
@@ -1324,10 +1322,8 @@ msgstr "ListenBrainz scrobbling"
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
 
-#, fuzzy
-#| msgid "Loading folders..."
 msgid "Loading related tracks..."
-msgstr "Lade Ordner..."
+msgstr "Verwandte Titel werden geladen …"
 
 msgid "Loading..."
 msgstr "Lädt …"
@@ -1644,10 +1640,8 @@ msgstr "Keine Netzwerkadresse verfügbar"
 msgid "No network devices found"
 msgstr "Keine Netzwerkgeräte gefunden"
 
-#, fuzzy
-#| msgid "No matching tracks found"
 msgid "No related tracks found"
-msgstr "Keine passenden Titel gefunden"
+msgstr "Keine verwandten Titel gefunden"
 
 msgid "No results"
 msgstr "Keine Ergebnisse"
@@ -1834,23 +1828,17 @@ msgstr "Angeheftete Elemente"
 msgid "Plain lyrics"
 msgstr "Einfache Songtexte"
 
-#, fuzzy
-#| msgid "Play filter"
 msgid "Play (shuffled)"
-msgstr "Gefilterte Titel abspielen"
+msgstr "Wiedergeben (zufällig)"
 
-#, fuzzy
-#| msgid "Play Later"
 msgid "Play Later (shuffled)"
-msgstr "Später abspielen"
+msgstr "Später wiedergeben (zufällig)"
 
 msgid "Play Later"
 msgstr "Später abspielen"
 
-#, fuzzy
-#| msgid "Play Next"
 msgid "Play Next (shuffled)"
-msgstr "Als nächstes abspielen"
+msgstr "Als Nächstes wiedergeben (zufällig)"
 
 msgid "Play Next"
 msgstr "Als nächstes abspielen"
@@ -2090,10 +2078,8 @@ msgstr "Zugriffstoken neu generieren"
 msgid "Regenerate access token?"
 msgstr "Zugriffstoken neu generieren?"
 
-#, fuzzy
-#| msgid "Slate"
 msgid "Related"
-msgstr "Schiefergrau"
+msgstr "Ähnliche"
 
 msgid "Release date"
 msgstr "Veröffentlichungsdatum"
@@ -2206,10 +2192,8 @@ msgstr "Ressource nicht gefunden"
 msgid "Restore User State"
 msgstr "Benutzerstatus wiederherstellen"
 
-#, fuzzy
-#| msgid "Restore User State"
 msgid "Restore player layout"
-msgstr "Benutzerstatus wiederherstellen"
+msgstr "Player-Layout wiederherstellen"
 
 msgid "Restore"
 msgstr "Wiederherstellen"
@@ -2466,10 +2450,8 @@ msgstr "Shared Secret"
 msgid "Show Rufin"
 msgstr "Rufin anzeigen"
 
-#, fuzzy
-#| msgid "Artwork"
 msgid "Show artwork"
-msgstr "Artwork"
+msgstr "Cover anzeigen"
 
 msgid "Show downloaded badge"
 msgstr "Heruntergeladen-Symbol anzeigen"
@@ -2643,7 +2625,7 @@ msgid "Switch between layouts"
 msgstr "Zwischen Layouts wechseln"
 
 msgid "Switch pane"
-msgstr ""
+msgstr "Bereich wechseln"
 
 msgid "Switching library..."
 msgstr "Bibliothek wird gewechselt..."
