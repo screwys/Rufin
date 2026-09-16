@@ -7,58 +7,73 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: Automatically generated\n"
-"Language-Team: none\n"
+"PO-Revision-Date: 2026-09-16 19:05+0000\n"
+"Last-Translator: Patrick Canal <patrickcanal3@gmail.com>\n"
+"Language-Team: Italian <https://hosted.weblate.org/projects/rufin/app/it/>\n"
 "Language: it\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
+"X-Generator: Weblate 2026.10.dev0\n"
 
 msgid ""
 "Backup file may contain sensitive information. Do you want to set a password?"
 msgstr ""
+"I file di backup potrebbero contenere informazioni sensibili. Vuoi impostare "
+"una password?"
 
 #, rust-format
 msgid ""
 "Backup restored with {entries} skipped playlist entries and {listens} "
 "skipped listens."
-msgstr ""
+msgstr "Backup ripristinato saltando {entries} playlist e {listens} ascolti."
 
 msgid ""
 "Downloads from this server will be removed, and automatic rules will be "
 "turned off"
 msgstr ""
+"Gli scaricamenti da questo server verranno rimossi e le regole automatiche "
+"disattivate"
 
 msgid ""
 "List shared folders on this server using the entered credentials or guest "
 "access"
 msgstr ""
+"Elenca le cartelle condivise su questo server utilizzando le credenziali o "
+"l'accesso come guest"
 
 msgid ""
 "Logs have secrets and absolute folder paths redacted, but you may still want "
 "to review the logs before sharing them"
 msgstr ""
+"I log contengono segreti e path assoluti delle cartelle censurati, potresti "
+"comunque voler ricontrollarli prima di condividerli"
 
 msgid ""
 "No results \302\257\\_(\302\260\342\225\255\342\225\256\302\260)_/\302\257"
-msgstr ""
+msgstr "Nessun risultato 302257\\_(302260342225255342225256302260)_/302257"
 
 msgid ""
 "No secret service found. Rufin will use a file to store its credentials. "
 "Cancelling will not save credentials at all."
 msgstr ""
+"Nessun servizio per i segreti trovato. Rufin utilizzerà un file per salvare "
+"le credenziali. Annullare l'operazione non salverà le credeneziali."
 
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
 "stay"
 msgstr ""
+"Solo i download con questa regola verranno eliminati. I download condivisi e "
+"manuali rimarranno"
 
 msgid ""
 "Remove Local and its cached library from Rufin? Your music files will not be "
 "deleted."
 msgstr ""
+"Rimuovi Local e la relativa cache da Rufin? I tuoi file musicali non "
+"verranno eliminati."
 
 #, rust-format
 msgid ""
@@ -66,11 +81,18 @@ msgid ""
 "{sources}\n"
 "Their retained user state and saved logins will remain unless selected."
 msgstr ""
+"Vuoi rimpiazzare i contenuti selezionati e rimuovere le seguenti fonti "
+"configurate?\n"
+"{sources}\n"
+"Lo stato utente e i login salvati rimarranno a meno che non vengano "
+"selezionati."
 
 msgid ""
 "Replace the selected contents with this backup? Local folder permissions may "
 "need to be selected again."
 msgstr ""
+"Vuoi rimpiazzare i contenuti selezionati con questo backup? I permessi della "
+"cartella Local potrebbero dover essere selezionati nuovamente."
 
 msgid ""
 "Route server media through this device instead of sharing provider URLs with "
@@ -140,309 +162,312 @@ msgid ". You only need to fill email and an application name parts"
 msgstr ""
 
 msgid "1 hour"
-msgstr ""
+msgstr "1 ora"
 
 msgid "12 hours"
-msgstr ""
+msgstr "12 ore"
 
 msgid "128 kbps"
-msgstr ""
+msgstr "128 kbps"
 
 msgid "192 kbps"
-msgstr ""
+msgstr "192 kbps"
 
 msgid "24 hours"
-msgstr ""
+msgstr "24 ore"
 
 msgid "256 kbps"
-msgstr ""
+msgstr "256 kbps"
 
 msgid "320 kbps"
-msgstr ""
+msgstr "320 kbps"
 
 msgid "5 Latest Albums"
-msgstr ""
+msgstr "5 Ultimi Album"
 
 msgid "6 hours"
-msgstr ""
+msgstr "6 ore"
 
 msgid "API key (Subsonic)"
-msgstr ""
+msgstr "Chiave API (Subsonic)"
 
 msgid "API key"
-msgstr ""
+msgstr "Chiave API"
 
 msgid "API keys"
-msgstr ""
+msgstr "Chiavi API"
 
 msgid "About Rufin"
-msgstr ""
+msgstr "Informazioni su Rufin"
 
 msgid "Accent color"
-msgstr ""
+msgstr "Colore d'accento"
 
 msgid "Access token"
-msgstr ""
+msgstr "Token di accesso"
 
 msgid "Actions"
-msgstr ""
+msgstr "Azioni"
 
 msgid "Activity"
-msgstr ""
+msgstr "Attività"
 
 msgid "Add Rule"
-msgstr ""
+msgstr "Aggiungi Regola"
 
 msgid "Add Source"
-msgstr ""
+msgstr "Aggiungi Sorgente"
 
 msgid "Add a matching server prefix"
-msgstr ""
+msgstr "Aggiungi un prefisso server corrispondente"
 
 msgid "Add a music folder"
-msgstr ""
+msgstr "Aggiungi una cartella con la musica"
 
 msgid "Add a music source to start listening."
-msgstr ""
+msgstr "Aggiungi una sorgente multimediale per iniziare ad ascoltare."
 
 msgid "Add a new source"
-msgstr ""
+msgstr "Aggiungi una sorgente"
 
 msgid "Add a title"
-msgstr ""
+msgstr "Aggiungi un titolo"
 
+#, fuzzy
 msgid "Add current"
-msgstr ""
+msgstr "Aggiungi brano corrente"
 
 msgid "Add folder"
-msgstr ""
+msgstr "Aggiungi cartella"
 
 msgid "Add to Favorites"
-msgstr ""
+msgstr "Aggiungi ai Preferiti"
 
 msgid "Add to Pins"
-msgstr ""
+msgstr "Aggiungi agli elementi fissati"
 
 msgid "Add to Playlist"
-msgstr ""
+msgstr "Aggiungi alla Playlist"
 
+#, fuzzy
 msgid "Add tracks when fewer than this many remain"
-msgstr ""
+msgstr "Aggiungi tracce quando ne rimangono meno di questo numero"
 
 msgid "Add"
-msgstr ""
+msgstr "Aggiungi"
 
 msgid "Added to favorites"
-msgstr ""
+msgstr "Aggiunto ai preferiti"
 
 msgid "Added to"
-msgstr ""
+msgstr "Aggiunto a"
 
 msgid "Adding source"
-msgstr ""
+msgstr "Aggiungendo una sorgente"
 
 msgid "Album Artists"
-msgstr ""
+msgstr "Artisti dell'Album"
 
 msgid "Album artist"
-msgstr ""
+msgstr "Artista dell'album"
 
 msgid "Album artists"
-msgstr ""
+msgstr "Artisti dell'album"
 
 msgid "Album radio"
-msgstr ""
+msgstr "Radio dell'album"
 
 msgid "Album title"
-msgstr ""
+msgstr "Titolo dell'album"
 
 msgid "Album tracks"
-msgstr ""
+msgstr "Tracce dell'album"
 
 msgid "Album unavailable"
-msgstr ""
+msgstr "Album non disponibile"
 
 msgid "Album"
-msgstr ""
+msgstr "Album"
 
 msgid "Albums"
-msgstr ""
+msgstr "Album"
 
 msgid "All Music"
-msgstr ""
+msgstr "Tutta la Musica"
 
 msgid "All Playlists"
-msgstr ""
+msgstr "Tutte le Playlist"
 
 msgid "All tracks"
-msgstr ""
+msgstr "Tutte le Tracce"
 
 msgid "All"
-msgstr ""
+msgstr "Tutto"
 
 msgid "Allow remote connections"
-msgstr ""
+msgstr "Consenti connessioni remote"
 
 msgid "Alternate addresses"
-msgstr ""
+msgstr "Indirizzi alternativi"
 
 msgid "Anonymous (WebDAV / SMB)"
-msgstr ""
+msgstr "Anonimo (WebDAV / SMB)"
 
 msgid "Anonymous"
-msgstr ""
+msgstr "Anonimo"
 
 msgid "Any genre"
-msgstr ""
+msgstr "Qualunque genere"
 
 msgid "Any"
-msgstr ""
+msgstr "Qualunque"
 
 msgid "App settings"
-msgstr ""
+msgstr "Impostazioni dell'app"
 
 msgid "Appearance"
-msgstr ""
+msgstr "Aspetto"
 
 msgid "Appears On"
-msgstr ""
+msgstr "Compare In"
 
 msgid "Application name"
-msgstr ""
+msgstr "Nome dell'applicazione"
 
 msgid "Apply Template"
-msgstr ""
+msgstr "Applica Template"
 
 msgid "Approve sign-in in your browser"
-msgstr ""
+msgstr "Approva l'accesso nel tuo browser"
 
 msgid "Artist / Album"
-msgstr ""
+msgstr "Artista / Album"
 
 msgid "Artist albums"
-msgstr ""
+msgstr "Album dell'artista"
 
 msgid "Artist name"
-msgstr ""
+msgstr "Nome dell'artista"
 
 msgid "Artist radio"
-msgstr ""
+msgstr "Radio dell'artista"
 
 msgid "Artist tracks"
-msgstr ""
+msgstr "Tracce dell'artista"
 
 msgid "Artist unavailable"
-msgstr ""
+msgstr "Artista non disponibile"
 
 msgid "Artist"
-msgstr ""
+msgstr "Artista"
 
 msgid "Artists"
-msgstr ""
+msgstr "Artisti"
 
 msgid "Artwork"
-msgstr ""
+msgstr "Copertina"
 
 msgid "Audio fade on play/pause"
-msgstr ""
+msgstr "Dissolvenza audio su play/pausa"
 
 msgid "Audio output"
-msgstr ""
+msgstr "Output audio"
 
 msgid "Audio processing is unavailable while casting"
-msgstr ""
+msgstr "L'elaborazione audio non è disponibile durante il casting"
 
 msgid "Audio"
-msgstr ""
+msgstr "Audio"
 
 msgid "Authentication"
-msgstr ""
+msgstr "Autenticazione"
 
 msgid "Auto DJ off"
-msgstr ""
+msgstr "Auto DJ spento"
 
 msgid "Auto DJ on"
-msgstr ""
+msgstr "Auto DJ acceso"
 
+#, fuzzy
 msgid "Auto DJ refill threshold"
-msgstr ""
+msgstr "Soglia di ricarica Auto DJ"
 
 msgid "Auto DJ"
-msgstr ""
+msgstr "Auto DJ"
 
 msgid "Automatic Backups"
-msgstr ""
+msgstr "Backup automatici"
 
 msgid "Automatic updates"
-msgstr ""
+msgstr "Aggiornamenti automatici"
 
 msgid "Automatic"
-msgstr ""
+msgstr "Automatico"
 
 msgid "BPM"
-msgstr ""
+msgstr "BPM"
 
 msgid "Back"
-msgstr ""
+msgstr "Indietro"
 
 msgid "Backup Folder"
-msgstr ""
+msgstr "Cartella di Backup"
 
 msgid "Backup Password"
-msgstr ""
+msgstr "Password di Backup"
 
 msgid "Backup Settings"
-msgstr ""
+msgstr "Impostazioni di Backup"
 
 msgid "Backup exported"
-msgstr ""
+msgstr "Backup esportato"
 
 #, rust-format
 msgid "Backup failed: {error}"
-msgstr ""
+msgstr "Backup fallito: {error}"
 
 #, rust-format
 msgid "Backup restored with warnings: {warnings}"
-msgstr ""
+msgstr "Backup ripristinato con i seguenti errori: {warnings}"
 
 msgid "Backup restored"
-msgstr ""
+msgstr "Backup ripristinato"
 
 msgid "Backups"
-msgstr ""
+msgstr "Backup"
 
 msgid "Bearer token (WebDAV)"
-msgstr ""
+msgstr "Token Bearer (WebDAV)"
 
 msgid "Bearer token"
-msgstr ""
+msgstr "Token Bearer"
 
 msgid "Blue"
-msgstr ""
+msgstr "Blu"
 
 msgid "Cached"
-msgstr ""
+msgstr "In cache"
 
 msgid "Caching Library"
-msgstr ""
+msgstr "Libreria di Cache"
 
 msgid "Caching local library..."
-msgstr ""
+msgstr "Memorizzazione nella cache della libreria locale..."
 
 msgid "Cancel download and clear downloaded items"
-msgstr ""
+msgstr "Annulla download ed elimina gli elementi scaricati"
 
 msgid "Cancel download"
-msgstr ""
+msgstr "Annulla download"
 
 msgid "Cancel"
-msgstr ""
+msgstr "Annulla"
 
 msgid "Casting network"
-msgstr ""
+msgstr "Rete di casting"
 
 msgid "Casting"
-msgstr ""
+msgstr "Casting"
 
 msgid "Certificate authority (PEM)"
 msgstr ""
@@ -481,16 +506,16 @@ msgid "Check for updates"
 msgstr ""
 
 msgid "Choose Folder"
-msgstr ""
+msgstr "Seleziona una Cartella"
 
 msgid "Choose Server"
-msgstr ""
+msgstr "Seleziona un Server"
 
 msgid "Choose a local music folder"
-msgstr ""
+msgstr "Seleziona una cartella locale"
 
 msgid "Choose an address"
-msgstr ""
+msgstr "Seleziona un indirizzo"
 
 msgid "Choose an existing local folder"
 msgstr ""
