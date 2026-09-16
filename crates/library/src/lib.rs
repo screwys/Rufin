@@ -66,7 +66,7 @@ pub use queue::{
     OccurrenceId, QUEUE_CONTEXT_LIMIT, QueueChoice, QueueCollection, QueueEntry, QueueInput,
     QueueItem, QueueOccurrence, QueuePageRow, QueuePlacement, QueueProvenance, QueueQuery,
     QueueReadPage, QueueReadRequest, QueueReorderTarget, QueueRepeatMode, QueueRestore, QueueScope,
-    QueueSource,
+    QueueSource, shuffle_order,
 };
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
 pub use scan::{

@@ -179,7 +179,7 @@ impl Shell {
         {
             match shortcut {
                 SelectionShortcut::Play(placement) => {
-                    selection.play(&self.products.playback.queue, placement)
+                    selection.play(&self.products.playback.queue, placement, false)
                 }
                 SelectionShortcut::AddToPlaylist => {
                     present_playlist_picker_entries(self, selection)
@@ -196,7 +196,7 @@ impl Shell {
         };
         match shortcut {
             SelectionShortcut::Play(placement) => {
-                selection.play(&self.products.playback.queue, placement)
+                selection.play(&self.products.playback.queue, placement, false)
             }
             SelectionShortcut::AddToPlaylist => present_playlist_picker_selection(self, selection),
             SelectionShortcut::Download => {

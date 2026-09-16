@@ -143,6 +143,7 @@
     <file>hicolor/scalable/actions/rufin-pane-right-focus-symbolic.svg</file>
   </gresource>
   <gresource prefix="/io/github/screwys/Rufin/ui">
+    <file compressed="true">routes/play_menu.ui</file>
     <file compressed="true">preferences/source/manage_server.ui</file>
     <file compressed="true">routes/recycled_artwork_cell.ui</file>
     <file compressed="true">routes/recycled_badged_text_cell.ui</file>

@@ -471,6 +471,7 @@ pub enum QueueReadRequest {
         input: Box<QueueInput>,
         anchor_index: usize,
         random_start: Option<u64>,
+        shuffled: Option<u64>,
     },
     Hydrate {
         entries: Vec<QueueEntry>,
@@ -789,6 +790,7 @@ impl Database {
                 input,
                 anchor_index,
                 random_start,
+                shuffled,
             } => {
                 let mut entries = Vec::new();
                 let mut anchor = None;
@@ -808,6 +810,10 @@ impl Database {
                 .await?;
                 transaction.commit().await?;
                 drop(reader);
+                if let Some(seed) = shuffled {
+                    shuffle_order(&mut entries, seed);
+                    anchor = Some(0);
+                }
                 let current_index = random_start
                     .filter(|_| !entries.is_empty())
                     .map(|seed| seed as usize % entries.len())
@@ -1843,3 +1849,15 @@ async fn read_occurrence(
 }
 
 const OCCURRENCE_SELECT: &str = "SELECT occurrence.object_id,occurrence.media_uri,origin_source source_index,playlist_entry_id,COALESCE(origin_position,position) canonical_position,provenance_kind,provenance_context_id,provenance_source_rank,occurrence.title,occurrence.artist,occurrence.album,occurrence.album_display_artist,track.artwork_binding,occurrence.duration_millis,occurrence.disc_number,occurrence.track_number,occurrence.year,occurrence.release_date,occurrence.source_format,occurrence.musicbrainz_recording_id,occurrence.musicbrainz_release_track_id,occurrence.musicbrainz_album_id,occurrence.musicbrainz_release_group_id,occurrence.primary_artist_musicbrainz_id FROM queue_occurrences occurrence LEFT JOIN tracks track USING(media_uri)";
+
+/// Fisher-Yates shuffle with SplitMix64, shared by queue capture and playback order.
+pub fn shuffle_order<T>(values: &mut [T], mut seed: u64) {
+    for i in (1..values.len()).rev() {
+        seed = seed.wrapping_add(0x9e3779b97f4a7c15);
+        let mut n = seed;
+        n = (n ^ (n >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+        n = (n ^ (n >> 27)).wrapping_mul(0x94d049bb133111eb);
+        n ^= n >> 31;
+        values.swap(i, ((u128::from(n) * (i as u128 + 1)) >> 64) as usize);
+    }
+}

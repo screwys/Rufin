@@ -827,6 +827,7 @@ impl AlbumGridCell {
                 (shell.media_menus.play_target)(
                     &album_playback_target(row.media_uri.clone(), context.as_deref()),
                     placement,
+                    false,
                 );
             },
         );
@@ -912,7 +913,7 @@ impl ArtistGridCell {
                 } else {
                     PlaybackTarget::Artist(row.media_uri.clone())
                 };
-                (shell.media_menus.play_target)(&target, placement);
+                (shell.media_menus.play_target)(&target, placement, false);
             },
         );
         install_grid_favorite(

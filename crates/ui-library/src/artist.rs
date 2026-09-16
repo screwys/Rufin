@@ -1115,8 +1115,8 @@ fn artist_detail_header_restored(
     actions.set_halign(gtk::Align::Start);
     let target = artist_playback_target(artist.media_uri.clone(), album_artist);
     let play_shell = Rc::clone(shell);
-    let play: CollectionPlay = Rc::new(move |placement| {
-        (play_shell.media_menus.play_target)(&target, placement);
+    let play: CollectionPlay = Rc::new(move |placement, shuffled| {
+        (play_shell.media_menus.play_target)(&target, placement, shuffled);
     });
     let controls = detail_playback_controls(
         &actions,

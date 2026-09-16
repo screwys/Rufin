@@ -193,8 +193,13 @@ impl CatalogUi {
         let play_model = model.clone();
         let play_queue = self.queue.clone();
         let play_context = owner.context_id();
-        let play: CollectionPlay = Rc::new(move |placement| {
-            play_model.play_source(play_queue.clone(), placement, play_context.clone());
+        let play: CollectionPlay = Rc::new(move |placement, shuffled| {
+            play_model.play_source(
+                play_queue.clone(),
+                placement,
+                play_context.clone(),
+                shuffled,
+            );
         });
         let (tracks_widget, tracks, toolbar) = self.scrolling_track_projection(
             model,
@@ -344,8 +349,8 @@ impl CatalogUi {
         };
         let play_queue = self.queue.clone();
         let download_entries = Rc::clone(&entries);
-        let play: CollectionPlay = Rc::new(move |placement| {
-            entries.play(play_queue.clone(), placement);
+        let play: CollectionPlay = Rc::new(move |placement, shuffled| {
+            entries.play(play_queue.clone(), placement, shuffled);
         });
         self.shared_playlist_detail_route(
             owner,

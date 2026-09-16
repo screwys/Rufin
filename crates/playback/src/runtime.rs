@@ -892,6 +892,7 @@ mod persistence_tests {
                     )])),
                     anchor_index: 0,
                     random_start: None,
+                    shuffled: None,
                 })
                 .await
                 .unwrap();
@@ -1090,6 +1091,7 @@ mod persistence_tests {
                 }),
                 anchor_index: 0,
                 random_start: None,
+                shuffled: None,
             })
             .await
             .unwrap();

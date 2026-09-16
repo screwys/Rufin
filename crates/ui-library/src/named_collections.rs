@@ -637,7 +637,7 @@ impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
                 controls.imp().play_last.get(),
             ],
             |shell, item, placement| {
-                (shell.media_menus.play_target)(&item.playback(), placement);
+                (shell.media_menus.play_target)(&item.playback(), placement, false);
             },
         );
         let body = CollectionGridCardCell::new(&shell, fields, controls.upcast());

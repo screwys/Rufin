@@ -1155,6 +1155,7 @@ impl PlaybackSession {
                 input: Box::new(batch.input),
                 anchor_index: anchor,
                 random_start: batch.random_start.then_some(batch.shuffle_seed),
+                shuffled: batch.shuffled.then_some(batch.shuffle_seed),
             },
             if replacing {
                 QueueCompletion::Replace {
@@ -1437,6 +1438,7 @@ impl PlaybackSession {
                 input: Box::new(input),
                 anchor_index: 0,
                 random_start: None,
+                shuffled: None,
             },
             QueueCompletion::Insert {
                 target: target.clone(),
@@ -2598,6 +2600,7 @@ mod orchestration_tests {
                 input: Box::new(Batch::new(items).input),
                 anchor_index: 0,
                 random_start: None,
+                shuffled: None,
             })
             .await
             .unwrap();
@@ -3259,6 +3262,113 @@ mod orchestration_tests {
             .expect("enable Auto DJ");
         assert!(auto_dj.view_changed);
         assert!(session.view().controls.auto_dj_enabled);
+    }
+
+    #[tokio::test]
+    async fn shuffled_batches_keep_placement_and_global_shuffle() {
+        let sample = ClockSample {
+            monotonic_millis: 0,
+            unix_seconds: 0,
+            local_period: "1970-01".into(),
+        };
+        for global_shuffle in [false, true] {
+            for placement in [Placement::Now, Placement::Next, Placement::Last] {
+                for count in [1, 12] {
+                    let existing = (1..=4)
+                        .map(|id| batch_item(id, Provenance::Manual))
+                        .collect();
+                    let (_directory, database, sequence) = seeded(existing).await;
+                    let mut session = PlaybackSession::new(
+                        sequence,
+                        "shuffled-batch",
+                        PlaybackSettings::default(),
+                        PlaybackOutput::Local,
+                        false,
+                        3,
+                    );
+                    let update = session
+                        .handle_command(
+                            SessionCommand::SetShuffle {
+                                enabled: global_shuffle,
+                                seed: 7,
+                            },
+                            &sample,
+                        )
+                        .unwrap();
+                    finish_queue(&database, &mut session, update).await;
+                    let before = session.sequence().snapshot();
+                    // Keep duplicate tracks as distinct occurrences.
+                    let items = (0..count)
+                        .map(|rank| {
+                            batch_item(
+                                100 + rank / 2,
+                                Provenance::Context {
+                                    context_id: "selected-collection".into(),
+                                    source_rank: rank as usize,
+                                },
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    let request = crate::PlayRequest::captured(
+                        Batch::new(items).input,
+                        count as usize - 1,
+                        placement,
+                        true,
+                    )
+                    .shuffled(true);
+                    assert!(request.activation_context().is_none());
+                    let (batch, placement) = request.compact_batch(42);
+                    let reservation = session.reserve_materialization(placement);
+                    let update = session
+                        .apply_materialization(reservation.id, batch, placement, &sample)
+                        .unwrap()
+                        .unwrap();
+                    finish_queue(&database, &mut session, update).await;
+                    let after = session.sequence().snapshot();
+                    assert_eq!(after.shuffled, global_shuffle);
+                    let incoming = after
+                        .entries
+                        .iter()
+                        .filter_map(|entry| match &entry.provenance {
+                            Provenance::Context { source_rank, .. } => Some(*source_rank),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>();
+                    let expected = (0..count as usize).collect::<Vec<_>>();
+                    let mut sorted = incoming.clone();
+                    sorted.sort_unstable();
+                    assert_eq!(sorted, expected);
+                    if count > 1 {
+                        assert_ne!(incoming, expected);
+                    }
+                    let ordered = |state: &library::QueueRestore| {
+                        state
+                            .order
+                            .iter()
+                            .map(|index| state.entries[*index as usize].occurrence.clone())
+                            .collect::<Vec<_>>()
+                    };
+                    let original = ordered(&before);
+                    let result = ordered(&after);
+                    if placement == Placement::Now {
+                        assert_eq!(result.len(), count as usize);
+                        assert_eq!(after.current_index, Some(0));
+                    } else {
+                        assert_eq!(after.current(), before.current());
+                        let at = if placement == Placement::Next {
+                            1
+                        } else {
+                            original.len()
+                        };
+                        assert_eq!(&result[..at], &original[..at]);
+                        assert_eq!(&result[at + count as usize..], &original[at..]);
+                    }
+                    let restored = database.restore_queue().await.unwrap();
+                    assert_eq!(restored.shuffled, global_shuffle);
+                    assert_eq!(ordered(&restored), result);
+                }
+            }
+        }
     }
 
     #[tokio::test]
@@ -4013,6 +4123,7 @@ mod orchestration_tests {
                 }),
                 anchor_index: 0,
                 random_start: None,
+                shuffled: None,
             })
             .await
             .unwrap();

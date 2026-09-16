@@ -125,8 +125,13 @@ impl CatalogUi {
         let controller = self.queue.clone();
         let play_context = playback_context;
         let play_tracks = track_projection.clone();
-        let play: CollectionPlay = Rc::new(move |placement| {
-            play_tracks.play_source(controller.clone(), placement, play_context.clone());
+        let play: CollectionPlay = Rc::new(move |placement, shuffled| {
+            play_tracks.play_source(
+                controller.clone(),
+                placement,
+                play_context.clone(),
+                shuffled,
+            );
         });
         let actions = showcase_view.actions();
         actions.set_halign(gtk::Align::Start);

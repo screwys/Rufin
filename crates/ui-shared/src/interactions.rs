@@ -35,6 +35,7 @@ pub struct ContextMenuSurface {
     position: Option<(f64, f64)>,
     entries: RefCell<Vec<ContextMenuEntry<gio::MenuItem>>>,
     custom_children: RefCell<Vec<ContextMenuCustomChild>>,
+    submenu_actions: RefCell<Vec<(String, &'static str)>>,
 }
 
 struct ContextMenuCustomChild {
@@ -91,11 +92,60 @@ impl ContextMenuSurface {
             position,
             entries: RefCell::new(Vec::new()),
             custom_children: RefCell::new(Vec::new()),
+            submenu_actions: RefCell::new(Vec::new()),
         }
     }
 
     pub fn popover(&self) -> &gtk::PopoverMenu {
         &self.popover
+    }
+
+    pub fn append_play_actions(&self, settings: &ContextMenuSettings) {
+        let placements = [
+            ContextMenuItem::Play,
+            ContextMenuItem::PlayNext,
+            ContextMenuItem::PlayLater,
+        ];
+        let Some(first) = placements
+            .iter()
+            .copied()
+            .find(|item| settings.is_visible(*item))
+        else {
+            return;
+        };
+        let resource = crate::ui_resource::PLAY_MENU_RESOURCE;
+        let builder = crate::ui_resource::builder(resource);
+        crate::objects!(builder, resource, {
+            play_menu: gio::Menu,
+            regular: gio::Menu,
+            shuffled: gio::Menu,
+        });
+        for section in [regular, shuffled] {
+            for (index, setting) in placements.iter().enumerate().rev() {
+                let item = gio::MenuItem::from_model(&section, index as i32);
+                let action = item
+                    .attribute_value("action", None)
+                    .unwrap()
+                    .get::<String>()
+                    .unwrap();
+                section.remove(index as i32);
+                if settings.is_visible(*setting) {
+                    item.set_detailed_action(&format!("{}.{}", self.group_name, action));
+                    item.set_icon(&gio::ThemedIcon::new(
+                        [PLAY_ICON, PLAY_NEXT_ICON, PLAY_LATER_ICON][index],
+                    ));
+                    section.insert_item(index as i32, &item);
+                }
+            }
+        }
+        let item = gio::MenuItem::from_model(&play_menu, 0);
+        item.set_icon(&gio::ThemedIcon::new(PLAY_ICON));
+        if settings.is_visible(ContextMenuItem::Play) {
+            self.submenu_actions.borrow_mut().push((tr("Play"), "play"));
+        }
+        self.entries
+            .borrow_mut()
+            .push(ContextMenuEntry::Configurable(first, item));
     }
 
     pub fn append_fixed_action(&self, label: &str, action: &str, icon_name: &str) {
@@ -152,6 +202,11 @@ impl ContextMenuSurface {
     ) {
         let item = gio::MenuItem::new_submenu(Some(&tr(label)), submenu);
         item.set_icon(&gio::ThemedIcon::new(icon_name));
+        if setting == ContextMenuItem::PlayRadio {
+            self.submenu_actions
+                .borrow_mut()
+                .push((tr(label), "play-radio"));
+        }
         self.entries
             .borrow_mut()
             .push(ContextMenuEntry::Configurable(setting, item));
@@ -255,6 +310,11 @@ impl ContextMenuSurface {
         }
         self.target
             .insert_action_group(self.group_name, Some(&self.actions));
+        install_submenu_actions(
+            self.popover.upcast_ref(),
+            &self.actions,
+            &self.submenu_actions.into_inner(),
+        );
         let hover_owners = Rc::new(context_menu_hover_owners(&self.target));
         for owner in hover_owners.iter() {
             owner.add_css_class(CONTEXT_MENU_HOVER_HELD_CLASS);
@@ -582,6 +642,56 @@ fn install_native_submenu_primary_click(
         run();
     });
     owner.add_controller(click);
+}
+
+fn install_submenu_actions(
+    container: &gtk::Widget,
+    actions: &gio::SimpleActionGroup,
+    defaults: &[(String, &'static str)],
+) {
+    let mut child = container.first_child();
+    while let Some(owner) = child {
+        child = owner.next_sibling();
+        if owner.type_().name() == "GtkModelButton"
+            && generated_menu_button_has_starting_space(&owner)
+            && (owner.property::<Option<gtk::Popover>>("popover").is_some()
+                || owner.property::<Option<String>>("menu-name").is_some())
+            && let Some((_, action)) = defaults
+                .iter()
+                .find(|(label, _)| *label == owner.property::<String>("text"))
+        {
+            let actions = actions.clone();
+            let action = *action;
+            let click = gtk::GestureClick::new();
+            click.set_button(1);
+            click.set_propagation_phase(gtk::PropagationPhase::Capture);
+            click.connect_pressed(move |gesture, _, x, y| {
+                let Some(owner) = gesture.widget() else {
+                    return;
+                };
+                let mut child = owner.first_child();
+                while let Some(widget) = child {
+                    child = widget.next_sibling();
+                    if widget.css_name() == "arrow"
+                        && widget.compute_bounds(&owner).is_some_and(|bounds| {
+                            bounds.contains_point(&gtk::graphene::Point::new(x as f32, y as f32))
+                        })
+                    {
+                        gesture.set_state(gtk::EventSequenceState::Claimed);
+                        owner.grab_focus();
+                        owner.child_focus(gtk::DirectionType::Right);
+                        return;
+                    }
+                }
+            });
+            owner.add_controller(click);
+            owner.connect_local("clicked", false, move |_| {
+                actions.activate_action(action, None);
+                None
+            });
+        }
+        install_submenu_actions(&owner, actions, defaults);
+    }
 }
 
 pub fn popdown_on_anchor_unmap(

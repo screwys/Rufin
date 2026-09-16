@@ -534,6 +534,7 @@ pub fn track_collection_projection<T: TrackPresentation>(
             playback::QueuePlacement::Now,
             &play_context_id,
             false,
+            false,
         );
     }) as Rc<dyn Fn(u32)>;
     LibraryCollectionProjection::new(
@@ -1036,6 +1037,7 @@ pub fn track_table<T: TrackPresentation>(
             position as usize,
             playback::QueuePlacement::Now,
             &context_id,
+            false,
             false,
         );
     });

@@ -66,7 +66,9 @@ pub fn album_cover_overlay(
     ] {
         let play_shell = Rc::clone(shell);
         let target = PlaybackTarget::Album(album.media_uri.clone());
-        button.connect_clicked(move |_| (play_shell.media_menus.play_target)(&target, placement));
+        button.connect_clicked(move |_| {
+            (play_shell.media_menus.play_target)(&target, placement, false)
+        });
     }
     let favorite_key = album.media_uri.clone();
     shell.register_dynamic_favorite_button(

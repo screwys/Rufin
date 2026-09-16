@@ -42,13 +42,21 @@ pub(crate) fn remove_download(target: &PlaybackTarget, shell: &Shell) {
     });
 }
 
-pub(crate) fn play_target(target: &PlaybackTarget, shell: &Shell, placement: QueuePlacement) {
+pub(crate) fn play_target(
+    target: &PlaybackTarget,
+    shell: &Shell,
+    placement: QueuePlacement,
+    shuffled: bool,
+) {
     let selected = shell.selected_library();
     let source = selected.as_ref().map(|selected| selected.source_key);
     let folder = selected
         .as_ref()
         .and_then(|selected| selected.music_folder_key);
-    target.play(&shell.products.playback.queue, source, folder, placement);
+    shell.products.playback.queue.play(
+        playback::PlayRequest::ordered(target.queue_input(source, folder), 0, placement, true)
+            .shuffled(shuffled),
+    );
 }
 
 use downloads::DownloadSubject;

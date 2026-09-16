@@ -112,9 +112,9 @@ pub(super) fn build(
         },
         play_target: {
             let weak = weak.clone();
-            Rc::new(move |target, placement| {
+            Rc::new(move |target, placement, shuffled| {
                 if let Some(shell) = weak.upgrade() {
-                    crate::shell::catalog_actions::play_target(target, &shell, placement);
+                    crate::shell::catalog_actions::play_target(target, &shell, placement, shuffled);
                 }
             })
         },

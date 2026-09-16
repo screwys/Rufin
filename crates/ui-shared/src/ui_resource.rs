@@ -91,6 +91,7 @@ pub const RECYCLED_TEXT_CELL_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/routes/recycled_text_cell.ui";
 
 pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
+    PLAY_MENU_RESOURCE,
     PLAYLIST_PICKER_RESOURCE,
     PLAYLIST_PICKER_CONTEXT_RESOURCE,
     PLAYLIST_PICKER_ROW_RESOURCE,
@@ -105,6 +106,8 @@ pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     RECYCLED_MERGED_CELL_RESOURCE,
     RECYCLED_TEXT_CELL_RESOURCE,
 ];
+
+pub const PLAY_MENU_RESOURCE: &str = "/io/github/screwys/Rufin/ui/routes/play_menu.ui";
 
 pub const METADATA_DIALOG_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/dialogs/metadata.ui";

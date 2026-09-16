@@ -169,6 +169,7 @@ impl PlaylistEntryModel {
             queue,
             playback::QueuePlacement::Now,
             false,
+            false,
         );
     }
 
@@ -178,6 +179,7 @@ impl PlaylistEntryModel {
         queue: playback::QueueHandle,
         placement: playback::QueuePlacement,
         collection_start: bool,
+        shuffled: bool,
     ) {
         let order = self.order();
         let Some(anchor_entry) = order.get(position).copied() else {
@@ -189,20 +191,23 @@ impl PlaylistEntryModel {
         } else {
             playback::PlayRequest::captured
         };
-        queue.play(request(
-            library::QueueInput::PlaylistQuery {
-                key: self.inner.playlist_key,
-                folder: None,
-                filter: applied.query.clone(),
-                sort: applied.settings.sort_key.playlist_entry_sort(),
-                descending: applied.settings.descending,
-                context_id: self.visible_context_id().into(),
-                anchor_entry: Some(anchor_entry),
-                anchor_uri: self.ready(position as u32).map(|row| row.media_uri.clone()),
-            },
-            position,
-            placement,
-            collection_start,
-        ));
+        queue.play(
+            request(
+                library::QueueInput::PlaylistQuery {
+                    key: self.inner.playlist_key,
+                    folder: None,
+                    filter: applied.query.clone(),
+                    sort: applied.settings.sort_key.playlist_entry_sort(),
+                    descending: applied.settings.descending,
+                    context_id: self.visible_context_id().into(),
+                    anchor_entry: Some(anchor_entry),
+                    anchor_uri: self.ready(position as u32).map(|row| row.media_uri.clone()),
+                },
+                position,
+                placement,
+                collection_start,
+            )
+            .shuffled(shuffled),
+        );
     }
 }

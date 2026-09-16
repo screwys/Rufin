@@ -57,9 +57,22 @@ impl PlayRequest {
     }
 
     pub fn activation_context(&self) -> Option<(String, String, usize)> {
-        (self.reactivate && self.placement == QueuePlacement::Now && !self.shuffled_start)
+        (self.reactivate
+            && self.placement == QueuePlacement::Now
+            && !self.shuffled_start
+            && !self.batch.shuffled)
             .then(|| self.batch.activation_context(self.anchor_index))
             .flatten()
+    }
+
+    pub fn shuffled(mut self, shuffled: bool) -> Self {
+        self.batch.shuffled = shuffled;
+        if shuffled {
+            self.anchor_index = 0;
+            self.batch.input.clear_anchor();
+            self.shuffled_start = false;
+        }
+        self
     }
 
     pub fn compact_batch(self, shuffle_seed: u64) -> (Batch, Placement) {
@@ -276,6 +289,7 @@ mod tests {
                 input: Box::new(request.batch.input.clone()),
                 anchor_index: 0,
                 random_start: None,
+                shuffled: None,
             })
             .await
             .unwrap();

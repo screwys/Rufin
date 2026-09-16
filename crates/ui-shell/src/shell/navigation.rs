@@ -1507,6 +1507,7 @@ fn compact_sidebar_pin(
             &playback_target,
             &playback_shell,
             QueuePlacement::Now,
+            false,
         );
     });
     controls.add_to_overlay(&row);
@@ -1712,7 +1713,12 @@ fn install_sidebar_pin_double_click(
         let Some(shell) = shell.upgrade() else { return };
         if presses >= 2 && presses % 2 == 0 {
             gesture.set_state(gtk::EventSequenceState::Claimed);
-            crate::shell::catalog_actions::play_target(&playback, &shell, QueuePlacement::Now);
+            crate::shell::catalog_actions::play_target(
+                &playback,
+                &shell,
+                QueuePlacement::Now,
+                false,
+            );
         }
     });
     target.add_controller(click);
@@ -1782,7 +1788,7 @@ fn sidebar_pin_transport_button(
     let target = target.clone();
     button.connect_clicked(move |_| {
         let Some(shell) = shell.upgrade() else { return };
-        crate::shell::catalog_actions::play_target(&target, &shell, placement);
+        crate::shell::catalog_actions::play_target(&target, &shell, placement, false);
     });
     button
 }

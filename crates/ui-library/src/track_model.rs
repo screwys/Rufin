@@ -197,6 +197,7 @@ impl<T: TrackPresentation> TrackCollectionModel<T> {
         placement: QueuePlacement,
         context_base: &str,
         collection_start: bool,
+        shuffled: bool,
     ) {
         let order = self.0.sparse.order();
         if anchor_index >= order.len() {
@@ -212,7 +213,7 @@ impl<T: TrackPresentation> TrackCollectionModel<T> {
         } else {
             PlayRequest::captured
         };
-        queue.play(request(input, anchor_index, placement, collection_start));
+        queue.play(request(input, anchor_index, placement, collection_start).shuffled(shuffled));
     }
 
     pub fn play_source(
@@ -220,8 +221,9 @@ impl<T: TrackPresentation> TrackCollectionModel<T> {
         queue: playback::QueueHandle,
         placement: QueuePlacement,
         context_id: String,
+        shuffled: bool,
     ) {
-        self.play(queue, 0, placement, &context_id, true);
+        self.play(queue, 0, placement, &context_id, true, shuffled);
     }
 
     pub fn visible_context_id(&self, context_base: &str) -> String {

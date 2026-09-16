@@ -648,8 +648,8 @@ impl CatalogUi {
         actions.set_halign(gtk::Align::Start);
         let play_shell = Rc::clone(self);
         let play_target = PlaybackTarget::Album(album.media_uri.clone());
-        let play: CollectionPlay = Rc::new(move |placement| {
-            (play_shell.media_menus.play_target)(&play_target, placement);
+        let play: CollectionPlay = Rc::new(move |placement, shuffled| {
+            (play_shell.media_menus.play_target)(&play_target, placement, shuffled);
         });
         let controls = detail_playback_controls(
             &actions,
@@ -828,6 +828,7 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
                 (play_shell.media_menus.play_target)(
                     &rufin_core::playback::PlaybackTarget::Track(play_media_uri.clone()),
                     playback::QueuePlacement::Now,
+                    false,
                 );
             });
             let field = Rc::new(move |_, track: &library::TrackRow, field| match field {
@@ -876,6 +877,7 @@ fn activate_home_item(shell: &Rc<CatalogUi>, item: HomeItem) {
         HomeItem::Track(item) => (shell.media_menus.play_target)(
             &rufin_core::playback::PlaybackTarget::Track(item.track.media_uri),
             playback::QueuePlacement::Now,
+            false,
         ),
         HomeItem::Album(item) => shell.navigate(Route::AlbumDetail(item.album.media_uri.clone())),
     }

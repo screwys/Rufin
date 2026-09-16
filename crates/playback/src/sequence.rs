@@ -19,6 +19,7 @@ pub struct Batch {
     pub(crate) input: library::QueueInput,
     pub(crate) shuffle_seed: u64,
     pub(crate) random_start: bool,
+    pub(crate) shuffled: bool,
 }
 impl Batch {
     pub fn new(items: Vec<BatchItem>) -> Self {
@@ -34,6 +35,7 @@ impl Batch {
             input,
             shuffle_seed: 0,
             random_start: false,
+            shuffled: false,
         }
     }
     pub fn with_shuffle_intent(mut self, seed: u64, random_start: bool) -> Self {
@@ -43,6 +45,9 @@ impl Batch {
     }
     pub fn input(&self) -> &library::QueueInput {
         &self.input
+    }
+    pub fn shuffled_seed(&self) -> Option<u64> {
+        self.shuffled.then_some(self.shuffle_seed)
     }
     pub(crate) fn activation_context(&self, index: usize) -> Option<(String, String, usize)> {
         match &self.input {
@@ -309,7 +314,7 @@ impl Sequence {
             *entry = i as u32;
         }
         if self.shuffle_enabled {
-            shuffle_indices(order, self.revision.wrapping_add(1));
+            library::shuffle_order(order, self.revision.wrapping_add(1));
         }
         self.selected_index = None;
         self.changed(QueuePersistenceKind::Order);
@@ -346,7 +351,7 @@ impl Sequence {
         let start = self.selected_index.map_or(0, |i| i + 1);
         let remaining = &mut Arc::make_mut(&mut self.order)[start..];
         if enabled {
-            shuffle_indices(remaining, seed);
+            library::shuffle_order(remaining, seed);
         } else {
             remaining.sort_unstable();
         }
@@ -357,7 +362,7 @@ impl Sequence {
         if let Some(selected) = self.selected_index {
             let order = Arc::make_mut(&mut self.order);
             order.swap(0, selected);
-            shuffle_indices(&mut order[1..], seed);
+            library::shuffle_order(&mut order[1..], seed);
         }
         self.selected_index = (!self.order.is_empty()).then_some(0);
         self.trim_rows();
@@ -572,17 +577,6 @@ impl Sequence {
 impl Default for Sequence {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-fn shuffle_indices(values: &mut [u32], mut seed: u64) {
-    for i in (1..values.len()).rev() {
-        seed = seed.wrapping_add(0x9e3779b97f4a7c15);
-        let mut n = seed;
-        n = (n ^ (n >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
-        n = (n ^ (n >> 27)).wrapping_mul(0x94d049bb133111eb);
-        n ^= n >> 31;
-        values.swap(i, ((u128::from(n) * (i as u128 + 1)) >> 64) as usize);
     }
 }
 
