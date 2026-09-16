@@ -2,8 +2,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
-use gtk::glib;
 use gtk::prelude::*;
+use gtk::{gio, glib};
 use playback::{EQUALIZER_BAND_COUNT, EqualizerSettings};
 
 use localization::tr;
@@ -72,8 +72,10 @@ pub fn equalizer_presets() -> Vec<(&'static str, Vec<f64>)> {
 }
 
 pub fn equalizer_preset_names() -> Vec<&'static str> {
-    std::iter::once(CUSTOM_PRESET)
-        .chain(equalizer_presets().iter().map(|(name, _)| *name))
+    equalizer_presets()
+        .into_iter()
+        .map(|(name, _)| name)
+        .chain(std::iter::once(CUSTOM_PRESET))
         .collect()
 }
 
@@ -86,19 +88,6 @@ pub fn equalizer_selected_preset(equalizer: &EqualizerSettings) -> String {
     } else {
         CUSTOM_PRESET.to_string()
     }
-}
-
-pub fn equalizer_preset_position(name: &str) -> u32 {
-    equalizer_preset_names()
-        .iter()
-        .position(|preset| *preset == name)
-        .unwrap_or_default() as u32
-}
-
-pub fn equalizer_preset_name_at(position: u32) -> Option<String> {
-    equalizer_preset_names()
-        .get(position as usize)
-        .map(|name| (*name).to_string())
 }
 
 pub fn equalizer_preset_title(name: &str) -> String {
@@ -132,23 +121,6 @@ pub fn equalizer_preset_bands(name: &str) -> Vec<f64> {
     equalizer_default_preset_bands(name)
 }
 
-pub fn equalizer_preset_model() -> gtk::StringList {
-    let titles = equalizer_preset_names()
-        .into_iter()
-        .map(equalizer_preset_title)
-        .collect::<Vec<_>>();
-    let title_refs = titles.iter().map(String::as_str).collect::<Vec<_>>();
-    gtk::StringList::new(&title_refs)
-}
-
-pub fn build_equalizer_preset_dropdown(selected: u32) -> gtk::DropDown {
-    let model = equalizer_preset_model();
-    gtk::DropDown::builder()
-        .model(&model)
-        .selected(selected)
-        .build()
-}
-
 #[derive(Clone)]
 pub struct EqualizerSurface {
     pub root: gtk::Box,
@@ -158,9 +130,11 @@ pub struct EqualizerSurface {
 }
 
 pub struct EqualizerControls {
-    pub enabled: gtk::Switch,
-    pub preset: gtk::DropDown,
+    enabled: Cell<bool>,
+    pub preset: gtk::MenuButton,
+    selected_preset: RefCell<String>,
     reset: gtk::Button,
+    reset_preset: RefCell<String>,
     pub scales: Vec<gtk::Scale>,
     pub syncing: Rc<Cell<bool>>,
 }
@@ -171,15 +145,12 @@ impl EqualizerSurface {
         let builder = ui_shared::ui_resource::builder(resource);
         ui_shared::objects!(builder, resource, {
             root: gtk::Box,
-            enabled: gtk::Switch,
-            preset_host: gtk::Box,
+            preset: gtk::MenuButton,
             reset_button: gtk::Button,
             band_row: gtk::Box,
             bands: gtk::Box,
         });
-        let preset = build_equalizer_preset_dropdown(0);
-        preset.set_valign(gtk::Align::Center);
-        preset_host.append(&preset);
+        preset.set_width_request(160);
         let mut scales = Vec::with_capacity(EQUALIZER_BAND_COUNT);
         for index in 0..EQUALIZER_BAND_COUNT {
             let band = gtk::Box::new(gtk::Orientation::Vertical, EQUALIZER_BAND_SPACING);
@@ -209,9 +180,11 @@ impl EqualizerSurface {
             band_row,
             reset: reset_button.clone(),
             controls: Rc::new(EqualizerControls {
-                enabled,
+                enabled: Cell::new(settings.enabled),
                 preset,
+                selected_preset: RefCell::new(CUSTOM_PRESET.to_string()),
                 reset: reset_button,
+                reset_preset: RefCell::new("Flat".to_string()),
                 scales,
                 syncing: Rc::new(Cell::new(false)),
             }),
@@ -228,29 +201,6 @@ impl EqualizerSurface {
     pub fn connect_changed(&self, changed: impl Fn(EqualizerSettings) + 'static) {
         let changed: Rc<dyn Fn(EqualizerSettings)> = Rc::new(changed);
 
-        let switch_controls = Rc::downgrade(&self.controls);
-        let switch_changed = Rc::clone(&changed);
-        self.controls
-            .enabled
-            .connect_state_set(move |row, enabled| {
-                let Some(controls) = switch_controls.upgrade() else {
-                    return glib::Propagation::Proceed;
-                };
-                if controls.syncing.get() {
-                    return glib::Propagation::Proceed;
-                }
-                row.set_state(enabled);
-                let mut settings = controls.settings();
-                settings.enabled = enabled;
-                if !enabled {
-                    settings.selected_preset = "Flat".to_string();
-                    settings.bands = equalizer_default_preset_bands("Flat");
-                }
-                controls.set_settings(&settings);
-                switch_changed(settings);
-                glib::Propagation::Stop
-            });
-
         let pending_update = Rc::new(RefCell::new(None::<glib::SourceId>));
         let pointer_active = Rc::new(Cell::new(false));
         let scale_controls = Rc::downgrade(&self.controls);
@@ -260,6 +210,7 @@ impl EqualizerSurface {
                 return;
             };
             let mut settings = controls.settings();
+            settings.enabled = true;
             settings.selected_preset = CUSTOM_PRESET.to_string();
             controls.set_settings(&settings);
             scale_changed(settings);
@@ -274,37 +225,62 @@ impl EqualizerSurface {
             );
         }
 
+        let preset_actions = gio::SimpleActionGroup::new();
+        let select_preset = gio::SimpleAction::new("select", Some(glib::VariantTy::STRING));
         let preset_controls = Rc::downgrade(&self.controls);
         let preset_changed = Rc::clone(&changed);
+        select_preset.connect_activate(move |_, parameter| {
+            let Some(controls) = preset_controls.upgrade() else {
+                return;
+            };
+            let Some(preset) = parameter.and_then(|value| value.get::<String>()) else {
+                return;
+            };
+            let mut settings = controls.settings();
+            settings.enabled = true;
+            settings.selected_preset = preset.clone();
+            settings.bands = equalizer_preset_bands(&preset);
+            settings.sanitize();
+            controls.set_settings(&settings);
+            preset_changed(settings);
+        });
+        preset_actions.add_action(&select_preset);
         self.controls
             .preset
-            .connect_selected_notify(move |dropdown| {
-                let Some(controls) = preset_controls.upgrade() else {
-                    return;
-                };
-                if controls.syncing.get() {
-                    return;
-                }
-                let Some(preset) = equalizer_preset_name_at(dropdown.selected()) else {
-                    return;
-                };
-                let mut settings = controls.settings();
-                settings.enabled = true;
-                settings.selected_preset = preset.clone();
-                settings.bands = equalizer_preset_bands(&preset);
-                settings.sanitize();
-                controls.set_settings(&settings);
-                preset_changed(settings);
-            });
+            .insert_action_group("equalizer", Some(&preset_actions));
+
+        let menu = gio::Menu::new();
+        let flat = gio::Menu::new();
+        let flat_item = gio::MenuItem::new(
+            Some(&equalizer_preset_title("Flat")),
+            Some("equalizer.select"),
+        );
+        flat_item.set_attribute_value("target", Some(&"Flat".to_variant()));
+        flat.append_item(&flat_item);
+        menu.append_section(None, &flat);
+
+        let presets = gio::Menu::new();
+        for preset in equalizer_preset_names().into_iter().skip(1) {
+            let item = gio::MenuItem::new(
+                Some(&equalizer_preset_title(preset)),
+                Some("equalizer.select"),
+            );
+            item.set_attribute_value("target", Some(&preset.to_variant()));
+            presets.append_item(&item);
+        }
+        menu.append_section(None, &presets);
+        self.controls.preset.set_menu_model(Some(&menu));
 
         let reset_controls = Rc::downgrade(&self.controls);
         self.reset.connect_clicked(move |_| {
             let Some(controls) = reset_controls.upgrade() else {
                 return;
             };
+            let preset = controls.reset_preset.borrow().clone();
             let mut settings = controls.settings();
-            settings.selected_preset = "Flat".to_string();
-            settings.bands = equalizer_default_preset_bands("Flat");
+            settings.enabled = true;
+            settings.selected_preset = preset.clone();
+            settings.bands = equalizer_preset_bands(&preset);
             settings.sanitize();
             controls.set_settings(&settings);
             changed(settings);
@@ -323,13 +299,19 @@ impl EqualizerSurface {
 impl EqualizerControls {
     pub fn set_settings(&self, settings: &EqualizerSettings) {
         self.syncing.set(true);
-        self.reset
-            .set_visible(settings.selected_preset == CUSTOM_PRESET);
-        self.enabled.set_active(settings.enabled);
+        let selected_preset = equalizer_selected_preset(settings);
+        if selected_preset != CUSTOM_PRESET {
+            *self.reset_preset.borrow_mut() = selected_preset.clone();
+        }
+        let is_custom = selected_preset == CUSTOM_PRESET;
+        self.reset.set_visible(true);
+        self.reset.set_opacity(if is_custom { 1.0 } else { 0.0 });
+        self.reset.set_sensitive(is_custom);
+        self.reset.set_can_target(is_custom);
+        self.enabled.set(settings.enabled);
+        *self.selected_preset.borrow_mut() = selected_preset.clone();
         self.preset
-            .set_selected(equalizer_preset_position(&equalizer_selected_preset(
-                settings,
-            )));
+            .set_label(&equalizer_preset_title(&selected_preset));
         for (index, scale) in self.scales.iter().enumerate() {
             scale.set_value(settings.bands.get(index).copied().unwrap_or(0.0));
         }
@@ -338,9 +320,8 @@ impl EqualizerControls {
 
     pub fn settings(&self) -> EqualizerSettings {
         let mut settings = EqualizerSettings {
-            enabled: self.enabled.is_active(),
-            selected_preset: equalizer_preset_name_at(self.preset.selected())
-                .unwrap_or_else(|| CUSTOM_PRESET.to_string()),
+            enabled: self.enabled.get(),
+            selected_preset: self.selected_preset.borrow().clone(),
             bands: self.scales.iter().map(gtk::Scale::value).collect(),
         };
         settings.sanitize();
@@ -451,7 +432,10 @@ pub fn connect_equalizer_scale_commit(
 
 #[cfg(test)]
 mod tests {
-    use super::{EQUALIZER_BAND_COUNT, EqualizerSurface, equalizer_presets};
+    use super::{
+        CUSTOM_PRESET, EQUALIZER_BAND_COUNT, EqualizerSurface, equalizer_preset_names,
+        equalizer_presets,
+    };
     use gtk::prelude::*;
 
     #[test]
@@ -460,6 +444,13 @@ mod tests {
             assert_eq!(bands.len(), EQUALIZER_BAND_COUNT);
             assert!(bands.iter().all(|gain| (-12.0..=12.0).contains(gain)));
         }
+    }
+
+    #[test]
+    pub fn equalizer_preset_menu_order_is_grouped() {
+        let names = equalizer_preset_names();
+        assert_eq!(names.first(), Some(&"Flat"));
+        assert_eq!(names.last(), Some(&CUSTOM_PRESET));
     }
 
     #[test]
@@ -482,7 +473,10 @@ mod tests {
             .collect::<Vec<_>>();
         drop(surface);
         let retained = state.upgrade().expect("mounted equalizer controls");
-        retained.preset.set_selected(2);
+        retained
+            .preset
+            .activate_action("equalizer.select", Some(&"Classical".to_variant()))
+            .expect("preset action");
         assert_eq!(changes.borrow().len(), 1);
         assert_eq!(changes.borrow()[0], retained.settings());
         drop(retained);

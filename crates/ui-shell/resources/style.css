@@ -2206,7 +2206,7 @@ entry.lyrics-offset-value.flat:focus-within {
 }
 
 .fullscreen-player-equalizer-scroller {
-  margin: 0 0 6px 12px;
+  margin: 0 12px 6px;
   min-height: 0;
 }
 
