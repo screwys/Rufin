@@ -1956,8 +1956,23 @@ msgstr "Atslēgas"
 msgid "Plain lyrics"
 msgstr "Vienkārši teksti"
 
+#, fuzzy
+#| msgid "Play filter"
+msgid "Play (shuffled)"
+msgstr "Atskaņošanas filtrs"
+
+#, fuzzy
+#| msgid "Play Later"
+msgid "Play Later (shuffled)"
+msgstr "Atskaņot vēlāk"
+
 msgid "Play Later"
 msgstr "Atskaņot vēlāk"
+
+#, fuzzy
+#| msgid "Play Next"
+msgid "Play Next (shuffled)"
+msgstr "Atskaņot nākamo"
 
 msgid "Play Next"
 msgstr "Atskaņot nākamo"

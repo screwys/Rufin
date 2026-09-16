@@ -1756,7 +1756,16 @@ msgstr ""
 msgid "Plain lyrics"
 msgstr ""
 
+msgid "Play (shuffled)"
+msgstr ""
+
+msgid "Play Later (shuffled)"
+msgstr ""
+
 msgid "Play Later"
+msgstr ""
+
+msgid "Play Next (shuffled)"
 msgstr ""
 
 msgid "Play Next"

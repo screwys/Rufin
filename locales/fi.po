@@ -1840,8 +1840,21 @@ msgstr "Kiinnitykset"
 msgid "Plain lyrics"
 msgstr ""
 
+msgid "Play (shuffled)"
+msgstr ""
+
+#, fuzzy
+#| msgid "Play Later"
+msgid "Play Later (shuffled)"
+msgstr "Toista myöhemmin"
+
 msgid "Play Later"
 msgstr "Toista myöhemmin"
+
+#, fuzzy
+#| msgid "Play Next"
+msgid "Play Next (shuffled)"
+msgstr "Toista seuraava"
 
 msgid "Play Next"
 msgstr "Toista seuraava"

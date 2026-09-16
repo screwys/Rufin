@@ -1837,8 +1837,23 @@ msgstr "Закрепленные элементы"
 msgid "Plain lyrics"
 msgstr "Обычный текст песен"
 
+#, fuzzy
+#| msgid "Play filter"
+msgid "Play (shuffled)"
+msgstr "Воспроизвести фильтр"
+
+#, fuzzy
+#| msgid "Play Later"
+msgid "Play Later (shuffled)"
+msgstr "Воспроизвести позже"
+
 msgid "Play Later"
 msgstr "Воспроизвести позже"
+
+#, fuzzy
+#| msgid "Play Next"
+msgid "Play Next (shuffled)"
+msgstr "Воспроизвести следующим"
 
 msgid "Play Next"
 msgstr "Воспроизвести следующим"
