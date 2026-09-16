@@ -938,9 +938,6 @@ msgstr "Включить автоматическое создание резе�
 msgid "Enable background image"
 msgstr ""
 
-msgid "Enable equalizer"
-msgstr "Включить эквалайзер"
-
 msgid "Enable partial star ratings"
 msgstr "Включить частичные оценки в виде звёзд"
 
@@ -3123,6 +3120,9 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Enable equalizer"
+#~ msgstr "Включить эквалайзер"
 
 #~ msgid "Visualizer"
 #~ msgstr "Визуализатор"

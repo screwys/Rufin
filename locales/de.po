@@ -935,9 +935,6 @@ msgstr "Automatische Sicherungen aktivieren"
 msgid "Enable background image"
 msgstr "Hintergrundbild aktivieren"
 
-msgid "Enable equalizer"
-msgstr "Equalizer einschalten"
-
 msgid "Enable partial star ratings"
 msgstr "Teilbewertungen mit Sternen aktivieren"
 
@@ -3088,6 +3085,9 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#~ msgid "Enable equalizer"
+#~ msgstr "Equalizer einschalten"
 
 #~ msgid "Visualizer"
 #~ msgstr "Visualisierung"

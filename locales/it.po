@@ -23,7 +23,6 @@ msgstr ""
 "I file di backup potrebbero contenere informazioni sensibili. Vuoi impostare "
 "una password?"
 
-#, rust-format
 msgid ""
 "Backup restored with {entries} skipped playlist entries and {listens} "
 "skipped listens."
@@ -50,8 +49,7 @@ msgstr ""
 "I log contengono segreti e path assoluti delle cartelle censurati, potresti "
 "comunque voler ricontrollarli prima di condividerli"
 
-msgid ""
-"No results \302\257\\_(\302\260\342\225\255\342\225\256\302\260)_/\302\257"
+msgid "No results ¯\\_(°╭╮°)_/¯"
 msgstr "Nessun risultato 302257\\_(302260342225255342225256302260)_/302257"
 
 msgid ""
@@ -75,7 +73,6 @@ msgstr ""
 "Rimuovi Local e la relativa cache da Rufin? I tuoi file musicali non "
 "verranno eliminati."
 
-#, rust-format
 msgid ""
 "Replace the selected contents and remove these configured sources?\n"
 "{sources}\n"
@@ -422,11 +419,9 @@ msgstr "Impostazioni di Backup"
 msgid "Backup exported"
 msgstr "Backup esportato"
 
-#, rust-format
 msgid "Backup failed: {error}"
 msgstr "Backup fallito: {error}"
 
-#, rust-format
 msgid "Backup restored with warnings: {warnings}"
 msgstr "Backup ripristinato con i seguenti errori: {warnings}"
 
@@ -487,7 +482,6 @@ msgstr ""
 msgid "Change"
 msgstr ""
 
-#, rust-format
 msgid "Changes apply to {count} track"
 msgid_plural "Changes apply to {count} tracks"
 msgstr[0] ""
@@ -616,7 +610,6 @@ msgstr ""
 msgid "Connect"
 msgstr ""
 
-#, rust-format
 msgid "Connected as {username}"
 msgstr ""
 
@@ -626,7 +619,6 @@ msgstr ""
 msgid "Connecting to music server..."
 msgstr ""
 
-#, rust-format
 msgid "Connecting to {device}..."
 msgstr ""
 
@@ -678,7 +670,6 @@ msgstr ""
 msgid "Could not load this page"
 msgstr ""
 
-#, rust-format
 msgid "Could not open folder: {error}"
 msgstr ""
 
@@ -688,14 +679,12 @@ msgstr ""
 msgid "Could not save diagnostic log"
 msgstr ""
 
-#, rust-format
 msgid "Could not update Rufin to {version}"
 msgstr ""
 
 msgid "Could not update favorites"
 msgstr ""
 
-#, rust-format
 msgid "Couldn't connect to {service}"
 msgstr ""
 
@@ -705,7 +694,7 @@ msgstr ""
 msgid "Couldn't search for lyrics"
 msgstr ""
 
-msgid "Couldn\342\200\231t download Japanese dictionary"
+msgid "Couldn’t download Japanese dictionary"
 msgstr ""
 
 msgid "Create"
@@ -762,7 +751,6 @@ msgstr ""
 msgid "Delete Playlist"
 msgstr ""
 
-#, rust-format
 msgid "Delete \"{name}\"?"
 msgstr ""
 
@@ -796,7 +784,6 @@ msgstr ""
 msgid "Disc number"
 msgstr ""
 
-#, rust-format
 msgid "Disc {number}"
 msgstr ""
 
@@ -912,9 +899,6 @@ msgid "Enable automatic backups"
 msgstr ""
 
 msgid "Enable background image"
-msgstr ""
-
-msgid "Enable equalizer"
 msgstr ""
 
 msgid "Enable partial star ratings"
@@ -1055,7 +1039,6 @@ msgstr ""
 msgid "Forget Source"
 msgstr ""
 
-#, rust-format
 msgid "Forget \"{name}\"?"
 msgstr ""
 
@@ -1113,7 +1096,6 @@ msgstr ""
 msgid "Go to Album"
 msgstr ""
 
-#, rust-format
 msgid "Go to {artist}"
 msgstr ""
 
@@ -1315,7 +1297,6 @@ msgstr ""
 msgid "Local file mapping is no longer available"
 msgstr ""
 
-#, rust-format
 msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
@@ -1864,7 +1845,6 @@ msgstr ""
 msgid "Playing on this device"
 msgstr ""
 
-#, rust-format
 msgid "Playing on {device}"
 msgstr ""
 
@@ -2135,7 +2115,6 @@ msgstr ""
 msgid "ReplayGain"
 msgstr ""
 
-#, rust-format
 msgid "Request failed ({status})"
 msgstr ""
 
@@ -2223,7 +2202,6 @@ msgstr ""
 msgid "Saved logins"
 msgstr ""
 
-#, rust-format
 msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
 msgstr[0] ""
@@ -2301,7 +2279,6 @@ msgstr ""
 msgid "Searching for devices..."
 msgstr ""
 
-#, rust-format
 msgid "Searching for {provider} servers on the local network..."
 msgstr ""
 
@@ -2326,7 +2303,6 @@ msgstr ""
 msgid "Seek playback"
 msgstr ""
 
-#, rust-format
 msgid "Seek to {time}"
 msgstr ""
 
@@ -2348,7 +2324,6 @@ msgstr ""
 msgid "Select all"
 msgstr ""
 
-#, rust-format
 msgid "Select {title}"
 msgstr ""
 
@@ -2382,7 +2357,6 @@ msgstr ""
 msgid "Server Settings"
 msgstr ""
 
-#, rust-format
 msgid "Server discovery failed: {error}"
 msgstr ""
 
@@ -2479,7 +2453,6 @@ msgstr ""
 msgid "Sidebar Items"
 msgstr ""
 
-#, rust-format
 msgid "Sidebar item {position}"
 msgstr ""
 
@@ -2630,14 +2603,12 @@ msgstr ""
 msgid "This device"
 msgstr ""
 
-#, rust-format
 msgid "This is owned by {source}. Regular playlists are synced to your remote."
 msgstr ""
 
 msgid "This isn't available"
 msgstr ""
 
-#, rust-format
 msgid "This playlist only accepts {source} tracks"
 msgstr ""
 
@@ -2734,15 +2705,12 @@ msgstr ""
 msgid "Update"
 msgstr ""
 
-#, rust-format
 msgid "Updated Rufin to {version}"
 msgstr ""
 
-#, rust-format
 msgid "Updated Rufin to {version}. Restart to apply."
 msgstr ""
 
-#, rust-format
 msgid "Updating Rufin to {version}..."
 msgstr ""
 
@@ -2926,56 +2894,47 @@ msgstr ""
 msgid "yesterday"
 msgstr ""
 
-#, rust-format
 msgid "{count} album"
 msgid_plural "{count} albums"
 msgstr[0] ""
 msgstr[1] ""
 
-#, rust-format
 msgid "{count} day ago"
 msgid_plural "{count} days ago"
 msgstr[0] ""
 msgstr[1] ""
 
-#, rust-format
 msgid "{count} folder selected"
 msgid_plural "{count} folders selected"
 msgstr[0] ""
 msgstr[1] ""
 
-#, rust-format
 msgid "{count} month ago"
 msgid_plural "{count} months ago"
 msgstr[0] ""
 msgstr[1] ""
 
-#, rust-format
 msgid "{count} result"
 msgid_plural "{count} results"
 msgstr[0] ""
 msgstr[1] ""
 
-#, rust-format
 msgid "{count} track"
 msgid_plural "{count} tracks"
 msgstr[0] ""
 msgstr[1] ""
 
-#, rust-format
 msgid "{count} week ago"
 msgid_plural "{count} weeks ago"
 msgstr[0] ""
 msgstr[1] ""
 
-#, rust-format
 msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] ""
 msgstr[1] ""
 
-#, rust-format
-msgid "{status} \302\267 {stage} {completed}{total}"
+msgid "{status} · {stage} {completed}{total}"
 msgstr ""
 
 #. Windows installer: FinishText.
@@ -3010,13 +2969,11 @@ msgid "Choose a separate installation folder."
 msgstr ""
 
 #. Windows installer: CloseToInstall. {app_name} is the application display name.
-#, rust-format
 msgctxt "Windows installer"
 msgid "Close {app_name} and try the installation again."
 msgstr ""
 
 #. Windows installer: CloseToUninstall. {app_name} is the application display name.
-#, rust-format
 msgctxt "Windows installer"
 msgid "Close {app_name} and try the uninstall again."
 msgstr ""
@@ -3032,7 +2989,6 @@ msgid "Create desktop shortcut"
 msgstr ""
 
 #. Windows installer: RemoveCache. {app_name} is the application display name.
-#, rust-format
 msgctxt "Windows installer"
 msgid "Remove {app_name}'s cache"
 msgstr ""
@@ -3043,7 +2999,6 @@ msgid "Setup could not complete the installation. Please try again."
 msgstr ""
 
 #. Windows installer: InvalidUpdate. {app_name} is the application display name.
-#, rust-format
 msgctxt "Windows installer"
 msgid "The {app_name} automatic update option is invalid."
 msgstr ""
