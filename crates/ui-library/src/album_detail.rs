@@ -327,6 +327,7 @@ struct AlbumDetailVirtualListInner {
     scheduled: Cell<bool>,
     model_handler: RefCell<Option<(SparseObjectModel, glib::SignalHandlerId)>>,
     adjustment_handlers: RefCell<Option<AlbumDetailAdjustmentHandlers>>,
+    focus_handler: RefCell<Option<(glib::WeakRef<gtk::Root>, glib::SignalHandlerId)>>,
 }
 
 struct AlbumDetailAdjustmentHandlers {
@@ -698,8 +699,16 @@ impl AlbumDetailVirtualList {
             scheduled: Cell::new(false),
             model_handler: RefCell::new(None),
             adjustment_handlers: RefCell::new(None),
+            focus_handler: RefCell::new(None),
         });
         inner.apply_extent();
+
+        let weak = Rc::downgrade(&inner);
+        inner.widget.connect_root_notify(move |_| {
+            if let Some(inner) = weak.upgrade() {
+                inner.bind_focus_scrolling();
+            }
+        });
 
         let object_model = model.list_model();
         let weak = Rc::downgrade(&inner);
@@ -837,6 +846,44 @@ fn album_detail_geometry_changes(previous_width: i32, width: i32) -> bool {
 }
 
 impl AlbumDetailVirtualListInner {
+    fn bind_focus_scrolling(&self) {
+        self.disconnect_focus();
+        let Some(root) = self.widget.root() else {
+            return;
+        };
+        let Some(viewport) = self.widget.parent().and_downcast::<gtk::Viewport>() else {
+            return;
+        };
+        // Reveal keyboard focus without scrolling when a pointer-dismissed menu
+        // restores focus, or when focus returns to the full virtual collection.
+        viewport.set_scroll_to_focus(false);
+        let widget = self.widget.downgrade();
+        let viewport = viewport.downgrade();
+        let handler = root.connect_notify_local(Some("focus-widget"), move |root, _| {
+            let (Some(widget), Some(viewport), Some(focus)) =
+                (widget.upgrade(), viewport.upgrade(), root.focus())
+            else {
+                return;
+            };
+            if focus.state_flags().contains(gtk::StateFlags::FOCUS_VISIBLE)
+                && focus.is_ancestor(&widget)
+                && focus.native() == widget.native()
+            {
+                viewport.scroll_to(&focus, None::<gtk::ScrollInfo>);
+            }
+        });
+        self.focus_handler
+            .replace(Some((root.downgrade(), handler)));
+    }
+
+    fn disconnect_focus(&self) {
+        if let Some((root, handler)) = self.focus_handler.borrow_mut().take()
+            && let Some(root) = root.upgrade()
+        {
+            root.disconnect(handler);
+        }
+    }
+
     fn rebuild_layout(&self) {
         self.layout
             .replace(AlbumDetailLayout::build(&self.model, self.width.get()));
@@ -885,6 +932,16 @@ impl AlbumDetailVirtualListInner {
             return;
         }
         self.rendered.replace(Some(visible.clone()));
+        if self
+            .widget
+            .root()
+            .and_then(|root| root.focus())
+            .is_some_and(|focus| focus.is_ancestor(&self.rows_widget))
+        {
+            // Keep focus on the surviving list instead of letting GTK focus a
+            // replacement row and scroll back toward it on every render.
+            self.widget.grab_focus();
+        }
         while let Some(child) = self.rows_widget.first_child() {
             self.rows_widget.remove(&child);
         }
@@ -990,6 +1047,7 @@ impl Drop for AlbumDetailVirtualListInner {
             model.disconnect(handler);
         }
         self.disconnect_adjustment();
+        self.disconnect_focus();
     }
 }
 
@@ -1242,16 +1300,15 @@ fn album_detail_separator(height: i32) -> gtk::Widget {
 fn album_track_header(field_widths: &[(LibraryField, i32)]) -> gtk::Widget {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, ALBUM_DETAIL_TRACK_COLUMN_GAP);
     row.add_css_class("album-detail-track-cells");
+    row.add_css_class("table-header");
     row.set_height_request(ALBUM_DETAIL_TRACK_HEADER_HEIGHT);
     for (field, width) in field_widths {
         let label = if *field == LibraryField::Duration {
             let image = gtk::Image::from_icon_name("rufin-preferences-system-time-symbolic");
-            image.add_css_class("muted");
             image.set_tooltip_text(Some(&localization::tr("Duration")));
             image.upcast()
         } else if *field == LibraryField::Favorite {
             let image = gtk::Image::from_icon_name(FAVORITE_ADD_ICON);
-            image.add_css_class("muted");
             image.set_tooltip_text(Some(&localization::tr("Favorite")));
             image.upcast()
         } else {
@@ -1260,7 +1317,7 @@ fn album_track_header(field_widths: &[(LibraryField, i32)]) -> gtk::Widget {
                 *field,
                 *width,
             );
-            label.add_css_class("muted");
+            label.remove_css_class("track-list-title");
             label.upcast()
         };
         row.append(&fixed_album_track_cell(

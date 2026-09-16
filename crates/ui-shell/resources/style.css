@@ -1984,6 +1984,11 @@ listview.queue-list row:hover .row-favorite-button:not(.active-toggle),
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
 }
 
+.album-detail-track-cells.table-header {
+  padding: 0;
+  border-bottom: 0;
+}
+
 listview.queue-list row {
   padding: 0;
   background: transparent;
