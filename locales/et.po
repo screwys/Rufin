@@ -731,6 +731,11 @@ msgstr "Kopeeri"
 
 #, fuzzy
 #| msgid "Couldn't load this folder"
+msgid "Could not load related tracks"
+msgstr "Selle kausta laadimine ei õnnestunud"
+
+#, fuzzy
+#| msgid "Couldn't load this folder"
 msgid "Could not load this page"
 msgstr "Selle kausta laadimine ei õnnestunud"
 
@@ -925,6 +930,9 @@ msgstr "Järjekorra muutmiseks lohista"
 msgid "Duration"
 msgstr "Kestus"
 
+msgid "Dynamic background"
+msgstr ""
+
 msgid "EBU R128 reference level"
 msgstr "EBU R128 viide"
 
@@ -979,6 +987,9 @@ msgstr "Kas lülitad EBU R128 analüüsi sisse?"
 msgid "Enable automatic backups"
 msgstr ""
 
+msgid "Enable background image"
+msgstr ""
+
 msgid "Enable equalizer"
 msgstr "Kasuta ekvalaiserit"
 
@@ -1014,6 +1025,9 @@ msgstr "Ekvalaiser"
 
 msgid "Everything, including new tracks"
 msgstr "Kõik, sealhulgas uued lood"
+
+msgid "Expand lyrics and visualizer"
+msgstr ""
 
 msgid "Expand sidebar"
 msgstr "Laienda külgriba"
@@ -1384,6 +1398,11 @@ msgid "ListenBrainz"
 msgstr "ListenBrainz"
 
 #, fuzzy
+#| msgid "Loading folders..."
+msgid "Loading related tracks..."
+msgstr "Laadin kaustu…"
+
+#, fuzzy
 #| msgid "Saving..."
 msgid "Loading..."
 msgstr "Salvestan…"
@@ -1714,6 +1733,11 @@ msgstr "Ühtegi võrguseadet ei leidu"
 
 msgid "No network devices found"
 msgstr "Ühtegi võrguseadet ei leidu"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No related tracks found"
+msgstr "Sobivaid lugusid pole"
 
 #, fuzzy
 #| msgid "results"
@@ -2175,6 +2199,11 @@ msgstr ""
 msgid "Regenerate access token?"
 msgstr ""
 
+#, fuzzy
+#| msgid "Slate"
+msgid "Related"
+msgstr "Paekarva"
+
 msgid "Release date"
 msgstr "Avaldamise kuupäev"
 
@@ -2290,6 +2319,11 @@ msgstr "Vastendatud kohalikku faili ei leidu"
 #, fuzzy
 #| msgid "Restore Default"
 msgid "Restore User State"
+msgstr "Taasta vaikimisi väärtus"
+
+#, fuzzy
+#| msgid "Restore Default"
+msgid "Restore player layout"
 msgstr "Taasta vaikimisi väärtus"
 
 msgid "Restore"
@@ -2568,6 +2602,9 @@ msgstr "Jagatud saladus"
 msgid "Show Rufin"
 msgstr "Näita Rufinit"
 
+msgid "Show artwork"
+msgstr ""
+
 msgid "Show downloaded badge"
 msgstr "Näita allalaaditud märki"
 
@@ -2747,6 +2784,9 @@ msgstr "Vaheta otsingute ja lemmikute vahekaardid"
 
 msgid "Switch between layouts"
 msgstr "Vaheta visuaali paigutusi"
+
+msgid "Switch pane"
+msgstr ""
 
 msgid "Switching library..."
 msgstr "Vahetan muusikakogu…"
@@ -2987,9 +3027,6 @@ msgstr "Vaade"
 msgid "Visible"
 msgstr "Nähtav"
 
-msgid "Visualizer"
-msgstr "Visualiseerija"
-
 msgid "Volume Down"
 msgstr "Heli vaiksemaks"
 
@@ -3216,6 +3253,9 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
 
+#~ msgid "Visualizer"
+#~ msgstr "Visualiseerija"
+
 #~ msgid ""
 #~ "This uses Jellyfin API for play radio, necessary if you want "
 #~ "recommendation plugins to work"
@@ -3285,9 +3325,6 @@ msgstr ""
 #~ "Laulusõnade laadimiseks ja nende salvestamiseks rakenduse vahemällu "
 #~ "klõpsa kirjet. Klõpsa nuppu „Salvesta“, kui soovid salvestada need ka "
 #~ "muusikafailide kausta"
-
-#~ msgid "Loading folders..."
-#~ msgstr "Laadin kaustu…"
 
 #~ msgid "Reset equalizer"
 #~ msgstr "Lähtesta ekvalaiser"

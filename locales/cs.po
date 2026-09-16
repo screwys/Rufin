@@ -743,6 +743,11 @@ msgstr "Kopírovat"
 
 #, fuzzy
 #| msgid "Couldn't load this folder"
+msgid "Could not load related tracks"
+msgstr "Nelze načíst tuto složku"
+
+#, fuzzy
+#| msgid "Couldn't load this folder"
 msgid "Could not load this page"
 msgstr "Nelze načíst tuto složku"
 
@@ -941,6 +946,9 @@ msgstr "Přetažením změňte pořadí"
 msgid "Duration"
 msgstr "Délka"
 
+msgid "Dynamic background"
+msgstr ""
+
 msgid "EBU R128 reference level"
 msgstr ""
 
@@ -1003,6 +1011,9 @@ msgstr ""
 msgid "Enable automatic backups"
 msgstr ""
 
+msgid "Enable background image"
+msgstr ""
+
 msgid "Enable equalizer"
 msgstr "Zapnout equalizer"
 
@@ -1038,6 +1049,9 @@ msgstr "Ekvalizér"
 
 msgid "Everything, including new tracks"
 msgstr "Vše, včetně nových skladeb"
+
+msgid "Expand lyrics and visualizer"
+msgstr ""
 
 msgid "Expand sidebar"
 msgstr "Rozbalit postranní panel"
@@ -1408,6 +1422,11 @@ msgid "ListenBrainz"
 msgstr "ListenBrainz"
 
 #, fuzzy
+#| msgid "Loading folders..."
+msgid "Loading related tracks..."
+msgstr "Načítání složek..."
+
+#, fuzzy
 #| msgid "Saving..."
 msgid "Loading..."
 msgstr "Ukládání..."
@@ -1752,6 +1771,11 @@ msgstr "Nebyly nalezeny žádné sítové zařízení"
 
 msgid "No network devices found"
 msgstr "Nebyly nalezeny žádné sítové zařízení"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No related tracks found"
+msgstr "Žádné odpovídající skladby"
 
 #, fuzzy
 #| msgid "{count} result"
@@ -2221,6 +2245,11 @@ msgstr ""
 msgid "Regenerate access token?"
 msgstr ""
 
+#, fuzzy
+#| msgid "Slate"
+msgid "Related"
+msgstr "Šedá"
+
 msgid "Release date"
 msgstr "Datum vydání"
 
@@ -2336,6 +2365,9 @@ msgid "Resource not found"
 msgstr ""
 
 msgid "Restore User State"
+msgstr ""
+
+msgid "Restore player layout"
 msgstr ""
 
 msgid "Restore"
@@ -2625,6 +2657,9 @@ msgstr "Sdílený tajný klíč"
 msgid "Show Rufin"
 msgstr "Zobrazit Rufin"
 
+msgid "Show artwork"
+msgstr ""
+
 msgid "Show downloaded badge"
 msgstr "Zobrazit odznak stažení"
 
@@ -2808,6 +2843,9 @@ msgid "Switch Search/Favorites tabs"
 msgstr ""
 
 msgid "Switch between layouts"
+msgstr ""
+
+msgid "Switch pane"
 msgstr ""
 
 msgid "Switching library..."
@@ -3051,9 +3089,6 @@ msgstr "Pohled"
 msgid "Visible"
 msgstr "Viditelné"
 
-msgid "Visualizer"
-msgstr "Vizualizace"
-
 msgid "Volume Down"
 msgstr "Snížit hlasitost"
 
@@ -3288,6 +3323,9 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
 
+#~ msgid "Visualizer"
+#~ msgstr "Vizualizace"
+
 #~ msgid ""
 #~ "This uses Jellyfin API for play radio, necessary if you want "
 #~ "recommendation plugins to work"
@@ -3361,9 +3399,6 @@ msgstr ""
 #~ "Klepnutím na položku načtete text skladby a uložíte jej do mezipaměti "
 #~ "aplikace, klikněte na Uložit pouze v případě, že jej chcete uložit také "
 #~ "do složky s hudbou"
-
-#~ msgid "Loading folders..."
-#~ msgstr "Načítání složek..."
 
 #~ msgid "Reset equalizer"
 #~ msgstr "Resetovat equalizer"

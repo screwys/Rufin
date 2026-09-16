@@ -699,6 +699,11 @@ msgstr "Копировать ссылку"
 msgid "Copy"
 msgstr "Копировать"
 
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Could not load related tracks"
+msgstr "Не удалось загрузить эту страницу"
+
 msgid "Could not load this page"
 msgstr "Не удалось загрузить эту страницу"
 
@@ -879,6 +884,9 @@ msgstr "Перетащите, чтобы изменить порядок"
 msgid "Duration"
 msgstr "Продолжительность"
 
+msgid "Dynamic background"
+msgstr ""
+
 msgid "EBU R128 reference level"
 msgstr "Эталонный уровень EBU R128"
 
@@ -927,6 +935,9 @@ msgstr "Включить анализ EBU R128?"
 msgid "Enable automatic backups"
 msgstr "Включить автоматическое создание резервных копий"
 
+msgid "Enable background image"
+msgstr ""
+
 msgid "Enable equalizer"
 msgstr "Включить эквалайзер"
 
@@ -962,6 +973,9 @@ msgstr "Эквалайзер"
 
 msgid "Everything, including new tracks"
 msgstr "Всё, включая новые треки"
+
+msgid "Expand lyrics and visualizer"
+msgstr ""
 
 msgid "Expand sidebar"
 msgstr "Развернуть боковую панель"
@@ -1309,6 +1323,11 @@ msgstr "Отправка данных о прослушивании в ListenBra
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
 
+#, fuzzy
+#| msgid "Loading folders..."
+msgid "Loading related tracks..."
+msgstr "Загрузка папок…"
+
 msgid "Loading..."
 msgstr "Загрузка..."
 
@@ -1628,6 +1647,11 @@ msgstr "Сетевой адрес недоступен"
 
 msgid "No network devices found"
 msgstr "Устройства в сети не найдены"
+
+#, fuzzy
+#| msgid "No matching tracks found"
+msgid "No related tracks found"
+msgstr "Не найдено ни одного трека, соответствующего запросу"
 
 msgid "No results"
 msgstr "Результатов не найдено"
@@ -2055,6 +2079,11 @@ msgstr "Сгенерировать новый токен доступа"
 msgid "Regenerate access token?"
 msgstr "Сгенерировать новый токен доступа?"
 
+#, fuzzy
+#| msgid "Slate"
+msgid "Related"
+msgstr "Серый"
+
 msgid "Release date"
 msgstr "Дата выпуска"
 
@@ -2164,6 +2193,11 @@ msgid "Resource not found"
 msgstr "Ресурс не найден"
 
 msgid "Restore User State"
+msgstr "Восстановить состояние пользователя"
+
+#, fuzzy
+#| msgid "Restore User State"
+msgid "Restore player layout"
 msgstr "Восстановить состояние пользователя"
 
 msgid "Restore"
@@ -2425,6 +2459,11 @@ msgstr "Общий секретный ключ"
 msgid "Show Rufin"
 msgstr "Показать Rufin"
 
+#, fuzzy
+#| msgid "Artwork"
+msgid "Show artwork"
+msgstr "Обложка"
+
 msgid "Show downloaded badge"
 msgstr "Показывать значок \"Загружено\""
 
@@ -2598,6 +2637,9 @@ msgstr "Переключить вкладки «Поиск» и «Избранн
 
 msgid "Switch between layouts"
 msgstr "Переключить между макетами"
+
+msgid "Switch pane"
+msgstr ""
 
 msgid "Switching library..."
 msgstr "Переключение библиотеки…"
@@ -2823,9 +2865,6 @@ msgstr "Показать"
 
 msgid "Visible"
 msgstr "Видимый"
-
-msgid "Visualizer"
-msgstr "Визуализатор"
 
 msgid "Volume Down"
 msgstr "Уменьшить громкость"
@@ -3070,6 +3109,9 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
 
+#~ msgid "Visualizer"
+#~ msgstr "Визуализатор"
+
 #~ msgid "Enter your Rufin access token."
 #~ msgstr "Введите свой токен доступа к Rufin."
 
@@ -3153,9 +3195,6 @@ msgstr "Добро пожаловать в программу установки
 #~ "Нажмите на запись, чтобы загрузить текст песни и сохранить его в кэше "
 #~ "приложения. Нажмите «Сохранить», только если вы также хотите сохранить "
 #~ "его в папке с музыкой"
-
-#~ msgid "Loading folders..."
-#~ msgstr "Загрузка папок…"
 
 #~ msgid "Reset equalizer"
 #~ msgstr "Сбросить настройки эквалайзера"
