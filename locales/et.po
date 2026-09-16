@@ -1943,8 +1943,23 @@ msgstr "Esiletõstmised"
 msgid "Plain lyrics"
 msgstr "Tavalised laulusõnad"
 
+#, fuzzy
+#| msgid "Play filter"
+msgid "Play (shuffled)"
+msgstr "Esituste filter"
+
+#, fuzzy
+#| msgid "Play Later"
+msgid "Play Later (shuffled)"
+msgstr "Esita hiljem"
+
 msgid "Play Later"
 msgstr "Esita hiljem"
+
+#, fuzzy
+#| msgid "Play Next"
+msgid "Play Next (shuffled)"
+msgstr "Esita järgmisena"
 
 msgid "Play Next"
 msgstr "Esita järgmisena"

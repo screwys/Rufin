@@ -1932,8 +1932,23 @@ msgstr "釘選"
 msgid "Plain lyrics"
 msgstr "原始歌詞"
 
+#, fuzzy
+#| msgid "Play filter"
+msgid "Play (shuffled)"
+msgstr "播放篩選內容"
+
+#, fuzzy
+#| msgid "Play Later"
+msgid "Play Later (shuffled)"
+msgstr "稍候播放"
+
 msgid "Play Later"
 msgstr "稍候播放"
+
+#, fuzzy
+#| msgid "Play Next"
+msgid "Play Next (shuffled)"
+msgstr "接續播放"
 
 msgid "Play Next"
 msgstr "接續播放"

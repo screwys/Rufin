@@ -1834,8 +1834,23 @@ msgstr "Angeheftete Elemente"
 msgid "Plain lyrics"
 msgstr "Einfache Songtexte"
 
+#, fuzzy
+#| msgid "Play filter"
+msgid "Play (shuffled)"
+msgstr "Gefilterte Titel abspielen"
+
+#, fuzzy
+#| msgid "Play Later"
+msgid "Play Later (shuffled)"
+msgstr "Später abspielen"
+
 msgid "Play Later"
 msgstr "Später abspielen"
+
+#, fuzzy
+#| msgid "Play Next"
+msgid "Play Next (shuffled)"
+msgstr "Als nächstes abspielen"
 
 msgid "Play Next"
 msgstr "Als nächstes abspielen"

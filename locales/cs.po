@@ -1985,8 +1985,23 @@ msgstr "Připnuto"
 msgid "Plain lyrics"
 msgstr "Jednoduché texty"
 
+#, fuzzy
+#| msgid "Play filter"
+msgid "Play (shuffled)"
+msgstr "Filtr přehrání"
+
+#, fuzzy
+#| msgid "Play Later"
+msgid "Play Later (shuffled)"
+msgstr "Přehrát později"
+
 msgid "Play Later"
 msgstr "Přehrát později"
+
+#, fuzzy
+#| msgid "Play Next"
+msgid "Play Next (shuffled)"
+msgstr "Přehrát další"
 
 msgid "Play Next"
 msgstr "Přehrát další"
