@@ -148,6 +148,11 @@ impl SubsonicSource {
                 Err(error) => return Err(error),
             }
         }
+        let section = crate::SourceHomeSection::NewlyAdded;
+        match self.home_section(section).await {
+            Ok(entries) => scan.replace_home_section(section.id(), &entries).await?,
+            Err(error) => crate::source::optional_collection_error(error)?,
+        }
         Ok(scan.finish().await?)
     }
 }
@@ -227,6 +232,78 @@ mod tests {
     use crate::subsonic::{NAVIDROME_LIBRARY_VERSION, SOURCE_CONFIG_VERSION, SubsonicCredential};
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn live_updates_refresh_newly_added_and_retain_it_on_failure() {
+        let server = MockServer::start().await;
+        let source = navidrome_source_with_token(&server, "token");
+        let directory = tempfile::tempdir().unwrap();
+        let database = library::Database::open(directory.path().join("library.sqlite"))
+            .await
+            .unwrap();
+        let scan = Scan::begin(&database, "source", "Source", "source", None)
+            .await
+            .unwrap();
+        let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
+            panic!("initial publication");
+        };
+        let cancellation = library::ReadCancellation::new();
+        for (id, status, empty, identical, expected) in [
+            ("old", 200, false, false, vec!["old"]),
+            ("new", 200, false, false, vec!["new"]),
+            ("new", 200, false, true, vec!["new"]),
+            ("third", 503, false, false, vec!["new"]),
+            ("third", 200, true, false, vec!["new", "old", "third"]),
+        ] {
+            server.reset().await;
+            let item = serde_json::json!({"id":id,"name":id});
+            Mock::given(method("GET"))
+                .and(path("/api/album".to_string()))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_json(serde_json::json!([item.clone()])),
+                )
+                .expect(1)
+                .mount(&server)
+                .await;
+            let entries = if empty { vec![] } else { vec![item] };
+            Mock::given(method("GET")).and(path("/rest/getAlbumList2.view"))
+                .and(wiremock::matchers::query_param("type", "newest")).and(wiremock::matchers::query_param("size", "24"))
+                .respond_with(ResponseTemplate::new(status).set_body_json(serde_json::json!({"subsonic-response":{"status":"ok","albumList2":{"album":entries}}})))
+                .expect(1).mount(&server).await;
+            let outcome = source
+                .apply_navidrome_changes(&database, "source", vec![format!("album:{id}")])
+                .await
+                .unwrap();
+            assert_eq!(
+                matches!(outcome, library::ScanOutcome::Identical(_)),
+                identical
+            );
+            assert!(matches!(
+                outcome,
+                library::ScanOutcome::Changed(_) | library::ScanOutcome::Identical(_)
+            ));
+            let home = database
+                .home_page(
+                    publication.source,
+                    None,
+                    0,
+                    0,
+                    &[library::HomeBlockKind::NewlyAdded],
+                    &cancellation,
+                )
+                .await
+                .unwrap();
+            let mut titles = home
+                .newly_added
+                .albums
+                .iter()
+                .map(|row| row.title.as_str())
+                .collect::<Vec<_>>();
+            titles.sort_unstable();
+            assert_eq!(titles, expected);
+            server.verify().await;
+        }
+    }
 
     #[tokio::test]
     async fn native_events_update_ratings_and_favorites_through_the_selected_feed() {
