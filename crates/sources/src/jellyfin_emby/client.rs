@@ -1555,7 +1555,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exact_track_change_closes_over_its_album_and_removal_fetches_nothing() {
+    async fn exact_track_change_closes_over_its_album_and_removal_does_not_refetch_items() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/Items/track-one"))
@@ -1701,9 +1701,11 @@ mod tests {
                 .received_requests()
                 .await
                 .expect("Jellyfin requests")
-                .len(),
+                .iter()
+                .filter(|request| request.url.path() != "/Items")
+                .count(),
             3,
-            "the removal path must use accepted Store identity without fetching"
+            "the removal path must use accepted Store identity without refetching items"
         );
     }
 }

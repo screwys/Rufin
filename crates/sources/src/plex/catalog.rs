@@ -270,6 +270,11 @@ impl PlexSource {
             scan.remove_playlist(&plex_id("playlist", raw_item_id(&raw)))
                 .await?;
         }
+        let section = SourceHomeSection::NewlyAdded;
+        match self.home_section(section).await {
+            Ok(entries) => scan.replace_home_section(section.id(), &entries).await?,
+            Err(error) => crate::source::optional_collection_error(error)?,
+        }
         Ok(scan.finish().await?)
     }
 
@@ -468,6 +473,85 @@ pub(super) mod tests {
         "year":{},"parentYear":2010,"index":[],"skipCount":-4,"Guid":[null,{"id":"mbid://recording"}],"Genre":[{"tag":"Rock"},{"tag":[]}],"Mood":[{"tag":"Calm"}],
         "Media":[{"container":"flac","Part":[{"file":"/music/song.flac","Stream":[{"streamType":2,"gain":-4.25,"peak":0.8,"albumGain":-3.5,"loudness":-18.0}]}]}],
         "thumb":"/library/metadata/album/thumb/1"})
+    }
+
+    #[tokio::test]
+    async fn live_updates_refresh_newly_added_and_retain_it_on_failure() {
+        let server = MockServer::start().await;
+        let source = source(&server);
+        let directory = tempfile::tempdir().unwrap();
+        let database = library::Database::open(directory.path().join("library.sqlite"))
+            .await
+            .unwrap();
+        let scan = Scan::begin(&database, "source", "Source", "source", None)
+            .await
+            .unwrap();
+        let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
+            panic!("initial publication");
+        };
+        let cancellation = library::ReadCancellation::new();
+        for (id, status, empty, identical, expected) in [
+            ("old", 200, false, false, vec!["old"]),
+            ("new", 200, false, false, vec!["new"]),
+            ("new", 200, false, true, vec!["new"]),
+            ("third", 503, false, false, vec!["new"]),
+            ("third", 200, true, false, vec!["new", "old", "third"]),
+        ] {
+            server.reset().await;
+            let item = serde_json::json!({"ratingKey":id,"title":id,"type":"album"});
+            Mock::given(method("GET"))
+                .and(path(format!("/library/metadata/{id}")))
+                .respond_with(ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({"MediaContainer":{"Metadata":[item.clone()]}}),
+                ))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let entries = if empty { vec![] } else { vec![item] };
+            Mock::given(method("GET"))
+                .and(path("/library/all"))
+                .and(query_param("sort", "addedAt:desc"))
+                .and(query_param("X-Plex-Container-Size", "24"))
+                .respond_with(
+                    ResponseTemplate::new(status)
+                        .set_body_json(serde_json::json!({"MediaContainer":{"Metadata":entries}})),
+                )
+                .expect(1)
+                .mount(&server)
+                .await;
+            let outcome = source
+                .apply_live_items(&database, "source", vec![id.into()], vec![])
+                .await
+                .unwrap();
+            assert_eq!(
+                matches!(outcome, library::ScanOutcome::Identical(_)),
+                identical
+            );
+            assert!(matches!(
+                outcome,
+                library::ScanOutcome::Changed(_) | library::ScanOutcome::Identical(_)
+            ));
+            let home = database
+                .home_page(
+                    publication.source,
+                    None,
+                    0,
+                    0,
+                    &[library::HomeBlockKind::NewlyAdded],
+                    &cancellation,
+                )
+                .await
+                .unwrap();
+            let mut titles = home
+                .newly_added
+                .albums
+                .iter()
+                .map(|row| row.title.as_str())
+                .collect::<Vec<_>>();
+            titles.sort_unstable();
+            assert_eq!(titles, expected);
+            server.verify().await;
+        }
     }
 
     #[tokio::test]
