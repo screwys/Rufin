@@ -719,16 +719,25 @@ pub fn external_best_lyrics(
     }
     order_external_results(&mut results, &lookup, providers);
     let selection = crate::Settings {
+        karaoke_mode: require_word_timing,
         prefer_translations,
         preferred_translation_language: preferred_translation_language.to_string(),
         ..crate::Settings::default()
     };
+    Ok(select_external_lyrics(results, &selection, cancelled))
+}
+
+fn select_external_lyrics(
+    results: Vec<LyricsSearchResult>,
+    selection: &crate::Settings,
+    cancelled: &AtomicBool,
+) -> Option<Lyrics> {
     let mut fallback = None;
     let mut fallback_satisfies_selection = false;
     let mut deferred_attempts = HashMap::<ExternalLyricsProvider, usize>::new();
     for result in results {
         if cancelled.load(Ordering::Acquire) {
-            return Ok(None);
+            return None;
         }
         if matches!(result.content, LyricsSearchContent::Deferred) {
             let attempts = deferred_attempts.entry(result.provider).or_default();
@@ -738,15 +747,19 @@ pub fn external_best_lyrics(
             *attempts += 1;
         }
         match lyrics_from_search_result(&result) {
-            Ok(Some(lyrics)) if lyrics.is_instrumental() => return Ok(Some(lyrics)),
+            Ok(Some(lyrics)) if lyrics.is_instrumental() => {
+                if fallback.is_none() {
+                    return Some(lyrics);
+                }
+            }
             Ok(Some(lyrics)) => {
                 let satisfies_selection =
-                    !prefer_translations || lyrics.has_preferred_translation(&selection);
+                    !selection.prefer_translations || lyrics.has_preferred_translation(selection);
                 let has_word_timing = lyrics
-                    .selected_document(&selection)
+                    .selected_document(selection)
                     .is_some_and(LyricsDocument::has_word_timing);
-                if satisfies_selection && (!require_word_timing || has_word_timing) {
-                    return Ok(Some(lyrics));
+                if satisfies_selection && (!selection.karaoke_mode || has_word_timing) {
+                    return Some(lyrics);
                 }
                 if fallback.is_none() || satisfies_selection && !fallback_satisfies_selection {
                     fallback = Some(lyrics);
@@ -754,14 +767,12 @@ pub fn external_best_lyrics(
                 }
             }
             Ok(None) => {}
-            Err(error) => errors.push(format!("{}: {error}", result.provider.title())),
+            Err(error) => {
+                debug!(provider = result.provider.title(), %error, "could not fetch lyric candidate")
+            }
         }
     }
-    if !had_success && !errors.is_empty() {
-        Err(errors.join("; "))
-    } else {
-        Ok(fallback)
-    }
+    fallback
 }
 fn external_best_lyrics_for_provider(
     lookup: &LyricsLookup,
@@ -1941,6 +1952,64 @@ fn bytes_to_mib(bytes: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vocal_and_instrumental_versions_follow_the_requested_recording() {
+        let candidates = parse_lrclib_search_body(
+            r#"[
+                {"id":1,"trackName":"Hikaru nara -instrumental-","artistName":"Goose house","duration":252.16,"instrumental":true},
+                {"id":2,"trackName":"Hikaru nara","artistName":"Goose house","duration":254.13,"syncedLyrics":"[00:17.690]Vocal lyrics"}
+            ]"#,
+        )
+        .unwrap();
+        for karaoke_mode in [false, true] {
+            for prefer_translations in [false, true] {
+                let selection = crate::Settings {
+                    karaoke_mode,
+                    prefer_translations,
+                    ..crate::Settings::default()
+                };
+                for (title, instrumental) in
+                    [("Hikaru nara", false), ("Hikaru nara -instrumental-", true)]
+                {
+                    let lookup = LyricsLookup::from_search("Goose house", title, 254);
+                    let mut results = candidates.clone();
+                    filter_external_results_for_lookup(&mut results, &lookup);
+                    order_external_results(
+                        &mut results,
+                        &lookup,
+                        &[ExternalLyricsProvider::Lrclib],
+                    );
+                    let lyrics =
+                        select_external_lyrics(results, &selection, &AtomicBool::new(false))
+                            .unwrap();
+                    assert_eq!(lyrics.is_instrumental(), instrumental);
+                    if !instrumental {
+                        assert_eq!(lyrics.documents()[0].lines[0].text, "Vocal lyrics");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn instrumental_candidate_does_not_stop_the_search_for_word_timing() {
+        let candidates = parse_lrclib_search_body(
+            r#"[
+                {"id":1,"syncedLyrics":"[00:01.000]Vocal lyrics"},
+                {"id":2,"instrumental":true},
+                {"id":3,"syncedLyrics":"[00:01.000]<00:01.000>Vocal <00:01.500>lyrics"}
+            ]"#,
+        )
+        .unwrap();
+        let selection = crate::Settings {
+            karaoke_mode: true,
+            ..crate::Settings::default()
+        };
+        let lyrics =
+            select_external_lyrics(candidates, &selection, &AtomicBool::new(false)).unwrap();
+        assert!(lyrics.documents()[0].has_word_timing());
+    }
 
     #[test]
     fn provider_cleanup_removes_headers_and_credits_preserving_timed_words() {

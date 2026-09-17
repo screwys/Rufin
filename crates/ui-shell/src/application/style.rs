@@ -151,7 +151,7 @@ fn appearance_override_css(
         css.push_str(";\n");
     }
     css.push_str("}\n");
-    let selectors = ".lyrics-line, .lyrics-furigana, .lyrics-romanization, .lyrics-reading-surface, .lyrics-cue";
+    let selectors = ".lyrics-line, .lyrics-instrumental, .lyrics-furigana, .lyrics-romanization, .lyrics-reading-surface, .lyrics-cue";
     if let Some(family) = lyrics.lyrics_font_family.as_deref() {
         css.push_str(selectors);
         css.push_str(" {\n");
@@ -161,7 +161,9 @@ fn appearance_override_css(
         css.push_str("}\n");
     }
     if let Some(size) = lyrics.lyrics_font_size {
-        css.push_str(&format!(".lyrics-line {{ font-size: {size}px; }}\n"));
+        css.push_str(&format!(
+            ".lyrics-line, .lyrics-instrumental {{ font-size: {size}px; }}\n"
+        ));
     }
     css
 }

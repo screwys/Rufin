@@ -608,8 +608,7 @@ impl LyricsPane {
             indicator.append(&icon);
 
             let label = gtk::Label::new(Some(&tr(msgid("Instrumental"))));
-            label.add_css_class("dim-label");
-            label.add_css_class("heading");
+            label.add_css_class("lyrics-instrumental");
             indicator.append(&label);
             self.body.append(&indicator);
         } else if matches!(&content, LyricsPaneContent::Loading) {
@@ -619,13 +618,11 @@ impl LyricsPane {
             placeholder.set_hexpand(true);
             placeholder.set_vexpand(true);
 
-            let spinner = gtk::Spinner::new();
-            spinner.add_css_class("lyrics-loading-spinner");
+            let spinner = adw::Spinner::new();
             spinner.set_halign(gtk::Align::Center);
             spinner.set_valign(gtk::Align::Center);
-            spinner.set_hexpand(true);
-            spinner.set_vexpand(true);
-            spinner.start();
+            spinner.set_width_request(32);
+            spinner.set_height_request(32);
             placeholder.append(&spinner);
             self.body.append(&placeholder);
         } else if let LyricsPaneContent::Empty(empty_status) = &content {
