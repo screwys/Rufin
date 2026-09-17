@@ -937,9 +937,6 @@ msgstr "Ota automaattiset varmuuskopiot käyttöön"
 msgid "Enable background image"
 msgstr ""
 
-msgid "Enable equalizer"
-msgstr ""
-
 msgid "Enable partial star ratings"
 msgstr ""
 

@@ -980,9 +980,6 @@ msgstr ""
 msgid "Enable background image"
 msgstr ""
 
-msgid "Enable equalizer"
-msgstr "啟用等化器"
-
 msgid "Enable partial star ratings"
 msgstr ""
 
@@ -3244,6 +3241,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Enable equalizer"
+#~ msgstr "啟用等化器"
 
 #~ msgid "Visualizer"
 #~ msgstr "視覺效果"
