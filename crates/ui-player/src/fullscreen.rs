@@ -663,8 +663,11 @@ impl crate::PlayerUi {
     }
 
     fn refresh_fullscreen_background(&self) {
-        let settings = self.settings.current.borrow();
         let parts = &self.views.fullscreen_player;
+        if !self.fullscreen_player_visible() || parts.animation_tick.borrow().is_some() {
+            return;
+        }
+        let settings = self.settings.current.borrow();
         let dynamic = settings.fullscreen_dynamic_background;
         parts.background.set_visible(dynamic);
         if dynamic {
@@ -701,8 +704,8 @@ impl crate::PlayerUi {
             return;
         }
         self.views.fullscreen_player.visible.set(true);
-        self.apply_fullscreen_display_settings();
         self.animate_fullscreen_player(true);
+        self.apply_fullscreen_display_settings();
         let presentation = NowPlayingPresentation::new(Some(&player));
         self.apply_fullscreen_now_playing_text(&presentation);
         self.apply_fullscreen_responsive_layout();
@@ -917,6 +920,10 @@ impl crate::PlayerUi {
         }
 
         let root = self.views.fullscreen_player.root.clone();
+        if opening {
+            self.views.fullscreen_player.background.set_visible(false);
+            root.remove_css_class("artwork-background");
+        }
         let height = self.fullscreen_player_hidden_offset();
         let duration_us = i64::from(if opening {
             FULLSCREEN_PLAYER_OPEN_TRANSITION_MS
@@ -966,7 +973,6 @@ impl crate::PlayerUi {
                     if let Some(window) = tick_shell.window.upgrade() {
                         window.remove_css_class("fullscreen-artwork-bars");
                     }
-                    tick_shell.refresh_fullscreen_background();
                 }
                 root.set_visible(opening);
                 tick_shell
@@ -975,6 +981,7 @@ impl crate::PlayerUi {
                     .animation_tick
                     .borrow_mut()
                     .take();
+                tick_shell.refresh_fullscreen_background();
                 glib::ControlFlow::Break
             } else {
                 glib::ControlFlow::Continue
