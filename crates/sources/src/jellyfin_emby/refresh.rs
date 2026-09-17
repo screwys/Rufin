@@ -217,6 +217,11 @@ impl JellyfinEmbySource {
                 .await?;
         }
         scan.finish_batch().await?;
+        let section = crate::SourceHomeSection::NewlyAdded;
+        match self.home_section(section).await {
+            Ok(entries) => scan.replace_home_section(section.id(), &entries).await?,
+            Err(error) => crate::source::optional_collection_error(error)?,
+        }
         Ok(scan.finish().await?)
     }
 
@@ -662,6 +667,104 @@ mod tests {
         assert!(!pages.advance(1, Some(3)).expect("grown total"));
         assert_eq!(pages.offset(), 2);
         assert!(pages.advance(1, Some(3)).expect("final page"));
+    }
+
+    #[tokio::test]
+    async fn live_updates_refresh_newly_added_and_retain_it_on_failure() {
+        for kind in [crate::ServerKind::Jellyfin, crate::ServerKind::Emby] {
+            let server = MockServer::start().await;
+            let source = JellyfinEmbySource::open(
+                JellyfinEmbySourceConfig {
+                    emby_connect: false,
+                    kind,
+                    base_url: server.uri(),
+                    server_id: Some("server".into()),
+                    user_id: "user".into(),
+                    username: "listener".into(),
+                    trust_invalid_cert: false,
+                    use_instant_mix: false,
+                },
+                "token".into(),
+                "device".into(),
+            )
+            .unwrap();
+            let directory = tempfile::tempdir().unwrap();
+            let database = library::Database::open(directory.path().join("library.sqlite"))
+                .await
+                .unwrap();
+            let scan = Scan::begin(&database, "source", "Source", "source", None)
+                .await
+                .unwrap();
+            let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
+                panic!("initial publication");
+            };
+            let cancellation = library::ReadCancellation::new();
+            for (id, status, empty, identical, expected) in [
+                ("old", 200, false, false, vec!["old"]),
+                ("new", 200, false, false, vec!["new"]),
+                ("new", 200, false, true, vec!["new"]),
+                ("third", 503, false, false, vec!["new"]),
+                ("third", 200, true, false, vec!["new", "old", "third"]),
+            ] {
+                server.reset().await;
+                let item = serde_json::json!({"Id":id,"Name":id,"Type":"MusicAlbum"});
+                Mock::given(method("GET"))
+                    .and(path(match kind {
+                        crate::ServerKind::Jellyfin => format!("/Items/{id}"),
+                        crate::ServerKind::Emby => format!("/emby/Users/user/Items/{id}"),
+                    }))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(item.clone()))
+                    .expect(1)
+                    .mount(&server)
+                    .await;
+                let entries = if empty { vec![] } else { vec![item] };
+                Mock::given(method("GET"))
+                    .and(path(match kind {
+                        crate::ServerKind::Jellyfin => "/Items",
+                        crate::ServerKind::Emby => "/emby/Items",
+                    }))
+                    .and(query_param("SortBy", "DateCreated,SortName"))
+                    .and(query_param("Limit", "24"))
+                    .respond_with(ResponseTemplate::new(status).set_body_json(
+                        serde_json::json!({"Items":entries,"TotalRecordCount":entries.len()}),
+                    ))
+                    .expect(1)
+                    .mount(&server)
+                    .await;
+                let outcome = source
+                    .apply_live_items(&database, "source", vec![id.into()], vec![])
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    matches!(outcome, library::ScanOutcome::Identical(_)),
+                    identical
+                );
+                assert!(matches!(
+                    outcome,
+                    library::ScanOutcome::Changed(_) | library::ScanOutcome::Identical(_)
+                ));
+                let home = database
+                    .home_page(
+                        publication.source,
+                        None,
+                        0,
+                        0,
+                        &[library::HomeBlockKind::NewlyAdded],
+                        &cancellation,
+                    )
+                    .await
+                    .unwrap();
+                let mut titles = home
+                    .newly_added
+                    .albums
+                    .iter()
+                    .map(|row| row.title.as_str())
+                    .collect::<Vec<_>>();
+                titles.sort_unstable();
+                assert_eq!(titles, expected);
+                server.verify().await;
+            }
+        }
     }
 
     #[tokio::test]
