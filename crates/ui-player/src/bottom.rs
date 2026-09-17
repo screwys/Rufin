@@ -76,7 +76,8 @@ pub const BOTTOM_PLAYER_COMPACT_MIN_WIDTH: i32 =
         BOTTOM_PLAYER_ACTIONS_COMPACT_MIN_WIDTH
     };
 pub const BOTTOM_PLAYER_TINY_WIDTH: i32 = BOTTOM_PLAYER_COMPACT_MIN_WIDTH;
-pub const BOTTOM_PLAYER_FULL_PROGRESS_WIDTH: i32 = 864;
+const BOTTOM_PLAYER_PROGRESS_CENTER_PERCENT: i32 = 95;
+const BOTTOM_PLAYER_LAYOUT_COLUMNS: i32 = 3;
 pub const SEEK_PREVIEW_TOLERANCE_MILLIS: u64 = 1_500;
 pub const VOLUME_PERSIST_DELAY: Duration = Duration::from_millis(250);
 
@@ -854,16 +855,13 @@ pub fn bottom_player_content_width(player_width: i32) -> i32 {
 }
 
 pub fn bottom_player_progress_width(player_width: i32) -> i32 {
-    if player_width < BOTTOM_PLAYER_COMPACT_MIN_WIDTH {
-        BOTTOM_PLAYER_PROGRESS_MIN_WIDTH
-    } else if player_width <= BOTTOM_PLAYER_FULL_PROGRESS_WIDTH {
-        let span = BOTTOM_PLAYER_FULL_PROGRESS_WIDTH - BOTTOM_PLAYER_COMPACT_MIN_WIDTH;
-        let width_span = BOTTOM_PLAYER_PROGRESS_WIDTH - BOTTOM_PLAYER_PROGRESS_MIN_WIDTH;
-        let progress = player_width - BOTTOM_PLAYER_COMPACT_MIN_WIDTH;
-        BOTTOM_PLAYER_PROGRESS_MIN_WIDTH + width_span * progress / span
-    } else {
-        BOTTOM_PLAYER_PROGRESS_WIDTH + (player_width - BOTTOM_PLAYER_FULL_PROGRESS_WIDTH) / 3
-    }
+    let extra_width = player_width
+        .saturating_sub(BOTTOM_PLAYER_COMPACT_MIN_WIDTH)
+        .max(0);
+    // Feishin gives the seekbar 95% of its one-third center column. Apply the same
+    // share to width beyond Rufin's compact layout so the bar grows smoothly.
+    BOTTOM_PLAYER_PROGRESS_MIN_WIDTH
+        + extra_width * BOTTOM_PLAYER_PROGRESS_CENTER_PERCENT / (100 * BOTTOM_PLAYER_LAYOUT_COLUMNS)
 }
 
 pub fn centered_progress_width(
@@ -1972,7 +1970,7 @@ mod tests {
     }
 
     #[test]
-    fn bottom_player_progress_width_scales_with_window_size() {
+    fn bottom_player_progress_width_scales_with_the_center_column() {
         assert_eq!(
             super::bottom_player_progress_width(super::BOTTOM_PLAYER_COMPACT_MIN_WIDTH - 50),
             super::BOTTOM_PLAYER_PROGRESS_MIN_WIDTH
@@ -1982,19 +1980,15 @@ mod tests {
             super::BOTTOM_PLAYER_PROGRESS_MIN_WIDTH
         );
         assert_eq!(
-            super::bottom_player_progress_width(super::BOTTOM_PLAYER_FULL_PROGRESS_WIDTH),
-            super::BOTTOM_PLAYER_PROGRESS_WIDTH
+            super::bottom_player_progress_width(super::BOTTOM_PLAYER_COMPACT_MIN_WIDTH + 300),
+            super::BOTTOM_PLAYER_PROGRESS_MIN_WIDTH + 95
         );
         assert!(
             super::bottom_player_progress_width(1024)
-                > super::bottom_player_progress_width(super::BOTTOM_PLAYER_FULL_PROGRESS_WIDTH)
+                > super::bottom_player_progress_width(super::BOTTOM_PLAYER_COMPACT_MIN_WIDTH)
         );
         assert!(
             super::bottom_player_progress_width(1920) > super::bottom_player_progress_width(1024)
-        );
-        assert_eq!(
-            super::bottom_player_progress_width(super::BOTTOM_PLAYER_FULL_PROGRESS_WIDTH + 300),
-            super::BOTTOM_PLAYER_PROGRESS_WIDTH + 100
         );
     }
 
