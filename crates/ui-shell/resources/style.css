@@ -1459,12 +1459,8 @@ popover.slider-value-popover label {
   padding: 0;
 }
 
-.lyrics-loading-spinner {
-  min-width: 24px;
-  min-height: 24px;
-}
-
-.lyrics-line {
+.lyrics-line,
+.lyrics-instrumental {
   color: var(--window-fg-color);
   font-size: 19px;
   font-weight: 650;
@@ -1474,6 +1470,11 @@ popover.slider-value-popover label {
     color 180ms ease,
     opacity 360ms cubic-bezier(0.16, 1, 0.3, 1),
     transform 360ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.lyrics-instrumental {
+  opacity: 0.8;
+  text-shadow: 0 0 4px var(--window-bg-color);
 }
 
 .lyrics-line,
