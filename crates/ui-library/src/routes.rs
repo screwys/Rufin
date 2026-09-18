@@ -616,6 +616,7 @@ impl CatalogUi {
                         .activity_history(
                             request.1.as_ref(),
                             &request.0.query,
+                            request.0.settings.descending,
                             &library::ReadCancellation::new(),
                         )
                         .await

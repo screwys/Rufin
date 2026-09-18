@@ -1202,7 +1202,10 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
         assert_eq!(queue[0].artwork_binding, binding);
         let restored = database.restore_queue().await.unwrap();
         assert_eq!(restored.occurrences[0].artwork_binding, binding);
-        let history = database.activity_history(None, "", &cancel).await.unwrap();
+        let history = database
+            .activity_history(None, "", true, &cancel)
+            .await
+            .unwrap();
         assert_eq!(history[0].artwork_binding, binding);
         let history_window = database
             .history_rows_by_uri(std::slice::from_ref(uri), &cancel)

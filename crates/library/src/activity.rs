@@ -347,6 +347,7 @@ impl Database {
         &self,
         current: Option<&SourceId>,
         query: &str,
+        descending: bool,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<HistoryRow>> {
         let query: String = query.trim().to_lowercase().chars().take(256).collect();
@@ -391,12 +392,13 @@ impl Database {
             })
             .collect::<Vec<_>>()
             .join(" UNION ALL ");
+        let direction = if descending { "DESC" } else { "ASC" };
         let sql = format!(
             "WITH selected AS MATERIALIZED (
                SELECT * FROM ({selected}) ORDER BY started_at DESC,listen_key DESC LIMIT ?3
              )
              SELECT {} {HISTORY_ROW_SELECT}
-             ORDER BY listen.started_at DESC,listen.listen_key DESC",
+             ORDER BY listen.started_at {direction},listen.listen_key {direction}",
             crate::tracks::TRACK_LINK_COLUMNS,
         );
         let result = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))

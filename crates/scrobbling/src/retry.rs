@@ -942,7 +942,7 @@ mod tests {
 
         assert_eq!(
             database
-                .activity_history(Some(&SourceId::new("source")), "", &cancellation)
+                .activity_history(Some(&SourceId::new("source")), "", true, &cancellation)
                 .await
                 .expect("Activity")
                 .len(),
@@ -988,7 +988,7 @@ mod tests {
         );
         assert_eq!(
             database
-                .activity_history(Some(&SourceId::new("source")), "", &cancellation)
+                .activity_history(Some(&SourceId::new("source")), "", true, &cancellation)
                 .await
                 .expect("Activity after account removal")
                 .len(),

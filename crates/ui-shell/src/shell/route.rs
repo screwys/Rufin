@@ -1320,12 +1320,19 @@ impl Shell {
 
     fn queue_history_route(self: &Rc<Self>, route: Route, render_started: RouteTiming) {
         let database = Arc::clone(&self.products.library);
+        let settings = self
+            .settings
+            .current
+            .borrow()
+            .library_list(LibraryListKey::History);
         self.queue_application_route(
             route,
             render_started,
             "History route",
             move |_, cancellation| async move {
-                database.activity_history(None, "", &cancellation).await
+                database
+                    .activity_history(None, "", settings.descending, &cancellation)
+                    .await
             },
             |shell, rows| shell.history_route(rows),
         );
