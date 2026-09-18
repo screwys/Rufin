@@ -7,19 +7,21 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-19 19:55+0000\n"
-"Last-Translator: \"David Yakobi (Houtarou)\" <houtarou86@duck.com>\n"
+"PO-Revision-Date: 2026-09-18 21:50+0000\n"
+"Last-Translator: Arnaud Constantin <a.constantin@laposte.net>\n"
 "Language-Team: French <https://hosted.weblate.org/projects/rufin/app/fr/>\n"
 "Language: fr\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n > 1;\n"
-"X-Generator: Weblate 2026.9.dev0\n"
+"X-Generator: Weblate 2026.10.dev0\n"
 
 msgid ""
 "Backup file may contain sensitive information. Do you want to set a password?"
 msgstr ""
+"Les fichiers de sauvegarde peuvent contenir des informations sensible. "
+"Voulez-vous ajouter un mot de passe ?"
 
 msgid ""
 "Backup restored with {entries} skipped playlist entries and {listens} "
@@ -30,6 +32,8 @@ msgid ""
 "Downloads from this server will be removed, and automatic rules will be "
 "turned off"
 msgstr ""
+"Les téléchargements de ce serveur seront supprimés et les règles "
+"automatiques arrêtées"
 
 msgid ""
 "List shared folders on this server using the entered credentials or guest "
@@ -45,7 +49,7 @@ msgstr ""
 "consulter avant de les partager"
 
 msgid "No results ¯\\_(°╭╮°)_/¯"
-msgstr ""
+msgstr "Pas de résultat ¯\\_(°╭╮°)_/¯"
 
 msgid ""
 "No secret service found. Rufin will use a file to store its credentials. "
@@ -72,6 +76,8 @@ msgid ""
 "Replace the selected contents with this backup? Local folder permissions may "
 "need to be selected again."
 msgstr ""
+"Remplacer le contenu sélectionné avec cette sauvegarde ? Les permissions des "
+"dossiers locaux pourraient avoir besoin d’être à nouveau sélectionnées."
 
 msgid ""
 "Route server media through this device instead of sharing provider URLs with "
@@ -82,15 +88,22 @@ msgid ""
 "Rufin started with fresh user state because the saved database could not be "
 "used. Your settings and saved logins are unchanged."
 msgstr ""
+"Rufin s'est lancé avec un nouvel utilisateur car la base sauvegardée n'a pas "
+"pu être utilisée. Vos réglages et vos identifiants sont inchangés."
 
 msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
+"Rufin va calculer les données EBU R128 pour toute la bibliothèque. Cela peut "
+"utiliser une quantité significative de processeur, batterie et réseau pour "
+"un long moment."
 
 msgid ""
 "Temporary library storage is in use. Changes may be lost when Rufin closes."
 msgstr ""
+"Une bibliothèque temporaire est utilisée. Des changements peuvent être "
+"perdus en fermant Rufin."
 
 msgid ""
 "Thank you for trying out Rufin! If you have problems or suggestions, please "
@@ -145,31 +158,31 @@ msgid ". You only need to fill email and an application name parts"
 msgstr ""
 
 msgid "1 hour"
-msgstr ""
+msgstr "1 heure"
 
 msgid "12 hours"
-msgstr ""
+msgstr "12 heures"
 
 msgid "128 kbps"
-msgstr ""
+msgstr "128 kbps"
 
 msgid "192 kbps"
-msgstr ""
+msgstr "192 kbps"
 
 msgid "24 hours"
-msgstr ""
+msgstr "24 heures"
 
 msgid "256 kbps"
-msgstr ""
+msgstr "256 kbps"
 
 msgid "320 kbps"
-msgstr ""
+msgstr "320 kbps"
 
 msgid "5 Latest Albums"
-msgstr ""
+msgstr "5 derniers Albums"
 
 msgid "6 hours"
-msgstr ""
+msgstr "6 heures"
 
 msgid "API key (Subsonic)"
 msgstr ""
@@ -178,142 +191,142 @@ msgid "API key"
 msgstr ""
 
 msgid "API keys"
-msgstr ""
+msgstr "Clés API"
 
 msgid "About Rufin"
-msgstr ""
+msgstr "A propos de Rufin"
 
 msgid "Accent color"
 msgstr ""
 
 msgid "Access token"
-msgstr ""
+msgstr "Jeton d'accès"
 
 msgid "Actions"
-msgstr ""
+msgstr "Actions"
 
 msgid "Activity"
-msgstr ""
+msgstr "Activité"
 
 msgid "Add Rule"
-msgstr ""
+msgstr "Ajouter une règle"
 
 msgid "Add Source"
-msgstr ""
+msgstr "Ajouter une source"
 
 msgid "Add a matching server prefix"
 msgstr ""
 
 msgid "Add a music folder"
-msgstr ""
+msgstr "Ajouter un dossier musique"
 
 msgid "Add a music source to start listening."
 msgstr ""
 
 msgid "Add a new source"
-msgstr ""
+msgstr "Ajouter une nouvelle source"
 
 msgid "Add a title"
-msgstr ""
+msgstr "Ajouter un titre"
 
 msgid "Add current"
 msgstr ""
 
 msgid "Add folder"
-msgstr ""
+msgstr "Ajouter un dossier"
 
 msgid "Add to Favorites"
-msgstr ""
+msgstr "Ajouter aux favoris"
 
 msgid "Add to Pins"
 msgstr ""
 
 msgid "Add to Playlist"
-msgstr ""
+msgstr "Ajouter à une playlist"
 
 msgid "Add tracks when fewer than this many remain"
 msgstr ""
 
 msgid "Add"
-msgstr ""
+msgstr "Ajouter"
 
 msgid "Added to favorites"
-msgstr ""
+msgstr "Ajouté aux favoris"
 
 msgid "Added to"
-msgstr ""
+msgstr "Ajouté à"
 
 msgid "Adding source"
-msgstr ""
+msgstr "Ajouter une source"
 
 msgid "Album Artists"
-msgstr ""
+msgstr "Artiste de l'Album"
 
 msgid "Album artist"
-msgstr ""
+msgstr "Artiste de l'album"
 
 msgid "Album artists"
-msgstr ""
+msgstr "Artistes de l'album"
 
 msgid "Album radio"
 msgstr ""
 
 msgid "Album title"
-msgstr ""
+msgstr "Titre de l'album"
 
 msgid "Album tracks"
-msgstr ""
+msgstr "Pistes de l'album"
 
 msgid "Album unavailable"
-msgstr ""
+msgstr "Album non disponible"
 
 msgid "Album"
-msgstr ""
+msgstr "Album"
 
 msgid "Albums"
-msgstr ""
+msgstr "Albums"
 
 msgid "All Music"
-msgstr ""
+msgstr "Toute la musique"
 
 msgid "All Playlists"
-msgstr ""
+msgstr "Toutes les plalists"
 
 msgid "All tracks"
-msgstr ""
+msgstr "Toutes les pistes"
 
 msgid "All"
-msgstr ""
+msgstr "Tout"
 
 msgid "Allow remote connections"
-msgstr ""
+msgstr "Autoriser les connections à distance"
 
 msgid "Alternate addresses"
 msgstr ""
 
 msgid "Anonymous (WebDAV / SMB)"
-msgstr ""
+msgstr "Anonyme (WebDAV / SMB)"
 
 msgid "Anonymous"
-msgstr ""
+msgstr "Anonyme"
 
 msgid "Any genre"
-msgstr ""
+msgstr "Tous les genres"
 
 msgid "Any"
-msgstr ""
+msgstr "Tout"
 
 msgid "App settings"
-msgstr ""
+msgstr "Préférences"
 
 msgid "Appearance"
-msgstr ""
+msgstr "Apparence"
 
 msgid "Appears On"
 msgstr ""
 
 msgid "Application name"
-msgstr ""
+msgstr "Nom de l'application"
 
 msgid "Apply Template"
 msgstr ""
@@ -322,13 +335,13 @@ msgid "Approve sign-in in your browser"
 msgstr ""
 
 msgid "Artist / Album"
-msgstr ""
+msgstr "Artiste / Album"
 
 msgid "Artist albums"
-msgstr ""
+msgstr "Artiste albums"
 
 msgid "Artist name"
-msgstr ""
+msgstr "Nom de l'artiste"
 
 msgid "Artist radio"
 msgstr ""
@@ -337,31 +350,31 @@ msgid "Artist tracks"
 msgstr ""
 
 msgid "Artist unavailable"
-msgstr ""
+msgstr "Artiste non disponible"
 
 msgid "Artist"
-msgstr ""
+msgstr "Artiste"
 
 msgid "Artists"
-msgstr ""
+msgstr "Artistes"
 
 msgid "Artwork"
-msgstr ""
+msgstr "Illustration"
 
 msgid "Audio fade on play/pause"
 msgstr ""
 
 msgid "Audio output"
-msgstr ""
+msgstr "Sortie audio"
 
 msgid "Audio processing is unavailable while casting"
 msgstr ""
 
 msgid "Audio"
-msgstr ""
+msgstr "Audio"
 
 msgid "Authentication"
-msgstr ""
+msgstr "Authentification"
 
 msgid "Auto DJ off"
 msgstr ""
@@ -373,46 +386,46 @@ msgid "Auto DJ refill threshold"
 msgstr ""
 
 msgid "Auto DJ"
-msgstr ""
+msgstr "Auto DJ"
 
 msgid "Automatic Backups"
-msgstr ""
+msgstr "Sauvegarde automatique"
 
 msgid "Automatic updates"
-msgstr ""
+msgstr "Mises à jour automatiques"
 
 msgid "Automatic"
-msgstr ""
+msgstr "Automatique"
 
 msgid "BPM"
 msgstr ""
 
 msgid "Back"
-msgstr ""
+msgstr "Retour"
 
 msgid "Backup Folder"
-msgstr ""
+msgstr "Dossier de sauvegarde"
 
 msgid "Backup Password"
-msgstr ""
+msgstr "Mot de passe de sauvegarde"
 
 msgid "Backup Settings"
-msgstr ""
+msgstr "Réglages des sauvegardes"
 
 msgid "Backup exported"
-msgstr ""
+msgstr "Sauvegarde exportée"
 
 msgid "Backup failed: {error}"
-msgstr ""
+msgstr "Erreur lors de la sauvegarde : {error}"
 
 msgid "Backup restored with warnings: {warnings}"
 msgstr ""
 
 msgid "Backup restored"
-msgstr ""
+msgstr "Sauvegarde restaurée"
 
 msgid "Backups"
-msgstr ""
+msgstr "Sauvegarde"
 
 msgid "Bearer token (WebDAV)"
 msgstr ""
@@ -433,13 +446,13 @@ msgid "Caching local library..."
 msgstr ""
 
 msgid "Cancel download and clear downloaded items"
-msgstr ""
+msgstr "Annuler et effacer les éléments téléchargés"
 
 msgid "Cancel download"
-msgstr ""
+msgstr "Annuler le téléchargement"
 
 msgid "Cancel"
-msgstr ""
+msgstr "Annuler"
 
 msgid "Casting network"
 msgstr ""
@@ -451,45 +464,45 @@ msgid "Certificate authority (PEM)"
 msgstr ""
 
 msgid "Change Profile"
-msgstr ""
+msgstr "Changer de profile"
 
 msgid "Change Secret Storage"
 msgstr ""
 
 msgid "Change Source"
-msgstr ""
+msgstr "Changer de source"
 
 msgid "Change sort order"
-msgstr ""
+msgstr "Changer l'ordre de tri"
 
 msgid "Change"
-msgstr ""
+msgstr "Changer"
 
 msgid "Changes apply to {count} track"
 msgid_plural "Changes apply to {count} tracks"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "Les modifications s'appliquent à {count} piste"
+msgstr[1] "Les modifications s'appliquent à {count} pistes"
 
 msgid "Changes take effect after restarting Rufin"
-msgstr ""
+msgstr "Les changements prendrons effets lors du redémarrage de Rufin"
 
 msgid "Changing source"
-msgstr ""
+msgstr "Changer de source"
 
 msgid "Check for updates every"
-msgstr ""
+msgstr "Rechercher les mises à jour tous les"
 
 msgid "Check for updates"
-msgstr ""
+msgstr "Rechercher les mises à jour"
 
 msgid "Choose Folder"
-msgstr ""
+msgstr "Choisissez le dossier"
 
 msgid "Choose Server"
-msgstr ""
+msgstr "Choisissez le serveur"
 
 msgid "Choose a local music folder"
-msgstr ""
+msgstr "Choisissez un dossier local de musique"
 
 msgid "Choose an address"
 msgstr ""
@@ -531,31 +544,31 @@ msgid "Clearing queue also clears the current song"
 msgstr ""
 
 msgid "Close Window"
-msgstr ""
+msgstr "Fermer la fenêtre"
 
 msgid "Close app window"
-msgstr ""
+msgstr "Fermer la fenêtre de l'application"
 
 msgid "Close fullscreen player"
 msgstr ""
 
 msgid "Close"
-msgstr ""
+msgstr "Fermer"
 
 msgid "Club"
 msgstr ""
 
 msgid "Collapse sidebar"
-msgstr ""
+msgstr "Réduire la barre latérale"
 
 msgid "Collapse/expand sidebar"
-msgstr ""
+msgstr "Réduire / étendre la barre latérale"
 
 msgid "Collection"
-msgstr ""
+msgstr "Collection"
 
 msgid "Collections"
-msgstr ""
+msgstr "Collections"
 
 msgid "Color for the active word during playback"
 msgstr ""
@@ -564,7 +577,7 @@ msgid "Color scheme"
 msgstr ""
 
 msgid "Columns"
-msgstr ""
+msgstr "Colonnes"
 
 msgid "Comment text"
 msgstr ""
@@ -579,19 +592,19 @@ msgid "Complete sign-in in your browser"
 msgstr ""
 
 msgid "Confirm"
-msgstr ""
+msgstr "Confirmer"
 
 msgid "Connect manually"
 msgstr ""
 
 msgid "Connect to Rufin"
-msgstr ""
+msgstr "Connecter à Rufin"
 
 msgid "Connect your music servers or local folders."
 msgstr ""
 
 msgid "Connect"
-msgstr ""
+msgstr "Connecter"
 
 msgid "Connected as {username}"
 msgstr ""
@@ -645,7 +658,7 @@ msgid "Copy link"
 msgstr ""
 
 msgid "Copy"
-msgstr ""
+msgstr "Copier"
 
 msgid "Could not load related tracks"
 msgstr ""
@@ -702,7 +715,7 @@ msgid "Customize display"
 msgstr ""
 
 msgid "Cut"
-msgstr ""
+msgstr "Couper"
 
 msgid "Daily"
 msgstr ""
@@ -711,16 +724,16 @@ msgid "Dance"
 msgstr ""
 
 msgid "Dark"
-msgstr ""
+msgstr "Sombre"
 
 msgid "Date added"
-msgstr ""
+msgstr "Date d'ajout"
 
 msgid "Debug logging"
-msgstr ""
+msgstr "Logging de débogage"
 
 msgid "Decrease"
-msgstr ""
+msgstr "Diminuer"
 
 msgid "Default left sidebar"
 msgstr ""
@@ -747,46 +760,46 @@ msgid "Detail track columns"
 msgstr ""
 
 msgid "Detail"
-msgstr ""
+msgstr "Détail"
 
 msgid "Diagnostic log saved"
-msgstr ""
+msgstr "Journal de diagnostic enregistré"
 
 msgid "Diagnostic log"
-msgstr ""
+msgstr "Journal de diagnostic"
 
 msgid "Direction"
-msgstr ""
+msgstr "Direction"
 
 msgid "Disable private mode"
-msgstr ""
+msgstr "Mode privé désactive"
 
 msgid "Disabled"
-msgstr ""
+msgstr "Désactivé"
 
 msgid "Disc number"
-msgstr ""
+msgstr "Numéro de disque"
 
 msgid "Disc {number}"
-msgstr ""
+msgstr "Disque {number}"
 
 msgid "Disc"
-msgstr ""
+msgstr "Disque"
 
 msgid "Discography"
 msgstr ""
 
 msgid "Disconnect from Rufin?"
-msgstr ""
+msgstr "Se déconnecter de Rufin ?"
 
 msgid "Disconnect"
-msgstr ""
+msgstr "Déconnecter"
 
 msgid "Discord Rich Presence"
-msgstr ""
+msgstr "Discord Rich Presence"
 
 msgid "Discord"
-msgstr ""
+msgstr "Discord"
 
 msgid "Do not encrypt"
 msgstr ""
@@ -795,10 +808,10 @@ msgid "Don't duplicate"
 msgstr ""
 
 msgid "Download Folder"
-msgstr ""
+msgstr "Dossier de téléchargement"
 
 msgid "Download Queue"
-msgstr ""
+msgstr "Liste de téléchargement"
 
 msgid "Download quality"
 msgstr ""
@@ -810,25 +823,25 @@ msgid "Download started"
 msgstr ""
 
 msgid "Download"
-msgstr ""
+msgstr "Télécharger"
 
 msgid "Downloaded"
-msgstr ""
+msgstr "Téléchargé"
 
 msgid "Downloading Japanese dictionary..."
-msgstr ""
+msgstr "Téléchargement du dictionnaire japonais..."
 
 msgid "Downloading"
-msgstr ""
+msgstr "Téléchargement"
 
 msgid "Downloads"
-msgstr ""
+msgstr "Téléchargements"
 
 msgid "Drag to reorder"
 msgstr ""
 
 msgid "Duration"
-msgstr ""
+msgstr "Durée"
 
 msgid "Dynamic background"
 msgstr ""
@@ -837,16 +850,16 @@ msgid "EBU R128 reference level"
 msgstr ""
 
 msgid "EBU R128"
-msgstr ""
+msgstr "EBU R128"
 
 msgid "EP"
-msgstr ""
+msgstr "EP"
 
 msgid "EPs"
-msgstr ""
+msgstr "EPs"
 
 msgid "Edit Lyrics"
-msgstr ""
+msgstr "Modifier les paroles"
 
 msgid "Edit Smart Playlist"
 msgstr ""
@@ -855,7 +868,7 @@ msgid "Edit Source"
 msgstr ""
 
 msgid "Edit lyrics"
-msgstr ""
+msgstr "Modifier les paroles"
 
 msgid "Edit metadata"
 msgstr ""
@@ -876,10 +889,10 @@ msgid "Enable Controller"
 msgstr ""
 
 msgid "Enable EBU R128 Analysis?"
-msgstr ""
+msgstr "Activer l'analyse EBU R128 ?"
 
 msgid "Enable automatic backups"
-msgstr ""
+msgstr "Activer les sauvegardes automatiques"
 
 msgid "Enable background image"
 msgstr ""
@@ -888,10 +901,10 @@ msgid "Enable partial star ratings"
 msgstr ""
 
 msgid "Enable private mode"
-msgstr ""
+msgstr "Activer le mode privé"
 
 msgid "Enable"
-msgstr ""
+msgstr "Activé"
 
 msgid "Encrypt backups"
 msgstr ""
@@ -912,19 +925,19 @@ msgid "Entire Library"
 msgstr ""
 
 msgid "Equalizer"
-msgstr ""
+msgstr "Égaliseur"
 
 msgid "Everything, including new tracks"
-msgstr ""
+msgstr "Tout, y compris les nouvelles pistes"
 
 msgid "Expand lyrics and visualizer"
 msgstr ""
 
 msgid "Expand sidebar"
-msgstr ""
+msgstr "Étendre la barre latérale"
 
 msgid "Explore"
-msgstr ""
+msgstr "Explorer"
 
 msgid "Export Activity"
 msgstr ""
@@ -942,10 +955,10 @@ msgid "Export playlist"
 msgstr ""
 
 msgid "Export your listening history in Rufin"
-msgstr ""
+msgstr "Exportez votre historique d'écoute dans Rufin"
 
 msgid "Export"
-msgstr ""
+msgstr "Exporter"
 
 msgid "External lyric lookup is off"
 msgstr ""
@@ -960,25 +973,25 @@ msgid "External site links"
 msgstr ""
 
 msgid "Fade audio when playback is paused or resumed"
-msgstr ""
+msgstr "Fondu audio lorsque la lecture est interrompue ou reprise"
 
 msgid "Favorite current track"
 msgstr ""
 
 msgid "Favorite tracks"
-msgstr ""
+msgstr "Morceaux favoris"
 
 msgid "Favorite tracks, plus tracks from favorite albums and artists"
 msgstr ""
 
 msgid "Favorite"
-msgstr ""
+msgstr "Favoris"
 
 msgid "Favorites and ratings"
 msgstr ""
 
 msgid "Favorites"
-msgstr ""
+msgstr "Favoris"
 
 msgid "Featured genres"
 msgstr ""
@@ -987,43 +1000,45 @@ msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 
 msgid "Files"
-msgstr ""
+msgstr "Fichiers"
 
 msgid "Find shares"
 msgstr ""
 
 msgid "Find your ListenBrainz user token"
-msgstr ""
+msgstr "Trouvez votre jeton d'utilisateur ListenBrainz"
 
 msgid "Finding lyrics..."
-msgstr ""
+msgstr "Trouver les paroles..."
 
 msgid "Fixed position"
 msgstr ""
 
 msgid "Flat"
-msgstr ""
+msgstr "Plat"
 
 msgid "Folder"
-msgstr ""
+msgstr "Dossier"
 
 msgid "Folders"
-msgstr ""
+msgstr "Dossiers"
 
 msgid "Font family"
 msgstr ""
 
 msgid "Font size (px)"
-msgstr ""
+msgstr "Taille de la police (px)"
 
 msgid "For this import or export only. Leave empty for an unencrypted archive."
 msgstr ""
+"Pour cette importation ou exportation seulement. Laisser vide pour une "
+"archive non chiffrée."
 
 msgid "Forget Source"
-msgstr ""
+msgstr "Oublie la source"
 
 msgid "Forget \"{name}\"?"
-msgstr ""
+msgstr "Oubliez \"{name}\" ?"
 
 msgid "Forward"
 msgstr ""
@@ -1032,7 +1047,7 @@ msgid "Found Servers"
 msgstr ""
 
 msgid "Friday"
-msgstr ""
+msgstr "Vendredi"
 
 msgid "Full Bass"
 msgstr ""
@@ -1044,7 +1059,7 @@ msgid "Full"
 msgstr ""
 
 msgid "Furigana"
-msgstr ""
+msgstr "Furigana"
 
 msgid "Gapless mode"
 msgstr ""
@@ -1059,7 +1074,7 @@ msgid "Generate and cache waveforms for the current track"
 msgstr ""
 
 msgid "Genius"
-msgstr ""
+msgstr "Genius"
 
 msgid "Genre radio"
 msgstr ""
@@ -1125,52 +1140,52 @@ msgid "Home"
 msgstr ""
 
 msgid "Hour"
-msgstr ""
+msgstr "Heure"
 
 msgid "Identify"
-msgstr ""
+msgstr "Identification"
 
 msgid "Identifying..."
 msgstr ""
 
 msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
-msgstr ""
+msgstr "Si la page ne se charge pas, alors Libre.fm bloque votre IP/VPN"
 
 msgid "If you do not have API keys, create them"
-msgstr ""
+msgstr "Si vous n'avez pas de clés API, créez-les"
 
 msgid "Image"
-msgstr ""
+msgstr "Image"
 
 msgid "Import Backup"
-msgstr ""
+msgstr "Importer une sauvegarde"
 
 msgid "Import Playlist"
-msgstr ""
+msgstr "Importer une playlist"
 
 msgid "Include detailed Rufin diagnostics in this session"
-msgstr ""
+msgstr "Inclure des diagnostics détaillés dans cette session"
 
 msgid "Increase"
-msgstr ""
+msgstr "Augmenter"
 
 msgid "Increases memory usage"
 msgstr ""
 
 msgid "Install available updates when Rufin starts"
-msgstr ""
+msgstr "Installez les mises à jour disponibles lors du démarrage de Rufin"
 
 msgid "Installed"
-msgstr ""
+msgstr "Installé"
 
 msgid "Instrumental"
-msgstr ""
+msgstr "Instrumental"
 
 msgid "Integrations"
-msgstr ""
+msgstr "Intégrations"
 
 msgid "Jellyfin"
-msgstr ""
+msgstr "Jellyfin"
 
 msgid "Karaoke Playback"
 msgstr ""
@@ -1179,10 +1194,10 @@ msgid "Karaoke highlight color"
 msgstr ""
 
 msgid "Karaoke mode"
-msgstr ""
+msgstr "Mode Karaoke"
 
 msgid "Keep Rufin running after closing the window"
-msgstr ""
+msgstr "Garder Rufin actif après la fermeture de la fenêtre"
 
 msgid "Keep album transitions gapless when possible"
 msgstr ""
@@ -1191,7 +1206,7 @@ msgid "Keep music available offline. Folder changes only affect new downloads"
 msgstr ""
 
 msgid "Keyboard Shortcuts"
-msgstr ""
+msgstr "Raccourcis clavier"
 
 msgid "LRCLIB"
 msgstr ""
@@ -1200,10 +1215,10 @@ msgid "Language and readings"
 msgstr ""
 
 msgid "Language"
-msgstr ""
+msgstr "Langue"
 
 msgid "Laptop/Headphones"
-msgstr ""
+msgstr "Ordinateur portable / Casques"
 
 msgid "Last played"
 msgstr ""
@@ -1212,13 +1227,14 @@ msgid "Last.fm scrobbling"
 msgstr ""
 
 msgid "Last.fm"
-msgstr ""
+msgstr "Last.fm"
 
 msgid "Layout"
 msgstr ""
 
 msgid "Leave the password empty to keep the saved credential"
 msgstr ""
+"Laissez le mot de passe vide pour conserver les identifiants enregistrés"
 
 msgid "Legacy authorization"
 msgstr ""
@@ -1233,19 +1249,19 @@ msgid "Legacy"
 msgstr ""
 
 msgid "Library"
-msgstr ""
+msgstr "Bibliothèque"
 
 msgid "Libre.fm scrobbling"
 msgstr ""
 
 msgid "Libre.fm"
-msgstr ""
+msgstr "Libre.fm"
 
 msgid "Light"
 msgstr ""
 
 msgid "Limit"
-msgstr ""
+msgstr "Limite"
 
 msgid "Linear"
 msgstr ""
@@ -1254,28 +1270,28 @@ msgid "ListenBrainz scrobbling"
 msgstr ""
 
 msgid "ListenBrainz"
-msgstr ""
+msgstr "ListenBrainz"
 
 msgid "Loading related tracks..."
-msgstr ""
+msgstr "Chargement des pistes correspondantes..."
 
 msgid "Loading..."
-msgstr ""
+msgstr "Chargement..."
 
 msgid "Local File Access"
-msgstr ""
+msgstr "Accès aux fichiers locaux"
 
 msgid "Local File Mapping"
 msgstr ""
 
 msgid "Local Folders"
-msgstr ""
+msgstr "Dossiers locaux"
 
 msgid "Local Prefix"
 msgstr ""
 
 msgid "Local file access configured"
-msgstr ""
+msgstr "Accès aux fichiers locaux configuré"
 
 msgid "Local file mapping is no longer available"
 msgstr ""
@@ -1289,52 +1305,52 @@ msgid "Local imports and access"
 msgstr ""
 
 msgid "Local library"
-msgstr ""
+msgstr "Bibliothèque locale"
 
 msgid "Local music folder is unavailable"
-msgstr ""
+msgstr "Le dossier musique local n'est pas disponible"
 
 msgid "Local music folder"
-msgstr ""
+msgstr "Dossier de musique local"
 
 msgid "Local playback saved"
 msgstr ""
 
 msgid "Local"
-msgstr ""
+msgstr "Local"
 
 msgid "Locate Folder"
-msgstr ""
+msgstr "Localiser le dossier"
 
 msgid "Lock metadata"
 msgstr ""
 
 msgid "Logs are copied"
-msgstr ""
+msgstr "Les journaux sont copiés"
 
 msgid "Loudness normalization"
 msgstr ""
 
 msgid "Lyrics loaded"
-msgstr ""
+msgstr "Paroles chargées"
 
 msgid "Lyrics offset (ms)"
-msgstr ""
+msgstr "Décalage des paroles (ms)"
 
 msgid "Lyrics settings"
-msgstr ""
+msgstr "Paramètres des paroles"
 
 msgid "Lyrics storage"
-msgstr ""
+msgstr "Stockage des paroles"
 
 msgid "Lyrics will appear here."
 msgstr ""
 
 msgid "Lyrics"
-msgstr ""
+msgstr "Paroles"
 
 msgid "Manage"
-msgstr ""
+msgstr "Gérer"
 
 msgid "Mapped Local Path"
 msgstr ""
@@ -1343,28 +1359,28 @@ msgid "Mapped local file not found"
 msgstr ""
 
 msgid "Maximum year"
-msgstr ""
+msgstr "Année maximale"
 
 msgid "Menu"
-msgstr ""
+msgstr "Menu"
 
 msgid "Metadata editing is no longer available"
-msgstr ""
+msgstr "L'édition des métadonnées n'est plus disponible"
 
 msgid "Metadata editing requires Local access"
 msgstr ""
 
 msgid "Metadata source"
-msgstr ""
+msgstr "Source de métadonnées"
 
 msgid "Metadata"
-msgstr ""
+msgstr "Métadonnées"
 
 msgid "Minimum year"
-msgstr ""
+msgstr "Année minimum"
 
 msgid "Monday"
-msgstr ""
+msgstr "Lundi"
 
 msgid "Mood tracks"
 msgstr ""
@@ -1373,28 +1389,28 @@ msgid "Mood"
 msgstr ""
 
 msgid "Moods"
-msgstr ""
+msgstr "Humeurs"
 
 msgid "More actions"
-msgstr ""
+msgstr "Autres actions"
 
 msgid "Most Played (Monthly)"
-msgstr ""
+msgstr "Le plus joué (mois)"
 
 msgid "Most Played (Weekly)"
-msgstr ""
+msgstr "Le plus joué (semaine)"
 
 msgid "Most Played (Yearly)"
-msgstr ""
+msgstr "Le plus joué (année)"
 
 msgid "Most Played"
-msgstr ""
+msgstr "Le plus joué"
 
 msgid "Most Skipped"
-msgstr ""
+msgstr "Le plus sauté"
 
 msgid "Most played"
-msgstr ""
+msgstr "Le plus joué"
 
 msgid "Move down"
 msgstr ""
@@ -1409,19 +1425,19 @@ msgid "Move up"
 msgstr ""
 
 msgid "Multi-selection"
-msgstr ""
+msgstr "Multisélection"
 
 msgid "Multiple values"
-msgstr ""
+msgstr "Valeurs multiples"
 
 msgid "Music Folder"
-msgstr ""
+msgstr "Dossier de musique"
 
 msgid "Music folders on the Rufin machine"
-msgstr ""
+msgstr "Dossiers de musique sur la machine Rufin"
 
 msgid "MusicBrainz + Last.fm"
-msgstr ""
+msgstr "MusicBrainz + Last.fm"
 
 msgid "MusicBrainz artist ID"
 msgstr ""
@@ -1475,46 +1491,46 @@ msgid "Navigation"
 msgstr ""
 
 msgid "Needs attention"
-msgstr ""
+msgstr "Besoin d'attention"
 
 msgid "NetEase"
-msgstr ""
+msgstr "NetEase"
 
 msgid "Network used to send local and proxied media to casting devices"
 msgstr ""
 
 msgid "Never Played"
-msgstr ""
+msgstr "Jamais joué"
 
 msgid "New Playlist"
-msgstr ""
+msgstr "Nouvelle playlist"
 
 msgid "New Smart Playlist"
-msgstr ""
+msgstr "Nouvelle playlist intelligente"
 
 msgid "New download rule"
-msgstr ""
+msgstr "Nouvelle règle de téléchargement"
 
 msgid "Newly added"
-msgstr ""
+msgstr "Nouvellement ajouté"
 
 msgid "Next Track"
-msgstr ""
+msgstr "Piste suivante"
 
 msgid "Next audio device"
 msgstr ""
 
 msgid "Next page"
-msgstr ""
+msgstr "Page suivante"
 
 msgid "Next source"
-msgstr ""
+msgstr "Source suivante"
 
 msgid "Next"
-msgstr ""
+msgstr "Suivant"
 
 msgid "No Servers Found"
-msgstr ""
+msgstr "Aucun serveur trouvé"
 
 msgid "No albums from this artist yet"
 msgstr ""
@@ -1523,19 +1539,19 @@ msgid "No cached server path yet"
 msgstr ""
 
 msgid "No favorite albums yet"
-msgstr ""
+msgstr "Pas encore d'albums favori"
 
 msgid "No favorite artists yet"
-msgstr ""
+msgstr "Pas encore d'artistes favori"
 
 msgid "No favorites yet"
-msgstr ""
+msgstr "Pas encore de favoris"
 
 msgid "No folder selected"
-msgstr ""
+msgstr "Pas de dossier sélectionné"
 
 msgid "No folders selected"
-msgstr ""
+msgstr "Pas de dossiers sélectionnés"
 
 msgid "No limit"
 msgstr ""
@@ -1550,19 +1566,19 @@ msgid "No local folders configured"
 msgstr ""
 
 msgid "No lyrics available."
-msgstr ""
+msgstr "Pas de paroles disponibles."
 
 msgid "No lyrics"
-msgstr ""
+msgstr "Pas de paroles"
 
 msgid "No matching tracks found"
-msgstr ""
+msgstr "Aucune piste correspondante trouvée"
 
 msgid "No matching tracks"
 msgstr ""
 
 msgid "No music from this artist yet"
-msgstr ""
+msgstr "Pas de musique de cet artiste pour l’instant"
 
 msgid "No network address available"
 msgstr ""
@@ -1574,7 +1590,7 @@ msgid "No related tracks found"
 msgstr ""
 
 msgid "No results"
-msgstr ""
+msgstr "Aucun résultat"
 
 msgid "No servers found, add one manually or try again"
 msgstr ""
