@@ -111,7 +111,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     let cancel = ReadCancellation::new();
     let history = fixture
         .database
-        .activity_history(Some(&SourceId::new("source")), "", &cancel)
+        .activity_history(Some(&SourceId::new("source")), "", true, &cancel)
         .await
         .expect("Activity History");
     assert_eq!(history.len(), 1);
@@ -193,7 +193,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         .unwrap();
     let history = fixture
         .database
-        .activity_history(None, "", &cancel)
+        .activity_history(None, "", true, &cancel)
         .await
         .unwrap();
     let row = &history[0];
@@ -285,7 +285,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     assert_eq!(
         fixture
             .database
-            .activity_history(Some(&SourceId::new("source")), "", &cancel)
+            .activity_history(Some(&SourceId::new("source")), "", true, &cancel)
             .await
             .expect("History survives delivery")
             .len(),
@@ -377,7 +377,7 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
     let cancel = ReadCancellation::new();
     let current = fixture
         .database
-        .activity_history(Some(&SourceId::new("source")), "", &cancel)
+        .activity_history(Some(&SourceId::new("source")), "", true, &cancel)
         .await
         .unwrap();
     assert_eq!(
@@ -389,7 +389,7 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
     );
     let matching = fixture
         .database
-        .activity_history(Some(&SourceId::new("source")), "legacy", &cancel)
+        .activity_history(Some(&SourceId::new("source")), "legacy", true, &cancel)
         .await
         .unwrap();
     assert_eq!(
@@ -401,7 +401,7 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
     );
     let remote = fixture
         .database
-        .activity_history(Some(&SourceId::new("remote")), "", &cancel)
+        .activity_history(Some(&SourceId::new("remote")), "", true, &cancel)
         .await
         .unwrap();
     assert_eq!(remote.len(), 1);
@@ -490,7 +490,7 @@ async fn history_preserves_latest_matching_facts_and_source_scope() {
     let cancel = ReadCancellation::new();
     let all = fixture
         .database
-        .activity_history(None, "", &cancel)
+        .activity_history(None, "", true, &cancel)
         .await
         .unwrap();
     assert_eq!(
@@ -505,13 +505,13 @@ async fn history_preserves_latest_matching_facts_and_source_scope() {
     assert_eq!(all[3].play_count, 2);
     let current = fixture
         .database
-        .activity_history(Some(&SourceId::new("source")), "", &cancel)
+        .activity_history(Some(&SourceId::new("source")), "", true, &cancel)
         .await
         .unwrap();
     assert_eq!(current, vec![all[3].clone()]);
     let matching = fixture
         .database
-        .activity_history(None, " old TITLE ", &cancel)
+        .activity_history(None, " old TITLE ", true, &cancel)
         .await
         .unwrap();
     assert_eq!(matching.len(), 1);
@@ -521,7 +521,7 @@ async fn history_preserves_latest_matching_facts_and_source_scope() {
     assert!(
         fixture
             .database
-            .activity_history(Some(&SourceId::new("other")), "old", &cancel)
+            .activity_history(Some(&SourceId::new("other")), "old", true, &cancel)
             .await
             .unwrap()
             .is_empty()

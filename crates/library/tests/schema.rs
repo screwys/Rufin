@@ -911,7 +911,7 @@ async fn schema_43_fixture_relocates_and_migrates_every_core_durable_family_and_
         .await
         .expect("migrate schema 43 to 44");
     let history = database
-        .activity_history(None, "", &ReadCancellation::new())
+        .activity_history(None, "", true, &ReadCancellation::new())
         .await
         .expect("read migrated orphan Activity");
     assert_eq!(
