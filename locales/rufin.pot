@@ -178,6 +178,9 @@ msgstr ""
 msgid "About Rufin"
 msgstr ""
 
+msgid "Absolute"
+msgstr ""
+
 msgid "Accent color"
 msgstr ""
 
@@ -311,6 +314,9 @@ msgid "Application name"
 msgstr ""
 
 msgid "Apply Template"
+msgstr ""
+
+msgid "Apply"
 msgstr ""
 
 msgid "Approve sign-in in your browser"
@@ -741,6 +747,9 @@ msgstr ""
 msgid "Delete \"{name}\"?"
 msgstr ""
 
+msgid "Delete playlist file"
+msgstr ""
+
 msgid "Delete"
 msgstr ""
 
@@ -851,6 +860,9 @@ msgid "EPs"
 msgstr ""
 
 msgid "Edit Lyrics"
+msgstr ""
+
+msgid "Edit Playlist"
 msgstr ""
 
 msgid "Edit Smart Playlist"
@@ -988,6 +1000,9 @@ msgstr ""
 msgid "Featured genres"
 msgstr ""
 
+msgid "Filename"
+msgstr ""
+
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 
@@ -1029,6 +1044,9 @@ msgstr ""
 
 #, rust-format
 msgid "Forget \"{name}\"?"
+msgstr ""
+
+msgid "Format"
 msgstr ""
 
 msgid "Forward"
@@ -1155,6 +1173,12 @@ msgstr ""
 msgid "Import Playlist"
 msgstr ""
 
+msgid "Import a copy"
+msgstr ""
+
+msgid "Import"
+msgstr ""
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr ""
 
@@ -1257,10 +1281,22 @@ msgstr ""
 msgid "Linear"
 msgstr ""
 
+msgid "Link exported file"
+msgstr ""
+
+msgid "Link to file\342\200\246"
+msgstr ""
+
+msgid "Linked file"
+msgstr ""
+
 msgid "ListenBrainz scrobbling"
 msgstr ""
 
 msgid "ListenBrainz"
+msgstr ""
+
+msgid "Load file contents"
 msgstr ""
 
 msgid "Loading related tracks..."
@@ -1653,6 +1689,9 @@ msgstr ""
 msgid "On this device"
 msgstr ""
 
+msgid "On"
+msgstr ""
+
 msgid "One Name: Value header per line"
 msgstr ""
 
@@ -1710,6 +1749,9 @@ msgstr ""
 msgid "Open settings"
 msgstr ""
 
+msgid "Open"
+msgstr ""
+
 msgid "OpenSubsonic"
 msgstr ""
 
@@ -1740,7 +1782,13 @@ msgstr ""
 msgid "Paste"
 msgstr ""
 
+msgid "Path format"
+msgstr ""
+
 msgid "Path in Source"
+msgstr ""
+
+msgid "Path"
 msgstr ""
 
 msgid "Pause"
@@ -1841,6 +1889,12 @@ msgid "Playing on {device}"
 msgstr ""
 
 msgid "Playlist File"
+msgstr ""
+
+msgid "Playlist file changed"
+msgstr ""
+
+msgid "Playlist files"
 msgstr ""
 
 msgid "Playlist name"
@@ -1993,6 +2047,9 @@ msgstr ""
 msgid "Redo"
 msgstr ""
 
+msgid "Refresh automatically"
+msgstr ""
+
 msgid "Refresh section"
 msgstr ""
 
@@ -2014,6 +2071,9 @@ msgstr ""
 msgid "Related"
 msgstr ""
 
+msgid "Relative"
+msgstr ""
+
 msgid "Release date"
 msgstr ""
 
@@ -2021,6 +2081,12 @@ msgid "Release notifications"
 msgstr ""
 
 msgid "Release"
+msgstr ""
+
+msgid "Reload from file"
+msgstr ""
+
+msgid "Reload"
 msgstr ""
 
 msgid "Remote lyrics"
@@ -2083,10 +2149,7 @@ msgstr ""
 msgid "Removed from"
 msgstr ""
 
-msgid "Rename Playlist"
-msgstr ""
-
-msgid "Rename"
+msgid "Rename file"
 msgstr ""
 
 msgid "Repeat all"
@@ -2099,6 +2162,9 @@ msgid "Repeat one"
 msgstr ""
 
 msgid "Repeat"
+msgstr ""
+
+msgid "Replace file contents"
 msgstr ""
 
 msgid "Replace saved custom headers"
@@ -2153,6 +2219,9 @@ msgstr ""
 msgid "Rufin data folder"
 msgstr ""
 
+msgid "Rufin host"
+msgstr ""
+
 msgid "Rule actions"
 msgstr ""
 
@@ -2180,7 +2249,13 @@ msgstr ""
 msgid "Save action saves the lyrics directly to your source"
 msgstr ""
 
+msgid "Save changes automatically"
+msgstr ""
+
 msgid "Save lyrics automatically"
+msgstr ""
+
+msgid "Save playlist changes automatically"
 msgstr ""
 
 msgid "Save to rescan"
@@ -2694,6 +2769,9 @@ msgstr ""
 msgid "Unknown disc"
 msgstr ""
 
+msgid "Unlink"
+msgstr ""
+
 msgid "Unmute"
 msgstr ""
 
@@ -2752,6 +2830,9 @@ msgid "Use maximum year"
 msgstr ""
 
 msgid "Use minimum year"
+msgstr ""
+
+msgid "Use source setting"
 msgstr ""
 
 msgid "Use the server's Instant Mix for Radio and Auto DJ."

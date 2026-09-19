@@ -10,7 +10,7 @@ where
     dialog.present(Some(parent));
 }
 
-fn install_light_dismiss<D>(dialog: &D)
+pub fn install_light_dismiss<D>(dialog: &D)
 where
     D: IsA<adw::Dialog> + Clone + 'static,
 {

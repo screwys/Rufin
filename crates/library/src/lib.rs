@@ -12,8 +12,9 @@ mod keys;
 mod local;
 mod loudness;
 mod lyrics;
-mod m3u;
 mod migration;
+mod playlist_format;
+mod playlist_links;
 mod playlists;
 mod queue;
 mod radio;
@@ -57,7 +58,11 @@ pub use local::{
 };
 pub use loudness::{AlbumLoudnessWork, LoudnessMeasurement, R128TagWrite, TrackLoudnessWork};
 pub use lyrics::LyricsCacheRow;
-pub use m3u::PlaylistImportReport;
+pub use playlist_format::{
+    PlaylistFile, PlaylistFileEntry, PlaylistFormat, PlaylistImportReport, PlaylistPathMode,
+    playlist_host_path, playlist_locator,
+};
+pub use playlist_links::{ObservedPlaylistFile, PlaylistFileLink};
 pub use playlists::{
     PlaylistDetailPage, PlaylistEntryRow, PlaylistEntrySort, PlaylistEntryWrite, PlaylistGenreLink,
     PlaylistIdentity, PlaylistRow, PlaylistSort,

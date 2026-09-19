@@ -21,10 +21,14 @@ serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 regex.workspace = true
+roxmltree.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tokio = { workspace = true, features = ["macros", "sync", "time"] }
 url.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix.workspace = true
 
 [dev-dependencies]
 proptest = "1.6.0"

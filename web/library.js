@@ -17,6 +17,7 @@ import { api, fragment, session, state } from "./connection.js";
 import {
   closeMenus,
   openName,
+  openPlaylistTransfer,
   playlistMenu,
   radioMenu,
   showMenu,
@@ -376,6 +377,7 @@ async function loadView(initial = false) {
       ? !detail
       : !state.source);
   $("new-playlist").hidden = route !== "playlists" || !!detail;
+  $("import-playlist").hidden = route !== "playlists" || !!detail;
   $("search").placeholder = tr("Search");
   try {
     if (route === "sources") {
@@ -825,9 +827,10 @@ function bindCards(host) {
         ]);
       const pin = pinAction(kind, row, row.source ?? state.source);
       if (pin) actions.push(pin);
+      if (kind === "playlist") actions.push([tr("Export Playlist"), () => openPlaylistTransfer(row), "export"]);
       if (row.writable)
         actions.push(
-          [tr("Rename Playlist"), () => openName(row)],
+          [tr("Edit"), () => openName(row)],
           [
             tr("Delete Playlist"),
             async () => {

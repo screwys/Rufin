@@ -21,4 +21,5 @@ pub mod lyrics;
 pub mod artwork;
 
 pub mod metadata;
+pub mod playlist_files;
 pub mod playlists;

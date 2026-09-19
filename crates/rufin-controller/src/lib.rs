@@ -5,6 +5,30 @@ use std::sync::Arc;
 
 use rufin_core::{app, diagnostics::Diagnostics, paths};
 
+pub fn discovery_worker_argument() -> Option<ExitCode> {
+    let mut arguments = std::env::args_os().skip(1);
+    if arguments.next().as_deref() != Some(std::ffi::OsStr::new("--discovery-worker")) {
+        return None;
+    }
+    let result = (|| {
+        let timeout = arguments
+            .next()
+            .and_then(|value| value.to_str().and_then(|value| value.parse::<u64>().ok()))
+            .ok_or("Usage: rufin --discovery-worker TIMEOUT_SECONDS".to_string())?;
+        if arguments.next().is_some() {
+            return Err("Usage: rufin --discovery-worker TIMEOUT_SECONDS".to_string());
+        }
+        sources::run_discovery_worker(timeout).map_err(|error| error.to_string())
+    })();
+    Some(match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            let _ = writeln!(io::stderr().lock(), "{error}");
+            ExitCode::FAILURE
+        }
+    })
+}
+
 pub fn run(arguments: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
     match run_inner(arguments) {
         Ok(()) => ExitCode::SUCCESS,

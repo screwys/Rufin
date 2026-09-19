@@ -39,6 +39,7 @@ pub use config::{
 };
 pub use file::discovery::run_worker as run_discovery_worker;
 pub use file::metadata::read_embedded_lyrics;
+pub use file::playlist::{playlist_file_is_non_audio, playlist_file_revision};
 pub use file::remote::smb::list_smb_shares;
 pub use file::remote::webdav::nextcloud::authorize_nextcloud;
 pub use file::remote::{

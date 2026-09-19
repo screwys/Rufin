@@ -2491,9 +2491,23 @@ impl Source {
         &self,
         database: &Database,
         path: &str,
+        target: Option<library::PlaylistKey>,
     ) -> SourceResult<library::PlaylistImportReport> {
         match &self.implementation {
-            Implementation::Files(source) => source.import_playlist_file(database, path).await,
+            Implementation::Files(source) => {
+                source.import_playlist_file(database, path, target).await
+            }
+            Implementation::Local(_) => {
+                let path = self
+                    .local_playlist_path(path)
+                    .ok_or(SourceError::NotFound)?;
+                let input = std::fs::File::open(&path)
+                    .map_err(|error| SourceError::Other(error.to_string()))?;
+                database
+                    .import_playlist_file(std::io::BufReader::new(input), &path, target, |_| None)
+                    .await
+                    .map_err(Into::into)
+            }
             _ => Err(SourceError::InvalidRequest(
                 "This source does not store playlist files",
             )),
@@ -2505,9 +2519,67 @@ impl Source {
         database: &Database,
         path: &str,
         file: tempfile::TempPath,
+        path_mode: library::PlaylistPathMode,
+        expected_revision: Option<&str>,
     ) -> SourceResult<()> {
         match &self.implementation {
-            Implementation::Files(source) => source.save_playlist_file(database, path, file).await,
+            Implementation::Files(source) => {
+                source
+                    .save_playlist_file(database, path, file, path_mode, expected_revision)
+                    .await
+            }
+            _ => Err(SourceError::InvalidRequest(
+                "This source does not store playlist files",
+            )),
+        }
+    }
+
+    pub fn local_playlist_path(&self, path: &str) -> Option<std::path::PathBuf> {
+        let Implementation::Local(source) = &self.implementation else {
+            return None;
+        };
+        let (index, relative) = path
+            .strip_prefix('@')
+            .and_then(|value| value.split_once('/'))
+            .and_then(|(index, relative)| {
+                index.parse::<usize>().ok().map(|index| (index, relative))
+            })
+            .unwrap_or((0, path));
+        source.roots().get(index).map(|root| root.join(relative))
+    }
+
+    pub async fn playlist_file_revision(&self, path: &str) -> SourceResult<String> {
+        match &self.implementation {
+            Implementation::Local(_) => crate::playlist_file_revision(
+                &self
+                    .local_playlist_path(path)
+                    .ok_or(SourceError::NotFound)?,
+            )
+            .map_err(|error| SourceError::Other(error.to_string())),
+            Implementation::Files(source) => source.playlist_file_revision(path).await,
+            _ => Err(SourceError::InvalidRequest(
+                "This source does not store playlist files",
+            )),
+        }
+    }
+
+    pub async fn rename_playlist_file(&self, from: &str, to: &str) -> SourceResult<()> {
+        match &self.implementation {
+            Implementation::Files(source) => source.rename_playlist_file(from, to).await,
+            _ => Err(SourceError::InvalidRequest(
+                "Use native file access for this source",
+            )),
+        }
+    }
+
+    pub async fn delete_playlist_file(&self, path: &str) -> SourceResult<()> {
+        match &self.implementation {
+            Implementation::Local(_) => std::fs::remove_file(
+                self.local_playlist_path(path)
+                    .ok_or(SourceError::NotFound)?,
+            )
+            .map_err(|error| SourceError::Other(error.to_string())),
+            Implementation::Files(source) => source.delete_playlist_file(path).await,
             _ => Err(SourceError::InvalidRequest(
                 "This source does not store playlist files",
             )),

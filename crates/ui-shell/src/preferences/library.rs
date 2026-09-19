@@ -417,6 +417,12 @@ pub(crate) fn local_sources_page(shell: &Rc<Shell>, dialog: &adw::Dialog) -> adw
     {
         local_group.add(&half_stars);
     }
+    if let Some(row) = local_source
+        .as_ref()
+        .and_then(|source| super::source::playlist_auto_save_row(shell, source))
+    {
+        local_group.add(&row);
+    }
     if configured.local_folders.is_empty() {
         local_group.add(&empty_local_row);
     } else {

@@ -538,6 +538,7 @@ async fn icon(
         icon!("rufin-audio-only-symbolic.svg"),
         icon!("rufin-playlists-compact-symbolic.svg"),
         icon!("rufin-document-edit-symbolic.svg"),
+        icon!("rufin-document-save-symbolic.svg"),
         icon!("rufin-object-select-symbolic.svg"),
         icon!("rufin-x-office-calendar-symbolic.svg"),
         icon!("rufin-more-symbolic.svg"),

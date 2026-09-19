@@ -52,6 +52,60 @@ pub(crate) fn half_stars_row(
     Some(row)
 }
 
+pub(crate) fn playlist_auto_save_row(
+    shell: &Rc<crate::shell::Shell>,
+    source: &SourceSummary,
+) -> Option<adw::SwitchRow> {
+    use adw::prelude::*;
+    if !matches!(source.kind.as_str(), "local" | "smb" | "webdav") {
+        return None;
+    }
+    let resource = crate::ui_resource::PLAYLIST_FILE_DIALOG_RESOURCE;
+    let row: adw::SwitchRow = ui_shared::ui_resource::object(
+        &ui_shared::ui_resource::builder(resource),
+        resource,
+        "source_auto_save",
+    );
+    let owner = shell.products.source.clone();
+    let source_id = source.id.clone();
+    let weak_row = row.downgrade();
+    let weak_shell = Rc::downgrade(shell);
+    gtk::glib::spawn_future_local(async move {
+        let Some(row) = weak_row.upgrade() else {
+            return;
+        };
+        match rufin_core::playlist_files::source_auto_save(&owner, source_id.clone())
+            .recv()
+            .await
+        {
+            Ok(Ok(enabled)) => row.set_active(enabled),
+            Ok(Err(error)) => {
+                if let Some(shell) = weak_shell.upgrade() {
+                    shell.control_feedback.show_feedback_toast(error);
+                }
+                return;
+            }
+            Err(_) => return,
+        }
+        row.connect_active_notify(move |row| {
+            let result = rufin_core::playlist_files::set_source_auto_save(
+                &owner,
+                source_id.clone(),
+                row.is_active(),
+            );
+            let weak_shell = weak_shell.clone();
+            gtk::glib::spawn_future_local(async move {
+                if let Ok(Err(error)) = result.recv().await {
+                    if let Some(shell) = weak_shell.upgrade() {
+                        shell.control_feedback.show_feedback_toast(error);
+                    }
+                }
+            });
+        });
+    });
+    Some(row)
+}
+
 pub(crate) fn folder_selected_text(count: u64) -> String {
     let label = count.to_string();
     trn_with(

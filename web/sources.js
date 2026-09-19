@@ -169,6 +169,9 @@ async function openSource(item = null) {
     : "local";
   $("source-kind").disabled = !!editingSource;
   sourceFields();
+  const fileSource = editingSource && ["local", "smb", "webdav"].includes(editingSource.kind);
+  $("source-playlist-save-row").hidden = !fileSource;
+  if (fileSource) $("source-playlist-save").checked = (await api(`/playlists/source-settings?source=${encodeURIComponent(item.id)}`)).auto_save;
   if (editingSource?.kind === "local")
     $("source-paths").value = editingSource.roots.join("\n");
   if (editingSource?.preset) {
@@ -326,6 +329,7 @@ function init() {
         return;
       }
       if (!editingSource) state.source = result.id;
+      if (editingSource && !$("source-playlist-save-row").hidden) await api("/playlists/source-settings", "PATCH", { source: editingSource.id, auto_save: $("source-playlist-save").checked });
       $("source-dialog").close();
       $("password").value = "";
       updateSources(await api("/sources"));

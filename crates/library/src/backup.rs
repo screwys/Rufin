@@ -75,7 +75,7 @@ impl Database {
                 "SELECT playlist_key FROM main.playlists WHERE playlist_key>?1 AND name IS NOT NULL ORDER BY playlist_key LIMIT 1")
                 .bind(cursor).fetch_optional(&mut *transaction).await? {
                 let path = directory.join(format!("playlists/{ordinal}.m3u8"));
-                crate::m3u::export_playlist_m3u_on(&mut transaction, key, &path, private_file(&path)?).await?;
+                crate::playlist_format::export_playlist_on(&mut transaction, key, &path, crate::PlaylistPathMode::Absolute, private_file(&path)?).await?;
                 cursor = key.raw();
                 ordinal += 1;
             }
@@ -139,7 +139,7 @@ impl Database {
         let mut transaction = connection.begin().await?;
         let mut report = BackupRestoreReport::default();
         if contents.playlists {
-            sqlx::raw_sql("DELETE FROM main.playlists;DELETE FROM smart_playlists;")
+            sqlx::raw_sql("DELETE FROM main.playlists;DELETE FROM smart_playlists;DELETE FROM playlist_file_ignored;DELETE FROM playlist_file_settings;")
                 .execute(&mut *transaction)
                 .await?;
             report.playlists = crate::playlists::import_playlists_jsonl_on(
@@ -150,10 +150,11 @@ impl Database {
             for ordinal in 0..playlist_count {
                 let name = format!("playlists/{ordinal}.m3u8");
                 let path = directory.join(&name);
-                let imported = crate::m3u::import_playlist_m3u_on(
+                let imported = crate::playlist_format::import_playlist_on(
                     &mut transaction,
-                    open(&name)?,
+                    crate::PlaylistFile::read(open(&name)?, &path)?,
                     &path,
+                    None,
                     |_| None,
                 )
                 .await?;

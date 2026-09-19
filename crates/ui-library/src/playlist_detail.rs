@@ -467,15 +467,15 @@ impl CatalogUi {
                 });
                 wrapper.add_controller(drop);
 
-                let rename = detail_action_button(EDIT_ICON, "Rename");
-                let rename_shell = Rc::clone(self);
+                let edit = detail_action_button(EDIT_ICON, "Edit");
+                let edit_shell = Rc::clone(self);
                 let playlist = *key;
-                let rename_owner = Rc::clone(&owner_state);
-                rename.connect_clicked(move |_| {
-                    let name = rename_owner.borrow().name().to_string();
-                    (rename_shell.media_menus.rename_playlist_dialog)(playlist, name);
+                let edit_owner = Rc::clone(&owner_state);
+                edit.connect_clicked(move |_| {
+                    let name = edit_owner.borrow().name().to_string();
+                    (edit_shell.media_menus.edit_playlist_dialog)(playlist, name);
                 });
-                actions.append(&rename);
+                actions.append(&edit);
 
                 let add_current = detail_action_button(ADD_ICON, "Add current");
                 add_current.set_sensitive(self.has_current_track);

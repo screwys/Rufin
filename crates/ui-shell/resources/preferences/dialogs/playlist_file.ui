@@ -24,4 +24,21 @@
       <response id="source" translatable="yes" appearance="suggested">Use This Source</response>
     </responses>
   </object>
+  <object class="GtkFileFilter" id="playlist_filter"><property name="name" translatable="yes">Playlist files</property><patterns><pattern>*.m3u</pattern><pattern>*.m3u8</pattern><pattern>*.pls</pattern><pattern>*.xspf</pattern><pattern>*.M3U</pattern><pattern>*.M3U8</pattern><pattern>*.PLS</pattern><pattern>*.XSPF</pattern></patterns></object>
+  <object class="GtkFileDialog" id="chooser"><property name="title" translatable="yes">Playlist File</property></object>
+  <object class="AdwAlertDialog" id="import_options">
+    <property name="heading" translatable="yes">Import Playlist</property><property name="close-response">cancel</property>
+    <property name="extra-child"><object class="AdwSwitchRow" id="import_copy"><property name="title" translatable="yes">Import a copy</property></object></property>
+    <responses><response id="cancel" translatable="yes">Cancel</response><response id="import" translatable="yes" appearance="suggested">Import</response></responses>
+  </object>
+  <object class="AdwAlertDialog" id="export_options">
+    <property name="heading" translatable="yes">Export Playlist</property><property name="close-response">cancel</property>
+    <property name="extra-child"><object class="GtkListBox"><property name="selection-mode">none</property><style><class name="boxed-list"/></style>
+      <child><object class="AdwComboRow" id="export_format"><property name="title" translatable="yes">Format</property><property name="model"><object class="GtkStringList"><items><item>M3U8</item><item>M3U</item><item>PLS</item><item>XSPF</item></items></object></property></object></child>
+      <child><object class="AdwComboRow" id="export_path_mode"><property name="title" translatable="yes">Path format</property><property name="model"><object class="GtkStringList"><items><item translatable="yes">Automatic</item><item translatable="yes">Relative</item><item translatable="yes">Absolute</item></items></object></property></object></child>
+      <child><object class="AdwSwitchRow" id="export_link"><property name="title" translatable="yes">Link exported file</property></object></child>
+    </object></property>
+    <responses><response id="cancel" translatable="yes">Cancel</response><response id="export" translatable="yes" appearance="suggested">Export</response></responses>
+  </object>
+  <object class="AdwSwitchRow" id="source_auto_save"><property name="title" translatable="yes">Save playlist changes automatically</property></object>
 </interface>

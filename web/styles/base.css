@@ -290,6 +290,96 @@ dialog textarea {
   margin-top: 23px;
 }
 
+dialog.playlist-edit {
+  width: min(620px, calc(100% - 32px));
+}
+
+#playlist-file-options {
+  min-width: 0;
+  margin: 24px 0 0;
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+}
+
+#playlist-file-options label {
+  margin: 0;
+}
+
+.playlist-link-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.playlist-link-fields input,
+.playlist-link-fields select {
+  margin-top: 6px;
+}
+
+.playlist-link-actions,
+.playlist-file-actions {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.playlist-file-actions {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+#playlist-file-options button {
+  white-space: normal;
+}
+
+.playlist-file-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 16px 12px;
+  align-items: center;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-color);
+}
+
+.playlist-filename-field {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.playlist-filename-field button {
+  flex-shrink: 0;
+}
+
+#playlist-file-refresh {
+  justify-self: end;
+}
+
+#playlist-file-error:empty {
+  display: none;
+}
+
+@media (max-width: 480px) {
+  dialog.playlist-edit {
+    padding: 20px;
+  }
+  .playlist-link-fields,
+  .playlist-file-settings {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .playlist-file-settings {
+    gap: 8px;
+  }
+  .playlist-file-settings label:not(:first-child) {
+    margin-top: 8px !important;
+  }
+  #playlist-file-refresh {
+    justify-self: start;
+  }
+}
+
 .checkbox {
   display: flex;
   align-items: center;
