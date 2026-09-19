@@ -473,7 +473,7 @@ async fn source_icon(
             asset(
                 "image/svg+xml",
                 include_bytes!(concat!(
-                    "../../../../data/icons/hicolor/scalable/apps/io.github.screwys.Rufin.source.",
+                    "../../../../data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.",
                     $name,
                     ".svg"
                 )),

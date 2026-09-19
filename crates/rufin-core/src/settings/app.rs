@@ -201,6 +201,8 @@ pub struct Settings {
     pub lyrics_panel_visible: bool,
     #[serde(default)]
     pub visualizer_panel_visible: bool,
+    #[serde(default)]
+    pub visualizer: super::visualizer::VisualizerSettings,
     #[serde(default = "default_lyrics_panel_visible")]
     pub fullscreen_lyrics_visible: bool,
     #[serde(default)]
@@ -264,6 +266,7 @@ impl Default for Settings {
             window_height: None,
             lyrics_panel_visible: true,
             visualizer_panel_visible: false,
+            visualizer: super::visualizer::VisualizerSettings::default(),
             fullscreen_lyrics_visible: true,
             fullscreen_visualizer_visible: false,
             fullscreen_dynamic_background: false,

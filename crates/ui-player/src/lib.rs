@@ -173,12 +173,14 @@ pub fn register_resources() -> Result<(), String> {
 }
 
 pub mod bottom;
+mod color_chooser;
 pub mod equalizer;
 pub mod fullscreen;
 mod fullscreen_background;
 mod icons;
 mod progress;
 pub mod visualizer;
+mod visualizer_settings;
 use bottom::PlayerControls;
 use fullscreen::FullscreenPlayerParts;
 use visualizer::VisualizerParts;

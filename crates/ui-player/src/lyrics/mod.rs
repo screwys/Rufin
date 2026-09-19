@@ -2,6 +2,7 @@ pub mod search;
 pub mod state;
 mod timing;
 mod view;
+pub use view::LyricsPane;
 mod wrapping_line;
 
 mod panel;

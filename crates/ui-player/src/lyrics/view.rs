@@ -273,6 +273,8 @@ use karaoke_text::KaraokeText;
 pub struct LyricsPane {
     root: gtk::Overlay,
     scroller: gtk::ScrolledWindow,
+    controls: gtk::Box,
+    pub(crate) settings_controls: gtk::Box,
     body: gtk::Box,
     save_button: gtk::Button,
     clear_auto_search_button: gtk::Button,
@@ -382,6 +384,7 @@ impl LyricsPane {
             scroller: gtk::ScrolledWindow,
             body: gtk::Box,
             controls: gtk::Box,
+            settings_controls: gtk::Box,
             save_button: gtk::Button,
             clear_auto_search_button: gtk::Button,
             search_button: gtk::Button,
@@ -394,14 +397,13 @@ impl LyricsPane {
         let edit_label = tr("Edit lyrics");
         edit_button.set_tooltip_text(Some(&edit_label));
         edit_button.update_property(&[gtk::accessible::Property::Label(&edit_label)]);
-        let settings_label = tr("Lyrics settings");
-        settings_button.set_tooltip_text(Some(&settings_label));
-        settings_button.update_property(&[gtk::accessible::Property::Label(&settings_label)]);
         root.set_measure_overlay(&controls, false);
 
         let pane = Self {
             root,
             scroller,
+            controls,
+            settings_controls,
             body,
             save_button,
             clear_auto_search_button,
@@ -439,6 +441,13 @@ impl LyricsPane {
 
     pub fn connect_settings_clicked(&self, open: impl Fn() + 'static) {
         self.settings_button.connect_clicked(move |_| open());
+    }
+
+    pub fn set_lyrics_visible(&self, visible: bool) {
+        self.scroller.set_visible(visible);
+        self.search_button.set_visible(visible);
+        self.edit_button.set_visible(visible);
+        self.controls.set_visible(visible);
     }
 
     pub fn connect_edit_clicked(&self, edit: impl Fn() + 'static) {

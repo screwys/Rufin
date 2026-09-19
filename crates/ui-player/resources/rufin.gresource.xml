@@ -11,7 +11,9 @@
     <file compressed="true">player/lyrics/search.ui</file>
     <file compressed="true">player/right_panel.ui</file>
     <file compressed="true">player/lyrics/settings.ui</file>
-    <file compressed="true">player/lyrics/color_chooser.ui</file>
+    <file compressed="true">player/visualizer_settings.ui</file>
+    <file compressed="true">player/visualizer_paste.ui</file>
+    <file compressed="true">player/color_chooser.ui</file>
     <file compressed="true">player/playback_settings.ui</file>
   </gresource>
 </gresources>

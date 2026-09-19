@@ -129,6 +129,16 @@ pub fn present_lyrics_settings_dialog(
     let (dialog, page) =
         build_lyrics_settings(shell, window, uses_local_storage, appearance_changed);
     dialog.add(&page);
+    let visualizer_page = crate::visualizer_settings::build_visualizer_settings(shell);
+    dialog.add(&visualizer_page);
+    let lyrics_visible = if shell.fullscreen_player_visible() {
+        shell.views.fullscreen_player.lyrics_enabled.get()
+    } else {
+        shell.lyrics.panel_visible.get()
+    };
+    if !lyrics_visible {
+        dialog.set_visible_page(&visualizer_page);
+    }
     if let Some(lyrics) = shell.selected_lyrics() {
         lyrics.settings_dialog.set(Some(&dialog));
     }
@@ -174,6 +184,7 @@ fn build_lyrics_settings(
         karaoke: adw::SwitchRow,
         theme_accent: gtk::Box,
         color_button: gtk::Button,
+        highlight_color: adw::ActionRow,
         font: adw::ComboRow,
         size: adw::SpinRow,
         size_adjustment: gtk::Adjustment,
@@ -365,6 +376,7 @@ fn build_lyrics_settings(
     let color_window = window.downgrade();
     let color_appearance = Rc::clone(&appearance_changed);
     let default_accent = theme_accent.clone();
+    let color_title = highlight_color.title();
     color_button.connect_clicked(move |_| {
         let default_color = default_accent.color();
         let initial = color_shell
@@ -379,12 +391,26 @@ fn build_lyrics_settings(
         let Some(window) = color_window.upgrade() else {
             return;
         };
-        present_lyrics_color_chooser(
-            &color_shell,
-            Rc::clone(&color_appearance),
+        let shell = Rc::downgrade(&color_shell);
+        let appearance_changed = Rc::clone(&color_appearance);
+        let default_probe = default_accent.clone();
+        crate::color_chooser::present_color_chooser(
             &window,
+            &color_title,
             initial,
-            default_accent.clone().upcast(),
+            move || default_probe.color(),
+            move |color| {
+                if let Some(shell) = shell.upgrade()
+                    && shell.set_lyrics_setting(
+                        "lyrics highlight color",
+                        true,
+                        Some(rgba_hex(&color)),
+                        |settings| &mut settings.lyrics_highlight_color,
+                    )
+                {
+                    appearance_changed();
+                }
+            },
         );
     });
     let font_families = Rc::new(system_font_families(window));
@@ -566,74 +592,6 @@ fn system_font_families(widget: &impl IsA<gtk::Widget>) -> Vec<String> {
     families.sort_unstable();
     families.dedup();
     families
-}
-
-#[allow(deprecated)]
-fn present_lyrics_color_chooser(
-    shell: &Rc<crate::PlayerUi>,
-    appearance_changed: Rc<dyn Fn()>,
-    parent: &impl IsA<gtk::Window>,
-    initial: gtk::gdk::RGBA,
-    default_probe: gtk::Widget,
-) {
-    let resource = crate::ui_resource::LYRICS_COLOR_CHOOSER_RESOURCE;
-    let builder = ui_shared::ui_resource::builder(resource);
-    ui_shared::objects!(builder, resource, {
-        dialog: adw::Window,
-        cancel: gtk::Button,
-        default: gtk::Button,
-        select: gtk::Button,
-        body: gtk::Box,
-    });
-    let chooser = Rc::new(RefCell::new(lyrics_color_chooser(&initial)));
-    body.append(&*chooser.borrow());
-    dialog.set_transient_for(Some(parent));
-
-    let close = dialog.downgrade();
-    cancel.connect_clicked(move |_| {
-        if let Some(close) = close.upgrade() {
-            close.close();
-        }
-    });
-    let default_chooser = Rc::clone(&chooser);
-    let default_body = body.clone();
-    default.connect_clicked(move |_| {
-        let replacement = lyrics_color_chooser(&default_probe.color());
-        default_body.remove(&*default_chooser.borrow());
-        default_body.append(&replacement);
-        default_chooser.replace(replacement);
-    });
-    let shell = Rc::downgrade(shell);
-    let close = dialog.downgrade();
-    select.connect_clicked(move |_| {
-        let Some(shell) = shell.upgrade() else {
-            return;
-        };
-        let color = chooser.borrow().rgba();
-        if shell.set_lyrics_setting(
-            "lyrics highlight color",
-            true,
-            Some(rgba_hex(&color)),
-            |settings| &mut settings.lyrics_highlight_color,
-        ) {
-            appearance_changed();
-        }
-        if let Some(close) = close.upgrade() {
-            close.close();
-        }
-    });
-    dialog.present();
-}
-
-#[allow(deprecated)]
-fn lyrics_color_chooser(color: &gtk::gdk::RGBA) -> gtk::ColorChooserWidget {
-    let chooser = gtk::ColorChooserWidget::new();
-    chooser.set_show_editor(true);
-    chooser.set_use_alpha(false);
-    chooser.set_rgba(color);
-    chooser.set_hexpand(true);
-    chooser.set_vexpand(true);
-    chooser
 }
 
 fn rgba_hex(color: &gtk::gdk::RGBA) -> String {

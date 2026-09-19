@@ -417,6 +417,9 @@ msgstr ""
 msgid "Backups"
 msgstr ""
 
+msgid "Bar spacing (px)"
+msgstr ""
+
 msgid "Bearer token (WebDAV)"
 msgstr ""
 
@@ -511,6 +514,9 @@ msgid "Choose playback output"
 msgstr ""
 
 msgid "Choose"
+msgstr ""
+
+msgid "Circular spectrum"
 msgstr ""
 
 msgid "Classical"
@@ -648,6 +654,12 @@ msgid "Copy access token"
 msgstr ""
 
 msgid "Copy link"
+msgstr ""
+
+msgid "Copy preset"
+msgstr ""
+
+msgid "Copy the current appearance to the clipboard"
 msgstr ""
 
 msgid "Copy"
@@ -979,6 +991,9 @@ msgstr ""
 msgid "Fade audio when playback is paused or resumed"
 msgstr ""
 
+msgid "Fall speed (%)"
+msgstr ""
+
 msgid "Favorite current track"
 msgstr ""
 
@@ -1009,6 +1024,9 @@ msgstr ""
 msgid "Files"
 msgstr ""
 
+msgid "Filled spectrum"
+msgstr ""
+
 msgid "Find shares"
 msgstr ""
 
@@ -1028,6 +1046,9 @@ msgid "Folder"
 msgstr ""
 
 msgid "Folders"
+msgstr ""
+
+msgid "Follow the app accent with lighter and darker tones"
 msgstr ""
 
 msgid "Font family"
@@ -1065,6 +1086,9 @@ msgid "Full Treble"
 msgstr ""
 
 msgid "Full"
+msgstr ""
+
+msgid "Fullscreen"
 msgstr ""
 
 msgid "Furigana"
@@ -1111,6 +1135,12 @@ msgid "Go to"
 msgstr ""
 
 msgid "Google Cast"
+msgstr ""
+
+msgid "Gradient end"
+msgstr ""
+
+msgid "Gradient start"
 msgstr ""
 
 msgid "Green"
@@ -1359,13 +1389,13 @@ msgstr ""
 msgid "Loudness normalization"
 msgstr ""
 
+msgid "Lyrics background opacity"
+msgstr ""
+
 msgid "Lyrics loaded"
 msgstr ""
 
 msgid "Lyrics offset (ms)"
-msgstr ""
-
-msgid "Lyrics settings"
 msgstr ""
 
 msgid "Lyrics storage"
@@ -1407,6 +1437,9 @@ msgstr ""
 msgid "Minimum year"
 msgstr ""
 
+msgid "Mirrored bars"
+msgstr ""
+
 msgid "Monday"
 msgstr ""
 
@@ -1438,6 +1471,9 @@ msgid "Most Skipped"
 msgstr ""
 
 msgid "Most played"
+msgstr ""
+
+msgid "Motion"
 msgstr ""
 
 msgid "Move down"
@@ -1710,6 +1746,9 @@ msgstr ""
 msgid "Only unplayed tracks"
 msgstr ""
 
+msgid "Opacity (%)"
+msgstr ""
+
 msgid "Open Controller"
 msgstr ""
 
@@ -1770,6 +1809,9 @@ msgstr ""
 msgid "Other releases"
 msgstr ""
 
+msgid "Outline bars"
+msgstr ""
+
 msgid "Overview"
 msgstr ""
 
@@ -1777,6 +1819,9 @@ msgid "Password or token"
 msgstr ""
 
 msgid "Password"
+msgstr ""
+
+msgid "Paste preset"
 msgstr ""
 
 msgid "Paste"
@@ -1792,6 +1837,12 @@ msgid "Path"
 msgstr ""
 
 msgid "Pause"
+msgstr ""
+
+msgid "Peak fall speed (% per second)"
+msgstr ""
+
+msgid "Peak hold (seconds)"
 msgstr ""
 
 msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
@@ -1954,7 +2005,28 @@ msgstr ""
 msgid "Preserve pitch"
 msgstr ""
 
+msgid "Preset 1"
+msgstr ""
+
+msgid "Preset 2"
+msgstr ""
+
+msgid "Preset 3"
+msgstr ""
+
+msgid "Preset 4"
+msgstr ""
+
+msgid "Preset 5"
+msgstr ""
+
+msgid "Preset saved"
+msgstr ""
+
 msgid "Preset"
+msgstr ""
+
+msgid "Presets"
 msgstr ""
 
 msgid "Prevent automatic metadata refreshes from replacing these values"
@@ -2180,6 +2252,9 @@ msgstr ""
 msgid "Require SMB encryption"
 msgstr ""
 
+msgid "Reset appearance"
+msgstr ""
+
 msgid "Reset to defaults"
 msgstr ""
 
@@ -2190,6 +2265,9 @@ msgid "Resource not found"
 msgstr ""
 
 msgid "Restore User State"
+msgstr ""
+
+msgid "Restore defaults without deleting saved presets"
 msgstr ""
 
 msgid "Restore player layout"
@@ -2207,10 +2285,16 @@ msgstr ""
 msgid "Retry"
 msgstr ""
 
+msgid "Rise speed (%)"
+msgstr ""
+
 msgid "Rock"
 msgstr ""
 
 msgid "Romaji"
+msgstr ""
+
+msgid "Rounded bars"
 msgstr ""
 
 msgid "Rows"
@@ -2275,6 +2359,9 @@ msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
 msgstr[0] ""
 msgstr[1] ""
+
+msgid "Saved preset"
+msgstr ""
 
 msgid "Saved to"
 msgstr ""
@@ -2380,6 +2467,9 @@ msgstr ""
 msgid "Seekbar"
 msgstr ""
 
+msgid "Segmented bars"
+msgstr ""
+
 msgid "Select All"
 msgstr ""
 
@@ -2454,6 +2544,9 @@ msgstr ""
 msgid "Settings and sources"
 msgstr ""
 
+msgid "Settings"
+msgstr ""
+
 msgid "Share"
 msgstr ""
 
@@ -2482,6 +2575,9 @@ msgid "Show lyrics"
 msgstr ""
 
 msgid "Show paused status"
+msgstr ""
+
+msgid "Show peak markers"
 msgstr ""
 
 msgid "Show ratings in the bottom bar"
@@ -2533,6 +2629,9 @@ msgstr ""
 msgid "Sidebar route by position"
 msgstr ""
 
+msgid "Sidebar"
+msgstr ""
+
 msgid "Sign In in Browser"
 msgstr ""
 
@@ -2578,6 +2677,9 @@ msgstr ""
 msgid "Smart playlists"
 msgstr ""
 
+msgid "Solid bars"
+msgstr ""
+
 msgid "Some playlist entries could not be imported"
 msgstr ""
 
@@ -2611,6 +2713,9 @@ msgstr ""
 msgid "Sources"
 msgstr ""
 
+msgid "Spectrum line"
+msgstr ""
+
 msgid "Sponsor"
 msgstr ""
 
@@ -2627,6 +2732,9 @@ msgid "Store calculated loudness in supported Local music files"
 msgstr ""
 
 msgid "Stream quality"
+msgstr ""
+
+msgid "Style"
 msgstr ""
 
 msgid "Sunday"
@@ -2675,6 +2783,9 @@ msgid "Theme"
 msgstr ""
 
 msgid "This device"
+msgstr ""
+
+msgid "This is not a valid Rufin visualizer preset."
 msgstr ""
 
 #, rust-format
@@ -2814,6 +2925,9 @@ msgstr ""
 msgid "Use a number above zero"
 msgstr ""
 
+msgid "Use accent color"
+msgstr ""
+
 msgid "Use different layout below a threshold width"
 msgstr ""
 
@@ -2869,6 +2983,9 @@ msgid "View"
 msgstr ""
 
 msgid "Visible"
+msgstr ""
+
+msgid "Visualizer"
 msgstr ""
 
 msgid "Volume Down"

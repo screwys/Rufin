@@ -5,8 +5,8 @@
     <file>hicolor/64x64/apps/io.github.screwys.Rufin.external.lastfm.png</file>
     <file>hicolor/64x64/apps/io.github.screwys.Rufin.external.musicbrainz.png</file>
     <file>hicolor/64x64/apps/io.github.screwys.Rufin.source.jellyfin.png</file>
-    <file>hicolor/scalable/apps/io.github.screwys.Rufin.source.plex.svg</file>
-    <file>hicolor/scalable/apps/io.github.screwys.Rufin.source.emby.svg</file>
+    <file>hicolor/64x64/apps/io.github.screwys.Rufin.source.plex.svg</file>
+    <file>hicolor/64x64/apps/io.github.screwys.Rufin.source.emby.svg</file>
     <file>hicolor/64x64/apps/io.github.screwys.Rufin.source.navidrome.png</file>
     <file>hicolor/64x64/apps/io.github.screwys.Rufin.source.opensubsonic.png</file>
     <file>hicolor/64x64/apps/io.github.screwys.Rufin.source.webdav.png</file>
@@ -128,6 +128,7 @@
     <file>hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-sliders-vertical-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-sound-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-text-center-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-waves-and-screen-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-text-justify-center-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-view-switch-symbolic.svg</file>

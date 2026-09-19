@@ -85,21 +85,6 @@
                       <class name="wide-sidebar-slot" />
                       <class name="fullscreen-player-experience" />
                     </style>
-                    <child type="overlay">
-                      <object class="GtkToggleButton" id="focus_button">
-                        <property name="halign">end</property>
-                        <property name="valign">start</property>
-                        <property name="margin-end">8</property>
-                        <property name="icon-name">rufin-view-fullscreen-corners-symbolic</property>
-                        <property name="tooltip-text" translatable="yes">Expand lyrics and visualizer</property>
-                        <style>
-                          <class name="icon-button" />
-                          <class name="flat" />
-                          <class name="circular" />
-                          <class name="fullscreen-focus-button" />
-                        </style>
-                      </object>
-                    </child>
                   </object>
                 </child>
               </object>
@@ -376,6 +361,17 @@
         </child>
       </object>
     </child>
+  </object>
+  <object class="GtkToggleButton" id="focus_button">
+    <property name="focus-on-click">false</property>
+    <property name="icon-name">rufin-view-fullscreen-symbolic</property>
+    <property name="tooltip-text" translatable="yes">Expand lyrics and visualizer</property>
+    <style>
+      <class name="icon-button" />
+      <class name="flat" />
+      <class name="circular" />
+      <class name="fullscreen-focus-button" />
+    </style>
   </object>
   <object class="GtkBox" id="lyrics_host">
     <property name="orientation">vertical</property>

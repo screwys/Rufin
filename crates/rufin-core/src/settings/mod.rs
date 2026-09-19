@@ -4,6 +4,7 @@ pub mod layout;
 mod secret_storage;
 pub use secret_storage::KeyringSecretStore;
 pub mod sidebar;
+pub mod visualizer;
 
 pub use app::{
     ExternalSiteLinkSettings, HomeBlockKind, HomeSectionKind, RandomPlayGenreSelection,
