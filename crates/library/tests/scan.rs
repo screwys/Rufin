@@ -357,7 +357,7 @@ async fn connection(path: &Path) -> SqliteConnection {
 }
 
 #[tokio::test]
-async fn artist_sort_names_survive_sparse_credits_and_reset_with_complete_records() {
+async fn artist_names_and_sort_names_survive_sparse_credits_and_reset_with_complete_records() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("library.sqlite3");
     let database = Database::open(&path).await.unwrap();
@@ -377,7 +377,7 @@ async fn artist_sort_names_survive_sparse_credits_and_reset_with_complete_record
     .await
     .unwrap();
     scan.write_artist(
-        "artist", "The Cure", "the cure", None, None, None, None, None,
+        "artist", "the cure", "the cure", None, None, None, None, None,
     )
     .await
     .unwrap();
@@ -427,6 +427,13 @@ async fn artist_sort_names_survive_sparse_credits_and_reset_with_complete_record
                 .await
                 .unwrap();
         assert_eq!(actual, sort.unwrap_or("cure, the"));
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT name FROM artists WHERE object_id=\'artist\'")
+                .fetch_one(&mut reader)
+                .await
+                .unwrap(),
+            "The Cure"
+        );
     }
 }
 
@@ -552,7 +559,7 @@ async fn write_small_catalog(
         "genre-one",
         "Genre One",
         "genre one",
-        "genre one",
+        Some("genre one"),
         Some(genre_artwork),
     )
     .await
@@ -664,6 +671,7 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
         panic!("first scan must publish");
     };
     assert_eq!(first.catalog_revision, 1);
+    assert!(first.tracks_added);
     assert_eq!(
         database
             .cached_source("source-one", &ReadCancellation::new())
@@ -704,7 +712,10 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
 
     assert_eq!(
         write_small_catalog(&database, "fresh-two", "Track One", true, b"genre-art").await,
-        ScanOutcome::Identical(first)
+        ScanOutcome::Identical(library::Publication {
+            tracks_added: false,
+            ..first
+        })
     );
     assert_eq!(
         Scan::accept_freshness(
@@ -715,7 +726,10 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
         )
         .await
         .expect("accept freshness"),
-        Some(first)
+        Some(library::Publication {
+            tracks_added: false,
+            ..first
+        })
     );
 
     let ScanOutcome::Changed(changed) = write_small_catalog(
@@ -943,7 +957,7 @@ async fn point_album_artwork_updates_cached_members_without_replacing_distinct_c
                     "genre-one",
                     "Genre One",
                     "genre one",
-                    "genre one",
+                    Some("genre one"),
                     Some(b"genre-art"),
                 )
                 .await
@@ -1067,7 +1081,7 @@ async fn complete_scans_remove_unseen_items_after_partial_updates() {
             scan.incomplete();
         }
         for name in names {
-            scan.write_genre(name, name, name, name, None)
+            scan.write_genre(name, name, name, Some(name), None)
                 .await
                 .unwrap();
         }
@@ -1089,7 +1103,7 @@ async fn complete_scans_remove_unseen_items_after_partial_updates() {
     }
     let mut point = Scan::begin_items(&database, "source").await.unwrap();
     point
-        .write_genre("a", "Live name", "live name", "live name", None)
+        .write_genre("a", "Live name", "live name", Some("live name"), None)
         .await
         .unwrap();
     point.finish().await.unwrap();
@@ -1097,7 +1111,7 @@ async fn complete_scans_remove_unseen_items_after_partial_updates() {
         .await
         .unwrap();
     complete
-        .write_genre("a", "a", "a", "a", None)
+        .write_genre("a", "a", "a", Some("a"), None)
         .await
         .unwrap();
     assert!(matches!(
@@ -1147,7 +1161,7 @@ async fn identical_and_artwork_only_incomplete_scans_retain_unseen_local_files()
         let mut scan = Scan::begin(&database, "local", "Local", "local", None)
             .await
             .unwrap();
-        scan.write_genre("genre", "Genre", "genre", "genre", Some(artwork))
+        scan.write_genre("genre", "Genre", "genre", Some("genre"), Some(artwork))
             .await
             .unwrap();
         if index > 0 {
@@ -1233,7 +1247,7 @@ async fn failed_and_stale_publications_are_atomic() {
         .expect("begin oversized scan");
     let oversized_name = "x".repeat(8 * 1024 * 1024 + 1);
     oversized
-        .write_genre("genre", &oversized_name, "genre", "genre", None)
+        .write_genre("genre", &oversized_name, "genre", Some("genre"), None)
         .await
         .expect_err("oversized row fails staging");
     assert_eq!(
@@ -1639,5 +1653,77 @@ async fn artist_credits_preserve_favorites_and_explicit_false_clears_them() {
             .unwrap()
             .unwrap();
         assert_eq!(row.favorite, index < 2);
+    }
+}
+
+#[tokio::test]
+async fn sparse_names_keep_casing_but_do_not_require_complete_metadata_for_renames() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("library.sqlite");
+    let database = Database::open(&path).await.unwrap();
+    let mut scan = Scan::begin(&database, "source", "Source", "source", None)
+        .await
+        .unwrap();
+    scan.write_genre("genre", "Rock", "rock", Some("rock"), None)
+        .await
+        .unwrap();
+    scan.write_artist(
+        "artist",
+        "Artist",
+        "artist",
+        Some("artist"),
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    scan.finish().await.unwrap();
+    let mut raw = connection(&path).await;
+    for (artist, genre, complete, expected_artist, expected_genre) in [
+        ("artist", "rock", false, "Artist", "Rock"),
+        ("Renamed", "Alternative", false, "Renamed", "Alternative"),
+        ("RENAMED", "ALTERNATIVE", true, "RENAMED", "ALTERNATIVE"),
+    ] {
+        let mut scan = Scan::begin_items(&database, "source").await.unwrap();
+        let artist_sort = artist.to_lowercase();
+        let genre_sort = genre.to_lowercase();
+        scan.write_artist(
+            "artist",
+            artist,
+            &artist_sort,
+            complete.then_some(artist_sort.as_str()),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        scan.write_genre(
+            "genre",
+            genre,
+            &genre_sort,
+            complete.then_some(genre_sort.as_str()),
+            None,
+        )
+        .await
+        .unwrap();
+        scan.finish().await.unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT name FROM artists")
+                .fetch_one(&mut raw)
+                .await
+                .unwrap(),
+            expected_artist
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT name FROM genres")
+                .fetch_one(&mut raw)
+                .await
+                .unwrap(),
+            expected_genre
+        );
     }
 }

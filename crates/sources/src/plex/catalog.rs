@@ -237,26 +237,43 @@ impl PlexSource {
         }
     }
 
-    pub(crate) async fn apply_live_items(
+    pub(crate) async fn stage_items(
         &self,
-        database: &library::Database,
-        source_id: &str,
+        scan: &mut Scan,
         upserts: Vec<String>,
-        removals: Vec<String>,
-    ) -> SourceResult<library::ScanOutcome> {
-        let mut scan = Scan::begin_items(database, source_id).await?;
+        mut removals: Vec<String>,
+    ) -> SourceResult<()> {
         for raw in upserts {
-            let item = self.metadata(&raw).await?;
+            let item = match self.metadata(&raw).await {
+                Ok(item) => item,
+                Err(SourceError::NotFound) => {
+                    removals.push(raw);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            if item["type"] == "album" {
+                stage_item(scan, &item).await?;
+                self.stage_collection_contents(
+                    scan,
+                    &crate::SourceCollection::Album(plex_id("album", raw_item_id(&raw))),
+                )
+                .await?;
+                continue;
+            }
             if item["type"].as_str() == Some("track")
                 && let Some(album) = id(&item["parentRatingKey"])
             {
-                stage_item(&mut scan, &self.metadata(&album).await?).await?;
+                match self.metadata(&album).await {
+                    Ok(album) => stage_item(scan, &album).await?,
+                    Err(error) => crate::source::optional_collection_error(error)?,
+                }
             }
-            stage_item(&mut scan, &item).await?;
+            stage_item(scan, &item).await?;
             if item["type"].as_str() == Some("playlist")
                 && let Some(raw) = id(&item["ratingKey"])
             {
-                self.stage_playlist_entries(&mut scan, &plex_id("playlist", &raw))
+                self.stage_playlist_entries(scan, &plex_id("playlist", &raw))
                     .await?;
             }
         }
@@ -270,12 +287,7 @@ impl PlexSource {
             scan.remove_playlist(&plex_id("playlist", raw_item_id(&raw)))
                 .await?;
         }
-        let section = SourceHomeSection::NewlyAdded;
-        match self.home_section(section).await {
-            Ok(entries) => scan.replace_home_section(section.id(), &entries).await?,
-            Err(error) => crate::source::optional_collection_error(error)?,
-        }
-        Ok(scan.finish().await?)
+        Ok(())
     }
 
     pub(crate) async fn home_section(
@@ -478,7 +490,10 @@ pub(super) mod tests {
     #[tokio::test]
     async fn live_updates_refresh_newly_added_and_retain_it_on_failure() {
         let server = MockServer::start().await;
-        let source = source(&server);
+        let source = crate::Source::new(
+            crate::SourceId::new("source"),
+            crate::source::Implementation::Plex(source(&server)),
+        );
         let directory = tempfile::tempdir().unwrap();
         let database = library::Database::open(directory.path().join("library.sqlite"))
             .await
@@ -507,6 +522,12 @@ pub(super) mod tests {
                 .expect(1)
                 .mount(&server)
                 .await;
+            Mock::given(method("GET")).and(path(format!("/library/metadata/{id}/children")))
+                .respond_with(move |request: &wiremock::Request| {
+                    let offset = request.url.query_pairs().find(|(key, _)| key == "X-Plex-Container-Start").unwrap().1;
+                    ResponseTemplate::new(200).set_body_json(json!({"MediaContainer":{"totalSize":2,"Metadata":[{"ratingKey":format!("{id}-track-{offset}"),"title":"Track","type":"track","parentRatingKey":id,"parentTitle":id}]}}))
+                }).expect(2)
+                .mount(&server).await;
             let entries = if empty { vec![] } else { vec![item] };
             Mock::given(method("GET"))
                 .and(path("/library/all"))
@@ -520,7 +541,7 @@ pub(super) mod tests {
                 .mount(&server)
                 .await;
             let outcome = source
-                .apply_live_items(&database, "source", vec![id.into()], vec![])
+                .apply_items(&database, vec![id.into()], vec![])
                 .await
                 .unwrap();
             assert_eq!(
@@ -542,6 +563,12 @@ pub(super) mod tests {
                 )
                 .await
                 .unwrap();
+            assert!(
+                home.newly_added
+                    .albums
+                    .iter()
+                    .all(|album| album.album.track_count == 2)
+            );
             let mut titles = home
                 .newly_added
                 .albums
@@ -766,15 +793,13 @@ pub(super) mod tests {
                 .mount(&server)
                 .await;
         }
-        source
-            .apply_live_items(
-                &database,
-                "plex-test",
-                vec!["invalid".into(), "track".into()],
-                vec![],
-            )
-            .await
-            .unwrap();
+        crate::Source::new(
+            crate::SourceId::new("plex-test"),
+            crate::source::Implementation::Plex(source),
+        )
+        .apply_items(&database, vec!["invalid".into(), "track".into()], vec![])
+        .await
+        .unwrap();
         let row = database
             .track_row_by_uri(&uri, &cancellation)
             .await

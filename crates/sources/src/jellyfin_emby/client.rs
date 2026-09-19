@@ -72,9 +72,36 @@ impl JellyfinEmbySource {
         scan: &mut library::Scan,
         collection: &crate::SourceCollection,
     ) -> SourceResult<()> {
-        let mut staged_albums = std::collections::HashSet::new();
-        let mut start = 0;
+        if let crate::SourceCollection::Album(album_id) = collection {
+            let raw = raw_item_id(album_id);
+            let mut url = self.item_url(raw)?;
+            url.query_pairs_mut()
+                .append_pair("UserId", &self.user_id)
+                .append_pair("Fields", ALBUM_FIELDS);
+            match self.get_json::<Value>(url).await {
+                Ok(item) => {
+                    if let Some(album) = album_from_item(self.kind, item) {
+                        stage_album(scan, album).await?;
+                    }
+                }
+                Err(error) => crate::source::optional_collection_error(error)?,
+            }
+        }
+        self.stage_collection_contents(scan, collection).await
+    }
+
+    pub(super) async fn stage_collection_contents(
+        &self,
+        scan: &mut library::Scan,
+        collection: &crate::SourceCollection,
+    ) -> SourceResult<()> {
+        let mut pages = PageState::default();
         loop {
+            let mut staged_albums = std::collections::HashSet::new();
+            if let crate::SourceCollection::Album(id) = collection {
+                staged_albums.insert(raw_item_id(id).to_string());
+            }
+            let mut album_folders = std::collections::HashMap::new();
             let mut url = endpoint(&self.base_url, "Items")?;
             url.query_pairs_mut()
                 .append_pair("UserId", &self.user_id)
@@ -89,8 +116,8 @@ impl JellyfinEmbySource {
                 .append_pair("Fields", MIXED_ITEM_FIELDS)
                 .append_pair("SortBy", "ParentIndexNumber,IndexNumber,SortName")
                 .append_pair("SortOrder", "Ascending")
-                .append_pair("StartIndex", &start.to_string())
-                .append_pair("Limit", "100");
+                .append_pair("StartIndex", &pages.offset().to_string())
+                .append_pair("Limit", &COLLECTION_PAGE_SIZE.to_string());
             match collection {
                 crate::SourceCollection::Album(id) => {
                     url.query_pairs_mut()
@@ -102,49 +129,75 @@ impl JellyfinEmbySource {
                 }
             }
             let page = self.get_json::<Value>(url).await?;
-            let count = items(&page["Items"]).len();
-            if count == 0 {
-                break;
-            }
-            for item in items(&page["Items"]) {
-                if let Some(album_id) = id(&item["AlbumId"]).filter(|_| {
-                    matches!(collection, crate::SourceCollection::Album(_)) || is_audio_item(item)
-                }) {
-                    if staged_albums.insert(album_id.clone()) {
-                        let mut album_url = self.item_url(&album_id)?;
-                        album_url
-                            .query_pairs_mut()
-                            .append_pair("UserId", &self.user_id)
-                            .append_pair("Fields", ALBUM_FIELDS);
-                        let album = self.get_json::<Value>(album_url).await?;
-                        scan.begin_batch().await?;
-                        if let Some(mapped) = album_from_item(self.kind, album) {
-                            stage_album(scan, mapped).await?;
-                        }
-                        scan.finish_batch().await?;
-                    }
-                }
-            }
-            scan.begin_batch().await?;
+            let finished = pages.advance(
+                items(&page["Items"]).len(),
+                field(&page, "TotalRecordCount"),
+            )?;
+            let mut tracks = Vec::new();
             for item in items(&page["Items"]).iter().cloned() {
                 if matches!(collection, crate::SourceCollection::Album(_)) || is_audio_item(&item) {
-                    if let Some(mapped) = track_from_item(self.kind, item) {
-                        stage_track(scan, mapped).await?;
+                    if let Some(album_id) = id(&item["AlbumId"]) {
+                        if staged_albums.insert(album_id.clone()) {
+                            let mut url = self.item_url(&album_id)?;
+                            url.query_pairs_mut()
+                                .append_pair("UserId", &self.user_id)
+                                .append_pair("Fields", ALBUM_FIELDS);
+                            match self.get_json::<Value>(url).await {
+                                Ok(item) => {
+                                    if let Some(album) = album_from_item(self.kind, item) {
+                                        stage_album(scan, album).await?;
+                                    }
+                                }
+                                Err(error) => crate::source::optional_collection_error(error)?,
+                            }
+                        }
+                    }
+                    if let Some(mut track) = track_from_item(self.kind, item) {
+                        if track.album_id.is_none() {
+                            if let crate::SourceCollection::Album(id) = collection {
+                                track.album_id = Some(id.clone());
+                            }
+                        }
+                        let owner = track.album_id.as_deref().unwrap_or(&track.id);
+                        if !album_folders.contains_key(owner) {
+                            album_folders.insert(
+                                owner.to_string(),
+                                self.stage_item_folders(scan, raw_item_id(owner)).await?,
+                            );
+                        }
+                        tracks.push(track);
                     }
                 } else if item["Type"]
                     .as_str()
                     .is_some_and(|kind| kind.eq_ignore_ascii_case("MusicAlbum"))
                 {
-                    if let Some(mapped) = album_from_item(self.kind, item) {
-                        stage_album(scan, mapped).await?;
+                    if let Some(album) = album_from_item(self.kind, item) {
+                        stage_album(scan, album).await?;
                     }
                 }
             }
+            scan.begin_batch().await?;
+            for track in tracks {
+                let owner = track.album_id.as_deref().unwrap_or(&track.id);
+                if let Some(folders) = &album_folders[owner] {
+                    scan.replace_track_folders(
+                        &track.id,
+                        &folders
+                            .iter()
+                            .map(|(id, position)| library::ScanLink::new(&track.id, id, *position))
+                            .collect::<Vec<_>>(),
+                    )
+                    .await?;
+                }
+                stage_track(scan, track).await?;
+            }
             scan.finish_batch().await?;
-            start += count;
-            if count < 100 {
+            if finished {
                 break;
             }
+        }
+        if let crate::SourceCollection::Album(id) = collection {
+            scan.replace_album_membership(id).await?;
         }
         Ok(())
     }
@@ -1519,10 +1572,14 @@ mod tests {
                     .await
                     .unwrap()
                     .unwrap();
-                let outcome = source
-                    .apply_live_items(&database, "source", vec!["track".into()], vec![])
+                let mut scan = library::Scan::begin_items(&database, "source")
                     .await
                     .unwrap();
+                source
+                    .stage_items(&mut scan, vec!["track".into()], vec![])
+                    .await
+                    .unwrap();
+                let outcome = scan.finish().await.unwrap();
                 if prior.favorite == favorite {
                     assert!(
                         matches!(outcome, library::ScanOutcome::Identical(_)),
@@ -1639,13 +1696,12 @@ mod tests {
         scan.finish_batch().await.expect("finish initial batch");
         scan.finish().await.expect("publish initial Scan");
 
+        let source = crate::Source::new(
+            crate::SourceId::new("jellyfin:test"),
+            crate::source::Implementation::JellyfinEmby(source),
+        );
         source
-            .apply_live_items(
-                &database,
-                "jellyfin:test",
-                vec!["track-one".to_string()],
-                Vec::new(),
-            )
+            .apply_items(&database, vec!["track-one".to_string()], Vec::new())
             .await
             .expect("apply exact Track change");
         let cancellation = library::ReadCancellation::new();
@@ -1671,12 +1727,7 @@ mod tests {
         assert_eq!(albums[0].title, "Updated Album");
 
         source
-            .apply_live_items(
-                &database,
-                "jellyfin:test",
-                Vec::new(),
-                vec!["track-one".to_string()],
-            )
+            .apply_items(&database, Vec::new(), vec!["track-one".to_string()])
             .await
             .expect("apply exact removal");
         assert!(

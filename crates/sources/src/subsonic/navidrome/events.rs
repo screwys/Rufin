@@ -63,15 +63,13 @@ impl SubsonicSource {
             .read_timeout(Duration::from_secs(45))
             .build()
             .map_err(|error| remote_http::map_reqwest_error(error, NAVIDROME_HTTP))?;
-        let mut established = false;
         let mut delay = Duration::from_secs(5);
         loop {
             match self.connect_navidrome_events(&client).await {
                 Ok(response) => {
-                    if established && !changed(RemoteItemChange::BoundaryLost) {
+                    if !changed(RemoteItemChange::BoundaryLost) {
                         return Ok(());
                     }
-                    established = true;
                     delay = Duration::from_secs(5);
                     match read_events(response, &mut changed).await {
                         Ok(false) => return Ok(()),
@@ -86,74 +84,6 @@ impl SubsonicSource {
             sleep(delay).await;
             delay = delay.saturating_mul(2).min(Duration::from_secs(60));
         }
-    }
-
-    pub(crate) async fn apply_navidrome_changes(
-        &self,
-        database: &library::Database,
-        source_id: &str,
-        upserts: Vec<String>,
-    ) -> SourceResult<library::ScanOutcome> {
-        let mut scan = Scan::begin_items(database, source_id).await?;
-        for (resource, kind) in [("artist", "artist"), ("album", "album"), ("song", "track")] {
-            let ids: Vec<_> = upserts
-                .iter()
-                .filter_map(|object| {
-                    let (item_kind, id) = object.split_once(':')?;
-                    (item_kind == resource).then(|| serde_json::json!({"id":id}))
-                })
-                .collect();
-            let values = self.navidrome_items(resource, &ids).await?;
-            scan.begin_batch().await?;
-            for value in &values {
-                let Some(id) = id(&value["id"]) else { continue };
-                match resource {
-                    "artist" => {
-                        stage_artist(&mut scan, artist_from_navidrome(self, &id, value)).await?
-                    }
-                    "album" => {
-                        stage_album(&mut scan, album_from_navidrome(self, &id, value)).await?
-                    }
-                    _ => {
-                        stage_track(&mut scan, track_from_navidrome(self, &id, value)).await?;
-                    }
-                }
-            }
-            for id in ids.iter().filter_map(|value| id(&value["id"])) {
-                if !values.iter().any(|value| {
-                    crate::remote_json::id(&value["id"]).as_deref() == Some(id.as_str())
-                }) {
-                    let object = self.id(kind, &id);
-                    match kind {
-                        "artist" => scan.remove_artist(&object).await?,
-                        "album" => scan.remove_album(&object).await?,
-                        _ => scan.remove_track(&object).await?,
-                    }
-                }
-            }
-            scan.finish_batch().await?;
-        }
-        for id in upserts
-            .iter()
-            .filter_map(|object| object.strip_prefix("playlist:"))
-        {
-            match self
-                .stage_playlist_snapshot(&mut scan, &self.id("playlist", id))
-                .await
-            {
-                Ok(()) => {}
-                Err(SourceError::NotFound) => {
-                    scan.remove_playlist(&self.id("playlist", id)).await?
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        let section = crate::SourceHomeSection::NewlyAdded;
-        match self.home_section(section).await {
-            Ok(entries) => scan.replace_home_section(section.id(), &entries).await?,
-            Err(error) => crate::source::optional_collection_error(error)?,
-        }
-        Ok(scan.finish().await?)
     }
 }
 
@@ -236,7 +166,12 @@ mod tests {
     #[tokio::test]
     async fn live_updates_refresh_newly_added_and_retain_it_on_failure() {
         let server = MockServer::start().await;
-        let source = navidrome_source_with_token(&server, "token");
+        let source = crate::Source::new(
+            crate::SourceId::new("source"),
+            crate::source::Implementation::OpenSubsonic(navidrome_source_with_token(
+                &server, "token",
+            )),
+        );
         let directory = tempfile::tempdir().unwrap();
         let database = library::Database::open(directory.path().join("library.sqlite"))
             .await
@@ -256,7 +191,13 @@ mod tests {
             ("third", 200, true, false, vec!["new", "old", "third"]),
         ] {
             server.reset().await;
-            let item = serde_json::json!({"id":id,"name":id});
+            let song = serde_json::json!({"id":format!("{id}-track"),"title":"Track","albumId":id,"album":id});
+            let item = serde_json::json!({"id":id,"name":id,"song":[song.clone()]});
+            Mock::given(method("GET"))
+                .and(path("/api/song"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([song])))
+                .mount(&server)
+                .await;
             Mock::given(method("GET"))
                 .and(path("/api/album".to_string()))
                 .respond_with(
@@ -265,13 +206,20 @@ mod tests {
                 .expect(1)
                 .mount(&server)
                 .await;
+            Mock::given(method("GET"))
+                .and(path("/rest/getAlbum.view"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({"subsonic-response":{"status":"ok","album":item.clone()}}),
+                ))
+                .mount(&server)
+                .await;
             let entries = if empty { vec![] } else { vec![item] };
             Mock::given(method("GET")).and(path("/rest/getAlbumList2.view"))
                 .and(wiremock::matchers::query_param("type", "newest")).and(wiremock::matchers::query_param("size", "24"))
                 .respond_with(ResponseTemplate::new(status).set_body_json(serde_json::json!({"subsonic-response":{"status":"ok","albumList2":{"album":entries}}})))
                 .expect(1).mount(&server).await;
             let outcome = source
-                .apply_navidrome_changes(&database, "source", vec![format!("album:{id}")])
+                .apply_items(&database, vec![format!("album:{id}")], vec![])
                 .await
                 .unwrap();
             assert_eq!(
@@ -293,6 +241,12 @@ mod tests {
                 )
                 .await
                 .unwrap();
+            assert!(
+                home.newly_added
+                    .albums
+                    .iter()
+                    .all(|album| album.album.track_count == 1)
+            );
             let mut titles = home
                 .newly_added
                 .albums
@@ -306,7 +260,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn native_events_update_ratings_and_favorites_through_the_selected_feed() {
+    async fn native_events_update_ratings_and_favorites_with_the_rotated_token() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/auth/login"))
@@ -319,7 +273,7 @@ mod tests {
         Mock::given(method("GET")).and(path("/api/events")).and(header("x-nd-authorization", "Bearer token"))
             .respond_with(ResponseTemplate::new(200).insert_header("Content-Type", "text/event-stream")
                 .insert_header("x-nd-authorization", "renewed")
-                .set_body_raw("event: serverStart\r\ndata: {}\r\n\r\n: comment\r\nevent: refreshResource\r\ndata: {\"song\":\r\ndata: [\"track\"]}\r\n\r\nevent: keepAlive\r\ndata: {}\r\n\r\n".as_bytes(), "text/event-stream"))
+                .set_body_raw("event: serverStart\r\ndata: {}\r\n\r\n: comment\r\nevent: refreshResource\r\ndata: {\"song\":\r\ndata: [\"track\",\"second\"]}\r\n\r\nevent: keepAlive\r\ndata: {}\r\n\r\n".as_bytes(), "text/event-stream"))
             .expect(1).mount(&server).await;
         let mut item = serde_json::json!({"id":"track","title":"Track","duration":42,"starred":false,"rating":1});
         let baseline = navidrome_source_with_token(&server, "unused");
@@ -340,7 +294,17 @@ mod tests {
         stage_track(&mut scan, track_from_navidrome(&baseline, "track", &item))
             .await
             .unwrap();
-        let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
+        stage_track(
+            &mut scan,
+            track_from_navidrome(
+                &baseline,
+                "second",
+                &serde_json::json!({"id":"second","title":"Second"}),
+            ),
+        )
+        .await
+        .unwrap();
+        let library::ScanOutcome::Changed(_) = scan.finish().await.unwrap() else {
             panic!("initial publication")
         };
         item["starred"] = true.into();
@@ -348,31 +312,47 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/api/song"))
             .and(header("x-nd-authorization", "Bearer renewed"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([item])))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!([item, {"id":"second","title":"Second"}])),
+            )
             .expect(1)
             .mount(&server)
             .await;
-        let source = std::sync::Arc::new(crate::Source::open(crate::SourceConfiguration {
+        let configuration = crate::SourceConfiguration {
             source_id: crate::SourceId::new("source"), kind:"navidrome".into(), name:"Source".into(),
             provider_payload: serde_json::json!({"version":SOURCE_CONFIG_VERSION,"base_url":server.uri(),
                 "username":"listener","trust_invalid_cert":false,"navidrome_library_version":NAVIDROME_LIBRARY_VERSION,
                 "authentication":"password"}).to_string(),
-        }, Some(SubsonicCredential::from_navidrome_password("password").serialize()), None).unwrap());
-        let feed = source
-            .start_selected_feed(&tokio::runtime::Handle::current())
-            .expect("native feed");
-        assert!(
-            tokio::time::timeout(Duration::from_secs(2), feed.wait_for_change())
-                .await
-                .unwrap()
+        };
+        let provider = crate::subsonic::open(
+            &configuration,
+            Some(SubsonicCredential::from_navidrome_password("password").serialize()),
+        )
+        .unwrap();
+        let mut upserts = Vec::new();
+        provider
+            .listen_navidrome_changes(|change| match change {
+                RemoteItemChange::BoundaryLost => true,
+                RemoteItemChange::Items { upserts: items, .. } => {
+                    upserts = items;
+                    false
+                }
+            })
+            .await
+            .unwrap();
+        assert_eq!(upserts, ["song:second", "song:track"]);
+        let source = crate::Source::new(
+            configuration.source_id,
+            crate::source::Implementation::OpenSubsonic(provider),
         );
         assert!(matches!(
-            feed.apply_pending(&database, publication.source)
+            source
+                .apply_items(&database, upserts, vec![])
                 .await
                 .unwrap(),
-            Some(library::ScanOutcome::Changed(_))
+            library::ScanOutcome::Changed(_)
         ));
-        feed.cancel();
         let cancellation = library::ReadCancellation::new();
         let uri = library::source_entity_uri(
             &crate::SourceId::new("source"),
@@ -396,7 +376,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reconnect_recovers_once_and_initial_server_start_is_not_a_rescan() {
+    async fn initial_connection_and_reconnect_request_reconciliation() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/events"))
@@ -418,12 +398,12 @@ mod tests {
             source.listen_navidrome_changes(|change| {
                 assert_eq!(change, RemoteItemChange::BoundaryLost);
                 recoveries += 1;
-                false
+                recoveries < 2
             }),
         )
         .await
         .unwrap()
         .unwrap();
-        assert_eq!(recoveries, 1);
+        assert_eq!(recoveries, 2);
     }
 }

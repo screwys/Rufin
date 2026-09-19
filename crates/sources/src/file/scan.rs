@@ -217,7 +217,7 @@ async fn stage_genre(scan: &mut Scan, genre: &media::NamedCredit) -> SourceResul
             &genre.id,
             &genre.name,
             &genre.name.to_lowercase(),
-            &genre.name.to_lowercase(),
+            Some(&genre.name.to_lowercase()),
             None,
         )
         .await?)

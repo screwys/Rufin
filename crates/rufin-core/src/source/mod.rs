@@ -958,18 +958,24 @@ impl SourceOwner {
                     warn!(%error, "bounded selected-source change failed; reacquiring after feed boundary loss");
                 }
             }
-            observer.cancel();
             let acquisition = self.shared.begin_acquisition();
-            let _ = self
-                .manual_refresh_selected(&selected, "selected-feed-gap", Arc::clone(&acquisition))
-                .await;
+            if let Some(source) = &selected.source {
+                let result = source
+                    .manual_refresh(
+                        &selected.database,
+                        &selected.configuration.name,
+                        &|_| {},
+                        Arc::clone(&acquisition),
+                    )
+                    .await;
+                if self.shared.acquisition_is_current(&acquisition) {
+                    self.finish_automatic_refresh(selected.source_id(), result)
+                        .await;
+                }
+            }
             if !self.shared.acquisition_is_current(&acquisition) {
                 return;
             }
-            if let Some(selected) = session.resolve() {
-                self.start_observer(Arc::clone(&session), selected, false);
-            }
-            return;
         }
     }
 
@@ -1048,6 +1054,33 @@ impl SourceOwner {
         }
         self.finish_refresh(source_id, outcome).await;
         result
+    }
+
+    async fn finish_automatic_refresh(
+        &self,
+        source_id: &SourceId,
+        result: sources::SourceResult<ScanOutcome>,
+    ) {
+        // A background read is not evidence that anything changed.
+        if matches!(
+            &result,
+            Ok(ScanOutcome::Changed(publication))
+                | Err(SourceError::IncompleteScan {
+                    outcome: ScanOutcome::Changed(publication),
+                    ..
+                }) if publication.tracks_added
+        ) {
+            self.publish_operation(SourceOperation::Refreshing {
+                source_id: source_id.clone(),
+                progress: source_progress(SourceReadProgress {
+                    stage: sources::SourceReadStage::Finalizing,
+                    completed: 0,
+                    total: None,
+                }),
+            })
+            .await;
+        }
+        self.finish_refresh(source_id, result).await;
     }
 
     async fn finish_refresh(
@@ -1328,27 +1361,23 @@ impl SourceOwner {
         let Some(acquisition) = self.shared.try_begin_acquisition() else {
             return;
         };
-        let progressed = Arc::new(AtomicBool::new(false));
-        let progress_started = Arc::clone(&progressed);
-        let publish = refreshing_progress(Arc::clone(&self.shared), selected.source_id().clone());
-        let progress = move |value: SourceReadProgress| {
-            progress_started.store(true, Ordering::Release);
-            publish(value);
-        };
         let result = source
             .refresh_if_needed(
                 &selected.database,
                 &selected.configuration.name,
-                &progress,
+                &|_| {},
                 Arc::clone(&acquisition),
             )
             .await;
         if self.shared.acquisition_is_current(&acquisition) {
             match result {
-                Ok(Some(outcome)) => self.finish_refresh(selected.source_id(), Ok(outcome)).await,
-                Err(error) => self.finish_refresh(selected.source_id(), Err(error)).await,
-                Ok(None) if progressed.load(Ordering::Acquire) => {
-                    self.publish_operation(SourceOperation::Idle).await
+                Ok(Some(outcome)) => {
+                    self.finish_automatic_refresh(selected.source_id(), Ok(outcome))
+                        .await
+                }
+                Err(error) => {
+                    self.finish_automatic_refresh(selected.source_id(), Err(error))
+                        .await
                 }
                 Ok(None) => {}
             }
@@ -3685,6 +3714,72 @@ mod artwork_preparation_tests {
                 .is_none()
         );
         assert!(owner.shared.plex_logins.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn automatic_refresh_feedback_requires_new_tracks() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = Arc::new(
+            Database::open(directory.path().join("library.sqlite"))
+                .await
+                .unwrap(),
+        );
+        let runtime = tokio::runtime::Handle::current();
+        let (events, receiver) = async_channel::unbounded();
+        let owner = SourceOwner::open_dormant(
+            Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
+            Arc::clone(&database),
+            Downloads::new(
+                directory.path().join("downloads"),
+                database.as_ref().clone(),
+                runtime.clone(),
+                async_channel::unbounded().0,
+                Vec::new(),
+            ),
+            SettingsFile::memory(),
+            Arc::new(SwitchableSecretStore::new(Arc::new(
+                secrets::MemorySecretStore::new(),
+            ))),
+            runtime,
+            SourceOutputs {
+                events,
+                discovery: async_channel::unbounded().0,
+            },
+        )
+        .owner;
+
+        let source_id = SourceId::new("test");
+        let scan = library::Scan::begin(&database, source_id.as_str(), "Test", "test", None)
+            .await
+            .unwrap();
+        let ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
+            panic!("initial publication")
+        };
+        for (outcome, visible) in [
+            (ScanOutcome::Identical(publication), false),
+            (ScanOutcome::ArtworkChanged(publication), false),
+            (ScanOutcome::Changed(publication), false),
+            (
+                ScanOutcome::Changed(library::Publication {
+                    tracks_added: true,
+                    ..publication
+                }),
+                true,
+            ),
+        ] {
+            while receiver.try_recv().is_ok() {}
+            owner
+                .finish_automatic_refresh(&source_id, Ok(outcome))
+                .await;
+            let mut refreshing = false;
+            while let Ok(event) = receiver.try_recv() {
+                refreshing |= matches!(
+                    event,
+                    SourceEvent::Operation(SourceOperation::Refreshing { .. })
+                );
+            }
+            assert_eq!(refreshing, visible);
+        }
     }
 
     #[tokio::test]

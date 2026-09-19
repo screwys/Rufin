@@ -243,7 +243,7 @@ pub(super) async fn stage_item(scan: &mut Scan, item: &Value) -> SourceResult<()
             &genre_id,
             name,
             &name.to_lowercase(),
-            &name.to_lowercase(),
+            Some(&name.to_lowercase()),
             None,
         )
         .await?;
