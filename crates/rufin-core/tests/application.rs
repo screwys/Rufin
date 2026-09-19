@@ -1346,11 +1346,6 @@ async fn exercise_browser_restart(products: rufin_core::runtime::ProductHandles)
     let address = listener.local_addr().unwrap();
     let origin = format!("http://{address}");
     let mut listener = Some(listener);
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(5))
-        .build()
-        .unwrap();
     let mut cookie = String::new();
     for (token, expected) in [
         ("persistent", StatusCode::OK),
@@ -1366,6 +1361,11 @@ async fn exercise_browser_restart(products: rufin_core::runtime::ProductHandles)
             products.clone(),
             token.into(),
         ));
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
         if cookie.is_empty() {
             let response = client
                 .post(format!("{origin}/session"))

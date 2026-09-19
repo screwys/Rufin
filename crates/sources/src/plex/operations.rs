@@ -225,12 +225,25 @@ impl PlexSource {
         scan: &mut library::Scan,
         collection: &crate::SourceCollection,
     ) -> SourceResult<()> {
+        let object = match collection {
+            crate::SourceCollection::Album(id) | crate::SourceCollection::Artist(id) => id,
+        };
+        match self.metadata(object).await {
+            Ok(metadata) => item::stage_item(scan, &metadata).await?,
+            Err(error) => crate::source::optional_collection_error(error)?,
+        }
+        self.stage_collection_contents(scan, collection).await
+    }
+
+    pub(super) async fn stage_collection_contents(
+        &self,
+        scan: &mut library::Scan,
+        collection: &crate::SourceCollection,
+    ) -> SourceResult<()> {
         let (object, suffix) = match collection {
             crate::SourceCollection::Album(id) => (id, "children"),
             crate::SourceCollection::Artist(id) => (id, "allLeaves"),
         };
-        let metadata = self.metadata(object).await?;
-        item::stage_item(scan, &metadata).await?;
         let mut offset = 0;
         loop {
             let response = self
@@ -249,13 +262,16 @@ impl PlexSource {
             }
             scan.finish_batch().await?;
             offset += entries.len();
-            if entries.is_empty()
-                || field::<usize>(&response["MediaContainer"], "totalSize")
-                    .is_some_and(|total| offset >= total)
-                || entries.len() < 512
-            {
+            let total = field::<usize>(&response["MediaContainer"], "totalSize");
+            if entries.is_empty() && total.is_some_and(|total| offset < total) {
+                return Err(SourceError::Other("Plex omitted a collection page".into()));
+            }
+            if entries.is_empty() || total.map_or(entries.len() < 512, |total| offset >= total) {
                 break;
             }
+        }
+        if let crate::SourceCollection::Album(id) = collection {
+            scan.replace_album_membership(id).await?;
         }
         Ok(())
     }

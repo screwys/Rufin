@@ -381,15 +381,13 @@ impl Database {
             sqlx::query_as::<_, HomeGenreRow>(
                 "SELECT genre.genre_key,genre.object_id,genre.name,genre.artwork_binding,
                     count(DISTINCT track.album_key) album_count,
-                    count(DISTINCT relation.track_key) track_count
+                    count(DISTINCT track.track_key) track_count
              FROM genres genre
-             LEFT JOIN track_genres relation USING(genre_key)
-             LEFT JOIN tracks track ON track.track_key=relation.track_key
-             WHERE genre.source_key=?1 AND (?2 IS NULL OR EXISTS (
-               SELECT 1 FROM track_genres credit JOIN track_folders scope USING(track_key)
-               WHERE credit.genre_key=genre.genre_key AND scope.folder_key=?2))
+             LEFT JOIN tracks track ON track.track_key IN (SELECT track_key FROM track_genres WHERE genre_key=genre.genre_key UNION SELECT track_key FROM album_genres JOIN tracks USING(album_key) WHERE genre_key=genre.genre_key)
+               AND (?2 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?2))
+             WHERE genre.source_key=?1 AND (?2 IS NULL OR track.track_key IS NOT NULL)
              GROUP BY genre.genre_key
-             ORDER BY count(relation.track_key) DESC,genre.sort_text,genre.genre_key LIMIT 12",
+             ORDER BY count(track.track_key) DESC,genre.sort_text,genre.genre_key LIMIT 12",
             )
             .bind(source)
             .bind(folder)

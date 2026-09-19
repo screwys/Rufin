@@ -248,7 +248,7 @@ pub(super) async fn stage_genre(
         &genre.id,
         &genre.name,
         &genre.name.to_lowercase(),
-        &genre.name.to_lowercase(),
+        Some(&genre.name.to_lowercase()),
         artwork.as_deref(),
     )
     .await
@@ -281,7 +281,7 @@ async fn stage_genre_credit(
         &genre.id,
         &genre.name,
         &genre.name.to_lowercase(),
-        &genre.name.to_lowercase(),
+        None,
         None,
     )
     .await

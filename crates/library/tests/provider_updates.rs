@@ -95,6 +95,19 @@ async fn fixture() -> (tempfile::TempDir, Database) {
 }
 
 #[tokio::test]
+async fn favorite_and_play_count_changes_do_not_report_new_tracks() {
+    let (_directory, database) = fixture().await;
+    for (favorite, plays) in [(true, 1), (false, 2)] {
+        let mut scan = Scan::begin_items(&database, "source").await.unwrap();
+        track(&mut scan, Some(favorite), Some(plays)).await;
+        let ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
+            panic!("user state changed");
+        };
+        assert!(!publication.tracks_added);
+    }
+}
+
+#[tokio::test]
 async fn point_metadata_preserves_folders_and_complete_memberships_can_clear_them() {
     let (directory, database) = fixture().await;
     let mut raw = super::support::connection(&directory.path().join("library.sqlite3")).await;

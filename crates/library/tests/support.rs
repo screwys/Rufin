@@ -95,7 +95,7 @@ pub async fn fixture() -> Fixture {
         .await
         .expect("stage Artist");
     }
-    scan.write_genre("genre", "Rock", "rock", "rock", None)
+    scan.write_genre("genre", "Rock", "rock", Some("rock"), None)
         .await
         .expect("stage Genre");
     scan.write_mood("mood", "Energetic", "energetic", "energetic")

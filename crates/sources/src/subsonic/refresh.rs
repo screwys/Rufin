@@ -558,7 +558,13 @@ fn freshness(status: ScanStatus) -> Vec<u8> {
 }
 
 fn completed_freshness(status: ScanStatus) -> Option<Vec<u8>> {
-    (!status.scanning).then(|| freshness(status))
+    // Counts alone cannot detect a retag or a same-size replacement.
+    (!status.scanning
+        && status
+            .last_scan
+            .as_ref()
+            .is_some_and(|value| !value.trim().is_empty()))
+    .then(|| freshness(status))
 }
 
 fn stage(stage: SourceReadStage, completed: usize) -> SourceReadProgress {
@@ -614,6 +620,11 @@ mod tests {
         let mut scanning = status(41, "2026-08-27T00:01:00Z");
         scanning.scanning = true;
         assert_eq!(completed_freshness(scanning), None);
+        for last_scan in [None, Some(String::new())] {
+            let mut incomplete = status(40, "2026-08-27T00:00:00Z");
+            incomplete.last_scan = last_scan;
+            assert_eq!(completed_freshness(incomplete), None);
+        }
     }
 
     #[tokio::test]
@@ -959,7 +970,7 @@ mod tests {
                 .await
                 .unwrap();
                 previous
-                    .write_genre("cached-genre", "Cached", "cached", "cached", None)
+                    .write_genre("cached-genre", "Cached", "cached", Some("cached"), None)
                     .await
                     .unwrap();
                 previous
@@ -1117,6 +1128,30 @@ mod tests {
                     );
                 }
             }
+            // getScanStatus and optional collection endpoints are deliberately absent.
+            // Automatic refresh must still acquire the catalog and keep no-ops quiet.
+            progress.lock().unwrap().clear();
+            let source = crate::Source::new(
+                crate::SourceId::new("source"),
+                crate::source::Implementation::OpenSubsonic(source),
+            );
+            let outcome = source
+                .refresh_if_needed(
+                    &database,
+                    "Nextcloud Music",
+                    &|value| progress.lock().unwrap().push(value),
+                    std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                )
+                .await
+                .unwrap();
+            assert!(matches!(outcome, Some(library::ScanOutcome::Identical(_))));
+            assert!(
+                progress
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|value| value.stage == crate::SourceReadStage::Tracks)
+            );
         }
     }
 

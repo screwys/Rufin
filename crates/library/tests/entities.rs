@@ -1767,3 +1767,98 @@ async fn metadata_point_writes_publish_changes_and_leave_no_ops_unchanged() {
     .3;
     assert!(point_plan.contains("INTEGER PRIMARY KEY"), "{point_plan}");
 }
+
+#[tokio::test]
+async fn album_genres_supply_browsing_and_playback_without_changing_track_tags() {
+    let fixture = fixture().await;
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("DELETE FROM album_genres")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    // Keep one track credit overlapping the album credit to check set semantics.
+    sqlx::query("DELETE FROM track_genres WHERE track_key<>?1")
+        .bind(fixture.tracks[0])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT OR REPLACE INTO album_genres(album_key,genre_key,position) VALUES(?1,?2,0)",
+    )
+    .bind(fixture.albums[0])
+    .bind(fixture.genre)
+    .execute(&mut raw)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE albums SET artwork_binding=?1 WHERE album_key=?2")
+        .bind(vec![1u8])
+        .bind(fixture.albums[0])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    let cancel = ReadCancellation::new();
+    for folder in [None, Some(fixture.folder)] {
+        let detail = fixture
+            .database
+            .genre_detail(fixture.source, fixture.genre, folder, &cancel)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.genre.track_count, 2);
+        assert_eq!(detail.genre.album_count, 1);
+        assert_eq!(detail.representative_albums, [fixture.albums[0]]);
+        assert_eq!(detail.genre.representative_artwork, [vec![1u8]]);
+        let route = fixture
+            .database
+            .genre_track_route_page(
+                fixture.source,
+                fixture.genre,
+                folder,
+                "",
+                TrackSort::Title,
+                false,
+                RouteSeedWindow::top(),
+                &cancel,
+            )
+            .await
+            .unwrap();
+        assert_eq!(route.order.len(), 2);
+        let (tracks, _) = fixture
+            .database
+            .collection_tracks_page(
+                &library::QueueCollection::Genre(fixture.genre),
+                folder,
+                "",
+                TrackSort::Title,
+                false,
+                false,
+                0,
+                10,
+                &cancel,
+            )
+            .await
+            .unwrap();
+        assert_eq!(tracks.len(), 2);
+        assert!(tracks.iter().any(|track| track.genres.is_empty()));
+        let home = fixture
+            .database
+            .home_page(
+                fixture.source,
+                folder,
+                0,
+                0,
+                &[library::HomeBlockKind::Genres],
+                &cancel,
+            )
+            .await
+            .unwrap();
+        assert_eq!(home.genres[0].track_count, 2);
+    }
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM track_genres")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        1
+    );
+}
