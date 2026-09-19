@@ -266,7 +266,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_derive",
- "syn 3.0.3",
+ "syn 3.0.5",
 ]
 
 [[package]]
@@ -448,7 +448,7 @@ checksum = "82f6aeea286b8eb4dd3431a1be1b59d290ace00f5bfd8e2a159bc2a05e2c1667"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.5",
 ]
 
 [[package]]
@@ -2069,7 +2069,7 @@ checksum = "9fb9654ba8355388abeb8dcb4fc62f511300867002afc858860463bdd9fe0c44"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.5",
 ]
 
 [[package]]
@@ -3645,7 +3645,7 @@ checksum = "fdbca1b60ba7cea959ffc84ac27f3dbdbacd6dfda168c7eabbc00e48654bb9fd"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.5",
 ]
 
 [[package]]
@@ -4984,7 +4984,7 @@ dependencies = [
  "proc-macro-error-attr3",
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.5",
 ]
 
 [[package]]
@@ -6023,7 +6023,7 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.5",
 ]
 
 [[package]]
@@ -6058,7 +6058,7 @@ checksum = "8d3b1629de253c70a0508c3899572da79ca359fdab27c7920ff00406df418906"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.5",
 ]
 
 [[package]]
@@ -6673,9 +6673,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.3"
+version = "3.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3"
+checksum = "12df2e0110f65b775f769bb17ef989067a1d931b2eb822bd4346631eeada89f9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6822,7 +6822,7 @@ checksum = "bc04cd3e1236dd4a98afca4569f2deb3f120e5422a4023be2cb683f8486292af"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.5",
 ]
 
 [[package]]
@@ -8104,7 +8104,7 @@ dependencies = [
  "proc-macro2",
  "roxmltree",
  "serde_json",
- "syn 3.0.3",
+ "syn 3.0.5",
  "tempfile",
 ]
 
