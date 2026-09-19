@@ -227,6 +227,9 @@ msgstr "API atslēgas"
 msgid "About Rufin"
 msgstr "Par Rufin"
 
+msgid "Absolute"
+msgstr ""
+
 msgid "Accent color"
 msgstr "Akcenta krāsa"
 
@@ -361,6 +364,9 @@ msgstr "Lietotnes nosaukums"
 
 msgid "Apply Template"
 msgstr "Lietot veidni"
+
+msgid "Apply"
+msgstr ""
 
 msgid "Approve sign-in in your browser"
 msgstr "Apstipriniet pieteikšanos savā pārlūkprogrammā"
@@ -784,6 +790,11 @@ msgstr "Dzēst atskaņošanas sarakstu"
 msgid "Delete \"{name}\"?"
 msgstr "Dzēst \"{name}\"?"
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Delete playlist file"
+msgstr "Dzēst atskaņošanas sarakstu"
+
 msgid "Delete"
 msgstr "Dzēst"
 
@@ -894,6 +905,11 @@ msgstr "EP"
 
 msgid "Edit Lyrics"
 msgstr "Rediģēt tekstus"
+
+#, fuzzy
+#| msgid "Edit Smart Playlist"
+msgid "Edit Playlist"
+msgstr "Rediģēt viedo atskaņošanas sarakstu"
 
 msgid "Edit Smart Playlist"
 msgstr "Rediģēt viedo atskaņošanas sarakstu"
@@ -1034,6 +1050,11 @@ msgstr "Izlase"
 msgid "Featured genres"
 msgstr "Ieteicamie žanri"
 
+#, fuzzy
+#| msgid "Rename"
+msgid "Filename"
+msgstr "Pārdēvēt"
+
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 "Failiem jābūt pievienotām noskaņas/BPM tagām. Neatbalstīts programmai "
@@ -1079,6 +1100,9 @@ msgstr "Aizmirst avotu"
 
 msgid "Forget \"{name}\"?"
 msgstr "Aizmirst \"{name}\"?"
+
+msgid "Format"
+msgstr ""
 
 msgid "Forward"
 msgstr "Pārtīt uz priekšu"
@@ -1203,6 +1227,16 @@ msgstr "Importēt rezerves kopiju"
 msgid "Import Playlist"
 msgstr "Importēt atskaņošanas sarakstu"
 
+#, fuzzy
+#| msgid "Import Backup"
+msgid "Import a copy"
+msgstr "Importēt rezerves kopiju"
+
+#, fuzzy
+#| msgid "Export"
+msgid "Import"
+msgstr "Eksportēt"
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr "Iekļaut detalizētu Rufin diagnostikas informāciju šajā sesijā"
 
@@ -1307,11 +1341,27 @@ msgstr "Ierobežojums"
 msgid "Linear"
 msgstr "Lineārs"
 
+#, fuzzy
+#| msgid "Backup exported"
+msgid "Link exported file"
+msgstr "Eksportētā reze veskopija"
+
+msgid "Link to file..."
+msgstr ""
+
+msgid "Linked file"
+msgstr ""
+
 msgid "ListenBrainz scrobbling"
 msgstr "ListenBrainz skroblēšana"
 
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
+
+#, fuzzy
+#| msgid "No folder contents found."
+msgid "Load file contents"
+msgstr "Mapes saturs nav atrasts."
 
 msgid "Loading related tracks..."
 msgstr "Ielādē saistītās dziesmas..."
@@ -1339,9 +1389,12 @@ msgstr "Vietējo failu kartēšana vairs nav pieejama"
 
 msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
-msgstr[0] "Lokālo failu atbilžu noteikšana: {matched} no {total} servera ceļiem"
-msgstr[1] "Lokālo failu atbilžu noteikšana: {matched} no {total} servera ceļiem"
-msgstr[2] "Lokālo failu atbilžu noteikšana: {matched} no {total} servera ceļiem"
+msgstr[0] ""
+"Lokālo failu atbilžu noteikšana: {matched} no {total} servera ceļiem"
+msgstr[1] ""
+"Lokālo failu atbilžu noteikšana: {matched} no {total} servera ceļiem"
+msgstr[2] ""
+"Lokālo failu atbilžu noteikšana: {matched} no {total} servera ceļiem"
 
 msgid "Local imports and access"
 msgstr "Lokālie importi un piekļuve"
@@ -1705,6 +1758,9 @@ msgstr "Izslēgts"
 msgid "On this device"
 msgstr "Šajā ierīcē"
 
+msgid "On"
+msgstr ""
+
 msgid "One Name: Value header per line"
 msgstr "Viena nosaukuma/vērtības kombinācija katrā rindā"
 
@@ -1762,6 +1818,9 @@ msgstr "Atvērt izdevuma piezīmes"
 msgid "Open settings"
 msgstr "Atvērt iestatījumus"
 
+msgid "Open"
+msgstr ""
+
 msgid "OpenSubsonic"
 msgstr "OpenSubsonic"
 
@@ -1792,8 +1851,16 @@ msgstr "Parole"
 msgid "Paste"
 msgstr "Ielīmēt"
 
+#, fuzzy
+#| msgid "Export format"
+msgid "Path format"
+msgstr "Eksportēšanas formāts"
+
 msgid "Path in Source"
 msgstr "Ceļš avotā"
+
+msgid "Path"
+msgstr ""
 
 msgid "Pause"
 msgstr "Pauzēt"
@@ -1894,6 +1961,16 @@ msgid "Playing on {device}"
 msgstr "Atskaņo ierīcē {device}"
 
 msgid "Playlist File"
+msgstr "Atskaņošanas saraksta fails"
+
+#, fuzzy
+#| msgid "Playlist File"
+msgid "Playlist file changed"
+msgstr "Atskaņošanas saraksta fails"
+
+#, fuzzy
+#| msgid "Playlist File"
+msgid "Playlist files"
 msgstr "Atskaņošanas saraksta fails"
 
 msgid "Playlist name"
@@ -2046,6 +2123,11 @@ msgstr "Sarkans"
 msgid "Redo"
 msgstr "Atkārtot"
 
+#, fuzzy
+#| msgid "Save lyrics automatically"
+msgid "Refresh automatically"
+msgstr "Saglabāt tekstus automātiski"
+
 msgid "Refresh section"
 msgstr "Atsvaidzināt sadaļu"
 
@@ -2067,6 +2149,11 @@ msgstr "Ģenerēt piekļuves tokenu vēlreiz?"
 msgid "Related"
 msgstr "Saistīts"
 
+#, fuzzy
+#| msgid "Related"
+msgid "Relative"
+msgstr "Saistīts"
+
 msgid "Release date"
 msgstr "Izdošanas datums"
 
@@ -2075,6 +2162,14 @@ msgstr "Jaunu izdevumu paziņojumi"
 
 msgid "Release"
 msgstr "Izdevums"
+
+#, fuzzy
+#| msgid "Removed from favorites"
+msgid "Reload from file"
+msgstr "Noņemts no izlases"
+
+msgid "Reload"
+msgstr ""
 
 msgid "Remote lyrics"
 msgstr "Attālināti teksti"
@@ -2136,10 +2231,9 @@ msgstr "Noņemts no izlases"
 msgid "Removed from"
 msgstr "Noņemts no"
 
-msgid "Rename Playlist"
-msgstr "Pārdēvēt atskaņošanas sarakstu"
-
-msgid "Rename"
+#, fuzzy
+#| msgid "Rename"
+msgid "Rename file"
 msgstr "Pārdēvēt"
 
 msgid "Repeat all"
@@ -2153,6 +2247,9 @@ msgstr "Atkārtot vienu"
 
 msgid "Repeat"
 msgstr "Atkārtot"
+
+msgid "Replace file contents"
+msgstr ""
 
 msgid "Replace saved custom headers"
 msgstr "Aizstāt saglabātos pielāgotos virsrakstus"
@@ -2205,6 +2302,9 @@ msgstr "Rindas"
 msgid "Rufin data folder"
 msgstr "Rufin datu mape"
 
+msgid "Rufin host"
+msgstr ""
+
 msgid "Rule actions"
 msgstr "Noteikumu darbības"
 
@@ -2232,7 +2332,17 @@ msgstr "Saglabāt servera iestatījumus"
 msgid "Save action saves the lyrics directly to your source"
 msgstr "Saglabāšanas darbība saglabā tekstus tieši jūsu avotā"
 
+#, fuzzy
+#| msgid "Save lyrics automatically"
+msgid "Save changes automatically"
+msgstr "Saglabāt tekstus automātiski"
+
 msgid "Save lyrics automatically"
+msgstr "Saglabāt tekstus automātiski"
+
+#, fuzzy
+#| msgid "Save lyrics automatically"
+msgid "Save playlist changes automatically"
 msgstr "Saglabāt tekstus automātiski"
 
 msgid "Save to rescan"
@@ -2741,6 +2851,9 @@ msgstr "Nepazīstams izpildītājs"
 msgid "Unknown disc"
 msgstr "Nepazīstams disks"
 
+msgid "Unlink"
+msgstr ""
+
 msgid "Unmute"
 msgstr "Ieslēgt skaņu"
 
@@ -2801,6 +2914,11 @@ msgstr "Izmantot maksimālo gadu"
 
 msgid "Use minimum year"
 msgstr "Izmantojiet minimālo gadu"
+
+#, fuzzy
+#| msgid "Lyrics settings"
+msgid "Use source setting"
+msgstr "Tekstu iestatījumi"
 
 msgid "Use the server's Instant Mix for Radio and Auto DJ."
 msgstr ""
@@ -3081,6 +3199,9 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
 
+#~ msgid "Rename Playlist"
+#~ msgstr "Pārdēvēt atskaņošanas sarakstu"
+
 #~ msgid "Enable equalizer"
 #~ msgstr "Iespējot ekvalaizeru"
 
@@ -3329,9 +3450,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 
 #~ msgid "No changes to save."
 #~ msgstr "Nav izmaiņu, ko saglabāt."
-
-#~ msgid "No folder contents found."
-#~ msgstr "Mapes saturs nav atrasts."
 
 #~ msgid "No lyrics for the current track."
 #~ msgstr "Nav tekstu pašreizējai dziesmai."

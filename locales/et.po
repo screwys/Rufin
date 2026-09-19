@@ -203,6 +203,9 @@ msgstr "API võtmed"
 msgid "About Rufin"
 msgstr "Rakenduse teave: Rufin"
 
+msgid "Absolute"
+msgstr ""
+
 msgid "Accent color"
 msgstr "Aktsentvärv"
 
@@ -349,6 +352,9 @@ msgstr "Rakenduse nimi"
 
 msgid "Apply Template"
 msgstr "Rakenda mall"
+
+msgid "Apply"
+msgstr ""
 
 msgid "Approve sign-in in your browser"
 msgstr ""
@@ -829,6 +835,11 @@ msgstr "Kustuta esitusloend"
 msgid "Delete \"{name}\"?"
 msgstr ""
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Delete playlist file"
+msgstr "Kustuta esitusloend"
+
 msgid "Delete"
 msgstr "Kustuta"
 
@@ -947,6 +958,11 @@ msgstr "EP-plaadid"
 
 msgid "Edit Lyrics"
 msgstr "Muuda laulusõnu"
+
+#, fuzzy
+#| msgid "Edit Smart Playlist"
+msgid "Edit Playlist"
+msgstr "Muuda nutikat esitusloendit"
 
 msgid "Edit Smart Playlist"
 msgstr "Muuda nutikat esitusloendit"
@@ -1103,6 +1119,11 @@ msgstr "Lemmikud"
 msgid "Featured genres"
 msgstr "Esiletõstetud žanrid"
 
+#, fuzzy
+#| msgid "Rename"
+msgid "Filename"
+msgstr "Muuda nime"
+
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 "Selleks peavad failides olema meeleolu/BPM-i sildid. Jellyfinis vastav tugi "
@@ -1149,6 +1170,9 @@ msgid "Forget Source"
 msgstr "Unusta server"
 
 msgid "Forget \"{name}\"?"
+msgstr ""
+
+msgid "Format"
 msgstr ""
 
 msgid "Forward"
@@ -1280,6 +1304,16 @@ msgstr ""
 msgid "Import Playlist"
 msgstr "Nutikas esitusloend"
 
+#, fuzzy
+#| msgid "Smart Playlist"
+msgid "Import a copy"
+msgstr "Nutikas esitusloend"
+
+#, fuzzy
+#| msgid "Support"
+msgid "Import"
+msgstr "Kasutajatugi"
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr "Kaasa sellest sessioonist Rufini üksikasjalik statistika"
 
@@ -1388,11 +1422,25 @@ msgstr "Piirang"
 msgid "Linear"
 msgstr "Lineaarne"
 
+msgid "Link exported file"
+msgstr ""
+
+msgid "Link to file..."
+msgstr ""
+
+msgid "Linked file"
+msgstr ""
+
 msgid "ListenBrainz scrobbling"
 msgstr "Kraasimine ListenBrainzi teenuses"
 
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
+
+#, fuzzy
+#| msgid "No folder contents found."
+msgid "Load file contents"
+msgstr "Kaustasisu ei leidu."
 
 #, fuzzy
 #| msgid "Loading folders..."
@@ -1814,6 +1862,9 @@ msgstr "Väljas"
 msgid "On this device"
 msgstr "See seade"
 
+msgid "On"
+msgstr ""
+
 msgid "One Name: Value header per line"
 msgstr ""
 
@@ -1883,6 +1934,9 @@ msgstr "Vaata versiooniteavet"
 msgid "Open settings"
 msgstr "Rakenduse seadistused"
 
+msgid "Open"
+msgstr ""
+
 msgid "OpenSubsonic"
 msgstr "OpenSubsonic"
 
@@ -1915,10 +1969,16 @@ msgstr "Salasõna"
 msgid "Paste"
 msgstr "Aseta"
 
+msgid "Path format"
+msgstr ""
+
 #, fuzzy
 #| msgid "Saved Sources"
 msgid "Path in Source"
 msgstr "Salvestatud allikad"
+
+msgid "Path"
+msgstr ""
 
 msgid "Pause"
 msgstr "Peata esitus"
@@ -2031,6 +2091,16 @@ msgstr "Esitamisel seadmes: {device}"
 #, fuzzy
 #| msgid "Playlist name"
 msgid "Playlist File"
+msgstr "Esitusloendi nimi"
+
+#, fuzzy
+#| msgid "Playlist name"
+msgid "Playlist file changed"
+msgstr "Esitusloendi nimi"
+
+#, fuzzy
+#| msgid "Playlist name"
+msgid "Playlist files"
 msgstr "Esitusloendi nimi"
 
 msgid "Playlist name"
@@ -2189,6 +2259,11 @@ msgstr "Punane"
 msgid "Redo"
 msgstr "Korda tegevust"
 
+#, fuzzy
+#| msgid "Save lyrics automatically"
+msgid "Refresh automatically"
+msgstr "Salvesta laulusõnad automaatselt"
+
 msgid "Refresh section"
 msgstr "Uuenda ploki andmeid"
 
@@ -2216,6 +2291,11 @@ msgstr ""
 msgid "Related"
 msgstr "Paekarva"
 
+#, fuzzy
+#| msgid "Slate"
+msgid "Relative"
+msgstr "Paekarva"
+
 msgid "Release date"
 msgstr "Avaldamise kuupäev"
 
@@ -2224,6 +2304,14 @@ msgstr "Uute versioonide teave"
 
 msgid "Release"
 msgstr "Väljalase"
+
+#, fuzzy
+#| msgid "Removed from favorites"
+msgid "Reload from file"
+msgstr "Eemaldatud lemmikute seast"
+
+msgid "Reload"
+msgstr ""
 
 msgid "Remote lyrics"
 msgstr "Laulusõnad kaugserverist"
@@ -2287,10 +2375,9 @@ msgstr "Eemaldatud lemmikute seast"
 msgid "Removed from"
 msgstr "Eemaldatud asukohast"
 
-msgid "Rename Playlist"
-msgstr "Muuda esitusloendi nime"
-
-msgid "Rename"
+#, fuzzy
+#| msgid "Rename"
+msgid "Rename file"
 msgstr "Muuda nime"
 
 msgid "Repeat all"
@@ -2304,6 +2391,9 @@ msgstr "Korda üht lugu"
 
 msgid "Repeat"
 msgstr "Korda"
+
+msgid "Replace file contents"
+msgstr ""
 
 msgid "Replace saved custom headers"
 msgstr ""
@@ -2362,6 +2452,9 @@ msgstr "Read"
 msgid "Rufin data folder"
 msgstr "Rufini andmekaust"
 
+msgid "Rufin host"
+msgstr ""
+
 msgid "Rule actions"
 msgstr "Toiminguid reeglite alusel"
 
@@ -2389,7 +2482,17 @@ msgstr "Salvesta serveri seadistused"
 msgid "Save action saves the lyrics directly to your source"
 msgstr "Salvestamine talletab laulusõnad sinu andmeallikasse"
 
+#, fuzzy
+#| msgid "Save lyrics automatically"
+msgid "Save changes automatically"
+msgstr "Salvesta laulusõnad automaatselt"
+
 msgid "Save lyrics automatically"
+msgstr "Salvesta laulusõnad automaatselt"
+
+#, fuzzy
+#| msgid "Save lyrics automatically"
+msgid "Save playlist changes automatically"
 msgstr "Salvesta laulusõnad automaatselt"
 
 msgid "Save to rescan"
@@ -2928,6 +3031,9 @@ msgstr ""
 msgid "Unknown disc"
 msgstr ""
 
+msgid "Unlink"
+msgstr ""
+
 #, fuzzy
 #| msgid "Unmuted"
 msgid "Unmute"
@@ -2999,6 +3105,11 @@ msgstr "Maksimaalne aasta"
 #| msgid "Minimum year"
 msgid "Use minimum year"
 msgstr "Minimaalne aasta"
+
+#, fuzzy
+#| msgid "Lyrics settings"
+msgid "Use source setting"
+msgstr "Laulusõnade seadistused"
 
 msgid "Use the server's Instant Mix for Radio and Auto DJ."
 msgstr ""
@@ -3265,6 +3376,9 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
 
+#~ msgid "Rename Playlist"
+#~ msgstr "Muuda esitusloendi nime"
+
 #~ msgid "Enable equalizer"
 #~ msgstr "Kasuta ekvalaiserit"
 
@@ -3510,9 +3624,6 @@ msgstr ""
 
 #~ msgid "No changes to save."
 #~ msgstr "Pole muudatusi, mida salvestada."
-
-#~ msgid "No folder contents found."
-#~ msgstr "Kaustasisu ei leidu."
 
 #~ msgid "No lyrics for the current track."
 #~ msgstr "Selle loo jaoks pole laulusõnu."

@@ -188,6 +188,9 @@ msgstr "API-avaimet"
 msgid "About Rufin"
 msgstr "Tietoja - Rufin"
 
+msgid "Absolute"
+msgstr ""
+
 msgid "Accent color"
 msgstr "Korostusväri"
 
@@ -328,6 +331,9 @@ msgstr "Sovelluksen nimi"
 
 msgid "Apply Template"
 msgstr "Toteuta mallipohja"
+
+msgid "Apply"
+msgstr ""
 
 #, fuzzy
 #| msgid "Complete sign-in in your browser"
@@ -782,6 +788,11 @@ msgstr "Poista soittolista"
 msgid "Delete \"{name}\"?"
 msgstr ""
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Delete playlist file"
+msgstr "Poista soittolista"
+
 msgid "Delete"
 msgstr "Poista"
 
@@ -896,6 +907,11 @@ msgstr ""
 
 msgid "Edit Lyrics"
 msgstr "Muokkaa sanoituksia"
+
+#, fuzzy
+#| msgid "Edit Smart Playlist"
+msgid "Edit Playlist"
+msgstr "Muokkaa älykästä soittolistaa"
 
 msgid "Edit Smart Playlist"
 msgstr "Muokkaa älykästä soittolistaa"
@@ -1038,6 +1054,11 @@ msgstr "Suosikit"
 msgid "Featured genres"
 msgstr ""
 
+#, fuzzy
+#| msgid "Rename"
+msgid "Filename"
+msgstr "Nimeä uudelleen"
+
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 
@@ -1080,6 +1101,9 @@ msgid "Forget Source"
 msgstr "Unohda lähde"
 
 msgid "Forget \"{name}\"?"
+msgstr ""
+
+msgid "Format"
 msgstr ""
 
 msgid "Forward"
@@ -1205,6 +1229,16 @@ msgstr "Tuo varmuuskopio"
 msgid "Import Playlist"
 msgstr "Tuo soittolista"
 
+#, fuzzy
+#| msgid "Import Backup"
+msgid "Import a copy"
+msgstr "Tuo varmuuskopio"
+
+#, fuzzy
+#| msgid "Export"
+msgid "Import"
+msgstr "Vie"
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr ""
 
@@ -1309,11 +1343,23 @@ msgstr "Raja"
 msgid "Linear"
 msgstr ""
 
+msgid "Link exported file"
+msgstr ""
+
+msgid "Link to file..."
+msgstr ""
+
+msgid "Linked file"
+msgstr ""
+
 msgid "ListenBrainz scrobbling"
 msgstr ""
 
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
+
+msgid "Load file contents"
+msgstr ""
 
 #, fuzzy
 #| msgid "Only played tracks"
@@ -1723,6 +1769,9 @@ msgstr ""
 msgid "On this device"
 msgstr "Tällä laitteella"
 
+msgid "On"
+msgstr ""
+
 msgid "One Name: Value header per line"
 msgstr ""
 
@@ -1784,6 +1833,9 @@ msgstr "Avaa julkaisutiedot"
 msgid "Open settings"
 msgstr "Sovelluksen asetukset"
 
+msgid "Open"
+msgstr ""
+
 msgid "OpenSubsonic"
 msgstr "OpenSubsonic"
 
@@ -1816,7 +1868,13 @@ msgstr "Salasana"
 msgid "Paste"
 msgstr "Liitä"
 
+msgid "Path format"
+msgstr ""
+
 msgid "Path in Source"
+msgstr ""
+
+msgid "Path"
 msgstr ""
 
 msgid "Pause"
@@ -1924,6 +1982,16 @@ msgid "Playing on {device}"
 msgstr "Toistetaan laitteella {device}"
 
 msgid "Playlist File"
+msgstr "Soittolistatiedosto"
+
+#, fuzzy
+#| msgid "Playlist File"
+msgid "Playlist file changed"
+msgstr "Soittolistatiedosto"
+
+#, fuzzy
+#| msgid "Playlist File"
+msgid "Playlist files"
 msgstr "Soittolistatiedosto"
 
 msgid "Playlist name"
@@ -2080,6 +2148,11 @@ msgstr "Punainen"
 msgid "Redo"
 msgstr "Tee uudelleen"
 
+#, fuzzy
+#| msgid "Save lyrics automatically"
+msgid "Refresh automatically"
+msgstr "Tallenna sanoitukset automaattisesti"
+
 msgid "Refresh section"
 msgstr ""
 
@@ -2105,6 +2178,11 @@ msgstr ""
 msgid "Related"
 msgstr "Mallipohja"
 
+#, fuzzy
+#| msgid "Template"
+msgid "Relative"
+msgstr "Mallipohja"
+
 msgid "Release date"
 msgstr "Julkaisupäivä"
 
@@ -2112,6 +2190,14 @@ msgid "Release notifications"
 msgstr "Julkaisuilmoitukset"
 
 msgid "Release"
+msgstr ""
+
+#, fuzzy
+#| msgid "Removed from favorites"
+msgid "Reload from file"
+msgstr "Poistettu suosikeista"
+
+msgid "Reload"
 msgstr ""
 
 msgid "Remote lyrics"
@@ -2174,10 +2260,9 @@ msgstr "Poistettu suosikeista"
 msgid "Removed from"
 msgstr ""
 
-msgid "Rename Playlist"
-msgstr "Nimeä soittolista uudelleen"
-
-msgid "Rename"
+#, fuzzy
+#| msgid "Rename"
+msgid "Rename file"
 msgstr "Nimeä uudelleen"
 
 msgid "Repeat all"
@@ -2191,6 +2276,9 @@ msgstr "Kertaa yksi"
 
 msgid "Repeat"
 msgstr "Kertaa"
+
+msgid "Replace file contents"
+msgstr ""
 
 msgid "Replace saved custom headers"
 msgstr ""
@@ -2243,6 +2331,9 @@ msgstr "Rivit"
 msgid "Rufin data folder"
 msgstr "Rufin-datakansio"
 
+msgid "Rufin host"
+msgstr ""
+
 msgid "Rule actions"
 msgstr "Säännön toiminnot"
 
@@ -2270,7 +2361,17 @@ msgstr "Tallenna palvelinasetukset"
 msgid "Save action saves the lyrics directly to your source"
 msgstr ""
 
+#, fuzzy
+#| msgid "Save lyrics automatically"
+msgid "Save changes automatically"
+msgstr "Tallenna sanoitukset automaattisesti"
+
 msgid "Save lyrics automatically"
+msgstr "Tallenna sanoitukset automaattisesti"
+
+#, fuzzy
+#| msgid "Save lyrics automatically"
+msgid "Save playlist changes automatically"
 msgstr "Tallenna sanoitukset automaattisesti"
 
 msgid "Save to rescan"
@@ -2800,6 +2901,9 @@ msgstr ""
 msgid "Unknown disc"
 msgstr ""
 
+msgid "Unlink"
+msgstr ""
+
 #, fuzzy
 #| msgid "Unmuted"
 msgid "Unmute"
@@ -2862,6 +2966,11 @@ msgstr "Vuosi enintään"
 #| msgid "Minimum year"
 msgid "Use minimum year"
 msgstr "Vuosi vähintään"
+
+#, fuzzy
+#| msgid "Lyrics settings"
+msgid "Use source setting"
+msgstr "Sanoitusten asetukset"
 
 msgid "Use the server's Instant Mix for Radio and Auto DJ."
 msgstr ""
@@ -3129,6 +3238,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#~ msgid "Rename Playlist"
+#~ msgstr "Nimeä soittolista uudelleen"
 
 #~ msgid "Visualizer"
 #~ msgstr "Visualisointi"

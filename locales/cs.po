@@ -197,6 +197,9 @@ msgstr "API klíče"
 msgid "About Rufin"
 msgstr "O aplikaci Rufin"
 
+msgid "Absolute"
+msgstr ""
+
 msgid "Accent color"
 msgstr "Barva zvýraznění"
 
@@ -347,6 +350,9 @@ msgstr "Název aplikace"
 #| msgid "Slate"
 msgid "Apply Template"
 msgstr "Šedá"
+
+msgid "Apply"
+msgstr ""
 
 msgid "Approve sign-in in your browser"
 msgstr ""
@@ -844,6 +850,11 @@ msgstr "Smazat playlist"
 msgid "Delete \"{name}\"?"
 msgstr ""
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Delete playlist file"
+msgstr "Smazat playlist"
+
 msgid "Delete"
 msgstr "Smazat"
 
@@ -966,6 +977,11 @@ msgstr "EP"
 #| msgid "Lyrics"
 msgid "Edit Lyrics"
 msgstr "Text skladby"
+
+#, fuzzy
+#| msgid "Smart Playlist"
+msgid "Edit Playlist"
+msgstr "Chytrý Playlist"
 
 #, fuzzy
 #| msgid "Smart Playlist"
@@ -1126,6 +1142,11 @@ msgstr "Oblíbené"
 msgid "Featured genres"
 msgstr "Vybrané žánry"
 
+#, fuzzy
+#| msgid "Rename"
+msgid "Filename"
+msgstr "Přejmenovat"
+
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 "Soubory musí obsahovat značky Mood/BPM. Tato funkce není v aplikaci Jellyfin "
@@ -1172,6 +1193,9 @@ msgid "Forget Source"
 msgstr "Zapomenout server"
 
 msgid "Forget \"{name}\"?"
+msgstr ""
+
+msgid "Format"
 msgstr ""
 
 msgid "Forward"
@@ -1303,6 +1327,16 @@ msgstr ""
 msgid "Import Playlist"
 msgstr "Chytrý Playlist"
 
+#, fuzzy
+#| msgid "Smart Playlist"
+msgid "Import a copy"
+msgstr "Chytrý Playlist"
+
+#, fuzzy
+#| msgid "Support"
+msgid "Import"
+msgstr "Uživatelská podpora"
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr "Do této relace zahrňte podrobnou diagnostiku aplikace Rufin"
 
@@ -1413,11 +1447,25 @@ msgstr "Omezení"
 msgid "Linear"
 msgstr "Lineární"
 
+msgid "Link exported file"
+msgstr ""
+
+msgid "Link to file..."
+msgstr ""
+
+msgid "Linked file"
+msgstr ""
+
 msgid "ListenBrainz scrobbling"
 msgstr "Scrobblování na ListenBrainz"
 
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
+
+#, fuzzy
+#| msgid "Local File Access"
+msgid "Load file contents"
+msgstr "Přístup k místním souborům"
 
 #, fuzzy
 #| msgid "Loading folders..."
@@ -1855,6 +1903,9 @@ msgstr "Vypnuto"
 msgid "On this device"
 msgstr "Toto zařízení"
 
+msgid "On"
+msgstr ""
+
 msgid "One Name: Value header per line"
 msgstr ""
 
@@ -1924,6 +1975,9 @@ msgstr "Otevřít poznámky k verzi"
 msgid "Open settings"
 msgstr "Nastavení aplikace"
 
+msgid "Open"
+msgstr ""
+
 msgid "OpenSubsonic"
 msgstr "OpenSubsonic"
 
@@ -1958,10 +2012,16 @@ msgstr "Heslo"
 msgid "Paste"
 msgstr "Vložit"
 
+msgid "Path format"
+msgstr ""
+
 #, fuzzy
 #| msgid "Saved Sources"
 msgid "Path in Source"
 msgstr "Uložené zdroje"
+
+msgid "Path"
+msgstr ""
 
 msgid "Pause"
 msgstr "Pauza"
@@ -2074,6 +2134,16 @@ msgstr "Přehrává se na {device}"
 #, fuzzy
 #| msgid "Playlist name"
 msgid "Playlist File"
+msgstr "Název playlistu"
+
+#, fuzzy
+#| msgid "Playlist name"
+msgid "Playlist file changed"
+msgstr "Název playlistu"
+
+#, fuzzy
+#| msgid "Playlist name"
+msgid "Playlist files"
 msgstr "Název playlistu"
 
 msgid "Playlist name"
@@ -2236,6 +2306,11 @@ msgstr "Červená"
 msgid "Redo"
 msgstr "Opakovat"
 
+#, fuzzy
+#| msgid "Searching will start automatically"
+msgid "Refresh automatically"
+msgstr "Vyhledávání se spustí automaticky"
+
 msgid "Refresh section"
 msgstr "Obnovit sekci"
 
@@ -2263,6 +2338,11 @@ msgstr ""
 msgid "Related"
 msgstr "Šedá"
 
+#, fuzzy
+#| msgid "Slate"
+msgid "Relative"
+msgstr "Šedá"
+
 msgid "Release date"
 msgstr "Datum vydání"
 
@@ -2271,6 +2351,14 @@ msgstr "Notifikace vydání"
 
 msgid "Release"
 msgstr "Vydání"
+
+#, fuzzy
+#| msgid "Removed from favorites"
+msgid "Reload from file"
+msgstr "Odebrat z oblíbených"
+
+msgid "Reload"
+msgstr ""
 
 msgid "Remote lyrics"
 msgstr "Vzdálené texty skladeb"
@@ -2338,10 +2426,9 @@ msgstr "Odebrat z oblíbených"
 msgid "Removed from"
 msgstr "Odepnout"
 
-msgid "Rename Playlist"
-msgstr "Přejmenovat Playlist"
-
-msgid "Rename"
+#, fuzzy
+#| msgid "Rename"
+msgid "Rename file"
 msgstr "Přejmenovat"
 
 msgid "Repeat all"
@@ -2355,6 +2442,9 @@ msgstr "Opakovat jednou"
 
 msgid "Repeat"
 msgstr "Opakovat"
+
+msgid "Replace file contents"
+msgstr ""
 
 msgid "Replace saved custom headers"
 msgstr ""
@@ -2407,6 +2497,9 @@ msgstr "Řádky"
 msgid "Rufin data folder"
 msgstr "Složka s daty aplikace Rufin"
 
+msgid "Rufin host"
+msgstr ""
+
 msgid "Rule actions"
 msgstr "Akce založené na pravidlech"
 
@@ -2436,7 +2529,17 @@ msgstr ""
 
 #, fuzzy
 #| msgid "Searching will start automatically"
+msgid "Save changes automatically"
+msgstr "Vyhledávání se spustí automaticky"
+
+#, fuzzy
+#| msgid "Searching will start automatically"
 msgid "Save lyrics automatically"
+msgstr "Vyhledávání se spustí automaticky"
+
+#, fuzzy
+#| msgid "Searching will start automatically"
+msgid "Save playlist changes automatically"
 msgstr "Vyhledávání se spustí automaticky"
 
 msgid "Save to rescan"
@@ -2993,6 +3096,9 @@ msgstr ""
 msgid "Unknown disc"
 msgstr ""
 
+msgid "Unlink"
+msgstr ""
+
 #, fuzzy
 #| msgid "Unmuted"
 msgid "Unmute"
@@ -3063,6 +3169,11 @@ msgstr "Maximální rok"
 #| msgid "Minimum year"
 msgid "Use minimum year"
 msgstr "Minimální rok"
+
+#, fuzzy
+#| msgid "Lyrics settings"
+msgid "Use source setting"
+msgstr "Nastavení textu skladeb"
 
 msgid "Use the server's Instant Mix for Radio and Auto DJ."
 msgstr ""
@@ -3335,6 +3446,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Rename Playlist"
+#~ msgstr "Přejmenovat Playlist"
 
 #~ msgid "Enable equalizer"
 #~ msgstr "Zapnout equalizer"

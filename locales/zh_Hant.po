@@ -180,6 +180,9 @@ msgstr "API 金鑰"
 msgid "About Rufin"
 msgstr "關於 Rufin"
 
+msgid "Absolute"
+msgstr ""
+
 msgid "Accent color"
 msgstr "強調色"
 
@@ -325,6 +328,9 @@ msgid "Application name"
 msgstr "應用程式名稱"
 
 msgid "Apply Template"
+msgstr ""
+
+msgid "Apply"
 msgstr ""
 
 msgid "Approve sign-in in your browser"
@@ -811,6 +817,11 @@ msgstr "刪除播放清單"
 msgid "Delete \"{name}\"?"
 msgstr ""
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Delete playlist file"
+msgstr "刪除播放清單"
+
 msgid "Delete"
 msgstr "刪除"
 
@@ -931,6 +942,11 @@ msgstr ""
 #| msgid "Lyrics"
 msgid "Edit Lyrics"
 msgstr "歌詞"
+
+#, fuzzy
+#| msgid "Smart Playlist"
+msgid "Edit Playlist"
+msgstr "智慧播放清單"
 
 #, fuzzy
 #| msgid "Smart Playlist"
@@ -1089,6 +1105,11 @@ msgstr "最愛"
 msgid "Featured genres"
 msgstr ""
 
+#, fuzzy
+#| msgid "Rename"
+msgid "Filename"
+msgstr "重新命名"
+
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr "檔案需要有 Mood/BPM 的標籤。不支援 Jellyfin"
 
@@ -1133,6 +1154,9 @@ msgid "Forget Source"
 msgstr "遺忘伺服器"
 
 msgid "Forget \"{name}\"?"
+msgstr ""
+
+msgid "Format"
 msgstr ""
 
 msgid "Forward"
@@ -1262,6 +1286,14 @@ msgstr ""
 msgid "Import Playlist"
 msgstr "智慧播放清單"
 
+#, fuzzy
+#| msgid "Smart Playlist"
+msgid "Import a copy"
+msgstr "智慧播放清單"
+
+msgid "Import"
+msgstr ""
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr ""
 
@@ -1368,11 +1400,23 @@ msgstr "限制"
 msgid "Linear"
 msgstr "線性"
 
+msgid "Link exported file"
+msgstr ""
+
+msgid "Link to file..."
+msgstr ""
+
+msgid "Linked file"
+msgstr ""
+
 msgid "ListenBrainz scrobbling"
 msgstr ""
 
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
+
+msgid "Load file contents"
+msgstr ""
 
 #, fuzzy
 #| msgid "Loading folders..."
@@ -1803,6 +1847,9 @@ msgstr "關閉"
 msgid "On this device"
 msgstr "此裝置"
 
+msgid "On"
+msgstr ""
+
 msgid "One Name: Value header per line"
 msgstr ""
 
@@ -1872,6 +1919,9 @@ msgstr "開啟更新記錄"
 msgid "Open settings"
 msgstr "應用程式設定"
 
+msgid "Open"
+msgstr ""
+
 msgid "OpenSubsonic"
 msgstr "OpenSubsonic"
 
@@ -1906,10 +1956,16 @@ msgstr "密碼"
 msgid "Paste"
 msgstr "貼上"
 
+msgid "Path format"
+msgstr ""
+
 #, fuzzy
 #| msgid "Change Secret Storage"
 msgid "Path in Source"
 msgstr "變更敏感存儲空間"
+
+msgid "Path"
+msgstr ""
 
 msgid "Pause"
 msgstr "暫停"
@@ -2020,6 +2076,16 @@ msgstr "在 {device} 上播放"
 #, fuzzy
 #| msgid "Playlist name"
 msgid "Playlist File"
+msgstr "播放清單名稱"
+
+#, fuzzy
+#| msgid "Playlist name"
+msgid "Playlist file changed"
+msgstr "播放清單名稱"
+
+#, fuzzy
+#| msgid "Playlist name"
+msgid "Playlist files"
 msgstr "播放清單名稱"
 
 msgid "Playlist name"
@@ -2180,6 +2246,9 @@ msgstr "紅色"
 msgid "Redo"
 msgstr "重做"
 
+msgid "Refresh automatically"
+msgstr ""
+
 msgid "Refresh section"
 msgstr "重新整理區塊"
 
@@ -2205,6 +2274,9 @@ msgstr ""
 msgid "Related"
 msgstr ""
 
+msgid "Relative"
+msgstr ""
+
 msgid "Release date"
 msgstr "發行日期"
 
@@ -2212,6 +2284,14 @@ msgid "Release notifications"
 msgstr ""
 
 msgid "Release"
+msgstr ""
+
+#, fuzzy
+#| msgid "Removed from favorites"
+msgid "Reload from file"
+msgstr "從最愛中移除"
+
+msgid "Reload"
 msgstr ""
 
 msgid "Remote lyrics"
@@ -2280,10 +2360,9 @@ msgstr "從最愛中移除"
 msgid "Removed from"
 msgstr "從釘選中移除"
 
-msgid "Rename Playlist"
-msgstr "重新命名播放清單"
-
-msgid "Rename"
+#, fuzzy
+#| msgid "Rename"
+msgid "Rename file"
 msgstr "重新命名"
 
 msgid "Repeat all"
@@ -2297,6 +2376,9 @@ msgstr "重複播放單曲"
 
 msgid "Repeat"
 msgstr "重複播放"
+
+msgid "Replace file contents"
+msgstr ""
 
 msgid "Replace saved custom headers"
 msgstr ""
@@ -2349,6 +2431,9 @@ msgstr "列表"
 msgid "Rufin data folder"
 msgstr "Rufin 資料資料夾"
 
+msgid "Rufin host"
+msgstr ""
+
 msgid "Rule actions"
 msgstr ""
 
@@ -2376,7 +2461,13 @@ msgstr "儲存伺服器設定"
 msgid "Save action saves the lyrics directly to your source"
 msgstr ""
 
+msgid "Save changes automatically"
+msgstr ""
+
 msgid "Save lyrics automatically"
+msgstr ""
+
+msgid "Save playlist changes automatically"
 msgstr ""
 
 msgid "Save to rescan"
@@ -2923,6 +3014,9 @@ msgstr ""
 msgid "Unknown disc"
 msgstr ""
 
+msgid "Unlink"
+msgstr ""
+
 msgid "Unmute"
 msgstr ""
 
@@ -2987,6 +3081,11 @@ msgstr "最大年份"
 #| msgid "Minimum year"
 msgid "Use minimum year"
 msgstr "最小年份"
+
+#, fuzzy
+#| msgid "Lyrics settings"
+msgid "Use source setting"
+msgstr "歌詞設定"
 
 msgid "Use the server's Instant Mix for Radio and Auto DJ."
 msgstr ""
@@ -3241,6 +3340,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Rename Playlist"
+#~ msgstr "重新命名播放清單"
 
 #~ msgid "Enable equalizer"
 #~ msgstr "啟用等化器"
