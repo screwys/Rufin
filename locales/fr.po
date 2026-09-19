@@ -433,6 +433,9 @@ msgstr "Sauvegarde restaurée"
 msgid "Backups"
 msgstr "Sauvegarde"
 
+msgid "Bar spacing (px)"
+msgstr ""
+
 msgid "Bearer token (WebDAV)"
 msgstr ""
 
@@ -529,6 +532,9 @@ msgstr ""
 
 msgid "Choose"
 msgstr "Choisissez"
+
+msgid "Circular spectrum"
+msgstr ""
 
 msgid "Classical"
 msgstr "Classique"
@@ -664,6 +670,12 @@ msgstr "Copier le token d'accès"
 
 msgid "Copy link"
 msgstr "Copier le lien"
+
+msgid "Copy preset"
+msgstr ""
+
+msgid "Copy the current appearance to the clipboard"
+msgstr ""
 
 msgid "Copy"
 msgstr "Copier"
@@ -991,6 +1003,9 @@ msgstr ""
 msgid "Fade audio when playback is paused or resumed"
 msgstr "Fondu audio lorsque la lecture est interrompue ou reprise"
 
+msgid "Fall speed (%)"
+msgstr ""
+
 msgid "Favorite current track"
 msgstr ""
 
@@ -1023,6 +1038,9 @@ msgstr ""
 msgid "Files"
 msgstr "Fichiers"
 
+msgid "Filled spectrum"
+msgstr ""
+
 msgid "Find shares"
 msgstr ""
 
@@ -1043,6 +1061,9 @@ msgstr "Dossier"
 
 msgid "Folders"
 msgstr "Dossiers"
+
+msgid "Follow the app accent with lighter and darker tones"
+msgstr ""
 
 msgid "Font family"
 msgstr ""
@@ -1081,6 +1102,9 @@ msgstr ""
 
 msgid "Full"
 msgstr "Plein"
+
+msgid "Fullscreen"
+msgstr ""
 
 msgid "Furigana"
 msgstr "Furigana"
@@ -1126,6 +1150,12 @@ msgstr "Allez"
 
 msgid "Google Cast"
 msgstr "Google Cast"
+
+msgid "Gradient end"
+msgstr ""
+
+msgid "Gradient start"
+msgstr ""
 
 msgid "Green"
 msgstr "Vert"
@@ -1383,14 +1413,14 @@ msgstr "Les journaux sont copiés"
 msgid "Loudness normalization"
 msgstr ""
 
+msgid "Lyrics background opacity"
+msgstr ""
+
 msgid "Lyrics loaded"
 msgstr "Paroles chargées"
 
 msgid "Lyrics offset (ms)"
 msgstr "Décalage des paroles (ms)"
-
-msgid "Lyrics settings"
-msgstr "Paramètres des paroles"
 
 msgid "Lyrics storage"
 msgstr "Stockage des paroles"
@@ -1431,6 +1461,9 @@ msgstr "Métadonnées"
 msgid "Minimum year"
 msgstr "Année minimum"
 
+msgid "Mirrored bars"
+msgstr ""
+
 msgid "Monday"
 msgstr "Lundi"
 
@@ -1463,6 +1496,11 @@ msgstr "Le plus sauté"
 
 msgid "Most played"
 msgstr "Le plus joué"
+
+#, fuzzy
+#| msgid "Position"
+msgid "Motion"
+msgstr "Position"
 
 msgid "Move down"
 msgstr ""
@@ -1734,6 +1772,9 @@ msgstr ""
 msgid "Only unplayed tracks"
 msgstr ""
 
+msgid "Opacity (%)"
+msgstr ""
+
 msgid "Open Controller"
 msgstr ""
 
@@ -1794,6 +1835,9 @@ msgstr "Original"
 msgid "Other releases"
 msgstr ""
 
+msgid "Outline bars"
+msgstr ""
+
 msgid "Overview"
 msgstr "Aperçu"
 
@@ -1802,6 +1846,9 @@ msgstr "Mot de passe ou jeton"
 
 msgid "Password"
 msgstr "Mot de passe"
+
+msgid "Paste preset"
+msgstr ""
 
 msgid "Paste"
 msgstr "Coller"
@@ -1817,6 +1864,12 @@ msgstr "Chemin"
 
 msgid "Pause"
 msgstr "Pause"
+
+msgid "Peak fall speed (% per second)"
+msgstr ""
+
+msgid "Peak hold (seconds)"
+msgstr ""
 
 msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
 msgstr ""
@@ -1979,7 +2032,28 @@ msgstr "Préparation de la bibliothèque..."
 msgid "Preserve pitch"
 msgstr ""
 
+msgid "Preset 1"
+msgstr ""
+
+msgid "Preset 2"
+msgstr ""
+
+msgid "Preset 3"
+msgstr ""
+
+msgid "Preset 4"
+msgstr ""
+
+msgid "Preset 5"
+msgstr ""
+
+msgid "Preset saved"
+msgstr ""
+
 msgid "Preset"
+msgstr ""
+
+msgid "Presets"
 msgstr ""
 
 msgid "Prevent automatic metadata refreshes from replacing these values"
@@ -2204,6 +2278,11 @@ msgstr ""
 msgid "Require SMB encryption"
 msgstr "Requière le chiffrement SMB"
 
+#, fuzzy
+#| msgid "Appearance"
+msgid "Reset appearance"
+msgstr "Apparence"
+
 msgid "Reset to defaults"
 msgstr ""
 
@@ -2214,6 +2293,9 @@ msgid "Resource not found"
 msgstr "Ressource non trouvée"
 
 msgid "Restore User State"
+msgstr ""
+
+msgid "Restore defaults without deleting saved presets"
 msgstr ""
 
 msgid "Restore player layout"
@@ -2231,10 +2313,16 @@ msgstr ""
 msgid "Retry"
 msgstr ""
 
+msgid "Rise speed (%)"
+msgstr ""
+
 msgid "Rock"
 msgstr ""
 
 msgid "Romaji"
+msgstr ""
+
+msgid "Rounded bars"
 msgstr ""
 
 msgid "Rows"
@@ -2298,6 +2386,9 @@ msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
 msgstr[0] ""
 msgstr[1] ""
+
+msgid "Saved preset"
+msgstr ""
 
 msgid "Saved to"
 msgstr ""
@@ -2401,6 +2492,9 @@ msgstr ""
 msgid "Seekbar"
 msgstr ""
 
+msgid "Segmented bars"
+msgstr ""
+
 msgid "Select All"
 msgstr ""
 
@@ -2473,6 +2567,11 @@ msgstr ""
 msgid "Settings and sources"
 msgstr ""
 
+#, fuzzy
+#| msgid "App settings"
+msgid "Settings"
+msgstr "Préférences"
+
 msgid "Share"
 msgstr ""
 
@@ -2501,6 +2600,9 @@ msgid "Show lyrics"
 msgstr ""
 
 msgid "Show paused status"
+msgstr ""
+
+msgid "Show peak markers"
 msgstr ""
 
 msgid "Show ratings in the bottom bar"
@@ -2551,6 +2653,11 @@ msgstr ""
 msgid "Sidebar route by position"
 msgstr ""
 
+#, fuzzy
+#| msgid "Hide sidebar"
+msgid "Sidebar"
+msgstr "Cacher la barre latérale"
+
 msgid "Sign In in Browser"
 msgstr ""
 
@@ -2596,6 +2703,9 @@ msgstr ""
 msgid "Smart playlists"
 msgstr ""
 
+msgid "Solid bars"
+msgstr ""
+
 msgid "Some playlist entries could not be imported"
 msgstr ""
 
@@ -2629,6 +2739,9 @@ msgstr ""
 msgid "Sources"
 msgstr ""
 
+msgid "Spectrum line"
+msgstr ""
+
 msgid "Sponsor"
 msgstr ""
 
@@ -2645,6 +2758,9 @@ msgid "Store calculated loudness in supported Local music files"
 msgstr ""
 
 msgid "Stream quality"
+msgstr ""
+
+msgid "Style"
 msgstr ""
 
 msgid "Sunday"
@@ -2693,6 +2809,9 @@ msgid "Theme"
 msgstr ""
 
 msgid "This device"
+msgstr ""
+
+msgid "This is not a valid Rufin visualizer preset."
 msgstr ""
 
 msgid "This is owned by {source}. Regular playlists are synced to your remote."
@@ -2827,6 +2946,9 @@ msgstr ""
 msgid "Use a number above zero"
 msgstr ""
 
+msgid "Use accent color"
+msgstr ""
+
 msgid "Use different layout below a threshold width"
 msgstr ""
 
@@ -2885,6 +3007,11 @@ msgstr ""
 
 msgid "Visible"
 msgstr ""
+
+#, fuzzy
+#| msgid "Equalizer"
+msgid "Visualizer"
+msgstr "Égaliseur"
 
 msgid "Volume Down"
 msgstr ""
@@ -3107,6 +3234,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Lyrics settings"
+#~ msgstr "Paramètres des paroles"
 
 #~ msgid ""
 #~ "Tap to the entry to load the lyrics and save in the app cache, click save "

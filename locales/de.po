@@ -469,6 +469,9 @@ msgstr "Sicherung wiederhergestellt"
 msgid "Backups"
 msgstr "Sicherungen"
 
+msgid "Bar spacing (px)"
+msgstr ""
+
 msgid "Bearer token (WebDAV)"
 msgstr "Bearer-Token (WebDAV)"
 
@@ -565,6 +568,9 @@ msgstr "Wiedergabeausgabe auswählen"
 
 msgid "Choose"
 msgstr "Wähle"
+
+msgid "Circular spectrum"
+msgstr ""
 
 msgid "Classical"
 msgstr "Klassik"
@@ -700,6 +706,12 @@ msgstr "Zugriffstoken kopieren"
 
 msgid "Copy link"
 msgstr "Link kopieren"
+
+msgid "Copy preset"
+msgstr ""
+
+msgid "Copy the current appearance to the clipboard"
+msgstr ""
 
 msgid "Copy"
 msgstr "Kopie"
@@ -1032,6 +1044,9 @@ msgid "Fade audio when playback is paused or resumed"
 msgstr ""
 "Audio beim Pausieren oder Fortsetzen der Wiedergabe sanft ein- und ausblenden"
 
+msgid "Fall speed (%)"
+msgstr ""
+
 msgid "Favorite current track"
 msgstr "Aktuellen Titel zu Favoriten hinzufügen"
 
@@ -1068,6 +1083,9 @@ msgstr ""
 msgid "Files"
 msgstr "Dateien"
 
+msgid "Filled spectrum"
+msgstr ""
+
 msgid "Find shares"
 msgstr "Freigaben suchen"
 
@@ -1088,6 +1106,9 @@ msgstr "Ordner"
 
 msgid "Folders"
 msgstr "Ordner"
+
+msgid "Follow the app accent with lighter and darker tones"
+msgstr ""
 
 msgid "Font family"
 msgstr "Schriftart"
@@ -1126,6 +1147,11 @@ msgstr "Höhen-Anhebung"
 
 msgid "Full"
 msgstr "Vollständig"
+
+#, fuzzy
+#| msgid "Toggle Fullscreen"
+msgid "Fullscreen"
+msgstr "Vollbildmodus"
 
 msgid "Furigana"
 msgstr "Furigana"
@@ -1171,6 +1197,12 @@ msgstr "Gehe zu"
 
 msgid "Google Cast"
 msgstr "Google Cast"
+
+msgid "Gradient end"
+msgstr ""
+
+msgid "Gradient start"
+msgstr ""
 
 msgid "Green"
 msgstr "Grün"
@@ -1430,14 +1462,16 @@ msgstr "Protokolle wurden kopiert"
 msgid "Loudness normalization"
 msgstr "Lautstärkenormalisierung"
 
+#, fuzzy
+#| msgid "Dynamic background"
+msgid "Lyrics background opacity"
+msgstr "Dynamischer Hintergrund"
+
 msgid "Lyrics loaded"
 msgstr "Liedtexte geladen"
 
 msgid "Lyrics offset (ms)"
 msgstr "Liedtext-Zeitversatz (ms)"
-
-msgid "Lyrics settings"
-msgstr "Liedtexteinstellungen"
 
 msgid "Lyrics storage"
 msgstr "Liedtext-Speicher"
@@ -1478,6 +1512,9 @@ msgstr "Metadaten"
 msgid "Minimum year"
 msgstr "Mindestjahr"
 
+msgid "Mirrored bars"
+msgstr ""
+
 msgid "Monday"
 msgstr "Montag"
 
@@ -1510,6 +1547,11 @@ msgstr "Am häufigsten übersprungen"
 
 msgid "Most played"
 msgstr "Am häufigsten gespielt"
+
+#, fuzzy
+#| msgid "Position"
+msgid "Motion"
+msgstr "Position"
 
 msgid "Move down"
 msgstr "Nach unten verschieben"
@@ -1786,6 +1828,9 @@ msgstr "Nur gespielte Titel"
 msgid "Only unplayed tracks"
 msgstr "Nur ungespielte Titel"
 
+msgid "Opacity (%)"
+msgstr ""
+
 msgid "Open Controller"
 msgstr "Controller öffnen"
 
@@ -1846,6 +1891,9 @@ msgstr "Original"
 msgid "Other releases"
 msgstr "Andere Veröffentlichungen"
 
+msgid "Outline bars"
+msgstr ""
+
 msgid "Overview"
 msgstr "Übersicht"
 
@@ -1854,6 +1902,11 @@ msgstr "Passwort oder Token"
 
 msgid "Password"
 msgstr "Passwort"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Paste preset"
+msgstr "Voreinstellung"
 
 msgid "Paste"
 msgstr "Einfügen"
@@ -1871,6 +1924,12 @@ msgstr ""
 
 msgid "Pause"
 msgstr "Pause"
+
+msgid "Peak fall speed (% per second)"
+msgstr ""
+
+msgid "Peak hold (seconds)"
+msgstr ""
 
 msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
 msgstr ""
@@ -2037,7 +2096,42 @@ msgstr "Bibliothek wird vorbereitet..."
 msgid "Preserve pitch"
 msgstr "Tonhöhe beibehalten"
 
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset 1"
+msgstr "Voreinstellung"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset 2"
+msgstr "Voreinstellung"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset 3"
+msgstr "Voreinstellung"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset 4"
+msgstr "Voreinstellung"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset 5"
+msgstr "Voreinstellung"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset saved"
+msgstr "Voreinstellung"
+
 msgid "Preset"
+msgstr "Voreinstellung"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Presets"
 msgstr "Voreinstellung"
 
 msgid "Prevent automatic metadata refreshes from replacing these values"
@@ -2271,6 +2365,11 @@ msgstr "Anfrage fehlgeschlagen ({status})"
 msgid "Require SMB encryption"
 msgstr "SMB-Verschlüsselung anfordern"
 
+#, fuzzy
+#| msgid "Appearance"
+msgid "Reset appearance"
+msgstr "Mitwirkungen"
+
 msgid "Reset to defaults"
 msgstr "Auf Standardeinstellungen zurücksetzen"
 
@@ -2282,6 +2381,9 @@ msgstr "Ressource nicht gefunden"
 
 msgid "Restore User State"
 msgstr "Benutzerstatus wiederherstellen"
+
+msgid "Restore defaults without deleting saved presets"
+msgstr ""
 
 msgid "Restore player layout"
 msgstr "Player-Layout wiederherstellen"
@@ -2298,11 +2400,17 @@ msgstr "Bibliothek neu synchronisieren"
 msgid "Retry"
 msgstr "Wiederholen"
 
+msgid "Rise speed (%)"
+msgstr ""
+
 msgid "Rock"
 msgstr "Rock"
 
 msgid "Romaji"
 msgstr "Romaji"
+
+msgid "Rounded bars"
+msgstr ""
 
 msgid "Rows"
 msgstr "Reihen"
@@ -2370,6 +2478,11 @@ msgid_plural "Saved mapping. {matched} of {total} server paths match"
 msgstr[0] "Gespeicherte Zuordnung: {matched} von {total} Serverpfad zugeordnet"
 msgstr[1] ""
 "Gespeicherte Zuordnung: {matched} von {total} Serverpfaden zugeordnet"
+
+#, fuzzy
+#| msgid "Saved to"
+msgid "Saved preset"
+msgstr "Gespeichert unter"
 
 msgid "Saved to"
 msgstr "Gespeichert unter"
@@ -2473,6 +2586,11 @@ msgstr "Zu {time} springen"
 msgid "Seekbar"
 msgstr "Wiedergabeleiste"
 
+#, fuzzy
+#| msgid "Selected folders"
+msgid "Segmented bars"
+msgstr "Ausgewählte Ordner"
+
 msgid "Select All"
 msgstr "Alle auswählen"
 
@@ -2545,6 +2663,11 @@ msgstr "Discord-Aktivitätstyp auf „Hört gerade“ festlegen"
 msgid "Settings and sources"
 msgstr "Einstellungen und Quellen"
 
+#, fuzzy
+#| msgid "App settings"
+msgid "Settings"
+msgstr "App-Einstellungen"
+
 msgid "Share"
 msgstr "Freigabe"
 
@@ -2574,6 +2697,9 @@ msgstr "Songtexte einblenden"
 
 msgid "Show paused status"
 msgstr "Pausierten Status anzeigen"
+
+msgid "Show peak markers"
+msgstr ""
 
 msgid "Show ratings in the bottom bar"
 msgstr "Bewertungen in der unteren Leiste anzeigen"
@@ -2623,6 +2749,11 @@ msgstr "Seitenleistenelement {position}"
 msgid "Sidebar route by position"
 msgstr "Seitenleistenroute nach Position"
 
+#, fuzzy
+#| msgid "Show sidebar"
+msgid "Sidebar"
+msgstr "Seitenleiste einblenden"
+
 msgid "Sign In in Browser"
 msgstr "Im Browser anmelden"
 
@@ -2668,6 +2799,9 @@ msgstr "Smart-Playlist-Titel"
 msgid "Smart playlists"
 msgstr "Smart-Playlists"
 
+msgid "Solid bars"
+msgstr ""
+
 msgid "Some playlist entries could not be imported"
 msgstr "Einige Playlist-Einträge konnten nicht importiert werden"
 
@@ -2701,6 +2835,9 @@ msgstr "Quelle"
 msgid "Sources"
 msgstr "Quellen"
 
+msgid "Spectrum line"
+msgstr ""
+
 msgid "Sponsor"
 msgstr "Sponsor"
 
@@ -2718,6 +2855,9 @@ msgstr "Berechnete Lautheit in unterstützten lokalen Musikdateien speichern"
 
 msgid "Stream quality"
 msgstr "Streaming-Qualität"
+
+msgid "Style"
+msgstr ""
 
 msgid "Sunday"
 msgstr "Sonntag"
@@ -2766,6 +2906,9 @@ msgstr "Darstellung"
 
 msgid "This device"
 msgstr "Dieses Gerät"
+
+msgid "This is not a valid Rufin visualizer preset."
+msgstr ""
 
 msgid "This is owned by {source}. Regular playlists are synced to your remote."
 msgstr ""
@@ -2903,6 +3046,11 @@ msgstr "Diese Quelle verwenden"
 msgid "Use a number above zero"
 msgstr "Verwende eine Zahl größer als null"
 
+#, fuzzy
+#| msgid "Accent color"
+msgid "Use accent color"
+msgstr "Akzentfarbe"
+
 msgid "Use different layout below a threshold width"
 msgstr "Anderes Layout unterhalb einer Mindestbreite verwenden"
 
@@ -2964,6 +3112,9 @@ msgstr "Ansicht"
 
 msgid "Visible"
 msgstr "Sichtbar"
+
+msgid "Visualizer"
+msgstr "Visualisierung"
 
 msgid "Volume Down"
 msgstr "Lautstärke verringern"
@@ -3201,14 +3352,14 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
 
+#~ msgid "Lyrics settings"
+#~ msgstr "Liedtexteinstellungen"
+
 #~ msgid "Rename Playlist"
 #~ msgstr "Playlist umbenennen"
 
 #~ msgid "Enable equalizer"
 #~ msgstr "Equalizer einschalten"
-
-#~ msgid "Visualizer"
-#~ msgstr "Visualisierung"
 
 #~ msgid ""
 #~ "This uses Jellyfin API for play radio, necessary if you want "

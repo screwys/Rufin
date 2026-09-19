@@ -435,6 +435,9 @@ msgstr "Varmuuskopio palautettu"
 msgid "Backups"
 msgstr "Varmuuskopiot"
 
+msgid "Bar spacing (px)"
+msgstr ""
+
 msgid "Bearer token (WebDAV)"
 msgstr ""
 
@@ -537,6 +540,9 @@ msgstr "Valitse toiston ulostulo"
 
 msgid "Choose"
 msgstr "Valitse"
+
+msgid "Circular spectrum"
+msgstr ""
 
 msgid "Classical"
 msgstr "Klassinen"
@@ -686,6 +692,12 @@ msgstr ""
 #| msgid "Copy"
 msgid "Copy link"
 msgstr "Kopioi"
+
+msgid "Copy preset"
+msgstr ""
+
+msgid "Copy the current appearance to the clipboard"
+msgstr ""
 
 msgid "Copy"
 msgstr "Kopioi"
@@ -1031,6 +1043,9 @@ msgstr "Ulkoisten sivujen linkit"
 msgid "Fade audio when playback is paused or resumed"
 msgstr "Häivytä ääni kun toisto keskeytetään tai palautetaan"
 
+msgid "Fall speed (%)"
+msgstr ""
+
 #, fuzzy
 #| msgid "Favorite tracks"
 msgid "Favorite current track"
@@ -1065,6 +1080,9 @@ msgstr ""
 msgid "Files"
 msgstr ""
 
+msgid "Filled spectrum"
+msgstr ""
+
 msgid "Find shares"
 msgstr ""
 
@@ -1087,6 +1105,9 @@ msgstr "Kansio"
 
 msgid "Folders"
 msgstr "Kansiot"
+
+msgid "Follow the app accent with lighter and darker tones"
+msgstr ""
 
 msgid "Font family"
 msgstr "Fonttiperhe"
@@ -1123,6 +1144,11 @@ msgstr ""
 
 msgid "Full"
 msgstr ""
+
+#, fuzzy
+#| msgid "Toggle Fullscreen"
+msgid "Fullscreen"
+msgstr "Koko näyttö päällä/pois"
 
 msgid "Furigana"
 msgstr ""
@@ -1167,6 +1193,12 @@ msgid "Go to"
 msgstr ""
 
 msgid "Google Cast"
+msgstr ""
+
+msgid "Gradient end"
+msgstr ""
+
+msgid "Gradient start"
 msgstr ""
 
 msgid "Green"
@@ -1426,14 +1458,14 @@ msgstr ""
 msgid "Loudness normalization"
 msgstr ""
 
+msgid "Lyrics background opacity"
+msgstr ""
+
 msgid "Lyrics loaded"
 msgstr "Sanoitukset ladattu"
 
 msgid "Lyrics offset (ms)"
 msgstr "Sanoituksen siirtymä (ms)"
-
-msgid "Lyrics settings"
-msgstr "Sanoitusten asetukset"
 
 msgid "Lyrics storage"
 msgstr "Sanoitusten tallennustila"
@@ -1474,6 +1506,9 @@ msgstr "Metatieto"
 msgid "Minimum year"
 msgstr "Vuosi vähintään"
 
+msgid "Mirrored bars"
+msgstr ""
+
 msgid "Monday"
 msgstr "Maanantai"
 
@@ -1506,6 +1541,11 @@ msgstr "Eniten ohitetut"
 
 msgid "Most played"
 msgstr "Eniten toistettu"
+
+#, fuzzy
+#| msgid "More actions"
+msgid "Motion"
+msgstr "Lisää toimintoja"
 
 msgid "Move down"
 msgstr "Siirrä alas"
@@ -1790,6 +1830,9 @@ msgstr "Vain toistetut kappaleet"
 msgid "Only unplayed tracks"
 msgstr ""
 
+msgid "Opacity (%)"
+msgstr ""
+
 #, fuzzy
 #| msgid "Open Folder"
 msgid "Open Controller"
@@ -1854,6 +1897,9 @@ msgstr "Alkuperäinen"
 msgid "Other releases"
 msgstr "Muut julkaisut"
 
+msgid "Outline bars"
+msgstr ""
+
 msgid "Overview"
 msgstr ""
 
@@ -1864,6 +1910,9 @@ msgstr "Salasana"
 
 msgid "Password"
 msgstr "Salasana"
+
+msgid "Paste preset"
+msgstr ""
 
 msgid "Paste"
 msgstr "Liitä"
@@ -1879,6 +1928,12 @@ msgstr ""
 
 msgid "Pause"
 msgstr "Keskeytä"
+
+msgid "Peak fall speed (% per second)"
+msgstr ""
+
+msgid "Peak hold (seconds)"
+msgstr ""
 
 msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
 msgstr ""
@@ -2051,8 +2106,41 @@ msgstr "Valmistellaan kirjastoa..."
 msgid "Preserve pitch"
 msgstr ""
 
+#, fuzzy
+#| msgid "Reset"
+msgid "Preset 1"
+msgstr "Palauta oletukset"
+
+#, fuzzy
+#| msgid "Reset"
+msgid "Preset 2"
+msgstr "Palauta oletukset"
+
+#, fuzzy
+#| msgid "Reset"
+msgid "Preset 3"
+msgstr "Palauta oletukset"
+
+#, fuzzy
+#| msgid "Reset"
+msgid "Preset 4"
+msgstr "Palauta oletukset"
+
+#, fuzzy
+#| msgid "Reset"
+msgid "Preset 5"
+msgstr "Palauta oletukset"
+
+msgid "Preset saved"
+msgstr ""
+
 msgid "Preset"
 msgstr ""
+
+#, fuzzy
+#| msgid "Reset"
+msgid "Presets"
+msgstr "Palauta oletukset"
 
 msgid "Prevent automatic metadata refreshes from replacing these values"
 msgstr ""
@@ -2292,6 +2380,11 @@ msgstr ""
 msgid "Require SMB encryption"
 msgstr "Vaadi SMB-salaus"
 
+#, fuzzy
+#| msgid "Appearance"
+msgid "Reset appearance"
+msgstr "Ulkoasu"
+
 msgid "Reset to defaults"
 msgstr "Palauta oletusarvot"
 
@@ -2302,6 +2395,9 @@ msgid "Resource not found"
 msgstr "Resurssia ei löytynyt"
 
 msgid "Restore User State"
+msgstr ""
+
+msgid "Restore defaults without deleting saved presets"
 msgstr ""
 
 msgid "Restore player layout"
@@ -2319,10 +2415,16 @@ msgstr "Synkronoi kirjasto uudelleen"
 msgid "Retry"
 msgstr "Yritä uudelleen"
 
+msgid "Rise speed (%)"
+msgstr ""
+
 msgid "Rock"
 msgstr "Rock"
 
 msgid "Romaji"
+msgstr ""
+
+msgid "Rounded bars"
 msgstr ""
 
 msgid "Rows"
@@ -2390,6 +2492,11 @@ msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
 msgstr[0] ""
 msgstr[1] ""
+
+#, fuzzy
+#| msgid "Save Lyrics"
+msgid "Saved preset"
+msgstr "Tallenna sanoitukset"
 
 msgid "Saved to"
 msgstr ""
@@ -2503,6 +2610,9 @@ msgstr ""
 msgid "Seekbar"
 msgstr "Kelauspalkki"
 
+msgid "Segmented bars"
+msgstr ""
+
 msgid "Select All"
 msgstr "Valitse kaikki"
 
@@ -2577,6 +2687,11 @@ msgstr ""
 msgid "Settings and sources"
 msgstr "Asetukset ja lähteet"
 
+#, fuzzy
+#| msgid "App settings"
+msgid "Settings"
+msgstr "Sovelluksen asetukset"
+
 msgid "Share"
 msgstr ""
 
@@ -2605,6 +2720,9 @@ msgid "Show lyrics"
 msgstr "Näytä sanoitukset"
 
 msgid "Show paused status"
+msgstr ""
+
+msgid "Show peak markers"
 msgstr ""
 
 msgid "Show ratings in the bottom bar"
@@ -2657,6 +2775,11 @@ msgstr "Sivupalkin tietue {position}"
 msgid "Sidebar route by position"
 msgstr ""
 
+#, fuzzy
+#| msgid "Show sidebar"
+msgid "Sidebar"
+msgstr "Näytä sivupalkki"
+
 msgid "Sign In in Browser"
 msgstr "Kirjaudu sisään selaimessa"
 
@@ -2704,6 +2827,9 @@ msgstr ""
 msgid "Smart playlists"
 msgstr "Älykkäät soittolistat"
 
+msgid "Solid bars"
+msgstr ""
+
 msgid "Some playlist entries could not be imported"
 msgstr ""
 
@@ -2741,6 +2867,9 @@ msgstr "Lähde"
 msgid "Sources"
 msgstr "Lähteet"
 
+msgid "Spectrum line"
+msgstr ""
+
 msgid "Sponsor"
 msgstr ""
 
@@ -2760,6 +2889,9 @@ msgstr ""
 
 msgid "Stream quality"
 msgstr "Suoratoiston laatu"
+
+msgid "Style"
+msgstr ""
 
 msgid "Sunday"
 msgstr "Sunnuntai"
@@ -2808,6 +2940,9 @@ msgstr "Teema"
 
 msgid "This device"
 msgstr "Tämä laite"
+
+msgid "This is not a valid Rufin visualizer preset."
+msgstr ""
 
 msgid "This is owned by {source}. Regular playlists are synced to your remote."
 msgstr ""
@@ -2945,6 +3080,11 @@ msgstr "Käytä tätä lähdettä"
 msgid "Use a number above zero"
 msgstr ""
 
+#, fuzzy
+#| msgid "Accent color"
+msgid "Use accent color"
+msgstr "Korostusväri"
+
 msgid "Use different layout below a threshold width"
 msgstr ""
 
@@ -3009,6 +3149,9 @@ msgstr "Näkymä"
 
 msgid "Visible"
 msgstr "Näkyvissä"
+
+msgid "Visualizer"
+msgstr "Visualisointi"
 
 msgid "Volume Down"
 msgstr ""
@@ -3239,8 +3382,8 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
 
+#~ msgid "Lyrics settings"
+#~ msgstr "Sanoitusten asetukset"
+
 #~ msgid "Rename Playlist"
 #~ msgstr "Nimeä soittolista uudelleen"
-
-#~ msgid "Visualizer"
-#~ msgstr "Visualisointi"
