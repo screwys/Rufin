@@ -1127,6 +1127,8 @@ fn set_cookie(
         .insert(hyper::header::CACHE_CONTROL, "no-store".parse().unwrap());
 }
 
+const BROWSER_SESSION_AGE: u64 = 365 * 24 * 60 * 60;
+
 async fn login(
     Extension(auth): Extension<Arc<Authorization>>,
     Extension(peer): Extension<SocketAddr>,
@@ -1150,9 +1152,12 @@ async fn login(
         }
         return *response;
     }
-    let csrf = match random_secret() {
-        Ok(nonce) => nonce,
-        Err(error) => return error.into_response(),
+    let csrf = match session(&auth, &headers) {
+        Some(csrf) => csrf,
+        None => match random_secret() {
+            Ok(nonce) => nonce,
+            Err(error) => return error.into_response(),
+        },
     };
     let signature = blake3::keyed_hash(&auth.browser_key, csrf.as_bytes());
     let value = format!("{csrf}.{}", signature.to_hex());
@@ -1164,7 +1169,7 @@ async fn login(
     } else {
         axum::response::Redirect::to("/").into_response()
     };
-    set_cookie(&mut response, &headers, &value, None);
+    set_cookie(&mut response, &headers, &value, Some(BROWSER_SESSION_AGE));
     response
 }
 

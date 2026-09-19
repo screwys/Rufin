@@ -19,15 +19,13 @@ import { coverRequest, showLyrics, showPlayback } from "./player.js";
 import { showSourceProgress, updateSources } from "./sources.js";
 import { refreshPins, resetPins } from "./pins.js";
 
-let token =
-  new URLSearchParams(location.hash.slice(1)).get("token") ||
-  sessionStorage.getItem("rufin-token") ||
-  "";
-
 let session = null;
 let initialPage = true;
 let leavingPage = false;
 let csrf = document.querySelector('meta[name="rufin-csrf"]').content;
+let token = csrf
+  ? ""
+  : new URLSearchParams(location.hash.slice(1)).get("token") || "";
 
 async function login() {
   if (!token) return;
@@ -40,7 +38,6 @@ async function login() {
   if (!response.ok) throw new Error(result.error);
   csrf = result.csrf;
   token = "";
-  sessionStorage.removeItem("rufin-token");
 }
 
 function browserHeaders() {
@@ -118,7 +115,6 @@ function disconnect() {
   session = null;
   resetPins();
   token = "";
-  sessionStorage.removeItem("rufin-token");
   for (const url of coverUrls.values()) URL.revokeObjectURL(url);
   coverUrls.clear();
   state.playback = null;
@@ -289,7 +285,8 @@ function init() {
     connect().catch((error) => {
       if (!session?.signal.aborted) {
         $("login-error").textContent = error.message;
-        $("login-dialog").showModal();
+        if (token || !csrf) $("login-dialog").showModal();
+        else notice(error.message);
       }
     });
   else $("login-dialog").showModal();
