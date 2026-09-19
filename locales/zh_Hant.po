@@ -443,6 +443,9 @@ msgstr "安全儲存空間"
 msgid "Backups"
 msgstr "返回"
 
+msgid "Bar spacing (px)"
+msgstr ""
+
 #, fuzzy
 #| msgid "Get token"
 msgid "Bearer token (WebDAV)"
@@ -554,6 +557,9 @@ msgstr "選擇播放裝置"
 
 msgid "Choose"
 msgstr "選擇"
+
+msgid "Circular spectrum"
+msgstr ""
 
 msgid "Classical"
 msgstr "古典"
@@ -711,6 +717,12 @@ msgstr ""
 #| msgid "Copy"
 msgid "Copy link"
 msgstr "複製"
+
+msgid "Copy preset"
+msgstr ""
+
+msgid "Copy the current appearance to the clipboard"
+msgstr ""
 
 msgid "Copy"
 msgstr "複製"
@@ -1080,6 +1092,9 @@ msgstr "外部網站連結"
 msgid "Fade audio when playback is paused or resumed"
 msgstr "當播放暫停或繼續時淡出或淡入"
 
+msgid "Fall speed (%)"
+msgstr ""
+
 #, fuzzy
 #| msgid "Favorite tracks"
 msgid "Favorite current track"
@@ -1116,6 +1131,9 @@ msgstr "檔案需要有 Mood/BPM 的標籤。不支援 Jellyfin"
 msgid "Files"
 msgstr ""
 
+msgid "Filled spectrum"
+msgstr ""
+
 msgid "Find shares"
 msgstr ""
 
@@ -1138,6 +1156,9 @@ msgstr "資料夾"
 
 msgid "Folders"
 msgstr "資料夾"
+
+msgid "Follow the app accent with lighter and darker tones"
+msgstr ""
 
 msgid "Font family"
 msgstr ""
@@ -1176,6 +1197,11 @@ msgstr ""
 
 msgid "Full"
 msgstr "完整"
+
+#, fuzzy
+#| msgid "Toggle Fullscreen"
+msgid "Fullscreen"
+msgstr "切換全螢幕"
 
 msgid "Furigana"
 msgstr "注音假名"
@@ -1222,6 +1248,12 @@ msgid "Go to"
 msgstr "前往"
 
 msgid "Google Cast"
+msgstr ""
+
+msgid "Gradient end"
+msgstr ""
+
+msgid "Gradient start"
 msgstr ""
 
 msgid "Green"
@@ -1482,14 +1514,14 @@ msgstr ""
 msgid "Loudness normalization"
 msgstr "響度正規化"
 
+msgid "Lyrics background opacity"
+msgstr ""
+
 msgid "Lyrics loaded"
 msgstr "歌詞已載入"
 
 msgid "Lyrics offset (ms)"
 msgstr "歌詞延遲 (ms)"
-
-msgid "Lyrics settings"
-msgstr "歌詞設定"
 
 #, fuzzy
 #| msgid "Lyrics loaded"
@@ -1534,6 +1566,9 @@ msgstr "元資料"
 msgid "Minimum year"
 msgstr "最小年份"
 
+msgid "Mirrored bars"
+msgstr ""
+
 msgid "Monday"
 msgstr ""
 
@@ -1572,6 +1607,11 @@ msgstr "最常跳過"
 
 msgid "Most played"
 msgstr "最常播放"
+
+#, fuzzy
+#| msgid "Position"
+msgid "Motion"
+msgstr "位置"
 
 msgid "Move down"
 msgstr "下移"
@@ -1868,6 +1908,9 @@ msgstr "僅播放過的曲目"
 msgid "Only unplayed tracks"
 msgstr "僅未播放過的曲目"
 
+msgid "Opacity (%)"
+msgstr ""
+
 #, fuzzy
 #| msgid "Folder"
 msgid "Open Controller"
@@ -1942,6 +1985,9 @@ msgstr ""
 msgid "Other releases"
 msgstr "開啟更新記錄"
 
+msgid "Outline bars"
+msgstr ""
+
 msgid "Overview"
 msgstr "總覽"
 
@@ -1952,6 +1998,11 @@ msgstr "密碼"
 
 msgid "Password"
 msgstr "密碼"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Paste preset"
+msgstr "預設集"
 
 msgid "Paste"
 msgstr "貼上"
@@ -1969,6 +2020,12 @@ msgstr ""
 
 msgid "Pause"
 msgstr "暫停"
+
+msgid "Peak fall speed (% per second)"
+msgstr ""
+
+msgid "Peak hold (seconds)"
+msgstr ""
 
 msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
 msgstr ""
@@ -2147,7 +2204,42 @@ msgstr "媒體庫準備中..."
 msgid "Preserve pitch"
 msgstr "維持音調"
 
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset 1"
+msgstr "預設集"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset 2"
+msgstr "預設集"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset 3"
+msgstr "預設集"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset 4"
+msgstr "預設集"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset 5"
+msgstr "預設集"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset saved"
+msgstr "預設集"
+
 msgid "Preset"
+msgstr "預設集"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Presets"
 msgstr "預設集"
 
 msgid "Prevent automatic metadata refreshes from replacing these values"
@@ -2392,6 +2484,11 @@ msgstr ""
 msgid "Require SMB encryption"
 msgstr ""
 
+#, fuzzy
+#| msgid "Appearance"
+msgid "Reset appearance"
+msgstr "外觀"
+
 msgid "Reset to defaults"
 msgstr "重置回預設值"
 
@@ -2402,6 +2499,9 @@ msgid "Resource not found"
 msgstr ""
 
 msgid "Restore User State"
+msgstr ""
+
+msgid "Restore defaults without deleting saved presets"
 msgstr ""
 
 msgid "Restore player layout"
@@ -2419,11 +2519,17 @@ msgstr ""
 msgid "Retry"
 msgstr ""
 
+msgid "Rise speed (%)"
+msgstr ""
+
 msgid "Rock"
 msgstr "搖滾"
 
 msgid "Romaji"
 msgstr "羅馬拼音"
+
+msgid "Rounded bars"
+msgstr ""
 
 msgid "Rows"
 msgstr "列表"
@@ -2489,6 +2595,11 @@ msgstr "儲存至"
 msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
 msgstr[0] ""
+
+#, fuzzy
+#| msgid "Saved to"
+msgid "Saved preset"
+msgstr "儲存至"
 
 msgid "Saved to"
 msgstr "儲存至"
@@ -2606,6 +2717,11 @@ msgstr ""
 msgid "Seekbar"
 msgstr ""
 
+#, fuzzy
+#| msgid "Select Music Folder"
+msgid "Segmented bars"
+msgstr "選擇音樂資料夾"
+
 msgid "Select All"
 msgstr "全選"
 
@@ -2686,6 +2802,11 @@ msgstr ""
 msgid "Settings and sources"
 msgstr "元資料來源"
 
+#, fuzzy
+#| msgid "App settings"
+msgid "Settings"
+msgstr "應用程式設定"
+
 msgid "Share"
 msgstr ""
 
@@ -2714,6 +2835,9 @@ msgid "Show lyrics"
 msgstr "顯示歌詞"
 
 msgid "Show paused status"
+msgstr ""
+
+msgid "Show peak markers"
 msgstr ""
 
 #, fuzzy
@@ -2768,6 +2892,11 @@ msgstr "側邊欄項目 {position}"
 msgid "Sidebar route by position"
 msgstr "按位置瀏覽側邊欄"
 
+#, fuzzy
+#| msgid "Show sidebar"
+msgid "Sidebar"
+msgstr "顯示側邊欄"
+
 msgid "Sign In in Browser"
 msgstr ""
 
@@ -2813,6 +2942,9 @@ msgstr "智慧播放清單曲目"
 msgid "Smart playlists"
 msgstr "智慧播放清單"
 
+msgid "Solid bars"
+msgstr ""
+
 msgid "Some playlist entries could not be imported"
 msgstr ""
 
@@ -2854,6 +2986,9 @@ msgstr "無來源"
 msgid "Sources"
 msgstr ""
 
+msgid "Spectrum line"
+msgstr ""
+
 msgid "Sponsor"
 msgstr ""
 
@@ -2873,6 +3008,9 @@ msgstr ""
 
 msgid "Stream quality"
 msgstr "串流品質"
+
+msgid "Style"
+msgstr ""
 
 msgid "Sunday"
 msgstr ""
@@ -2921,6 +3059,9 @@ msgstr "主題"
 
 msgid "This device"
 msgstr "此裝置"
+
+msgid "This is not a valid Rufin visualizer preset."
+msgstr ""
 
 msgid "This is owned by {source}. Regular playlists are synced to your remote."
 msgstr ""
@@ -3060,6 +3201,11 @@ msgstr ""
 msgid "Use a number above zero"
 msgstr ""
 
+#, fuzzy
+#| msgid "Accent color"
+msgid "Use accent color"
+msgstr "強調色"
+
 msgid "Use different layout below a threshold width"
 msgstr ""
 
@@ -3124,6 +3270,9 @@ msgstr ""
 
 msgid "Visible"
 msgstr ""
+
+msgid "Visualizer"
+msgstr "視覺效果"
 
 msgid "Volume Down"
 msgstr ""
@@ -3341,14 +3490,14 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
 
+#~ msgid "Lyrics settings"
+#~ msgstr "歌詞設定"
+
 #~ msgid "Rename Playlist"
 #~ msgstr "重新命名播放清單"
 
 #~ msgid "Enable equalizer"
 #~ msgstr "啟用等化器"
-
-#~ msgid "Visualizer"
-#~ msgstr "視覺效果"
 
 #~ msgid "Add server"
 #~ msgstr "新增伺服器"

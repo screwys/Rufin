@@ -468,6 +468,9 @@ msgstr "Turvaline andmeruum"
 msgid "Backups"
 msgstr "Tagasi"
 
+msgid "Bar spacing (px)"
+msgstr ""
+
 #, fuzzy
 #| msgid "User token"
 msgid "Bearer token (WebDAV)"
@@ -578,6 +581,9 @@ msgstr "Vali taasesituse väljund"
 
 msgid "Choose"
 msgstr "Vali"
+
+msgid "Circular spectrum"
+msgstr ""
 
 msgid "Classical"
 msgstr "Klassikaline muusika"
@@ -731,6 +737,12 @@ msgstr ""
 #| msgid "Copy"
 msgid "Copy link"
 msgstr "Kopeeri"
+
+msgid "Copy preset"
+msgstr ""
+
+msgid "Copy the current appearance to the clipboard"
+msgstr ""
 
 msgid "Copy"
 msgstr "Kopeeri"
@@ -1094,6 +1106,9 @@ msgstr "Väliste veebisaitide lingid"
 msgid "Fade audio when playback is paused or resumed"
 msgstr "Sujuv helivaljuse muutmine taasesituse peatamisel või jätkamisel"
 
+msgid "Fall speed (%)"
+msgstr ""
+
 #, fuzzy
 #| msgid "Favorite tracks"
 msgid "Favorite current track"
@@ -1132,6 +1147,9 @@ msgstr ""
 msgid "Files"
 msgstr ""
 
+msgid "Filled spectrum"
+msgstr ""
+
 msgid "Find shares"
 msgstr ""
 
@@ -1154,6 +1172,9 @@ msgstr "Kaust"
 
 msgid "Folders"
 msgstr "Kaustad"
+
+msgid "Follow the app accent with lighter and darker tones"
+msgstr ""
 
 msgid "Font family"
 msgstr "Kirjatüübi perekond"
@@ -1192,6 +1213,11 @@ msgstr "Täiskõrged"
 
 msgid "Full"
 msgstr "Täisvaates"
+
+#, fuzzy
+#| msgid "Toggle Fullscreen"
+msgid "Fullscreen"
+msgstr "Lülita täisekraanivaade sisse/välja"
 
 msgid "Furigana"
 msgstr "Furigana"
@@ -1239,6 +1265,12 @@ msgstr "Mine asukohta"
 
 msgid "Google Cast"
 msgstr "Google Cast"
+
+msgid "Gradient end"
+msgstr ""
+
+msgid "Gradient start"
+msgstr ""
 
 msgid "Green"
 msgstr "Roheline"
@@ -1510,14 +1542,14 @@ msgstr "Logid on kopeeritud"
 msgid "Loudness normalization"
 msgstr "Helivaljuse normaliseerimine"
 
+msgid "Lyrics background opacity"
+msgstr ""
+
 msgid "Lyrics loaded"
 msgstr "Laulusõnad on laaditud"
 
 msgid "Lyrics offset (ms)"
 msgstr "Laulusõnade nihe (msek)"
-
-msgid "Lyrics settings"
-msgstr "Laulusõnade seadistused"
 
 msgid "Lyrics storage"
 msgstr "Laulusõnade andmeruum"
@@ -1560,6 +1592,9 @@ msgstr "Metateave"
 msgid "Minimum year"
 msgstr "Minimaalne aasta"
 
+msgid "Mirrored bars"
+msgstr ""
+
 msgid "Monday"
 msgstr ""
 
@@ -1592,6 +1627,11 @@ msgstr "Enim vahele jäetud"
 
 msgid "Most played"
 msgstr "Enimesitatud"
+
+#, fuzzy
+#| msgid "Position"
+msgid "Motion"
+msgstr "Asukoht"
 
 msgid "Move down"
 msgstr "Liiguta allapoole"
@@ -1883,6 +1923,9 @@ msgstr "Vaid esitatud lood"
 msgid "Only unplayed tracks"
 msgstr "Vaid esitamata lood"
 
+msgid "Opacity (%)"
+msgstr ""
+
 #, fuzzy
 #| msgid "Folder"
 msgid "Open Controller"
@@ -1955,6 +1998,9 @@ msgstr "Algne"
 msgid "Other releases"
 msgstr "Muud versioonid"
 
+msgid "Outline bars"
+msgstr ""
+
 msgid "Overview"
 msgstr "Ülevaade"
 
@@ -1965,6 +2011,11 @@ msgstr "Salasõna"
 
 msgid "Password"
 msgstr "Salasõna"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Paste preset"
+msgstr "Eelseadistus"
 
 msgid "Paste"
 msgstr "Aseta"
@@ -1982,6 +2033,12 @@ msgstr ""
 
 msgid "Pause"
 msgstr "Peata esitus"
+
+msgid "Peak fall speed (% per second)"
+msgstr ""
+
+msgid "Peak hold (seconds)"
+msgstr ""
 
 msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
 msgstr ""
@@ -2162,7 +2219,42 @@ msgstr "Valmistan muusikakogu ette…"
 msgid "Preserve pitch"
 msgstr "Säilita helikõrgus"
 
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset 1"
+msgstr "Eelseadistus"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset 2"
+msgstr "Eelseadistus"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset 3"
+msgstr "Eelseadistus"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset 4"
+msgstr "Eelseadistus"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset 5"
+msgstr "Eelseadistus"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset saved"
+msgstr "Eelseadistus"
+
 msgid "Preset"
+msgstr "Eelseadistus"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Presets"
 msgstr "Eelseadistus"
 
 msgid "Prevent automatic metadata refreshes from replacing these values"
@@ -2407,6 +2499,11 @@ msgstr ""
 msgid "Require SMB encryption"
 msgstr ""
 
+#, fuzzy
+#| msgid "Appearance"
+msgid "Reset appearance"
+msgstr "Välimus"
+
 msgid "Reset to defaults"
 msgstr "Taasta vaikimisi väärtus"
 
@@ -2422,6 +2519,9 @@ msgstr "Vastendatud kohalikku faili ei leidu"
 #| msgid "Restore Default"
 msgid "Restore User State"
 msgstr "Taasta vaikimisi väärtus"
+
+msgid "Restore defaults without deleting saved presets"
+msgstr ""
 
 #, fuzzy
 #| msgid "Restore Default"
@@ -2440,11 +2540,17 @@ msgstr "Sünkrooni muusikakogu uuesti"
 msgid "Retry"
 msgstr ""
 
+msgid "Rise speed (%)"
+msgstr ""
+
 msgid "Rock"
 msgstr "Rokkmuusika"
 
 msgid "Romaji"
 msgstr "Rōmaji (jaapani keele romaniseerimine)"
+
+msgid "Rounded bars"
+msgstr ""
 
 msgid "Rows"
 msgstr "Read"
@@ -2515,6 +2621,11 @@ msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
 msgstr[0] "Vastendus on salvestatud - {matched} / {total} serveri asukohast"
 msgstr[1] "Vastendus on salvestatud - {matched} / {total} serveri asukohtadest"
+
+#, fuzzy
+#| msgid "Saved per server"
+msgid "Saved preset"
+msgstr "Salvestatud serverikohaselt"
 
 msgid "Saved to"
 msgstr "Salvestatud asukohta"
@@ -2630,6 +2741,11 @@ msgstr ""
 msgid "Seekbar"
 msgstr "Kerimisriba"
 
+#, fuzzy
+#| msgid "Select Music Folder"
+msgid "Segmented bars"
+msgstr "Vali muusikakaust"
+
 msgid "Select All"
 msgstr "Vali kõik"
 
@@ -2708,6 +2824,11 @@ msgstr "Märgi Discordis tegevuseks kuulamine (Listening)"
 msgid "Settings and sources"
 msgstr "Metateabe allikas"
 
+#, fuzzy
+#| msgid "App settings"
+msgid "Settings"
+msgstr "Rakenduse seadistused"
+
 msgid "Share"
 msgstr ""
 
@@ -2737,6 +2858,9 @@ msgstr "Vaata laulusõnu"
 
 msgid "Show paused status"
 msgstr "Näita peatamise olekut"
+
+msgid "Show peak markers"
+msgstr ""
 
 msgid "Show ratings in the bottom bar"
 msgstr "Näita alumisel ribal hinnanguid"
@@ -2788,6 +2912,11 @@ msgstr "Külgriba objekt {position}"
 msgid "Sidebar route by position"
 msgstr "Külgriba teekond asukoha alusel"
 
+#, fuzzy
+#| msgid "Show sidebar"
+msgid "Sidebar"
+msgstr "Näita külgriba"
+
 msgid "Sign In in Browser"
 msgstr ""
 
@@ -2833,6 +2962,9 @@ msgstr "Nutika esitusloendi lood"
 msgid "Smart playlists"
 msgstr "Nutikad esitusloendid"
 
+msgid "Solid bars"
+msgstr ""
+
 msgid "Some playlist entries could not be imported"
 msgstr ""
 
@@ -2870,6 +3002,9 @@ msgstr "Allikas"
 msgid "Sources"
 msgstr "Allikad"
 
+msgid "Spectrum line"
+msgstr ""
+
 msgid "Sponsor"
 msgstr ""
 
@@ -2890,6 +3025,9 @@ msgstr ""
 
 msgid "Stream quality"
 msgstr "Voogedastuse kvaliteet"
+
+msgid "Style"
+msgstr ""
 
 msgid "Sunday"
 msgstr ""
@@ -2938,6 +3076,9 @@ msgstr "Kujundus"
 
 msgid "This device"
 msgstr "See seade"
+
+msgid "This is not a valid Rufin visualizer preset."
+msgstr ""
 
 msgid "This is owned by {source}. Regular playlists are synced to your remote."
 msgstr ""
@@ -3081,6 +3222,11 @@ msgstr "Kasuta seda allikat"
 msgid "Use a number above zero"
 msgstr "Kasuta nullist suuremat numbrit"
 
+#, fuzzy
+#| msgid "Accent color"
+msgid "Use accent color"
+msgstr "Aktsentvärv"
+
 msgid "Use different layout below a threshold width"
 msgstr ""
 "Kui ekraani laius jääb alla etteantud piiri, siis näita kitsast paigutust"
@@ -3149,6 +3295,9 @@ msgstr "Vaade"
 
 msgid "Visible"
 msgstr "Nähtav"
+
+msgid "Visualizer"
+msgstr "Visualiseerija"
 
 msgid "Volume Down"
 msgstr "Heli vaiksemaks"
@@ -3376,14 +3525,14 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
 
+#~ msgid "Lyrics settings"
+#~ msgstr "Laulusõnade seadistused"
+
 #~ msgid "Rename Playlist"
 #~ msgstr "Muuda esitusloendi nime"
 
 #~ msgid "Enable equalizer"
 #~ msgstr "Kasuta ekvalaiserit"
-
-#~ msgid "Visualizer"
-#~ msgstr "Visualiseerija"
 
 #~ msgid ""
 #~ "This uses Jellyfin API for play radio, necessary if you want "
@@ -3855,9 +4004,6 @@ msgstr ""
 
 #~ msgid "Saved mapping."
 #~ msgstr "Vastendus on salvestatud."
-
-#~ msgid "Saved per server"
-#~ msgstr "Salvestatud serverikohaselt"
 
 #~ msgid "Search server lyrics before external providers"
 #~ msgstr ""

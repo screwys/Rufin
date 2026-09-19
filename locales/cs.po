@@ -468,6 +468,9 @@ msgstr "Bezpečné úložiště"
 msgid "Backups"
 msgstr "Zpět"
 
+msgid "Bar spacing (px)"
+msgstr ""
+
 #, fuzzy
 #| msgid "User token"
 msgid "Bearer token (WebDAV)"
@@ -585,6 +588,9 @@ msgstr "Vyberte výstup přehrávání"
 
 msgid "Choose"
 msgstr "Vyberte"
+
+msgid "Circular spectrum"
+msgstr ""
 
 msgid "Classical"
 msgstr "Klasická hudba"
@@ -744,6 +750,12 @@ msgstr ""
 #| msgid "Copy"
 msgid "Copy link"
 msgstr "Kopírovat"
+
+msgid "Copy preset"
+msgstr ""
+
+msgid "Copy the current appearance to the clipboard"
+msgstr ""
 
 msgid "Copy"
 msgstr "Kopírovat"
@@ -1117,6 +1129,9 @@ msgstr "Odkazy na externí stránky"
 msgid "Fade audio when playback is paused or resumed"
 msgstr "Ztlumit zvuk při pozastavení nebo obnovení přehrávání"
 
+msgid "Fall speed (%)"
+msgstr ""
+
 #, fuzzy
 #| msgid "Favorite tracks"
 msgid "Favorite current track"
@@ -1155,6 +1170,9 @@ msgstr ""
 msgid "Files"
 msgstr ""
 
+msgid "Filled spectrum"
+msgstr ""
+
 msgid "Find shares"
 msgstr ""
 
@@ -1177,6 +1195,9 @@ msgstr "Složka"
 
 msgid "Folders"
 msgstr "Složky"
+
+msgid "Follow the app accent with lighter and darker tones"
+msgstr ""
 
 msgid "Font family"
 msgstr ""
@@ -1215,6 +1236,11 @@ msgstr "Zesílení výšek"
 
 msgid "Full"
 msgstr "Úplné zobrazení"
+
+#, fuzzy
+#| msgid "Toggle Fullscreen"
+msgid "Fullscreen"
+msgstr "Přepnout do režimu celé obrazovky"
 
 msgid "Furigana"
 msgstr "Furigana"
@@ -1262,6 +1288,12 @@ msgstr "Přejít do"
 
 msgid "Google Cast"
 msgstr "Google Cast"
+
+msgid "Gradient end"
+msgstr ""
+
+msgid "Gradient start"
+msgstr ""
 
 msgid "Green"
 msgstr "Zelená"
@@ -1535,14 +1567,14 @@ msgstr ""
 msgid "Loudness normalization"
 msgstr "Normalizace hlasitosti"
 
+msgid "Lyrics background opacity"
+msgstr ""
+
 msgid "Lyrics loaded"
 msgstr "Texty skladeb načteny"
 
 msgid "Lyrics offset (ms)"
 msgstr "Posun textu skladby (ms)"
-
-msgid "Lyrics settings"
-msgstr "Nastavení textu skladeb"
 
 #, fuzzy
 #| msgid "Lyrics loaded"
@@ -1587,6 +1619,9 @@ msgstr "Metadata"
 msgid "Minimum year"
 msgstr "Minimální rok"
 
+msgid "Mirrored bars"
+msgstr ""
+
 msgid "Monday"
 msgstr ""
 
@@ -1625,6 +1660,11 @@ msgstr "Nejčastěji přeskakované"
 
 msgid "Most played"
 msgstr "Nejčastěji přehrávané"
+
+#, fuzzy
+#| msgid "Position"
+msgid "Motion"
+msgstr "Pozice"
 
 msgid "Move down"
 msgstr "Posunout dolů"
@@ -1924,6 +1964,9 @@ msgstr "Pouze přehrané skladby"
 msgid "Only unplayed tracks"
 msgstr "Pouze nepřehrané skladby"
 
+msgid "Opacity (%)"
+msgstr ""
+
 #, fuzzy
 #| msgid "Folder"
 msgid "Open Controller"
@@ -1998,6 +2041,9 @@ msgstr "Originál"
 msgid "Other releases"
 msgstr "Otevřít poznámky k verzi"
 
+msgid "Outline bars"
+msgstr ""
+
 msgid "Overview"
 msgstr "Přehled"
 
@@ -2008,6 +2054,11 @@ msgstr "Heslo"
 
 msgid "Password"
 msgstr "Heslo"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Paste preset"
+msgstr "Předvolba"
 
 msgid "Paste"
 msgstr "Vložit"
@@ -2025,6 +2076,12 @@ msgstr ""
 
 msgid "Pause"
 msgstr "Pauza"
+
+msgid "Peak fall speed (% per second)"
+msgstr ""
+
+msgid "Peak hold (seconds)"
+msgstr ""
 
 msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
 msgstr ""
@@ -2205,7 +2262,42 @@ msgstr "Příprava knihovny..."
 msgid "Preserve pitch"
 msgstr "Zachovat výšku tónu"
 
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset 1"
+msgstr "Předvolba"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset 2"
+msgstr "Předvolba"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset 3"
+msgstr "Předvolba"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset 4"
+msgstr "Předvolba"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset 5"
+msgstr "Předvolba"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset saved"
+msgstr "Předvolba"
+
 msgid "Preset"
+msgstr "Předvolba"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Presets"
 msgstr "Předvolba"
 
 msgid "Prevent automatic metadata refreshes from replacing these values"
@@ -2458,6 +2550,11 @@ msgstr ""
 msgid "Require SMB encryption"
 msgstr ""
 
+#, fuzzy
+#| msgid "Appearance"
+msgid "Reset appearance"
+msgstr "Vzhled"
+
 msgid "Reset to defaults"
 msgstr "Obnovit výchozí nastavení"
 
@@ -2468,6 +2565,9 @@ msgid "Resource not found"
 msgstr ""
 
 msgid "Restore User State"
+msgstr ""
+
+msgid "Restore defaults without deleting saved presets"
 msgstr ""
 
 msgid "Restore player layout"
@@ -2485,11 +2585,17 @@ msgstr "Znovu synchronizovat knihovnu"
 msgid "Retry"
 msgstr ""
 
+msgid "Rise speed (%)"
+msgstr ""
+
 msgid "Rock"
 msgstr "Rock"
 
 msgid "Romaji"
 msgstr "Rómadži (romanizace japonštiny)"
+
+msgid "Rounded bars"
+msgstr ""
 
 msgid "Rows"
 msgstr "Řádky"
@@ -2563,6 +2669,11 @@ msgid_plural "Saved mapping. {matched} of {total} server paths match"
 msgstr[0] ""
 msgstr[1] ""
 msgstr[2] ""
+
+#, fuzzy
+#| msgid "Saved to"
+msgid "Saved preset"
+msgstr "Uložit do"
 
 msgid "Saved to"
 msgstr "Uložit do"
@@ -2684,6 +2795,11 @@ msgstr ""
 msgid "Seekbar"
 msgstr "Indikátor průběhu"
 
+#, fuzzy
+#| msgid "Select Music Folder"
+msgid "Segmented bars"
+msgstr "Vybrat složku s hudbou"
+
 msgid "Select All"
 msgstr "Vybrat vše"
 
@@ -2764,6 +2880,11 @@ msgstr "Nastavte typ aktivity v Discordu na „Poslech“"
 msgid "Settings and sources"
 msgstr "Zdroj metadat"
 
+#, fuzzy
+#| msgid "App settings"
+msgid "Settings"
+msgstr "Nastavení aplikace"
+
 msgid "Share"
 msgstr ""
 
@@ -2793,6 +2914,9 @@ msgstr "Zobrazit texty skladeb"
 
 msgid "Show paused status"
 msgstr "Zobrazit stav pozastaveno"
+
+msgid "Show peak markers"
+msgstr ""
 
 #, fuzzy
 #| msgid "Show lyrics in the right panel"
@@ -2846,6 +2970,11 @@ msgstr "Položka postranního panelu {position}"
 msgid "Sidebar route by position"
 msgstr "Rozložení postranního panelu podle pozice"
 
+#, fuzzy
+#| msgid "Show sidebar"
+msgid "Sidebar"
+msgstr "Zobrazit postranní panel"
+
 msgid "Sign In in Browser"
 msgstr ""
 
@@ -2891,6 +3020,9 @@ msgstr "Skladby v chytrém playlistu"
 msgid "Smart playlists"
 msgstr "Chytré playlisty"
 
+msgid "Solid bars"
+msgstr ""
+
 msgid "Some playlist entries could not be imported"
 msgstr ""
 
@@ -2932,6 +3064,9 @@ msgstr "Zdroje"
 msgid "Sources"
 msgstr "Zdroje"
 
+msgid "Spectrum line"
+msgstr ""
+
 msgid "Sponsor"
 msgstr ""
 
@@ -2951,6 +3086,9 @@ msgstr ""
 
 msgid "Stream quality"
 msgstr "Kvalita streamu"
+
+msgid "Style"
+msgstr ""
 
 msgid "Sunday"
 msgstr ""
@@ -3001,6 +3139,9 @@ msgstr "Téma"
 
 msgid "This device"
 msgstr "Toto zařízení"
+
+msgid "This is not a valid Rufin visualizer preset."
+msgstr ""
 
 msgid "This is owned by {source}. Regular playlists are synced to your remote."
 msgstr ""
@@ -3146,6 +3287,11 @@ msgstr ""
 msgid "Use a number above zero"
 msgstr "Zadejte číslo větší než nula"
 
+#, fuzzy
+#| msgid "Accent color"
+msgid "Use accent color"
+msgstr "Barva zvýraznění"
+
 msgid "Use different layout below a threshold width"
 msgstr "Při šířce menší než stanovená hodnota použít jiné rozložení"
 
@@ -3212,6 +3358,9 @@ msgstr "Pohled"
 
 msgid "Visible"
 msgstr "Viditelné"
+
+msgid "Visualizer"
+msgstr "Vizualizace"
 
 msgid "Volume Down"
 msgstr "Snížit hlasitost"
@@ -3447,14 +3596,14 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
 
+#~ msgid "Lyrics settings"
+#~ msgstr "Nastavení textu skladeb"
+
 #~ msgid "Rename Playlist"
 #~ msgstr "Přejmenovat Playlist"
 
 #~ msgid "Enable equalizer"
 #~ msgstr "Zapnout equalizer"
-
-#~ msgid "Visualizer"
-#~ msgstr "Vizualizace"
 
 #~ msgid ""
 #~ "This uses Jellyfin API for play radio, necessary if you want "
