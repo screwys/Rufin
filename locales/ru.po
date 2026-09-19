@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-15 16:51+0000\n"
+"PO-Revision-Date: 2026-09-18 17:51+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
 "Language: ru\n"
@@ -699,10 +699,8 @@ msgstr "Копировать ссылку"
 msgid "Copy"
 msgstr "Копировать"
 
-#, fuzzy
-#| msgid "Could not load this page"
 msgid "Could not load related tracks"
-msgstr "Не удалось загрузить эту страницу"
+msgstr "Не удалось загрузить похожие треки"
 
 msgid "Could not load this page"
 msgstr "Не удалось загрузить эту страницу"
@@ -885,7 +883,7 @@ msgid "Duration"
 msgstr "Продолжительность"
 
 msgid "Dynamic background"
-msgstr ""
+msgstr "Динамический фон"
 
 msgid "EBU R128 reference level"
 msgstr "Эталонный уровень EBU R128"
@@ -936,7 +934,7 @@ msgid "Enable automatic backups"
 msgstr "Включить автоматическое создание резервных копий"
 
 msgid "Enable background image"
-msgstr ""
+msgstr "Включить фоновое изображение"
 
 msgid "Enable partial star ratings"
 msgstr "Включить частичные оценки в виде звёзд"
@@ -972,7 +970,7 @@ msgid "Everything, including new tracks"
 msgstr "Всё, включая новые треки"
 
 msgid "Expand lyrics and visualizer"
-msgstr ""
+msgstr "Развернуть текст песни и визуализатор"
 
 msgid "Expand sidebar"
 msgstr "Развернуть боковую панель"
@@ -1320,10 +1318,8 @@ msgstr "Отправка данных о прослушивании в ListenBra
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
 
-#, fuzzy
-#| msgid "Loading folders..."
 msgid "Loading related tracks..."
-msgstr "Загрузка папок…"
+msgstr "Загрузка похожих треков..."
 
 msgid "Loading..."
 msgstr "Загрузка..."
@@ -1645,10 +1641,8 @@ msgstr "Сетевой адрес недоступен"
 msgid "No network devices found"
 msgstr "Устройства в сети не найдены"
 
-#, fuzzy
-#| msgid "No matching tracks found"
 msgid "No related tracks found"
-msgstr "Не найдено ни одного трека, соответствующего запросу"
+msgstr "Не найдено похожих треков"
 
 msgid "No results"
 msgstr "Результатов не найдено"
@@ -1834,23 +1828,17 @@ msgstr "Закрепленные элементы"
 msgid "Plain lyrics"
 msgstr "Обычный текст песен"
 
-#, fuzzy
-#| msgid "Play filter"
 msgid "Play (shuffled)"
-msgstr "Воспроизвести фильтр"
+msgstr "Воспроизвести (в случайном порядке)"
 
-#, fuzzy
-#| msgid "Play Later"
 msgid "Play Later (shuffled)"
-msgstr "Воспроизвести позже"
+msgstr "Воспроизвести Позже (в случайном порядке)"
 
 msgid "Play Later"
 msgstr "Воспроизвести позже"
 
-#, fuzzy
-#| msgid "Play Next"
 msgid "Play Next (shuffled)"
-msgstr "Воспроизвести следующим"
+msgstr "Воспроизвести следующим (в случайном порядке)"
 
 msgid "Play Next"
 msgstr "Воспроизвести следующим"
@@ -2091,10 +2079,8 @@ msgstr "Сгенерировать новый токен доступа"
 msgid "Regenerate access token?"
 msgstr "Сгенерировать новый токен доступа?"
 
-#, fuzzy
-#| msgid "Slate"
 msgid "Related"
-msgstr "Серый"
+msgstr "Похожие"
 
 msgid "Release date"
 msgstr "Дата выпуска"
@@ -2207,10 +2193,8 @@ msgstr "Ресурс не найден"
 msgid "Restore User State"
 msgstr "Восстановить состояние пользователя"
 
-#, fuzzy
-#| msgid "Restore User State"
 msgid "Restore player layout"
-msgstr "Восстановить состояние пользователя"
+msgstr "Восстановить макет плеера"
 
 msgid "Restore"
 msgstr "Восстановить"
@@ -2471,10 +2455,8 @@ msgstr "Общий секретный ключ"
 msgid "Show Rufin"
 msgstr "Показать Rufin"
 
-#, fuzzy
-#| msgid "Artwork"
 msgid "Show artwork"
-msgstr "Обложка"
+msgstr "Показать обложку"
 
 msgid "Show downloaded badge"
 msgstr "Показывать значок \"Загружено\""
@@ -2651,7 +2633,7 @@ msgid "Switch between layouts"
 msgstr "Переключить между макетами"
 
 msgid "Switch pane"
-msgstr ""
+msgstr "Переключить панель"
 
 msgid "Switching library..."
 msgstr "Переключение библиотеки…"
