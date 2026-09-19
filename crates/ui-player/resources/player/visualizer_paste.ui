@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+  <object class="AdwDialog" id="dialog">
+    <property name="title" translatable="yes">Paste preset</property>
+    <property name="content-width">480</property>
+    <property name="content-height">380</property>
+    <property name="child"><object class="AdwToolbarView">
+      <child type="top"><object class="AdwHeaderBar">
+        <child type="end"><object class="GtkButton" id="apply"><property name="label" translatable="yes">Apply</property><style><class name="suggested-action"/></style></object></child>
+      </object></child>
+      <property name="content"><object class="GtkBox">
+        <property name="orientation">vertical</property><property name="spacing">12</property>
+        <property name="margin-start">16</property><property name="margin-end">16</property><property name="margin-bottom">16</property>
+        <child><object class="GtkScrolledWindow">
+          <property name="vexpand">true</property><property name="hscrollbar-policy">never</property><style><class name="card"/></style>
+          <property name="child"><object class="GtkTextView" id="text">
+            <property name="monospace">true</property><property name="wrap-mode">word-char</property>
+            <property name="left-margin">12</property><property name="right-margin">12</property><property name="top-margin">12</property><property name="bottom-margin">12</property>
+            <accessibility><relation name="labelled-by">instructions</relation></accessibility>
+          </object></property>
+        </object></child>
+        <child><object class="GtkLabel" id="error"><property name="label" translatable="yes">This is not a valid Rufin visualizer preset.</property><property name="visible">false</property><property name="wrap">true</property><property name="xalign">0</property><style><class name="error"/></style></object></child>
+      </object></property>
+    </object></property>
+  </object>
+</interface>

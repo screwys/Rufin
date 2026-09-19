@@ -519,9 +519,9 @@ fn replace_primary_menu_model(menu: &gio::Menu, shell: &Rc<Shell>) {
         &tr("Toggle Fullscreen"),
         "win.toggle-fullscreen",
         if shell.chrome.window.is_fullscreen() {
-            "rufin-view-restore-symbolic"
+            "rufin-view-restore-corners-symbolic"
         } else {
-            "rufin-view-fullscreen-symbolic"
+            "rufin-view-fullscreen-corners-symbolic"
         },
     );
     append_menu_action(

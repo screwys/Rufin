@@ -4,13 +4,13 @@
   <requires lib="libadwaita" version="1.9"/>
 
   <object class="AdwPreferencesDialog" id="dialog">
-    <property name="title" translatable="yes">Lyrics settings</property>
+    <property name="title" translatable="yes">Settings</property>
     <property name="search-enabled">false</property>
   </object>
 
   <object class="AdwPreferencesPage" id="page">
-    <property name="title" translatable="yes">Lyrics settings</property>
-    <property name="icon-name">rufin-applications-system-symbolic</property>
+    <property name="title" translatable="yes">Lyrics</property>
+    <property name="icon-name">rufin-text-center-symbolic</property>
     <child>
       <object class="AdwPreferencesGroup" id="sources">
         <property name="title" translatable="yes">Sources</property>

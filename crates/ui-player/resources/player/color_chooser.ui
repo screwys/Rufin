@@ -4,7 +4,6 @@
   <requires lib="libadwaita" version="1.9"/>
 
   <object class="AdwWindow" id="dialog">
-    <property name="title" translatable="yes">Karaoke highlight color</property>
     <property name="default-width">520</property>
     <property name="default-height">420</property>
     <property name="modal">true</property>
@@ -16,7 +15,7 @@
             <property name="show-start-title-buttons">false</property>
             <property name="show-end-title-buttons">false</property>
             <property name="title-widget">
-              <object class="AdwWindowTitle" id="title"><property name="title" translatable="yes">Karaoke highlight color</property></object>
+              <object class="AdwWindowTitle" id="heading"/>
             </property>
             <child type="start"><object class="GtkButton" id="cancel"><property name="label" translatable="yes">Cancel</property></object></child>
             <child type="end">

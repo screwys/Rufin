@@ -116,6 +116,11 @@ impl FullscreenPlayerParts {
         self.lyrics_enabled.get() || self.visualizer_enabled.get()
     }
 
+    pub fn attach_lyrics_pane(&self, pane: &crate::lyrics::LyricsPane) {
+        self.lyrics_host.append(pane.widget());
+        pane.settings_controls.prepend(&self.focus_button);
+    }
+
     pub fn experience_visible(&self) -> bool {
         self.has_experience()
             && (self.focus_button.is_active()
@@ -125,11 +130,9 @@ impl FullscreenPlayerParts {
     fn apply_mode(&self) {
         let has_experience = self.has_experience();
         self.experience.set_visible(has_experience);
-        self.lyrics_host.set_visible(self.lyrics_enabled.get());
+        self.lyrics_host.set_visible(has_experience);
         self.visualizer_panel
             .set_visible(self.visualizer_enabled.get());
-        self.visualizer_panel
-            .set_opacity(if self.lyrics_enabled.get() { 0.25 } else { 1.0 });
         self.update_hero_layout();
     }
 
@@ -244,9 +247,6 @@ pub fn build_fullscreen_player(visualizer_area: &gtk::DrawingArea) -> Fullscreen
     experience.set_measure_overlay(&visualizer_panel, false);
     experience.add_overlay(&lyrics_host);
     experience.set_measure_overlay(&lyrics_host, false);
-    experience.remove_overlay(&focus_button);
-    experience.add_overlay(&focus_button);
-    experience.set_measure_overlay(&focus_button, false);
     connect_fullscreen_player_switcher(
         &stack,
         [
@@ -463,9 +463,9 @@ pub fn connect_fullscreen_player_controls(shell: &Rc<crate::PlayerUi>) {
         .focus_button
         .connect_toggled(move |button| {
             button.set_icon_name(if button.is_active() {
-                "rufin-view-restore-corners-symbolic"
+                "rufin-view-restore-symbolic"
             } else {
-                "rufin-view-fullscreen-corners-symbolic"
+                "rufin-view-fullscreen-symbolic"
             });
             let Some(shell) = weak.upgrade() else {
                 return;

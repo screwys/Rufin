@@ -187,17 +187,12 @@ pub fn apply_sidebar_media_visibility(shell: Rc<crate::PlayerUi>) {
     let visualizer_visible = shell.right_panel.visualizer_visible.get();
     let visible = lyrics_visible || visualizer_visible;
     shell.right_panel.lyrics_surface.set_visible(visible);
-    shell.right_panel.lyrics_host.set_visible(lyrics_visible);
+    shell.right_panel.lyrics_host.set_visible(visible);
     shell
         .views
         .visualizer
         .sidebar_area
         .set_visible(visualizer_visible);
-    shell
-        .views
-        .visualizer
-        .sidebar_area
-        .set_opacity(if lyrics_visible { 0.48 } else { 1.0 });
     if visible {
         let available_height = queue_lyrics_restore_available_height(&shell);
         let saved_height = shell.settings.current.borrow().queue_lyrics_height;

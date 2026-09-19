@@ -2004,6 +2004,31 @@ listview.queue-list row {
   min-height: 120px;
 }
 
+.visualizer-accent {
+  color: var(--accent-color);
+}
+
+.visualizer-setting-cell {
+  padding: 12px 16px;
+}
+
+.visualizer-setting-cell:first-child {
+  border-right: 1px solid var(--border-color);
+}
+
+.visualizer-setting-cell scale {
+  margin: 4px 0;
+}
+
+.visualizer-color-button {
+  padding: 8px 10px;
+}
+
+.visualizer-color-swatch {
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--border-color);
+}
+
 .lyrics-controls {
   opacity: 0;
   transition: opacity 160ms ease-out;
@@ -2121,19 +2146,8 @@ entry.lyrics-offset-value.flat:focus-within {
   transition: background 600ms ease;
 }
 
-.fullscreen-player .lyrics-top-controls,
-.fullscreen-focus-button {
+.fullscreen-player .lyrics-top-controls {
   margin-top: 8px;
-}
-
-.fullscreen-focus-button {
-  opacity: 0;
-  transition: opacity 160ms ease-out;
-}
-
-.fullscreen-player-experience:hover .fullscreen-focus-button,
-.fullscreen-focus-button:focus-visible {
-  opacity: 1;
 }
 
 .fullscreen-focus-button:checked:not(:hover):not(:active) {

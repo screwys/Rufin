@@ -122,8 +122,7 @@ impl Shell {
         self.player_ui
             .views
             .fullscreen_player
-            .lyrics_host
-            .append(lyrics.fullscreen_pane.widget());
+            .attach_lyrics_pane(&lyrics.fullscreen_pane);
         drop(lyrics);
         connect_lyrics_search_controls(&self.player_ui);
         crate::player::lyrics::settings::connect_lyrics_settings_controls(self);

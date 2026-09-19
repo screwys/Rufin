@@ -1,7 +1,9 @@
 pub const LYRICS_PANE_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/lyrics/pane.ui";
 pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
+    VISUALIZER_SETTINGS_RESOURCE,
+    VISUALIZER_PASTE_RESOURCE,
     PLAYBACK_SETTINGS_POPOVER_RESOURCE,
-    LYRICS_COLOR_CHOOSER_RESOURCE,
+    COLOR_CHOOSER_RESOURCE,
     LYRICS_SETTINGS_RESOURCE,
     RIGHT_PANEL_RESOURCE,
     LYRICS_SEARCH_RESOURCE,
@@ -13,6 +15,10 @@ pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     BOTTOM_PLAYER_RESOURCE,
     LYRICS_PANE_RESOURCE,
 ];
+pub const VISUALIZER_SETTINGS_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/player/visualizer_settings.ui";
+pub const VISUALIZER_PASTE_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/player/visualizer_paste.ui";
 
 pub const BOTTOM_PLAYER_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/bottom.ui";
 
@@ -33,8 +39,7 @@ pub const RIGHT_PANEL_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/right
 
 pub const LYRICS_SETTINGS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/lyrics/settings.ui";
 
-pub const LYRICS_COLOR_CHOOSER_RESOURCE: &str =
-    "/io/github/screwys/Rufin/ui/player/lyrics/color_chooser.ui";
+pub const COLOR_CHOOSER_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/color_chooser.ui";
 
 pub const PLAYBACK_SETTINGS_POPOVER_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/player/playback_settings.ui";
