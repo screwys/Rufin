@@ -193,8 +193,9 @@ fn library_socket_message(text: &str, user_id: &str) -> SourceResult<JellyfinSoc
                     RemoteItemChange::BoundaryLost,
                 ))
             } else {
-                Ok(JellyfinSocketMessage::Change(RemoteItemChange::UserData {
+                Ok(JellyfinSocketMessage::Change(RemoteItemChange::Items {
                     upserts,
+                    removals: Vec::new(),
                 }))
             }
         }
@@ -266,8 +267,9 @@ mod tests {
         let event = r#"{"MessageType":"UserDataChanged","Data":{"UserId":"user","UserDataList":[{"ItemId":"album","IsFavorite":true},{"ItemId":42,"PlayCount":3},{"ItemId":"album"},{"ItemId":null}]}}"#;
         assert_eq!(
             library_socket_message(event, "user").unwrap(),
-            JellyfinSocketMessage::Change(RemoteItemChange::UserData {
+            JellyfinSocketMessage::Change(RemoteItemChange::Items {
                 upserts: vec!["42".into(), "album".into()],
+                removals: Vec::new(),
             })
         );
         assert_eq!(
@@ -320,6 +322,15 @@ mod tests {
                 "device".into(),
             )
             .unwrap();
+            let source = crate::Source::new(
+                crate::SourceId::new("source"),
+                crate::source::Implementation::JellyfinEmby(source),
+            );
+            Mock::given(method("GET")).and(path(match kind {
+                ServerKind::Jellyfin => "/Items", ServerKind::Emby => "/emby/Items",
+            })).and(wiremock::matchers::query_param("ParentId", "3272"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"Items":[{"Id":"track","Name":"Track","AlbumId":"3272","Type":"Audio"}]})))
+                .mount(&server).await;
             let root = tempfile::tempdir().unwrap();
             let database = library::Database::open(root.path().join("library.sqlite"))
                 .await
@@ -339,13 +350,13 @@ mod tests {
             scan.finish().await.unwrap();
             let event = r#"{"MessageType":"UserDataChanged","Data":{"UserId":"user","UserDataList":[{"ItemId":"3272","IsFavorite":true}]}}"#;
             for repeated in [false, true] {
-                let JellyfinSocketMessage::Change(RemoteItemChange::UserData { upserts }) =
+                let JellyfinSocketMessage::Change(RemoteItemChange::Items { upserts, removals }) =
                     library_socket_message(event, "user").unwrap()
                 else {
                     panic!("user data must retain the item boundary");
                 };
                 let outcome = source
-                    .apply_user_data(&database, "source", upserts)
+                    .apply_items(&database, upserts, removals)
                     .await
                     .unwrap();
                 assert_eq!(
@@ -366,7 +377,103 @@ mod tests {
                     .unwrap()
                     .unwrap();
                 assert_eq!(album.favorite, favorite);
+                assert_eq!(album.track_count, i64::from(favorite));
             }
+            server.verify().await;
+            for (album_id, removed) in [("3272", false), ("other", true)] {
+                server.reset().await;
+                let item_path = match kind {
+                    ServerKind::Jellyfin => format!("/Items/{album_id}"),
+                    ServerKind::Emby => format!("/emby/Users/user/Items/{album_id}"),
+                };
+                Mock::given(method("GET")).and(path(item_path))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                        "Id":album_id,"Name":"Album","Type":"MusicAlbum","UserData":{"IsFavorite":true}
+                    }))).mount(&server).await;
+                Mock::given(method("GET"))
+                    .and(path(match kind {
+                        ServerKind::Jellyfin => "/Items",
+                        ServerKind::Emby => "/emby/Items",
+                    }))
+                    .and(wiremock::matchers::query_param("ParentId", album_id))
+                    .respond_with(
+                        ResponseTemplate::new(200).set_body_json(serde_json::json!({"Items":[]})),
+                    )
+                    .mount(&server)
+                    .await;
+                Mock::given(method("GET"))
+                    .and(path(match kind {
+                        ServerKind::Jellyfin => "/Items/track",
+                        ServerKind::Emby => "/emby/Users/user/Items/track",
+                    }))
+                    .respond_with(
+                        ResponseTemplate::new(if removed { 404 } else { 200 }).set_body_json(
+                            serde_json::json!({
+                                "Id":"track","Name":"Moved","Type":"Audio","AlbumId":"other"
+                            }),
+                        ),
+                    )
+                    .expect(1)
+                    .mount(&server)
+                    .await;
+                // Album membership no longer lists the old track. Resolve the track
+                // itself before deciding whether it moved or was deleted.
+                source
+                    .apply_items(&database, vec![album_id.into()], vec![])
+                    .await
+                    .unwrap();
+                let uri = library::source_entity_uri(
+                    &crate::SourceId::new("source"),
+                    "track",
+                    &kind.object_id("track", "track"),
+                );
+                let track = database
+                    .track_row_by_uri(&uri, &cancellation)
+                    .await
+                    .unwrap();
+                if removed {
+                    assert!(track.is_none());
+                } else {
+                    let track = track.unwrap();
+                    assert_eq!(track.title, "Moved");
+                    assert_eq!(
+                        track.album_media_uri,
+                        Some(library::source_entity_uri(
+                            &crate::SourceId::new("source"),
+                            "album",
+                            &kind.object_id("album", "other")
+                        ))
+                    );
+                }
+                server.verify().await;
+            }
+            source
+                .apply_items(&database, vec![], vec!["3272".into()])
+                .await
+                .unwrap();
+            let uri = library::source_entity_uri(
+                &crate::SourceId::new("source"),
+                "album",
+                &kind.object_id("album", "3272"),
+            );
+            assert!(
+                database
+                    .album_row_by_media_uri(&uri, &cancellation)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            let mut full =
+                library::Scan::begin(&database, "source", kind.name(), kind.source_kind(), None)
+                    .await
+                    .unwrap();
+            stage_album(&mut full, album_from_item(kind, serde_json::json!({
+                "Id":"other","Name":"Album","Type":"MusicAlbum","UserData":{"IsFavorite":true}
+            })).unwrap()).await.unwrap();
+            assert!(matches!(
+                full.finish().await.unwrap(),
+                library::ScanOutcome::Identical(_)
+            ));
         }
     }
 

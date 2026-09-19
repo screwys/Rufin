@@ -23,6 +23,123 @@ const SUBSONIC_HTTP: RemoteHttpPolicy = RemoteHttpPolicy {
 };
 
 impl SubsonicSource {
+    pub(crate) async fn stage_items(
+        &self,
+        scan: &mut library::Scan,
+        objects: Vec<String>,
+    ) -> SourceResult<()> {
+        for (kind, entity, method) in [
+            ("album", "album", "getAlbum"),
+            ("song", "track", "getSong"),
+            ("artist", "artist", "getArtist"),
+        ] {
+            let ids: Vec<_> = objects
+                .iter()
+                .filter_map(|object| {
+                    let (resource, id) = object.split_once(':')?;
+                    (resource == kind).then_some(id)
+                })
+                .collect();
+            let mut values = Vec::with_capacity(ids.len());
+            let mut removed = Vec::new();
+            for raw in &ids {
+                if self.has_navidrome_library() {
+                    values.push(serde_json::json!({"id":raw}));
+                } else {
+                    match self.get_json(method, &[("id", raw.to_string())]).await {
+                        Ok(mut body) => values.push(body[kind].take()),
+                        Err(SourceError::NotFound) => removed.push(self.id(entity, raw)),
+                        Err(error) => return Err(error),
+                    }
+                }
+            }
+            let mut observed = std::collections::HashSet::new();
+            match kind {
+                "album" => {
+                    for album in self.read_albums(&values).await? {
+                        let id = album.id.clone();
+                        observed.insert(id.clone());
+                        stage_album(scan, album).await?;
+                        if self.has_navidrome_library() {
+                            match self
+                                .get_json("getAlbum", &[("id", raw_item_id(&id).to_string())])
+                                .await
+                            {
+                                Ok(body) => {
+                                    self.stage_album_tracks(scan, &id, &body["album"]).await?
+                                }
+                                Err(error) => crate::source::optional_collection_error(error)?,
+                            }
+                        } else if let Some(value) = values.iter().find(|value| {
+                            json::id(&value["id"]).as_deref() == Some(raw_item_id(&id))
+                        }) {
+                            self.stage_album_tracks(scan, &id, value).await?;
+                        }
+                    }
+                }
+                "song" => {
+                    let tracks = self.read_tracks(&values).await?;
+                    for track in &tracks {
+                        observed.insert(track.id.clone());
+                        if let Some(album) = &track.album_id {
+                            if !scan.contains_entity("album", album).await? {
+                                if let Err(error) = self
+                                    .stage_collection(
+                                        scan,
+                                        &crate::SourceCollection::Album(album.clone()),
+                                    )
+                                    .await
+                                {
+                                    crate::source::optional_collection_error(error)?;
+                                }
+                            }
+                        }
+                    }
+                    scan.begin_batch().await?;
+                    for track in tracks {
+                        stage_track(scan, track).await?;
+                    }
+                    scan.finish_batch().await?;
+                }
+                _ => {
+                    let artists = self.read_artists(&values).await?;
+                    scan.begin_batch().await?;
+                    for artist in artists {
+                        observed.insert(artist.id.clone());
+                        stage_artist(scan, artist).await?;
+                    }
+                    scan.finish_batch().await?;
+                }
+            }
+            if self.has_navidrome_library() {
+                removed.extend(
+                    ids.iter()
+                        .map(|raw| self.id(entity, raw))
+                        .filter(|id| !observed.contains(id)),
+                );
+            }
+            for id in removed {
+                match entity {
+                    "album" => scan.remove_album(&id).await?,
+                    "track" => scan.remove_track(&id).await?,
+                    _ => scan.remove_artist(&id).await?,
+                }
+            }
+        }
+        for raw in objects
+            .iter()
+            .filter_map(|object| object.strip_prefix("playlist:"))
+        {
+            let id = self.id("playlist", raw);
+            match self.stage_playlist_snapshot(scan, &id).await {
+                Ok(()) => {}
+                Err(SourceError::NotFound) => scan.remove_playlist(&id).await?,
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) async fn generated_track_object_ids(
         &self,
         seed: &crate::SourceRadioSeed,
@@ -197,7 +314,9 @@ impl SubsonicSource {
         };
         for mut album in albums {
             let album_id = json::id(&album["id"]).expect("album identity");
-            let mut body = self.get_json("getAlbum", &[("id", album_id)]).await?;
+            let mut body = self
+                .get_json("getAlbum", &[("id", album_id.clone())])
+                .await?;
             if let Value::Object(detail) = body["album"].take() {
                 album.as_object_mut().expect("album summary").extend(detail);
             }
@@ -206,15 +325,30 @@ impl SubsonicSource {
                 stage_album(scan, metadata).await?;
                 scan.finish_batch().await?;
             }
-            for page in json::items(&album["song"]).chunks(100) {
-                let tracks = self.read_tracks(page).await?;
-                scan.begin_batch().await?;
-                for song in tracks {
-                    stage_track(scan, song).await?;
-                }
-                scan.finish_batch().await?;
-            }
+            self.stage_album_tracks(scan, &self.id("album", &album_id), &album)
+                .await?;
         }
+        Ok(())
+    }
+
+    async fn stage_album_tracks(
+        &self,
+        scan: &mut library::Scan,
+        album_id: &str,
+        album: &Value,
+    ) -> SourceResult<()> {
+        for page in json::items(&album["song"]).chunks(100) {
+            let tracks = self.read_tracks(page).await?;
+            scan.begin_batch().await?;
+            for mut song in tracks {
+                if song.album_id.is_none() {
+                    song.album_id = Some(album_id.to_string());
+                }
+                stage_track(scan, song).await?;
+            }
+            scan.finish_batch().await?;
+        }
+        scan.replace_album_membership(album_id).await?;
         Ok(())
     }
 

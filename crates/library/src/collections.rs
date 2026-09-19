@@ -1751,32 +1751,20 @@ impl Database {
     ) -> LibraryResult<Option<GenreDetail>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let genre = sqlx::query_as::<_, GenreRow>(
-            "SELECT genre.genre_key,genre.source_key,(SELECT object_id FROM sources WHERE source_key=genre.source_key) source_id,genre.object_id,genre.name,genre.artwork_binding,
-              count(DISTINCT track.album_key) album_count,
-              count(DISTINCT track.track_key) track_count,
-              COALESCE(sum(track.duration_millis),0) duration_millis,
-              count(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download') THEN track.track_key END) downloaded_count
-             FROM genres genre LEFT JOIN track_genres credit USING(genre_key)
-             LEFT JOIN tracks track ON track.track_key=credit.track_key
-               AND (?3 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))
-             WHERE genre.source_key=?1 AND genre.genre_key=?2
-             GROUP BY genre.genre_key",
-        )
-        .bind(source)
-        .bind(key)
-        .bind(folder)
-        .fetch_optional(&mut *transaction)
-        .await?;
+        let genre = load_genre_rows(&mut transaction, source, &[key], folder)
+            .await?
+            .pop();
         let Some(genre) = genre else {
             transaction.commit().await?;
             Database::clear_progress(&mut connection).await?;
             return Ok(None);
         };
         let representative_albums = sqlx::query_scalar::<_, AlbumKey>(
-            "SELECT DISTINCT track.album_key FROM track_genres credit
-             JOIN tracks track USING(track_key)
-             WHERE credit.genre_key=?1 AND track.source_key=?2 AND track.album_key IS NOT NULL
+            "SELECT DISTINCT track.album_key FROM tracks track
+             WHERE track.track_key IN (
+               SELECT track_key FROM track_genres WHERE genre_key=?1
+               UNION SELECT track_key FROM album_genres JOIN tracks USING(album_key) WHERE genre_key=?1
+             ) AND track.source_key=?2 AND track.album_key IS NOT NULL
                AND (?3 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))
              ORDER BY track.date_added DESC NULLS LAST,track.album_key LIMIT 16",
         )
@@ -2033,7 +2021,7 @@ fn collection_track_query(
             }
         ),
         C::Genre(key) => format!(
-            "EXISTS(SELECT 1 FROM track_genres credit WHERE credit.genre_key={} AND credit.track_key=track.track_key)",
+            "(EXISTS(SELECT 1 FROM track_genres credit WHERE credit.genre_key={0} AND credit.track_key=track.track_key) OR EXISTS(SELECT 1 FROM album_genres credit WHERE credit.genre_key={0} AND credit.album_key=track.album_key))",
             key.raw()
         ),
         C::Mood(key) => format!(
@@ -2330,13 +2318,18 @@ async fn named_collection_artwork(
     if keys.is_empty() {
         return Ok(BTreeMap::new());
     }
+    let relation = if kind == "genre" {
+        "(SELECT track_key FROM track_genres WHERE genre_key=requested.value UNION SELECT track_key FROM album_genres JOIN tracks USING(album_key) WHERE genre_key=requested.value)".to_string()
+    } else {
+        format!("(SELECT track_key FROM track_{kind}s WHERE {kind}_key=requested.value)")
+    };
     let sql = format!(
         "WITH requested AS (SELECT DISTINCT value FROM json_each(?1))
          SELECT requested.value,album.artwork_binding FROM requested
          CROSS JOIN json_each((SELECT json_group_array(album_key) FROM (
-             SELECT album.album_key FROM track_{kind}s relation
+             SELECT album.album_key FROM {relation} relation
              JOIN tracks track USING(track_key) JOIN albums album USING(album_key)
-             WHERE relation.{kind}_key=requested.value AND track.source_key=?2
+             WHERE track.source_key=?2
                AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope
                    WHERE scope.track_key=track.track_key AND scope.folder_key=?3))
                AND album.artwork_binding IS NOT NULL
@@ -2371,7 +2364,7 @@ async fn load_genre_rows(
     query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
         row.push_bind(*key).push_bind(position as i64);
     });
-    query.push(") SELECT genre.genre_key,genre.source_key,(SELECT object_id FROM sources WHERE source_key=genre.source_key) source_id,genre.object_id,genre.name,genre.artwork_binding,count(DISTINCT track.album_key) album_count,count(DISTINCT track.track_key) track_count,COALESCE(sum(track.duration_millis),0) duration_millis,count(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download') THEN track.track_key END) downloaded_count FROM requested JOIN genres genre USING(genre_key) LEFT JOIN track_genres relation USING(genre_key) LEFT JOIN tracks track ON track.track_key=relation.track_key AND (").push_bind(folder).push(" IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push(")) WHERE genre.source_key=").push_bind(source).push(" GROUP BY requested.position ORDER BY requested.position");
+    query.push(") SELECT genre.genre_key,genre.source_key,(SELECT object_id FROM sources WHERE source_key=genre.source_key) source_id,genre.object_id,genre.name,genre.artwork_binding,count(DISTINCT track.album_key) album_count,count(DISTINCT track.track_key) track_count,COALESCE(sum(track.duration_millis),0) duration_millis,count(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download') THEN track.track_key END) downloaded_count FROM requested JOIN genres genre USING(genre_key) LEFT JOIN tracks track ON track.track_key IN (SELECT track_key FROM track_genres WHERE genre_key=genre.genre_key UNION SELECT track_key FROM album_genres JOIN tracks USING(album_key) WHERE genre_key=genre.genre_key) AND (").push_bind(folder).push(" IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push(")) WHERE genre.source_key=").push_bind(source).push(" GROUP BY requested.position ORDER BY requested.position");
     let mut rows = query
         .build_query_as::<GenreRow>()
         .persistent(false)
@@ -2869,7 +2862,7 @@ async fn load_genre_order(
     // LIMIT 1 keeps SQLite paging tied to genre rows.
     let result = if !filter.is_empty() {
         genre_keys(
-                "SELECT genre.genre_key FROM genres genre WHERE genre.source_key=?1 AND instr(genre.normalized_name,?2)>0 AND EXISTS(SELECT 1 FROM track_genres credit WHERE credit.genre_key=genre.genre_key AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=credit.track_key AND scope.folder_key=?3)) LIMIT 1) ORDER BY genre.sort_text,genre.genre_key",
+                "SELECT genre.genre_key FROM genres genre WHERE genre.source_key=?1 AND instr(genre.normalized_name,?2)>0 AND EXISTS(SELECT 1 FROM tracks credit WHERE credit.track_key IN (SELECT track_key FROM track_genres WHERE genre_key=genre.genre_key UNION SELECT track_key FROM album_genres JOIN tracks USING(album_key) WHERE genre_key=genre.genre_key) AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=credit.track_key AND scope.folder_key=?3)) LIMIT 1) ORDER BY genre.sort_text,genre.genre_key",
             )
             .bind(source)
             .bind(filter)
@@ -2877,10 +2870,10 @@ async fn load_genre_order(
             .fetch_all(&mut *connection)
             .await?
     } else if sort == GenreSort::Title {
-        genre_keys(if descending {"SELECT genre.genre_key FROM genres genre WHERE genre.source_key=?1 AND EXISTS(SELECT 1 FROM track_genres credit WHERE credit.genre_key=genre.genre_key AND (?2 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=credit.track_key AND scope.folder_key=?2)) LIMIT 1) ORDER BY genre.sort_text DESC,genre.genre_key"} else {"SELECT genre.genre_key FROM genres genre WHERE genre.source_key=?1 AND EXISTS(SELECT 1 FROM track_genres credit WHERE credit.genre_key=genre.genre_key AND (?2 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=credit.track_key AND scope.folder_key=?2)) LIMIT 1) ORDER BY genre.sort_text,genre.genre_key"}).bind(source).bind(folder).fetch_all(&mut *connection).await?
+        genre_keys(if descending {"SELECT genre.genre_key FROM genres genre WHERE genre.source_key=?1 AND EXISTS(SELECT 1 FROM tracks credit WHERE credit.track_key IN (SELECT track_key FROM track_genres WHERE genre_key=genre.genre_key UNION SELECT track_key FROM album_genres JOIN tracks USING(album_key) WHERE genre_key=genre.genre_key) AND (?2 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=credit.track_key AND scope.folder_key=?2)) LIMIT 1) ORDER BY genre.sort_text DESC,genre.genre_key"} else {"SELECT genre.genre_key FROM genres genre WHERE genre.source_key=?1 AND EXISTS(SELECT 1 FROM tracks credit WHERE credit.track_key IN (SELECT track_key FROM track_genres WHERE genre_key=genre.genre_key UNION SELECT track_key FROM album_genres JOIN tracks USING(album_key) WHERE genre_key=genre.genre_key) AND (?2 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=credit.track_key AND scope.folder_key=?2)) LIMIT 1) ORDER BY genre.sort_text,genre.genre_key"}).bind(source).bind(folder).fetch_all(&mut *connection).await?
     } else {
         genre_keys(
-                "WITH rows AS (SELECT genre.genre_key,genre.sort_text,count(DISTINCT track.album_key) album_count,count(DISTINCT track.track_key) track_count FROM genres genre JOIN track_genres credit USING(genre_key) JOIN tracks track USING(track_key) WHERE genre.source_key=?1 AND (?4 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?4)) GROUP BY genre.genre_key) SELECT genre_key FROM rows ORDER BY CASE WHEN ?2=0 AND ?3=0 THEN sort_text END ASC,CASE WHEN ?2=0 AND ?3=1 THEN sort_text END DESC,CASE WHEN ?2=1 AND ?3=0 THEN album_count END ASC,CASE WHEN ?2=1 AND ?3=1 THEN album_count END DESC,CASE WHEN ?2=2 AND ?3=0 THEN track_count END ASC,CASE WHEN ?2=2 AND ?3=1 THEN track_count END DESC,sort_text,genre_key")
+                "WITH rows AS (SELECT genre.genre_key,genre.sort_text,count(DISTINCT track.album_key) album_count,count(DISTINCT track.track_key) track_count FROM genres genre JOIN tracks track ON track.track_key IN (SELECT track_key FROM track_genres WHERE genre_key=genre.genre_key UNION SELECT track_key FROM album_genres JOIN tracks USING(album_key) WHERE genre_key=genre.genre_key) WHERE genre.source_key=?1 AND (?4 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?4)) GROUP BY genre.genre_key) SELECT genre_key FROM rows ORDER BY CASE WHEN ?2=0 AND ?3=0 THEN sort_text END ASC,CASE WHEN ?2=0 AND ?3=1 THEN sort_text END DESC,CASE WHEN ?2=1 AND ?3=0 THEN album_count END ASC,CASE WHEN ?2=1 AND ?3=1 THEN album_count END DESC,CASE WHEN ?2=2 AND ?3=0 THEN track_count END ASC,CASE WHEN ?2=2 AND ?3=1 THEN track_count END DESC,sort_text,genre_key")
                 .bind(source).bind(sort.code()).bind(descending).bind(folder).fetch_all(&mut *connection).await?
     };
     Ok(result)

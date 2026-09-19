@@ -57,12 +57,32 @@ impl DetailLinks {
             return Self::text(text);
         }
 
+        let mut folded = String::new();
+        let mut boundaries = Vec::new();
+        for (offset, character) in text.char_indices() {
+            boundaries.push((folded.len(), offset));
+            folded.extend(character.to_lowercase());
+        }
+        boundaries.push((folded.len(), text.len()));
         let mut candidates = credits
             .iter()
             .enumerate()
             .flat_map(|(credit_index, credit)| {
-                text.match_indices(name(credit))
-                    .map(move |(start, matched)| (start, start + matched.len(), credit_index))
+                folded
+                    .match_indices(&name(credit).to_lowercase())
+                    .filter_map(|(start, matched)| {
+                        let start = boundaries
+                            .binary_search_by_key(&start, |(folded, _)| *folded)
+                            .ok()?;
+                        let end = boundaries
+                            .binary_search_by_key(
+                                &(boundaries[start].0 + matched.len()),
+                                |(folded, _)| *folded,
+                            )
+                            .ok()?;
+                        Some((boundaries[start].1, boundaries[end].1, credit_index))
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
         candidates.sort_by(|left, right| {
@@ -303,6 +323,25 @@ pub fn album_artist_links(album: &AlbumRow) -> DetailLinks {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn credited_case_preserves_display_text_and_unicode_link_boundaries() {
+        for (display, credited) in [
+            ("Mei Ehara", "mei ehara"),
+            ("Édith", "édith"),
+            ("İpek", "i\u{307}pek"),
+        ] {
+            let links = DetailLinks::artist_text(
+                display,
+                &[credit(3, credited)],
+                |artist| artist.media_uri.clone(),
+                |artist| artist.name.as_str(),
+                false,
+            );
+            assert_eq!(links.text, display);
+            assert_eq!(links.links.len(), 1);
+            assert_eq!(links.links[0].range, 0..display.len());
+        }
+    }
     #[test]
     fn projected_metadata_keeps_album_and_all_artist_routes() {
         let album_uri = uri("album", 9);

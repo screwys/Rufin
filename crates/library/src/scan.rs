@@ -42,6 +42,8 @@ pub struct Publication {
     pub source: SourceKey,
     pub catalog_revision: u64,
     pub artwork_digest: [u8; 32],
+    /// This publication inserted tracks that were not in the source catalog.
+    pub tracks_added: bool,
 }
 
 #[derive(Clone, Debug, FromRow, Eq, PartialEq)]
@@ -138,6 +140,25 @@ pub struct LocalArtworkCandidate {
 impl Scan {
     pub fn source_id(&self) -> &str {
         &self.source_id
+    }
+
+    pub async fn contains_entity(&mut self, kind: &str, object_id: &str) -> LibraryResult<bool> {
+        let table = match kind {
+            "album" => "albums",
+            "track" => "tracks",
+            "artist" => "artists",
+            _ => return Ok(false),
+        };
+        let mut writer = self.database.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT EXISTS(SELECT 1 FROM temp.scan_{table} WHERE object_id=?2
+             UNION ALL SELECT 1 FROM {table} WHERE source_key=?1 AND object_id=?2)"
+        )))
+        .bind(self.existing_source_key)
+        .bind(object_id)
+        .fetch_one(connection)
+        .await?)
     }
 
     /// Returns the current publication when the cheap freshness fact is accepted.
@@ -442,6 +463,31 @@ impl Scan {
 
     pub async fn remove_track(&mut self, object_id: &str) -> LibraryResult<()> {
         self.write_removal("track", object_id).await
+    }
+
+    /// The album's complete track listing was read. Previously known members
+    /// absent from that listing must be resolved before publishing: they may
+    /// have moved to another album rather than disappeared from the source.
+    pub async fn replace_album_membership(&mut self, object_id: &str) -> LibraryResult<()> {
+        self.write_removal("album-members", object_id).await
+    }
+
+    pub async fn unobserved_album_tracks(
+        &mut self,
+        after: Option<&str>,
+    ) -> LibraryResult<Vec<String>> {
+        let mut writer = self.database.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        Ok(sqlx::query_scalar(
+            "SELECT track.object_id FROM temp.scan_removals scope
+             JOIN albums album ON album.source_key=?1 AND album.object_id=scope.object_id
+             JOIN tracks track USING(album_key)
+             WHERE scope.entity_kind='album-members'
+               AND (?2 IS NULL OR track.object_id>?2)
+               AND NOT EXISTS(SELECT 1 FROM temp.scan_tracks staged WHERE staged.object_id=track.object_id)
+               AND NOT EXISTS(SELECT 1 FROM temp.scan_removals removed WHERE removed.entity_kind='track' AND removed.object_id=track.object_id)
+             ORDER BY track.object_id LIMIT 100",
+        ).bind(self.existing_source_key).bind(after).fetch_all(connection).await?)
     }
 
     pub async fn remove_album(&mut self, object_id: &str) -> LibraryResult<()> {
@@ -1416,7 +1462,7 @@ impl Scan {
             artwork_binding.unwrap_or_default(),
         ])?;
         self.stage(
-            sqlx::query("INSERT INTO temp.scan_artists VALUES (?1, ?2, ?3, ?4, COALESCE(?5,(SELECT sort_text FROM artists WHERE source_key=?10 AND object_id=?1),?4), COALESCE(?6,(SELECT musicbrainz_artist_id FROM artists WHERE ?5 IS NULL AND source_key=?10 AND object_id=?1)), ?7, ?8, COALESCE(?9,(SELECT source_rating FROM artists WHERE ?5 IS NULL AND source_key=?10 AND object_id=?1))) ON CONFLICT(object_id) DO UPDATE SET name=excluded.name,normalized_name=excluded.normalized_name,sort_text=COALESCE(?5,scan_artists.sort_text),musicbrainz_artist_id=CASE WHEN ?5 IS NOT NULL THEN ?6 ELSE COALESCE(?6,scan_artists.musicbrainz_artist_id) END,artwork_binding=COALESCE(excluded.artwork_binding,scan_artists.artwork_binding),favorite=COALESCE(excluded.favorite,scan_artists.favorite),rating=CASE WHEN ?5 IS NOT NULL THEN ?9 ELSE COALESCE(?9,scan_artists.rating) END")
+            sqlx::query("INSERT INTO temp.scan_artists VALUES (?1, ?2, COALESCE((SELECT name FROM artists WHERE ?5 IS NULL AND normalized_name=?4 AND source_key=?10 AND object_id=?1),?3), COALESCE((SELECT normalized_name FROM artists WHERE ?5 IS NULL AND normalized_name=?4 AND source_key=?10 AND object_id=?1),?4), COALESCE(?5,(SELECT sort_text FROM artists WHERE source_key=?10 AND object_id=?1),?4), COALESCE(?6,(SELECT musicbrainz_artist_id FROM artists WHERE ?5 IS NULL AND source_key=?10 AND object_id=?1)), ?7, ?8, COALESCE(?9,(SELECT source_rating FROM artists WHERE ?5 IS NULL AND source_key=?10 AND object_id=?1))) ON CONFLICT(object_id) DO UPDATE SET name=CASE WHEN ?5 IS NULL AND scan_artists.normalized_name=excluded.normalized_name THEN scan_artists.name ELSE excluded.name END,normalized_name=excluded.normalized_name,sort_text=COALESCE(?5,scan_artists.sort_text),musicbrainz_artist_id=CASE WHEN ?5 IS NOT NULL THEN ?6 ELSE COALESCE(?6,scan_artists.musicbrainz_artist_id) END,artwork_binding=COALESCE(excluded.artwork_binding,scan_artists.artwork_binding),favorite=COALESCE(excluded.favorite,scan_artists.favorite),rating=CASE WHEN ?5 IS NOT NULL THEN ?9 ELSE COALESCE(?9,scan_artists.rating) END")
                 .bind(object_id)
                 .bind(media_uri)
                 .bind(name)
@@ -1448,7 +1494,7 @@ impl Scan {
         object_id: &str,
         name: &str,
         normalized_name: &str,
-        sort_text: &str,
+        sort_text: Option<&str>,
         artwork_binding: Option<&[u8]>,
     ) -> LibraryResult<()> {
         self.require_id("genre", object_id)?;
@@ -1456,16 +1502,17 @@ impl Scan {
             object_id.as_bytes(),
             name.as_bytes(),
             normalized_name.as_bytes(),
-            sort_text.as_bytes(),
+            sort_text.unwrap_or_default().as_bytes(),
             artwork_binding.unwrap_or_default(),
         ])?;
         self.stage(
-            sqlx::query("INSERT INTO temp.scan_genres VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(object_id) DO UPDATE SET name=excluded.name,normalized_name=excluded.normalized_name,sort_text=excluded.sort_text,artwork_binding=COALESCE(excluded.artwork_binding,scan_genres.artwork_binding)")
+            sqlx::query("INSERT INTO temp.scan_genres VALUES (?1, COALESCE((SELECT name FROM genres WHERE ?4 IS NULL AND normalized_name=?3 AND source_key=?6 AND object_id=?1),?2), COALESCE((SELECT normalized_name FROM genres WHERE ?4 IS NULL AND normalized_name=?3 AND source_key=?6 AND object_id=?1),?3), COALESCE(?4,(SELECT sort_text FROM genres WHERE source_key=?6 AND object_id=?1),?3), ?5) ON CONFLICT(object_id) DO UPDATE SET name=CASE WHEN ?4 IS NULL AND scan_genres.normalized_name=excluded.normalized_name THEN scan_genres.name ELSE excluded.name END,normalized_name=excluded.normalized_name,sort_text=COALESCE(?4,scan_genres.sort_text),artwork_binding=COALESCE(excluded.artwork_binding,scan_genres.artwork_binding)")
                 .bind(object_id)
                 .bind(name)
                 .bind(normalized_name)
                 .bind(sort_text)
-                .bind(artwork_binding),
+                .bind(artwork_binding)
+                .bind(self.existing_source_key),
         )
         .await
     }
@@ -1572,6 +1619,7 @@ impl Scan {
         object_id: &str,
         links: &[ScanLink<'_>],
     ) -> LibraryResult<()> {
+        self.write_removal("track-folders", object_id).await?;
         self.stage(
             sqlx::query("DELETE FROM temp.scan_track_folders WHERE owner_id=?1").bind(object_id),
         )
@@ -1862,6 +1910,22 @@ impl Scan {
                  WHERE EXISTS(SELECT 1 FROM albums WHERE source_key=?1 AND object_id=staged.object_id)",
             ).bind(source).execute(&mut *transaction).await?;
         }
+        let mut affected_albums = if self.point_update {
+            sqlx::query_scalar::<_, crate::AlbumKey>(
+                "SELECT DISTINCT album_key FROM tracks WHERE source_key=?1 AND album_key IS NOT NULL
+                 AND (object_id IN (SELECT object_id FROM temp.scan_tracks)
+                   OR object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='track'))",
+            ).bind(source).fetch_all(&mut *transaction).await?
+        } else {
+            Vec::new()
+        };
+        let tracks_added = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM temp.scan_tracks staged WHERE NOT EXISTS(
+                SELECT 1 FROM tracks WHERE source_key=?1 AND object_id=staged.object_id))",
+        )
+        .bind(source)
+        .fetch_one(&mut *transaction)
+        .await?;
         let artwork_changed = staged_artwork_changed(&mut transaction, source, full).await?;
         let mut metadata_changed = publish_entities(&mut transaction, source).await?;
         let mut playlists_changed = publish_playlists(&mut transaction, source).await?;
@@ -1877,11 +1941,13 @@ impl Scan {
         playlists_changed |= publish_playlist_entries(&mut transaction, source).await?;
         let home_changed = publish_home(&mut transaction, source, full).await?;
         if self.point_update && metadata_changed {
-            let albums = sqlx::query_scalar::<_, crate::AlbumKey>(
+            affected_albums.extend(sqlx::query_scalar::<_, crate::AlbumKey>(
                 "SELECT DISTINCT track.album_key FROM tracks track JOIN temp.scan_tracks staged ON staged.object_id=track.object_id
                  WHERE track.source_key=?1 AND track.album_key IS NOT NULL",
-            ).bind(source).fetch_all(&mut *transaction).await?;
-            for album in albums {
+            ).bind(source).fetch_all(&mut *transaction).await?);
+            affected_albums.sort_unstable();
+            affected_albums.dedup();
+            for album in affected_albums {
                 crate::loudness::recompute_album_source_and_current_keys(&mut transaction, album)
                     .await?;
             }
@@ -1928,7 +1994,10 @@ impl Scan {
                 .execute(&mut *connection)
                 .await?;
         }
-        let publication = publication(source, revision, &artwork)?;
+        let publication = Publication {
+            tracks_added,
+            ..publication(source, revision, &artwork)?
+        };
         Ok(if metadata_changed || user_changed || home_changed {
             ScanOutcome::Changed(publication)
         } else if playlists_changed {
@@ -2400,6 +2469,7 @@ impl Database {
                 source,
                 catalog_revision: 0,
                 artwork_digest: [0; 32],
+                tracks_added: false,
             }),
         }
     }
@@ -2512,6 +2582,7 @@ fn publication(
     Ok(Publication {
         source: SourceKey::from_raw(source_key),
         catalog_revision: revision,
+        tracks_added: false,
         artwork_digest: artwork_digest.try_into().map_err(|_| {
             LibraryError::InvalidStore("source artwork digest is not 32 bytes".to_string())
         })?,
@@ -3273,6 +3344,10 @@ async fn publish_links(
                  AND expected.target=current.{target_key} AND expected.position=current.position)",
             if full {
                 String::new()
+            } else if relation == "track_folders" {
+                "AND object_id IN (SELECT owner_id FROM temp.scan_track_folders
+                 UNION SELECT object_id FROM temp.scan_removals WHERE entity_kind='track-folders')"
+                    .to_string()
             } else {
                 format!("AND object_id IN (SELECT object_id FROM temp.scan_{owners})")
             }
@@ -3426,7 +3501,7 @@ mod tests {
         let mut scan = Scan::begin(&database, "source", "Source", "source", None)
             .await
             .expect("next Scan reuses released token");
-        scan.write_genre("genre", "Genre", "genre", "genre", None)
+        scan.write_genre("genre", "Genre", "genre", Some("genre"), None)
             .await
             .expect("stage before writer failure");
         database.fail_writer().await.expect("fail fixed writer");

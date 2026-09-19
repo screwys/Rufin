@@ -125,26 +125,13 @@ impl SelectedFeed {
                 "Selected feed has no pending change",
             ))?;
         match (&self.source.implementation, change) {
-            (
-                Implementation::OpenSubsonic(_),
-                SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost),
-            ) => Ok(None),
-            (
-                Implementation::OpenSubsonic(source),
-                SelectedFeedChange::Remote(RemoteItemChange::Items { upserts, .. }),
-            ) => source
-                .apply_navidrome_changes(database, self.source.source_id.as_str(), upserts)
-                .await
-                .map(Some),
-            (
-                Implementation::Plex(_),
-                SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost),
-            ) => Ok(None),
-            (
-                Implementation::Plex(source),
-                SelectedFeedChange::Remote(RemoteItemChange::Items { upserts, removals }),
-            ) => source
-                .apply_live_items(database, self.source.source_id.as_str(), upserts, removals)
+            (_, SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost))
+            | (Implementation::Local(_), SelectedFeedChange::Local(LocalLiveChange::Rescan)) => {
+                Ok(None)
+            }
+            (_, SelectedFeedChange::Remote(RemoteItemChange::Items { upserts, removals })) => self
+                .source
+                .apply_items(database, upserts, removals)
                 .await
                 .map(Some),
             (
@@ -164,11 +151,6 @@ impl SelectedFeed {
                 .publish_paths(database, source_key, &paths, rename.as_ref())
                 .await
                 .map(Some),
-            (Implementation::Local(_), SelectedFeedChange::Local(LocalLiveChange::Rescan))
-            | (
-                Implementation::JellyfinEmby(_),
-                SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost),
-            ) => Ok(None),
             (
                 Implementation::Local(local),
                 SelectedFeedChange::Local(LocalLiveChange::Paths { paths, rename }),
@@ -180,20 +162,6 @@ impl SelectedFeed {
                     &paths,
                     rename.as_ref(),
                 )
-                .await
-                .map(Some),
-            (
-                Implementation::JellyfinEmby(source),
-                SelectedFeedChange::Remote(RemoteItemChange::UserData { upserts }),
-            ) => source
-                .apply_user_data(database, self.source.source_id.as_str(), upserts)
-                .await
-                .map(Some),
-            (
-                Implementation::JellyfinEmby(source),
-                SelectedFeedChange::Remote(RemoteItemChange::Items { upserts, removals }),
-            ) => source
-                .apply_live_items(database, self.source.source_id.as_str(), upserts, removals)
                 .await
                 .map(Some),
             _ => Err(SourceError::InvalidRequest(
@@ -367,9 +335,6 @@ pub(crate) fn optional_collection_error(error: SourceError) -> SourceResult<()> 
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum RemoteItemChange {
-    UserData {
-        upserts: Vec<String>,
-    },
     Items {
         upserts: Vec<String>,
         removals: Vec<String>,
@@ -381,28 +346,6 @@ impl RemoteItemChange {
     fn merge(self, incoming: Self) -> Self {
         match (self, incoming) {
             (Self::BoundaryLost, _) | (_, Self::BoundaryLost) => Self::BoundaryLost,
-            (
-                Self::UserData {
-                    upserts: mut current,
-                },
-                Self::UserData { upserts },
-            ) => {
-                current.extend(upserts);
-                current.sort();
-                current.dedup();
-                if current.len() > LIVE_CHANGE_LIMIT {
-                    Self::BoundaryLost
-                } else {
-                    Self::UserData { upserts: current }
-                }
-            }
-            (Self::UserData { upserts }, items @ Self::Items { .. })
-            | (items @ Self::Items { .. }, Self::UserData { upserts }) => {
-                items.merge(Self::Items {
-                    upserts,
-                    removals: Vec::new(),
-                })
-            }
             (
                 Self::Items {
                     upserts: mut current_upserts,
@@ -594,7 +537,7 @@ pub enum SourceEditResult {
     Connected(Box<ConnectedSource>),
 }
 
-enum Implementation {
+pub(crate) enum Implementation {
     Plex(crate::plex::PlexSource),
     Local(crate::file::local::LocalSource),
     Files(crate::file::remote::RemoteSource),
@@ -638,13 +581,8 @@ impl Source {
         database: &Database,
         rating_keys: &[String],
     ) -> SourceResult<()> {
-        self.plex_companion_source()?
-            .apply_live_items(
-                database,
-                self.source_id.as_str(),
-                rating_keys.to_vec(),
-                Vec::new(),
-            )
+        self.plex_companion_source()?;
+        self.apply_items(database, rating_keys.to_vec(), Vec::new())
             .await?;
         Ok(())
     }
@@ -708,7 +646,7 @@ impl Source {
             ))
     }
 
-    fn new(source_id: SourceId, implementation: Implementation) -> Self {
+    pub(crate) fn new(source_id: SourceId, implementation: Implementation) -> Self {
         Self {
             source_id,
             implementation,
@@ -900,7 +838,10 @@ impl Source {
         } else {
             None
         };
-        if freshness.is_some() && accepted.is_none() {
+        if accepted.is_none()
+            && (freshness.is_some()
+                || matches!(&self.implementation, Implementation::OpenSubsonic(_)))
+        {
             return self
                 .refresh(database, display_name, &report, cancelled, freshness, false)
                 .await
@@ -1549,14 +1490,11 @@ impl Source {
             Implementation::Plex(plex) => {
                 plex.write_track_metadata(&track.object_id, expected_revision, &edit)
                     .await?;
-                plex.apply_live_items(
-                    database,
-                    self.source_id.as_str(),
-                    vec![raw_item_id(&track.object_id).into()],
-                    vec![],
-                )
-                .await
-                .map_err(|error| crate::SourceMetadataError::SavedRefreshFailed(error.to_string()))
+                self.apply_items(database, vec![raw_item_id(&track.object_id).into()], vec![])
+                    .await
+                    .map_err(|error| {
+                        crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
+                    })
             }
             Implementation::Files(files) => {
                 files
@@ -1607,14 +1545,11 @@ impl Source {
             Implementation::Plex(plex) => {
                 plex.write_album_metadata(&album.object_id, expected_revision, &edit)
                     .await?;
-                plex.apply_live_items(
-                    database,
-                    self.source_id.as_str(),
-                    vec![raw_item_id(&album.object_id).into()],
-                    vec![],
-                )
-                .await
-                .map_err(|error| crate::SourceMetadataError::SavedRefreshFailed(error.to_string()))
+                self.apply_items(database, vec![raw_item_id(&album.object_id).into()], vec![])
+                    .await
+                    .map_err(|error| {
+                        crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
+                    })
             }
             Implementation::Files(files) => {
                 files
@@ -1665,9 +1600,8 @@ impl Source {
             Implementation::Plex(plex) => {
                 plex.write_artist_metadata(&artist.object_id, expected_revision, &edit)
                     .await?;
-                plex.apply_live_items(
+                self.apply_items(
                     database,
-                    self.source_id.as_str(),
                     vec![raw_item_id(&artist.object_id).into()],
                     vec![],
                 )
@@ -1709,11 +1643,7 @@ impl Source {
         database: &Database,
         raw: String,
     ) -> Result<ScanOutcome, crate::SourceMetadataError> {
-        let Implementation::JellyfinEmby(jellyfin) = &self.implementation else {
-            return Err(crate::SourceMetadataError::Unavailable);
-        };
-        jellyfin
-            .apply_live_items(database, self.source_id.as_str(), vec![raw], Vec::new())
+        self.apply_items(database, vec![raw], Vec::new())
             .await
             .map_err(|error| crate::SourceMetadataError::SavedRefreshFailed(error.to_string()))
     }
@@ -2401,31 +2331,19 @@ impl Source {
         deleted: Option<String>,
     ) -> SourceResult<ScanOutcome> {
         match &self.implementation {
-            Implementation::Plex(source) => {
-                source
-                    .apply_live_items(
-                        database,
-                        self.source_id.as_str(),
-                        affected.into_iter().collect(),
-                        deleted.into_iter().collect(),
-                    )
-                    .await
-            }
-            Implementation::JellyfinEmby(source) => {
-                source
-                    .apply_live_items(
-                        database,
-                        self.source_id.as_str(),
-                        affected
-                            .into_iter()
-                            .map(|id| raw_item_id(&id).to_string())
-                            .collect(),
-                        deleted
-                            .into_iter()
-                            .map(|id| raw_item_id(&id).to_string())
-                            .collect(),
-                    )
-                    .await
+            Implementation::Plex(_) | Implementation::JellyfinEmby(_) => {
+                self.apply_items(
+                    database,
+                    affected
+                        .into_iter()
+                        .map(|id| raw_item_id(&id).to_string())
+                        .collect(),
+                    deleted
+                        .into_iter()
+                        .map(|id| raw_item_id(&id).to_string())
+                        .collect(),
+                )
+                .await
             }
             Implementation::OpenSubsonic(source) => {
                 let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
@@ -2596,6 +2514,89 @@ impl Source {
         }
     }
 
+    pub(crate) async fn apply_items(
+        &self,
+        database: &Database,
+        upserts: Vec<String>,
+        removals: Vec<String>,
+    ) -> SourceResult<ScanOutcome> {
+        let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
+        self.stage_items(&mut scan, upserts, removals).await?;
+        self.publish_items(scan).await
+    }
+
+    async fn stage_items(
+        &self,
+        scan: &mut Scan,
+        upserts: Vec<String>,
+        removals: Vec<String>,
+    ) -> SourceResult<()> {
+        match &self.implementation {
+            Implementation::JellyfinEmby(source) => {
+                source.stage_items(scan, upserts, removals).await
+            }
+            Implementation::Plex(source) => source.stage_items(scan, upserts, removals).await,
+            Implementation::OpenSubsonic(source) => source.stage_items(scan, upserts).await,
+            _ => Err(SourceError::InvalidRequest(
+                "Source has no remote item feed",
+            )),
+        }
+    }
+
+    fn item_request_id(&self, kind: &str, object: &str) -> String {
+        let raw = raw_item_id(object);
+        match &self.implementation {
+            Implementation::OpenSubsonic(_) => {
+                format!("{}:{raw}", if kind == "track" { "song" } else { kind })
+            }
+            _ => raw.to_string(),
+        }
+    }
+
+    async fn publish_items(&self, mut scan: Scan) -> SourceResult<ScanOutcome> {
+        let section = SourceHomeSection::NewlyAdded;
+        match self.home_section(section).await {
+            Ok(entries) => {
+                let mut missing = Vec::new();
+                for entry in &entries {
+                    let kind = match entry.kind {
+                        library::HomeEntryKind::Album => "album",
+                        library::HomeEntryKind::Track => "track",
+                        _ => continue,
+                    };
+                    if !scan.contains_entity(kind, &entry.entity_object_id).await? {
+                        missing.push(self.item_request_id(kind, &entry.entity_object_id));
+                    }
+                }
+                if !missing.is_empty() {
+                    if let Err(error) = self.stage_items(&mut scan, missing, Vec::new()).await {
+                        optional_collection_error(error)?;
+                    }
+                }
+                scan.replace_home_section(section.id(), &entries).await?;
+            }
+            Err(error) => optional_collection_error(error)?,
+        }
+        let mut after = None;
+        loop {
+            let tracks = scan.unobserved_album_tracks(after.as_deref()).await?;
+            if tracks.is_empty() {
+                break;
+            }
+            after = tracks.last().cloned();
+            self.stage_items(
+                &mut scan,
+                tracks
+                    .iter()
+                    .map(|id| self.item_request_id("track", id))
+                    .collect(),
+                Vec::new(),
+            )
+            .await?;
+        }
+        Ok(scan.finish().await?)
+    }
+
     pub async fn prepare_collection(
         &self,
         database: &Database,
@@ -2631,7 +2632,7 @@ impl Source {
             }
             Implementation::Local(_) | Implementation::Files(_) => unreachable!(),
         }
-        scan.finish().await?;
+        self.publish_items(scan).await?;
         Ok(())
     }
 
@@ -2706,7 +2707,10 @@ impl Source {
                 let producer = Arc::clone(&feed);
                 let task = runtime.spawn(async move {
                     let ready_feed = Arc::clone(&producer);
-                    let mut ready = move || !ready_feed.cancelled.load(Ordering::Acquire);
+                    let mut ready = move || {
+                        ready_feed
+                            .submit(SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost))
+                    };
                     let gap_feed = Arc::clone(&producer);
                     let mut gap = move || {
                         gap_feed.submit(SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost))

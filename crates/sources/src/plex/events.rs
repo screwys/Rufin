@@ -38,6 +38,9 @@ impl PlexSource {
             .await
             .map_err(|error| remote_http::map_reqwest_error(error, HTTP))?;
         let mut socket = WebSocketStream::from_raw_socket(upgraded, Role::Client, None).await;
+        if !changed(RemoteItemChange::BoundaryLost) {
+            return Ok(());
+        }
         while let Some(message) = socket.next().await {
             match message.map_err(|error| SourceError::Network(error.to_string()))? {
                 Message::Text(text) => {
