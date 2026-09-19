@@ -195,6 +195,9 @@ msgstr "Claves de API"
 msgid "About Rufin"
 msgstr "Acerca de Rufin"
 
+msgid "Absolute"
+msgstr ""
+
 msgid "Accent color"
 msgstr "Color de acento"
 
@@ -336,6 +339,9 @@ msgid "Application name"
 msgstr "Nombre de la aplicación"
 
 msgid "Apply Template"
+msgstr ""
+
+msgid "Apply"
 msgstr ""
 
 msgid "Approve sign-in in your browser"
@@ -773,6 +779,11 @@ msgstr ""
 msgid "Delete \"{name}\"?"
 msgstr ""
 
+#, fuzzy
+#| msgid "All Playlists"
+msgid "Delete playlist file"
+msgstr "Todas las listas"
+
 msgid "Delete"
 msgstr ""
 
@@ -883,6 +894,11 @@ msgstr ""
 
 msgid "Edit Lyrics"
 msgstr ""
+
+#, fuzzy
+#| msgid "Add to Playlist"
+msgid "Edit Playlist"
+msgstr "Añadir a la lista de reproducción"
 
 #, fuzzy
 #| msgid "Add to Playlist"
@@ -1029,6 +1045,9 @@ msgstr ""
 msgid "Featured genres"
 msgstr ""
 
+msgid "Filename"
+msgstr ""
+
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 
@@ -1071,6 +1090,9 @@ msgid "Forget Source"
 msgstr ""
 
 msgid "Forget \"{name}\"?"
+msgstr ""
+
+msgid "Format"
 msgstr ""
 
 msgid "Forward"
@@ -1198,6 +1220,14 @@ msgstr ""
 msgid "Import Playlist"
 msgstr "Añadir a la lista de reproducción"
 
+#, fuzzy
+#| msgid "Add to Playlist"
+msgid "Import a copy"
+msgstr "Añadir a la lista de reproducción"
+
+msgid "Import"
+msgstr ""
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr ""
 
@@ -1302,10 +1332,22 @@ msgstr ""
 msgid "Linear"
 msgstr ""
 
+msgid "Link exported file"
+msgstr ""
+
+msgid "Link to file..."
+msgstr ""
+
+msgid "Linked file"
+msgstr ""
+
 msgid "ListenBrainz scrobbling"
 msgstr ""
 
 msgid "ListenBrainz"
+msgstr ""
+
+msgid "Load file contents"
 msgstr ""
 
 msgid "Loading related tracks..."
@@ -1697,6 +1739,9 @@ msgstr ""
 msgid "On this device"
 msgstr ""
 
+msgid "On"
+msgstr ""
+
 msgid "One Name: Value header per line"
 msgstr ""
 
@@ -1756,6 +1801,9 @@ msgstr ""
 msgid "Open settings"
 msgstr "Ajustes de la aplicación"
 
+msgid "Open"
+msgstr ""
+
 msgid "OpenSubsonic"
 msgstr ""
 
@@ -1786,10 +1834,16 @@ msgstr ""
 msgid "Paste"
 msgstr ""
 
+msgid "Path format"
+msgstr ""
+
 #, fuzzy
 #| msgid "Add a new source"
 msgid "Path in Source"
 msgstr "Añadir una nueva fuente"
+
+msgid "Path"
+msgstr ""
 
 msgid "Pause"
 msgstr ""
@@ -1890,6 +1944,16 @@ msgstr ""
 #, fuzzy
 #| msgid "All Playlists"
 msgid "Playlist File"
+msgstr "Todas las listas"
+
+#, fuzzy
+#| msgid "All Playlists"
+msgid "Playlist file changed"
+msgstr "Todas las listas"
+
+#, fuzzy
+#| msgid "All Playlists"
+msgid "Playlist files"
 msgstr "Todas las listas"
 
 msgid "Playlist name"
@@ -2042,6 +2106,9 @@ msgstr ""
 msgid "Redo"
 msgstr ""
 
+msgid "Refresh automatically"
+msgstr ""
+
 msgid "Refresh section"
 msgstr ""
 
@@ -2063,6 +2130,9 @@ msgstr ""
 msgid "Related"
 msgstr ""
 
+msgid "Relative"
+msgstr ""
+
 msgid "Release date"
 msgstr ""
 
@@ -2070,6 +2140,12 @@ msgid "Release notifications"
 msgstr ""
 
 msgid "Release"
+msgstr ""
+
+msgid "Reload from file"
+msgstr ""
+
+msgid "Reload"
 msgstr ""
 
 msgid "Remote lyrics"
@@ -2132,10 +2208,7 @@ msgstr ""
 msgid "Removed from"
 msgstr ""
 
-msgid "Rename Playlist"
-msgstr ""
-
-msgid "Rename"
+msgid "Rename file"
 msgstr ""
 
 msgid "Repeat all"
@@ -2148,6 +2221,9 @@ msgid "Repeat one"
 msgstr ""
 
 msgid "Repeat"
+msgstr ""
+
+msgid "Replace file contents"
 msgstr ""
 
 msgid "Replace saved custom headers"
@@ -2201,6 +2277,9 @@ msgstr ""
 msgid "Rufin data folder"
 msgstr ""
 
+msgid "Rufin host"
+msgstr ""
+
 msgid "Rule actions"
 msgstr ""
 
@@ -2228,7 +2307,13 @@ msgstr ""
 msgid "Save action saves the lyrics directly to your source"
 msgstr ""
 
+msgid "Save changes automatically"
+msgstr ""
+
 msgid "Save lyrics automatically"
+msgstr ""
+
+msgid "Save playlist changes automatically"
 msgstr ""
 
 msgid "Save to rescan"
@@ -2742,6 +2827,9 @@ msgstr ""
 msgid "Unknown disc"
 msgstr ""
 
+msgid "Unlink"
+msgstr ""
+
 msgid "Unmute"
 msgstr ""
 
@@ -2799,6 +2887,9 @@ msgid "Use maximum year"
 msgstr ""
 
 msgid "Use minimum year"
+msgstr ""
+
+msgid "Use source setting"
 msgstr ""
 
 msgid "Use the server's Instant Mix for Radio and Auto DJ."

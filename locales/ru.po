@@ -231,6 +231,9 @@ msgstr "Ключи API"
 msgid "About Rufin"
 msgstr "О программе Rufin"
 
+msgid "Absolute"
+msgstr ""
+
 msgid "Accent color"
 msgstr "Акцентный цвет"
 
@@ -366,6 +369,9 @@ msgstr "Название приложения"
 
 msgid "Apply Template"
 msgstr "Применить шаблон"
+
+msgid "Apply"
+msgstr ""
 
 msgid "Approve sign-in in your browser"
 msgstr "Подтвердите вход в системе в вашем браузере"
@@ -789,6 +795,11 @@ msgstr "Удалить плейлист"
 msgid "Delete \"{name}\"?"
 msgstr "Удалить \"{name}\"?"
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Delete playlist file"
+msgstr "Удалить плейлист"
+
 msgid "Delete"
 msgstr "Удалить"
 
@@ -899,6 +910,11 @@ msgstr "EP-альбомы"
 
 msgid "Edit Lyrics"
 msgstr "Редактировать текст песни"
+
+#, fuzzy
+#| msgid "Edit Smart Playlist"
+msgid "Edit Playlist"
+msgstr "Редактировать умный плейлист"
 
 msgid "Edit Smart Playlist"
 msgstr "Редактировать умный плейлист"
@@ -1037,6 +1053,11 @@ msgstr "Избранные"
 msgid "Featured genres"
 msgstr "Рекомендованные жанры"
 
+#, fuzzy
+#| msgid "Rename"
+msgid "Filename"
+msgstr "Переименовать"
+
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 "Для файлов необходимо указать теги «Настроение» и «BPM». Не поддерживается "
@@ -1082,6 +1103,9 @@ msgstr "Удалить источник"
 
 msgid "Forget \"{name}\"?"
 msgstr "Забыть \"{name}\"?"
+
+msgid "Format"
+msgstr ""
 
 msgid "Forward"
 msgstr "Вперед"
@@ -1208,6 +1232,16 @@ msgstr "Импортировать резервную копию"
 msgid "Import Playlist"
 msgstr "Импортировать плейлист"
 
+#, fuzzy
+#| msgid "Import Backup"
+msgid "Import a copy"
+msgstr "Импортировать резервную копию"
+
+#, fuzzy
+#| msgid "Export"
+msgid "Import"
+msgstr "Экспорт"
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr "Включить подробную диагностику Rufin в текущей сессии"
 
@@ -1312,11 +1346,27 @@ msgstr "Ограничение"
 msgid "Linear"
 msgstr "Линейная"
 
+#, fuzzy
+#| msgid "Backup exported"
+msgid "Link exported file"
+msgstr "Резервная копия экспортирована"
+
+msgid "Link to file..."
+msgstr ""
+
+msgid "Linked file"
+msgstr ""
+
 msgid "ListenBrainz scrobbling"
 msgstr "Отправка данных о прослушивании в ListenBrainz"
 
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
+
+#, fuzzy
+#| msgid "No folder contents found."
+msgid "Load file contents"
+msgstr "Содержимое папки не найдено."
 
 msgid "Loading related tracks..."
 msgstr "Загрузка похожих треков..."
@@ -1716,6 +1766,9 @@ msgstr "Выкл."
 msgid "On this device"
 msgstr "На этом устройстве"
 
+msgid "On"
+msgstr ""
+
 msgid "One Name: Value header per line"
 msgstr "Одна пара «Имя: Значение» на строку"
 
@@ -1775,6 +1828,9 @@ msgstr "Открыть примечания к выпуску"
 msgid "Open settings"
 msgstr "Открыть настройки"
 
+msgid "Open"
+msgstr ""
+
 msgid "OpenSubsonic"
 msgstr "OpenSubsonic"
 
@@ -1805,8 +1861,16 @@ msgstr "Пароль"
 msgid "Paste"
 msgstr "Вставить"
 
+#, fuzzy
+#| msgid "Export format"
+msgid "Path format"
+msgstr "Формат экспорта"
+
 msgid "Path in Source"
 msgstr "Путь к исходному файлу"
+
+msgid "Path"
+msgstr ""
 
 msgid "Pause"
 msgstr "Приостановить"
@@ -1907,6 +1971,16 @@ msgid "Playing on {device}"
 msgstr "Играет на {device}"
 
 msgid "Playlist File"
+msgstr "Файл плейлиста"
+
+#, fuzzy
+#| msgid "Playlist File"
+msgid "Playlist file changed"
+msgstr "Файл плейлиста"
+
+#, fuzzy
+#| msgid "Playlist File"
+msgid "Playlist files"
 msgstr "Файл плейлиста"
 
 msgid "Playlist name"
@@ -2061,6 +2135,11 @@ msgstr "Красный"
 msgid "Redo"
 msgstr "Повторить"
 
+#, fuzzy
+#| msgid "Save lyrics automatically"
+msgid "Refresh automatically"
+msgstr "Автоматически сохранять текст песни"
+
 msgid "Refresh section"
 msgstr "Обновить раздел"
 
@@ -2082,6 +2161,11 @@ msgstr "Сгенерировать новый токен доступа?"
 msgid "Related"
 msgstr "Похожие"
 
+#, fuzzy
+#| msgid "Related"
+msgid "Relative"
+msgstr "Похожие"
+
 msgid "Release date"
 msgstr "Дата выпуска"
 
@@ -2090,6 +2174,14 @@ msgstr "Уведомления о новых версиях"
 
 msgid "Release"
 msgstr "Выпуск"
+
+#, fuzzy
+#| msgid "Removed from favorites"
+msgid "Reload from file"
+msgstr "Удалено из избранного"
+
+msgid "Reload"
+msgstr ""
 
 msgid "Remote lyrics"
 msgstr "Удалённые тексты песен"
@@ -2151,10 +2243,9 @@ msgstr "Удалено из избранного"
 msgid "Removed from"
 msgstr "Удалено из"
 
-msgid "Rename Playlist"
-msgstr "Переименовать плейлист"
-
-msgid "Rename"
+#, fuzzy
+#| msgid "Rename"
+msgid "Rename file"
 msgstr "Переименовать"
 
 msgid "Repeat all"
@@ -2168,6 +2259,9 @@ msgstr "Повторять один"
 
 msgid "Repeat"
 msgstr "Повтор"
+
+msgid "Replace file contents"
+msgstr ""
 
 msgid "Replace saved custom headers"
 msgstr "Заменить сохраненные настраиваемые заголовки"
@@ -2220,6 +2314,9 @@ msgstr "Строки"
 msgid "Rufin data folder"
 msgstr "Папка с данными Rufin"
 
+msgid "Rufin host"
+msgstr ""
+
 msgid "Rule actions"
 msgstr "Действия с правилами"
 
@@ -2248,7 +2345,17 @@ msgid "Save action saves the lyrics directly to your source"
 msgstr ""
 "Действие «Сохранить» сохраняет текст песни непосредственно в исходный файл"
 
+#, fuzzy
+#| msgid "Save lyrics automatically"
+msgid "Save changes automatically"
+msgstr "Автоматически сохранять текст песни"
+
 msgid "Save lyrics automatically"
+msgstr "Автоматически сохранять текст песни"
+
+#, fuzzy
+#| msgid "Save lyrics automatically"
+msgid "Save playlist changes automatically"
 msgstr "Автоматически сохранять текст песни"
 
 msgid "Save to rescan"
@@ -2763,6 +2870,9 @@ msgstr "Неизвестный исполнитель"
 msgid "Unknown disc"
 msgstr "Неизвестный диск"
 
+msgid "Unlink"
+msgstr ""
+
 msgid "Unmute"
 msgstr "Включить звук"
 
@@ -2823,6 +2933,11 @@ msgstr "Использовать максимальный год"
 
 msgid "Use minimum year"
 msgstr "Использовать минимальный год"
+
+#, fuzzy
+#| msgid "Lyrics settings"
+msgid "Use source setting"
+msgstr "Настройки текстов"
 
 msgid "Use the server's Instant Mix for Radio and Auto DJ."
 msgstr "Использовать «Мгновенный микс» сервера для радио и «Авто-DJ»."
@@ -3102,6 +3217,9 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Rename Playlist"
+#~ msgstr "Переименовать плейлист"
 
 #~ msgid "Enable equalizer"
 #~ msgstr "Включить эквалайзер"
@@ -3466,9 +3584,6 @@ msgstr "Добро пожаловать в программу установки
 
 #~ msgid "No changes to save."
 #~ msgstr "Нет изменений для сохранения."
-
-#~ msgid "No folder contents found."
-#~ msgstr "Содержимое папки не найдено."
 
 #~ msgid "No lyrics for the current track."
 #~ msgstr "Для текущего трека текст песни отсутствует."
