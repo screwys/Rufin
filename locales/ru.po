@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-18 17:51+0000\n"
+"PO-Revision-Date: 2026-09-19 16:16+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
 "Language: ru\n"
@@ -232,7 +232,7 @@ msgid "About Rufin"
 msgstr "О программе Rufin"
 
 msgid "Absolute"
-msgstr ""
+msgstr "Абсолютный"
 
 msgid "Accent color"
 msgstr "Акцентный цвет"
@@ -371,7 +371,7 @@ msgid "Apply Template"
 msgstr "Применить шаблон"
 
 msgid "Apply"
-msgstr ""
+msgstr "Применить"
 
 msgid "Approve sign-in in your browser"
 msgstr "Подтвердите вход в системе в вашем браузере"
@@ -795,10 +795,8 @@ msgstr "Удалить плейлист"
 msgid "Delete \"{name}\"?"
 msgstr "Удалить \"{name}\"?"
 
-#, fuzzy
-#| msgid "Delete Playlist"
 msgid "Delete playlist file"
-msgstr "Удалить плейлист"
+msgstr "Удалить файл плейлиста"
 
 msgid "Delete"
 msgstr "Удалить"
@@ -911,10 +909,8 @@ msgstr "EP-альбомы"
 msgid "Edit Lyrics"
 msgstr "Редактировать текст песни"
 
-#, fuzzy
-#| msgid "Edit Smart Playlist"
 msgid "Edit Playlist"
-msgstr "Редактировать умный плейлист"
+msgstr "Редактировать плейлист"
 
 msgid "Edit Smart Playlist"
 msgstr "Редактировать умный плейлист"
@@ -1053,10 +1049,8 @@ msgstr "Избранные"
 msgid "Featured genres"
 msgstr "Рекомендованные жанры"
 
-#, fuzzy
-#| msgid "Rename"
 msgid "Filename"
-msgstr "Переименовать"
+msgstr "Имя файла"
 
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
@@ -1105,7 +1099,7 @@ msgid "Forget \"{name}\"?"
 msgstr "Забыть \"{name}\"?"
 
 msgid "Format"
-msgstr ""
+msgstr "Формат"
 
 msgid "Forward"
 msgstr "Вперед"
@@ -1232,15 +1226,11 @@ msgstr "Импортировать резервную копию"
 msgid "Import Playlist"
 msgstr "Импортировать плейлист"
 
-#, fuzzy
-#| msgid "Import Backup"
 msgid "Import a copy"
-msgstr "Импортировать резервную копию"
+msgstr "Импортировать копию"
 
-#, fuzzy
-#| msgid "Export"
 msgid "Import"
-msgstr "Экспорт"
+msgstr "Импорт"
 
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr "Включить подробную диагностику Rufin в текущей сессии"
@@ -1346,16 +1336,14 @@ msgstr "Ограничение"
 msgid "Linear"
 msgstr "Линейная"
 
-#, fuzzy
-#| msgid "Backup exported"
 msgid "Link exported file"
-msgstr "Резервная копия экспортирована"
+msgstr "Привязать экспортированный файл"
 
 msgid "Link to file..."
-msgstr ""
+msgstr "Ссылка на файл..."
 
 msgid "Linked file"
-msgstr ""
+msgstr "Связанный файл"
 
 msgid "ListenBrainz scrobbling"
 msgstr "Отправка данных о прослушивании в ListenBrainz"
@@ -1363,10 +1351,8 @@ msgstr "Отправка данных о прослушивании в ListenBra
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
 
-#, fuzzy
-#| msgid "No folder contents found."
 msgid "Load file contents"
-msgstr "Содержимое папки не найдено."
+msgstr "Загрузить содержимое файла"
 
 msgid "Loading related tracks..."
 msgstr "Загрузка похожих треков..."
@@ -1767,7 +1753,7 @@ msgid "On this device"
 msgstr "На этом устройстве"
 
 msgid "On"
-msgstr ""
+msgstr "Вкл"
 
 msgid "One Name: Value header per line"
 msgstr "Одна пара «Имя: Значение» на строку"
@@ -1829,7 +1815,7 @@ msgid "Open settings"
 msgstr "Открыть настройки"
 
 msgid "Open"
-msgstr ""
+msgstr "Открыть"
 
 msgid "OpenSubsonic"
 msgstr "OpenSubsonic"
@@ -1861,16 +1847,14 @@ msgstr "Пароль"
 msgid "Paste"
 msgstr "Вставить"
 
-#, fuzzy
-#| msgid "Export format"
 msgid "Path format"
-msgstr "Формат экспорта"
+msgstr "Формат пути"
 
 msgid "Path in Source"
 msgstr "Путь к исходному файлу"
 
 msgid "Path"
-msgstr ""
+msgstr "Путь"
 
 msgid "Pause"
 msgstr "Приостановить"
@@ -1973,15 +1957,11 @@ msgstr "Играет на {device}"
 msgid "Playlist File"
 msgstr "Файл плейлиста"
 
-#, fuzzy
-#| msgid "Playlist File"
 msgid "Playlist file changed"
-msgstr "Файл плейлиста"
+msgstr "Файл плейлиста изменен"
 
-#, fuzzy
-#| msgid "Playlist File"
 msgid "Playlist files"
-msgstr "Файл плейлиста"
+msgstr "Файлы плейлиста"
 
 msgid "Playlist name"
 msgstr "Название плейлиста"
@@ -2135,10 +2115,8 @@ msgstr "Красный"
 msgid "Redo"
 msgstr "Повторить"
 
-#, fuzzy
-#| msgid "Save lyrics automatically"
 msgid "Refresh automatically"
-msgstr "Автоматически сохранять текст песни"
+msgstr "Автоматическое обновление"
 
 msgid "Refresh section"
 msgstr "Обновить раздел"
@@ -2161,10 +2139,8 @@ msgstr "Сгенерировать новый токен доступа?"
 msgid "Related"
 msgstr "Похожие"
 
-#, fuzzy
-#| msgid "Related"
 msgid "Relative"
-msgstr "Похожие"
+msgstr "Относительный"
 
 msgid "Release date"
 msgstr "Дата выпуска"
@@ -2175,13 +2151,11 @@ msgstr "Уведомления о новых версиях"
 msgid "Release"
 msgstr "Выпуск"
 
-#, fuzzy
-#| msgid "Removed from favorites"
 msgid "Reload from file"
-msgstr "Удалено из избранного"
+msgstr "Перезагрузить из файла"
 
 msgid "Reload"
-msgstr ""
+msgstr "Перезагрузить"
 
 msgid "Remote lyrics"
 msgstr "Удалённые тексты песен"
@@ -2243,10 +2217,8 @@ msgstr "Удалено из избранного"
 msgid "Removed from"
 msgstr "Удалено из"
 
-#, fuzzy
-#| msgid "Rename"
 msgid "Rename file"
-msgstr "Переименовать"
+msgstr "Переименовать файл"
 
 msgid "Repeat all"
 msgstr "Повторять все"
@@ -2261,7 +2233,7 @@ msgid "Repeat"
 msgstr "Повтор"
 
 msgid "Replace file contents"
-msgstr ""
+msgstr "Заменить содержимое файла"
 
 msgid "Replace saved custom headers"
 msgstr "Заменить сохраненные настраиваемые заголовки"
@@ -2315,7 +2287,7 @@ msgid "Rufin data folder"
 msgstr "Папка с данными Rufin"
 
 msgid "Rufin host"
-msgstr ""
+msgstr "Хост Rufin"
 
 msgid "Rule actions"
 msgstr "Действия с правилами"
@@ -2345,18 +2317,14 @@ msgid "Save action saves the lyrics directly to your source"
 msgstr ""
 "Действие «Сохранить» сохраняет текст песни непосредственно в исходный файл"
 
-#, fuzzy
-#| msgid "Save lyrics automatically"
 msgid "Save changes automatically"
-msgstr "Автоматически сохранять текст песни"
+msgstr "Автоматически сохранять изменения"
 
 msgid "Save lyrics automatically"
 msgstr "Автоматически сохранять текст песни"
 
-#, fuzzy
-#| msgid "Save lyrics automatically"
 msgid "Save playlist changes automatically"
-msgstr "Автоматически сохранять текст песни"
+msgstr "Автоматически сохранять изменения в плейлисте"
 
 msgid "Save to rescan"
 msgstr "Сохранить для повторного сканирования"
@@ -2871,7 +2839,7 @@ msgid "Unknown disc"
 msgstr "Неизвестный диск"
 
 msgid "Unlink"
-msgstr ""
+msgstr "Отвязать"
 
 msgid "Unmute"
 msgstr "Включить звук"
@@ -2934,10 +2902,8 @@ msgstr "Использовать максимальный год"
 msgid "Use minimum year"
 msgstr "Использовать минимальный год"
 
-#, fuzzy
-#| msgid "Lyrics settings"
 msgid "Use source setting"
-msgstr "Настройки текстов"
+msgstr "Использовать настройки источника"
 
 msgid "Use the server's Instant Mix for Radio and Auto DJ."
 msgstr "Использовать «Мгновенный микс» сервера для радио и «Авто-DJ»."
