@@ -614,15 +614,15 @@ impl LyricsPane {
         } else if matches!(&content, LyricsPaneContent::Loading) {
             let placeholder = gtk::Box::new(gtk::Orientation::Vertical, 0);
             placeholder.set_halign(gtk::Align::Fill);
-            placeholder.set_valign(gtk::Align::Fill);
+            placeholder.set_valign(gtk::Align::Center);
             placeholder.set_hexpand(true);
             placeholder.set_vexpand(true);
 
             let spinner = adw::Spinner::new();
             spinner.set_halign(gtk::Align::Center);
             spinner.set_valign(gtk::Align::Center);
-            spinner.set_width_request(32);
-            spinner.set_height_request(32);
+            spinner.set_width_request(24);
+            spinner.set_height_request(24);
             placeholder.append(&spinner);
             self.body.append(&placeholder);
         } else if let LyricsPaneContent::Empty(empty_status) = &content {

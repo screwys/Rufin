@@ -758,14 +758,14 @@ fn finish_playback_projection(
         shell.refresh_current_route_now_playing_selections();
         update_sidebar_pin_playback(shell);
     }
+    shell
+        .player_ui
+        .maybe_clear_player_seek_preview(&next_player, media_changed);
     if let Some(now_playing) = now_playing.as_ref() {
         shell
             .player_ui
             .update_bottom_player_with(&next_player, now_playing);
     }
-    shell
-        .player_ui
-        .maybe_clear_player_seek_preview(&next_player, media_changed);
     if position_only {
         shell.player_ui.update_bottom_player_position();
     } else if !static_playback_changed {
