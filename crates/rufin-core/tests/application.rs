@@ -1296,7 +1296,7 @@ async fn exercise_browser(origin: &str, token: &str, source: &str, uri: &str) {
             .unwrap();
         assert_eq!(response.status(), StatusCode::SEE_OTHER, "{route}");
     }
-    // Script login uses the same endpoint and issues a fresh signed cookie.
+    // Reconnecting renews the browser session without invalidating open tabs.
     let login: reqwest::Response = client
         .post(format!("{origin}/session"))
         .header("Cookie", cookie)
@@ -1314,7 +1314,19 @@ async fn exercise_browser(origin: &str, token: &str, source: &str, uri: &str) {
         .unwrap()
         .to_owned();
     let login: Value = login.json().await.unwrap();
-    assert_ne!(cookie, new_cookie);
+    assert_eq!(cookie, new_cookie);
+    assert_eq!(login["csrf"], csrf);
+    assert_eq!(
+        client
+            .post(format!("{origin}/api/playback/pause"))
+            .header("Cookie", cookie)
+            .header("X-Rufin-CSRF", csrf)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
     let response = client
         .post(format!("{origin}/session/logout"))
         .header("Cookie", &new_cookie)
@@ -1374,7 +1386,7 @@ async fn exercise_browser_restart(products: rufin_core::runtime::ProductHandles)
                 .await
                 .unwrap();
             let set_cookie = response.headers()["set-cookie"].to_str().unwrap();
-            assert!(!set_cookie.contains("Max-Age="));
+            assert!(set_cookie.contains("Max-Age=31536000"));
             cookie = set_cookie.split(';').next().unwrap().to_owned();
         }
         assert_eq!(
