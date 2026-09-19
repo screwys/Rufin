@@ -19,6 +19,31 @@ pub struct PlaylistFileLink {
 mod tests {
     use super::*;
 
+    macro_rules! check {
+        ($condition:expr $(,)?) => {
+            if !$condition {
+                return Err(LibraryError::InvalidRequest(format!(
+                    "test assertion failed: {}",
+                    stringify!($condition)
+                )));
+            }
+        };
+    }
+
+    macro_rules! check_eq {
+        ($left:expr, $right:expr $(,)?) => {{
+            let left = &$left;
+            let right = &$right;
+            if left != right {
+                return Err(LibraryError::InvalidRequest(format!(
+                    "test assertion failed: {} == {} (left: {left:?}, right: {right:?})",
+                    stringify!($left),
+                    stringify!($right),
+                )));
+            }
+        }};
+    }
+
     #[tokio::test]
     async fn removing_earlier_roots_keeps_links_on_their_original_files() -> LibraryResult<()> {
         let directory = tempfile::tempdir()?;
@@ -64,14 +89,14 @@ mod tests {
             .remove_playlist_file_roots(&source, &[(0, root_a.clone())])
             .await?;
         let a = database.get_playlist_file_link(keys[2]).await?.unwrap();
-        assert_eq!(a.source_id, None);
-        assert_eq!(std::path::PathBuf::from(&a.path), root_a.join("music.m3u8"));
-        assert_eq!(a.auto_save, Some(true));
+        check_eq!(a.source_id, None);
+        check_eq!(std::path::PathBuf::from(&a.path), root_a.join("music.m3u8"));
+        check_eq!(a.auto_save, Some(true));
         let b = database.get_playlist_file_link(keys[1]).await?.unwrap();
-        assert_eq!(b.path, "@0/music.m3u8");
-        assert_eq!(b.source_id, Some(source.clone()));
-        assert_eq!(b.auto_save, None);
-        assert_eq!(
+        check_eq!(b.path, "@0/music.m3u8");
+        check_eq!(b.source_id, Some(source.clone()));
+        check_eq!(b.auto_save, None);
+        check_eq!(
             database
                 .get_playlist_file_link(keys[0])
                 .await?
@@ -79,23 +104,23 @@ mod tests {
                 .path,
             "@1/music.m3u8"
         );
-        assert!(
+        check!(
             database
                 .is_playlist_file_ignored(None, &root_a.join("ignored.pls").to_string_lossy())
                 .await?
         );
-        assert!(
+        check!(
             database
                 .is_playlist_file_ignored(Some(&source), "@0/ignored.pls")
                 .await?
         );
-        assert!(
+        check!(
             database
                 .is_playlist_file_ignored(Some(&source), "@1/ignored.pls")
                 .await?
         );
         std::fs::write(&a.path, "#EXTM3U\nremoved-root-song.flac\n")?;
-        assert_eq!(
+        check_eq!(
             std::fs::read_to_string(root_b.join("music.m3u8"))?,
             "#EXTM3U\n"
         );
@@ -118,22 +143,22 @@ mod tests {
                 .execute(writer.as_mut().unwrap()).await?;
         }
         let source = SourceId::new("files");
-        assert!(
+        check!(
             database
                 .file_path_is_rejected(&source, "album/photo.png")
                 .await?
         );
-        assert!(
+        check!(
             database
                 .file_path_is_rejected(&source, "album/Music.M3U8")
                 .await?
         );
-        assert!(
+        check!(
             !database
                 .file_path_is_rejected(&source, "album/missing.flac")
                 .await?
         );
-        assert!(
+        check!(
             !database
                 .file_path_is_rejected(&SourceId::new("other"), "album/photo.png")
                 .await?
@@ -141,15 +166,15 @@ mod tests {
         let rows = database
             .observed_playlist_file_page(crate::SourceKey::from_raw(1), None)
             .await?;
-        assert_eq!(rows.len(), 2);
+        check_eq!(rows.len(), 2);
         let next = database
             .observed_playlist_file_page(
                 crate::SourceKey::from_raw(1),
                 Some(rows[0].local_file_key),
             )
             .await?;
-        assert_eq!(next.len(), 1);
-        assert_eq!(next[0].path, "album/other.pls");
+        check_eq!(next.len(), 1);
+        check_eq!(next[0].path, "album/other.pls");
         database.close().await
     }
 
@@ -179,8 +204,8 @@ mod tests {
             dirty: false,
             error: None,
         };
-        assert!(database.save_playlist_file_link(&link).await?);
-        assert!(!database.save_playlist_file_link(&link).await?);
+        check!(database.save_playlist_file_link(&link).await?);
+        check!(!database.save_playlist_file_link(&link).await?);
         let second = database
             .create_playlist(None, "Second", &[])
             .await?
@@ -188,29 +213,29 @@ mod tests {
             .0;
         let mut duplicate = link.clone();
         duplicate.playlist = second;
-        assert!(database.save_playlist_file_link(&duplicate).await.is_err());
-        assert!(!database.playlist_file_auto_save(Some(&source)).await?);
+        check!(database.save_playlist_file_link(&duplicate).await.is_err());
+        check!(!database.playlist_file_auto_save(Some(&source)).await?);
         database
             .set_playlist_file_auto_save(Some(&source), true)
             .await?;
         database
             .ignore_playlist_file(Some(&source), "0/ignored.pls")
             .await?;
-        assert!(!database.rename_playlist(None, playlist, "Music").await?);
-        assert!(
+        check!(!database.rename_playlist(None, playlist, "Music").await?);
+        check!(
             !database
                 .get_playlist_file_link(playlist)
                 .await?
                 .unwrap()
                 .dirty
         );
-        assert_eq!(
+        check_eq!(
             database
                 .add_playlist_media(None, playlist, &["file:///song.flac".into()], true)
                 .await?,
             0
         );
-        assert!(
+        check!(
             !database
                 .get_playlist_file_link(playlist)
                 .await?
@@ -218,7 +243,7 @@ mod tests {
                 .dirty
         );
         database.rename_playlist(None, playlist, "New name").await?;
-        assert!(
+        check!(
             database
                 .get_playlist_file_link(playlist)
                 .await?
@@ -231,7 +256,7 @@ mod tests {
         database
             .add_playlist_media(None, playlist, &["file:///three.flac".into()], false)
             .await?;
-        assert!(
+        check!(
             database
                 .get_playlist_file_link(playlist)
                 .await?
@@ -254,7 +279,7 @@ mod tests {
         database
             .move_playlist_entry(None, playlist, entries[0], 0)
             .await?;
-        assert!(
+        check!(
             !database
                 .get_playlist_file_link(playlist)
                 .await?
@@ -264,7 +289,7 @@ mod tests {
         database
             .move_playlist_entry(None, playlist, entries[0], 2)
             .await?;
-        assert!(
+        check!(
             database
                 .get_playlist_file_link(playlist)
                 .await?
@@ -277,7 +302,7 @@ mod tests {
         database
             .remove_playlist_entries(None, playlist, &[entries[1]])
             .await?;
-        assert!(
+        check!(
             database
                 .get_playlist_file_link(playlist)
                 .await?
@@ -287,13 +312,13 @@ mod tests {
         database
             .mark_playlist_file_synced(playlist, "third")
             .await?;
-        assert_eq!(
+        check_eq!(
             database
                 .remove_playlist_entries(None, playlist, &[entries[1]])
                 .await?,
             0
         );
-        assert!(
+        check!(
             !database
                 .get_playlist_file_link(playlist)
                 .await?
@@ -306,16 +331,16 @@ mod tests {
             .find_playlist_file_link(Some(&source), &link.path)
             .await?
             .unwrap();
-        assert_eq!(restored.revision.as_deref(), Some("third"));
-        assert!(!restored.dirty);
-        assert!(database.playlist_file_auto_save(Some(&source)).await?);
-        assert!(
+        check_eq!(restored.revision.as_deref(), Some("third"));
+        check!(!restored.dirty);
+        check!(database.playlist_file_auto_save(Some(&source)).await?);
+        check!(
             database
                 .is_playlist_file_ignored(Some(&source), "0/ignored.pls")
                 .await?
         );
         database.delete_playlist(None, playlist).await?;
-        assert!(database.get_playlist_file_link(playlist).await?.is_none());
+        check!(database.get_playlist_file_link(playlist).await?.is_none());
         database.close().await
     }
 
@@ -362,16 +387,16 @@ mod tests {
             .find_playlist_file_link(None, &link.path)
             .await?
             .unwrap();
-        assert_eq!(restored.path_mode, PlaylistPathMode::Relative);
-        assert_eq!(restored.auto_save, Some(true));
-        assert!(restored.dirty);
-        assert_eq!(restored.error, link.error);
-        assert!(
+        check_eq!(restored.path_mode, PlaylistPathMode::Relative);
+        check_eq!(restored.auto_save, Some(true));
+        check!(restored.dirty);
+        check_eq!(restored.error, link.error);
+        check!(
             database
                 .is_playlist_file_ignored(None, "ignored.m3u")
                 .await?
         );
-        assert!(database.playlist_file_auto_save(None).await?);
+        check!(database.playlist_file_auto_save(None).await?);
         database.close().await
     }
 }
