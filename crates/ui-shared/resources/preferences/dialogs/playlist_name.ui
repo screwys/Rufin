@@ -104,7 +104,7 @@
     </property>
   </object>
   <object class="AdwAlertDialog" id="link_choice">
-    <property name="heading" translatable="yes">Link to file…</property>
+    <property name="heading" translatable="yes">Link to file...</property>
     <property name="close-response">cancel</property>
     <responses><response id="cancel" translatable="yes">Cancel</response><response id="load" translatable="yes">Load file contents</response><response id="replace" translatable="yes" appearance="destructive">Replace file contents</response></responses>
   </object>

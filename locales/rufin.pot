@@ -1284,7 +1284,7 @@ msgstr ""
 msgid "Link exported file"
 msgstr ""
 
-msgid "Link to file\342\200\246"
+msgid "Link to file..."
 msgstr ""
 
 msgid "Linked file"
