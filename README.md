@@ -346,10 +346,14 @@ Icon is designed by [Commenter25](https://commenter.cc) and it is licensed under
 - Chezch translation by [Jakub Cabal](https://github.com/jakubcabal)
 - Chinese (Traditional) translation by [Tsung-Ying Yu](https://github.com/an920107)
 - Finnish translation by Jiri Grönroos
+- French translation by Arnaud Constantin
+- Italian translation by Patrick Canal 
 
-## Sponsors 
+## Donations
 
-If you would like to contribute financially, you can do so on [Github](https://github.com/sponsors/screwys). I would like to thank everyone who has made a donation:
+If you would like to contribute financially, you can do so on [Github](https://github.com/sponsors/screwys) or via bitcoin: `bc1q4hmfnc64xsk2zprlw6d088kxkhv5xek8hmv87t`
+
+I would like to thank everyone who has made a donation:
 
 ### Past Sponsors
 
