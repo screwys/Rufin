@@ -170,6 +170,25 @@ pub enum EditableSource {
 }
 
 impl SourceConfiguration {
+    /// Identify a selected file inside one of the configured local folder grants.
+    pub fn local_playlist_location(&self, path: &std::path::Path) -> Option<(String, PathBuf)> {
+        if !self.is_local() {
+            return None;
+        }
+        let host = library::playlist_host_path(path);
+        let roots = crate::file::local::LocalSourceConfig::from_configuration(self)
+            .ok()?
+            .roots;
+        roots.iter().enumerate().find_map(|(index, root)| {
+            let root_host = library::playlist_host_path(root);
+            let relative = host.strip_prefix(&root_host).ok()?;
+            Some((
+                format!("@{index}/{}", relative.to_string_lossy()),
+                root.join(relative),
+            ))
+        })
+    }
+
     pub fn is_local(&self) -> bool {
         self.kind == crate::file::local::LOCAL_SOURCE_ID
     }

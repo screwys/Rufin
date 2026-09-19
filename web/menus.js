@@ -41,7 +41,7 @@ function menuItems(menu, actions) {
         [tr("Play Later")]: "play-last",
         [tr("Remove from Queue")]: "remove",
         [tr("Remove from Playlist")]: "remove",
-        [tr("Rename Playlist")]: "edit",
+        [tr("Edit")]: "edit",
         [tr("Delete Playlist")]: "delete",
         [tr("Favorite")]: "favorite",
         [tr("Add to Favorites")]: "favorite",
@@ -263,19 +263,38 @@ function renderPlaylistSubmenu(menu, target, signal) {
   run(load);
 }
 
-let renamePlaylist = null;
+let editingPlaylist = null;
+let transferPlaylist = null;
+
+async function openPlaylistTransfer(playlist = null) {
+  transferPlaylist = playlist;
+  $("playlist-transfer-title").textContent = playlist ? tr("Export Playlist") : tr("Import Playlist");
+  $("playlist-transfer-path").value = playlist ? `${playlist.name}.m3u8` : "";
+  $("playlist-transfer-copy-row").hidden = !!playlist;
+  for (const name of ["link", "mode", "format"]) $("playlist-transfer-" + name + "-row").hidden = !playlist;
+  $("playlist-transfer-link").checked = false;
+  if (playlist) $("playlist-transfer-link-row").hidden = !(await api(`/playlists/file?id=${playlist.id}`)).can_link;
+  const sources = await api("/sources");
+  $("playlist-transfer-source").replaceChildren(new Option(tr("Rufin host"), ""), ...sources.sources.filter(source => ["local", "smb", "webdav"].includes(source.kind)).map(source => new Option(source.name, source.id)));
+  $("playlist-transfer-source").value = state.source || "";
+  $("playlist-transfer-dialog").showModal();
+}
 
 let newPlaylistUris = { uris: [] };
 let playlistSource = null;
 
 async function openName(playlist = null, uris = []) {
-  renamePlaylist = playlist;
+  editingPlaylist = playlist;
+  $("name-dialog").classList.toggle("playlist-edit", !!playlist);
+  $("playlist-apply").textContent = playlist ? tr("Apply") : tr("Save");
   newPlaylistUris = Array.isArray(uris) ? { uris } : uris;
   $("name-title").textContent = playlist
-    ? tr("Rename Playlist")
+    ? tr("Edit Playlist")
     : tr("New Playlist");
   $("playlist-name").value = playlist?.name || "";
   $("playlist-owner").hidden = !!playlist;
+  $("playlist-file-options").hidden = !playlist;
+  if (playlist) await loadPlaylistFile();
   if (!playlist) {
     const configured = await api("/sources");
     playlistSource =
@@ -289,6 +308,22 @@ async function openName(playlist = null, uris = []) {
   }
   $("name-dialog").showModal();
   $("playlist-name").focus();
+}
+
+async function loadPlaylistFile() {
+  const settings = await api(`/playlists/file?id=${editingPlaylist.id}`);
+  const link = settings.link;
+  $("playlist-file-options").hidden = !settings.can_link;
+  $("playlist-file-path").value = link?.path || "";
+  $("playlist-file-name").value = (link?.path || "").split(/[\\/]/).pop();
+  $("playlist-file-refresh").checked = link?.auto_refresh ?? true;
+  $("playlist-file-save").value = link?.auto_save == null ? "inherit" : link.auto_save ? "on" : "off";
+  $("playlist-file-mode").value = link?.path_mode || "automatic";
+  $("playlist-file-error").textContent = link?.error || "";
+  const sources = await api("/sources");
+  $("playlist-file-source").replaceChildren(new Option(tr("Rufin host"), ""), ...sources.sources.filter(source => ["local", "smb", "webdav"].includes(source.kind)).map(source => new Option(source.name, source.id)));
+  $("playlist-file-source").value = link?.source_id || "";
+  for (const button of document.querySelectorAll("[data-playlist-file]")) button.disabled = button.dataset.playlistFile !== "link" && !link;
 }
 
 function showPlaylistOwner() {
@@ -310,7 +345,47 @@ function showPlaylistOwner() {
   owner.setAttribute("aria-label", owner.title);
 }
 
+function playlistEditInput() {
+  return { id: editingPlaylist.id, name: $("playlist-name").value.trim(), auto_refresh: $("playlist-file-refresh").checked, auto_save: $("playlist-file-save").value === "inherit" ? null : $("playlist-file-save").value === "on", path_mode: $("playlist-file-mode").value };
+}
+
 function init() {
+  $("import-playlist").addEventListener("click", () => run(() => openPlaylistTransfer()));
+  $("playlist-transfer-form").addEventListener("submit", event => {
+    event.preventDefault();
+    run(async () => {
+      const source = $("playlist-transfer-source").value || null;
+      const path = $("playlist-transfer-path").value.trim();
+      if (transferPlaylist) {
+        const extension = $("playlist-transfer-format").value;
+        await api("/playlists/export", "POST", { id: transferPlaylist.id, source, path: path.replace(/\.(m3u8?|pls|xspf)$/i, "") + "." + extension, path_mode: $("playlist-transfer-mode").value, linked: $("playlist-transfer-link").checked });
+      } else {
+        await api("/playlists/import", "POST", { source, paths: path.split("\n").map(path => path.trim()).filter(Boolean), copy: $("playlist-transfer-copy").checked });
+      }
+      $("playlist-transfer-dialog").close();
+      await loadView();
+    });
+  });
+  for (const button of document.querySelectorAll("[data-playlist-file]")) {
+    button.addEventListener("click", () => run(async () => {
+      const action = button.dataset.playlistFile;
+      const force = button.dataset.force === "true";
+      if ((action === "delete" || force) && !confirm(button.textContent.trim())) return;
+      const edit = playlistEditInput();
+      if (!edit.name) return;
+      await api("/playlists/file", "PATCH", edit);
+      const input = { id: editingPlaylist.id, action, force, path: action === "rename" ? $("playlist-file-name").value : $("playlist-file-path").value, source: $("playlist-file-source").value || null };
+      try { await api("/playlists/file", "POST", input); }
+      catch (error) {
+        $("playlist-file-error").textContent = error.message;
+        const resolution = action === "save" ? tr("Replace file contents") : tr("Reload from file");
+        if (!error.conflict || !["save", "reload"].includes(action) || !confirm(`${error.message}\n${resolution}?`)) return;
+        await api("/playlists/file", "POST", { ...input, force: true });
+      }
+      await loadPlaylistFile();
+      await loadView();
+    }));
+  }
   $("track-menu").setAttribute("popover", "manual");
   $("playlist-owner").addEventListener("click", () => {
     const owner = $("playlist-owner");
@@ -358,10 +433,10 @@ function init() {
       const name = $("playlist-name").value.trim();
       if (!name) return;
       const result = await api(
-        "/playlists",
-        renamePlaylist ? "PATCH" : "POST",
-        renamePlaylist
-          ? { id: renamePlaylist.id, name }
+        editingPlaylist ? "/playlists/file" : "/playlists",
+        editingPlaylist ? "PATCH" : "POST",
+        editingPlaylist
+          ? playlistEditInput()
           : {
               name,
               ...newPlaylistUris,
@@ -382,6 +457,7 @@ function init() {
 }
 
 export {
+  openPlaylistTransfer,
   goToMenu,
   closeMenus,
   openName,

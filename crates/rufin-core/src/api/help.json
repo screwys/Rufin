@@ -84,7 +84,14 @@
       "id": 1,
       "name": "New name"
     },
-    "DELETE /api/playlists?id=...": "Delete a playlist",
+    "DELETE /api/playlists?id=...": "Delete a playlist through its owner. Rufin-owned linked playlists are removed from Rufin and their files remain on disk.",
+    "GET /api/playlists/file?id=...": "Read the linked file, path display, saved error, refresh, save, and path options.",
+    "GET /api/playlists/source-settings?source=...": "Read the source default for automatic playlist saving.",
+    "PATCH /api/playlists/source-settings": "Set {source,auto_save}; linked playlists without an override inherit this setting.",
+    "POST /api/playlists/import": "Import {paths,source,copy}. paths is an array of M3U/M3U8/PLS/XSPF paths on the Rufin host or relative to source. copy defaults to false, retaining the file link.",
+    "POST /api/playlists/export": "Export {id,path,source,path_mode,linked}. The filename selects M3U/M3U8/PLS/XSPF. source is optional; without it path is on the Rufin host. linked defaults to false.",
+    "PATCH /api/playlists/file": "Edit with {id,name,auto_refresh,auto_save,path_mode}. auto_save is null to inherit the source default, false, or true. path_mode is automatic, relative, or absolute.",
+    "POST /api/playlists/file": "Run {id,action,force,path,source}. Actions are save, reload, unlink, delete, link, or rename. rename takes a sibling filename in path. link loads the file unless force is true, which writes the playlist. source is optional; without it path is on the Rufin host. force explicitly overwrites external file changes for save or discards unsaved playlist edits for reload.",
     "GET /api/playlists/entries?id=...": "Browse tracks in a playlist, up to 256 at a time. You can set offset, limit, q, sort and descending. To filter by folder, include source too.",
     "POST /api/playlists/entries": {
       "id": 1,

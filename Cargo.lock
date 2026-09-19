@@ -3507,6 +3507,8 @@ dependencies = [
  "percent-encoding",
  "proptest",
  "regex",
+ "roxmltree",
+ "rustix",
  "serde",
  "serde_json",
  "sqlx",
@@ -5615,6 +5617,7 @@ dependencies = [
  "playback",
  "playback-gstreamer",
  "rufin-core",
+ "sources",
  "tokio",
 ]
 

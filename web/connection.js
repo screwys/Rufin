@@ -65,10 +65,10 @@ async function api(path, method = "GET", data, signal = session?.signal) {
   }
   const result = await response.json();
   if (!response.ok)
-    throw new Error(
+    throw Object.assign(new Error(
       result.error ||
         tr("Request failed ({status})", { status: response.status }),
-    );
+    ), { conflict: result.conflict === true });
   return result;
 }
 

@@ -545,6 +545,20 @@ impl SourceOwner {
                 owner.select_source(source_id);
             }
         });
+        let weak = Arc::downgrade(&self.shared);
+        self.shared.runtime.spawn(async move {
+            let mut interval = tokio::time::interval(SOURCE_CHECK_INTERVAL);
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                let Some(shared) = weak.upgrade() else {
+                    break;
+                };
+                let owner = SourceOwner { shared };
+                let _lane = owner.shared.lane.lock().await;
+                crate::playlist_files::refresh_links(&owner, None).await;
+            }
+        });
         Ok(())
     }
 
@@ -1114,6 +1128,7 @@ impl SourceOwner {
             if !self.shared.acquisition_is_current(&cancelled) {
                 return Ok(());
             }
+            let previous = configured.clone();
             let mut replacement = configured;
             replacement.configuration = configuration;
             if let Some(fresh) = source.plex_login() {
@@ -1133,6 +1148,27 @@ impl SourceOwner {
                 }
             }
             self.persist_connected_source(&replacement, credential)?;
+            if let (Ok(old), Ok(new)) = (
+                local_roots(&previous.configuration),
+                local_roots(&replacement.configuration),
+            ) && new.len() < old.len()
+                && new.iter().all(|root| old.contains(root))
+            {
+                let removed = old
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(_, root)| !new.contains(root))
+                    .collect::<Vec<_>>();
+                if let Err(error) = self
+                    .shared
+                    .database
+                    .remove_playlist_file_roots(&replacement.configuration.source_id, &removed)
+                    .await
+                {
+                    self.persist_connected_source(&previous, None)?;
+                    return Err(string_error(error));
+                }
+            }
             self.bind_plex_login(&replacement, &mut source)?;
             let source = Arc::new(source);
             let publication = self
@@ -1275,6 +1311,13 @@ impl SourceOwner {
         outcome: ScanOutcome,
         change: CatalogChange,
     ) {
+        if let ScanOutcome::Changed(publication)
+        | ScanOutcome::PlaylistsChanged(publication)
+        | ScanOutcome::ArtworkChanged(publication)
+        | ScanOutcome::Identical(publication) = outcome
+        {
+            crate::playlist_files::discover(self, source_id, publication.source).await;
+        }
         tracing::debug!(?outcome, ?change, "accepting source scan result");
         let refresh_counts = matches!(outcome, ScanOutcome::Changed(_));
         let refresh_summary = refresh_counts && change == CatalogChange::Acquired;

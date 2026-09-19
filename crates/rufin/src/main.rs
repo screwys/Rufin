@@ -29,7 +29,7 @@ fn main() -> ExitCode {
     if let Some(result) = playback_gstreamer::restart_with_http1() {
         return result;
     }
-    if let Some(result) = discovery_worker_argument() {
+    if let Some(result) = rufin_controller::discovery_worker_argument() {
         return result;
     }
     let updated_restart = match updated_restart_argument() {
@@ -314,28 +314,4 @@ fn updated_restart_argument() -> Option<Result<(), String>> {
 #[cfg(not(target_os = "windows"))]
 fn updated_restart_argument() -> Option<Result<(), String>> {
     None
-}
-
-fn discovery_worker_argument() -> Option<ExitCode> {
-    let mut arguments = env::args_os().skip(1);
-    if arguments.next().as_deref() != Some(OsStr::new("--discovery-worker")) {
-        return None;
-    }
-    let result = (|| {
-        let timeout = arguments
-            .next()
-            .and_then(|value| value.to_str().and_then(|value| value.parse::<u64>().ok()))
-            .ok_or("Usage: rufin --discovery-worker TIMEOUT_SECONDS".to_string())?;
-        if arguments.next().is_some() {
-            return Err("Usage: rufin --discovery-worker TIMEOUT_SECONDS".to_string());
-        }
-        sources::run_discovery_worker(timeout).map_err(|error| error.to_string())
-    })();
-    Some(match result {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            let _ = writeln!(io::stderr().lock(), "{error}");
-            ExitCode::FAILURE
-        }
-    })
 }

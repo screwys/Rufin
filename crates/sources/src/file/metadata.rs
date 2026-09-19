@@ -1030,9 +1030,10 @@ mod tests {
             .await
             .unwrap();
         let playlist = database
-            .import_playlist_m3u(
+            .import_playlist_file(
                 std::io::Cursor::new("Jóga #1.wav\nJóga #1.wav\n"),
                 &directory.path().join("mix.m3u8"),
+                None,
                 |_| None,
             )
             .await

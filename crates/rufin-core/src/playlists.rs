@@ -18,21 +18,23 @@ pub fn import_playlist(
     owner: &SourceOwner,
     path: PathBuf,
     current: Option<SourceConfiguration>,
+    linked: bool,
 ) -> Receiver<Result<library::PlaylistImportReport, String>> {
     let (sender, receiver) = async_channel::bounded(1);
     owner.spawn_serialized(move |owner| async move {
         let result = async {
-            let file = std::fs::File::open(&path).map_err(string_error)?;
-            let report = owner
-                .shared
-                .database
-                .import_playlist_m3u(std::io::BufReader::new(file), &path, |locator| {
-                    current
-                        .as_ref()
-                        .and_then(|source| source.recognize_media_locator(locator))
-                })
-                .await
-                .map_err(string_error)?;
+            let (source_id, location, access) =
+                crate::playlist_files::local_location(&owner, &path);
+            let target =
+                crate::playlist_files::import_target(&owner, source_id.as_ref(), &location, linked)
+                    .await?;
+            let report =
+                crate::playlist_files::import_local_on(&owner, &access, target, current.as_ref())
+                    .await?;
+            if linked {
+                crate::playlist_files::remember(&owner, report.playlist, source_id, location, None)
+                    .await?;
+            }
             accept_playlist_result(&owner, None, Some(report.playlist), Ok((true, None))).await;
             Ok(report)
         }
@@ -57,66 +59,151 @@ pub fn import_source_playlist(
     owner: &SourceOwner,
     source_id: SourceId,
     path: String,
+    linked: bool,
 ) -> Receiver<Result<library::PlaylistImportReport, String>> {
-    owner.reply(move |owner, _| async move {
-        let source = owner.client(&source_id)?;
-        let report = source
-            .import_playlist_file(&owner.shared.database, &path)
-            .await
-            .map_err(string_error)?;
-        accept_playlist_result(&owner, None, Some(report.playlist), Ok((true, None))).await;
-        Ok(report)
+    let (sender, receiver) = async_channel::bounded(1);
+    owner.spawn_serialized(move |owner| async move {
+        let result = async {
+            let path = crate::playlist_files::source_location(&owner, &source_id, &path)?;
+            let target =
+                crate::playlist_files::import_target(&owner, Some(&source_id), &path, linked)
+                    .await?;
+            let report =
+                crate::playlist_files::import_source_on(&owner, &source_id, &path, target).await?;
+            if linked {
+                crate::playlist_files::remember(
+                    &owner,
+                    report.playlist,
+                    Some(source_id),
+                    path,
+                    None,
+                )
+                .await?;
+            }
+            accept_playlist_result(&owner, None, Some(report.playlist), Ok((true, None))).await;
+            Ok(report)
+        }
+        .await;
+        let _ = sender.send(result).await;
+    });
+    receiver
+}
+
+pub fn export_playlist(
+    owner: &SourceOwner,
+    source_id: Option<SourceId>,
+    path: PathBuf,
+    target: PlaylistExport,
+    scope: Option<(SourceKey, Option<FolderKey>)>,
+    mode: library::PlaylistPathMode,
+    linked: bool,
+) -> Receiver<Result<(), String>> {
+    crate::playlist_files::run(owner, move |owner| async move {
+        let key = match &target {
+            PlaylistExport::Playlist(key) => Some(*key),
+            _ => None,
+        };
+        let (source, location) = if let Some(source) = &source_id {
+            let path = path.to_str().ok_or("Source paths must be UTF-8")?;
+            (
+                Some(source.clone()),
+                crate::playlist_files::source_location(&owner, source, path)?,
+            )
+        } else {
+            let (source, location, _) = crate::playlist_files::local_location(&owner, &path);
+            (source, location)
+        };
+        if linked && let Some(key) = key {
+            crate::playlist_files::check_link(&owner, key, source.as_ref(), &location).await?;
+        }
+        if let Some(source) = &source_id {
+            export_source_playlist_on(&owner, source, &location, target, scope, mode, None).await?;
+        } else {
+            crate::playlist_files::export_local_on(&owner, &path, target, scope, mode, None)
+                .await?;
+        }
+        if linked && let Some(key) = key {
+            crate::playlist_files::remember(&owner, key, source, location, Some(mode)).await?;
+        }
+        Ok(())
     })
 }
 
-pub fn export_source_playlist(
+pub(crate) async fn export_source_playlist_on(
     owner: &SourceOwner,
-    source_id: SourceId,
-    path: String,
+    source_id: &SourceId,
+    path: &str,
     target: PlaylistExport,
     scope: Option<(SourceKey, Option<FolderKey>)>,
-) -> Receiver<Result<(), String>> {
-    owner.reply(move |owner, _| async move {
-        use std::io::Write;
-        let source = owner.client(&source_id)?;
-        let file = tempfile::NamedTempFile::new().map_err(string_error)?;
-        let mut output = std::io::BufWriter::new(file.reopen().map_err(string_error)?);
-        let destination = std::path::Path::new(&path);
-        match target {
-            PlaylistExport::Playlist(key) => {
-                owner
-                    .shared
-                    .database
-                    .export_playlist_m3u(key, destination, &mut output)
-                    .await
+    mode: library::PlaylistPathMode,
+    expected_revision: Option<&str>,
+) -> Result<(), String> {
+    let source = owner.client(source_id)?;
+    if let Some(access) = source.local_playlist_path(path) {
+        return crate::playlist_files::export_local_on(
+            owner,
+            &access,
+            target,
+            scope,
+            mode,
+            expected_revision,
+        )
+        .await;
+    }
+    let file = export_contents(owner, std::path::Path::new(path), target, scope, mode).await?;
+    source
+        .save_playlist_file(&owner.shared.database, path, file, mode, expected_revision)
+        .await
+        .map_err(|error| match error {
+            sources::SourceError::Server { status: 412, .. } => {
+                crate::playlist_files::FILE_CONFLICT.to_string()
             }
-            PlaylistExport::Smart(key) => {
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs() as i64;
-                owner
-                    .shared
-                    .database
-                    .export_smart_playlist_m3u(
-                        key,
-                        scope.map(|s| s.0),
-                        scope.and_then(|s| s.1),
-                        now,
-                        destination,
-                        &mut output,
-                    )
-                    .await
-            }
+            error => error.to_string(),
+        })
+}
+
+pub(crate) async fn export_contents(
+    owner: &SourceOwner,
+    path: &std::path::Path,
+    target: PlaylistExport,
+    scope: Option<(SourceKey, Option<FolderKey>)>,
+    mode: library::PlaylistPathMode,
+) -> Result<tempfile::TempPath, String> {
+    use std::io::Write;
+    let file = tempfile::NamedTempFile::new().map_err(string_error)?;
+    let mut output = std::io::BufWriter::new(file.reopen().map_err(string_error)?);
+    match target {
+        PlaylistExport::Playlist(key) => {
+            owner
+                .shared
+                .database
+                .export_playlist_file(key, path, mode, &mut output)
+                .await
         }
-        .map_err(string_error)?;
-        output.flush().map_err(string_error)?;
-        drop(output);
-        source
-            .save_playlist_file(&owner.shared.database, &path, file.into_temp_path())
-            .await
-            .map_err(string_error)
-    })
+        PlaylistExport::Smart(key) => {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+            owner
+                .shared
+                .database
+                .export_smart_playlist_file(
+                    key,
+                    scope.map(|s| s.0),
+                    scope.and_then(|s| s.1),
+                    now,
+                    path,
+                    mode,
+                    &mut output,
+                )
+                .await
+        }
+    }
+    .map_err(string_error)?;
+    output.flush().map_err(string_error)?;
+    drop(output);
+    Ok(file.into_temp_path())
 }
 
 pub fn create_playlist(
@@ -203,19 +290,37 @@ pub fn rename_playlist(
     playlist: PlaylistKey,
     name: String,
 ) -> Receiver<Result<bool, String>> {
-    playlist_change(&owner, playlist, move |target, database| async move {
-        match target {
-            PlaylistOwner::Local(source_key) => database
-                .rename_playlist(source_key, playlist, &name)
-                .await
-                .map(|changed| (changed, None))
-                .map_err(string_error),
-            PlaylistOwner::Server(source, source_key) => source
-                .rename_playlist(&database, source_key, playlist, &name)
-                .await
-                .map_err(string_error),
-        }
+    crate::playlist_files::run(owner, move |owner| async move {
+        rename_playlist_on(&owner, playlist, &name).await
     })
+}
+
+pub(crate) async fn rename_playlist_on(
+    owner: &SourceOwner,
+    playlist: PlaylistKey,
+    name: &str,
+) -> Result<bool, String> {
+    let target = playlist_source(owner, playlist).await?;
+    let source_key = target.source_key();
+    let result = match target {
+        PlaylistOwner::Local(source) => owner
+            .shared
+            .database
+            .rename_playlist(source, playlist, name)
+            .await
+            .map(|changed| (changed, None))
+            .map_err(string_error),
+        PlaylistOwner::Server(source, key) => source
+            .rename_playlist(&owner.shared.database, key, playlist, name)
+            .await
+            .map_err(string_error),
+    };
+    let reply = result
+        .as_ref()
+        .map(|(changed, _)| *changed)
+        .map_err(Clone::clone);
+    accept_playlist_result(owner, source_key, Some(playlist), result).await;
+    reply
 }
 
 pub fn delete_playlist(
@@ -224,6 +329,7 @@ pub fn delete_playlist(
 ) -> Receiver<Result<bool, String>> {
     let operation_owner = owner.clone();
     playlist_change(&owner, playlist, move |target, database| async move {
+        crate::playlist_files::forget_file(&operation_owner, playlist).await?;
         let result = match target {
             PlaylistOwner::Local(source_key) => database
                 .delete_playlist(source_key, playlist)
@@ -511,7 +617,7 @@ async fn enrich_imported_playlist(
     Ok(())
 }
 
-async fn prune_imported_playlist_files(owner: &SourceOwner) {
+pub(crate) async fn prune_imported_playlist_files(owner: &SourceOwner) {
     if let Some(local) = owner
         .shared
         .settings
@@ -555,6 +661,9 @@ async fn accept_playlist_result(
             return;
         }
     };
+    if let Some(playlist) = playlist {
+        crate::playlist_files::after_edit(owner, playlist).await;
+    }
     if let Some(outcome) = outcome
         && let Some(selected) = owner
             .shared

@@ -96,7 +96,7 @@ pub struct MediaMenus {
     pub set_sidebar_pin: Rc<dyn Fn(SidebarPin, bool)>,
     pub source_download_available: Rc<dyn Fn(&sources::SourceId) -> bool>,
     pub export_playlist_dialog: Rc<dyn Fn(rufin_core::runtime::source::PlaylistExport, &str)>,
-    pub rename_playlist_dialog: Rc<dyn Fn(library::PlaylistKey, String)>,
+    pub edit_playlist_dialog: Rc<dyn Fn(library::PlaylistKey, String)>,
     pub edit_smart_playlist_dialog: Rc<dyn Fn(SmartPlaylistRow)>,
     pub publish_smart_playlist_change:
         Rc<dyn Fn(SmartPlaylistChange, Option<Rc<dyn Fn(Result<(), String>)>>)>,
@@ -1004,7 +1004,7 @@ pub fn present_playlist_context_menu(
         )
     });
     if playlist.writable {
-        surface.append_fixed_action(msgid("Rename"), "rename", EDIT_ICON);
+        surface.append_fixed_action(msgid("Edit"), "edit", EDIT_ICON);
         surface.append_fixed_action(msgid("Add current"), "add-current", ADD_ICON);
         surface.append_fixed_action(msgid("Delete"), "delete", DELETE_ICON);
     }
@@ -1017,11 +1017,11 @@ pub fn present_playlist_context_menu(
     );
     install_loaded_actions(&surface, menus, playback, play);
     install_radio_actions(&surface, menus, RadioSeed::Playlist(playlist.playlist_key));
-    let rename_menus = Rc::clone(menus);
+    let edit_menus = Rc::clone(menus);
     let playlist_key = playlist.playlist_key;
     let playlist_name = playlist.name.clone();
-    surface.add_action("rename", move || {
-        (rename_menus.rename_playlist_dialog)(playlist_key, playlist_name.clone());
+    surface.add_action("edit", move || {
+        (edit_menus.edit_playlist_dialog)(playlist_key, playlist_name.clone());
     });
     let add_menus = Rc::clone(menus);
     surface.add_action_enabled("add-current", current.is_some(), move || {

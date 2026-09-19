@@ -43,6 +43,30 @@ CREATE INDEX IF NOT EXISTS playlists_title_idx ON playlists(source_key, sort_tex
 
 CREATE UNIQUE INDEX IF NOT EXISTS playlists_position_idx ON playlists(position);
 
+CREATE TABLE IF NOT EXISTS playlist_file_links (
+    playlist_key INTEGER PRIMARY KEY REFERENCES playlists ON DELETE CASCADE,
+    source_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    auto_refresh INTEGER NOT NULL,
+    auto_save INTEGER,
+    path_mode TEXT NOT NULL,
+    revision TEXT,
+    dirty INTEGER NOT NULL,
+    error TEXT,
+    UNIQUE(source_id, path)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS playlist_file_ignored (
+    source_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    PRIMARY KEY(source_id,path)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS playlist_file_settings (
+    source_id TEXT PRIMARY KEY,
+    auto_save INTEGER NOT NULL
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS playlist_entries (
     playlist_entry_key INTEGER PRIMARY KEY,
     playlist_key INTEGER NOT NULL REFERENCES playlists ON DELETE CASCADE,
@@ -604,6 +628,9 @@ CREATE INDEX IF NOT EXISTS local_files_identity_idx ON local_files(source_key, d
 CREATE INDEX IF NOT EXISTS local_files_native_id_idx ON local_files(source_key, native_id) WHERE native_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS local_files_kind_path_idx ON local_files(source_key, kind, path);
+
+CREATE INDEX IF NOT EXISTS local_files_playlist_idx ON local_files(source_key, local_file_key)
+    WHERE lower(path) LIKE '%.m3u' OR lower(path) LIKE '%.m3u8' OR lower(path) LIKE '%.pls' OR lower(path) LIKE '%.xspf';
 
 CREATE TABLE IF NOT EXISTS local_file_dependencies (
     local_file_key INTEGER NOT NULL REFERENCES local_files ON DELETE CASCADE,

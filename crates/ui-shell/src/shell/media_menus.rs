@@ -54,11 +54,11 @@ pub(super) fn build(
                 }
             })
         },
-        rename_playlist_dialog: {
+        edit_playlist_dialog: {
             let weak = weak.clone();
             Rc::new(move |key, name| {
                 if let Some(shell) = weak.upgrade() {
-                    shell.rename_playlist_dialog(key, name);
+                    shell.edit_playlist_dialog(key, name);
                 }
             })
         },

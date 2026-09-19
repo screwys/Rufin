@@ -770,18 +770,24 @@ impl Database {
         }
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        Ok(sqlx::query(
+        let mut transaction = connection.begin().await?;
+        let changed = sqlx::query(
             "UPDATE main.playlists SET name=?3, normalized_name=lower(?3), sort_text=lower(?3)
              WHERE ((?1 IS NULL AND source_key IS NULL) OR source_key=(SELECT durable.source_key FROM main.source_ids durable JOIN catalog.sources source USING(object_id) WHERE source.source_key=?1))
-               AND playlist_key=?2",
+               AND playlist_key=?2 AND name IS NOT ?3",
         )
         .bind(source)
         .bind(playlist)
         .bind(name)
-        .execute(connection)
+        .execute(&mut *transaction)
         .await?
         .rows_affected()
-            == 1)
+            == 1;
+        if changed {
+            crate::playlist_links::mark_dirty_on(&mut transaction, playlist).await?;
+        }
+        transaction.commit().await?;
+        Ok(changed)
     }
 
     pub async fn move_playlist(
@@ -913,6 +919,9 @@ impl Database {
             skip_existing,
         )
         .await?;
+        if accepted > 0 {
+            crate::playlist_links::mark_dirty_on(&mut transaction, playlist).await?;
+        }
         transaction.commit().await?;
         Ok(accepted)
     }
@@ -953,8 +962,12 @@ impl Database {
                 .await?
                 .rows_affected() as usize;
         }
-        sqlx::query(
-            "WITH positions AS (
+        if removed > 0 {
+            // Vacate the compact range before assigning positions in row-key order.
+            sqlx::query("UPDATE main.playlist_entries SET position=position+(SELECT COALESCE(max(position)+1,0) FROM playlist_entries WHERE playlist_key=?1) WHERE playlist_key=?1")
+                .bind(playlist).execute(&mut *transaction).await?;
+            sqlx::query(
+                "WITH positions AS (
                  SELECT playlist_entry_key,
                         row_number() OVER (ORDER BY position) - 1 AS next_position
                  FROM playlist_entries WHERE playlist_key=?1
@@ -962,10 +975,12 @@ impl Database {
                  SELECT next_position FROM positions
                  WHERE positions.playlist_entry_key=playlist_entries.playlist_entry_key
              ) WHERE playlist_key=?1",
-        )
-        .bind(playlist)
-        .execute(&mut *transaction)
-        .await?;
+            )
+            .bind(playlist)
+            .execute(&mut *transaction)
+            .await?;
+            crate::playlist_links::mark_dirty_on(&mut transaction, playlist).await?;
+        }
         transaction.commit().await?;
         Ok(removed)
     }
@@ -1032,6 +1047,7 @@ impl Database {
         .bind(offset)
         .execute(&mut *transaction)
         .await?;
+        crate::playlist_links::mark_dirty_on(&mut transaction, playlist).await?;
         transaction.commit().await?;
         Ok(true)
     }
@@ -1347,7 +1363,7 @@ async fn insert_playlist_media(
 }
 
 /// Rufin-authored names and global/native rank are durable; native observations are not.
-#[derive(Debug, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
 pub struct PlaylistIdentity {
     pub source_id: Option<String>,
     pub object_id: String,
@@ -1355,7 +1371,7 @@ pub struct PlaylistIdentity {
     pub position: i64,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
 pub struct PlaylistEntryWrite {
     pub object_id: String,
     pub media_uri: String,
@@ -1379,6 +1395,7 @@ pub struct PlaylistEntryWrite {
 #[serde(tag = "kind", content = "record")]
 enum PlaylistRecord {
     Playlist(PlaylistIdentity),
+    File(crate::playlist_links::PlaylistFileRecord),
 }
 
 pub(crate) async fn write_playlist_identity(
@@ -1448,13 +1465,20 @@ pub(crate) async fn export_playlist_order_jsonl_on(
     mut output: impl std::io::Write,
 ) -> LibraryResult<u64> {
     use futures_util::TryStreamExt;
-    let mut rows=sqlx::query_as::<_,PlaylistIdentity>("SELECT source.object_id source_id,playlist.object_id,playlist.name,playlist.position FROM main.playlists playlist LEFT JOIN main.source_ids source USING(source_key) ORDER BY playlist.position").fetch(connection);
+    let mut rows=sqlx::query_as::<_,PlaylistIdentity>("SELECT source.object_id source_id,playlist.object_id,playlist.name,playlist.position FROM main.playlists playlist LEFT JOIN main.source_ids source USING(source_key) ORDER BY playlist.position").fetch(&mut *connection);
     let mut count = 0;
     while let Some(row) = rows.try_next().await? {
         serde_json::to_writer(&mut output, &PlaylistRecord::Playlist(row))?;
         output.write_all(b"\n")?;
         count += 1;
     }
+    drop(rows);
+    crate::playlist_links::backup_records_on(connection, |record| {
+        serde_json::to_writer(&mut output, &PlaylistRecord::File(record))?;
+        output.write_all(b"\n")?;
+        Ok(())
+    })
+    .await?;
     Ok(count)
 }
 pub(crate) async fn import_playlists_jsonl_on(
@@ -1463,9 +1487,15 @@ pub(crate) async fn import_playlists_jsonl_on(
 ) -> LibraryResult<u64> {
     let mut count = 0;
     for line in input.lines() {
-        let PlaylistRecord::Playlist(identity) = serde_json::from_str(&line?)?;
-        write_playlist_identity(connection, &identity).await?;
-        count += 1;
+        match serde_json::from_str(&line?)? {
+            PlaylistRecord::Playlist(identity) => {
+                write_playlist_identity(connection, &identity).await?;
+                count += 1;
+            }
+            PlaylistRecord::File(record) => {
+                crate::playlist_links::restore_record_on(connection, record).await?
+            }
+        }
     }
     Ok(count)
 }

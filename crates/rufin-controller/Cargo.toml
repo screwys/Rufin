@@ -17,6 +17,7 @@ development = ["app-identity/development"]
 app-identity.workspace = true
 localization.workspace = true
 rufin-core.workspace = true
+sources.workspace = true
 playback.workspace = true
 playback-gstreamer.workspace = true
 tokio = { workspace = true, features = ["signal"] }

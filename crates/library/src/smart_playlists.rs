@@ -2175,18 +2175,20 @@ pub(crate) async fn write_smart_playlist(
 }
 
 impl Database {
-    pub async fn export_smart_playlist_m3u(
+    pub async fn export_smart_playlist_file(
         &self,
         key: SmartPlaylistKey,
         source: Option<SourceKey>,
         folder: Option<FolderKey>,
         now: i64,
         file: &std::path::Path,
-        mut output: impl std::io::Write,
+        mode: crate::PlaylistPathMode,
+        output: impl std::io::Write,
     ) -> LibraryResult<u64> {
         use futures_util::TryStreamExt;
         let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
-        output.write_all(b"#EXTM3U\n")?;
+        let mut output =
+            crate::playlist_format::PlaylistWriter::new(output, file, mode, None, None)?;
         let policy =
             smart_policy_sql(&mut connection, now, Some(std::slice::from_ref(&key)), true).await?;
         let sql = format!(
@@ -2199,13 +2201,10 @@ impl Database {
             .bind(folder)
             .bind(serde_json::to_string(&[key.raw()])?)
             .fetch(&mut *connection);
-        let mut count = 0;
         while let Some(entry) = rows.try_next().await? {
-            if crate::m3u::write_m3u_entry(&mut output, file, &entry)? {
-                count += 1;
-            }
+            output.entry(&entry)?;
         }
-        Ok(count)
+        output.finish()
     }
 }
 

@@ -167,6 +167,7 @@
             <span class="icon" data-icon="play"></span>{{ localization::tr("Play") }}</button>
           <button type="button" id="new-playlist" {% if page.view() != "playlists" %}hidden{% endif %}>
             <span class="icon" data-icon="add"></span>{{ localization::tr("New Playlist") }}</button>
+          <button type="button" id="import-playlist" {% if page.view() != "playlists" %}hidden{% endif %}>{{ localization::tr("Import Playlist") }}</button>
         </form>
         <div id="source-progress" role="status" hidden></div>
         <div id="content" data-rendered="{{ page.connected && page.error.is_empty() }}" data-source="{{ page.source }}" data-folder="{{ page.folder() }}" tabindex="-1" aria-busy="false" hx-sync="this:replace">
@@ -449,6 +450,7 @@
         </select>
         <label for="source-label">{{ localization::tr("Name") }}</label
         ><input id="source-label" placeholder="{{ localization::tr("My music") }}" />
+        <label id="source-playlist-save-row" hidden><input id="source-playlist-save" type="checkbox" />{{ localization::tr("Save playlist changes automatically") }}</label>
         <div id="local-fields">
           <label for="source-paths">{{ localization::tr("Music folders on the Rufin machine") }}</label
           ><textarea
@@ -487,6 +489,18 @@
         </div>
       </form>
     </dialog>
+    <dialog id="playlist-transfer-dialog" aria-labelledby="playlist-transfer-title">
+      <form id="playlist-transfer-form">
+        <h2 id="playlist-transfer-title"></h2>
+        <label for="playlist-transfer-path">{{ localization::tr("Path") }}</label><textarea id="playlist-transfer-path" placeholder="{{ localization::tr("One path per line") }}" required></textarea>
+        <label for="playlist-transfer-source">{{ localization::tr("Source") }}</label><select id="playlist-transfer-source"></select>
+        <label id="playlist-transfer-copy-row"><input type="checkbox" id="playlist-transfer-copy" />{{ localization::tr("Import a copy") }}</label>
+        <label id="playlist-transfer-link-row"><input type="checkbox" id="playlist-transfer-link" />{{ localization::tr("Link exported file") }}</label>
+        <label id="playlist-transfer-mode-row">{{ localization::tr("Path format") }}<select id="playlist-transfer-mode"><option value="automatic">{{ localization::tr("Automatic") }}</option><option value="relative">{{ localization::tr("Relative") }}</option><option value="absolute">{{ localization::tr("Absolute") }}</option></select></label>
+        <label id="playlist-transfer-format-row">{{ localization::tr("Format") }}<select id="playlist-transfer-format"><option value="m3u8">M3U8</option><option value="m3u">M3U</option><option value="pls">PLS</option><option value="xspf">XSPF</option></select></label>
+        <div class="dialog-actions"><button type="button" data-close="playlist-transfer-dialog">{{ localization::tr("Cancel") }}</button><button type="submit" class="primary">{{ localization::tr("Continue") }}</button></div>
+      </form>
+    </dialog>
     <dialog id="name-dialog" aria-labelledby="name-title">
       <form id="name-form">
         <h2 id="name-title">{{ localization::tr("New Playlist") }}</h2>
@@ -495,9 +509,38 @@
           <input id="playlist-name" required />
           <button type="button" id="playlist-owner" class="icon-button" aria-pressed="false"></button>
         </div>
+        <fieldset id="playlist-file-options" hidden>
+          <legend>{{ localization::tr("Linked file") }}</legend>
+          <div class="playlist-link-fields">
+            <label>{{ localization::tr("Path") }}<input id="playlist-file-path" /></label>
+            <label>{{ localization::tr("Source") }}<select id="playlist-file-source"></select></label>
+          </div>
+          <div class="playlist-link-actions">
+            <button type="button" data-playlist-file="link">{{ localization::tr("Load file contents") }}</button>
+            <button type="button" data-playlist-file="link" data-force="true">{{ localization::tr("Replace file contents") }}</button>
+          </div>
+          <div class="playlist-file-settings">
+          <label for="playlist-file-name">{{ localization::tr("Filename") }}</label>
+          <div class="playlist-filename-field"><input id="playlist-file-name" />
+          <button type="button" data-playlist-file="rename">{{ localization::tr("Rename file") }}</button>
+          </div>
+          <label for="playlist-file-refresh">{{ localization::tr("Refresh automatically") }}</label><input type="checkbox" id="playlist-file-refresh" />
+          <label for="playlist-file-save">{{ localization::tr("Save changes automatically") }}</label>
+          <select id="playlist-file-save"><option value="inherit">{{ localization::tr("Use source setting") }}</option><option value="off">{{ localization::tr("Off") }}</option><option value="on">{{ localization::tr("On") }}</option></select>
+          <label for="playlist-file-mode">{{ localization::tr("Path format") }}</label>
+          <select id="playlist-file-mode"><option value="automatic">{{ localization::tr("Automatic") }}</option><option value="relative">{{ localization::tr("Relative") }}</option><option value="absolute">{{ localization::tr("Absolute") }}</option></select>
+          </div>
+          <p id="playlist-file-error" class="error" role="status"></p>
+          <div class="playlist-file-actions">
+            <button type="button" data-playlist-file="save">{{ localization::tr("Save") }}</button>
+            <button type="button" data-playlist-file="reload">{{ localization::tr("Reload") }}</button>
+            <button type="button" data-playlist-file="unlink">{{ localization::tr("Unlink") }}</button>
+            <button type="button" data-playlist-file="delete">{{ localization::tr("Delete") }}</button>
+          </div>
+        </fieldset>
         <div class="dialog-actions">
           <button type="button" data-close="name-dialog">{{ localization::tr("Cancel") }}</button
-          ><button class="primary">{{ localization::tr("Save") }}</button>
+          ><button id="playlist-apply" class="primary">{{ localization::tr("Save") }}</button>
         </div>
       </form>
     </dialog>

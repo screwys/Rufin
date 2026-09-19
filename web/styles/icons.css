@@ -189,6 +189,10 @@
   mask-image: url("/icons/rufin-document-edit-symbolic.svg");
 }
 
+.icon[data-icon="export"] {
+  mask-image: url("/icons/rufin-document-save-symbolic.svg");
+}
+
 .icon[data-icon="delete"] {
   mask-image: url("/icons/rufin-process-stop-symbolic.svg");
 }
