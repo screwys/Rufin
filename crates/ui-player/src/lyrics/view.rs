@@ -600,7 +600,6 @@ impl LyricsPane {
             let indicator = gtk::Box::new(gtk::Orientation::Vertical, 20);
             indicator.set_halign(gtk::Align::Center);
             indicator.set_valign(gtk::Align::Center);
-            indicator.set_vexpand(true);
 
             let icon = gtk::Image::from_icon_name("rufin-audio-x-generic-symbolic");
             icon.set_pixel_size(36);
