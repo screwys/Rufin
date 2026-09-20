@@ -177,14 +177,7 @@ fn folder_exchange_preserves_disconnected_edits_without_rewriting_peer_files() {
                 owner.exchange().await.unwrap();
                 assert!(owner.database.favorite(&first).await.unwrap());
                 assert!(owner.database.favorite(&second).await.unwrap());
-                let session = owner.active().await.unwrap();
-                while session
-                    .documents
-                    .prune_history(&session.identity, &[], library::CONNECT_PAGE_SIZE)
-                    .await
-                    .unwrap()
-                    > 0
-                {}
+                prepare_profile_snapshot(owner).await;
                 owner.exchange().await.unwrap();
                 let own = folders[index].join(&names[index]);
                 let bytes = std::fs::read(&own).unwrap();
@@ -361,10 +354,7 @@ fn webdav_exchange_leaves_an_unchanged_profile_file_untouched() {
             )
             .await
             .unwrap();
-            while owner.database.connect_seed_page().await.unwrap() {}
-            while owner.synchronize().await.unwrap() {}
-            let session = owner.active().await.unwrap();
-            while session.documents.prune_history(&session.identity, &[], library::CONNECT_PAGE_SIZE).await.unwrap() > 0 {}
+            prepare_profile_snapshot(owner).await;
             owner.exchange().await.unwrap();
             let uploads = file.lock().unwrap().1;
             assert!(uploads > 0);
@@ -405,6 +395,26 @@ async fn execute(owner: &Arc<ConnectOwner>, action: Action) -> Result<Status, St
     tokio::spawn(async move { owner.execute(action).await })
         .await
         .unwrap()
+}
+
+// Finish the writes that background startup and pruning would otherwise race
+// against assertions about an unchanged profile file.
+async fn prepare_profile_snapshot(owner: &Arc<ConnectOwner>) {
+    loop {
+        let seeded = owner.database.connect_seed_page().await.unwrap();
+        let captured = owner.synchronize().await.unwrap();
+        if !seeded && !captured {
+            break;
+        }
+    }
+    let session = owner.active().await.unwrap();
+    while session
+        .documents
+        .prune_history(&session.identity, &[], library::CONNECT_PAGE_SIZE)
+        .await
+        .unwrap()
+        > 0
+    {}
 }
 
 async fn device(
@@ -1057,8 +1067,7 @@ fn profiles_adopt_only_after_verification_and_offline_edits_survive_enrollment()
                 remote_destination.storage_path(None),
                 local_file.to_string_lossy()
             );
-            a.exchange().await.unwrap();
-            // The first export can finish capturing the initial profile.
+            prepare_profile_snapshot(a).await;
             a.exchange().await.unwrap();
             let portable::Destination::Local { path } = a.status().settings.destination.unwrap()
             else {

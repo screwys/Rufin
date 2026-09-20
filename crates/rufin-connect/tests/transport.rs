@@ -351,6 +351,10 @@ async fn enrollment_delivery_media_and_removal() {
         b.media().fetch(&a.identity(), &hash, &destination, CancellationToken::new(), progress).await.unwrap();
         assert_eq!(tokio::fs::read(&destination).await.unwrap(), b"original media bytes");
         assert_eq!(tokio::fs::read(&original).await.unwrap(), b"original media bytes");
+        tokio::fs::write(&destination, b"previous downloaded copy").await.unwrap();
+        let (progress, _) = watch::channel(0);
+        b.media().fetch(&a.identity(), &hash, &destination, CancellationToken::new(), progress).await.unwrap();
+        assert_eq!(tokio::fs::read(&destination).await.unwrap(), b"original media bytes");
         let c_dir = tempfile::tempdir().unwrap();
         let (c, mut c_events) = node(c_dir.path(), "Third device").await;
         pair(&a, &mut a_events, &c, &mut c_events, &profile).await;
