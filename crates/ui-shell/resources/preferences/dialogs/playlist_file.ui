@@ -26,11 +26,6 @@
   </object>
   <object class="GtkFileFilter" id="playlist_filter"><property name="name" translatable="yes">Playlist files</property><patterns><pattern>*.m3u</pattern><pattern>*.m3u8</pattern><pattern>*.pls</pattern><pattern>*.xspf</pattern><pattern>*.M3U</pattern><pattern>*.M3U8</pattern><pattern>*.PLS</pattern><pattern>*.XSPF</pattern></patterns></object>
   <object class="GtkFileDialog" id="chooser"><property name="title" translatable="yes">Playlist File</property></object>
-  <object class="AdwAlertDialog" id="import_options">
-    <property name="heading" translatable="yes">Import Playlist</property><property name="close-response">cancel</property>
-    <property name="extra-child"><object class="AdwSwitchRow" id="import_copy"><property name="title" translatable="yes">Import a copy</property></object></property>
-    <responses><response id="cancel" translatable="yes">Cancel</response><response id="import" translatable="yes" appearance="suggested">Import</response></responses>
-  </object>
   <object class="AdwAlertDialog" id="export_options">
     <property name="heading" translatable="yes">Export Playlist</property><property name="close-response">cancel</property>
     <property name="extra-child"><object class="GtkListBox"><property name="selection-mode">none</property><style><class name="boxed-list"/></style>

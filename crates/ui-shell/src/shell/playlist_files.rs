@@ -94,17 +94,6 @@ impl Shell {
     pub(crate) fn import_playlist_dialog(self: &Rc<Self>) {
         let shell = Rc::clone(self);
         glib::spawn_future_local(async move {
-            let resource = crate::ui_resource::PLAYLIST_FILE_DIALOG_RESOURCE;
-            let builder = ui_shared::ui_resource::builder(resource);
-            ui_shared::objects!(builder, resource, { import_options: adw::AlertDialog, import_copy: adw::SwitchRow });
-            if import_options
-                .choose_future(Some(&shell.chrome.window))
-                .await
-                != "import"
-            {
-                return;
-            }
-            let linked = !import_copy.is_active();
             let Some(location) = playlist_file_location(&shell, "").await else {
                 return;
             };
@@ -113,7 +102,7 @@ impl Shell {
                     &shell.products.source,
                     source,
                     path,
-                    linked,
+                    true,
                 )]
             } else {
                 let dialog = playlist_chooser();
@@ -138,7 +127,7 @@ impl Shell {
                                 .selected_source_id
                                 .as_ref()
                                 .and_then(|id| shell.products.source.configuration(id)),
-                            linked,
+                            true,
                         )
                     })
                     .collect::<Vec<_>>()
