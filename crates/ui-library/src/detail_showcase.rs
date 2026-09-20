@@ -868,10 +868,12 @@ fn detail_source_button(
         "subsonic" => msgid("Open on server"),
         _ => return None,
     };
-    let button = detail_link_button(
-        ui_shared::source_labels::source_kind_icon_name(&source.kind)?,
-        label,
-    );
+    let icon = if folder {
+        "rufin-folders-symbolic"
+    } else {
+        ui_shared::source_labels::source_kind_icon_name(&source.kind)?
+    };
+    let button = detail_link_button(icon, label);
     if !folder {
         let uri = source.detail_web_url(&kind, &object_id).ok()?;
         connect_web_link(&button, shell.window.clone(), uri);
