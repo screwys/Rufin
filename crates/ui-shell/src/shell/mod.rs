@@ -4,6 +4,7 @@ mod diagnostics;
 pub(crate) mod layout;
 pub(crate) mod navigation;
 mod topbar;
+mod topbar_search;
 use std::cell::Cell;
 use std::rc::Rc;
 

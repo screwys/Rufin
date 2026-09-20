@@ -695,7 +695,7 @@ impl Shell {
             }
             Route::Search => {
                 self.replace_mounted_route(route, source_id, render_started, |catalog| {
-                    catalog.search_route(&selected)
+                    catalog.search_route()
                 });
             }
             Route::SmartPlaylists => unreachable!("application-owned route"),

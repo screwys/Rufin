@@ -36,7 +36,9 @@
       </object></child>
       <child><object class="GtkBox" id="casting_host"/></child>
     </object></child>
-    <property name="title-widget"><object class="GtkSearchEntry" id="search">
+    <property name="title-widget"><object class="GtkOverlay" id="search_host">
+      <style><class name="topbar-search"/></style>
+      <property name="child"><object class="GtkSearchEntry" id="search">
       <property name="hexpand">false</property>
       <property name="halign">center</property>
       <property name="width-request">1</property>
@@ -44,6 +46,24 @@
       <property name="max-width-chars">28</property>
       <property name="placeholder-text" translatable="yes">Search</property>
       <accessibility><property name="label" translatable="yes">Search</property></accessibility>
+      </object></property>
+      <child type="overlay"><object class="AdwShortcutLabel" id="search_shortcut">
+        <property name="halign">end</property>
+        <property name="valign">center</property>
+        <property name="margin-end">12</property>
+        <property name="can-target">false</property>
+        <property name="accelerator">&lt;Control&gt;k</property>
+        <style><class name="search-shortcut"/></style>
+      </object></child>
+      <child type="overlay"><object class="GtkImage">
+        <property name="icon-name">rufin-keyboard-enter-symbolic</property>
+        <property name="pixel-size">16</property>
+        <property name="halign">end</property>
+        <property name="valign">center</property>
+        <property name="margin-end">12</property>
+        <property name="can-target">false</property>
+        <style><class name="search-enter"/></style>
+      </object></child>
     </object></property>
     <child type="end"><object class="GtkBox">
       <property name="spacing">2</property>

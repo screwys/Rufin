@@ -23,6 +23,7 @@ pub struct CatalogUi {
     pub route_width: Rc<dyn Fn() -> i32>,
     pub is_current: Rc<dyn Fn() -> bool>,
     pub global_search: gtk::SearchEntry,
+    pub search_session: Rc<crate::SearchSession>,
     pub reconcile: Rc<dyn Fn()>,
     pub refresh: Rc<dyn Fn()>,
     pub refresh_catalog: Rc<dyn Fn()>,

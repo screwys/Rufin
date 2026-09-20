@@ -1,7 +1,6 @@
 use std::rc::Rc;
 
 use adw::prelude::*;
-use ui_shared::route::Route;
 
 use super::{Shell, layout::ResolvedLeftSidebarMode};
 
@@ -10,6 +9,10 @@ pub(crate) struct Topbar {
     pub content_host: adw::Bin,
     pub header: gtk::HeaderBar,
     pub search: gtk::SearchEntry,
+    pub search_session: Rc<ui_library::SearchSession>,
+    search_popup: std::cell::RefCell<Option<Rc<super::topbar_search::SearchPopup>>>,
+    search_host: gtk::Overlay,
+    search_shortcut: adw::ShortcutLabel,
     pub menu: gtk::MenuButton,
     sidebar: gtk::Button,
     source: gtk::MenuButton,
@@ -18,6 +21,23 @@ pub(crate) struct Topbar {
 }
 
 impl Topbar {
+    pub fn contains_search_focus(&self, focus: &gtk::Widget) -> bool {
+        focus.is_ancestor(&self.search_host)
+    }
+
+    pub fn focus_search(&self) {
+        self.search.grab_focus();
+        if let Some(popup) = self.search_popup.borrow().as_ref() {
+            popup.open();
+        }
+    }
+
+    pub fn allocate_search_popup(&self) {
+        if let Some(popup) = self.search_popup.borrow().as_ref() {
+            popup.present();
+        }
+    }
+
     pub fn new() -> Self {
         let resource = crate::ui_resource::TOPBAR_RESOURCE;
         let builder = ui_shared::ui_resource::builder(resource);
@@ -26,6 +46,8 @@ impl Topbar {
             content_host: adw::Bin,
             header: gtk::HeaderBar,
             search: gtk::SearchEntry,
+            search_host: gtk::Overlay,
+            search_shortcut: adw::ShortcutLabel,
             menu: gtk::MenuButton,
             sidebar: gtk::Button,
             source: gtk::MenuButton,
@@ -37,6 +59,10 @@ impl Topbar {
             content_host,
             header,
             search,
+            search_session: Rc::new(ui_library::SearchSession::default()),
+            search_popup: std::cell::RefCell::new(None),
+            search_host,
+            search_shortcut,
             menu,
             sidebar,
             source,
@@ -46,6 +72,17 @@ impl Topbar {
     }
 
     pub fn bind(&self, shell: &Rc<Shell>) {
+        self.search_shortcut
+            .set_accelerator(if cfg!(target_os = "macos") {
+                "<Meta>k"
+            } else {
+                "<Control>k"
+            });
+        self.search_popup
+            .replace(Some(super::topbar_search::SearchPopup::new(
+                shell,
+                &self.search_host,
+            )));
         super::navigation::install_primary_menu(&self.menu, shell);
         crate::preferences::controller::bind_popover(shell, &self.controller);
         let weak = Rc::downgrade(shell);
@@ -71,15 +108,6 @@ impl Topbar {
                         "toggle-left-sidebar",
                         None,
                     );
-                }
-            }
-        });
-        let weak = Rc::downgrade(shell);
-        self.search.connect_activate(move |_| {
-            if let Some(shell) = weak.upgrade() {
-                let searching = shell.navigation.routes.borrow().current() == &Route::Search;
-                if !searching {
-                    shell.navigate(Route::Search);
                 }
             }
         });

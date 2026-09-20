@@ -106,8 +106,27 @@ impl RandomPlaySettings {
 
 pub use library::{HomeBlockKind, HomeSectionKind};
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecentSearchKind {
+    Track,
+    Album,
+    Artist,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RecentSearchResult {
+    pub kind: RecentSearchKind,
+    pub media_uri: String,
+    pub title: String,
+    pub subtitle: String,
+    pub artwork_binding: Option<Vec<u8>>,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Settings {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_search_results: Vec<RecentSearchResult>,
     #[serde(default)]
     pub web_controller: crate::api::ControllerSettings,
     #[serde(default)]
@@ -216,6 +235,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            recent_search_results: Vec::new(),
             web_controller: crate::api::ControllerSettings::default(),
             layout: LayoutSettings::default(),
             sidebar: SidebarSettings::default(),
@@ -274,6 +294,18 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// Keep opened or played results in recency order, identified by their media URI.
+    pub fn remember_search_result(&mut self, result: RecentSearchResult) -> bool {
+        if self.recent_search_results.first() == Some(&result) {
+            return false;
+        }
+        self.recent_search_results
+            .retain(|recent| recent.media_uri != result.media_uri || recent.kind != result.kind);
+        self.recent_search_results.insert(0, result);
+        self.recent_search_results.truncate(20);
+        true
+    }
+
     pub fn allows_notifications(&self) -> bool {
         self.notifications_enabled
     }
@@ -287,6 +319,7 @@ impl Settings {
     }
 
     pub fn sanitize(&mut self) {
+        self.recent_search_results.truncate(20);
         if ![1, 6, 12, 24].contains(&self.release_check_interval_hours) {
             self.release_check_interval_hours = default_release_check_interval_hours();
         }
@@ -484,7 +517,74 @@ fn sanitize_downloads(downloads: &mut Vec<SourceDownloadSettings>) {
 
 #[cfg(test)]
 mod tests {
-    use super::Settings;
+    use super::{RecentSearchKind, RecentSearchResult, Settings};
+
+    #[test]
+    fn recent_search_results_keep_exact_items_in_recency_order_and_round_trip() {
+        let mut settings = Settings::default();
+        let artist = RecentSearchResult {
+            kind: RecentSearchKind::Artist,
+            media_uri: "provider://one/artist/1".into(),
+            title: "Björk".into(),
+            subtitle: String::new(),
+            artwork_binding: None,
+        };
+        let album = RecentSearchResult {
+            kind: RecentSearchKind::Album,
+            media_uri: "provider://one/album/1".into(),
+            ..artist.clone()
+        };
+        let other_source = RecentSearchResult {
+            media_uri: "provider://two/artist/1".into(),
+            ..artist.clone()
+        };
+        assert!(settings.remember_search_result(artist.clone()));
+        assert!(!settings.remember_search_result(artist.clone()));
+        settings.remember_search_result(album.clone());
+        settings.remember_search_result(other_source.clone());
+        settings.remember_search_result(artist.clone());
+        assert_eq!(
+            settings.recent_search_results,
+            [artist.clone(), other_source, album]
+        );
+        for index in 0..25 {
+            settings.remember_search_result(RecentSearchResult {
+                kind: RecentSearchKind::Track,
+                media_uri: format!("provider://one/track/{index}"),
+                ..artist.clone()
+            });
+        }
+        assert_eq!(settings.recent_search_results.len(), 20);
+        assert_eq!(
+            settings.recent_search_results.first().unwrap().media_uri,
+            "provider://one/track/24"
+        );
+        assert_eq!(
+            settings.recent_search_results.last().unwrap().media_uri,
+            "provider://one/track/5"
+        );
+        let restored: Settings =
+            serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
+        assert_eq!(
+            restored.recent_search_results,
+            settings.recent_search_results
+        );
+        let mut saved = serde_json::to_value(settings).unwrap();
+        saved
+            .as_object_mut()
+            .unwrap()
+            .remove("recent_search_results");
+        saved
+            .as_object_mut()
+            .unwrap()
+            .insert("recent_searches".into(), serde_json::json!(["old query"]));
+        assert!(
+            serde_json::from_value::<Settings>(saved)
+                .unwrap()
+                .recent_search_results
+                .is_empty()
+        );
+    }
 
     #[test]
     fn fullscreen_display_defaults_and_choices_survive_settings_reload() {

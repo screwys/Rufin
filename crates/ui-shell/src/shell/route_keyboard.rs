@@ -33,7 +33,7 @@ impl Shell {
         if self.transient_route_input_active() {
             return;
         }
-        self.chrome.topbar.search.grab_focus();
+        self.chrome.topbar.focus_search();
     }
 
     fn route_keyboard_available(&self) -> bool {
@@ -59,6 +59,12 @@ impl Shell {
         let shell = Rc::clone(self);
         key.connect_key_pressed(move |_, key, _, state| {
             let current_focus = GtkWindowExt::focus(&shell.chrome.window);
+            if current_focus
+                .as_ref()
+                .is_some_and(|focus| shell.chrome.topbar.contains_search_focus(focus))
+            {
+                return glib::Propagation::Proceed;
+            }
             if shell.route_keyboard_available()
                 && !focus_blocks_selection_shortcut(current_focus.as_ref())
                 && let Some(shortcut) = selection_shortcut(key, state)

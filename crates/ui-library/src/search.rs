@@ -34,6 +34,7 @@ use super::grid_cells::{
     install_grid_play,
 };
 use rufin_core::playback::PlaybackTarget;
+use rufin_core::settings::app::{RecentSearchKind, RecentSearchResult};
 use ui_shared::media_menus::{present_album_context_menu, present_artist_context_menu};
 
 use super::route_shell::{LibraryPageShell, LibraryToolbarProjection};
@@ -51,6 +52,7 @@ use ui_shared::route::Route;
 use ui_shared::sparse_model::{SparseObjectItem, connect_sparse_bind};
 
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(300);
+pub mod session;
 
 #[derive(Clone)]
 #[expect(clippy::large_enum_variant, reason = "bounded prepared Search rows")]
@@ -61,6 +63,32 @@ enum SearchItem {
 }
 
 impl SearchItem {
+    fn recent_result(&self) -> RecentSearchResult {
+        let (kind, media_uri, artwork_binding) = match self {
+            Self::Track(row) => (
+                RecentSearchKind::Track,
+                &row.media_uri,
+                &row.artwork_binding,
+            ),
+            Self::Album(row) => (
+                RecentSearchKind::Album,
+                &row.media_uri,
+                &row.artwork_binding,
+            ),
+            Self::Artist(row) => (
+                RecentSearchKind::Artist,
+                &row.media_uri,
+                &row.artwork_binding,
+            ),
+        };
+        RecentSearchResult {
+            kind,
+            media_uri: media_uri.clone(),
+            title: self.title().to_owned(),
+            subtitle: self.subtitle().to_owned(),
+            artwork_binding: artwork_binding.clone(),
+        }
+    }
     fn drag_source(&self, shell: &CatalogUi) -> Option<MediaDragSource> {
         Some(match self {
             Self::Track(row) => MediaDragSource::track(row.media_uri.clone()),
@@ -190,13 +218,6 @@ impl SearchItem {
             Self::Artist(_) => None,
         }
     }
-    fn route(&self) -> Option<Route> {
-        match self {
-            Self::Album(row) => Some(Route::AlbumDetail(row.media_uri.clone())),
-            Self::Artist(row) => Some(Route::ArtistDetail(row.media_uri.clone())),
-            _ => None,
-        }
-    }
     fn favorite(&self) -> Option<(library::FavoriteTarget, bool)> {
         Some(match self {
             Self::Track(row) => (
@@ -214,54 +235,17 @@ impl SearchItem {
         })
     }
     fn play(&self, shell: &Rc<CatalogUi>, placement: QueuePlacement) {
-        if let Self::Track(row) = self {
-            (shell.media_menus.play_target)(
-                &PlaybackTarget::Track(row.media_uri.clone()),
-                placement,
-                false,
-            );
-            return;
-        }
-        let Some(source) = self.drag_source(shell) else {
-            return;
-        };
-        let queue = shell.queue.clone();
-        shell.runtime.spawn(async move {
-            match source.queue_input().await {
-                Ok(input) => queue.play(playback::PlayRequest::ordered(input, 0, placement, true)),
-                Err(error) => {
-                    tracing::warn!(%error, "could not prepare Search collection playback")
-                }
-            }
-        });
+        session::SearchSession::play_recent(&self.recent_result(), shell, placement);
     }
     fn activate(&self, shell: &Rc<CatalogUi>) {
-        let Some(route) = self.route() else {
-            self.play(shell, QueuePlacement::Now);
-            return;
-        };
-        let media_uri = match self {
-            Self::Album(row) => row.media_uri.clone(),
-            Self::Artist(row) => row.media_uri.clone(),
-            Self::Track(_) => unreachable!(),
-        };
-        let receiver = shell.source.prepare_collection(media_uri);
-        let shell = Rc::downgrade(shell);
-        gtk::glib::spawn_future_local(async move {
-            if let Ok(Err(error)) = receiver.recv().await {
-                tracing::warn!(%error, "could not acquire Search collection");
-            }
-            let Some(shell) = shell.upgrade() else { return };
-            if (shell.is_current)() {
-                shell.navigate(route);
-            }
-        });
+        session::SearchSession::activate_recent(&self.recent_result(), shell);
     }
     fn present_context(
         &self,
         target: &gtk::Widget,
         shell: &Rc<CatalogUi>,
         position: Option<(f64, f64)>,
+        is_current: Rc<dyn Fn() -> bool>,
     ) {
         let media_uri = match self {
             Self::Track(row) => {
@@ -274,34 +258,24 @@ impl SearchItem {
         let receiver = shell.source.prepare_collection(media_uri);
         let item = self.clone();
         let target = target.downgrade();
-        let shell = Rc::downgrade(shell);
+        let menus = Rc::clone(&shell.media_menus);
         gtk::glib::spawn_future_local(async move {
             if let Ok(Err(error)) = receiver.recv().await {
                 tracing::warn!(%error, "could not acquire Search collection");
             }
-            let (Some(shell), Some(target)) = (shell.upgrade(), target.upgrade()) else {
+            let Some(target) = target.upgrade() else {
                 return;
             };
-            if target.root().is_none() || !(shell.is_current)() {
+            if !target.is_mapped() || !is_current() {
                 return;
             }
             match item {
-                Self::Album(row) => present_album_context_menu(
-                    &target,
-                    &shell.media_menus,
-                    row,
-                    None,
-                    None,
-                    position,
-                ),
-                Self::Artist(row) => present_artist_context_menu(
-                    &target,
-                    &shell.media_menus,
-                    row,
-                    false,
-                    None,
-                    position,
-                ),
+                Self::Album(row) => {
+                    present_album_context_menu(&target, &menus, row, None, None, position)
+                }
+                Self::Artist(row) => {
+                    present_artist_context_menu(&target, &menus, row, false, None, position)
+                }
                 Self::Track(_) => unreachable!(),
             }
         });
@@ -368,7 +342,9 @@ impl SearchGridCell {
             &menu,
             &overlay,
             &body.card,
-            |target, shell, item, point| item.present_context(target, shell, point),
+            |target, shell, item, point| {
+                item.present_context(target, shell, point, Rc::clone(&shell.is_current))
+            },
         );
         Self {
             body,
@@ -447,9 +423,10 @@ impl ReusableCollectionGridCell<SearchItem> for SearchGridCell {
 struct SearchRouteProjection {
     root: gtk::Widget,
     shell: Weak<CatalogUi>,
-    selected: SelectedLibrary,
     search: gtk::SearchEntry,
-    search_handler: RefCell<Option<glib::SignalHandlerId>>,
+    session: Rc<session::SearchSession>,
+    observer: RefCell<Option<Rc<dyn Fn()>>>,
+    revision: Cell<Option<u64>>,
     status: gtk::Stack,
     results: adw::ViewStack,
     result_page: gtk::Stack,
@@ -457,9 +434,6 @@ struct SearchRouteProjection {
     models: [gio::ListStore; 3],
     playing: super::columns::TrackRowPlayingIndicator,
     active: RefCell<Option<SearchPresentation>>,
-    generation: Cell<u64>,
-    debounce: RefCell<Option<glib::SourceId>>,
-    cancellation: RefCell<Option<ReadCancellation>>,
 }
 
 struct SearchPresentation {
@@ -483,7 +457,7 @@ ui_shared::composite_box!(
 );
 
 impl SearchRouteProjection {
-    fn new(shell: &Rc<CatalogUi>, selected: &SelectedLibrary) -> Rc<Self> {
+    fn new(shell: &Rc<CatalogUi>) -> Rc<Self> {
         let wrapper = SearchRouteView::new();
         let search = shell.global_search.clone();
 
@@ -491,7 +465,7 @@ impl SearchRouteProjection {
         let category_pages =
             CollectionCategory::ALL.map(|_| gtk::Box::new(gtk::Orientation::Vertical, 0).upcast());
         let (results, switcher) =
-            collection_category_tabs(category_pages, CollectionCategory::default());
+            collection_category_tabs(category_pages, shell.search_session.category.get());
         wrapper.imp().category_host.append(&switcher);
         let toolbar_host = wrapper.imp().toolbar_host.get();
         let status = wrapper.imp().status.get();
@@ -500,9 +474,10 @@ impl SearchRouteProjection {
         let projection = Rc::new(Self {
             root: wrapper.upcast(),
             shell: Rc::downgrade(shell),
-            selected: selected.clone(),
             search,
-            search_handler: RefCell::new(None),
+            session: Rc::clone(&shell.search_session),
+            observer: RefCell::new(None),
+            revision: Cell::new(None),
             status,
             results,
             result_page,
@@ -510,48 +485,21 @@ impl SearchRouteProjection {
             models,
             playing: super::columns::TrackRowPlayingIndicator::new(),
             active: RefCell::new(None),
-            generation: Cell::new(0),
-            debounce: RefCell::new(None),
-            cancellation: RefCell::new(None),
         });
         projection.connect();
-        projection.mount_category(CollectionCategory::default());
+        projection.mount_category(projection.session.category.get());
         projection.register_now_playing(shell);
-        let query = projection.search.text().trim().to_owned();
-        if !query.is_empty() {
-            projection.submit(query);
-        }
+        projection.sync();
         projection
     }
 
     fn connect(self: &Rc<Self>) {
         let weak = Rc::downgrade(self);
-        let handler = self.search.connect_text_notify(move |entry| {
-            let Some(projection) = weak.upgrade() else {
-                return;
-            };
-            if let Some(source) = projection.debounce.borrow_mut().take() {
-                source.remove();
+        self.observer.replace(Some(self.session.observe(move || {
+            if let Some(projection) = weak.upgrade() {
+                projection.sync();
             }
-            let query = entry.text().trim().to_string();
-            if query.is_empty() {
-                projection.reset();
-                return;
-            }
-            let weak = Rc::downgrade(&projection);
-            projection
-                .debounce
-                .replace(Some(glib::timeout_add_local_once(
-                    SEARCH_DEBOUNCE,
-                    move || {
-                        if let Some(projection) = weak.upgrade() {
-                            projection.debounce.borrow_mut().take();
-                            projection.submit(query);
-                        }
-                    },
-                )));
-        });
-        self.search_handler.replace(Some(handler));
+        })));
         let weak = Rc::downgrade(self);
         self.results.connect_visible_child_notify(move |results| {
             let Some(projection) = weak.upgrade() else {
@@ -563,6 +511,7 @@ impl SearchRouteProjection {
                 .map(CollectionCategory::from_name)
                 .unwrap_or_default();
             projection.mount_category(category);
+            projection.session.category.set(category);
         });
     }
 
@@ -629,46 +578,17 @@ impl SearchRouteProjection {
             .set_visible_child_name(if has_results { "results" } else { "empty" });
     }
 
-    fn reset(&self) {
-        self.generation.set(self.generation.get().wrapping_add(1));
-        if let Some(cancellation) = self.cancellation.borrow_mut().take() {
-            cancellation.cancel();
+    fn sync(&self) {
+        self.results
+            .set_visible_child_name(self.session.category.get().name());
+        if self.revision.replace(Some(self.session.revision.get()))
+            == Some(self.session.revision.get())
+        {
+            return;
         }
-        for model in &self.models {
-            model.remove_all();
-        }
-        self.show_results(false);
-        self.status.set_visible_child_name("initial");
-    }
-
-    fn submit(self: &Rc<Self>, query: String) {
-        let generation = self.generation.get().wrapping_add(1);
-        self.generation.set(generation);
-        if let Some(cancellation) = self.cancellation.borrow_mut().take() {
-            cancellation.cancel();
-        }
-        let cancellation = ReadCancellation::new();
-        self.cancellation.replace(Some(cancellation.clone()));
-        self.status.set_visible_child_name("loading");
-        let selected = self.selected.clone();
-        let weak = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let prepared = acquire_search(&selected, query, cancellation).await;
-            let Some(projection) = weak.upgrade() else {
-                return;
-            };
-            if projection.generation.get() != generation {
-                return;
-            }
-            projection.cancellation.borrow_mut().take();
-            match prepared {
-                Ok(items) => projection.apply(items),
-                Err(error) => {
-                    tracing::warn!(%error, "failed to load Search results");
-                    projection.status.set_visible_child_name("error");
-                }
-            }
-        });
+        let items = self.session.items.borrow().clone();
+        self.apply(items);
+        self.status.set_visible_child_name(self.session.status());
     }
 
     fn update_matching(
@@ -713,6 +633,7 @@ impl SearchRouteProjection {
     }
 
     fn resume(&self) {
+        self.sync();
         for category in CollectionCategory::ALL {
             self.sort_model(category);
         }
@@ -761,20 +682,6 @@ impl SearchRouteProjection {
     fn cycle_layout(&self) {
         if let Some(active) = self.active.borrow().as_ref() {
             active.toolbar.cycle_layout();
-        }
-    }
-}
-
-impl Drop for SearchRouteProjection {
-    fn drop(&mut self) {
-        if let Some(handler) = self.search_handler.get_mut().take() {
-            self.search.disconnect(handler);
-        }
-        if let Some(source) = self.debounce.get_mut().take() {
-            source.remove();
-        }
-        if let Some(cancellation) = self.cancellation.get_mut().take() {
-            cancellation.cancel();
         }
     }
 }
@@ -858,8 +765,8 @@ impl CatalogUi {
         }));
     }
 
-    pub fn search_route(self: &Rc<Self>, selected: &SelectedLibrary) -> MountedRoute {
-        let projection = SearchRouteProjection::new(self, selected);
+    pub fn search_route(self: &Rc<Self>) -> MountedRoute {
+        let projection = SearchRouteProjection::new(self);
         let layout_projection = Rc::downgrade(&projection);
         let layout_cycle = Rc::new(move || {
             if let Some(projection) = layout_projection.upgrade() {
@@ -1133,7 +1040,12 @@ fn search_merged_column(
                         (context_shell.upgrade(), context_item.upgrade())
                         && let Some(value) = item_at_from_item::<SearchItem>(&item)
                     {
-                        value.present_context(target, &shell, position);
+                        value.present_context(
+                            target,
+                            &shell,
+                            position,
+                            Rc::clone(&shell.is_current),
+                        );
                     }
                 }),
             );
@@ -1229,7 +1141,7 @@ fn search_favorite_column(shell: &Rc<CatalogUi>) -> gtk::ColumnViewColumn {
                     && let Some(value) = item_at_from_item::<SearchItem>(&item)
                     && value.favorite().is_some()
                 {
-                    value.present_context(target, &shell, position);
+                    value.present_context(target, &shell, position, Rc::clone(&shell.is_current));
                 }
             }),
         );

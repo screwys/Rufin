@@ -975,6 +975,7 @@ fn connect_layout_allocation_owner(shell: &Rc<Shell>) {
     let after_shell = Rc::downgrade(shell);
     owner.set_after_allocate(move |width, _| {
         if let Some(shell) = after_shell.upgrade() {
+            shell.chrome.topbar.allocate_search_popup();
             if let Some(lyrics) = shell.player_ui.selected_lyrics() {
                 lyrics.right_pane.restore_active_row_resize_anchor();
             }
