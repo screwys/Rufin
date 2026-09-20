@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-19 16:16+0000\n"
+"PO-Revision-Date: 2026-09-20 09:29+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
 "Language: ru\n"
@@ -470,7 +470,7 @@ msgid "Backups"
 msgstr "Резервные копии"
 
 msgid "Bar spacing (px)"
-msgstr ""
+msgstr "Интервал между панелями (в пикселях)"
 
 msgid "Bearer token (WebDAV)"
 msgstr "Токен аутентификации (WebDAV)"
@@ -571,7 +571,7 @@ msgid "Choose"
 msgstr "Выбрать"
 
 msgid "Circular spectrum"
-msgstr ""
+msgstr "Круговой спектр"
 
 msgid "Classical"
 msgstr "Классическая"
@@ -709,10 +709,10 @@ msgid "Copy link"
 msgstr "Копировать ссылку"
 
 msgid "Copy preset"
-msgstr ""
+msgstr "Скопировать пресет"
 
 msgid "Copy the current appearance to the clipboard"
-msgstr ""
+msgstr "Скопировать текущий внешний вид в буфер обмена"
 
 msgid "Copy"
 msgstr "Копировать"
@@ -1040,7 +1040,7 @@ msgstr ""
 "Плавное затухание звука при приостановке или возобновлении воспроизведения"
 
 msgid "Fall speed (%)"
-msgstr ""
+msgstr "Скорость затухания (%)"
 
 msgid "Favorite current track"
 msgstr "Добавить текущий трек в избранное"
@@ -1076,7 +1076,7 @@ msgid "Files"
 msgstr "Файлы"
 
 msgid "Filled spectrum"
-msgstr ""
+msgstr "Заполненный спектр"
 
 msgid "Find shares"
 msgstr "Найти общие папки"
@@ -1100,7 +1100,7 @@ msgid "Folders"
 msgstr "Папки"
 
 msgid "Follow the app accent with lighter and darker tones"
-msgstr ""
+msgstr "Используйте более светлые и темные оттенки основного цвета приложения"
 
 msgid "Font family"
 msgstr "Семейство шрифтов"
@@ -1140,8 +1140,6 @@ msgstr "Максимальные высокие частоты"
 msgid "Full"
 msgstr "Полный"
 
-#, fuzzy
-#| msgid "Toggle Fullscreen"
 msgid "Fullscreen"
 msgstr "Полноэкранный режим"
 
@@ -1191,10 +1189,10 @@ msgid "Google Cast"
 msgstr "Google Cast"
 
 msgid "Gradient end"
-msgstr ""
+msgstr "Конечный цвет градиента"
 
 msgid "Gradient start"
-msgstr ""
+msgstr "Начало градиента"
 
 msgid "Green"
 msgstr "Зелёный"
@@ -1452,10 +1450,8 @@ msgstr "Журналы скопированы"
 msgid "Loudness normalization"
 msgstr "Нормализация громкости"
 
-#, fuzzy
-#| msgid "Dynamic background"
 msgid "Lyrics background opacity"
-msgstr "Динамический фон"
+msgstr "Прозрачность фона текста песни"
 
 msgid "Lyrics loaded"
 msgstr "Текст песни загружен"
@@ -1503,7 +1499,7 @@ msgid "Minimum year"
 msgstr "Минимальный год"
 
 msgid "Mirrored bars"
-msgstr ""
+msgstr "Отражённые панели"
 
 msgid "Monday"
 msgstr "Понедельник"
@@ -1538,10 +1534,8 @@ msgstr "Самые пропускаемые"
 msgid "Most played"
 msgstr "Наиболее часто прослушиваемые"
 
-#, fuzzy
-#| msgid "Position"
 msgid "Motion"
-msgstr "Позиция"
+msgstr "Движение"
 
 msgid "Move down"
 msgstr "Переместить вниз"
@@ -1818,7 +1812,7 @@ msgid "Only unplayed tracks"
 msgstr "Только непрослушанные треки"
 
 msgid "Opacity (%)"
-msgstr ""
+msgstr "Прозрачность (%)"
 
 msgid "Open Controller"
 msgstr "Открыть контроллер"
@@ -1881,7 +1875,7 @@ msgid "Other releases"
 msgstr "Другие выпуски"
 
 msgid "Outline bars"
-msgstr ""
+msgstr "Отображать панели"
 
 msgid "Overview"
 msgstr "Обзор"
@@ -1892,10 +1886,8 @@ msgstr "Пароль или токен"
 msgid "Password"
 msgstr "Пароль"
 
-#, fuzzy
-#| msgid "Preset"
 msgid "Paste preset"
-msgstr "Предустановка"
+msgstr "Вставить предустановку"
 
 msgid "Paste"
 msgstr "Вставить"
@@ -1913,10 +1905,10 @@ msgid "Pause"
 msgstr "Приостановить"
 
 msgid "Peak fall speed (% per second)"
-msgstr ""
+msgstr "Максимальная скорость снижения пиков (% в секунду)"
 
 msgid "Peak hold (seconds)"
-msgstr ""
+msgstr "Время удержания пикового значения (в секундах)"
 
 msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
 msgstr ""
@@ -2079,43 +2071,29 @@ msgstr "Подготовка библиотеки…"
 msgid "Preserve pitch"
 msgstr "Сохранить высоту звука"
 
-#, fuzzy
-#| msgid "Preset"
 msgid "Preset 1"
-msgstr "Предустановка"
+msgstr "Предустановка 1"
 
-#, fuzzy
-#| msgid "Preset"
 msgid "Preset 2"
-msgstr "Предустановка"
+msgstr "Предустановка 2"
 
-#, fuzzy
-#| msgid "Preset"
 msgid "Preset 3"
-msgstr "Предустановка"
+msgstr "Предустановка 3"
 
-#, fuzzy
-#| msgid "Preset"
 msgid "Preset 4"
-msgstr "Предустановка"
+msgstr "Предустановка 4"
 
-#, fuzzy
-#| msgid "Preset"
 msgid "Preset 5"
-msgstr "Предустановка"
+msgstr "Предустановка 5"
 
-#, fuzzy
-#| msgid "Preset"
 msgid "Preset saved"
-msgstr "Предустановка"
+msgstr "Предустановка сохранена"
 
 msgid "Preset"
 msgstr "Предустановка"
 
-#, fuzzy
-#| msgid "Preset"
 msgid "Presets"
-msgstr "Предустановка"
+msgstr "Предустановки"
 
 msgid "Prevent automatic metadata refreshes from replacing these values"
 msgstr ""
@@ -2341,10 +2319,8 @@ msgstr "Запрос не удался ({status})"
 msgid "Require SMB encryption"
 msgstr "Требовать шифрование SMB"
 
-#, fuzzy
-#| msgid "Appearance"
 msgid "Reset appearance"
-msgstr "Оформление"
+msgstr "Сбросить настройки внешнего вида"
 
 msgid "Reset to defaults"
 msgstr "Восстановить настройки по умолчанию"
@@ -2359,7 +2335,7 @@ msgid "Restore User State"
 msgstr "Восстановить состояние пользователя"
 
 msgid "Restore defaults without deleting saved presets"
-msgstr ""
+msgstr "Восстановить настройки по умолчанию, не удаляя сохраненные пресеты"
 
 msgid "Restore player layout"
 msgstr "Восстановить макет плеера"
@@ -2377,7 +2353,7 @@ msgid "Retry"
 msgstr "Повторить"
 
 msgid "Rise speed (%)"
-msgstr ""
+msgstr "Скорость увеличения (%)"
 
 msgid "Rock"
 msgstr "Рок"
@@ -2386,7 +2362,7 @@ msgid "Romaji"
 msgstr "Ромадзи"
 
 msgid "Rounded bars"
-msgstr ""
+msgstr "Закруглённые панели"
 
 msgid "Rows"
 msgstr "Строки"
@@ -2455,10 +2431,8 @@ msgstr[1] ""
 msgstr[2] ""
 "Сопоставление сохранено. {matched} совпадений из {total} с путями на сервере"
 
-#, fuzzy
-#| msgid "Saved per server"
 msgid "Saved preset"
-msgstr "Сохранено для каждого сервера"
+msgstr "Сохраненный пресет"
 
 msgid "Saved to"
 msgstr "Сохранено в"
@@ -2562,10 +2536,8 @@ msgstr "Перейти к {time}"
 msgid "Seekbar"
 msgstr "Индикатор прогресса"
 
-#, fuzzy
-#| msgid "Selected folders"
 msgid "Segmented bars"
-msgstr "Выбранные папки"
+msgstr "Сегментированные панели"
 
 msgid "Select All"
 msgstr "Выбрать всё"
@@ -2639,10 +2611,8 @@ msgstr "Установите тип активности в Discord на \"Пр�
 msgid "Settings and sources"
 msgstr "Настройки и источники"
 
-#, fuzzy
-#| msgid "App settings"
 msgid "Settings"
-msgstr "Настройки приложения"
+msgstr "Настройки"
 
 msgid "Share"
 msgstr "Поделиться"
@@ -2676,7 +2646,7 @@ msgid "Show paused status"
 msgstr "Показывать статус \"на паузе\""
 
 msgid "Show peak markers"
-msgstr ""
+msgstr "Показывать пиковые отметки"
 
 msgid "Show ratings in the bottom bar"
 msgstr "Показать оценку в нижней панели"
@@ -2726,10 +2696,8 @@ msgstr "Элемент боковой панели {position}"
 msgid "Sidebar route by position"
 msgstr "Маршрут в боковой панели по расположению"
 
-#, fuzzy
-#| msgid "Show sidebar"
 msgid "Sidebar"
-msgstr "Показать боковую панель"
+msgstr "Боковая панель"
 
 msgid "Sign In in Browser"
 msgstr "Войти в браузере"
@@ -2777,7 +2745,7 @@ msgid "Smart playlists"
 msgstr "Умные плейлисты"
 
 msgid "Solid bars"
-msgstr ""
+msgstr "Сплошные панели"
 
 msgid "Some playlist entries could not be imported"
 msgstr "Некоторые элементы плейлиста не удалось импортировать"
@@ -2813,7 +2781,7 @@ msgid "Sources"
 msgstr "Источники"
 
 msgid "Spectrum line"
-msgstr ""
+msgstr "Линия спектра"
 
 msgid "Sponsor"
 msgstr "Спонсор"
@@ -2836,7 +2804,7 @@ msgid "Stream quality"
 msgstr "Качество потока"
 
 msgid "Style"
-msgstr ""
+msgstr "Стиль"
 
 msgid "Sunday"
 msgstr "Воскресенье"
@@ -2887,7 +2855,7 @@ msgid "This device"
 msgstr "Это устройство"
 
 msgid "This is not a valid Rufin visualizer preset."
-msgstr ""
+msgstr "Это недействительный пресет визуализации для Rufin."
 
 msgid "This is owned by {source}. Regular playlists are synced to your remote."
 msgstr ""
@@ -3023,10 +2991,8 @@ msgstr "Использовать Этот Источник"
 msgid "Use a number above zero"
 msgstr "Используйте число больше нуля"
 
-#, fuzzy
-#| msgid "Accent color"
 msgid "Use accent color"
-msgstr "Акцентный цвет"
+msgstr "Использовать акцентный цвет"
 
 msgid "Use different layout below a threshold width"
 msgstr ""

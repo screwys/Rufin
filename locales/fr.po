@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-19 16:15+0000\n"
+"PO-Revision-Date: 2026-09-20 09:29+0000\n"
 "Last-Translator: Arnaud Constantin <a.constantin@laposte.net>\n"
 "Language-Team: French <https://hosted.weblate.org/projects/rufin/app/fr/>\n"
 "Language: fr\n"
@@ -2457,25 +2457,25 @@ msgid "Search..."
 msgstr "Recherche..."
 
 msgid "Searching Local Network"
-msgstr ""
+msgstr "Recherche du réseau local"
 
 msgid "Searching for devices..."
-msgstr ""
+msgstr "Recherche des appareils..."
 
 msgid "Searching for {provider} servers on the local network..."
-msgstr ""
+msgstr "Recherche de serveurs {provider} sur le réseau local..."
 
 msgid "Searching will start automatically"
-msgstr ""
+msgstr "La recherche commencera automatiquement"
 
 msgid "Searching..."
-msgstr ""
+msgstr "Recherche..."
 
 msgid "Secret storage"
 msgstr ""
 
 msgid "Secure storage"
-msgstr ""
+msgstr "Stockage sécurisé"
 
 msgid "Seek Backward"
 msgstr ""
@@ -2487,37 +2487,38 @@ msgid "Seek playback"
 msgstr ""
 
 msgid "Seek to {time}"
-msgstr ""
+msgstr "Cherchez à {temps}"
 
 msgid "Seekbar"
-msgstr ""
+msgstr "Bar de recherche"
 
 msgid "Segmented bars"
 msgstr ""
 
 msgid "Select All"
-msgstr ""
+msgstr "Tout sélectionner"
 
 msgid "Select Download Folder"
-msgstr ""
+msgstr "Sélectionner le dossier de téléchargement"
 
 msgid "Select Music Folder"
-msgstr ""
+msgstr "Sélectionner le dossier musique"
 
+#, fuzzy
 msgid "Select Source"
-msgstr ""
+msgstr "Sélectionnez Source"
 
 msgid "Select all"
-msgstr ""
+msgstr "Tout sélectionner"
 
 msgid "Select {title}"
-msgstr ""
+msgstr "Sélectionnez {title}"
 
 msgid "Selected folders"
-msgstr ""
+msgstr "Sélectionner les dossiers"
 
 msgid "Selection"
-msgstr ""
+msgstr "Sélection"
 
 msgid "Separate .lrc file"
 msgstr ""
@@ -2627,22 +2628,22 @@ msgid "Show"
 msgstr ""
 
 msgid "Show/hide lyrics"
-msgstr ""
+msgstr "Afficher / masquer les paroles"
 
 msgid "Show/hide right sidebar"
-msgstr ""
+msgstr "Afficher / masquer la barre latérale droite"
 
 msgid "Showcase"
 msgstr ""
 
 msgid "Shuffle off"
-msgstr ""
+msgstr "Lecture aléatoire Off"
 
 msgid "Shuffle on"
-msgstr ""
+msgstr "Lecture aléatoire On"
 
 msgid "Shuffle"
-msgstr ""
+msgstr "Lecture aléatoire"
 
 msgid "Sidebar Items"
 msgstr ""
@@ -2659,28 +2660,28 @@ msgid "Sidebar"
 msgstr "Cacher la barre latérale"
 
 msgid "Sign In in Browser"
-msgstr ""
+msgstr "S'enregistrer avec le navigateur"
 
 msgid "Sign In with Password"
-msgstr ""
+msgstr "S'enregistrer avec mot de passe"
 
 msgid "Sign in with Nextcloud"
-msgstr ""
+msgstr "S'enregistrer avec Nextcloud"
 
 msgid "Sign in with a code"
-msgstr ""
+msgstr "S'enregistrer avec un code"
 
 msgid "Sign in"
-msgstr ""
+msgstr "S'enregistrer"
 
 msgid "SimpMusic"
-msgstr ""
+msgstr "SimpMusic"
 
 msgid "Single"
-msgstr ""
+msgstr "Single"
 
 msgid "Singles"
-msgstr ""
+msgstr "Singles"
 
 msgid "Skip count"
 msgstr ""
@@ -2692,64 +2693,64 @@ msgid "Slate"
 msgstr ""
 
 msgid "Smart Playlist"
-msgstr ""
+msgstr "Playlist intelligente"
 
 msgid "Smart Playlists"
-msgstr ""
+msgstr "Playlists intelligentes"
 
 msgid "Smart playlist tracks"
 msgstr ""
 
 msgid "Smart playlists"
-msgstr ""
+msgstr "Playlists intelligentes"
 
 msgid "Solid bars"
 msgstr ""
 
 msgid "Some playlist entries could not be imported"
-msgstr ""
+msgstr "Certaines entrées des playlists n'ont pas pu importées"
 
 msgid "Song title"
-msgstr ""
+msgstr "Titre"
 
 msgid "Song"
-msgstr ""
+msgstr "Morceau"
 
 msgid "Sort by"
-msgstr ""
+msgstr "Trier par"
 
 msgid "Sort title"
-msgstr ""
+msgstr "Titre de trie"
 
 msgid "Sort"
-msgstr ""
+msgstr "Trie"
 
 msgid "Source by position"
 msgstr ""
 
 msgid "Source to use for cover images and song/artist links"
-msgstr ""
+msgstr "Source à utiliser pour les illustrations et les liens chanson/artiste"
 
 msgid "Source type"
-msgstr ""
+msgstr "Type de source"
 
 msgid "Source"
-msgstr ""
+msgstr "Source"
 
 msgid "Sources"
-msgstr ""
+msgstr "Sources"
 
 msgid "Spectrum line"
 msgstr ""
 
 msgid "Sponsor"
-msgstr ""
+msgstr "Sponsor"
 
 msgid "Start minimized"
-msgstr ""
+msgstr "Démarrer minimisé"
 
 msgid "Starting..."
-msgstr ""
+msgstr "Démarrage..."
 
 msgid "Status display"
 msgstr ""
@@ -2758,13 +2759,13 @@ msgid "Store calculated loudness in supported Local music files"
 msgstr ""
 
 msgid "Stream quality"
-msgstr ""
+msgstr "Qualité de stream"
 
 msgid "Style"
-msgstr ""
+msgstr "Style"
 
 msgid "Sunday"
-msgstr ""
+msgstr "Dimanche"
 
 msgid "Switch Search/Favorites tabs"
 msgstr ""
@@ -2779,13 +2780,13 @@ msgid "Switching library..."
 msgstr ""
 
 msgid "Synced lyrics"
-msgstr ""
+msgstr "Paroles synchronisées"
 
 msgid "System default"
 msgstr ""
 
 msgid "System"
-msgstr ""
+msgstr "Système"
 
 msgid "Target loudness"
 msgstr ""
@@ -2794,22 +2795,22 @@ msgid "Teal"
 msgstr ""
 
 msgid "Techno"
-msgstr ""
+msgstr "Techno"
 
 msgid "Template"
-msgstr ""
+msgstr "Modèle"
 
 msgid "Text"
-msgstr ""
+msgstr "Texte"
 
 msgid "The API token was not accepted. Please connect again."
-msgstr ""
+msgstr "Le jeton d'API n'a pas été accepté. Veuillez vous connecter à nouveau."
 
 msgid "Theme"
-msgstr ""
+msgstr "Thème"
 
 msgid "This device"
-msgstr ""
+msgstr "Cet appareil"
 
 msgid "This is not a valid Rufin visualizer preset."
 msgstr ""
@@ -2818,67 +2819,67 @@ msgid "This is owned by {source}. Regular playlists are synced to your remote."
 msgstr ""
 
 msgid "This isn't available"
-msgstr ""
+msgstr "Ce n'est pas disponible"
 
 msgid "This playlist only accepts {source} tracks"
-msgstr ""
+msgstr "Cette playlist n'accepte que {source} titres"
 
 msgid "This source cannot edit this field"
-msgstr ""
+msgstr "Cette source ne peut pas modifier ce champ"
 
 msgid "Thursday"
-msgstr ""
+msgstr "Jeudi"
 
 msgid "Title (merged)"
-msgstr ""
+msgstr "Titre (fusionné)"
 
 msgid "Title"
-msgstr ""
+msgstr "Titre"
 
 msgid "Toggle Fullscreen"
-msgstr ""
+msgstr "Afficher en plein écran"
 
 msgid "Track number"
-msgstr ""
+msgstr "Numéro de piste"
 
 msgid "Track radio"
 msgstr ""
 
 msgid "Track"
-msgstr ""
+msgstr "Morceau"
 
 msgid "Tracks from every playlist"
-msgstr ""
+msgstr "Titres de chaque playlist"
 
 msgid "Tracks from your five latest albums"
-msgstr ""
+msgstr "Morceaux de vos cinq derniers albums"
 
 msgid "Tracks"
-msgstr ""
+msgstr "Morceaux"
 
 msgid "Transition mode"
-msgstr ""
+msgstr "Mode de transition"
 
 msgid "Translation language"
-msgstr ""
+msgstr "Langue de traduction"
 
 msgid "Troubleshooting"
-msgstr ""
+msgstr "Dépannage"
 
 msgid "Trust self-signed certificate"
-msgstr ""
+msgstr "Certificat autosignal de confiance"
 
 msgid "Tuesday"
-msgstr ""
+msgstr "Mardi"
 
 msgid "Turn off only for a server you control"
 msgstr ""
 
 msgid "Turn off private mode"
-msgstr ""
+msgstr "Désactivez le mode privé"
 
 msgid "Turn on private mode"
-msgstr ""
+msgstr "Activer le mode privé"
 
 msgid "Type to search or create a new playlist"
 msgstr ""
@@ -2887,22 +2888,22 @@ msgid "Type to search"
 msgstr ""
 
 msgid "Typography"
-msgstr ""
+msgstr "Typographie"
 
 msgid "UPnP"
-msgstr ""
+msgstr "UPnP"
 
 msgid "Undo identified value"
 msgstr ""
 
 msgid "Undo"
-msgstr ""
+msgstr "Annuler"
 
 msgid "Unknown artist"
-msgstr ""
+msgstr "Artiste inconnu"
 
 msgid "Unknown disc"
-msgstr ""
+msgstr "Disque inconnu"
 
 msgid "Unlink"
 msgstr ""
@@ -2914,40 +2915,40 @@ msgid "Unmuted"
 msgstr ""
 
 msgid "Untitled"
-msgstr ""
+msgstr "Sans titre"
 
 msgid "Update"
-msgstr ""
+msgstr "Mise à jour"
 
 msgid "Updated Rufin to {version}"
-msgstr ""
+msgstr "Rufin à été mis à jour en {version}"
 
 msgid "Updated Rufin to {version}. Restart to apply."
-msgstr ""
+msgstr "Rufin à été mis à jour en {version}. Redémarrage requis."
 
 msgid "Updating Rufin to {version}..."
-msgstr ""
+msgstr "Mise à jour de Rufin en {version}..."
 
 msgid "Use API key"
-msgstr ""
+msgstr "Utilisez la clé API"
 
 msgid "Use Instant Mix for recommendations"
 msgstr ""
 
 msgid "Use Rufin data folder"
-msgstr ""
+msgstr "Utilisez le dossier de données Rufin"
 
 msgid "Use Saved Login"
-msgstr ""
+msgstr "Utiliser les identifiants enregistrés"
 
 msgid "Use This Source"
-msgstr ""
+msgstr "Utiliser cette source"
 
 msgid "Use a number above zero"
-msgstr ""
+msgstr "Utiliser un nombre supérieur à zéro"
 
 msgid "Use accent color"
-msgstr ""
+msgstr "Utilisez une couleur de contrast"
 
 msgid "Use different layout below a threshold width"
 msgstr ""
@@ -3050,91 +3051,91 @@ msgid "Write EBU R128 tags to files"
 msgstr ""
 
 msgid "Year"
-msgstr ""
+msgstr "Année"
 
 msgid "Yellow"
-msgstr ""
+msgstr "Jaune"
 
 msgid "Yes"
-msgstr ""
+msgstr "Oui"
 
 msgid "Your music belongs here"
 msgstr ""
 
 msgid "Your queue is empty."
-msgstr ""
+msgstr "Votre file d'attente est vide."
 
 msgid "above"
-msgstr ""
+msgstr "dessus"
 
 msgid "after"
-msgstr ""
+msgstr "après"
 
 msgid "before"
-msgstr ""
+msgstr "avant"
 
 msgid "below"
-msgstr ""
+msgstr "dessous"
 
 msgid "contains"
-msgstr ""
+msgstr "contient"
 
 msgid "does not contain"
-msgstr ""
+msgstr "ne contient pas"
 
 msgid "does not equal"
-msgstr ""
+msgstr "n'est pas égal"
 
 msgid "equals"
-msgstr ""
+msgstr "égaux"
 
 msgid "excludes"
-msgstr ""
+msgstr "exclus"
 
 msgid "here"
-msgstr ""
+msgstr "ici"
 
 msgid "is empty"
-msgstr ""
+msgstr "est vide"
 
 msgid "is not empty"
-msgstr ""
+msgstr "n'est pas vide"
 
 msgid "is not"
-msgstr ""
+msgstr "n'est pas"
 
 msgid "is"
-msgstr ""
+msgstr "est"
 
 msgid "kbps"
-msgstr ""
+msgstr "kbps"
 
 msgid "range"
 msgstr ""
 
 msgid "to"
-msgstr ""
+msgstr "de"
 
 msgid "today"
-msgstr ""
+msgstr "aujourd'hui"
 
 msgid "yesterday"
-msgstr ""
+msgstr "hier"
 
 msgid "{count} album"
 msgid_plural "{count} albums"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} album"
+msgstr[1] "{count} albums"
 
 msgid "{count} day ago"
 msgid_plural "{count} days ago"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "depuis {count} jour"
+msgstr[1] "depuis {count} jours"
 
 msgid "{count} folder selected"
 msgid_plural "{count} folders selected"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} dossier sélectionné"
+msgstr[1] "{count} dossiers sélectionnés"
 
 msgid "{count} month ago"
 msgid_plural "{count} months ago"
