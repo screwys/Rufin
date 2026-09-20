@@ -64,7 +64,7 @@ impl CatalogUi {
     ) -> MountedRoute {
         let wrapper = FoldersRouteView::new();
         let search = gtk::SearchEntry::new();
-        ui_shared::controls::set_search_entry_icon(&search);
+        ui_shared::controls::configure_search_entry(&search);
         search.set_placeholder_text(Some(&tr("Search current folder")));
         let toolbar = self.library_toolbar_projection_without_detail(
             LibraryListKey::Tracks,

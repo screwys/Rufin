@@ -319,7 +319,7 @@ fn rebuild_preferences_dialog(
         search_results_group: adw::PreferencesGroup,
         content_stack: gtk::Stack,
     });
-    ui_shared::controls::set_search_entry_icon(&search_entry);
+    ui_shared::controls::configure_search_entry(&search_entry);
     let navigation_controls = PreferencesNavigationControls::new(back);
     search_button.update_property(&[gtk::accessible::Property::Label(&tr("Search"))]);
     close_button.update_property(&[gtk::accessible::Property::Label(&tr("Close"))]);

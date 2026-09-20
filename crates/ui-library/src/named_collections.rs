@@ -188,7 +188,7 @@ impl CatalogUi {
         });
         let content = named_collection_projection::<R>(self, Rc::clone(&sparse), key);
         let search = gtk::SearchEntry::new();
-        ui_shared::controls::set_search_entry_icon(&search);
+        ui_shared::controls::configure_search_entry(&search);
         ui_shared::localization::bind_search_placeholder(&search, "Search");
         let page = self.library_page_shell(LibraryPageShellOptions {
             key,

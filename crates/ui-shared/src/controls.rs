@@ -14,12 +14,22 @@ pub const MORE_ICON: &str = "rufin-more-symbolic";
 const SORT_ORDER_ICON: &str = "rufin-sort-name-symbolic";
 const SORT_ORDER_DESCENDING_ICON: &str = "rufin-sort-name-descending-symbolic";
 
-pub fn set_search_entry_icon(entry: &gtk::SearchEntry) {
+pub fn configure_search_entry(entry: &gtk::SearchEntry) {
     entry
         .first_child()
         .and_downcast::<gtk::Image>()
         .expect("search entry icon")
         .set_icon_name(Some("rufin-search-symbolic"));
+    let click = gtk::GestureClick::new();
+    click.set_button(1);
+    click.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let search = entry.downgrade();
+    click.connect_pressed(move |_, _, _, _| {
+        if let Some(search) = search.upgrade() {
+            search.grab_focus();
+        }
+    });
+    entry.add_controller(click);
 }
 
 pub fn sort_order_icon(descending: bool) -> &'static str {

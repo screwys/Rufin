@@ -78,17 +78,7 @@ pub fn build_right_panel(
     let controls =
         [SidebarPanel::Lyrics, SidebarPanel::Visualizer].map(|panel| (panel, PanelControls::new()));
     visualizer_controls.prepend(&controls[1].1.root);
-    ui_shared::controls::set_search_entry_icon(&queue_search);
-    let search_click = gtk::GestureClick::new();
-    search_click.set_button(1);
-    search_click.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let search = queue_search.downgrade();
-    search_click.connect_pressed(move |_, _, _, _| {
-        if let Some(search) = search.upgrade() {
-            search.grab_focus();
-        }
-    });
-    queue_search.add_controller(search_click);
+    ui_shared::controls::configure_search_entry(&queue_search);
     queue_search.connect_text_notify(|entry| {
         if entry.text().is_empty() {
             entry.remove_css_class("has-query");
