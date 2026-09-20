@@ -164,6 +164,7 @@ fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
 }
 
 fn release_selected_source(shell: &Rc<Shell>) {
+    shell.chrome.topbar.search_session.set_selected(None);
     shell.clear_mounted_routes();
     shell.release_selected_navigation();
     shell.artwork.reset_cover_pipeline_state();
@@ -290,7 +291,12 @@ fn apply_selected_source(
     *shell.source.configured.borrow_mut() = configured;
     shell
         .selected_ui
-        .install(super::selected_ui::SelectedUiSession::new(selected));
+        .install(super::selected_ui::SelectedUiSession::new(selected.clone()));
+    shell
+        .chrome
+        .topbar
+        .search_session
+        .set_selected(Some(selected));
 
     finish_source_assignment(shell, previous_source, next_source);
 }
@@ -306,7 +312,12 @@ fn apply_selected_library_replacement(
     });
     let source_key = selected.source_key;
     *shell.source.configured.borrow_mut() = configured;
-    shell.selected_ui.replace_library(selected);
+    shell.selected_ui.replace_library(selected.clone());
+    shell
+        .chrome
+        .topbar
+        .search_session
+        .set_selected(Some(selected));
     if scope_changed {
         shell.player_ui.refresh_queue_window();
         refresh_context_playlist_picker(shell);

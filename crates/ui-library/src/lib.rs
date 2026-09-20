@@ -40,6 +40,7 @@ mod playlist_entries;
 mod route_shell;
 mod routes;
 mod search;
+pub use search::session::{SEARCH_PREVIEW_LIMIT, SearchSession};
 mod table_links;
 mod table_sizing;
 pub(crate) fn collection_download_change(

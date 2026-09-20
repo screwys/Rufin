@@ -64,6 +64,7 @@ impl Shell {
                 .map(|session| Rc::clone(&session.favorites)),
             window: self.chrome.window.downgrade(),
             global_search: self.chrome.topbar.search.clone(),
+            search_session: Rc::clone(&self.chrome.topbar.search_session),
             current: RefCell::new(None),
             current_track_selections: RefCell::new(Vec::new()),
             track_selections: RefCell::new(Vec::new()),
