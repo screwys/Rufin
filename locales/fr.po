@@ -669,6 +669,11 @@ msgstr ""
 msgid "Columns"
 msgstr "Colonnes"
 
+#, fuzzy
+#| msgid "No lyrics available."
+msgid "Combine lyrics and visualizer"
+msgstr "Pas de paroles disponibles."
+
 msgid "Comment text"
 msgstr ""
 
@@ -853,6 +858,11 @@ msgstr ""
 
 msgid "Couldn’t download Japanese dictionary"
 msgstr ""
+
+#, fuzzy
+#| msgid "Delete playlist file"
+msgid "Create a playlist from queue"
+msgstr "Supprimer le fichier de playlist"
 
 msgid "Create"
 msgstr "Créer"

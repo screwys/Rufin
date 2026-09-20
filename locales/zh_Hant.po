@@ -694,6 +694,11 @@ msgstr "色彩配置"
 msgid "Columns"
 msgstr ""
 
+#, fuzzy
+#| msgid "No lyrics"
+msgid "Combine lyrics and visualizer"
+msgstr "無歌詞"
+
 msgid "Comment text"
 msgstr ""
 
@@ -904,6 +909,11 @@ msgstr "無法搜尋到歌詞"
 
 msgid "Couldn’t download Japanese dictionary"
 msgstr ""
+
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Create a playlist from queue"
+msgstr "刪除播放清單"
 
 msgid "Create"
 msgstr "建立"

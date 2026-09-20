@@ -725,6 +725,11 @@ msgstr "Schéma barev"
 msgid "Columns"
 msgstr "Sloupce"
 
+#, fuzzy
+#| msgid "This isn't available"
+msgid "Combine lyrics and visualizer"
+msgstr "Toto není dostupné"
+
 msgid "Comment text"
 msgstr "Text komentáře"
 
@@ -937,6 +942,11 @@ msgstr "Nepodařilo se vyhledat text skladby"
 
 msgid "Couldn’t download Japanese dictionary"
 msgstr ""
+
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Create a playlist from queue"
+msgstr "Smazat playlist"
 
 msgid "Create"
 msgstr "Vytvořit"

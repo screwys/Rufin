@@ -671,6 +671,11 @@ msgstr "Väriteema"
 msgid "Columns"
 msgstr "Sarakkeet"
 
+#, fuzzy
+#| msgid "This isn't available"
+msgid "Combine lyrics and visualizer"
+msgstr "Tämä ei ole saatavilla"
+
 msgid "Comment text"
 msgstr "Kommenttiteksti"
 
@@ -877,6 +882,11 @@ msgstr "Sanoituksia ei voitu hakea"
 
 msgid "Couldn’t download Japanese dictionary"
 msgstr "Japaninkielistä sanastoa ei voitu ladata"
+
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Create a playlist from queue"
+msgstr "Poista soittolista"
 
 msgid "Create"
 msgstr "Luo"

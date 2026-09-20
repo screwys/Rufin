@@ -697,6 +697,11 @@ msgstr "Krāsu shēma"
 msgid "Columns"
 msgstr "Kolonnas"
 
+#, fuzzy
+#| msgid "Expand lyrics and visualizer"
+msgid "Combine lyrics and visualizer"
+msgstr "Atvērt tekstus un vizualizāciju"
+
 msgid "Comment text"
 msgstr "Komentāra teksts"
 
@@ -883,6 +888,11 @@ msgstr "Nevarēja atrast tekstus"
 
 msgid "Couldn’t download Japanese dictionary"
 msgstr "Nevarēja lejupielādēt japāņu vārdnīcu"
+
+#, fuzzy
+#| msgid "Delete playlist file"
+msgid "Create a playlist from queue"
+msgstr "Dzēst atskaņošanas saraksta failu"
 
 msgid "Create"
 msgstr "Izveidot"
