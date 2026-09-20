@@ -22,6 +22,60 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/api/sources/plex/profiles", post(plex_profiles))
         .route("/api/sources/plex/logins", get(plex_logins))
         .route("/api/sources/plex/servers", post(plex_servers))
+        .route(
+            "/api/integrations/files",
+            get(file_integrations)
+                .post(add_file_integration)
+                .patch(update_file_integration),
+        )
+        .route("/api/integrations/files/edit", get(edit_file_integration))
+}
+
+async fn file_integrations(
+    State(products): State<ProductHandles>,
+) -> axum::Json<Vec<crate::source::FileIntegration>> {
+    axum::Json(products.source.file_integrations())
+}
+
+async fn add_file_integration(
+    State(products): State<ProductHandles>,
+    request: Request<Body>,
+) -> Result<Response<Body>, Error> {
+    let id = completion(
+        products
+            .source
+            .configure_file_integration(body(request).await?),
+    )
+    .await?;
+    Ok(json_response(StatusCode::OK, json!({"id": id})))
+}
+
+async fn update_file_integration(
+    State(products): State<ProductHandles>,
+    request: Request<Body>,
+) -> Result<Response<Body>, Error> {
+    completion(
+        products
+            .source
+            .update_file_integration(body(request).await?),
+    )
+    .await?;
+    Ok(accepted())
+}
+
+async fn edit_file_integration(
+    State(products): State<ProductHandles>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Result<Response<Body>, Error> {
+    let id = query
+        .get("id")
+        .ok_or_else(|| bad_request("id is required"))?;
+    let preset = products
+        .source
+        .file_integration_settings(&sources::SourceId::new(id))
+        .map_err(bad_request)?
+        .ok_or_else(|| bad_request("Connection not found"))?;
+    Ok(json_response(StatusCode::OK, json!(preset)))
 }
 
 async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, Error> {

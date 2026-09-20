@@ -172,8 +172,26 @@ CREATE TABLE IF NOT EXISTS queue_order (
     state TEXT NOT NULL
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS queue_transfer_pages (
+    transfer TEXT NOT NULL,
+    page_offset INTEGER NOT NULL,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (transfer, page_offset)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS connect_media_files (
+    media_uri TEXT NOT NULL,
+    encoding TEXT NOT NULL,
+    revision TEXT NOT NULL,
+    path TEXT NOT NULL,
+    managed INTEGER NOT NULL,
+    hash TEXT,
+    PRIMARY KEY (media_uri, encoding)
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS queue_occurrences (
     queue_occurrence_key INTEGER PRIMARY KEY,
+    received_from_connect INTEGER NOT NULL DEFAULT 0,
     object_id TEXT NOT NULL CHECK (object_id <> ''),
     media_uri TEXT NOT NULL CHECK (media_uri <> ''),
     snapshot_at INTEGER NOT NULL DEFAULT (unixepoch()),

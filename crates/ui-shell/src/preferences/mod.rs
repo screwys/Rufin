@@ -18,6 +18,7 @@ use ui_shared::layout::{
 };
 use ui_shared::popup::present_light_dismiss_dialog;
 
+pub(crate) mod connect;
 mod context_menu;
 pub(crate) mod controller;
 pub(crate) mod dialogs;
@@ -41,6 +42,8 @@ const LISTENBRAINZ_TOKEN_URL: &str = "https://listenbrainz.org/settings/";
 const INTEGRATIONS_ICON_NAME: &str = "rufin-network-workgroup-symbolic";
 
 pub(crate) struct PreferencesState {
+    pub(crate) connect_dialog: gtk::glib::WeakRef<adw::Dialog>,
+    pub(crate) connect_feedback: RefCell<Option<Rc<ui_shared::feedback::ControlFeedbackState>>>,
     pub(crate) secret_storage_row: gtk::glib::WeakRef<adw::ComboRow>,
     pub(crate) dialog: gtk::glib::WeakRef<adw::Dialog>,
     pub(crate) release_history: RefCell<rufin_core::runtime::ReleaseHistory>,

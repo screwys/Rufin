@@ -63,6 +63,7 @@ Rufin's crates try to follow a product ownership model. The goal is to separate 
 | `playback-gstreamer` | the GStreamer playback backend |
 | `rufin` | executable startup, desktop paths, backend construction and native observers |
 | `rufin-core` | shared application runtime, operations, settings, sources and HTTP API |
+| `rufin-connect` | Connect networking, pairing, and profile synchronization|
 | `rufin-controller` | headless executable with optional HTTP access |
 | `scrobbling` | scrobbling services|
 | `secrets` | storage for credentials and service keys |

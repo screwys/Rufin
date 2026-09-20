@@ -52,7 +52,7 @@ const MAX_RANDOM_PLAY_YEAR: u16 = 2050;
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RandomPlayGenreSelection {
     pub source_id: SourceId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub music_folder_id: Option<String>,
     pub genre_id: String,
 }
@@ -101,10 +101,6 @@ impl RandomPlaySettings {
         self.max_year = self
             .max_year
             .map(|year| year.clamp(MIN_RANDOM_PLAY_YEAR, MAX_RANDOM_PLAY_YEAR));
-    }
-
-    fn is_default(&self) -> bool {
-        self == &Self::default()
     }
 }
 
@@ -189,7 +185,7 @@ pub struct Settings {
     pub clear_queue_includes_current: bool,
     #[serde(default)]
     pub playback: PlaybackSettings,
-    #[serde(default, skip_serializing_if = "RandomPlaySettings::is_default")]
+    #[serde(default)]
     pub random_play: RandomPlaySettings,
     #[serde(default)]
     pub home_blocks: Vec<HomeBlockKind>,
@@ -211,7 +207,7 @@ pub struct Settings {
     pub fullscreen_dynamic_background: bool,
     #[serde(default = "default_lyrics_panel_visible")]
     pub fullscreen_background_image: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub queue_lyrics_height: Option<i32>,
     #[serde(default)]
     pub library_lists: Vec<LibraryListSettingsEntry>,

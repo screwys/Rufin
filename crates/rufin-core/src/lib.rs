@@ -3,6 +3,7 @@ mod album_release;
 pub mod api;
 pub mod app;
 pub mod backup;
+pub mod connect;
 pub mod diagnostics;
 mod loudness;
 pub mod paths;

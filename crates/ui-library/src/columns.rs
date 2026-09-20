@@ -219,7 +219,7 @@ where
             return;
         };
         cell.label().set_text(&(value)(&playlist));
-        bind_shell.downloads.bind_download_badge(
+        bind_shell.bind_download_badge(
             &cell.downloaded(),
             collection_is_downloaded(playlist.track_count, playlist.downloaded_count),
         );
@@ -323,7 +323,7 @@ where
             return;
         };
         cell.label().set_text(&(value)(&playlist));
-        bind_shell.downloads.bind_download_badge(
+        bind_shell.bind_download_badge(
             &cell.downloaded(),
             collection_is_downloaded(playlist.track_count, playlist.downloaded_count),
         );
@@ -376,7 +376,7 @@ pub fn song_column_for_key<T: ui_shared::library_fields::TrackPresentation>(
             playing.clone(),
             TrackMergedColumnValues {
                 track: |item: &T| Some(item.media_uri().to_string()),
-                downloaded: |item: &T| item.downloaded(),
+                downloaded: |item: &T| item.download_badge(),
                 artwork: |item: &T| opaque_artwork(item.artwork()),
                 title: |item: &T| item.title().to_string(),
                 subtitle: |item: &T| item.artist().to_string(),
@@ -393,7 +393,7 @@ pub fn song_column_for_key<T: ui_shared::library_fields::TrackPresentation>(
                 0.0,
                 Some(playing.clone()),
                 |item: &T| Some(item.media_uri().to_string()),
-                |item: &T| item.downloaded(),
+                |item: &T| item.download_badge(),
                 |_, item: &T| item.title().to_string(),
             );
             if matches!(
@@ -448,7 +448,7 @@ pub fn song_column_for_key<T: ui_shared::library_fields::TrackPresentation>(
             0.0,
             None,
             |item: &T| Some(item.media_uri().to_string()),
-            |item: &T| item.downloaded(),
+            |item: &T| item.download_badge(),
             move |_, item: &T| {
                 if key == LibraryListKey::AlbumDetailTracks && field == LibraryField::TrackNumber {
                     item.track_number()
@@ -920,7 +920,7 @@ where
             return;
         };
         cell.label().set_text(&(value)(&album));
-        bind_shell.downloads.bind_download_badge(
+        bind_shell.bind_download_badge(
             &cell.downloaded(),
             collection_is_downloaded(album.track_count, album.downloaded_count),
         );
@@ -995,7 +995,7 @@ pub fn album_merged_column(
         cell.bind_subtitle(album_artist_links(&album));
         cell.subtitle()
             .set_visible(!album.display_artist.trim().is_empty());
-        bind_shell.downloads.bind_download_badge(
+        bind_shell.bind_download_badge(
             &cell.downloaded().expect("album cell badge"),
             collection_is_downloaded(album.track_count, album.downloaded_count),
         );
@@ -1261,7 +1261,7 @@ where
             return;
         };
         cell.label().set_text(&(value)(&artist));
-        bind_shell.downloads.bind_download_badge(
+        bind_shell.bind_download_badge(
             &cell.downloaded(),
             collection_is_downloaded(artist.track_count, artist.downloaded_count),
         );

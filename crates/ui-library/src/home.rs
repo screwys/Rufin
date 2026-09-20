@@ -46,7 +46,7 @@ const HOME_ALBUM_GRID_FIELDS: [LibraryField; 2] = [LibraryField::AlbumArtist, Li
 const HOME_TRACK_GRID_FIELDS: [LibraryField; 2] = [LibraryField::Artist, LibraryField::Album];
 const HOME_SHOWCASE_ACTION_MIN_COVER_SIZE: i32 = 200;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 #[expect(
     clippy::large_enum_variant,
     reason = "Home sections are hard-bounded and keep final rows inline"
@@ -72,6 +72,31 @@ struct MountedHomeSection {
 
 impl MountedHomeSection {
     fn replace(&self, items: Vec<HomeItem>) {
+        let same_order = {
+            let previous = self.data.borrow();
+            previous.len() == items.len()
+                && previous.iter().zip(&items).all(|(a, b)| match (a, b) {
+                    (HomeItem::Track(a), HomeItem::Track(b)) => {
+                        a.track.media_uri == b.track.media_uri
+                    }
+                    (HomeItem::Album(a), HomeItem::Album(b)) => {
+                        a.album.media_uri == b.album.media_uri
+                    }
+                    _ => false,
+                })
+        };
+        if same_order {
+            let mut incoming = items.into_iter();
+            self.update(|item| {
+                let next = incoming.next().expect("matching Home section lengths");
+                if *item == next {
+                    return false;
+                }
+                *item = next;
+                true
+            });
+            return;
+        }
         self.data.replace(items);
         self.render();
     }
@@ -97,7 +122,7 @@ impl MountedHomeSection {
         }
     }
 
-    fn update(&self, update: impl Fn(&mut HomeItem) -> bool) {
+    fn update(&self, mut update: impl FnMut(&mut HomeItem) -> bool) {
         let changed = {
             let mut data = self.data.borrow_mut();
             data.iter_mut()

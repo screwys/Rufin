@@ -147,7 +147,7 @@ impl ArtworkTile {
             .request_key
             .borrow()
             .as_ref()
-            .is_some_and(|previous| previous.same_image(&request_key));
+            .is_some_and(|previous| previous.same_asset(&request_key));
         let same_request = self.request_key.borrow().as_ref() == Some(&request_key);
         if same_request && self.request_complete.get() {
             return ArtworkBindOutcome {

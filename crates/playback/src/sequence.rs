@@ -113,6 +113,7 @@ pub struct Sequence {
     repeat_mode: RepeatMode,
     shuffle_enabled: bool,
     revision: u64,
+    content_id: String,
     progress_millis: u64,
     dirty: Option<QueuePersistenceKind>,
     // Position ticks do not change the metadata window.
@@ -129,6 +130,7 @@ impl Sequence {
             repeat_mode: RepeatMode::Off,
             shuffle_enabled: false,
             revision: 0,
+            content_id: library::queue_content_id(&[], &[]),
             progress_millis: 0,
             dirty: None,
             window_dirty: true,
@@ -138,6 +140,7 @@ impl Sequence {
         window: library::QueueRestore,
         revision: u64,
     ) -> Result<Self, SequenceError> {
+        let content_id = library::queue_content_id(&window.entries, &window.order);
         let sequence = Self {
             members: window.entries,
             order: window.order,
@@ -146,6 +149,7 @@ impl Sequence {
             repeat_mode: window.repeat_mode,
             shuffle_enabled: window.shuffled,
             revision,
+            content_id,
             progress_millis: window.progress_millis.max(0) as u64,
             dirty: None,
             window_dirty: true,
@@ -172,6 +176,9 @@ impl Sequence {
     }
     fn changed(&mut self, kind: QueuePersistenceKind) {
         self.revision += 1;
+        if kind != QueuePersistenceKind::State {
+            self.content_id = library::queue_content_id(&self.members, &self.order);
+        }
         self.window_dirty |= kind != QueuePersistenceKind::State;
         self.dirty = Some(self.dirty.map_or(kind, |old| old.max(kind)));
     }
@@ -236,11 +243,24 @@ impl Sequence {
     pub fn revision(&self) -> u64 {
         self.revision
     }
+    pub fn content_id(&self) -> &str {
+        &self.content_id
+    }
     pub fn progress_millis(&self) -> u64 {
         self.progress_millis
     }
     pub fn set_progress_millis(&mut self, value: u64) {
         self.progress_millis = value;
+    }
+    pub(crate) fn set_selected_duration(&mut self, millis: u64) {
+        let selected = self.selected_id().cloned();
+        if let Some(row) = self
+            .rows
+            .iter_mut()
+            .find(|row| Some(&row.occurrence) == selected.as_ref())
+        {
+            Arc::make_mut(row).item.duration_millis = millis.min(i64::MAX as u64) as i64;
+        }
     }
     pub fn set_repeat_mode(&mut self, value: RepeatMode) {
         if self.repeat_mode != value {
@@ -366,6 +386,7 @@ impl Sequence {
         }
         self.selected_index = (!self.order.is_empty()).then_some(0);
         self.trim_rows();
+        self.content_id = library::queue_content_id(&self.members, &self.order);
     }
     pub(crate) fn add_page(
         &mut self,
@@ -619,6 +640,36 @@ mod tests {
         s.add_page(page(0, count), QueueReorderTarget::End, true, None);
         s.take_persistence();
         s
+    }
+    #[test]
+    fn content_identity_tracks_queue_edits_but_not_playback_position() {
+        let mut queue = sequence(4);
+        let original = queue.content_id().to_owned();
+        queue.activate_index(2);
+        queue.set_progress_millis(12_000);
+        queue.set_repeat_mode(RepeatMode::All);
+        assert_eq!(queue.content_id(), original);
+        let restored = Sequence::from_window(queue.snapshot(), 0).unwrap();
+        assert_eq!(restored.content_id(), original);
+        queue.reorder(
+            &[OccurrenceId::from("entry:3")],
+            &QueueReorderTarget::Before(OccurrenceId::from("entry:0")),
+        );
+        assert_ne!(queue.content_id(), original);
+        assert_eq!(
+            queue.content_id(),
+            library::queue_content_id(&queue.members, &queue.order)
+        );
+        queue.add_page(page(8, 1), QueueReorderTarget::End, false, None);
+        assert_eq!(
+            queue.content_id(),
+            library::queue_content_id(&queue.members, &queue.order)
+        );
+        queue.random_start(17);
+        assert_eq!(
+            queue.content_id(),
+            library::queue_content_id(&queue.members, &queue.order)
+        );
     }
     #[test]
     fn restored_membership_hydrates_a_later_duplicate_on_navigation() {

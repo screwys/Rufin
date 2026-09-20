@@ -3,6 +3,11 @@ all-features = true
 
 [advisories]
 ignore = [
+    { id = "RUSTSEC-2023-0089", reason = "Iroh and Loro pull postcard -> heapless 0.7 -> atomic-polyfill. Maintenance advisory; remove when upstream dependencies drop heapless 0.7." },
+    { id = "RUSTSEC-2024-0370", reason = "iroh-blobs and bao-tree use genawaiter -> genawaiter-proc-macro -> proc-macro-error. Maintenance advisory in a build-time macro dependency; remove when upstream replaces it." },
+    { id = "RUSTSEC-2026-0247", reason = "Loro 1.16 uses im -> bitmaps. Maintenance advisory; remove when Loro replaces im." },
+    { id = "RUSTSEC-2026-0248", reason = "Loro 1.16 uses im. Maintenance advisory; remove when Loro replaces im." },
+    { id = "RUSTSEC-2026-0251", reason = "Loro 1.16 uses im -> sized-chunks. Maintenance advisory; remove when Loro replaces im." },
     { id = "RUSTSEC-2023-0071", reason = "rsa is pulled by smb -> sspi -> picky; Rufin enables only NTLM, with Kerberos and PKU2U disabled, so the affected RSA private-key operations are unused. Reassess if SMB authentication features change." },
     { id = "RUSTSEC-2024-0436", reason = "lofty uses paste, can be removed if they change it to pastey" },
 ]

@@ -166,15 +166,21 @@ fn generate_srpm_inner(
             .arg(temp),
         "tar",
     )?;
-    run(
-        Command::new("cargo")
-            .current_dir(&source_tree)
-            .args(["vendor", "--locked", "--versioned-dirs", "vendor"])
-            .stdin(Stdio::null()),
-        "cargo vendor",
+    let vendor_config = Command::new("cargo")
+        .current_dir(&source_tree)
+        .args(["vendor", "--locked", "--versioned-dirs", "cargo-vendor"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::inherit())
+        .output()?;
+    if !vendor_config.status.success() {
+        return Err("cargo vendor failed".into());
+    }
+    fs::write(
+        source_tree.join("cargo-vendor/git-sources.toml"),
+        git_source_config(&String::from_utf8(vendor_config.stdout)?),
     )?;
     #[cfg(unix)]
-    clear_rust_source_executable_bits(&source_tree.join("vendor"))?;
+    clear_rust_source_executable_bits(&source_tree.join("cargo-vendor"))?;
 
     let timestamp_output = Command::new("git")
         .current_dir(root)
@@ -203,7 +209,7 @@ fn generate_srpm_inner(
             .arg(&staged_vendor)
             .args(["-C"])
             .arg(&source_tree)
-            .arg("vendor"),
+            .arg("cargo-vendor"),
         "tar",
     )?;
     set_archive_permissions(&staged_vendor)?;
@@ -419,13 +425,30 @@ fn verify_lock_sources(lock: &str) -> Result<()> {
         line.strip_prefix("source = \"")
             .and_then(|value| value.strip_suffix('"'))
     }) {
-        if source != REGISTRY_SOURCE {
+        if source != REGISTRY_SOURCE && crate::generate::locked_git_source(source).is_err() {
             return Err(
                 format!("Cargo.lock contains an unsupported remote source: {source}").into(),
             );
         }
     }
     Ok(())
+}
+
+fn git_source_config(config: &str) -> String {
+    let mut output = String::new();
+    let mut section = String::new();
+    for line in config.lines().chain(std::iter::once("[end]")) {
+        if line.starts_with('[') {
+            if section.lines().any(|line| line.starts_with("git = ")) {
+                output.push_str(&section);
+                output.push('\n');
+            }
+            section.clear();
+        }
+        section.push_str(line);
+        section.push('\n');
+    }
+    output
 }
 
 fn refuse_existing_artifacts<'a>(
@@ -465,7 +488,9 @@ fn run(command: &mut Command, label: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RpmSource, select_source, verify_lock_sources, verify_spec_linux_install};
+    use super::{
+        RpmSource, git_source_config, select_source, verify_lock_sources, verify_spec_linux_install,
+    };
 
     #[test]
     fn candidate_ref_is_distinct_from_a_signed_release_tag() {
@@ -477,9 +502,18 @@ mod tests {
     }
 
     #[test]
-    fn remote_git_dependencies_are_rejected() {
+    fn git_dependencies_require_a_locked_commit_and_keep_source_replacement() {
         let lock = "source = \"git+https://example.com/dependency\"\n";
         assert!(verify_lock_sources(lock).is_err());
+        verify_lock_sources("source = \"git+https://example.com/dependency?rev=772ebb69d539bf5444cdc358867c98ca3cd6ea81#772ebb69d539bf5444cdc358867c98ca3cd6ea81\"\n").unwrap();
+        let git = "[source.\"git+https://example.com/dependency?rev=abc\"]\ngit = \"https://example.com/dependency\"\nrev = \"abc\"\nreplace-with = \"vendored-sources\"\n";
+        let config = format!(
+            "[source.crates-io]\nreplace-with = \"vendored-sources\"\n\n{git}\n[source.vendored-sources]\ndirectory = \"cargo-vendor\"\n"
+        );
+        let selected = git_source_config(&config);
+        assert!(selected.contains(git));
+        assert!(!selected.contains("[source.crates-io]"));
+        assert!(!selected.contains("[source.vendored-sources]"));
     }
 
     #[test]

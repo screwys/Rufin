@@ -201,6 +201,8 @@ pub async fn build(
         dictionary_toast: RefCell::new(None),
     };
     let preferences = PreferencesState {
+        connect_dialog: gtk::glib::WeakRef::new(),
+        connect_feedback: RefCell::new(None),
         secret_storage_row: gtk::glib::WeakRef::new(),
         dialog: gtk::glib::WeakRef::new(),
         release_history: RefCell::new(release_history),
@@ -534,6 +536,7 @@ pub async fn build(
     apply_sidebar_media_visibility(Rc::clone(&shell.player_ui));
     shell.player_ui.request_initial_lyrics_if_needed();
     install_product_event_receivers(&shell, receivers);
+    crate::preferences::connect::install(&shell);
     let weak_shell = Rc::downgrade(&shell);
     gtk::glib::spawn_future_local(async move {
         while let Ok(storage) = secret_storage_fallbacks.recv().await {

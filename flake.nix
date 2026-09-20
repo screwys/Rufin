@@ -37,6 +37,7 @@
                 ./README.md
                 ./cmake
                 ./crates
+                ./vendor
                 ./data/icons/hicolor
                 ./data/io.github.screwys.Rufin.desktop
                 ./data/io.github.screwys.Rufin.metainfo.xml

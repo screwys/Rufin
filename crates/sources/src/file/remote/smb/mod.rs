@@ -370,6 +370,26 @@ impl SmbClient {
         .await
     }
 
+    pub async fn create_directory(&self, path: &str) -> SourceResult<()> {
+        let client = Arc::clone(self.client());
+        let failed = Arc::clone(&self.failed);
+        let target = self.path(path)?;
+        blocking(move || {
+            let mut args = FileCreateArgs::make_create_new(
+                Default::default(),
+                CreateOptions::new().with_directory_file(true),
+            );
+            args.disposition = smb_msg::CreateDisposition::OpenIf;
+            let resource = client
+                .create_file(&target, &args)
+                .map_err(|error| record_error(&failed, error))?;
+            handle(&resource)
+                .close()
+                .map_err(|error| record_error(&failed, error))
+        })
+        .await
+    }
+
     pub async fn write(file: &File, offset: u64, bytes: &[u8]) -> SourceResult<usize> {
         let handle = Arc::clone(file.handle());
         let failed = Arc::clone(&file.failed);

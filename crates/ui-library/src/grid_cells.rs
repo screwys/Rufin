@@ -717,7 +717,7 @@ impl<T: ui_shared::library_fields::TrackPresentation> ReusableCollectionGridCell
         );
         self.body
             .bind(row.title(), |value| (self.field)(position, &row, value));
-        self.body.set_download_target(&shell, row.downloaded());
+        self.body.set_download_target(&shell, row.download_badge());
         set_grid_favorite(&self.favorite, Some(row.favorite()));
         self.current.replace(Some(row));
         self.position.set(position);
@@ -953,7 +953,7 @@ impl ReusableCollectionGridCell<ArtistRow> for ArtistGridCell {
         });
         self.body.set_download_target(
             &shell,
-            collection_is_downloaded(row.track_count, row.downloaded_count),
+            !shell.local_source && collection_is_downloaded(row.track_count, row.downloaded_count),
         );
         set_grid_favorite(&self.favorite, Some(row.favorite));
         self.current.replace(Some(row));
@@ -1008,7 +1008,7 @@ impl ReusableCollectionGridCell<AlbumRow> for AlbumGridCell {
         });
         self.body.set_download_target(
             &shell,
-            collection_is_downloaded(row.track_count, row.downloaded_count),
+            !shell.local_source && collection_is_downloaded(row.track_count, row.downloaded_count),
         );
         set_grid_favorite(&self.favorite, Some(row.favorite));
         self.current.replace(Some(row));

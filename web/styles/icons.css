@@ -208,3 +208,9 @@
 .icon[data-icon="player-more"] {
   mask-image: url("/icons/rufin-player-more-symbolic.svg");
 }
+
+.icon[data-icon="copy"] {
+  mask-image: url("/icons/rufin-edit-copy-symbolic.svg");
+}
+
+.icon[data-icon="info"] { mask-image: url("/icons/rufin-help-about-symbolic.svg"); }

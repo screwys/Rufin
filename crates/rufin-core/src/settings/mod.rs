@@ -1,4 +1,5 @@
 pub mod app;
+mod connect;
 pub mod context_menu;
 pub mod layout;
 mod secret_storage;
@@ -92,8 +93,19 @@ pub(crate) struct SavedLocalAccess {
 pub(crate) struct SourceSettings {
     #[serde(default)]
     pub(crate) configured: Vec<ConfiguredSource>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) integrations: Vec<ConfiguredSource>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) selected_source_id: Option<SourceId>,
+}
+
+impl SourceSettings {
+    pub(crate) fn connections(&self) -> impl Iterator<Item = &ConfiguredSource> {
+        self.configured.iter().chain(&self.integrations)
+    }
+    pub(crate) fn connections_mut(&mut self) -> impl Iterator<Item = &mut ConfiguredSource> {
+        self.configured.iter_mut().chain(&mut self.integrations)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq)]

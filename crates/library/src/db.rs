@@ -502,6 +502,7 @@ async fn prepare_catalog(
                 .execute(&mut writer)
                 .await?;
             schema::initialize_local_activity(&mut writer).await?;
+            crate::connect::initialize(&mut writer).await?;
             sqlx::raw_sql("PRAGMA optimize=0x10002")
                 .execute(&mut writer)
                 .await?;

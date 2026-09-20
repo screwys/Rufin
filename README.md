@@ -1,17 +1,23 @@
 <h1>
   Rufin
 </h1>
+<p align="center">
   <a href="https://matrix.to/#/#rufin:matrix.org"><img alt="Matrix" src="https://img.shields.io/badge/matrix-%23rufin-red?logo=matrix"></a>
-  <a href="Cargo.toml"><img alt="Rust 1.95+" src="https://img.shields.io/badge/rust-1.95%2B-f74c00?logo=rust"></a>
+  <a href="Cargo.toml"><img alt="Rust 1.96+" src="https://img.shields.io/badge/rust-1.96%2B-f74c00?logo=rust"></a>
   <a href="LICENSE"><img alt="License: GPL-3.0+" src="https://img.shields.io/badge/license-GPL--3.0%2B-blue.svg"></a>
-  <a href="https://gitlab.gnome.org/GNOME/libadwaita/"><img alt="GTK 4 libadwaita" src="https://img.shields.io/badge/GTK%204-libadwaita-3584E4?logo=gnome&amp;logoColor=white&amp;labelColor=2E3436"></a>
+  <a href="https://gstreamer.freedesktop.org/"><img alt="GStreamer 1.26+" src="https://img.shields.io/badge/GStreamer-1.26%2B-3584E4?logo=gstreamer&amp;logoColor=white&amp;labelColor=2E3436"></a>
+  <br>
   <a href="https://flathub.org/apps/io.github.screwys.Rufin"><img alt="Flathub installs" src="https://img.shields.io/flathub/downloads/io.github.screwys.Rufin?logo=flathub&amp;label=flathub&amp;color=4A86CF"></a>
   <a href="https://aur.archlinux.org/packages/rufin-bin"><img alt="AUR version" src="https://img.shields.io/aur/version/rufin-bin?logo=archlinux&amp;label=AUR&amp;color=1793D1"></a>
+  <a href="https://search.nixos.org/packages?channel=unstable&amp;show=rufin&amp;query=rufin"><img alt="nixpkgs version" src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2FNixOS%2Fnixpkgs%2Fnixos-unstable%2Fpkgs%2Fby-name%2Fru%2Frufin%2Fpackage.nix&amp;search=version+%3D+%22%28%5B%5E%22%5D%2B%29%22&amp;replace=%241&amp;label=nixpkgs&amp;logo=nixos&amp;color=5277C3"></a>
   <a href="https://hosted.weblate.org/projects/rufin/"><img alt="Translate Rufin on Weblate" src="https://img.shields.io/badge/translate-Weblate-2ECCAA?logo=weblate&amp;logoColor=white"></a>
-  
+</p>
 
+<img align="right" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="80" height="80">
 
-<img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="128">Rufin is a powerful, fast and easy to use native music player for local/remote folders and music servers, available on [multiple platforms](#installation). You can bring music from any combination of sources into a single listening session with app-wide playlists and smart playlists. Rufin offers a rich library browsing and management experience while making the most of each source's unique features. It can be run headless, scripted, or controlled from its Web UI.
+Rufin is a native music player for local and remote folders and music servers, available on [multiple platforms](#installation). Browse and manage your libraries, combine sources in playlists and smart playlists, and sync devices with Rufin Connect. Rufin also supports headless use, scripting and browser control through a Web UI.
+
+<br clear="all">
 
 ![Rufin](data/screenshots/Rufin_full.png)
 
@@ -33,10 +39,10 @@
 
 ## 🎵 Playback
 
-- True gapless playback and configurable equal-power crossfade mode 
+- True gapless playback and configurable equal-power crossfade mode
 - ReplayGain/EBU R128 analysis and true-peak measurement
 - 10-band equalizer with presets, perceptual/linear volume scale preference and fade on play/pause
-- Auto DJ that keeps the queue filled; server recommendations when available with a smart local fallback 
+- Auto DJ that keeps the queue filled; server recommendations when available with a smart local fallback
 - Random play with filters for track count, year range, genre and played/unplayed status
 - Optional waveform seekbar; waveforms are generated for the current track and cached
 - Fullscreen player with visualizer
@@ -62,6 +68,15 @@
 - Granular import/export backup options including credentials, automatic backups with password protection available
 - Listening activity can be exported as Last.fm/ListenBrainz compatible `.csv` files
 
+## ✨ Rufin Connect
+
+- Shares sources, credentials, playlists, favorites, pins, preferences, listening history between paired devices
+- Uses [Iroh](https://github.com/n0-computer/iroh) for encrypted connections, discovery, relays and device-to-device transfers
+- Keeps playback queues, downloaded files, local paths and encoding choices per device
+- Continue playback where another device left off
+- Supports encrypted profile files through local folders, WebDAV/Nextcloud, and Samba shares
+- Local folder sync can be done with solutions like Syncthing or optional Iroh relays
+
 ## 🌍️ Discovery
 
 - Server-provided artist, track, album, playlist and genre radios, including recommendations from server plugins
@@ -81,9 +96,9 @@
 ## 🛰️ Headless/Controller
 
 - Run release binaries without the desktop interface with `rufin --headless`; use `cargo run -p rufin-controller` for the separate GTK-free build
-- Enable the Controller for browser access or scripting through the HTTP API, inside the app or from terminal with: 
+- Enable the Controller for browser access or scripting through the HTTP API, inside the app or from terminal with:
 ```bash
-export RUFIN_API_TOKEN="your_token"  
+export RUFIN_API_TOKEN="your_token"
 rufin --headless --listen
 ```
 - Control playback, browse your library, manage sources and playlists, and view the queue & lyrics from a browser
@@ -93,7 +108,7 @@ rufin --headless --listen
 ## 🖥️ Interface
 
 - Fast GTK 4/libadwaita interface with light/dark themes and accent customization
-- Fully usable across different window sizes, including a separate compact layout 
+- Fully usable across different window sizes, including a separate compact layout
 - Adjustable sidebars with separate presets for different window sizes
 - Configurable layouts, context menus and GTK menus
 - Extensive keyboard shortcuts catalog
@@ -142,7 +157,7 @@ yay -S rufin-bin
 
 Building from the source:
 ```bash
-yay -S rufin-git 
+yay -S rufin-git
 ```
 
 
@@ -159,7 +174,7 @@ To add it to your profile:
 nix profile install nixpkgs#rufin
 ```
 
-You can also run `main` or an older release directly. 
+You can also run `main` or an older release directly.
 
 ```bash
 nix run github:screwys/Rufin/main
@@ -211,7 +226,7 @@ This makes just commands go through the container development. If you want to bu
 
 ### Native build
 
-Building Rufin requires Rust 1.95 or newer, CMake 3.25 or newer, Ninja,
+Building Rufin requires Rust 1.96 or newer, CMake 3.25 or newer, Ninja,
 pkg-config, GTK 4.20 or newer, libadwaita 1.9 or newer, and GStreamer 1.26 or
 newer. Packaging and translation checks additionally require `msgfmt` from gettext.
 
@@ -320,7 +335,7 @@ To delete Rufin's cache as well, delete its cache folder based on your operating
 
 # Contributing
 
-To contribute code, please see [CONTRIBUTING.md](CONTRIBUTING.md). 
+To contribute code, please see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Translations
 
@@ -347,7 +362,7 @@ Icon is designed by [Commenter25](https://commenter.cc) and it is licensed under
 - Chinese (Traditional) translation by [Tsung-Ying Yu](https://github.com/an920107)
 - Finnish translation by Jiri Grönroos
 - French translation by Arnaud Constantin
-- Italian translation by Patrick Canal 
+- Italian translation by Patrick Canal
 
 ## Donations
 

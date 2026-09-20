@@ -41,6 +41,7 @@ pub(crate) fn scrobbling_page(
     let page: adw::PreferencesPage =
         ui_shared::ui_resource::object(&builder, resource, "integrations_page");
     super::controller::bind(shell, &page, &builder, resource);
+    super::source::login::bind_integrations(shell, &page, &builder);
     let settings = shell.products.scrobbling.preferences();
     ui_shared::objects!(builder, resource, {
         lastfm_enabled: adw::SwitchRow,

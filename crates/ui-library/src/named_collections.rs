@@ -689,7 +689,7 @@ impl<T: NamedCollectionRow> ReusableCollectionGridCell<T> for NamedCollectionGri
         self.body
             .bind(item.name(), |field| DetailLinks::text(&item.field(field)));
         self.body
-            .set_download_target(&self.shell, item.downloaded());
+            .set_download_target(&self.shell, !self.shell.local_source && item.downloaded());
         self.current.replace(Some(item));
     }
 
@@ -814,9 +814,7 @@ fn named_collection_column<T: NamedCollectionRow>(
                     return;
                 };
                 cell.label().set_text(row.name());
-                bind_shell
-                    .downloads
-                    .bind_download_badge(&cell.downloaded(), row.downloaded());
+                bind_shell.bind_download_badge(&cell.downloaded(), row.downloaded());
             });
             factory.connect_unbind(|_, item| {
                 if let Some(item) = item.downcast_ref::<gtk::ListItem>()

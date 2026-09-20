@@ -102,6 +102,9 @@ function renderSources(configured) {
     card.append(sourceIcon(item.kind), label, edit, actions);
     $("content").append(card);
   }
+  const integrations = el("section", "");
+  $("content").append(integrations);
+  run(() => renderIntegrations(integrations));
 }
 
 let previousOperation = "";
@@ -151,25 +154,33 @@ function showSourceProgress(value) {
 }
 
 let editingSource = null;
+let integrationSaved = null;
 
-async function openSource(item = null) {
-  editingSource = item
-    ? await api(`/sources/edit?${new URLSearchParams({ id: item.id })}`)
-    : null;
+async function openSource(item = null, integration = null) {
+  integrationSaved = integration?.saved || null;
+  if (item && integration) {
+    const preset = await api(`/integrations/files/edit?${new URLSearchParams({ id: item.id })}`);
+    editingSource = { id: item.id, kind: item.kind, preset };
+  } else {
+    editingSource = item ? await api(`/sources/edit?${new URLSearchParams({ id: item.id })}`) : null;
+  }
   $("source-form").reset();
   $("source-error").textContent = "";
-  $("source-title").textContent = item ? tr("Edit Source") : tr("Add Source");
-  $("source-submit").textContent = item ? tr("Save") : tr("Add Source");
+  $("source-title").textContent = integration ? tr("File connection") : item ? tr("Edit Source") : tr("Add Source");
+  $("source-submit").textContent = item ? tr("Save") : integration ? tr("Connect") : tr("Add Source");
+  $("source-label").placeholder = integration ? tr("Connection name") : tr("My music");
   $("source-kind").querySelector('[value="plex"]')?.remove();
   if (editingSource?.kind === "plex")
     $("source-kind").append(new Option(tr("Plex"), "plex"));
   $("source-kind").value = editingSource
     ? { webdav: "web_dav", subsonic: "open_subsonic" }[editingSource.kind] ||
       editingSource.kind
-    : "local";
-  $("source-kind").disabled = !!editingSource;
+    : integration ? (integration.kind === "webdav" ? "web_dav" : "smb") : "local";
+  $("source-kind").disabled = !!editingSource || !!integration;
+  $("source-kind").hidden = !!integration;
+  document.querySelector('label[for="source-kind"]').hidden = !!integration;
   sourceFields();
-  const fileSource = editingSource && ["local", "smb", "webdav"].includes(editingSource.kind);
+  const fileSource = !integration && editingSource && ["local", "smb", "webdav"].includes(editingSource.kind);
   $("source-playlist-save-row").hidden = !fileSource;
   if (fileSource) $("source-playlist-save").checked = (await api(`/playlists/source-settings?source=${encodeURIComponent(item.id)}`)).auto_save;
   if (editingSource?.kind === "local")
@@ -187,6 +198,36 @@ async function openSource(item = null) {
       "password";
   }
   $("source-dialog").showModal();
+}
+
+export async function chooseFileIntegration(kind, saved) {
+  const connections = (await api("/integrations/files")).filter((item) => item.kind === kind);
+  if (!connections.length) return openSource(null, {kind, saved});
+  const dialog = $("integration-reuse-dialog");
+  const choices = $("integration-reuse");
+  choices.replaceChildren(...connections.map((item) => new Option(item.name, item.id)));
+  dialog.returnValue = "cancel";
+  dialog.addEventListener("close", () => {
+    if (dialog.returnValue === "use") run(() => saved(choices.value));
+    if (dialog.returnValue === "new") run(() => openSource(null, {kind, saved}));
+  }, {once: true});
+  dialog.showModal();
+}
+
+async function renderIntegrations(host) {
+  const connections = await api("/integrations/files");
+  if (!host.isConnected) return;
+  host.replaceChildren(el("h2", "", tr("Integrations")));
+  const saved = () => renderIntegrations(host);
+  const actions = el("div", "source-actions");
+  for (const [kind, title] of [["webdav", tr("WebDAV / Nextcloud")], ["smb", tr("SMB / Samba")]])
+    actions.append(button(title, () => openSource(null, {kind, saved})));
+  host.append(actions);
+  for (const item of connections) {
+    const card = el("div", "list-card");
+    card.append(sourceIcon(item.kind), el("strong", "label", item.name), button(tr("Edit"), () => openSource(item, {kind: item.kind, saved}), "edit"));
+    host.append(card);
+  }
 }
 
 function sourceFields() {
@@ -310,6 +351,7 @@ function init() {
       if (name === "htmx:configRequest") {
         event.detail.headers["Content-Type"] = "application/json";
         event.detail.verb = editingSource ? "patch" : "post";
+        event.detail.path = integrationSaved ? "/api/integrations/files" : "/api/sources";
       }
     },
     encodeParameters() {
@@ -326,6 +368,14 @@ function init() {
       const result = JSON.parse(xhr.responseText);
       if (!event.detail.successful) {
         $("source-error").textContent = result.error;
+        return;
+      }
+      if (integrationSaved) {
+        const saved = integrationSaved;
+        const id = editingSource?.id || result.id;
+        $("source-dialog").close();
+        $("password").value = "";
+        await saved(id);
         return;
       }
       if (!editingSource) state.source = result.id;
@@ -360,7 +410,7 @@ function sourceInput() {
     input = {
       type: kind,
       data: {
-        name: name || "My music",
+        name: name || (integrationSaved ? (kind === "smb" ? tr("SMB / Samba") : tr("WebDAV")) : "My music"),
         settings: {
           url,
           alternate_urls: [],

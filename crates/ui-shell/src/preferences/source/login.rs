@@ -1,4 +1,5 @@
 mod files;
+pub(crate) use files::{bind_integrations, choose_integration};
 mod jellyfin_emby;
 mod plex;
 

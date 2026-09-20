@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use std::task::Poll;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -29,6 +29,37 @@ const MAX_ACTIVE_DOWNLOADS: usize = 3;
 pub struct Downloads {
     root: Arc<PathBuf>,
     commands: Sender<Command>,
+    connect: Arc<Mutex<Option<Weak<dyn ConnectDownload>>>>,
+}
+
+/// Connect supplies peer media; this actor retains download scheduling and files.
+pub trait ConnectDownload: Send + Sync {
+    fn enabled(&self) -> bool;
+    fn extension(&self) -> Option<&'static str>;
+    fn reuse<'a>(
+        &'a self,
+        uri: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, String>> + Send + 'a>>;
+    fn destination<'a>(
+        &'a self,
+        uri: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<PathBuf>, String>> + Send + 'a>>;
+    fn finish<'a>(
+        &'a self,
+        file: library::ConnectMediaFile,
+        destination: &'a Path,
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
+    fn remove<'a>(
+        &'a self,
+        uri: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<usize, String>> + Send + 'a>>;
+    fn transfer<'a>(
+        &'a self,
+        uri: &'a str,
+        partial: &'a Path,
+        extension: Option<&'a str>,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Pin<Box<dyn Future<Output = sources::SourceResult<library::ConnectMediaFile>> + Send + 'a>>;
 }
 
 /// Holds the existing download actor at a completed command boundary during restore.
@@ -52,6 +83,7 @@ enum Command {
         subject: DownloadSubject,
         media_uris: Vec<String>,
     },
+    ConnectChanged,
     Remove {
         media_uris: Vec<String>,
         notify: bool,
@@ -445,6 +477,7 @@ struct ActiveDownload {
     paths: DownloadPaths,
     cancellation: Option<tokio::sync::oneshot::Sender<()>>,
     task: tokio::task::JoinHandle<Result<(), DownloadFailure>>,
+    connect_receipt: Arc<Mutex<Option<library::ConnectMediaFile>>>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
@@ -677,6 +710,7 @@ struct Actor {
     database: Database,
     events: Sender<DownloadEvent>,
     transfers: Arc<TransferClients>,
+    connect: Arc<Mutex<Option<Weak<dyn ConnectDownload>>>>,
     prepared_rules: Sender<PreparedRules>,
     attached: HashMap<SourceId, AttachedSource>,
     settings: HashMap<SourceId, SourceDownloadSettings>,
@@ -685,9 +719,13 @@ struct Actor {
     jobs: HashMap<Option<SourceId>, Vec<DownloadJob>>,
     paused: bool,
     next_job: u64,
+    connect_after: Option<String>,
 }
 
 impl Downloads {
+    pub fn install_connect(&self, connect: Weak<dyn ConnectDownload>) {
+        *self.connect.lock().unwrap_or_else(|p| p.into_inner()) = Some(connect);
+    }
     pub fn default_directory(&self) -> &Path {
         &self.root
     }
@@ -704,6 +742,7 @@ impl Downloads {
         let downloads = Self {
             root: Arc::new(root),
             commands,
+            connect: Arc::new(Mutex::new(None)),
         };
         runtime.spawn(run(
             Actor {
@@ -711,6 +750,7 @@ impl Downloads {
                 database,
                 events,
                 transfers: Arc::new(TransferClients::default()),
+                connect: Arc::clone(&downloads.connect),
                 prepared_rules,
                 attached: HashMap::new(),
                 settings: settings
@@ -722,6 +762,7 @@ impl Downloads {
                 jobs: HashMap::new(),
                 paused: false,
                 next_job: 0,
+                connect_after: None,
             },
             receiver,
             rule_results,
@@ -762,6 +803,10 @@ impl Downloads {
 
     pub fn remove(&self, media_uris: Vec<String>, notify: bool) {
         self.send(Command::Remove { media_uris, notify });
+    }
+
+    pub fn connect_changed(&self) {
+        self.send(Command::ConnectChanged);
     }
 
     pub fn library_changed(&self, source_id: SourceId) {
@@ -856,6 +901,10 @@ async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiv
             actor.apply_prepared_rules(prepared, &mut active).await;
             continue;
         }
+        if actor.fill_connect_collection().await {
+            tokio::task::yield_now().await;
+            continue;
+        }
         actor.fill_slots(&mut active).await;
         if !active.is_empty() {
             tokio::select! {
@@ -912,6 +961,61 @@ async fn wait_for_finished(
 }
 
 impl Actor {
+    // Feed one bounded page into the existing queue. Finish that page before
+    // reading more, including when its transfers are waiting for a peer.
+    async fn fill_connect_collection(&mut self) -> bool {
+        let subject = DownloadSubject::Prepared {
+            context_id: "connect-local".into(),
+            title: None,
+        };
+        if self.paused
+            || self
+                .jobs
+                .values()
+                .flatten()
+                .any(|job| job.subject == subject)
+        {
+            return false;
+        }
+        let Some(after) = self.connect_after.take() else {
+            return false;
+        };
+        let connect = self
+            .connect
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .filter(|connect| connect.enabled());
+        let Some(connect) = connect else { return false };
+        let page = match self.database.connect_local_media_page(&after).await {
+            Ok(page) => page,
+            Err(error) => {
+                warn!(%error, "could not read local collection downloads");
+                return false;
+            }
+        };
+        self.connect_after = page.last().cloned();
+        let mut missing = Vec::new();
+        for uri in page {
+            match connect.reuse(&uri).await {
+                Ok(true) => {}
+                Ok(false) => missing.push(uri),
+                Err(error) => {
+                    warn!(%error, "could not reuse local collection media");
+                    missing.push(uri);
+                }
+            }
+        }
+        if missing.is_empty() {
+            return self.connect_after.is_some();
+        }
+        let _ = self
+            .enqueue(None, subject, StreamQuality::Original, missing)
+            .await;
+        false
+    }
+
     async fn apply(&mut self, command: Command, active: &mut Vec<ActiveDownload>) {
         match command {
             Command::Attach {
@@ -971,14 +1075,22 @@ impl Actor {
                         .map_or(StreamQuality::Original, |source_id| {
                             self.settings_for(source_id).quality
                         });
-                    self.enqueue(source_id, subject.clone(), quality, media_uris)
-                        .await;
+                    if let Some(feedback) = self
+                        .enqueue(source_id, subject.clone(), quality, media_uris)
+                        .await
+                    {
+                        let _ = self.events.send(DownloadEvent::Feedback(feedback)).await;
+                    }
                 }
                 if skipped {
                     self.mark_subject_incomplete(&subject).await;
                 } else {
                     self.publish_subject_complete(&subject);
                 }
+            }
+            Command::ConnectChanged => {
+                self.connect_after = Some(String::new());
+                self.retry_waiting();
             }
             Command::Remove { media_uris, notify } => {
                 let mut grouped = HashMap::<Option<SourceId>, Vec<String>>::new();
@@ -1278,13 +1390,36 @@ impl Actor {
         attachment_error.map_or(Ok(()), Err)
     }
 
+    async fn add_download_owner(
+        &self,
+        source_id: Option<&SourceId>,
+        media_uri: &str,
+        owner: &DownloadOwner,
+        custom_directory: Option<&Path>,
+    ) -> Result<bool, String> {
+        let connect = self
+            .connect
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+            .and_then(Weak::upgrade);
+        if let Some(connect) = connect.filter(|connect| connect.enabled())
+            && (library::file_media_path(media_uri).is_some()
+                || library::cue_media_parts(media_uri).is_some())
+        {
+            return connect.reuse(media_uri).await;
+        }
+        add_owner_to_existing_download(&self.root, source_id, media_uri, owner, custom_directory)
+            .await
+    }
+
     async fn enqueue(
         &mut self,
         source_id: Option<SourceId>,
         subject: DownloadSubject,
         quality: StreamQuality,
         media_uris: Vec<String>,
-    ) {
+    ) -> Option<DownloadFeedback> {
         let attached = source_id
             .as_ref()
             .and_then(|source_id| self.attached.get(source_id));
@@ -1302,21 +1437,21 @@ impl Actor {
             .filter(|media_uri| !media_uri.is_empty() && seen.insert(media_uri.clone()))
             .collect::<Vec<_>>();
         if media_uris.is_empty() {
-            return;
+            return None;
         }
 
         let owner = DownloadOwner::Subject(subject.clone());
         let mut completed = Vec::new();
         let mut remaining = Vec::new();
         for media_uri in &media_uris {
-            match add_owner_to_existing_download(
-                &self.root,
-                source_id.as_ref(),
-                media_uri,
-                &owner,
-                custom_directory.as_deref(),
-            )
-            .await
+            match self
+                .add_download_owner(
+                    source_id.as_ref(),
+                    media_uri,
+                    &owner,
+                    custom_directory.as_deref(),
+                )
+                .await
             {
                 Ok(true) => completed.push(media_uri.clone()),
                 Ok(false) => remaining.push(media_uri.clone()),
@@ -1387,21 +1522,16 @@ impl Actor {
         }
 
         self.persist_and_publish(source_id.as_ref()).await;
-        if scheduled_tracks > 0 {
-            let _ = self
-                .events
-                .send(DownloadEvent::Feedback(DownloadFeedback {
-                    subject,
-                    preview_uris: media_uris.iter().take(4).cloned().collect(),
-                    item_count: scheduled_tracks,
-                    kind: if can_start {
-                        DownloadFeedbackKind::Started
-                    } else {
-                        DownloadFeedbackKind::Queued
-                    },
-                }))
-                .await;
-        }
+        (scheduled_tracks > 0).then(|| DownloadFeedback {
+            subject,
+            preview_uris: media_uris.iter().take(4).cloned().collect(),
+            item_count: scheduled_tracks,
+            kind: if can_start {
+                DownloadFeedbackKind::Started
+            } else {
+                DownloadFeedbackKind::Queued
+            },
+        })
     }
 
     async fn reconcile_rule(
@@ -1484,14 +1614,9 @@ impl Actor {
         let mut completed = Vec::new();
         let mut remaining = Vec::new();
         for media_uri in &media_uris {
-            match add_owner_to_existing_download(
-                &self.root,
-                Some(&source_id),
-                media_uri,
-                &owner,
-                custom_directory,
-            )
-            .await
+            match self
+                .add_download_owner(Some(&source_id), media_uri, &owner, custom_directory)
+                .await
             {
                 Ok(true) => completed.push(media_uri.clone()),
                 Ok(false) => remaining.push(media_uri.clone()),
@@ -1594,14 +1719,9 @@ impl Actor {
                 .as_ref()
                 .and_then(|attached| attached.directory.as_deref());
             let owner = DownloadOwner::Subject(subject.clone());
-            match add_owner_to_existing_download(
-                &self.root,
-                source_id.as_ref(),
-                &media_uri,
-                &owner,
-                custom_directory,
-            )
-            .await
+            match self
+                .add_download_owner(source_id.as_ref(), &media_uri, &owner, custom_directory)
+                .await
             {
                 Ok(true) => {
                     self.remove_job_track(&source_id, &job_id, &media_uri, true);
@@ -1618,8 +1738,41 @@ impl Actor {
                     continue;
                 }
             }
+            let connect = if (library::file_media_path(&media_uri).is_some()
+                || library::cue_media_parts(&media_uri).is_some())
+                && self
+                    .database
+                    .connect_track_reference(&media_uri)
+                    .await
+                    .ok()
+                    .flatten()
+                    .is_some()
+            {
+                self.connect
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .as_ref()
+                    .and_then(Weak::upgrade)
+                    .filter(|connect| connect.enabled())
+            } else {
+                None
+            };
+            if connect.is_none()
+                && matches!(&subject, DownloadSubject::Prepared { context_id, .. } if context_id == "connect-local")
+            {
+                if let Some(job) = self.find_job_mut(&source_id, &job_id) {
+                    job.state = DownloadQueueState::WaitingForConnection;
+                }
+                self.persist_and_publish(source_id.as_ref()).await;
+                continue;
+            }
             let request = StreamRequest::new(media_uri.clone(), quality);
-            let resolved = if let Some(source) = source {
+            let resolved = if let Some(connect) = connect.as_ref() {
+                Ok((
+                    connect.extension().map(str::to_owned),
+                    ResolvedStream::new(&media_uri),
+                ))
+            } else if let Some(source) = source {
                 source
                     .resolve_download(&self.database, &request)
                     .await
@@ -1647,7 +1800,7 @@ impl Actor {
                 .await
                 .ok()
                 .flatten();
-            let paths = new_download_paths(
+            let mut paths = new_download_paths(
                 &self.root,
                 source_id.as_ref(),
                 &media_uri,
@@ -1655,6 +1808,26 @@ impl Actor {
                 custom_directory,
                 transcoded_extension.as_deref(),
             );
+            if let Some(connect) = &connect {
+                match connect.destination(&media_uri).await {
+                    Ok(Some(destination)) => {
+                        let directory = destination.parent();
+                        paths =
+                            staging_paths(&self.root, source_id.as_ref(), &media_uri, directory);
+                        paths.audio_root = directory.map(Path::to_path_buf);
+                        paths.audio = destination;
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        warn!(%error, %media_uri, "could not select Connect media storage");
+                        if let Some(job) = self.find_job_mut(&source_id, &job_id) {
+                            job.state = DownloadQueueState::NeedsAttention;
+                        }
+                        self.persist_and_publish(source_id.as_ref()).await;
+                        continue;
+                    }
+                }
+            }
             let entering_download = state != DownloadQueueState::Downloading;
             if let Some(job) = self.find_job_mut(&source_id, &job_id) {
                 job.state = DownloadQueueState::Downloading;
@@ -1667,18 +1840,44 @@ impl Actor {
             let task_paths = paths.clone();
             let transfers = Arc::clone(&self.transfers);
             let (cancellation, cancelled) = tokio::sync::oneshot::channel();
-            let task = match transfer {
-                Ok(stream) => tokio::spawn(download_track(
-                    source_id.clone(),
-                    request,
-                    stream,
-                    task_paths,
-                    transfers,
-                    cancelled,
-                )),
-                Err(error) => {
-                    drop(cancelled);
-                    tokio::spawn(async move { Err(error) })
+            let connect_receipt = Arc::new(Mutex::new(None));
+            let task = if let Some(connect) = connect {
+                let receipt = Arc::clone(&connect_receipt);
+                let uri = media_uri.clone();
+                tokio::spawn(async move {
+                    prepare_download_directories(&task_paths)
+                        .await
+                        .map_err(download_source_failure)?;
+                    let cancel = tokio_util::sync::CancellationToken::new();
+                    let transfer = connect.transfer(
+                        &uri,
+                        &task_paths.audio_part,
+                        transcoded_extension.as_deref(),
+                        cancel.clone(),
+                    );
+                    tokio::pin!(transfer);
+                    let result = tokio::select! {
+                        result = &mut transfer => result,
+                        _ = cancelled => { cancel.cancel(); transfer.await },
+                    }
+                    .map_err(download_source_failure)?;
+                    *receipt.lock().unwrap_or_else(|p| p.into_inner()) = Some(result);
+                    Ok(())
+                })
+            } else {
+                match transfer {
+                    Ok(stream) => tokio::spawn(download_track(
+                        source_id.clone(),
+                        request,
+                        stream,
+                        task_paths,
+                        transfers,
+                        cancelled,
+                    )),
+                    Err(error) => {
+                        drop(cancelled);
+                        tokio::spawn(async move { Err(error) })
+                    }
                 }
             };
             return Some(ActiveDownload {
@@ -1689,6 +1888,7 @@ impl Actor {
                 paths,
                 cancellation: Some(cancellation),
                 task,
+                connect_receipt,
             });
         }
     }
@@ -1750,12 +1950,56 @@ impl Actor {
             media_uri,
             subject,
             paths,
+            connect_receipt,
             ..
         } = active;
         let result = match joined {
             Ok(Ok(())) => {
-                self.commit_transfer(&source_id, &media_uri, &subject, &paths)
-                    .await
+                async {
+                    let receipt = connect_receipt
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .take();
+                    let connect = self
+                        .connect
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .as_ref()
+                        .and_then(Weak::upgrade);
+                    if let (Some(receipt), Some(connect)) = (receipt.as_ref(), connect.as_ref()) {
+                        connect
+                            .finish(receipt.clone(), &paths.audio)
+                            .await
+                            .map_err(DownloadFailure::NeedsAttention)?;
+                        let _ = self
+                            .events
+                            .send(DownloadEvent::Changed {
+                                media_uri: media_uri.clone(),
+                                downloaded: true,
+                            })
+                            .await;
+                    } else {
+                        self.commit_transfer(&source_id, &media_uri, &subject, &paths)
+                            .await?;
+                        if let Some(mut receipt) = receipt {
+                            receipt.path = reqwest::Url::from_file_path(&paths.audio)
+                                .map_err(|()| {
+                                    DownloadFailure::NeedsAttention(
+                                        "Download path must be absolute".into(),
+                                    )
+                                })?
+                                .to_string();
+                            self.database
+                                .connect_save_media_file(&receipt)
+                                .await
+                                .map_err(|error| {
+                                    DownloadFailure::NeedsAttention(error.to_string())
+                                })?;
+                        }
+                    }
+                    Ok(())
+                }
+                .await
             }
             Ok(Err(error)) => Err(error),
             Err(error) => Err(DownloadFailure::NeedsAttention(format!(
@@ -2213,6 +2457,32 @@ impl Actor {
         let records =
             load_download_records(&self.root, source_id, custom_directory).unwrap_or_default();
         for media_uri in media_uris {
+            let connect = self
+                .connect
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .as_ref()
+                .and_then(Weak::upgrade);
+            if let Some(connect) = connect {
+                match connect.remove(&media_uri).await {
+                    Ok(count) => {
+                        removed += count;
+                        if count > 0 {
+                            let _ = self
+                                .events
+                                .send(DownloadEvent::Changed {
+                                    media_uri: media_uri.clone(),
+                                    downloaded: false,
+                                })
+                                .await;
+                        }
+                    }
+                    Err(error) => {
+                        failed += 1;
+                        warn!(%error, %media_uri, "could not remove Connect media");
+                    }
+                }
+            }
             let Some(record) = records.get(&media_uri) else {
                 continue;
             };
@@ -2748,14 +3018,15 @@ mod tests {
         let (events, received) = async_channel::unbounded();
         actor.events = events;
         actor
-            .enqueue(
-                None,
-                DownloadSubject::Prepared {
-                    context_id: "direct".to_string(),
-                    title: Some("Direct".to_string()),
+            .apply(
+                Command::Download {
+                    subject: DownloadSubject::Prepared {
+                        context_id: "direct".to_string(),
+                        title: Some("Direct".to_string()),
+                    },
+                    media_uris: vec![media_uri.clone()],
                 },
-                StreamQuality::Original,
-                vec![media_uri.clone()],
+                &mut Vec::new(),
             )
             .await;
 
@@ -2796,6 +3067,7 @@ mod tests {
             subject: job.subject,
             paths: paths.clone(),
             cancellation: None,
+            connect_receipt: Arc::new(Mutex::new(None)),
             task: tokio::spawn(async { Ok(()) }),
         };
         actor.finish(active, Ok(Ok(())), &mut Vec::new()).await;
@@ -2879,6 +3151,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn peer_representation_is_recorded_only_after_download_commit() {
+        let (_library, database, source_key, track) =
+            download_fixture("connect-copy", "track").await;
+        let root = tempfile::tempdir().unwrap();
+        let source = SourceId::new("connect-copy");
+        let uri = test_media(&source, source_key, track);
+        let mut actor = actor_for_test(root.path(), database.clone(), &source, source_key);
+        let subject =
+            DownloadSubject::for_media_uris("connect", Some("Track"), std::slice::from_ref(&uri));
+        let _ = actor
+            .enqueue(
+                Some(source.clone()),
+                subject.clone(),
+                StreamQuality::Original,
+                vec![uri.clone()],
+            )
+            .await;
+        let paths = download_paths(root.path(), Some(&source), &uri);
+        std::fs::create_dir_all(paths.audio_part.parent().unwrap()).unwrap();
+        std::fs::write(&paths.audio_part, b"verified peer bytes").unwrap();
+        let receipt = library::ConnectMediaFile {
+            media_uri: uri.clone(),
+            encoding: "mp3".into(),
+            revision: "original-revision-2".into(),
+            path: reqwest::Url::from_file_path(&paths.audio_part)
+                .unwrap()
+                .to_string(),
+            managed: true,
+            hash: Some("blob-hash".into()),
+        };
+        assert!(
+            database
+                .connect_media_file(&uri, "mp3")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let active = ActiveDownload {
+            source_id: Some(source.clone()),
+            job_id: actor.jobs[&Some(source.clone())][0].id.clone(),
+            media_uri: uri.clone(),
+            subject,
+            paths: paths.clone(),
+            cancellation: None,
+            task: tokio::spawn(async { Ok(()) }),
+            connect_receipt: Arc::new(Mutex::new(Some(receipt))),
+        };
+        actor.finish(active, Ok(Ok(())), &mut Vec::new()).await;
+        assert_eq!(std::fs::read(&paths.audio).unwrap(), b"verified peer bytes");
+        assert!(!paths.audio_part.exists());
+        let saved = database
+            .connect_media_file(&uri, "mp3")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.revision, "original-revision-2");
+        assert_eq!(library::file_media_path(&saved.path), Some(paths.audio));
+        assert!(saved.managed);
+        assert!(
+            database
+                .track_key_by_object(source_key, "track", &library::ReadCancellation::new())
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
     async fn collection_completion_follows_its_download_jobs_across_sources() {
         for fail_first in [false, true] {
             let (_directory, database, source_key, _) = download_fixture("source", "track").await;
@@ -2919,6 +3259,7 @@ mod tests {
                     subject: job.subject,
                     paths,
                     cancellation: None,
+                    connect_receipt: Arc::new(Mutex::new(None)),
                     task: tokio::spawn(async { Ok(()) }),
                 };
                 let result = if index == 0 && fail_first {
@@ -3116,6 +3457,7 @@ mod tests {
             events,
             transfers: Arc::new(TransferClients::default()),
             prepared_rules,
+            connect: Arc::new(Mutex::new(None)),
             attached: HashMap::from([(
                 source_id.clone(),
                 AttachedSource {
@@ -3131,6 +3473,7 @@ mod tests {
             jobs: HashMap::new(),
             paused: false,
             next_job: 0,
+            connect_after: None,
         }
     }
 
@@ -3181,6 +3524,7 @@ mod tests {
             ),
             paths,
             cancellation: Some(cancel),
+            connect_receipt: Arc::new(Mutex::new(None)),
             task,
         }];
 
@@ -3221,6 +3565,7 @@ mod tests {
             ),
             paths,
             cancellation: Some(cancel),
+            connect_receipt: Arc::new(Mutex::new(None)),
             task,
         }];
 
@@ -3286,6 +3631,7 @@ mod tests {
             ),
             paths: paths.clone(),
             cancellation: Some(cancel),
+            connect_receipt: Arc::new(Mutex::new(None)),
             task,
         }];
 
@@ -3318,6 +3664,7 @@ mod tests {
             ),
             paths: paths.clone(),
             cancellation: None,
+            connect_receipt: Arc::new(Mutex::new(None)),
             task: tokio::spawn(async { Ok(()) }),
         };
 

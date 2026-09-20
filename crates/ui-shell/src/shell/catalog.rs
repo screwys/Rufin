@@ -29,6 +29,18 @@ impl Shell {
             settings: Rc::clone(&self.settings),
             artwork: Rc::clone(&self.artwork),
             downloads: Rc::clone(&self.downloads),
+            local_source: self
+                .source
+                .configured
+                .borrow()
+                .sources
+                .iter()
+                .any(|source| {
+                    source.kind == "local"
+                        && selected
+                            .as_ref()
+                            .is_some_and(|selected| selected.source_id == source.id)
+                }),
             media_menus: Rc::clone(&self.media_menus),
             selected,
             source_label: {

@@ -16,6 +16,7 @@ mod cue;
 pub(crate) mod input;
 mod metadata;
 mod playlist;
+mod profile_file;
 pub(crate) mod reader;
 mod scan;
 pub(crate) mod smb;

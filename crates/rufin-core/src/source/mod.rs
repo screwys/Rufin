@@ -1,4 +1,6 @@
 //! The configured sources and the one selected Database-backed source session.
+mod integrations;
+pub use integrations::FileIntegration;
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -322,6 +324,7 @@ pub(crate) struct Shared {
     artwork_preparation: Mutex<ArtworkPreparationOwner>,
     pub(crate) lane: tokio::sync::Mutex<()>,
     playback: Mutex<Weak<PlaybackOwner>>,
+    connect: Mutex<Weak<crate::connect::ConnectOwner>>,
     started: AtomicBool,
 }
 
@@ -513,6 +516,7 @@ impl SourceOwner {
             artwork_preparation: Mutex::new(ArtworkPreparationOwner::default()),
             lane: tokio::sync::Mutex::new(()),
             playback: Mutex::new(Weak::new()),
+            connect: Mutex::new(Weak::new()),
             started: AtomicBool::new(false),
         });
         SourceBootstrap {
@@ -572,14 +576,18 @@ impl SourceOwner {
         Work: Future<Output = Result<T, String>>,
     {
         let _lane = self.shared.lane.lock().await;
+        if setup {
+            // Retire acquisition before replacing its settings/catalog so an
+            // old source cannot publish another page into the restored profile.
+            self.release_selected(true).await;
+        }
         let result = restore().await;
         if result.is_ok()
             && let Err(error) = self.shared.load_source_counts().await
         {
             self.shared.warn_nonfatal(&error);
         }
-        if result.is_ok() && setup {
-            self.release_selected(true).await;
+        if setup {
             let current = self.shared.settings.load();
             if let Some(source) = current.sources.selected_source_id.filter(|id| {
                 current
@@ -599,6 +607,85 @@ impl SourceOwner {
             .await;
         self.publish_operation(SourceOperation::Idle).await;
         result
+    }
+
+    /// Called only for an applied Connect page. Empty synchronization passes do not
+    /// publish catalog events or rebuild the selected source.
+    pub(crate) async fn connect_changed(&self, sources_changed: bool) -> Result<(), String> {
+        let _lane = self.shared.lane.lock().await;
+        let current = self.shared.settings.load();
+        let catalog = self
+            .shared
+            .database
+            .connect_catalog_sources()
+            .await
+            .map_err(string_error)?;
+        for source in catalog {
+            if current
+                .sources
+                .configured
+                .iter()
+                .any(|item| item.configuration.source_id == source)
+            {
+                continue;
+            }
+            if let Some(key) = self
+                .shared
+                .database
+                .source_identity_key(&source)
+                .await
+                .map_err(string_error)?
+                && let Ok(playback) = self.shared.playback()
+            {
+                playback.forget_source(key).await?;
+            }
+            self.shared
+                .database
+                .connect_remove_source(&source)
+                .await
+                .map_err(string_error)?;
+            self.remove_source_resources(&source, None).await;
+        }
+        self.shared.load_source_counts().await?;
+        if sources_changed || self.shared.selected().is_none() {
+            self.release_selected(true).await;
+            if let Some(source) = current.sources.selected_source_id.or_else(|| {
+                let counts = self
+                    .shared
+                    .catalog_counts
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                current
+                    .sources
+                    .configured
+                    .iter()
+                    .find(|source| {
+                        counts
+                            .get(&source.configuration.source_id)
+                            .is_some_and(|(_, tracks)| *tracks > 0)
+                    })
+                    .map(|source| source.configuration.source_id.clone())
+            }) {
+                self.select_source(source);
+            }
+        }
+        if let Ok(playback) = self.shared.playback() {
+            playback.catalog_changed();
+        }
+        self.shared
+            .send(SourceEvent::Configured(
+                self.shared
+                    .configured_sources(self.shared.selected().as_deref()),
+            ))
+            .await;
+        self.shared
+            .send(SourceEvent::CatalogPublished(CatalogPublication {
+                source_key: None,
+                favorite: None,
+                change: CatalogChange::Acquired,
+            }))
+            .await;
+        Ok(())
     }
 
     async fn remove_source_resources(
@@ -1390,7 +1477,12 @@ impl SourceOwner {
                 .resolve()
                 .is_some_and(|selected| selected.source_key == publication.source)
         {
-            self.start_artwork_preparation(session);
+            let report_progress = publication.tracks_added
+                || matches!(
+                    *self.shared.operation.borrow(),
+                    SourceOperation::Refreshing { .. }
+                );
+            self.start_artwork_preparation(session, report_progress);
         }
     }
 
@@ -2081,9 +2173,19 @@ impl SourceOwner {
         self.shared.runtime.spawn(async move {
             let previous = owner.shared.settings.load();
             let changing = previous.ui.secret_storage_mode != mode;
-            let result = if previous.ui.secret_storage_mode == mode {
-                Ok(())
-            } else {
+            let result = async {
+                if !changing {
+                    return Ok(());
+                }
+                let connect = owner
+                    .shared
+                    .connect
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .upgrade();
+                if let Some(connect) = connect {
+                    connect.reset_secret_storage().await?;
+                }
                 let settings = owner.shared.settings.clone();
                 let secrets = Arc::clone(&owner.shared.secrets);
                 tokio::task::spawn_blocking(move || {
@@ -2106,7 +2208,12 @@ impl SourceOwner {
                             descriptor.value_mut(&mut stored.scrobbling).clear();
                         }
                         stored.scrobbling_secrets_present = false;
-                        for source in &mut stored.sources.configured {
+                        for source in stored
+                            .sources
+                            .configured
+                            .iter_mut()
+                            .chain(&mut stored.sources.integrations)
+                        {
                             source.credential_ref = None;
                         }
                         Ok(())
@@ -2118,7 +2225,8 @@ impl SourceOwner {
                 .await
                 .map_err(string_error)
                 .and_then(|result| result)
-            };
+            }
+            .await;
             let changed = result.is_ok() && changing;
             let _ = sender.send(result).await;
             if changed {
@@ -2436,6 +2544,21 @@ impl SourceOwner {
         receiver
     }
 
+    pub(crate) fn install_connect(&self, connect: &Arc<crate::connect::ConnectOwner>) {
+        *self
+            .shared
+            .connect
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Arc::downgrade(connect);
+        self.shared.downloads.install_connect(Arc::downgrade(
+            &(Arc::clone(connect) as Arc<dyn downloads::ConnectDownload>),
+        ));
+    }
+
+    pub(crate) fn connect_media_changed(&self) {
+        self.shared.downloads.connect_changed();
+    }
+
     pub fn download_media(&self, subject: downloads::DownloadSubject, media_uris: Vec<String>) {
         self.spawn_serialized(move |owner| async move {
             let mut source_ids = media_uris
@@ -2522,7 +2645,7 @@ impl ActiveSource {
             .await;
         });
         let owner = SourceOwner { shared };
-        owner.start_artwork_preparation(session);
+        owner.start_artwork_preparation(session, true);
     }
 
     pub fn refresh_library(
@@ -2889,7 +3012,15 @@ impl SourceOwner {
         {
             return Ok(source);
         }
-        let configured = configured_source(&self.shared.settings.load().sources, source_id)?;
+        let stored = self.shared.settings.load();
+        let configured = stored
+            .sources
+            .configured
+            .iter()
+            .chain(&stored.sources.integrations)
+            .find(|s| &s.configuration.source_id == source_id)
+            .cloned()
+            .ok_or("The connection no longer exists")?;
         let credential = configured
             .credential_ref
             .as_ref()
@@ -2989,7 +3120,7 @@ impl SourceOwner {
         }
     }
 
-    fn start_artwork_preparation(&self, session: Arc<ActiveSource>) {
+    fn start_artwork_preparation(&self, session: Arc<ActiveSource>, report_progress: bool) {
         let Some(selected) = session.resolve() else {
             return;
         };
@@ -2997,15 +3128,27 @@ impl SourceOwner {
             source: selected.source_key,
             digest: selected.artwork_digest,
         };
-        let Some((token, cancelled)) = self
+        let mut preparation = self
             .shared
             .artwork_preparation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .admit(key)
-        else {
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous = preparation.active.as_ref().map(|active| active.key);
+        let Some((token, cancelled)) = preparation.admit(key) else {
             return;
         };
+        drop(preparation);
+        if let Some(previous) = previous {
+            let _ = self
+                .shared
+                .outputs
+                .events
+                .try_send(SourceEvent::ArtworkPreparation {
+                    source_key: previous.source,
+                    revision: artwork_digest_revision(&previous.digest),
+                    progress: None,
+                });
+        }
         let owner = self.clone();
         let task = self.shared.runtime.spawn(async move {
             let initial_revision = artwork_digest_revision(&selected.artwork_digest);
@@ -3015,7 +3158,7 @@ impl SourceOwner {
             let events = owner.shared.outputs.events.clone();
             let progress = move |revision, completed| {
                 progress_revision.store(revision, Ordering::Release);
-                if !artwork_preparation_is_current(&owner, key, token) {
+                if !report_progress || !artwork_preparation_is_current(&owner, key, token) {
                     return;
                 }
                 let _ = events.try_send(SourceEvent::ArtworkPreparation {
@@ -3822,6 +3965,113 @@ mod artwork_preparation_tests {
                 );
             }
             assert_eq!(refreshing, visible);
+        }
+
+        let image = directory.path().join("cover.png");
+        image::RgbaImage::from_pixel(16, 16, image::Rgba([30, 80, 160, 255]))
+            .save(&image)
+            .unwrap();
+        let session = ActiveSource::new(
+            &owner.shared,
+            Arc::new(SelectedSourceState {
+                configuration: SourceConfiguration {
+                    source_id: source_id.clone(),
+                    kind: "local".into(),
+                    name: "Test".into(),
+                    provider_payload: "{}".into(),
+                },
+                source: None,
+                source_key: publication.source,
+                artwork_digest: publication.artwork_digest,
+                database: database.clone(),
+                runtime: tokio::runtime::Handle::current(),
+                music_folder_key: None,
+                music_folder_object_id: None,
+                music_folders: Arc::from([]),
+                track_count: 0,
+                formula_match_count: 0,
+                sample_source_path: None,
+            }),
+        );
+        *owner.shared.selected.lock().unwrap() = Some(session.clone());
+        for (revision, visible) in [(1, true), (2, false), (3, true)] {
+            while receiver.try_recv().is_ok() {}
+            let binding = serde_json::to_vec(&sources::LocalImageRef::File {
+                source_id: source_id.clone(),
+                path: image.to_string_lossy().into_owned(),
+                revision: revision.to_string(),
+            })
+            .unwrap();
+            let mut scan = library::Scan::begin_items(&database, source_id.as_str())
+                .await
+                .unwrap();
+            scan.write_artist(
+                "artist",
+                "Artist",
+                "artist",
+                None,
+                None,
+                Some(&binding),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+            let outcome = scan.finish().await.unwrap();
+            if revision == 1 {
+                let ScanOutcome::Changed(publication) = outcome else {
+                    panic!("initial artwork")
+                };
+                session.update(publication.source, |selected| {
+                    selected.artwork_digest = publication.artwork_digest
+                });
+                session.selected_library_revealed();
+            } else {
+                if revision == 3 {
+                    owner
+                        .publish_operation(SourceOperation::Refreshing {
+                            source_id: source_id.clone(),
+                            progress: initial_progress(),
+                        })
+                        .await;
+                }
+                owner
+                    .accept_scan(&source_id, outcome, CatalogChange::Broad)
+                    .await;
+            }
+            let reported = tokio::time::timeout(Duration::from_secs(5), async {
+                let mut reported = false;
+                loop {
+                    if let SourceEvent::ArtworkPreparation { progress, .. } =
+                        receiver.recv().await.unwrap()
+                    {
+                        match progress {
+                            Some(progress) => {
+                                assert_eq!(progress.completed, 1);
+                                reported = true;
+                            }
+                            None => break reported,
+                        }
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(
+                reported, visible,
+                "initial/manual loads report progress; background updates stay quiet"
+            );
+            let selected = session.resolve().unwrap();
+            assert!(
+                owner
+                    .shared
+                    .artwork
+                    .source_preparation_complete(
+                        &source_id,
+                        artwork_digest_revision(&selected.artwork_digest)
+                    )
+                    .unwrap()
+            );
         }
     }
 

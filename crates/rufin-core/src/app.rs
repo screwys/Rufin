@@ -265,7 +265,7 @@ where
 
     let backup = crate::backup::BackupOwner::new(
         Arc::clone(&library),
-        settings,
+        settings.clone(),
         settings_handle.as_ref().clone(),
         Arc::clone(&secrets),
         Arc::clone(&source),
@@ -274,6 +274,17 @@ where
         paths.data_dir().join("backups"),
     );
     backup.start();
+
+    let connect = crate::connect::ConnectOwner::new(
+        paths.data_dir().join("connect"),
+        Arc::clone(&library),
+        settings_handle.as_ref().clone(),
+        Arc::clone(&secrets),
+        Arc::clone(&source),
+        Arc::clone(&playback),
+        runtime.clone(),
+    );
+    connect.start();
 
     source.start()?;
     let source_handle: crate::runtime::SourceHandle = source.clone();
@@ -289,6 +300,7 @@ where
         products: ProductHandles {
             appearance: tokio::sync::watch::channel(std::collections::BTreeMap::new()).0,
             backup,
+            connect,
             library,
             runtime,
             source: source_handle,

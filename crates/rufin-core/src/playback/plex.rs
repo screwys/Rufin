@@ -28,6 +28,82 @@ pub(super) struct PlexPlayback {
 }
 
 impl PlexPlayback {
+    pub(super) async fn queue_content_id(&self) -> String {
+        let (_, context) = self.connection();
+        let queue = self.queue.lock().await;
+        match queue.as_ref() {
+            Some(queue) => format!("plex:{}:{}:{}", context.source_id, queue.id, queue.version),
+            None => library::queue_content_id(&[], &[]),
+        }
+    }
+
+    pub(super) async fn continuation_snapshot(
+        &self,
+    ) -> Result<Option<playback::Continuation>, String> {
+        let _guard = self.commands.lock().await;
+        let timeline = self.current().await?;
+        self.observe(timeline.clone(), false).await?;
+        let Some(mut snapshot) = self.playback.continuation().map_err(string_error)? else {
+            return Ok(None);
+        };
+        let items = self.all_items(&timeline, &self.cancelled).await?;
+        let (_, context) = self.connection();
+        let queue_id = timeline
+            .play_queue_id
+            .ok_or("The Plex player has no queue")?;
+        snapshot.queue.entries = items
+            .iter()
+            .map(|item| library::QueueEntry {
+                occurrence: receiver_occurrence(&context.source_id, queue_id, item.occurrence_id),
+                media_uri: item.media_uri.clone().into(),
+                playlist_entry_id: None,
+                provenance: playback::Provenance::Manual,
+            })
+            .collect();
+        snapshot.queue.order = (0..items.len() as u32).collect();
+        snapshot.queue.current_index = snapshot
+            .queue
+            .entries
+            .iter()
+            .position(|entry| entry.occurrence == snapshot.header.current);
+        snapshot.header.total = items.len();
+        Ok(Some(snapshot))
+    }
+
+    pub(super) async fn stop_continuation(
+        &self,
+        expected: &playback::ContinuationHeader,
+    ) -> Result<Option<playback::ContinuationHeader>, String> {
+        let _guard = self.commands.lock().await;
+        let mut timeline = self.current().await?;
+        self.observe(timeline.clone(), false).await?;
+        let Some(mut snapshot) = self.playback.continuation().map_err(string_error)? else {
+            return Ok(None);
+        };
+        if snapshot.header.current != expected.current
+            || snapshot
+                .header
+                .listen
+                .as_ref()
+                .map(|listen| &listen.play_id)
+                != expected.listen.as_ref().map(|listen| &listen.play_id)
+        {
+            return Ok(None);
+        }
+        self.control(|client| client.stop()).await?;
+        timeline.state = "stopped".into();
+        self.observe(timeline, false).await?;
+        snapshot.header.total = expected.total;
+        Ok(Some(snapshot.header))
+    }
+
+    pub(super) async fn stop_for_continuation(&self) -> Result<(), String> {
+        let _guard = self.commands.lock().await;
+        self.control(|client| client.stop()).await?;
+        self.cancel();
+        Ok(())
+    }
+
     fn connection(&self) -> (Arc<Source>, PlexCompanionContext) {
         self.connection
             .lock()

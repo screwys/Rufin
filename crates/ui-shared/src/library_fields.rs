@@ -20,6 +20,9 @@ pub trait TrackPresentation: Clone + PartialEq + Send + Sync + 'static {
     fn favorite(&self) -> bool;
     fn set_favorite(&mut self, value: bool);
     fn downloaded(&self) -> bool;
+    fn download_badge(&self) -> bool {
+        crate::downloads::media_download_badge(self.media_uri(), self.downloaded())
+    }
     fn set_downloaded(&mut self, value: bool);
     fn field(&self, field: LibraryField) -> String;
     fn track_number(&self) -> Option<i64>;

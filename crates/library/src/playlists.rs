@@ -967,7 +967,7 @@ impl Database {
             sqlx::query("UPDATE main.playlist_entries SET position=position+(SELECT COALESCE(max(position)+1,0) FROM playlist_entries WHERE playlist_key=?1) WHERE playlist_key=?1")
                 .bind(playlist).execute(&mut *transaction).await?;
             sqlx::query(
-                "WITH positions AS (
+                "WITH positions AS MATERIALIZED (
                  SELECT playlist_entry_key,
                         row_number() OVER (ORDER BY position) - 1 AS next_position
                  FROM playlist_entries WHERE playlist_key=?1

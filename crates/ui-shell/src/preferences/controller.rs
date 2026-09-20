@@ -123,6 +123,7 @@ pub(crate) fn bind_popover(shell: &Rc<Shell>, button: &gtk::MenuButton) {
             }
         });
         bind_controls(&shell, popover.upcast_ref(), &builder, resource);
+        super::connect::bind_controller(&shell, &popover, &builder, resource);
         button.set_popover(Some(&popover));
     });
 }
@@ -141,12 +142,14 @@ fn bind_controls(
         web_open: gtk::Button,
     });
     web_enabled.set_active(shell.settings.persistence.load().web_controller.enabled);
+    web_status.set_visible(web_enabled.is_active());
     let access_token = Rc::new(RefCell::new(String::new()));
     let weak = Rc::downgrade(shell);
     let status = web_status.downgrade();
     web_enabled.connect_active_notify(move |row| {
         if let (Some(shell), Some(status)) = (weak.upgrade(), status.upgrade()) {
             save(&shell, &status, |config| config.enabled = row.is_active());
+            status.set_visible(shell.settings.persistence.load().web_controller.enabled);
         }
     });
     bind_address_action(
@@ -192,6 +195,7 @@ fn bind_controls(
         *running.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
             loop {
                 let state = updates.borrow_and_update().clone();
+                status.set_visible(settings.load().web_controller.enabled);
                 if !state.token.is_empty() {
                     *token.borrow_mut() = state.token.clone();
                 }

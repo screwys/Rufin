@@ -25,7 +25,7 @@ BuildRequires:  pkgconfig(gstreamer-audio-1.0)
 BuildRequires:  pkgconfig(gstreamer-pbutils-1.0)
 BuildRequires:  pkgconfig(gtk4)
 BuildRequires:  pkgconfig(libadwaita-1) >= 1.9
-BuildRequires:  rust >= 1.95.0
+BuildRequires:  rust >= 1.96.0
 
 # Generated Linux package dependencies start.
 Requires:       gstreamer1
@@ -45,7 +45,8 @@ login path, Samba and NAS shares.
 
 %prep
 %autosetup -n Rufin-%{version} -a1
-%cargo_prep -v vendor
+%cargo_prep -v cargo-vendor
+cat cargo-vendor/git-sources.toml >> .cargo/config.toml
 
 %build
 # aws-lc-sys omits CFLAGS from one compiler probe, so pair Fedora's hardened

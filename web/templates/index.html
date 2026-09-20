@@ -17,6 +17,7 @@
     <script type="module" src="/app.js"></script>
   </head>
   <body>
+    {% include "connect.html" %}
     <dialog id="login-dialog" aria-labelledby="login-title" {% if !page.connected %}open{% endif %}>
       <form id="login-form" method="post" action="/session">
         <div class="login-heading">
@@ -52,6 +53,8 @@
           >
             <span class="icon" data-icon="server"></span>
           </button>
+          <button id="open-connect" class="icon-button" aria-label="{{ localization::tr("Rufin Connect") }}">⇄</button>
+          <button id="connect-continue" class="icon-button" aria-label="{{ localization::tr("Continue") }}" hidden><span class="icon" data-icon="play"></span></button>
           <a
             class="icon-button mobile"
             id="close-navigation"
@@ -361,6 +364,8 @@
         </div>
       </footer>
       <div id="toast" role="status" hidden></div>
+      <div id="connect-progress" role="status" hidden><span id="connect-progress-text"></span><button id="connect-progress-open">{{ localization::tr("Open Rufin Connect") }}</button><button id="connect-progress-dismiss" class="icon-button" aria-label="{{ localization::tr("Close") }}">×</button></div>
+      <div id="connect-offer" role="status" hidden><span id="connect-offer-text"></span><button id="connect-offer-accept">{{ localization::tr("Continue") }}</button><button id="connect-offer-dismiss" class="icon-button" aria-label="{{ localization::tr("Close") }}">×</button></div>
     </div>
 
     <div
@@ -435,6 +440,18 @@
         </div>
       </form>
     </div>
+    <dialog id="integration-reuse-dialog" aria-labelledby="integration-reuse-title">
+      <form method="dialog">
+        <h2 id="integration-reuse-title">{{ localization::tr("Use an existing connection?") }}</h2>
+        <p>{{ localization::tr("Do you want to use the existing configuration?") }}</p>
+        <label for="integration-reuse">{{ localization::tr("Connection") }}</label><select id="integration-reuse"></select>
+        <div class="dialog-actions">
+          <button value="cancel">{{ localization::tr("Cancel") }}</button>
+          <button value="new">{{ localization::tr("Configure another") }}</button>
+          <button value="use" class="primary">{{ localization::tr("Use existing") }}</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="source-dialog" aria-labelledby="source-title">
       <form id="source-form" hx-post="/api/sources" hx-ext="source-form" hx-swap="none" hx-disabled-elt="find button[type='submit']" hx-sync="this:drop">
         <h2 id="source-title">{{ localization::tr("Add Source") }}</h2>

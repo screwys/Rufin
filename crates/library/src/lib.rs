@@ -5,6 +5,8 @@ mod activity;
 mod artwork;
 mod backup;
 mod collections;
+mod connect;
+mod connect_media;
 mod db;
 mod favorites;
 mod home;
@@ -17,6 +19,7 @@ mod playlist_format;
 mod playlist_links;
 mod playlists;
 mod queue;
+pub use connect_media::ConnectMediaFile;
 mod radio;
 mod scan;
 mod schema;
@@ -39,6 +42,7 @@ pub use collections::{
     CollectionSourceReference, FolderRow, GenreDetail, GenreRow, GenreSort, MoodDetail, MoodRow,
     MoodSort,
 };
+pub use connect::{CONNECT_PAGE_SIZE, ConnectChange, ConnectRecord, ConnectRoot};
 pub use db::{Database, ReadCancellation};
 pub use favorites::{FavoriteTarget, UserMediaStateWrite};
 pub use home::{
@@ -71,7 +75,7 @@ pub use queue::{
     OccurrenceId, QUEUE_CONTEXT_LIMIT, QueueChoice, QueueCollection, QueueEntry, QueueInput,
     QueueItem, QueueOccurrence, QueuePageRow, QueuePlacement, QueueProvenance, QueueQuery,
     QueueReadPage, QueueReadRequest, QueueReorderTarget, QueueRepeatMode, QueueRestore, QueueScope,
-    QueueSource, shuffle_order,
+    QueueSource, QueueTransferPage, queue_content_id, shuffle_order,
 };
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
 pub use scan::{
@@ -93,6 +97,8 @@ use thiserror::Error;
 /// Failures at the Library persistence boundary.
 #[derive(Debug, Error)]
 pub enum LibraryError {
+    #[error("Connect catalog metadata is still arriving")]
+    ConnectPending,
     #[error("SQLite failed: {0}")]
     Sqlite(#[from] sqlx::Error),
     #[error("Library Store I/O failed: {0}")]

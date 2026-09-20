@@ -21,6 +21,191 @@ fn occurrence(
 }
 
 #[tokio::test]
+async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue_until_commit() {
+    let fixture = fixture().await;
+    let database = &fixture.database;
+    let captured = database
+        .read_queue(library::QueueReadRequest::Capture {
+            input: Box::new(library::QueueInput::Items(
+                (0..205)
+                    .map(|index| {
+                        (
+                            QueueItem::direct(
+                                format!("https://example.test/{}", index % 3),
+                                format!("Occurrence {index}"),
+                                "Artist",
+                                "Album",
+                                180_000,
+                            ),
+                            QueueProvenance::Manual,
+                        )
+                    })
+                    .collect(),
+            )),
+            anchor_index: 0,
+            random_start: None,
+            shuffled: None,
+        })
+        .await
+        .unwrap();
+    let queue = library::QueueRestore {
+        order: (0..205u32).rev().collect(),
+        entries: captured.entries.into(),
+        occurrences: captured.occurrences,
+        current_index: Some(12),
+        progress_millis: 42_000,
+        repeat_mode: QueueRepeatMode::All,
+        shuffled: true,
+        ..Default::default()
+    };
+    database.save_queue(&queue).await.unwrap();
+    let receiver_directory = tempfile::tempdir().unwrap();
+    let receiver = library::Database::open(receiver_directory.path().join("receiver.sqlite3"))
+        .await
+        .unwrap();
+    for offset in (0..205).step_by(library::QUEUE_CONTEXT_LIMIT) {
+        let page = database.queue_transfer_page(&queue, offset).await.unwrap();
+        assert!(page.occurrences.len() <= library::QUEUE_CONTEXT_LIMIT);
+        receiver
+            .stage_queue_transfer_page("transfer", &page)
+            .await
+            .unwrap();
+        // Repeated delivery replaces the page without repeating occurrences.
+        receiver
+            .stage_queue_transfer_page("transfer", &page)
+            .await
+            .unwrap();
+        assert!(receiver.restore_queue().await.unwrap().entries.is_empty());
+    }
+    let mut prepared = receiver
+        .prepare_queue_transfer("transfer", 205, queue.current().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(prepared.entries, queue.entries);
+    assert_eq!(prepared.order, queue.order);
+    assert_eq!(prepared.current(), queue.current());
+    assert_eq!(prepared.occurrences.len(), 1);
+    prepared.progress_millis = queue.progress_millis;
+    prepared.repeat_mode = queue.repeat_mode;
+    prepared.shuffled = queue.shuffled;
+    receiver
+        .commit_queue_transfer("transfer", &prepared)
+        .await
+        .unwrap();
+    let restored = receiver.restore_queue().await.unwrap();
+    assert_eq!(restored.entries, queue.entries);
+    assert_eq!(restored.order, queue.order);
+    assert_eq!(restored.current(), queue.current());
+    assert_eq!(restored.progress_millis, 42_000);
+    assert_eq!(restored.repeat_mode, QueueRepeatMode::All);
+    assert!(restored.shuffled);
+    assert!(restored.occurrences.len() <= library::QUEUE_CONTEXT_LIMIT);
+    assert!(
+        receiver
+            .connect_received_occurrence(queue.current().unwrap())
+            .await
+            .unwrap()
+    );
+    assert!(
+        !database
+            .connect_received_occurrence(queue.current().unwrap())
+            .await
+            .unwrap()
+    );
+    receiver.save_queue(&restored).await.unwrap();
+    assert!(
+        receiver
+            .connect_received_occurrence(queue.current().unwrap())
+            .await
+            .unwrap()
+    );
+    let final_page = receiver.queue_transfer_page(&restored, 200).await.unwrap();
+    assert_eq!(final_page.occurrences[4].title, "Occurrence 204");
+}
+
+#[tokio::test]
+async fn continuation_uses_local_artwork_before_starting_the_current_track() {
+    let fixture = fixture().await;
+    let mut connection = connection(&fixture.path).await;
+    let local_binding = vec![4, 5, 6];
+    sqlx::query("UPDATE tracks SET artwork_binding=?1 WHERE media_uri=?2")
+        .bind(&local_binding)
+        .bind(&fixture.track_uris[0])
+        .execute(&mut connection)
+        .await
+        .unwrap();
+    let mut item = QueueItem::direct(
+        &fixture.track_uris[0],
+        "Transferred title",
+        "Artist",
+        "Album",
+        180_000,
+    );
+    item.artwork_binding = Some(vec![1, 2, 3]);
+    let page = library::QueueTransferPage {
+        offset: 0,
+        occurrences: vec![occurrence("current", item, 0)],
+        order: vec![0],
+    };
+    fixture
+        .database
+        .stage_queue_transfer_page("artwork", &page)
+        .await
+        .unwrap();
+    let prepared = fixture
+        .database
+        .prepare_queue_transfer("artwork", 1, &OccurrenceId::from("current"))
+        .await
+        .unwrap();
+    assert_eq!(
+        prepared.occurrences[0].artwork_binding.as_ref(),
+        Some(&local_binding)
+    );
+    assert_eq!(prepared.occurrences[0].title, "Transferred title");
+}
+
+#[tokio::test]
+async fn interrupted_or_invalid_continuation_retains_saved_queue() {
+    let fixture = fixture().await;
+    let database = &fixture.database;
+    let before = database.restore_queue().await.unwrap();
+    let row = occurrence(
+        "first",
+        QueueItem::direct(
+            "https://example.test/track",
+            "Track",
+            "Artist",
+            "Album",
+            180_000,
+        ),
+        0,
+    );
+    let page = library::QueueTransferPage {
+        offset: 0,
+        occurrences: vec![row],
+        order: vec![99],
+    };
+    database
+        .stage_queue_transfer_page("incomplete", &page)
+        .await
+        .unwrap();
+    assert!(
+        database
+            .prepare_queue_transfer("incomplete", 101, &OccurrenceId::from("first"))
+            .await
+            .is_err()
+    );
+    assert!(
+        database
+            .prepare_queue_transfer("incomplete", 1, &OccurrenceId::from("first"))
+            .await
+            .is_err()
+    );
+    assert_eq!(database.restore_queue().await.unwrap(), before);
+    database.discard_queue_transfer("incomplete").await.unwrap();
+}
+
+#[tokio::test]
 async fn queue_restores_uri_owned_duplicates_state_and_unavailable_media() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();

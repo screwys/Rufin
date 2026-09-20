@@ -135,7 +135,26 @@ async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs
     let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     settings.web_controller.port = occupied.local_addr().unwrap().port();
     inputs.settings.save(&settings).unwrap();
-    controller_status(&mut status, |state| state.error.is_some()).await;
+    let fallback = controller_status(&mut status, |state| {
+        state.address.is_some_and(|current| current != address)
+    })
+    .await;
+    assert!(fallback.error.is_none());
+    assert!(fallback.address.unwrap().port() > settings.web_controller.port);
+    assert_eq!(
+        fallback.address.unwrap().ip(),
+        settings.web_controller.address
+    );
+    assert_eq!(
+        client
+            .get(format!("http://{}/api/playback", fallback.address.unwrap()))
+            .bearer_auth(&fallback.token)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::OK
+    );
     assert!(
         client
             .get(&url)
@@ -152,7 +171,10 @@ async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs
 
     settings.web_controller.port = 0;
     inputs.settings.save(&settings).unwrap();
-    let rebound = controller_status(&mut status, |state| state.address.is_some()).await;
+    let rebound = controller_status(&mut status, |state| {
+        state.address.is_some() && state.address != fallback.address
+    })
+    .await;
     assert_eq!(rebound.token, started.token);
     let mut connected = client
         .get(format!("http://{}/api/events", rebound.address.unwrap()))
