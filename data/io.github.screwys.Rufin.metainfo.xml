@@ -21,6 +21,7 @@
     <p>Enjoy your music library, local/remote folders or music server; with a powerful all-in-one music player.</p>
     <ul>
       <li>Supports Jellyfin, Navidrome/OpenSubsonic, Plex, and Emby servers; local folders,  WebDAV including a direct Nextcloud browser login path, Samba and NAS shares.</li>
+      <li>Control the player from its Web UI or custom scripts, additionally enable Rufin Connect for cross-device synchronization</li>
       <li>Powerful transition and loudness normalization implementation</li>
       <li>Auto DJ with server or app-matched recommendations and random play filters</li>
       <li>Built-in Last.fm, Libre.fm, ListenBrainz and Discord Rich presence integrations</li>
@@ -40,16 +41,8 @@
       <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/Rufin.png</image>
     </screenshot>
     <screenshot>
-      <caption>Browse all albums</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/albums.png</image>
-    </screenshot>
-    <screenshot>
       <caption>View artist details</caption>
       <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/artist_detail.png</image>
-    </screenshot>
-    <screenshot>
-      <caption>View album details</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/album_detail.png</image>
     </screenshot>
     <screenshot>
       <caption>Browse genres</caption>
@@ -60,28 +53,24 @@
       <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/smart_playlists.png</image>
     </screenshot>
     <screenshot>
-      <caption>Customize the appearance</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/appearance_settings.png</image>
-    </screenshot>
-    <screenshot>
-      <caption>Customize the display</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/customize_display.png</image>
-    </screenshot>
-    <screenshot>
-      <caption>Manage downloads</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/download_settings.png</image>
-    </screenshot>
-    <screenshot>
       <caption>Configure playback</caption>
       <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/playback_settings.png</image>
     </screenshot>
     <screenshot>
-      <caption>View keyboard shortcuts</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/keyboard_shortcuts.png</image>
+      <caption>Use the fullscreen player</caption>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/fullscreen_player.png</image>
     </screenshot>
     <screenshot>
-      <caption>Use the fullscreen player</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/visualizer.png</image>
+      <caption>Configure the visualizer</caption>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/visualizer_settings.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Configure integrations</caption>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/integrations.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Edit a playlist</caption>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/playlist_settings.png</image>
     </screenshot>
   </screenshots>
   <launchable type="desktop-id">io.github.screwys.Rufin.desktop</launchable>
