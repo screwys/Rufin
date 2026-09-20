@@ -740,6 +740,10 @@ row.artist-search-result button.search-preview-play {
   opacity: 1;
 }
 
+gridview.album-grid {
+  background: transparent;
+}
+
 .album-grid > child,
 .album-grid > flowboxchild {
   padding: 0;
