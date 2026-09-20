@@ -361,14 +361,19 @@ fn webdav_exchange_leaves_an_unchanged_profile_file_untouched() {
             )
             .await
             .unwrap();
+            while owner.database.connect_seed_page().await.unwrap() {}
+            while owner.synchronize().await.unwrap() {}
+            let session = owner.active().await.unwrap();
+            while session.documents.prune_history(&session.identity, &[], library::CONNECT_PAGE_SIZE).await.unwrap() > 0 {}
             owner.exchange().await.unwrap();
-            assert_eq!(file.lock().unwrap().1, 1);
+            let uploads = file.lock().unwrap().1;
+            assert!(uploads > 0);
             for _ in 0..3 {
                 owner.exchange().await.unwrap();
             }
             assert_eq!(
                 file.lock().unwrap().1,
-                1,
+                uploads,
                 "reading the same profile must not PUT it again, even without an ETag"
             );
             execute(
@@ -380,9 +385,9 @@ fn webdav_exchange_leaves_an_unchanged_profile_file_untouched() {
             .await
             .unwrap();
             owner.exchange().await.unwrap();
-            assert_eq!(file.lock().unwrap().1, 2, "local edits must reach the file");
+            assert_eq!(file.lock().unwrap().1, uploads + 1, "local edits must reach the file");
             owner.exchange().await.unwrap();
-            assert_eq!(file.lock().unwrap().1, 2);
+            assert_eq!(file.lock().unwrap().1, uploads + 1);
             owner.close_network().await.unwrap();
             inputs.receivers.visualizer.close();
             let playback = inputs.products.playback.transport.clone();

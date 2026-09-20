@@ -1257,6 +1257,14 @@ async fn fresh_schema_has_exact_table_inventory() {
     assert_eq!(
         tables,
         [
+            "connect_capture",
+            "connect_changes",
+            "connect_collection",
+            "connect_media_files",
+            "connect_native_playlist_seed",
+            "connect_playlist_seed",
+            "connect_roots",
+            "connect_seed",
             "favorite_outbox",
             "legacy_activity",
             "listen_outbox",
@@ -1271,6 +1279,7 @@ async fn fresh_schema_has_exact_table_inventory() {
             "queue_order",
             "queue_saved",
             "queue_state",
+            "queue_transfer_pages",
             "smart_playlists",
             "source_ids",
             "user_media_state"
