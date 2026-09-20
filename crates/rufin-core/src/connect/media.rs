@@ -628,9 +628,11 @@ impl ConnectOwner {
         }
         let parent = destination.parent().ok_or("Media path has no parent")?;
         tokio::fs::create_dir_all(parent).await.map_err(error)?;
-        let staged = tempfile::NamedTempFile::new_in(parent).map_err(error)?;
+        let staged = tempfile::NamedTempFile::new_in(parent)
+            .map_err(error)?
+            .into_temp_path();
         let receipt = self
-            .receive_media(peer, uri, staged.path(), offer, cancel)
+            .receive_media(peer, uri, &staged, offer, cancel)
             .await?;
         self.store_media(receipt, &destination).await
     }

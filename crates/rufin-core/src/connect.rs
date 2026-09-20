@@ -1667,7 +1667,7 @@ impl ConnectOwner {
         }
         self.save(|config| config.setup_pending = true)?;
         self.read_profile_file(
-            staged.path().to_owned(),
+            staged.to_path_buf(),
             true,
             Some(enrollment.file_key),
             Some(&profile),
@@ -1706,7 +1706,7 @@ impl ConnectOwner {
         network: &ConnectNetwork,
         peer: &str,
         setup: bool,
-    ) -> Result<tempfile::NamedTempFile, String> {
+    ) -> Result<tempfile::TempPath, String> {
         let answer = network
             .request(
                 peer,
@@ -1718,13 +1718,16 @@ impl ConnectOwner {
         let hash = answer["hash"]
             .as_str()
             .ok_or("The peer did not provide its profile")?;
-        let staged = tempfile::NamedTempFile::new().map_err(error)?;
+        // Blob installation replaces this path; close its handle before fetching on Windows.
+        let staged = tempfile::NamedTempFile::new()
+            .map_err(error)?
+            .into_temp_path();
         network
             .media()
             .fetch(
                 peer,
                 hash,
-                staged.path(),
+                &staged,
                 tokio_util::sync::CancellationToken::new(),
                 tokio::sync::watch::channel(0).0,
             )
