@@ -53,7 +53,7 @@ fn corresponding_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
 fn versioned_path(path: &Path, uri: &str, revision: &str, encoding: Encoding) -> PathBuf {
     let key = media_key(uri, revision, encoding);
     let extension = path.extension().unwrap_or_default().to_string_lossy();
-    path.with_extension(format!("{}.{}", &key[..12], extension))
+    path.with_extension(format!("{key:.12}.{extension}"))
 }
 
 fn media_key(uri: &str, revision: &str, encoding: Encoding) -> String {
@@ -103,7 +103,7 @@ impl ConnectOwner {
             } else {
                 reference["source_format"].as_str().unwrap_or("audio")
             };
-            path.set_extension(format!("{}.{}", &key[..12], extension));
+            path.set_extension(format!("{key:.12}.{extension}"));
         }
         Ok(Some(path))
     }
