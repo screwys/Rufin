@@ -2048,6 +2048,11 @@ msgstr "Zatím žádné oblíbené položky"
 msgid "No favorites yet"
 msgstr "Zatím žádné oblíbené položky"
 
+#, fuzzy
+#| msgid "No folder selected"
+msgid "No file linked"
+msgstr "Nebyla vybrána žádná složka"
+
 msgid "No folder selected"
 msgstr "Nebyla vybrána žádná složka"
 
@@ -2814,9 +2819,17 @@ msgstr "Odebrat z oblíbených"
 msgid "Removed from"
 msgstr "Odepnout"
 
+msgid "Rename Playlist"
+msgstr "Přejmenovat Playlist"
+
 #, fuzzy
 #| msgid "Rename"
 msgid "Rename file"
+msgstr "Přejmenovat"
+
+#, fuzzy
+#| msgid "Rename"
+msgid "Rename"
 msgstr "Přejmenovat"
 
 msgid "Repeat all"
@@ -3981,9 +3994,6 @@ msgstr ""
 
 #~ msgid "Lyrics settings"
 #~ msgstr "Nastavení textu skladeb"
-
-#~ msgid "Rename Playlist"
-#~ msgstr "Přejmenovat Playlist"
 
 #~ msgid "Enable equalizer"
 #~ msgstr "Zapnout equalizer"

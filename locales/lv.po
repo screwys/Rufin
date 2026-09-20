@@ -1908,6 +1908,11 @@ msgstr "Vēl nav iecienītāko izpildītāju"
 msgid "No favorites yet"
 msgstr "Vēl nav pievienots nevienas dziesmas izlasē"
 
+#, fuzzy
+#| msgid "No folder selected"
+msgid "No file linked"
+msgstr "Nav izvēlēta mape"
+
 msgid "No folder selected"
 msgstr "Nav izvēlēta mape"
 
@@ -2578,8 +2583,16 @@ msgstr "Noņemts no izlases"
 msgid "Removed from"
 msgstr "Noņemts no"
 
+msgid "Rename Playlist"
+msgstr "Pārdēvēt atskaņošanas sarakstu"
+
 msgid "Rename file"
 msgstr "Pārdēvēt failu"
+
+#, fuzzy
+#| msgid "Filename"
+msgid "Rename"
+msgstr "Faila nosaukums"
 
 msgid "Repeat all"
 msgstr "Atkārtot visus"
@@ -3674,9 +3687,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 
 #~ msgid "Lyrics settings"
 #~ msgstr "Tekstu iestatījumi"
-
-#~ msgid "Rename Playlist"
-#~ msgstr "Pārdēvēt atskaņošanas sarakstu"
 
 #~ msgid "Enable equalizer"
 #~ msgstr "Iespējot ekvalaizeru"

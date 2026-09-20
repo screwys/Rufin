@@ -1927,6 +1927,11 @@ msgstr "Noch keine Lieblingskünstler"
 msgid "No favorites yet"
 msgstr "Noch keine Favoriten"
 
+#, fuzzy
+#| msgid "No folder selected"
+msgid "No file linked"
+msgstr "Kein Ordner ausgewählt"
+
 msgid "No folder selected"
 msgstr "Kein Ordner ausgewählt"
 
@@ -2629,9 +2634,17 @@ msgstr "Aus Favoriten entfernt"
 msgid "Removed from"
 msgstr "Entfernt aus"
 
+msgid "Rename Playlist"
+msgstr "Playlist umbenennen"
+
 #, fuzzy
 #| msgid "Rename"
 msgid "Rename file"
+msgstr "Umbenennen"
+
+#, fuzzy
+#| msgid "Rename"
+msgid "Rename"
 msgstr "Umbenennen"
 
 msgid "Repeat all"
@@ -3737,9 +3750,6 @@ msgstr "Willkommen beim Rufin-Setup"
 
 #~ msgid "Lyrics settings"
 #~ msgstr "Liedtexteinstellungen"
-
-#~ msgid "Rename Playlist"
-#~ msgstr "Playlist umbenennen"
 
 #~ msgid "Enable equalizer"
 #~ msgstr "Equalizer einschalten"

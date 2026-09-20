@@ -1919,6 +1919,11 @@ msgstr "Ei suosikkiesittäjiä vielä"
 msgid "No favorites yet"
 msgstr "Ei suosikkeja vielä"
 
+#, fuzzy
+#| msgid "No folder selected"
+msgid "No file linked"
+msgstr "Kansiota ei ole valittu"
+
 msgid "No folder selected"
 msgstr "Kansiota ei ole valittu"
 
@@ -2644,9 +2649,17 @@ msgstr "Poistettu suosikeista"
 msgid "Removed from"
 msgstr ""
 
+msgid "Rename Playlist"
+msgstr "Nimeä soittolista uudelleen"
+
 #, fuzzy
 #| msgid "Rename"
 msgid "Rename file"
+msgstr "Nimeä uudelleen"
+
+#, fuzzy
+#| msgid "Rename"
+msgid "Rename"
 msgstr "Nimeä uudelleen"
 
 msgid "Repeat all"
@@ -3767,6 +3780,3 @@ msgstr "Tervetuloa Rufinin asennukseen"
 
 #~ msgid "Lyrics settings"
 #~ msgstr "Sanoitusten asetukset"
-
-#~ msgid "Rename Playlist"
-#~ msgstr "Nimeä soittolista uudelleen"

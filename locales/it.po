@@ -1874,6 +1874,9 @@ msgstr ""
 msgid "No favorites yet"
 msgstr ""
 
+msgid "No file linked"
+msgstr ""
+
 msgid "No folder selected"
 msgstr ""
 
@@ -2530,7 +2533,15 @@ msgstr ""
 msgid "Removed from"
 msgstr ""
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Rename Playlist"
+msgstr "Cancella Playlist"
+
 msgid "Rename file"
+msgstr ""
+
+msgid "Rename"
 msgstr ""
 
 msgid "Repeat all"

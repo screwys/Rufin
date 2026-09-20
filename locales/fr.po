@@ -1884,6 +1884,11 @@ msgstr "Pas encore d'artistes favori"
 msgid "No favorites yet"
 msgstr "Pas encore de favoris"
 
+#, fuzzy
+#| msgid "No folder selected"
+msgid "No file linked"
+msgstr "Pas de dossier sélectionné"
+
 msgid "No folder selected"
 msgstr "Pas de dossier sélectionné"
 
@@ -2552,8 +2557,18 @@ msgstr "Supprimé des favoris"
 msgid "Removed from"
 msgstr "Supprimé de"
 
+#, fuzzy
+#| msgid "Remove from Playlist"
+msgid "Rename Playlist"
+msgstr "Supprimer de la playlist"
+
 msgid "Rename file"
 msgstr ""
+
+#, fuzzy
+#| msgid "Files"
+msgid "Rename"
+msgstr "Fichiers"
 
 msgid "Repeat all"
 msgstr "Répétez tout"

@@ -1915,6 +1915,11 @@ msgstr "Пока нет избранных артистов"
 msgid "No favorites yet"
 msgstr "Пока нет избранных"
 
+#, fuzzy
+#| msgid "No folder selected"
+msgid "No file linked"
+msgstr "Папка не выбрана"
+
 msgid "No folder selected"
 msgstr "Папка не выбрана"
 
@@ -2589,8 +2594,16 @@ msgstr "Удалено из избранного"
 msgid "Removed from"
 msgstr "Удалено из"
 
+msgid "Rename Playlist"
+msgstr "Переименовать плейлист"
+
 msgid "Rename file"
 msgstr "Переименовать файл"
+
+#, fuzzy
+#| msgid "Filename"
+msgid "Rename"
+msgstr "Имя файла"
 
 msgid "Repeat all"
 msgstr "Повторять все"
@@ -3690,9 +3703,6 @@ msgstr "Добро пожаловать в программу установки
 
 #~ msgid "Lyrics settings"
 #~ msgstr "Настройки текстов"
-
-#~ msgid "Rename Playlist"
-#~ msgstr "Переименовать плейлист"
 
 #~ msgid "Enable equalizer"
 #~ msgstr "Включить эквалайзер"
