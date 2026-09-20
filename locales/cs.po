@@ -679,6 +679,11 @@ msgstr "Vymazat frontu"
 msgid "Clear title"
 msgstr "Seřadit podle názvu"
 
+#, fuzzy
+#| msgid "Clear queue"
+msgid "Clear"
+msgstr "Vymazat frontu"
+
 msgid "Clearing queue also clears the current song"
 msgstr ""
 
@@ -2095,6 +2100,9 @@ msgstr "Nebyly nalezeny žádné sítové zařízení"
 msgid "No related tracks found"
 msgstr "Žádné odpovídající skladby"
 
+msgid "No results for \"{query}\""
+msgstr ""
+
 #, fuzzy
 #| msgid "{count} result"
 #| msgid_plural "{count} results"
@@ -2266,6 +2274,11 @@ msgstr "Zahájení autorizace na Last.fm..."
 
 msgid "Opening Libre.fm authorization..."
 msgstr "Zahájení autorizace na Libre.fm..."
+
+#, fuzzy
+#| msgid "Server Actions"
+msgid "Options"
+msgstr "Akce serveru"
 
 msgid "Orange"
 msgstr "Oranžová"
@@ -2638,6 +2651,11 @@ msgstr "Výběr"
 msgid "Receiving profile"
 msgstr ""
 
+#, fuzzy
+#| msgid "Recently released"
+msgid "Recent searches"
+msgstr "Nedávno vydané"
+
 msgid "Recently played"
 msgstr "Nedávno přehrané"
 
@@ -2779,6 +2797,11 @@ msgstr "Odebrat z fronty"
 
 msgid "Remove rule"
 msgstr "Odebrat pravidlo"
+
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove search"
+msgstr "Odebrat složku"
 
 msgid "Remove"
 msgstr "Odebrat"
@@ -3026,6 +3049,11 @@ msgstr "Fronta vyhledávání"
 #| msgid "Search Lyrics"
 msgid "Search tracks"
 msgstr "Hledat Texty"
+
+#, fuzzy
+#| msgid "This isn't available"
+msgid "Search unavailable"
+msgstr "Toto není dostupné"
 
 msgid "Search"
 msgstr "Hledat"
@@ -3681,6 +3709,11 @@ msgstr "Historie verzí"
 
 msgid "Via relay"
 msgstr ""
+
+#, fuzzy
+#| msgid "View"
+msgid "View all"
+msgstr "Pohled"
 
 msgid "View"
 msgstr "Pohled"

@@ -658,6 +658,11 @@ msgstr "Очистить очередь"
 msgid "Clear title"
 msgstr "Очистить название"
 
+#, fuzzy
+#| msgid "Clear queue"
+msgid "Clear"
+msgstr "Очистить очередь"
+
 msgid "Clearing queue also clears the current song"
 msgstr "Очистка очереди также очищает текущую песню"
 
@@ -1952,6 +1957,9 @@ msgstr "Устройства в сети не найдены"
 msgid "No related tracks found"
 msgstr "Не найдено похожих треков"
 
+msgid "No results for \"{query}\""
+msgstr ""
+
 msgid "No results"
 msgstr "Результатов не найдено"
 
@@ -2105,6 +2113,11 @@ msgstr "Запуск авторизации в Last.fm…"
 
 msgid "Opening Libre.fm authorization..."
 msgstr "Открытие окна авторизации Libre.fm…"
+
+#, fuzzy
+#| msgid "Actions"
+msgid "Options"
+msgstr "Действия"
 
 msgid "Orange"
 msgstr "Оранжевый"
@@ -2431,6 +2444,11 @@ msgstr "Выбор диапазона"
 msgid "Receiving profile"
 msgstr ""
 
+#, fuzzy
+#| msgid "Recently released"
+msgid "Recent searches"
+msgstr "Недавно выпущенные"
+
 msgid "Recently played"
 msgstr "Недавно прослушанные"
 
@@ -2556,6 +2574,11 @@ msgstr "Удалить из Очереди"
 
 msgid "Remove rule"
 msgstr "Удалить правило"
+
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove search"
+msgstr "Удалить папку"
 
 msgid "Remove"
 msgstr "Удалить"
@@ -2775,6 +2798,11 @@ msgstr "Поиск в очереди воспроизведения"
 
 msgid "Search tracks"
 msgstr "Поиск треков"
+
+#, fuzzy
+#| msgid "Search is unavailable"
+msgid "Search unavailable"
+msgstr "Поиск недоступен"
 
 msgid "Search"
 msgstr "Поиск"
@@ -3381,6 +3409,11 @@ msgstr "История версий"
 
 msgid "Via relay"
 msgstr ""
+
+#, fuzzy
+#| msgid "View all tracks"
+msgid "View all"
+msgstr "Показать все треки"
 
 msgid "View"
 msgstr "Показать"
@@ -4204,9 +4237,6 @@ msgstr "Добро пожаловать в программу установки
 
 #~ msgid "Use server streams only"
 #~ msgstr "Использовать только потоковое вещание с сервера"
-
-#~ msgid "View all tracks"
-#~ msgstr "Показать все треки"
 
 #~ msgid "Website"
 #~ msgstr "Веб-сайт"

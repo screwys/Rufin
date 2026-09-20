@@ -625,6 +625,11 @@ msgstr "Effacer la file d'attente"
 msgid "Clear title"
 msgstr "Effacer le titre"
 
+#, fuzzy
+#| msgid "Clear queue"
+msgid "Clear"
+msgstr "Effacer la file d'attente"
+
 msgid "Clearing queue also clears the current song"
 msgstr "Effacer la file d'attente efface également la chanson actuelle"
 
@@ -1921,6 +1926,9 @@ msgstr "Aucun périphérique réseau trouvé"
 msgid "No related tracks found"
 msgstr "Aucune piste correspondante trouvée"
 
+msgid "No results for \"{query}\""
+msgstr ""
+
 msgid "No results"
 msgstr "Aucun résultat"
 
@@ -2070,6 +2078,11 @@ msgstr ""
 
 msgid "Opening Libre.fm authorization..."
 msgstr ""
+
+#, fuzzy
+#| msgid "Actions"
+msgid "Options"
+msgstr "Actions"
 
 msgid "Orange"
 msgstr "Orange"
@@ -2394,6 +2407,11 @@ msgstr "Collection"
 msgid "Receiving profile"
 msgstr ""
 
+#, fuzzy
+#| msgid "Recently played"
+msgid "Recent searches"
+msgstr "Récemment joué"
+
 msgid "Recently played"
 msgstr "Récemment joué"
 
@@ -2519,6 +2537,11 @@ msgstr "Supprimer de la file d'attente"
 
 msgid "Remove rule"
 msgstr "Supprimer la règle"
+
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove search"
+msgstr "Supprimer le dossier"
 
 msgid "Remove"
 msgstr "Supprimer"
@@ -2735,6 +2758,11 @@ msgstr ""
 
 msgid "Search tracks"
 msgstr "Rechercher un morceau"
+
+#, fuzzy
+#| msgid "Artist unavailable"
+msgid "Search unavailable"
+msgstr "Artiste non disponible"
 
 msgid "Search"
 msgstr "Recherche"
@@ -3338,6 +3366,9 @@ msgid "Version History"
 msgstr ""
 
 msgid "Via relay"
+msgstr ""
+
+msgid "View all"
 msgstr ""
 
 msgid "View"

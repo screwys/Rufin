@@ -648,6 +648,11 @@ msgstr "清除播放佇列"
 msgid "Clear title"
 msgstr "新增標題"
 
+#, fuzzy
+#| msgid "Clear queue"
+msgid "Clear"
+msgstr "清除播放佇列"
+
 msgid "Clearing queue also clears the current song"
 msgstr ""
 
@@ -2040,6 +2045,9 @@ msgstr "找不到網路裝置"
 msgid "No related tracks found"
 msgstr "無匹配的曲目"
 
+msgid "No results for \"{query}\""
+msgstr ""
+
 #, fuzzy
 #| msgid "{count} result"
 #| msgid_plural "{count} results"
@@ -2210,6 +2218,11 @@ msgstr ""
 
 msgid "Opening Libre.fm authorization..."
 msgstr ""
+
+#, fuzzy
+#| msgid "Collections"
+msgid "Options"
+msgstr "收藏"
 
 msgid "Orange"
 msgstr "橘色"
@@ -2578,6 +2591,11 @@ msgstr "選擇"
 msgid "Receiving profile"
 msgstr ""
 
+#, fuzzy
+#| msgid "Recently released"
+msgid "Recent searches"
+msgstr "最近發行"
+
 msgid "Recently played"
 msgstr "最近播放"
 
@@ -2711,6 +2729,11 @@ msgstr "從佇列中移除"
 
 msgid "Remove rule"
 msgstr "移除規則"
+
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove search"
+msgstr "移除資料夾"
 
 msgid "Remove"
 msgstr "移除"
@@ -2948,6 +2971,11 @@ msgstr "搜尋佇列"
 #| msgid "Search Lyrics"
 msgid "Search tracks"
 msgstr "搜尋歌詞"
+
+#, fuzzy
+#| msgid "Artist name"
+msgid "Search unavailable"
+msgstr "藝人名稱"
 
 msgid "Search"
 msgstr "搜尋"
@@ -3590,6 +3618,9 @@ msgid "Version History"
 msgstr ""
 
 msgid "Via relay"
+msgstr ""
+
+msgid "View all"
 msgstr ""
 
 msgid "View"

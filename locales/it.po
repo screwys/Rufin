@@ -638,6 +638,11 @@ msgstr "Rimuovi coda"
 msgid "Clear title"
 msgstr "Rimuovi titolo"
 
+#, fuzzy
+#| msgid "Clear queue"
+msgid "Clear"
+msgstr "Rimuovi coda"
+
 msgid "Clearing queue also clears the current song"
 msgstr "Rimuovere la coda rimuove anche la canzone corrente"
 
@@ -1911,6 +1916,9 @@ msgstr ""
 msgid "No related tracks found"
 msgstr ""
 
+msgid "No results for \"{query}\""
+msgstr ""
+
 msgid "No results"
 msgstr ""
 
@@ -2060,6 +2068,11 @@ msgstr ""
 
 msgid "Opening Libre.fm authorization..."
 msgstr ""
+
+#, fuzzy
+#| msgid "Actions"
+msgid "Options"
+msgstr "Azioni"
 
 msgid "Orange"
 msgstr ""
@@ -2380,6 +2393,9 @@ msgstr "Collezione"
 msgid "Receiving profile"
 msgstr ""
 
+msgid "Recent searches"
+msgstr ""
+
 msgid "Recently played"
 msgstr ""
 
@@ -2500,6 +2516,9 @@ msgid "Remove from Queue"
 msgstr ""
 
 msgid "Remove rule"
+msgstr ""
+
+msgid "Remove search"
 msgstr ""
 
 msgid "Remove"
@@ -2717,6 +2736,11 @@ msgstr ""
 
 msgid "Search tracks"
 msgstr ""
+
+#, fuzzy
+#| msgid "Artist unavailable"
+msgid "Search unavailable"
+msgstr "Artista non disponibile"
 
 msgid "Search"
 msgstr ""
@@ -3311,6 +3335,9 @@ msgid "Version History"
 msgstr ""
 
 msgid "Via relay"
+msgstr ""
+
+msgid "View all"
 msgstr ""
 
 msgid "View"

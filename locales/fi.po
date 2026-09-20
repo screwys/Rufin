@@ -627,6 +627,11 @@ msgstr "Tyhjennä jono"
 msgid "Clear title"
 msgstr ""
 
+#, fuzzy
+#| msgid "Clear queue"
+msgid "Clear"
+msgstr "Tyhjennä jono"
+
 msgid "Clearing queue also clears the current song"
 msgstr ""
 
@@ -1966,6 +1971,9 @@ msgstr "Verkkolaitteita ei löytynyt"
 msgid "No related tracks found"
 msgstr "Tässä kansiossa ei ole mitään"
 
+msgid "No results for \"{query}\""
+msgstr ""
+
 #, fuzzy
 #| msgid "{count} result"
 #| msgid_plural "{count} results"
@@ -2124,6 +2132,11 @@ msgstr "Avataan Last.fm-valtuutusta..."
 
 msgid "Opening Libre.fm authorization..."
 msgstr "Avataan Libre.fm-valtuutusta..."
+
+#, fuzzy
+#| msgid "Server Actions"
+msgid "Options"
+msgstr "Palvelimen toiminnot"
 
 msgid "Orange"
 msgstr "Oranssi"
@@ -2476,6 +2489,11 @@ msgstr "Odotetaan yhteyttä"
 msgid "Receiving profile"
 msgstr ""
 
+#, fuzzy
+#| msgid "Recently released"
+msgid "Recent searches"
+msgstr "Äskettäin julkaistu"
+
 msgid "Recently played"
 msgstr "Äskettäin toistettu"
 
@@ -2610,6 +2628,11 @@ msgid "Remove from Queue"
 msgstr "Poista jonosta"
 
 msgid "Remove rule"
+msgstr "Poista sääntö"
+
+#, fuzzy
+#| msgid "Remove rule"
+msgid "Remove search"
 msgstr "Poista sääntö"
 
 msgid "Remove"
@@ -2843,6 +2866,11 @@ msgstr ""
 #| msgid "Search Lyrics"
 msgid "Search tracks"
 msgstr "Hae sanoituksia"
+
+#, fuzzy
+#| msgid "Search is unavailable"
+msgid "Search unavailable"
+msgstr "Haku ei ole saatavilla"
 
 msgid "Search"
 msgstr "Hae"
@@ -3472,6 +3500,11 @@ msgstr "Versiohistoria"
 
 msgid "Via relay"
 msgstr ""
+
+#, fuzzy
+#| msgid "View"
+msgid "View all"
+msgstr "Näkymä"
 
 msgid "View"
 msgstr "Näkymä"
