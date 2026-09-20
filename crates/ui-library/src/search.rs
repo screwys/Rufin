@@ -144,7 +144,7 @@ impl SearchItem {
         }
     }
     fn is_downloaded(&self) -> bool {
-        matches!(self, Self::Track(row) if row.is_downloaded)
+        matches!(self, Self::Track(row) if ui_shared::library_fields::TrackPresentation::download_badge(row))
     }
     fn numeric_field(&self, field: LibraryField) -> Option<i64> {
         match self {

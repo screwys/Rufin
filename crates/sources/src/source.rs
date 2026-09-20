@@ -15,6 +15,7 @@ use playback::{ResolvedStream, SourceReportFact, StreamRequest};
 use serde::{Deserialize, Serialize};
 
 use crate::policy::raw_item_id;
+mod profile_file;
 use crate::{
     ImageBytes, SourceConfiguration, SourceError, SourceId, SourceResult, SourceSettingsInput,
     SourceSetupInput,

@@ -8,6 +8,7 @@ use library::LibraryResult;
 mod production_schema;
 
 mod activity;
+mod connect;
 mod entities;
 mod laws;
 mod playlists;

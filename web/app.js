@@ -7,6 +7,7 @@ import { init as menus } from "./menus.js";
 import { init as random } from "./random.js";
 import { init as connection } from "./connection.js";
 import { initPins } from "./pins.js";
+import { init as connect } from "./connect.js";
 
 ui();
 library();
@@ -17,3 +18,4 @@ menus();
 random();
 initPins();
 connection();
+connect();

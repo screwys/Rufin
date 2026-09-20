@@ -547,7 +547,7 @@ fn playlist_entry_title_column(
         cell.subtitle().set_visible(true);
         bind_shell.downloads.bind_download_badge(
             &cell.downloaded().expect("playlist title badge"),
-            entry.is_downloaded,
+            ui_shared::downloads::media_download_badge(&entry.media_uri, entry.is_downloaded),
         );
         bind_playing.bind(title.upcast_ref(), item.position());
     });
@@ -828,8 +828,10 @@ impl ReusableCollectionGridCell<PlaylistEntryRow> for PlaylistEntryGridCell {
         self.body.bind(&entry.title, |field| {
             playlist_entry_field_links(&entry, field)
         });
-        self.body
-            .set_download_target(&self.shell, entry.is_downloaded);
+        self.body.set_download_target(
+            &self.shell,
+            ui_shared::downloads::media_download_badge(&entry.media_uri, entry.is_downloaded),
+        );
         self.current.replace(Some(entry));
         self.bind_current_artwork();
     }

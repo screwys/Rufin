@@ -112,7 +112,7 @@ pub struct AudioscrobblerSettings {
     pub enabled: bool,
     #[serde(default)]
     pub username: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub api_key: String,
     #[serde(default)]
     pub api_secret: String,

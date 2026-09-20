@@ -84,6 +84,7 @@ impl ArtworkRequest {
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ArtworkKey {
+    asset: String,
     binding: String,
     variant: String,
     fetch_size: u32,
@@ -92,7 +93,7 @@ pub struct ArtworkKey {
 
 impl ArtworkKey {
     fn derive(
-        identity: &str,
+        candidate: Option<&selection::Candidate>,
         sizes: (u32, u32),
         external: Option<&ExternalPolicy>,
         allow_fetch: bool,
@@ -102,7 +103,16 @@ impl ArtworkKey {
             .map(|policy| format!("{policy:?}\0{}", epochs.1))
             .unwrap_or_default();
         Self {
-            binding: Self::binding_digest(identity),
+            asset: Self::binding_digest(
+                &candidate
+                    .map(selection::Candidate::asset_identity)
+                    .unwrap_or_default(),
+            ),
+            binding: Self::binding_digest(
+                &candidate
+                    .map(selection::Candidate::stable_identity)
+                    .unwrap_or_default(),
+            ),
             variant: Self::binding_digest(&format!("{policy}\0{allow_fetch}\0{}", epochs.0)),
             fetch_size: sizes.0,
             render_size: sizes.1,
@@ -117,8 +127,9 @@ impl ArtworkKey {
         (self.binding.clone(), self.variant.clone())
     }
 
-    pub fn same_image(&self, other: &Self) -> bool {
-        self.binding == other.binding && self.variant == other.variant
+    /// Whether an existing image can stay visible while this request refreshes it.
+    pub fn same_asset(&self, other: &Self) -> bool {
+        self.asset == other.asset && self.variant == other.variant
     }
 }
 
@@ -313,6 +324,70 @@ impl Artwork {
 mod preparation_tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
+
+    #[test]
+    fn refreshed_artwork_keeps_its_asset_but_requests_the_new_revision() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let artwork = Artwork::new(directory.path(), runtime.handle().clone()).unwrap();
+        let key = |encoded: Vec<u8>| {
+            artwork
+                .prepare(ArtworkRequest::new(
+                    ArtworkBinding::opaque(&encoded),
+                    128,
+                    64,
+                ))
+                .key
+        };
+        let native = |source: &str, image: &str, revision: &str| {
+            sources::native_artwork_binding(
+                source,
+                &sources::NativeImageRef::new(image, Some(revision.into())),
+            )
+            .unwrap()
+        };
+        let first = key(native("source", "cover", "one"));
+        let revised = key(native("source", "cover", "two"));
+        assert_ne!(first, revised);
+        assert!(first.same_asset(&revised));
+        assert!(!first.same_asset(&key(native("source", "other-cover", "one"))));
+        assert!(!first.same_asset(&key(native("other-source", "cover", "one"))));
+
+        let local = |source: &str, revision: &str, picture_index: Option<u32>| {
+            let source_id = SourceId::new(source);
+            let path = directory
+                .path()
+                .join("track.flac")
+                .to_string_lossy()
+                .into_owned();
+            let revision = revision.to_owned();
+            serde_json::to_vec(&match picture_index {
+                Some(picture_index) => sources::LocalImageRef::Embedded {
+                    source_id,
+                    path,
+                    revision,
+                    picture_index,
+                },
+                None => sources::LocalImageRef::File {
+                    source_id,
+                    path,
+                    revision,
+                },
+            })
+            .unwrap()
+        };
+        for picture_index in [None, Some(0)] {
+            let first = key(local("source", "one", picture_index));
+            let revised = key(local("source", "two", picture_index));
+            assert_ne!(first, revised);
+            assert!(first.same_asset(&revised));
+            assert!(!first.same_asset(&key(local("other-source", "one", picture_index))));
+            assert!(!first.same_asset(&key(local("source", "one", Some(1)))));
+        }
+
+        artwork.invalidate_source(&SourceId::new("source")).unwrap();
+        assert!(!first.same_asset(&key(native("source", "cover", "one"))));
+    }
 
     #[test]
     fn preparing_a_binding_does_not_construct_its_source() {

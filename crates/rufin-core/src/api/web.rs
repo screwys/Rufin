@@ -18,6 +18,7 @@ async fn translations() -> Response<Body> {
             include_str!("../../../../web/menus.js"),
             include_str!("../../../../web/random.js"),
             include_str!("../../../../web/pins.js"),
+            include_str!("../../../../web/connect.js"),
         ]
         .into_iter()
         .flat_map(web_gettext::messages)
@@ -378,7 +379,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
             get(|| async {
                 asset(
                     "text/javascript; charset=utf-8",
-                    include_bytes!("../../../../web/vendor/htmx.min.js"),
+                    include_bytes!("../../../../vendor/htmx/htmx.min.js"),
                 )
             }),
         )
@@ -387,7 +388,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
             get(|| async {
                 asset(
                     "text/plain; charset=utf-8",
-                    include_bytes!("../../../../web/vendor/htmx.LICENSE"),
+                    include_bytes!("../../../../vendor/htmx/htmx.LICENSE"),
                 )
             }),
         )
@@ -414,6 +415,7 @@ async fn script(
         file!("random.js"),
         file!("queue.js"),
         file!("pins.js"),
+        file!("connect.js"),
         file!("drag.js"),
     ];
     let bytes = files
@@ -535,6 +537,7 @@ async fn icon(
     }
     const ICONS: &[(&str, &[u8])] = &[
         icon!("rufin-application-exit-symbolic.svg"),
+        icon!("rufin-help-about-symbolic.svg"),
         icon!("rufin-audio-only-symbolic.svg"),
         icon!("rufin-playlists-compact-symbolic.svg"),
         icon!("rufin-document-edit-symbolic.svg"),

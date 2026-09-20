@@ -2404,3 +2404,8 @@ preferencespage.backup-settings > scrolledwindow > viewport > clamp > box {
 preferencespage.backup-settings row:not(.entry):not(.spin) > box.header {
   min-height: 40px;
 }
+
+button.connect-relay-link, button.connect-relay-link:visited { color: inherit; }
+
+.connect-device-online .subtitle { color: var(--success-color); }
+.connect-device-offline .subtitle { color: var(--error-color); }

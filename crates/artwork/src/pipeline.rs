@@ -462,7 +462,7 @@ fn request_key(state: &State, request: &ArtworkRequest, allow_fetch: bool) -> Ar
         .map(|candidate| source_epoch(state, candidate))
         .unwrap_or(0);
     ArtworkKey::derive(
-        request.binding.stable_identity(),
+        request.binding.candidate(),
         (request.fetch_size, request.render_size),
         request.binding.has_external().then_some(&request.external),
         allow_fetch,
@@ -793,7 +793,7 @@ fn remove_queued(state: &mut State, key: &ArtworkKey) {
 
 fn job_key(request: &CandidateRequest, source_epoch: u64, external_epoch: u64) -> ArtworkKey {
     ArtworkKey::derive(
-        &request.candidate.stable_identity(),
+        Some(&request.candidate),
         (request.fetch_size, request.render_size),
         request.candidate.is_external().then_some(&request.external),
         request.allow_fetch,

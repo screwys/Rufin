@@ -1,6 +1,7 @@
 //! Optional HTTP access to the same product owners used by native clients.
 
 mod catalog;
+mod connect;
 mod controller;
 mod media;
 mod pins;
@@ -101,6 +102,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .merge(playlists::routes())
         .merge(pins::routes())
         .merge(catalog::routes())
+        .merge(connect::routes())
 }
 
 async fn help() -> Result<Response<Body>, Error> {

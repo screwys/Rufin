@@ -90,9 +90,9 @@ pub struct SidebarSettings {
     pub route_items: Vec<SidebarRouteItemSettings>,
     #[serde(default = "default_true")]
     pub pins_visible: bool,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub pins: Vec<SidebarPin>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub playlist_pin_imported_sources: Vec<SourceId>,
     #[serde(default = "default_true")]
     pub server_visible: bool,

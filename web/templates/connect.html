@@ -1,0 +1,70 @@
+<dialog id="connect-dialog" aria-labelledby="connect-title">
+  <header class="connect-header">
+    <h2 id="connect-title" tabindex="-1">{{ localization::tr("Rufin Connect") }}</h2>
+    <form method="dialog"><button class="icon-button" aria-label="{{ localization::tr("Close") }}">×</button></form>
+  </header>
+  <div class="connect-body">
+    <p id="connect-error" role="alert" hidden></p>
+    <section data-connect-section="start">
+      <div class="connect-inline"><label for="connect-name">{{ localization::tr("Device name") }}</label><input id="connect-name" /><button id="connect-rename">{{ localization::tr("Save") }}</button><div id="connect-choices" class="connect-role" role="group" aria-label="{{ localization::tr("Connect a device") }}"><button data-connect-mode="join" aria-pressed="false">{{ localization::tr("Join") }}</button><button data-connect-mode="invite" aria-pressed="true">{{ localization::tr("Invite") }}</button></div><button id="connect-leave" class="icon-button" title="{{ localization::tr("Disconnect this device") }}" aria-label="{{ localization::tr("Disconnect this device") }}"><span class="icon" data-icon="disconnect" aria-hidden="true"></span></button><button id="connect-finish-setup" class="primary" hidden>{{ localization::tr("Continue") }}</button></div>
+    <div data-connect-section="invite" hidden>
+      <div class="connect-inline"><div class="connect-invitation-copy"><strong>{{ localization::tr("Connect a device") }}</strong><p>{{ localization::tr("Open Rufin Connect on another device, connect via Join button or by copying invitation code") }}</p></div><button id="connect-copy" class="icon-button" title="{{ localization::tr("Copy invitation") }}" aria-label="{{ localization::tr("Copy invitation") }}"><span class="icon" data-icon="copy" aria-hidden="true"></span></button></div>
+      <div id="connect-share-invitation" hidden><label class="visually-hidden" for="connect-invitation">{{ localization::tr("Device invitation") }}</label><input id="connect-invitation" readonly hidden /></div>
+    </div>
+      <p id="connect-setup-title" hidden>{{ localization::tr("Set up this device") }}</p>
+    </section>
+    <section data-connect-section="nearby" hidden>
+      <h3>{{ localization::tr("Nearby devices") }}</h3>
+      <div id="connect-nearby-devices" class="connect-card-list"></div>
+    </section>
+    <section data-connect-section="devices" hidden>
+      <div class="connect-section-heading"><h3>{{ localization::tr("Connected devices") }}</h3><button id="connect-refresh" class="text-button">{{ localization::tr("Refresh") }}</button></div>
+      <div id="connect-devices" class="connect-card-list"></div>
+    </section>
+    <section data-connect-section="join" hidden>
+      <div class="connect-inline"><label for="connect-join-method">{{ localization::tr("Join using") }}</label><select id="connect-join-method"><option value="device">{{ localization::tr("Another device") }}</option><option value="file">{{ localization::tr("Existing profile file") }}</option></select></div>
+      <div id="connect-peer-controls">
+      <div class="connect-inline"><label class="visually-hidden" for="connect-peer">{{ localization::tr("Device invitation") }}</label><input id="connect-peer" placeholder="{{ localization::tr("Device invitation") }}" /><button id="connect-join">{{ localization::tr("Join profile") }}</button></div>
+      </div>
+    </section>
+    <section data-connect-section="connecting" hidden>
+      <p id="connect-connecting-status" role="status"></p>
+      <button id="connect-cancel-pairing">{{ localization::tr("Cancel") }}</button>
+    </section>
+    <section data-connect-section="verify" hidden>
+      <h3>{{ localization::tr("Compare these emoji on both devices") }}</h3><p id="connect-verification-name"></p>
+      <div id="connect-emoji" class="connect-emoji" aria-live="polite"></div>
+      <p>{{ localization::tr("Approving gives this device access to your profile and saved source logins.") }}</p>
+      <p id="connect-approval-status" role="status" hidden>{{ localization::tr("Waiting for the other device to approve") }}</p>
+      <div class="connect-actions"><button id="connect-reject">{{ localization::tr("Cancel") }}</button><button id="connect-approve" class="primary">{{ localization::tr("These emoji match") }}</button></div>
+    </section>
+    <section data-connect-section="network" hidden>
+      <label class="connect-check"><input id="connect-enabled" type="checkbox" /><span>{{ localization::tr("Enable Rufin Connect") }}</span></label>
+      <label class="connect-check"><input id="connect-nearby" type="checkbox" role="switch" aria-describedby="connect-nearby-help" /><span>{{ localization::tr("Nearby discovery") }}</span></label>
+      <p id="connect-nearby-help">{{ localization::tr("This can be turned off after pairing if you want") }}</p>
+      <div class="connect-inline connect-relay-heading"><span>{{ localization::tr("Relay") }}</span><a class="icon-button" href="https://docs.iroh.computer/iroh-services/relays/self-hosted" target="_blank" rel="noopener" title="{{ localization::tr("Self-host an Iroh Relay") }}" aria-label="{{ localization::tr("Self-host an Iroh Relay") }}"><span class="icon" data-icon="go-to" aria-hidden="true"></span></a><a class="icon-button" href="https://github.com/n0-computer/iroh/blob/v1.0.3/iroh/src/defaults.rs#L25-L33" target="_blank" rel="noopener" title="{{ localization::tr("Use a public relay") }}" aria-label="{{ localization::tr("Use a public relay") }}"><span class="icon" data-icon="go-to" aria-hidden="true"></span></a><input id="connect-relay-enabled" type="checkbox" role="switch" aria-label="{{ localization::tr("Relay") }}" /></div>
+      <div class="connect-inline">
+        <label class="visually-hidden" for="connect-relay">{{ localization::tr("Relay address") }}</label><input id="connect-relay" type="url" placeholder="{{ localization::tr("Relay address") }}" /><button id="connect-network">{{ localization::tr("Save") }}</button>
+      </div>
+
+    </section>
+    <section data-connect-section="media" hidden>
+      <div class="connect-inline"><label for="connect-encoding">{{ localization::tr("Download quality") }}</label><select id="connect-encoding" aria-describedby="connect-encoding-help"><option value="original">{{ localization::tr("Original") }}</option><option value="mp3">MP3</option></select></div>
+      <p id="connect-encoding-help">{{ localization::tr("This only takes affect for new local files that are added by another device") }}</p>
+      <p id="connect-media-status" role="status" hidden></p>
+      <div id="connect-folder-section" hidden><h3>{{ localization::tr("Local music folders") }} <span class="icon" data-icon="info" tabindex="0" title="{{ localization::tr("Choose where this device stores local music received through Connect. Matching files already in the folder are reused; missing files are downloaded here.") }}" aria-label="{{ localization::tr("Choose where this device stores local music received through Connect. Matching files already in the folder are reused; missing files are downloaded here.") }}"></span></h3><div id="connect-folders" class="connect-card-list"></div></div>
+    </section>
+    <section data-connect-section="file" hidden>
+      <strong>{{ localization::tr("Profile storage") }}</strong>
+      <span id="connect-local-storage-help" class="icon" data-icon="info" tabindex="0" title="{{ localization::tr("To use a file-sync app, choose a folder it synchronizes.") }}" aria-label="{{ localization::tr("To use a file-sync app, choose a folder it synchronizes.") }}" hidden></span>
+      <span id="connect-storage-help" class="icon" data-icon="info" tabindex="0" title="{{ localization::tr("The folder is relative to the selected account. Applying it changes storage on all devices.") }}" aria-label="{{ localization::tr("The folder is relative to the selected account. Applying it changes storage on all devices.") }}" hidden></span>
+      <div class="connect-inline"><label for="connect-storage">{{ localization::tr("Storage") }}</label><select id="connect-storage"><option value="">{{ localization::tr("Local storage") }}</option><option value="webdav">{{ localization::tr("WebDAV / Nextcloud") }}</option><option value="smb">{{ localization::tr("SMB / Samba") }}</option></select><button id="connect-storage-connection" hidden>{{ localization::tr("Choose connection") }}</button></div>
+      <div class="connect-inline">
+        <label class="visually-hidden" for="connect-file">{{ localization::tr("Connect file") }}</label><input id="connect-file" spellcheck="false" placeholder="{{ localization::tr("Connect file") }}" />
+        <button id="connect-import">{{ localization::tr("Import") }}</button>
+        <button id="connect-save-storage" disabled>{{ localization::tr("Apply") }}</button>
+      </div>
+    </section>
+    
+  </div>
+</dialog>

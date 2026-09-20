@@ -12,6 +12,9 @@ pub(crate) const GENERAL_PREFERENCES_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/general.ui";
 pub(crate) const INTEGRATIONS_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/integrations.ui";
+pub(crate) const CONNECT_RESOURCE: &str = "/io/github/screwys/Rufin/ui/preferences/connect.ui";
+pub(crate) const CONNECT_COMPONENTS_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/preferences/connect-components.ui";
 pub(crate) const BACKUP_DIALOG_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/dialogs/backup.ui";
 pub(crate) const BACKUP_PREFERENCES_RESOURCE: &str =
@@ -40,6 +43,8 @@ pub(crate) const SOURCE_CHOICE_SELECTOR_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/source/choice_selector.ui";
 pub(crate) const FILE_HOST_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/source/file_host.ui";
+pub(crate) const FILE_INTEGRATION_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/preferences/source/file_integration.ui";
 pub(crate) const PLEX_HOST_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/source/plex_host.ui";
 pub(crate) const JELLYFIN_EMBY_HOST_RESOURCE: &str =
@@ -75,6 +80,8 @@ pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     CONTENT_CHROME_RESOURCE,
     DIAGNOSTICS_RESOURCE,
     INTEGRATIONS_RESOURCE,
+    CONNECT_RESOURCE,
+    CONNECT_COMPONENTS_RESOURCE,
     LIBRARY_PREFERENCES_RESOURCE,
     BACKUP_PREFERENCES_RESOURCE,
     BACKUP_DIALOG_RESOURCE,
@@ -89,6 +96,7 @@ pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     ONBOARDING_RESOURCE,
     CREDENTIAL_HOST_RESOURCE,
     FILE_HOST_RESOURCE,
+    FILE_INTEGRATION_RESOURCE,
     PLEX_HOST_RESOURCE,
     JELLYFIN_EMBY_HOST_RESOURCE,
     CODE_LOGIN_RESOURCE,

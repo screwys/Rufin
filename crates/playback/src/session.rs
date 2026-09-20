@@ -379,6 +379,106 @@ impl PlaybackSession {
     pub fn sequence(&self) -> &Sequence {
         &self.sequence
     }
+
+    pub(crate) fn continuation(&mut self, sample: &ClockSample) -> Option<crate::Continuation> {
+        if self.status() == TransportStatus::Stopped {
+            return None;
+        }
+        self.advance_external_clock(sample);
+        if let Some(current) = self.current_run.as_mut() {
+            current.advance_clock(sample.monotonic_millis);
+        }
+        let current = self.sequence.selected_id()?.clone();
+        Some(crate::Continuation {
+            header: crate::ContinuationHeader {
+                total: self.sequence.total(),
+                current,
+                position_millis: self.sequence.progress_millis(),
+                repeat: self.sequence.repeat_mode(),
+                shuffled: self.sequence.shuffle_enabled(),
+                auto_dj: self.auto_dj_enabled,
+                auto_dj_refill_threshold: self.auto_dj_refill_threshold,
+                playback_rate: self.settings.playback_rate,
+                listen: self.current_run.as_ref().map(|run| crate::ContinuedListen {
+                    play_id: run.play_id.clone(),
+                    started_at_unix_seconds: run.started_at_unix_seconds,
+                    local_period: run.local_period.clone(),
+                    audible_millis: run.audible_millis,
+                    qualified: run.qualified,
+                }),
+            },
+            queue: self.sequence.snapshot(),
+        })
+    }
+
+    pub(crate) fn stop_continuation(
+        &mut self,
+        expected: &crate::ContinuationHeader,
+        sample: &ClockSample,
+    ) -> (Option<crate::ContinuationHeader>, SessionUpdate) {
+        let Some(current) = self.continuation(sample) else {
+            return (None, SessionUpdate::default());
+        };
+        if current.header.current != expected.current
+            || current.header.listen.as_ref().map(|listen| &listen.play_id)
+                != expected.listen.as_ref().map(|listen| &listen.play_id)
+        {
+            return (None, SessionUpdate::default());
+        }
+        let mut effects = Vec::new();
+        self.qualify_current(&mut effects);
+        let header = self.continuation(sample).map(|state| state.header);
+        self.sequence.set_selected_duration(self.duration_millis());
+        let mut update = self.stop(sample, false);
+        effects.append(&mut update.effects);
+        update.effects = effects;
+        (header, update)
+    }
+
+    pub(crate) fn adopt_continuation(
+        &mut self,
+        continuation: crate::Continuation,
+        stream: PreparedStream,
+        sample: &ClockSample,
+    ) -> Result<SessionUpdate, SequenceError> {
+        let crate::Continuation { header, mut queue } = continuation;
+        queue.current_index = queue.order.iter().position(|index| {
+            queue
+                .entries
+                .get(*index as usize)
+                .is_some_and(|entry| entry.occurrence == header.current)
+        });
+        queue.progress_millis = header.position_millis.min(i64::MAX as u64) as i64;
+        queue.repeat_mode = header.repeat;
+        queue.shuffled = header.shuffled;
+        let sequence = Sequence::from_window(queue.clone(), self.sequence.revision() + 1)?;
+        if sequence.selected().is_none() {
+            return Err(SequenceError::MissingSelectedOccurrence);
+        }
+        let mut effects = Vec::new();
+        self.finish_current(RunEndReason::Replaced, sample, &mut effects);
+        self.pending_queue = None;
+        self.pending_replacement = None;
+        self.pending_additive.clear();
+        self.deferred_queue.clear();
+        self.queue_loading = false;
+        self.queue_transport = None;
+        self.settings.playback_rate = header.playback_rate;
+        self.auto_dj_enabled = header.auto_dj;
+        self.auto_dj_refill_threshold = header.auto_dj_refill_threshold;
+        let mut update = self.adopt_local(queue, stream, true)?;
+        if let (Some(current), Some(listen)) = (self.current_run.as_mut(), header.listen) {
+            current.play_id = listen.play_id;
+            current.started_at_unix_seconds = listen.started_at_unix_seconds;
+            current.local_period = listen.local_period;
+            current.audible_millis = listen.audible_millis;
+            current.qualified = listen.qualified;
+            current.last_monotonic_millis = Some(sample.monotonic_millis);
+        }
+        effects.append(&mut update.effects);
+        update.effects = effects;
+        Ok(update)
+    }
     pub(crate) fn external_queue_extent(&self) -> Option<(usize, usize)> {
         self.external
             .as_ref()
@@ -819,7 +919,7 @@ impl PlaybackSession {
             SessionCommand::PlayPause => Ok(self.play_pause()),
             SessionCommand::Play => Ok(self.set_playing(true)),
             SessionCommand::Pause => Ok(self.set_playing(false)),
-            SessionCommand::Stop => Ok(self.stop(sample)),
+            SessionCommand::Stop => Ok(self.stop(sample, true)),
             SessionCommand::Next => Ok(self.next(sample)),
             SessionCommand::Previous => Ok(self.previous(sample)),
             SessionCommand::Seek(position_millis) => Ok(self.seek(position_millis)),
@@ -1564,12 +1664,12 @@ impl PlaybackSession {
         }
     }
 
-    fn stop(&mut self, sample: &ClockSample) -> SessionUpdate {
+    fn stop(&mut self, sample: &ClockSample, reset_position: bool) -> SessionUpdate {
         if self.pending_queue.is_some() {
             self.queue_transport = Some(TransportStatus::Stopped);
         }
         let Some(run) = self.current_run.as_ref() else {
-            if self.sequence.progress_millis() == 0 && !self.restored_paused {
+            if !reset_position || (self.sequence.progress_millis() == 0 && !self.restored_paused) {
                 return SessionUpdate::default();
             }
             self.restored_paused = false;
@@ -1586,7 +1686,9 @@ impl PlaybackSession {
             .effects
             .push(SessionEffect::Backend(BackendCommand::Stop { run: run.id }));
         self.finish_current(RunEndReason::Stopped, sample, &mut update.effects);
-        self.sequence.set_progress_millis(0);
+        if reset_position {
+            self.sequence.set_progress_millis(0);
+        }
         update.effects.push(self.progress_effect());
         update.effects.push(SessionEffect::FlushPersistence);
         update
@@ -1916,7 +2018,12 @@ impl PlaybackSession {
         };
         current.backend_loaded = true;
         if current.started_at_unix_seconds.is_some() {
-            return SessionUpdate::default();
+            if current.status != TransportStatus::Buffering {
+                return SessionUpdate::default();
+            }
+            current.status = TransportStatus::Playing;
+            current.last_monotonic_millis = Some(sample.monotonic_millis);
+            return SessionUpdate::changed();
         }
         let mut update = SessionUpdate::changed();
         self.mark_started(sample, &mut update.effects);
@@ -2274,7 +2381,12 @@ impl PlaybackSession {
 
     fn resolve_effect(&self, run: RunId, entry: &std::sync::Arc<QueueOccurrence>) -> SessionEffect {
         let mut request = StreamRequest::for_item(&entry.item, self.settings.stream_quality);
-        request.session_identifier = Some(self.play_id(run));
+        request.session_identifier = Some(
+            self.current_run
+                .as_ref()
+                .filter(|current| current.id == run)
+                .map_or_else(|| self.play_id(run), |current| current.play_id.clone()),
+        );
         SessionEffect::ResolveStream {
             run,
             occurrence: entry.clone(),
@@ -2698,6 +2810,335 @@ mod orchestration_tests {
         session.set_playing(true);
         assert!(session.current_run().is_some());
         (_directory, _database, session)
+    }
+
+    #[tokio::test]
+    async fn continuation_preserves_occurrences_order_and_one_listen_across_devices() {
+        let (_directory, _database, mut sequence) = seeded(vec![
+            batch_item(1, Provenance::Manual),
+            batch_item(1, Provenance::Manual),
+            batch_item(2, Provenance::Manual),
+        ])
+        .await;
+        sequence.shuffle(true, 19);
+        sequence.set_repeat_mode(RepeatMode::All);
+        sequence.set_selected_duration(0);
+        let mut source = PlaybackSession::new(
+            sequence,
+            "work-laptop",
+            PlaybackSettings::default(),
+            PlaybackOutput::Local,
+            false,
+            3,
+        );
+        let mut sample = ClockSample {
+            monotonic_millis: 0,
+            unix_seconds: 1234,
+            local_period: "2026-09".into(),
+        };
+        source
+            .handle_command(SessionCommand::Play, &sample)
+            .unwrap();
+        let source_run = source.current_run().unwrap();
+        source.handle_backend(
+            BackendEvent::Duration {
+                run: source_run,
+                millis: 180_000,
+            },
+            &sample,
+        );
+        source.handle_backend(BackendEvent::Started { run: source_run }, &sample);
+        sample.monotonic_millis = 40_000;
+        source.handle_backend(
+            BackendEvent::Position {
+                run: source_run,
+                millis: 80_000,
+            },
+            &sample,
+        );
+        let first = source.continuation(&sample).unwrap();
+        assert!(!first.header.listen.as_ref().unwrap().qualified);
+        assert_eq!(first.header.listen.as_ref().unwrap().audible_millis, 40_000);
+        sample.monotonic_millis = 50_000;
+        let (final_header, stopped) = source.stop_continuation(&first.header, &sample);
+        let final_header = final_header.unwrap();
+        assert!(stopped.effects.iter().any(|effect| matches!(effect, SessionEffect::Backend(BackendCommand::Stop { run }) if *run == source_run)));
+        source.handle_backend(
+            BackendEvent::Position {
+                run: source_run,
+                millis: 0,
+            },
+            &sample,
+        );
+        assert_eq!(source.status(), TransportStatus::Stopped);
+        assert_eq!(source.position_millis(), 80_000);
+        assert_eq!(source.duration_millis(), 180_000);
+        assert!(source.can_seek());
+        source
+            .handle_command(SessionCommand::Seek(90_000), &sample)
+            .unwrap();
+        assert_eq!(source.position_millis(), 90_000);
+        assert!(!source.desired_playing());
+        source
+            .handle_command(SessionCommand::Play, &sample)
+            .unwrap();
+        let resumed = source.continuation(&sample).unwrap();
+        assert_ne!(
+            resumed.header.listen.as_ref().unwrap().play_id,
+            final_header.listen.as_ref().unwrap().play_id,
+        );
+        assert!(
+            !stopped
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, SessionEffect::Activity(_)))
+        );
+        assert_eq!(final_header.listen.as_ref().unwrap().audible_millis, 50_000);
+        let mut destination = PlaybackSession::new(
+            Sequence::new(),
+            "home-pc",
+            PlaybackSettings::default(),
+            PlaybackOutput::Local,
+            false,
+            3,
+        );
+        let stream = PreparedStream::new(
+            crate::ResolvedStream::new("file:///continued.flac"),
+            crate::TrackLoudness::default(),
+        );
+        let queue = first.queue.clone();
+        destination
+            .adopt_continuation(
+                crate::Continuation {
+                    header: final_header.clone(),
+                    queue,
+                },
+                stream,
+                &sample,
+            )
+            .unwrap();
+        let destination_run = destination.current_run().unwrap();
+        destination.handle_backend(
+            BackendEvent::Started {
+                run: destination_run,
+            },
+            &sample,
+        );
+        assert_eq!(destination.sequence.snapshot().entries, first.queue.entries);
+        assert_eq!(destination.sequence.snapshot().order, first.queue.order);
+        assert_ne!(
+            first.queue.entries[0].occurrence,
+            first.queue.entries[1].occurrence
+        );
+        assert_eq!(destination.sequence.repeat_mode(), RepeatMode::All);
+        assert!(destination.sequence.shuffle_enabled());
+        assert_eq!(destination.sequence.progress_millis(), 80_000);
+        sample.monotonic_millis = 90_000;
+        let qualified = destination.handle_backend(
+            BackendEvent::Position {
+                run: destination_run,
+                millis: 120_000,
+            },
+            &sample,
+        );
+        let activity = qualified
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                SessionEffect::Activity(activity) => Some(activity),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(activity.play_id, final_header.listen.unwrap().play_id);
+        assert_eq!(activity.started_at_unix_seconds, 1234);
+        assert_eq!(activity.local_period, "2026-09");
+        assert_eq!(activity.listened_millis, 90_000);
+        let old_position = destination.sequence.progress_millis();
+        // A completion belonging to an earlier destination run cannot rewind it.
+        destination.handle_backend(
+            BackendEvent::Position {
+                run: RunId::new(destination_run.get() + 100),
+                millis: 1,
+            },
+            &sample,
+        );
+        assert_eq!(destination.sequence.progress_millis(), old_position);
+        let next = destination.continuation(&sample).unwrap();
+        let (header, stopped) = destination.stop_continuation(&next.header, &sample);
+        assert!(header.unwrap().listen.unwrap().qualified);
+        assert!(
+            !stopped
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, SessionEffect::Activity(_)))
+        );
+    }
+
+    #[tokio::test]
+    async fn editing_upcoming_queue_does_not_block_continuation() {
+        let (_directory, database, mut source) = active_two_track_session().await;
+        let sample = ClockSample {
+            monotonic_millis: 0,
+            unix_seconds: 1234,
+            local_period: "2026-09".into(),
+        };
+        let snapshot = source.continuation(&sample).unwrap();
+        let revision = source.sequence.revision();
+        let upcoming = source.sequence.at(1).unwrap().occurrence.clone();
+        let update = source
+            .handle_command(SessionCommand::Remove(upcoming), &sample)
+            .unwrap();
+        finish_queue(&database, &mut source, update).await;
+        assert_ne!(source.sequence.revision(), revision);
+        assert_eq!(source.sequence.total(), 1);
+
+        let (header, _) = source.stop_continuation(&snapshot.header, &sample);
+        let header = header.expect("queue edits keep the active listen transferable");
+        assert_eq!(header.current, snapshot.header.current);
+        assert_eq!(header.listen, snapshot.header.listen);
+        assert_eq!(source.status(), TransportStatus::Stopped);
+
+        let mut destination = PlaybackSession::new(
+            Sequence::new(),
+            "home-pc",
+            PlaybackSettings::default(),
+            PlaybackOutput::Local,
+            false,
+            3,
+        );
+        destination
+            .adopt_continuation(
+                crate::Continuation {
+                    header,
+                    queue: snapshot.queue.clone(),
+                },
+                PreparedStream::new(
+                    crate::ResolvedStream::new("https://example.test/continued.flac"),
+                    crate::TrackLoudness::default(),
+                ),
+                &sample,
+            )
+            .unwrap();
+        assert_eq!(
+            destination.sequence.snapshot().entries,
+            snapshot.queue.entries
+        );
+        assert_eq!(destination.sequence.snapshot().order, snapshot.queue.order);
+    }
+
+    #[tokio::test]
+    async fn restarted_listen_does_not_stop_for_an_old_continuation() {
+        let (_directory, _database, mut session) = active_two_track_session().await;
+        let sample = ClockSample {
+            monotonic_millis: 0,
+            unix_seconds: 1234,
+            local_period: "2026-09".into(),
+        };
+        let snapshot = session.continuation(&sample).unwrap();
+        session
+            .handle_command(SessionCommand::Stop, &sample)
+            .unwrap();
+        session
+            .handle_command(SessionCommand::Play, &sample)
+            .unwrap();
+        let restarted = session.continuation(&sample).unwrap();
+        assert_eq!(restarted.header.current, snapshot.header.current);
+        assert_ne!(
+            restarted.header.listen.as_ref().unwrap().play_id,
+            snapshot.header.listen.as_ref().unwrap().play_id,
+        );
+        let current = session.current_run();
+        let (header, update) = session.stop_continuation(&snapshot.header, &sample);
+        assert!(header.is_none());
+        assert!(update.effects.is_empty());
+        assert_eq!(session.current_run(), current);
+    }
+
+    #[tokio::test]
+    async fn changed_source_playback_does_not_stop_for_an_old_continuation() {
+        let (_directory, _database, mut session) = active_two_track_session().await;
+        let sample = ClockSample {
+            monotonic_millis: 0,
+            unix_seconds: 1234,
+            local_period: "2026-09".into(),
+        };
+        let snapshot = session.continuation(&sample).unwrap();
+        session
+            .handle_command(SessionCommand::Next, &sample)
+            .unwrap();
+        let current = session.current_run();
+        let (header, update) = session.stop_continuation(&snapshot.header, &sample);
+        assert!(header.is_none());
+        assert!(update.effects.is_empty());
+        assert_eq!(session.current_run(), current);
+    }
+
+    #[tokio::test]
+    async fn already_qualified_continuation_does_not_create_another_submission() {
+        let (_directory, _database, mut source) = active_two_track_session().await;
+        let mut sample = ClockSample {
+            monotonic_millis: 0,
+            unix_seconds: 1234,
+            local_period: "2026-09".into(),
+        };
+        let run = source.current_run().unwrap();
+        source.handle_backend(BackendEvent::Started { run }, &sample);
+        sample.monotonic_millis = 90_000;
+        let qualified = source.handle_backend(
+            BackendEvent::Position {
+                run,
+                millis: 90_000,
+            },
+            &sample,
+        );
+        assert!(
+            qualified
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, SessionEffect::Activity(_)))
+        );
+        let snapshot = source.continuation(&sample).unwrap();
+        assert!(snapshot.header.listen.as_ref().unwrap().qualified);
+        let mut destination = PlaybackSession::new(
+            Sequence::new(),
+            "home-pc",
+            PlaybackSettings::default(),
+            PlaybackOutput::Local,
+            false,
+            3,
+        );
+        let stream = PreparedStream::new(
+            crate::ResolvedStream::new("file:///continued.flac"),
+            crate::TrackLoudness::default(),
+        );
+        destination
+            .adopt_continuation(snapshot, stream, &sample)
+            .unwrap();
+        let run = destination.current_run().unwrap();
+        destination.handle_backend(BackendEvent::Started { run }, &sample);
+        sample.monotonic_millis = 180_000;
+        let progressed = destination.handle_backend(
+            BackendEvent::Position {
+                run,
+                millis: 179_000,
+            },
+            &sample,
+        );
+        assert!(
+            !progressed
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, SessionEffect::Activity(_)))
+        );
+        let ended = destination
+            .handle_command(SessionCommand::Stop, &sample)
+            .unwrap();
+        assert!(
+            !ended
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, SessionEffect::Activity(_)))
+        );
     }
 
     #[tokio::test]
@@ -4084,7 +4525,7 @@ mod orchestration_tests {
                 )
                 .unwrap();
             if stop {
-                session.stop(&sample);
+                session.stop(&sample, true);
             } else {
                 session.set_playing(false);
             }

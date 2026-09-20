@@ -1,0 +1,27 @@
+[package]
+name = "rufin-connect"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version = "1.96"
+publish = false
+
+[dependencies]
+anyhow = "1"
+blake3.workspace = true
+futures-util.workspace = true
+iroh = { version = "1.0.3", default-features = false, features = ["tls-ring"] }
+iroh-blobs = "0.103.0"
+iroh-mdns-address-lookup = "0.5.0"
+library.workspace = true
+loro = "=1.16.0"
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sqlx.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+vodozemac = { version = "=0.10.0", default-features = false }
+tempfile.workspace = true
+
+[lints]
+workspace = true

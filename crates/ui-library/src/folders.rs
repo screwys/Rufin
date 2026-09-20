@@ -858,9 +858,13 @@ fn folder_merged_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk
                 cell.bind_subtitle(ui_shared::detail_links::track_artist_links(&track));
                 cell.subtitle().set_visible(true);
                 if let Some(downloaded) = cell.downloaded() {
-                    bind_shell
-                        .downloads
-                        .bind_download_badge(&downloaded, track.is_downloaded);
+                    bind_shell.downloads.bind_download_badge(
+                        &downloaded,
+                        ui_shared::downloads::media_download_badge(
+                            &track.media_uri,
+                            track.is_downloaded,
+                        ),
+                    );
                 }
             }
         }

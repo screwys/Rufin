@@ -82,6 +82,16 @@
       </object>
     </child>
     <child>
+      <object class="AdwPreferencesGroup" id="file_connections">
+        <property name="title" translatable="yes">File connections</property>
+        <property name="header-suffix"><object class="GtkBox">
+          <property name="spacing">6</property>
+          <child><object class="GtkButton" id="add_webdav"><property name="label" translatable="yes">WebDAV / Nextcloud</property></object></child>
+          <child><object class="GtkButton" id="add_smb"><property name="label" translatable="yes">SMB / Samba</property></object></child>
+        </object></property>
+      </object>
+    </child>
+    <child>
       <object class="AdwPreferencesGroup" id="lastfm_group">
         <property name="title" translatable="yes">Last.fm</property>
         <child>

@@ -143,6 +143,22 @@ type Reply<T> = SyncSender<PlaybackResult<T>>;
 type Clock = Arc<dyn Fn() -> ClockSample + Send + Sync>;
 
 enum RuntimeCommand {
+    QueueContentId {
+        reply: Reply<String>,
+    },
+    Continuation {
+        reply: Reply<Option<crate::Continuation>>,
+    },
+    StopContinuation {
+        expected: crate::ContinuationHeader,
+        reply: Reply<Option<crate::ContinuationHeader>>,
+    },
+    AdoptContinuation {
+        continuation: crate::Continuation,
+        stream: PreparedStream,
+        backend: Box<dyn PlaybackBackend>,
+        reply: Reply<()>,
+    },
     HandoffSnapshot {
         reply: Reply<(
             library::QueueRestore,
@@ -244,6 +260,34 @@ enum PlaybackOutput {
 /// backend polling cadence, and ordered output worker; callers cannot mutate
 /// the session or drive the backend through a second path.
 impl Playback {
+    pub fn queue_content_id(&self) -> PlaybackResult<String> {
+        self.request(|reply| RuntimeCommand::QueueContentId { reply })
+    }
+    pub fn continuation(&self) -> PlaybackResult<Option<crate::Continuation>> {
+        self.request(|reply| RuntimeCommand::Continuation { reply })
+    }
+
+    /// A changed queue or current listen leaves the source playing.
+    pub fn stop_continuation(
+        &self,
+        expected: crate::ContinuationHeader,
+    ) -> PlaybackResult<Option<crate::ContinuationHeader>> {
+        self.request(|reply| RuntimeCommand::StopContinuation { expected, reply })
+    }
+
+    pub fn adopt_continuation(
+        &self,
+        continuation: crate::Continuation,
+        stream: PreparedStream,
+        backend: Box<dyn PlaybackBackend>,
+    ) -> PlaybackResult<()> {
+        self.request(|reply| RuntimeCommand::AdoptContinuation {
+            continuation,
+            stream,
+            backend,
+            reply,
+        })
+    }
     #[allow(clippy::too_many_arguments)]
     pub fn start(
         sequence: Sequence,
@@ -550,6 +594,50 @@ fn apply_runtime_command(
 ) -> bool {
     let sample = clock();
     match command {
+        RuntimeCommand::QueueContentId { reply } => {
+            let _ = reply.send(Ok(runtime.session.sequence().content_id().to_owned()));
+        }
+        RuntimeCommand::Continuation { reply } => {
+            let _ = reply.send(Ok(runtime.session.continuation(&sample)));
+        }
+        RuntimeCommand::StopContinuation { expected, reply } => {
+            let (header, update) = runtime.session.stop_continuation(&expected, &sample);
+            let result = runtime
+                .finish(update, &sample)
+                .and_then(|update| publish_update(outputs, update))
+                .and_then(|()| fence_outputs(outputs))
+                .map(|()| header);
+            let _ = reply.send(result);
+        }
+        RuntimeCommand::AdoptContinuation {
+            continuation,
+            stream,
+            backend,
+            reply,
+        } => {
+            let previous_run = runtime.session.current_run();
+            let result = runtime
+                .session
+                .adopt_continuation(continuation, stream, &sample)
+                .map_err(PlaybackError::from)
+                .and_then(|update| {
+                    let mut previous = std::mem::replace(&mut runtime.backend, backend);
+                    if let Some(run) = previous_run {
+                        previous
+                            .send(crate::BackendCommand::Stop { run })
+                            .map_err(|error| PlaybackError::BackendShutdown(error.to_string()))?;
+                    }
+                    previous
+                        .shutdown()
+                        .map_err(|error| PlaybackError::BackendShutdown(error.to_string()))?;
+                    runtime.finish(update, &sample)
+                });
+            let _ = reply.send(
+                result
+                    .and_then(|update| publish_update(outputs, update))
+                    .and_then(|()| fence_outputs(outputs)),
+            );
+        }
         RuntimeCommand::HandoffSnapshot { reply } => {
             let (queue, report) = runtime.session.handoff_snapshot();
             let _ = reply.send(Ok((

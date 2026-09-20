@@ -567,14 +567,7 @@ fn download_request_error(error: reqwest::Error) -> SourceError {
     }
 }
 
-pub(super) async fn run_transfer(
-    source_id: Option<&SourceId>,
-    request: &StreamRequest,
-    stream: &ResolvedStream,
-    paths: &DownloadPaths,
-    transfers: &TransferClients,
-    mut cancellation: oneshot::Receiver<()>,
-) -> SourceResult<()> {
+pub(super) async fn prepare_download_directories(paths: &DownloadPaths) -> SourceResult<()> {
     for directory in [
         Some(paths.directory.as_path()),
         paths.audio.parent(),
@@ -589,6 +582,18 @@ pub(super) async fn run_transfer(
                 SourceError::Other(format!("could not create a download directory: {error}"))
             })?;
     }
+    Ok(())
+}
+
+pub(super) async fn run_transfer(
+    source_id: Option<&SourceId>,
+    request: &StreamRequest,
+    stream: &ResolvedStream,
+    paths: &DownloadPaths,
+    transfers: &TransferClients,
+    mut cancellation: oneshot::Receiver<()>,
+) -> SourceResult<()> {
+    prepare_download_directories(paths).await?;
     remove_file_if_present(&paths.record_part)
         .await
         .map_err(SourceError::Other)?;
@@ -659,10 +664,20 @@ pub(super) async fn finalize_download(
     if !normal_relative_path(&relative_audio_path) {
         return Err("the downloaded track has an invalid managed path".to_string());
     }
+    let mut owners = match tokio::fs::read(&paths.record).await {
+        Ok(bytes) => {
+            serde_json::from_slice::<DownloadRecord>(&bytes)
+                .map_err(|error| format!("could not read the download record: {error}"))?
+                .owners
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => HashSet::new(),
+        Err(error) => return Err(error.to_string()),
+    };
+    owners.insert(owner);
     let record = DownloadRecord {
         version: RECORD_VERSION,
         media_uri,
-        owners: HashSet::from([owner]),
+        owners,
         custom_storage: storage_root != paths.directory,
         relative_audio_path: Some(relative_audio_path),
         completed_size: Some(completed_size),

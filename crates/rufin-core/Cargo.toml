@@ -11,6 +11,8 @@ readme.workspace = true
 publish.workspace = true
 
 [dependencies]
+rufin-connect.workspace = true
+age.workspace = true
 axum.workspace = true
 askama.workspace = true
 image.workspace = true
@@ -23,6 +25,7 @@ async-channel.workspace = true
 bytes.workspace = true
 blake3.workspace = true
 futures-util.workspace = true
+flate2.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
@@ -47,6 +50,7 @@ serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
+tokio-util = { workspace = true, features = ["rt"] }
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 url.workspace = true

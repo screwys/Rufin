@@ -87,7 +87,7 @@ impl Controller {
                         access_token(store, false)
                     })
                         .await.map_err(|error| error.to_string())??;
-                    let listener = tokio::net::TcpListener::bind(SocketAddr::new(config.address, config.port))
+                    let listener = bind_available_port(SocketAddr::new(config.address, config.port))
                         .await.map_err(|error| error.to_string())?;
                     let address = listener.local_addr().map_err(|error| error.to_string())?;
                     status.send_replace(ControllerStatus {
@@ -139,6 +139,21 @@ impl Controller {
 impl Drop for Controller {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+async fn bind_available_port(mut address: SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
+    loop {
+        match tokio::net::TcpListener::bind(address).await {
+            Ok(listener) => return Ok(listener),
+            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+                let Some(port) = address.port().checked_add(1) else {
+                    return Err(error);
+                };
+                address.set_port(port);
+            }
+            Err(error) => return Err(error),
+        }
     }
 }
 

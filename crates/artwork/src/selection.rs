@@ -10,6 +10,26 @@ pub(crate) enum Candidate {
 }
 
 impl Candidate {
+    pub(crate) fn asset_identity(&self) -> String {
+        match self {
+            Self::Native(image) => {
+                format!("native\0{}\0{}", image.source_id, image.image.item_id)
+            }
+            Self::Local(LocalImageRef::File {
+                source_id, path, ..
+            }) => {
+                format!("local-file\0{source_id}\0{path}")
+            }
+            Self::Local(LocalImageRef::Embedded {
+                source_id,
+                path,
+                picture_index,
+                ..
+            }) => format!("local-embedded\0{source_id}\0{path}\0{picture_index}"),
+            Self::Album(album) => album.stable_identity(),
+        }
+    }
+
     pub(crate) fn stable_identity(&self) -> String {
         let mut identity = match self {
             Self::Native(image) => format!(

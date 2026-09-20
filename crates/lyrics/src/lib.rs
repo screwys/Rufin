@@ -99,11 +99,11 @@ pub struct Settings {
     pub show_romanization: bool,
     #[serde(default)]
     pub karaoke_mode: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub lyrics_font_family: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub lyrics_font_size: Option<u16>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub lyrics_highlight_color: Option<String>,
 }
 

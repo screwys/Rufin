@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use crate::process::{quoted_value, read_to_string, repo_root, temp_path, write_string};
 use crate::{Result, parse_check_flag};
@@ -39,7 +40,7 @@ pub(crate) fn flatpak_sources(check: bool) -> Result<()> {
     let root = repo_root()?;
     let lock_file = root.join("Cargo.lock");
     let sources_file = root.join("packaging/flatpak/cargo-sources.json");
-    let generated = generate_cargo_sources(&read_to_string(&lock_file)?)?;
+    let generated = generate_cargo_sources(&root, &read_to_string(&lock_file)?)?;
 
     if check {
         let current = read_to_string(&sources_file)?;
@@ -56,7 +57,7 @@ pub(crate) fn flatpak_sources(check: bool) -> Result<()> {
     Ok(())
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct CargoPackage {
     name: String,
     version: String,
@@ -64,16 +65,20 @@ struct CargoPackage {
     checksum: String,
 }
 
-fn generate_cargo_sources(lock: &str) -> Result<String> {
+fn generate_cargo_sources(root: &Path, lock: &str) -> Result<String> {
     let mut output = String::from("[\n");
     let mut current = CargoPackage::default();
     let mut in_package = false;
     let mut seen = HashSet::new();
+    let mut git_packages = Vec::new();
 
     for line in lock.lines() {
         if line == "[[package]]" {
             if in_package {
                 flush_cargo_package(&current, &mut seen, &mut output)?;
+                if current.source.starts_with("git+") {
+                    git_packages.push(current.clone());
+                }
             }
             current = CargoPackage::default();
             in_package = true;
@@ -97,18 +102,155 @@ fn generate_cargo_sources(lock: &str) -> Result<String> {
 
     if in_package {
         flush_cargo_package(&current, &mut seen, &mut output)?;
+        if current.source.starts_with("git+") {
+            git_packages.push(current.clone());
+        }
     }
+
+    let config = if git_packages.is_empty() {
+        "[source.vendored-sources]\ndirectory = \"cargo/vendor\"\n\n[source.crates-io]\nreplace-with = \"vendored-sources\"\n".to_owned()
+    } else {
+        append_git_sources(root, &git_packages, &mut output)?
+    };
 
     output.push_str("    {\n");
     output.push_str("        \"type\": \"inline\",\n");
-    output.push_str(
-        "        \"contents\": \"[source.vendored-sources]\\ndirectory = \\\"cargo/vendor\\\"\\n\\n[source.crates-io]\\nreplace-with = \\\"vendored-sources\\\"\\n\",\n",
-    );
+    output.push_str(&format!(
+        "        \"contents\": {},\n",
+        serde_json::to_string(&config)?
+    ));
     output.push_str("        \"dest\": \"cargo\",\n");
     output.push_str("        \"dest-filename\": \"config\"\n");
     output.push_str("    }\n");
     output.push_str("]\n");
     Ok(output)
+}
+
+/// Cargo owns workspace inheritance and git manifest normalization. Flatpak's
+/// offline inputs retain the locked checkout and use those normalized manifests.
+fn append_git_sources(
+    root: &Path,
+    packages: &[CargoPackage],
+    output: &mut String,
+) -> Result<String> {
+    let metadata = Command::new("cargo")
+        .current_dir(root)
+        .args(["metadata", "--locked", "--format-version=1"])
+        .output()?;
+    if !metadata.status.success() {
+        return Err(format!(
+            "cargo metadata failed: {}",
+            String::from_utf8_lossy(&metadata.stderr)
+        )
+        .into());
+    }
+    let metadata: serde_json::Value = serde_json::from_slice(&metadata.stdout)?;
+    let temporary = tempfile::tempdir()?;
+    let vendor = temporary.path().join("vendor");
+    let vendored = Command::new("cargo")
+        .current_dir(root)
+        .args(["vendor", "--locked", "--versioned-dirs"])
+        .arg(&vendor)
+        .stderr(Stdio::inherit())
+        .output()?;
+    if !vendored.status.success() {
+        return Err("cargo vendor failed while normalizing git sources".into());
+    }
+    let config = String::from_utf8(vendored.stdout)?
+        .lines()
+        .map(|line| {
+            if line.starts_with("directory = ") {
+                "directory = \"cargo/vendor\""
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let mut repositories = HashSet::new();
+    for package in packages {
+        let (repository, commit) = locked_git_source(&package.source)?;
+        let cache = format!("cargo/git/{commit}");
+        if repositories.insert(package.source.clone()) {
+            append_source(
+                output,
+                serde_json::json!({"type":"git","url":repository,"commit":commit,"dest":cache}),
+            )?;
+        }
+        let entry = metadata["packages"]
+            .as_array()
+            .ok_or("cargo metadata has no packages")?
+            .iter()
+            .find(|entry| {
+                entry["name"].as_str() == Some(&package.name)
+                    && entry["version"].as_str() == Some(&package.version)
+                    && entry["source"].as_str() == Some(&package.source)
+            })
+            .ok_or_else(|| format!("cargo metadata has no locked git package {}", package.name))?;
+        let manifest = Path::new(
+            entry["manifest_path"]
+                .as_str()
+                .ok_or("git package has no manifest path")?,
+        );
+        let checkout = Command::new("git")
+            .current_dir(manifest.parent().ok_or("git manifest has no parent")?)
+            .args(["rev-parse", "--show-toplevel"])
+            .output()?;
+        if !checkout.status.success() {
+            return Err("could not locate cargo git checkout".into());
+        }
+        let checkout = String::from_utf8(checkout.stdout)?;
+        let relative = manifest
+            .parent()
+            .ok_or("git manifest has no parent")?
+            .strip_prefix(checkout.trim())?;
+        let relative = relative
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+        let destination = format!("cargo/vendor/{}-{}", package.name, package.version);
+        append_source(
+            output,
+            serde_json::json!({"type":"shell","commands":[format!("mkdir -p cargo/vendor && cp -a {} {}",shell_quote(&format!("{cache}/{relative}")),shell_quote(&destination))]}),
+        )?;
+        append_source(
+            output,
+            serde_json::json!({"type":"inline","contents":fs::read_to_string(vendor.join(format!("{}-{}",package.name,package.version)).join("Cargo.toml"))?,"dest":destination,"dest-filename":"Cargo.toml"}),
+        )?;
+        append_source(
+            output,
+            serde_json::json!({"type":"inline","contents":"{\"package\":null,\"files\":{}}","dest":destination,"dest-filename":".cargo-checksum.json"}),
+        )?;
+    }
+    Ok(config)
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn append_source(output: &mut String, value: serde_json::Value) -> Result<()> {
+    for line in serde_json::to_string_pretty(&value)?.lines() {
+        output.push_str("    ");
+        output.push_str(line);
+        output.push('\n');
+    }
+    output.pop();
+    output.push_str(",\n");
+    Ok(())
+}
+
+pub(crate) fn locked_git_source(source: &str) -> Result<(&str, &str)> {
+    let (url, commit) = source
+        .strip_prefix("git+")
+        .and_then(|source| source.rsplit_once('#'))
+        .ok_or("git source has no locked commit")?;
+    if commit.len() != 40 || !commit.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("git source commit is not a full object ID".into());
+    }
+    Ok((url.split_once('?').map_or(url, |(url, _)| url), commit))
 }
 
 fn flush_cargo_package(

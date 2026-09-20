@@ -21,6 +21,7 @@ serde.workspace = true
 serde_json.workspace = true
 sources.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt", "sync", "time"] }
+tokio-util.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

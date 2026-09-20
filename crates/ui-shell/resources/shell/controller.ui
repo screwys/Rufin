@@ -11,12 +11,33 @@
       <property name="margin-start">8</property><property name="margin-end">8</property>
       <property name="margin-top">8</property><property name="margin-bottom">8</property>
       <child><object class="AdwPreferencesGroup">
+        <child><object class="AdwSwitchRow" id="connect_enabled">
+          <accessibility><property name="label" translatable="yes">Rufin Connect</property></accessibility>
+          <child type="prefix"><object class="GtkBox">
+            <property name="spacing">6</property>
+            <child><object class="GtkLabel"><property name="label" translatable="yes">Rufin Connect</property></object></child>
+            <child><object class="GtkButton" id="open_connect">
+              <property name="icon-name">rufin-external-link-symbolic</property>
+              <property name="tooltip-text" translatable="yes">Open Rufin Connect</property>
+              <property name="valign">center</property>
+              <style><class name="flat"/></style>
+            </object></child>
+            <child><object class="GtkButton" id="continue_connect">
+              <property name="icon-name">rufin-media-playback-start-symbolic</property>
+              <property name="visible">false</property>
+              <property name="valign">center</property>
+              <style><class name="flat"/></style>
+            </object></child>
+          </object></child>
+        </object></child>
+      </object></child>
+      <child><object class="AdwPreferencesGroup">
         <child><object class="AdwSwitchRow" id="web_enabled">
-          <accessibility><property name="label" translatable="yes">Enable Controller</property></accessibility>
+          <accessibility><property name="label" translatable="yes">Controller</property></accessibility>
           <child type="prefix"><object class="GtkBox">
             <property name="spacing">6</property>
             <child><object class="GtkLabel">
-              <property name="label" translatable="yes">Enable Controller</property>
+              <property name="label" translatable="yes">Controller</property>
             </object></child>
             <child><object class="GtkButton" id="open_settings">
               <property name="icon-name">rufin-external-link-symbolic</property>

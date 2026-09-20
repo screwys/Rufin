@@ -443,8 +443,8 @@ fn restore_preferences_and_logins(
         if let Err(error) = settings_apply.restore(
             |current| {
                 copy_scrobbling_logins(&restored, current);
-                for source in &mut current.sources.configured {
-                    if let Some(restored) = restored.sources.configured.iter().find(|restored| {
+                for source in current.sources.connections_mut() {
+                    if let Some(restored) = restored.sources.connections().find(|restored| {
                         restored.configuration.source_id == source.configuration.source_id
                     }) {
                         source.credential_ref = restored.credential_ref.clone();
@@ -487,11 +487,10 @@ fn preserve_destination_settings(
     incoming.ui.backup.destination_uri = previous.ui.backup.destination_uri.clone();
     incoming.ui.backup.schedule.schedule_id = previous.ui.backup.schedule.schedule_id.clone();
     incoming.ui.backup.schedule.last_successful_at = previous.ui.backup.schedule.last_successful_at;
-    for source in &mut incoming.sources.configured {
+    for source in incoming.sources.connections_mut() {
         source.credential_ref = match previous
             .sources
-            .configured
-            .iter()
+            .connections()
             .find(|old| old.configuration.source_id == source.configuration.source_id)
         {
             Some(old) => old.credential_ref.clone(),
@@ -572,7 +571,7 @@ fn saved_logins(stored: &StoredSettings, secrets: &dyn SecretStore) -> Result<Sa
         librefm_username: stored.scrobbling.librefm.username.clone(),
         ..SavedLogins::default()
     };
-    for source in &stored.sources.configured {
+    for source in stored.sources.connections() {
         let value = source
             .credential_ref
             .as_ref()
@@ -615,8 +614,7 @@ fn restore_logins(
     for (source_id, value) in logins.sources {
         let Some(source) = incoming
             .sources
-            .configured
-            .iter_mut()
+            .connections_mut()
             .find(|source| source.configuration.source_id == source_id)
         else {
             warnings.push(format!("Saved login has no configured source: {source_id}"));
@@ -893,6 +891,7 @@ mod tests {
         assert_eq!(password.as_deref(), Some("scheduled-password"));
         let mut settings = StoredSettings::default();
         settings.sources.configured = vec![source("source", "reference")];
+        settings.sources.integrations = vec![source("files", "file-reference")];
         settings.scrobbling_secrets_present = true;
         credentials
             .save_secret(
@@ -910,6 +909,11 @@ mod tests {
             )
             .unwrap();
         let logins = saved_logins(&settings, &credentials).unwrap();
+        assert!(
+            logins
+                .sources
+                .contains_key(&sources::SourceId::new("files"))
+        );
         assert_eq!(
             logins.sources[&sources::SourceId::new("source")].as_deref(),
             Some("provider-login")
@@ -925,7 +929,11 @@ mod tests {
         let credentials = MemorySecretStore::new();
         let mut incoming = StoredSettings::default();
         incoming.sources.configured = vec![source("exact", "destination-reference")];
+        incoming.sources.integrations = vec![source("files", "file-reference")];
         let mut logins = SavedLogins::default();
+        logins
+            .sources
+            .insert(sources::SourceId::new("files"), Some("file-login".into()));
         logins.sources.insert(
             sources::SourceId::new("exact"),
             Some("correct-login".into()),
@@ -944,6 +952,10 @@ mod tests {
             Some("correct-login")
         );
         assert!(credentials.load_token("absent-account").unwrap().is_none());
+        assert_eq!(
+            credentials.load_token("file-reference").unwrap().as_deref(),
+            Some("file-login")
+        );
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("absent-account"));
     }

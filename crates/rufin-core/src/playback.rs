@@ -1,5 +1,7 @@
 //! Rufin crossings for compact Playback, Database Queue persistence, streams, and Activity.
+mod continuation;
 mod plex;
+pub(crate) use continuation::PreparedContinuation;
 #[cfg(test)]
 mod queue_tests;
 mod target;
@@ -52,6 +54,7 @@ pub(crate) struct PlaybackOwner {
     audio_outputs: fn() -> Vec<playback::AudioOutput>,
     scrobbler: Arc<Scrobbler>,
     source: Mutex<std::sync::Weak<SourceOwner>>,
+    connect: Mutex<std::sync::Weak<crate::connect::ConnectOwner>>,
     active: Mutex<Option<ActivePlayback>>,
     stream_tasks: Mutex<std::collections::HashMap<RunId, tokio::task::JoinHandle<()>>>,
     update_sender: async_channel::Sender<PlaybackWork>,
@@ -75,6 +78,10 @@ struct PlaybackWork {
 }
 
 enum PlaybackStoreWork {
+    Continue {
+        prepared: Box<PreparedContinuation>,
+        reply: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
     Artwork {
         playback: Playback,
         media_uris: Vec<String>,
@@ -171,6 +178,7 @@ impl PlaybackOwner {
             audio_outputs,
             scrobbler,
             source: Mutex::new(std::sync::Weak::new()),
+            connect: Mutex::new(std::sync::Weak::new()),
             active: Mutex::new(None),
             stream_tasks: Mutex::new(std::collections::HashMap::new()),
             update_sender,
@@ -219,6 +227,10 @@ impl PlaybackOwner {
             .source
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Arc::downgrade(source);
+    }
+
+    pub(crate) fn install_connect(&self, connect: &Arc<crate::connect::ConnectOwner>) {
+        *self.connect.lock().unwrap_or_else(|p| p.into_inner()) = Arc::downgrade(connect);
     }
 
     pub(crate) async fn start(self: &Arc<Self>) -> Result<PlaybackProjection, String> {
@@ -380,6 +392,9 @@ impl PlaybackOwner {
 
     async fn consume_store(&self, work: PlaybackStoreWork) {
         match work {
+            PlaybackStoreWork::Continue { prepared, reply } => {
+                let _ = reply.send(self.commit_continuation(*prepared).await);
+            }
             PlaybackStoreWork::Artwork {
                 playback,
                 media_uris,
@@ -595,7 +610,21 @@ impl PlaybackOwner {
         let database = Arc::clone(&self.database);
         let source_owner = self.source_owner();
         let playback = active.playback;
+        let connect = self
+            .connect
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .upgrade();
         let task = self.runtime.spawn(async move {
+            if let Some(connect) = connect {
+                if let Err(error) = connect.resolve_media(&occurrence).await {
+                    let _ = tokio::task::spawn_blocking(move || {
+                        playback.resolve_stream(run, Err(error))
+                    })
+                    .await;
+                    return;
+                }
+            }
             let (track, album) = database
                 .playback_loudness(&occurrence.item.media_uri, &ReadCancellation::new())
                 .await
