@@ -18,12 +18,31 @@ msgstr ""
 "X-Generator: Weblate 2026.9.1\n"
 
 msgid ""
+"Approving gives this device access to your profile and saved source logins."
+msgstr ""
+
+msgid ""
 "Backup file may contain sensitive information. Do you want to set a password?"
 msgstr ""
 
 msgid ""
 "Backup restored with {entries} skipped playlist entries and {listens} "
 "skipped listens."
+msgstr ""
+
+msgid ""
+"Choose where this device stores local music received through Connect. "
+"Matching files already in the folder are reused; missing files are "
+"downloaded here."
+msgstr ""
+
+msgid ""
+"Connecting an existing profile will remove all data in this device, do you "
+"really want to continue?"
+msgstr ""
+
+msgid ""
+"Devices using Rufin Connect are no longer compatible. Please update Rufin."
 msgstr ""
 
 msgid ""
@@ -57,6 +76,11 @@ msgid ""
 msgstr ""
 "Vain tästä säännöstä johtuvat lataukset poistetaan. Jaetut ja manuaaliset "
 "lataukset säilyvät"
+
+msgid ""
+"Open Rufin Connect on another device, connect via Join button or by copying "
+"invitation code"
+msgstr ""
 
 msgid ""
 "Remove Local and its cached library from Rufin? Your music files will not be "
@@ -103,6 +127,11 @@ msgstr ""
 "ehdotuksia, avaa ongelma Githubiin."
 
 msgid ""
+"The folder is relative to the selected account. Applying it changes storage "
+"on all devices."
+msgstr ""
+
+msgid ""
 "These folders are combined into the Local source and shown through folder "
 "browsing"
 msgstr ""
@@ -117,6 +146,10 @@ msgstr ""
 msgid ""
 "This is owned by Rufin. It can include entries from all configured sources "
 "but it is not synced to remotes."
+msgstr ""
+
+msgid ""
+"This only takes affect for new local files that are added by another device"
 msgstr ""
 
 msgid ""
@@ -195,6 +228,9 @@ msgid "Accent color"
 msgstr "Korostusväri"
 
 msgid "Access token"
+msgstr ""
+
+msgid "Action required"
 msgstr ""
 
 #, fuzzy
@@ -311,6 +347,11 @@ msgstr ""
 msgid "Anonymous"
 msgstr ""
 
+#, fuzzy
+#| msgid "On this device"
+msgid "Another device"
+msgstr "Tällä laitteella"
+
 msgid "Any genre"
 msgstr "Mikä tahansa tyylilaji"
 
@@ -329,11 +370,19 @@ msgstr ""
 msgid "Application name"
 msgstr "Sovelluksen nimi"
 
+msgid "Applied"
+msgstr ""
+
 msgid "Apply Template"
 msgstr "Toteuta mallipohja"
 
 msgid "Apply"
 msgstr ""
+
+#, fuzzy
+#| msgid "Saving..."
+msgid "Applying..."
+msgstr "Tallennetaan..."
 
 #, fuzzy
 #| msgid "Complete sign-in in your browser"
@@ -504,6 +553,9 @@ msgstr "Muutokset tulevat voimaan, kun Rufin on käynnistetty uudelleen"
 msgid "Changing source"
 msgstr "Vaihda lähdettä"
 
+msgid "Changing this will redownload all local files."
+msgstr ""
+
 msgid "Check for updates every"
 msgstr ""
 
@@ -515,6 +567,9 @@ msgstr "Valitse kansio"
 
 msgid "Choose Server"
 msgstr "Valitse palvelin"
+
+msgid "Choose a connection for profile storage."
+msgstr ""
 
 msgid "Choose a local music folder"
 msgstr "Valitse paikallinen musiikkikansio"
@@ -529,6 +584,16 @@ msgstr "Valitse olemassa oleva paikallinen kansio"
 
 msgid "Choose at least one local music folder"
 msgstr "Valitse vähintään yksi paikallinen musiikkikansio"
+
+#, fuzzy
+#| msgid "Connection"
+msgid "Choose connection"
+msgstr "Yhteys"
+
+#, fuzzy
+#| msgid "Choose Folder"
+msgid "Choose folder"
+msgstr "Valitse kansio"
 
 msgid "Choose one or more folders to scan and play directly from this computer"
 msgstr ""
@@ -610,11 +675,37 @@ msgstr "Kommentti"
 msgid "Compact"
 msgstr "Kompakti"
 
+msgid "Compare these emoji on both devices"
+msgstr ""
+
 msgid "Complete sign-in in your browser"
 msgstr "Viimeistele kirjautuminen selaimessa"
 
+msgid "Configure another"
+msgstr ""
+
 msgid "Confirm"
 msgstr "Vahvista"
+
+#, fuzzy
+#| msgid "Connecting to {device}..."
+msgid "Connect a device"
+msgstr "Yhdistetään laitteeseen {device}..."
+
+#, fuzzy
+#| msgid "Connection failed"
+msgid "Connect file"
+msgstr "Yhteys epäonnistui"
+
+#, fuzzy
+#| msgid "Connection failed"
+msgid "Connect folder"
+msgstr "Yhteys epäonnistui"
+
+#, fuzzy
+#| msgid "Connection failed"
+msgid "Connect is not enabled"
+msgstr "Yhteys epäonnistui"
 
 #, fuzzy
 #| msgid "Connection"
@@ -637,8 +728,18 @@ msgstr "Yhdistä"
 msgid "Connected as {username}"
 msgstr "Yhdistetty käyttäjänä {username}"
 
+#, fuzzy
+#| msgid "Connected"
+msgid "Connected devices"
+msgstr "Yhdistetty"
+
 msgid "Connected"
 msgstr "Yhdistetty"
+
+#, fuzzy
+#| msgid "Connecting to {device}..."
+msgid "Connecting devices"
+msgstr "Yhdistetään laitteeseen {device}..."
 
 msgid "Connecting to music server..."
 msgstr "Yhdistetään musiikkipalvelimeen..."
@@ -651,6 +752,11 @@ msgstr "Yhdistetään laitteeseen {device}..."
 msgid "Connecting"
 msgstr "Yhteys"
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Connecting..."
+msgstr "Yhteys"
+
 msgid "Connection failed"
 msgstr "Yhteys epäonnistui"
 
@@ -659,8 +765,23 @@ msgstr "Yhteys epäonnistui"
 msgid "Connection lost. Reconnecting..."
 msgstr "Yhdistetään laitteeseen {device}..."
 
+#, fuzzy
+#| msgid "Connection failed"
+msgid "Connection name"
+msgstr "Yhteys epäonnistui"
+
 msgid "Connection options"
 msgstr ""
+
+#, fuzzy
+#| msgid "Connection"
+msgid "Connection settings"
+msgstr "Yhteys"
+
+#, fuzzy
+#| msgid "Connection failed"
+msgid "Connection test has failed"
+msgstr "Yhteys epäonnistui"
 
 msgid "Connection"
 msgstr "Yhteys"
@@ -670,6 +791,12 @@ msgstr ""
 
 msgid "Context Menus"
 msgstr "Kontekstivalikot"
+
+msgid "Continue from where {device} left off"
+msgstr ""
+
+msgid "Continue from where {device} left off?"
+msgstr ""
 
 msgid "Continue"
 msgstr "Jatka"
@@ -686,6 +813,9 @@ msgid "Controller"
 msgstr ""
 
 msgid "Copy access token"
+msgstr ""
+
+msgid "Copy invitation"
 msgstr ""
 
 #, fuzzy
@@ -817,11 +947,24 @@ msgstr ""
 msgid "Detail"
 msgstr ""
 
+msgid "Device invitation"
+msgstr ""
+
+#, fuzzy
+#| msgid "Rename"
+msgid "Device name"
+msgstr "Nimeä uudelleen"
+
 msgid "Diagnostic log saved"
 msgstr "Diagnostiikkaloki tallennettu"
 
 msgid "Diagnostic log"
 msgstr "Diagnostiikkaloki"
+
+#, fuzzy
+#| msgid "Direction"
+msgid "Direct"
+msgstr "Suunta"
 
 msgid "Direction"
 msgstr "Suunta"
@@ -850,6 +993,16 @@ msgid "Disconnect from Rufin?"
 msgstr ""
 
 #, fuzzy
+#| msgid "On this device"
+msgid "Disconnect this device"
+msgstr "Tällä laitteella"
+
+#, fuzzy
+#| msgid "On this device"
+msgid "Disconnect this device?"
+msgstr "Tällä laitteella"
+
+#, fuzzy
 #| msgid "Reconnect"
 msgid "Disconnect"
 msgstr "Yhdistä uudelleen"
@@ -862,6 +1015,9 @@ msgstr "Discord"
 
 msgid "Do not encrypt"
 msgstr "Älä salaa"
+
+msgid "Do you want to use the existing configuration?"
+msgstr ""
 
 msgid "Don't duplicate"
 msgstr "Älä kahdenna"
@@ -959,6 +1115,11 @@ msgstr ""
 msgid "Enable EBU R128 Analysis?"
 msgstr ""
 
+#, fuzzy
+#| msgid "Connect"
+msgid "Enable Rufin Connect"
+msgstr "Yhdistä"
+
 msgid "Enable automatic backups"
 msgstr "Ota automaattiset varmuuskopiot käyttöön"
 
@@ -996,6 +1157,9 @@ msgid "Equalizer"
 msgstr "Taajuuskorjain"
 
 msgid "Everything, including new tracks"
+msgstr ""
+
+msgid "Existing profile file"
 msgstr ""
 
 msgid "Expand lyrics and visualizer"
@@ -1068,6 +1232,16 @@ msgstr "Suosikit"
 
 msgid "Featured genres"
 msgstr ""
+
+#, fuzzy
+#| msgid "Connection"
+msgid "File connection"
+msgstr "Yhteys"
+
+#, fuzzy
+#| msgid "Connection"
+msgid "File connections"
+msgstr "Yhteys"
 
 #, fuzzy
 #| msgid "Rename"
@@ -1292,8 +1466,22 @@ msgstr "Instrumentaalinen"
 msgid "Integrations"
 msgstr "Integraatiot"
 
+msgid "Invite"
+msgstr ""
+
 msgid "Jellyfin"
 msgstr "Jellyfin"
+
+#, fuzzy
+#| msgid "Home Profile"
+msgid "Join profile"
+msgstr "Kotiprofiili"
+
+msgid "Join using"
+msgstr ""
+
+msgid "Join"
+msgstr ""
 
 msgid "Karaoke Playback"
 msgstr "Karaoketoisto"
@@ -1426,6 +1614,11 @@ msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
 msgstr[1] ""
 
+#, fuzzy
+#| msgid "Local Folders"
+msgid "Local folder"
+msgstr "Paikalliset kansiot"
+
 msgid "Local imports and access"
 msgstr ""
 
@@ -1439,9 +1632,24 @@ msgid "Local music folder"
 msgstr "Paikallinen musiikkikansio"
 
 #, fuzzy
+#| msgid "Local music folder"
+msgid "Local music folders"
+msgstr "Paikallinen musiikkikansio"
+
+#, fuzzy
+#| msgid "Searching Local Network"
+msgid "Local network"
+msgstr "Haetaan paikallisverkkoa"
+
+#, fuzzy
 #| msgid "Playback speed"
 msgid "Local playback saved"
 msgstr "Toistonopeus"
+
+#, fuzzy
+#| msgid "Lyrics storage"
+msgid "Local storage"
+msgstr "Sanoitusten tallennustila"
 
 msgid "Local"
 msgstr "Paikallinen"
@@ -1476,6 +1684,9 @@ msgstr ""
 msgid "Lyrics"
 msgstr "Sanoitukset"
 
+msgid "MP3"
+msgstr ""
+
 msgid "Manage"
 msgstr "Hallitse"
 
@@ -1487,6 +1698,14 @@ msgstr ""
 
 msgid "Maximum year"
 msgstr "Vuosi enintään"
+
+#, fuzzy
+#| msgid "Search is unavailable"
+msgid "Media available"
+msgstr "Haku ei ole saatavilla"
+
+msgid "Media transferring: {received} / {total} bytes"
+msgstr ""
 
 msgid "Menu"
 msgstr "Valikko"
@@ -1571,6 +1790,11 @@ msgstr "Musiikkikansio"
 msgid "Music folders on the Rufin machine"
 msgstr ""
 
+#, fuzzy
+#| msgid "On this device"
+msgid "Music on this device"
+msgstr "Tällä laitteella"
+
 msgid "MusicBrainz + Last.fm"
 msgstr "MusicBrainz + Last.fm"
 
@@ -1624,6 +1848,14 @@ msgstr ""
 
 msgid "Navigation"
 msgstr "Liikkuminen"
+
+#, fuzzy
+#| msgid "Next audio device"
+msgid "Nearby devices"
+msgstr "Seuraava äänilaite"
+
+msgid "Nearby discovery"
+msgstr ""
 
 msgid "Needs attention"
 msgstr "Vaatii huomiota"
@@ -1840,6 +2072,11 @@ msgstr "Avaa kansio"
 
 msgid "Open Folder"
 msgstr "Avaa kansio"
+
+#, fuzzy
+#| msgid "Connect"
+msgid "Open Rufin Connect"
+msgstr "Yhdistä"
 
 msgid "Open approval page"
 msgstr ""
@@ -2103,6 +2340,11 @@ msgstr "Asetukset"
 msgid "Preparing library..."
 msgstr "Valmistellaan kirjastoa..."
 
+#, fuzzy
+#| msgid "Preparing library..."
+msgid "Preparing smaller media"
+msgstr "Valmistellaan kirjastoa..."
+
 msgid "Preserve pitch"
 msgstr ""
 
@@ -2172,6 +2414,14 @@ msgstr "Yksityinen tila"
 msgid "Profile PIN"
 msgstr ""
 
+#, fuzzy
+#| msgid "Lyrics storage"
+msgid "Profile storage"
+msgstr "Sanoitusten tallennustila"
+
+msgid "Profile up to date"
+msgstr ""
+
 msgid "Pronunciation"
 msgstr ""
 
@@ -2217,6 +2467,14 @@ msgstr "Arvio"
 
 msgid "Ready"
 msgstr "Valmis"
+
+#, fuzzy
+#| msgid "Waiting for connection"
+msgid "Receiving collection"
+msgstr "Odotetaan yhteyttä"
+
+msgid "Receiving profile"
+msgstr ""
 
 msgid "Recently played"
 msgstr "Äskettäin toistettu"
@@ -2271,6 +2529,16 @@ msgstr "Mallipohja"
 msgid "Relative"
 msgstr "Mallipohja"
 
+#, fuzzy
+#| msgid "Choose Folder"
+msgid "Relay address"
+msgstr "Valitse kansio"
+
+#, fuzzy
+#| msgid "Template"
+msgid "Relay"
+msgstr "Mallipohja"
+
 msgid "Release date"
 msgstr "Julkaisupäivä"
 
@@ -2320,6 +2588,11 @@ msgstr "Poista kaikki lataukset"
 
 msgid "Remove and Delete"
 msgstr ""
+
+#, fuzzy
+#| msgid "Remove rule"
+msgid "Remove device"
+msgstr "Poista sääntö"
 
 msgid "Remove folder"
 msgstr ""
@@ -2429,6 +2702,11 @@ msgstr ""
 
 msgid "Rows"
 msgstr "Rivit"
+
+#, fuzzy
+#| msgid "Connect"
+msgid "Rufin Connect"
+msgstr "Yhdistä"
 
 msgid "Rufin data folder"
 msgstr "Rufin-datakansio"
@@ -2639,6 +2917,9 @@ msgstr ""
 msgid "Selection"
 msgstr "Valinta"
 
+msgid "Self-host an Iroh Relay"
+msgstr ""
+
 msgid "Separate .lrc file"
 msgstr "Erillinen .lrc-tiedosto"
 
@@ -2683,6 +2964,11 @@ msgstr "Palvelimet"
 
 msgid "Set the Discord activity type to Listening"
 msgstr ""
+
+#, fuzzy
+#| msgid "On this device"
+msgid "Set up this device"
+msgstr "Tällä laitteella"
 
 msgid "Settings and sources"
 msgstr "Asetukset ja lähteet"
@@ -2884,6 +3170,14 @@ msgstr "Tallennetaan..."
 msgid "Status display"
 msgstr ""
 
+msgid "Stop"
+msgstr ""
+
+#, fuzzy
+#| msgid "Secret storage"
+msgid "Storage"
+msgstr "Salaisuuden tallennustila"
+
 msgid "Store calculated loudness in supported Local music files"
 msgstr ""
 
@@ -2929,6 +3223,11 @@ msgstr ""
 msgid "Template"
 msgstr "Mallipohja"
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Test connection"
+msgstr "Yhteys"
+
 msgid "Text"
 msgstr "Teksti"
 
@@ -2937,6 +3236,12 @@ msgstr ""
 
 msgid "Theme"
 msgstr "Teema"
+
+msgid "These emoji match"
+msgstr ""
+
+msgid "This can be turned off after pairing if you want"
+msgstr ""
 
 msgid "This device"
 msgstr "Tämä laite"
@@ -2963,6 +3268,9 @@ msgid "Title (merged)"
 msgstr ""
 
 msgid "Title"
+msgstr ""
+
+msgid "To use a file-sync app, choose a folder it synchronizes."
 msgstr ""
 
 msgid "Toggle Fullscreen"
@@ -3080,16 +3388,34 @@ msgstr "Käytä tätä lähdettä"
 msgid "Use a number above zero"
 msgstr ""
 
+msgid "Use a public relay"
+msgstr ""
+
 #, fuzzy
 #| msgid "Accent color"
 msgid "Use accent color"
 msgstr "Korostusväri"
+
+#, fuzzy
+#| msgid "Waiting for connection"
+msgid "Use an existing connection?"
+msgstr "Odotetaan yhteyttä"
 
 msgid "Use different layout below a threshold width"
 msgstr ""
 
 msgid "Use each track's own cover when available"
 msgstr ""
+
+#, fuzzy
+#| msgid "Lyrics settings"
+msgid "Use existing"
+msgstr "Sanoitusten asetukset"
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "Use folder"
+msgstr "Lisää kansio"
 
 msgid "Use listening activity"
 msgstr ""
@@ -3144,6 +3470,9 @@ msgstr "Vahvista palvelimen varmenne"
 msgid "Version History"
 msgstr "Versiohistoria"
 
+msgid "Via relay"
+msgstr ""
+
 msgid "View"
 msgstr "Näkymä"
 
@@ -3167,11 +3496,32 @@ msgstr ""
 msgid "Volume"
 msgstr "Sarakkeet"
 
+#, fuzzy
+#| msgid "Waiting for connection"
+msgid "Waiting for a peer"
+msgstr "Odotetaan yhteyttä"
+
 msgid "Waiting for connection"
 msgstr "Odotetaan yhteyttä"
 
+#, fuzzy
+#| msgid "Searching for devices..."
+msgid "Waiting for device"
+msgstr "Haetaan laitteita..."
+
+#, fuzzy
+#| msgid "Waiting for connection"
+msgid "Waiting for media provider"
+msgstr "Odotetaan yhteyttä"
+
+msgid "Waiting for the other device to approve"
+msgstr ""
+
 msgid "Waveform seekbar"
 msgstr "Aaltomuotoinen kelauspalkki"
+
+msgid "WebDAV / Nextcloud"
+msgstr ""
 
 msgid "WebDAV"
 msgstr "WebDAV"
