@@ -1528,11 +1528,6 @@ msgid "Import Playlist"
 msgstr "Nutikas esitusloend"
 
 #, fuzzy
-#| msgid "Smart Playlist"
-msgid "Import a copy"
-msgstr "Nutikas esitusloend"
-
-#, fuzzy
 #| msgid "Support"
 msgid "Import"
 msgstr "Kasutajatugi"
@@ -3932,6 +3927,11 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Smart Playlist"
+#~ msgid "Import a copy"
+#~ msgstr "Nutikas esitusloend"
 
 #~ msgid "Lyrics settings"
 #~ msgstr "Laulusõnade seadistused"

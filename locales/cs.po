@@ -1549,11 +1549,6 @@ msgid "Import Playlist"
 msgstr "Chytrý Playlist"
 
 #, fuzzy
-#| msgid "Smart Playlist"
-msgid "Import a copy"
-msgstr "Chytrý Playlist"
-
-#, fuzzy
 #| msgid "Support"
 msgid "Import"
 msgstr "Uživatelská podpora"
@@ -4001,6 +3996,11 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Smart Playlist"
+#~ msgid "Import a copy"
+#~ msgstr "Chytrý Playlist"
 
 #~ msgid "Lyrics settings"
 #~ msgstr "Nastavení textu skladeb"

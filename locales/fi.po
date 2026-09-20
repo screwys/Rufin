@@ -1451,11 +1451,6 @@ msgid "Import Playlist"
 msgstr "Tuo soittolista"
 
 #, fuzzy
-#| msgid "Import Backup"
-msgid "Import a copy"
-msgstr "Tuo varmuuskopio"
-
-#, fuzzy
 #| msgid "Export"
 msgid "Import"
 msgstr "Vie"
@@ -3787,6 +3782,11 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#, fuzzy
+#~| msgid "Import Backup"
+#~ msgid "Import a copy"
+#~ msgstr "Tuo varmuuskopio"
 
 #~ msgid "Lyrics settings"
 #~ msgstr "Sanoitusten asetukset"

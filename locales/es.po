@@ -1405,11 +1405,6 @@ msgstr ""
 msgid "Import Playlist"
 msgstr "Añadir a la lista de reproducción"
 
-#, fuzzy
-#| msgid "Add to Playlist"
-msgid "Import a copy"
-msgstr "Añadir a la lista de reproducción"
-
 msgid "Import"
 msgstr ""
 
@@ -3596,6 +3591,11 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Add to Playlist"
+#~ msgid "Import a copy"
+#~ msgstr "Añadir a la lista de reproducción"
 
 #~ msgid ""
 #~ "This uses Jellyfin API for play radio, necessary if you want "
