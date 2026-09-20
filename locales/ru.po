@@ -702,6 +702,11 @@ msgstr "Цветовая схема"
 msgid "Columns"
 msgstr "Столбцы"
 
+#, fuzzy
+#| msgid "Expand lyrics and visualizer"
+msgid "Combine lyrics and visualizer"
+msgstr "Развернуть текст песни и визуализатор"
+
 msgid "Comment text"
 msgstr "Текст комментария"
 
@@ -888,6 +893,11 @@ msgstr "Не удалось найти текст песни"
 
 msgid "Couldn’t download Japanese dictionary"
 msgstr "Не удалось загрузить японский словарь"
+
+#, fuzzy
+#| msgid "Delete playlist file"
+msgid "Create a playlist from queue"
+msgstr "Удалить файл плейлиста"
 
 msgid "Create"
 msgstr "Создать"

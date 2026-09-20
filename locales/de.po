@@ -699,6 +699,11 @@ msgstr "Farbschema"
 msgid "Columns"
 msgstr "Spalten"
 
+#, fuzzy
+#| msgid "Expand lyrics and visualizer"
+msgid "Combine lyrics and visualizer"
+msgstr "Liedtexte und Visualisierung erweitern"
+
 msgid "Comment text"
 msgstr "Kommentartext"
 
@@ -883,6 +888,11 @@ msgstr "Es konnte nicht nach Liedtexten gesucht werdenSongtexte durchsuchen"
 
 msgid "Couldn’t download Japanese dictionary"
 msgstr "Japanisches Wörterbuch konnte nicht heruntergeladen werden"
+
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Create a playlist from queue"
+msgstr "Playlist löschen"
 
 msgid "Create"
 msgstr "Erstellen"

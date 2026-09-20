@@ -682,6 +682,9 @@ msgstr "Schema di colori"
 msgid "Columns"
 msgstr "Colonne"
 
+msgid "Combine lyrics and visualizer"
+msgstr ""
+
 msgid "Comment text"
 msgstr "Commento"
 
@@ -866,6 +869,11 @@ msgstr "Non è stato possibile cercare il testo della canzone"
 
 msgid "Couldn’t download Japanese dictionary"
 msgstr "Non è stato possibile scaricare il dizionario giapponese"
+
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Create a playlist from queue"
+msgstr "Cancella Playlist"
 
 msgid "Create"
 msgstr "Crea"

@@ -678,6 +678,9 @@ msgstr ""
 msgid "Columns"
 msgstr ""
 
+msgid "Combine lyrics and visualizer"
+msgstr ""
+
 msgid "Comment text"
 msgstr ""
 
@@ -850,6 +853,11 @@ msgstr ""
 
 msgid "Couldn’t download Japanese dictionary"
 msgstr ""
+
+#, fuzzy
+#| msgid "All Playlists"
+msgid "Create a playlist from queue"
+msgstr "Todas las listas"
 
 msgid "Create"
 msgstr ""
