@@ -270,7 +270,6 @@ async function openPlaylistTransfer(playlist = null) {
   transferPlaylist = playlist;
   $("playlist-transfer-title").textContent = playlist ? tr("Export Playlist") : tr("Import Playlist");
   $("playlist-transfer-path").value = playlist ? `${playlist.name}.m3u8` : "";
-  $("playlist-transfer-copy-row").hidden = !!playlist;
   for (const name of ["link", "mode", "format"]) $("playlist-transfer-" + name + "-row").hidden = !playlist;
   $("playlist-transfer-link").checked = false;
   if (playlist) $("playlist-transfer-link-row").hidden = !(await api(`/playlists/file?id=${playlist.id}`)).can_link;
@@ -360,7 +359,7 @@ function init() {
         const extension = $("playlist-transfer-format").value;
         await api("/playlists/export", "POST", { id: transferPlaylist.id, source, path: path.replace(/\.(m3u8?|pls|xspf)$/i, "") + "." + extension, path_mode: $("playlist-transfer-mode").value, linked: $("playlist-transfer-link").checked });
       } else {
-        await api("/playlists/import", "POST", { source, paths: path.split("\n").map(path => path.trim()).filter(Boolean), copy: $("playlist-transfer-copy").checked });
+        await api("/playlists/import", "POST", { source, paths: path.split("\n").map(path => path.trim()).filter(Boolean) });
       }
       $("playlist-transfer-dialog").close();
       await loadView();

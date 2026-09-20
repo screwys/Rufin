@@ -1346,9 +1346,6 @@ msgstr ""
 msgid "Import Playlist"
 msgstr ""
 
-msgid "Import a copy"
-msgstr ""
-
 msgid "Import"
 msgstr ""
 
