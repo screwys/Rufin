@@ -244,7 +244,7 @@ impl Database {
         output: impl Write,
         source_id: Option<&SourceId>,
     ) -> LibraryResult<u64> {
-        let mut connection = self.acquire_reader().await?;
+        let (_export, mut connection) = self.acquire_export().await?;
         export_activity_jsonl_on(&mut connection, output, source_id).await
     }
 
@@ -258,7 +258,7 @@ impl Database {
         if format == ActivityCsvFormat::ListenBrainz {
             output.write_all(b"artist,track,album,time\r\n")?;
         }
-        let mut connection = self.acquire_reader().await?;
+        let (_export, mut connection) = self.acquire_export().await?;
         let mut query = activity_export_query(source_id);
         let mut rows = query
             .build_query_as::<ActivityExportRow>()
