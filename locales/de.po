@@ -1455,11 +1455,6 @@ msgid "Import Playlist"
 msgstr "Wiedergabeliste importieren"
 
 #, fuzzy
-#| msgid "Import Backup"
-msgid "Import a copy"
-msgstr "Sicherung importieren"
-
-#, fuzzy
 #| msgid "Export"
 msgid "Import"
 msgstr "Exportieren"
@@ -3757,6 +3752,11 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#, fuzzy
+#~| msgid "Import Backup"
+#~ msgid "Import a copy"
+#~ msgstr "Sicherung importieren"
 
 #~ msgid "Lyrics settings"
 #~ msgstr "Liedtexteinstellungen"

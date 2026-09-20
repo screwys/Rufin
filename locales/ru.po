@@ -1449,9 +1449,6 @@ msgstr "Импортировать резервную копию"
 msgid "Import Playlist"
 msgstr "Импортировать плейлист"
 
-msgid "Import a copy"
-msgstr "Импортировать копию"
-
 msgid "Import"
 msgstr "Импорт"
 
@@ -3710,6 +3707,9 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Import a copy"
+#~ msgstr "Импортировать копию"
 
 #~ msgid "Lyrics settings"
 #~ msgstr "Настройки текстов"

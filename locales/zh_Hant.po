@@ -1507,11 +1507,6 @@ msgstr ""
 msgid "Import Playlist"
 msgstr "智慧播放清單"
 
-#, fuzzy
-#| msgid "Smart Playlist"
-msgid "Import a copy"
-msgstr "智慧播放清單"
-
 msgid "Import"
 msgstr ""
 
@@ -3891,6 +3886,11 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Smart Playlist"
+#~ msgid "Import a copy"
+#~ msgstr "智慧播放清單"
 
 #~ msgid "Lyrics settings"
 #~ msgstr "歌詞設定"

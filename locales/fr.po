@@ -1417,11 +1417,6 @@ msgid "Import Playlist"
 msgstr "Importer une playlist"
 
 #, fuzzy
-#| msgid "Import Backup"
-msgid "Import a copy"
-msgstr "Importer une sauvegarde"
-
-#, fuzzy
 #| msgid "Export"
 msgid "Import"
 msgstr "Exporter"
@@ -3645,6 +3640,11 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Import Backup"
+#~ msgid "Import a copy"
+#~ msgstr "Importer une sauvegarde"
 
 #~ msgid "Lyrics settings"
 #~ msgstr "Paramètres des paroles"

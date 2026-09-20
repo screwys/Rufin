@@ -1445,9 +1445,6 @@ msgstr "Importēt rezerves kopiju"
 msgid "Import Playlist"
 msgstr "Importēt atskaņošanas sarakstu"
 
-msgid "Import a copy"
-msgstr "Importēt kopiju"
-
 msgid "Import"
 msgstr "Importēt"
 
@@ -3694,6 +3691,9 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "Import a copy"
+#~ msgstr "Importēt kopiju"
 
 #~ msgid "Lyrics settings"
 #~ msgstr "Tekstu iestatījumi"
