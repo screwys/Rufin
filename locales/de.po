@@ -655,6 +655,11 @@ msgstr "Warteschlange leeren"
 msgid "Clear title"
 msgstr "Titel entfernen"
 
+#, fuzzy
+#| msgid "Clear queue"
+msgid "Clear"
+msgstr "Warteschlange leeren"
+
 msgid "Clearing queue also clears the current song"
 msgstr "Beim Leeren der Warteschlange wird auch der aktuelle Titel entfernt"
 
@@ -1922,6 +1927,11 @@ msgstr "Noch keine Lieblingskünstler"
 msgid "No favorites yet"
 msgstr "Noch keine Favoriten"
 
+#, fuzzy
+#| msgid "No folder selected"
+msgid "No file linked"
+msgstr "Kein Ordner ausgewählt"
+
 msgid "No folder selected"
 msgstr "Kein Ordner ausgewählt"
 
@@ -1963,6 +1973,9 @@ msgstr "Keine Netzwerkgeräte gefunden"
 
 msgid "No related tracks found"
 msgstr "Keine verwandten Titel gefunden"
+
+msgid "No results for \"{query}\""
+msgstr ""
 
 msgid "No results"
 msgstr "Keine Ergebnisse"
@@ -2118,6 +2131,11 @@ msgstr "Last.fm-Autorisierung wird geöffnet..."
 
 msgid "Opening Libre.fm authorization..."
 msgstr "Libre.fm-Autorisierung wird geöffnet..."
+
+#, fuzzy
+#| msgid "Actions"
+msgid "Options"
+msgstr "Aktionen"
 
 msgid "Orange"
 msgstr "Orange"
@@ -2465,6 +2483,11 @@ msgstr "Bereichsauswahl"
 msgid "Receiving profile"
 msgstr ""
 
+#, fuzzy
+#| msgid "Recently released"
+msgid "Recent searches"
+msgstr "Zuletzt veröffentlicht"
+
 msgid "Recently played"
 msgstr "Zuletzt gespielt"
 
@@ -2597,6 +2620,11 @@ msgstr "Aus Warteschlange entfernen"
 msgid "Remove rule"
 msgstr "Regel entfernen"
 
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove search"
+msgstr "Ordner entfernen"
+
 msgid "Remove"
 msgstr "Entfernen"
 
@@ -2606,9 +2634,17 @@ msgstr "Aus Favoriten entfernt"
 msgid "Removed from"
 msgstr "Entfernt aus"
 
+msgid "Rename Playlist"
+msgstr "Playlist umbenennen"
+
 #, fuzzy
 #| msgid "Rename"
 msgid "Rename file"
+msgstr "Umbenennen"
+
+#, fuzzy
+#| msgid "Rename"
+msgid "Rename"
 msgstr "Umbenennen"
 
 msgid "Repeat all"
@@ -2821,6 +2857,11 @@ msgstr "Warteschlange durchsuchen"
 
 msgid "Search tracks"
 msgstr "Titel durchsuchen"
+
+#, fuzzy
+#| msgid "Search is unavailable"
+msgid "Search unavailable"
+msgstr "Suche ist nicht verfügbar"
 
 msgid "Search"
 msgstr "Suche"
@@ -3436,6 +3477,11 @@ msgstr "Versionsverlauf"
 msgid "Via relay"
 msgstr ""
 
+#, fuzzy
+#| msgid "View"
+msgid "View all"
+msgstr "Ansicht"
+
 msgid "View"
 msgstr "Ansicht"
 
@@ -3704,9 +3750,6 @@ msgstr "Willkommen beim Rufin-Setup"
 
 #~ msgid "Lyrics settings"
 #~ msgstr "Liedtexteinstellungen"
-
-#~ msgid "Rename Playlist"
-#~ msgstr "Playlist umbenennen"
 
 #~ msgid "Enable equalizer"
 #~ msgstr "Equalizer einschalten"

@@ -638,6 +638,11 @@ msgstr "Rimuovi coda"
 msgid "Clear title"
 msgstr "Rimuovi titolo"
 
+#, fuzzy
+#| msgid "Clear queue"
+msgid "Clear"
+msgstr "Rimuovi coda"
+
 msgid "Clearing queue also clears the current song"
 msgstr "Rimuovere la coda rimuove anche la canzone corrente"
 
@@ -1869,6 +1874,9 @@ msgstr ""
 msgid "No favorites yet"
 msgstr ""
 
+msgid "No file linked"
+msgstr ""
+
 msgid "No folder selected"
 msgstr ""
 
@@ -1909,6 +1917,9 @@ msgid "No network devices found"
 msgstr ""
 
 msgid "No related tracks found"
+msgstr ""
+
+msgid "No results for \"{query}\""
 msgstr ""
 
 msgid "No results"
@@ -2060,6 +2071,11 @@ msgstr ""
 
 msgid "Opening Libre.fm authorization..."
 msgstr ""
+
+#, fuzzy
+#| msgid "Actions"
+msgid "Options"
+msgstr "Azioni"
 
 msgid "Orange"
 msgstr ""
@@ -2380,6 +2396,9 @@ msgstr "Collezione"
 msgid "Receiving profile"
 msgstr ""
 
+msgid "Recent searches"
+msgstr ""
+
 msgid "Recently played"
 msgstr ""
 
@@ -2502,6 +2521,9 @@ msgstr ""
 msgid "Remove rule"
 msgstr ""
 
+msgid "Remove search"
+msgstr ""
+
 msgid "Remove"
 msgstr ""
 
@@ -2511,7 +2533,15 @@ msgstr ""
 msgid "Removed from"
 msgstr ""
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Rename Playlist"
+msgstr "Cancella Playlist"
+
 msgid "Rename file"
+msgstr ""
+
+msgid "Rename"
 msgstr ""
 
 msgid "Repeat all"
@@ -2717,6 +2747,11 @@ msgstr ""
 
 msgid "Search tracks"
 msgstr ""
+
+#, fuzzy
+#| msgid "Artist unavailable"
+msgid "Search unavailable"
+msgstr "Artista non disponibile"
 
 msgid "Search"
 msgstr ""
@@ -3311,6 +3346,9 @@ msgid "Version History"
 msgstr ""
 
 msgid "Via relay"
+msgstr ""
+
+msgid "View all"
 msgstr ""
 
 msgid "View"

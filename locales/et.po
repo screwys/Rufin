@@ -668,6 +668,11 @@ msgstr "Tühjenda esitusjärjekord"
 msgid "Clear title"
 msgstr "Eemalda pealkiri"
 
+#, fuzzy
+#| msgid "Clear queue"
+msgid "Clear"
+msgstr "Tühjenda esitusjärjekord"
+
 msgid "Clearing queue also clears the current song"
 msgstr "Esitusjärjekorra tühjendamine eemaldab ka hetkel esitamisel oleva loo"
 
@@ -2006,6 +2011,11 @@ msgstr "Lemmikesitajaid veel pole"
 msgid "No favorites yet"
 msgstr "Lemmikuid veel pole"
 
+#, fuzzy
+#| msgid "No folder selected"
+msgid "No file linked"
+msgstr "Kaust on valimata"
+
 msgid "No folder selected"
 msgstr "Kaust on valimata"
 
@@ -2057,6 +2067,9 @@ msgstr "Ühtegi võrguseadet ei leidu"
 #| msgid "No matching tracks"
 msgid "No related tracks found"
 msgstr "Sobivaid lugusid pole"
+
+msgid "No results for \"{query}\""
+msgstr ""
 
 #, fuzzy
 #| msgid "results"
@@ -2227,6 +2240,11 @@ msgstr "Avan Last.fm-i autentimisvaadet…"
 
 msgid "Opening Libre.fm authorization..."
 msgstr "Avan Libre.fm-i autentimisvaadet…"
+
+#, fuzzy
+#| msgid "Actions"
+msgid "Options"
+msgstr "Tegevused"
 
 msgid "Orange"
 msgstr "Oranž"
@@ -2593,6 +2611,11 @@ msgstr "Vahemiku valik"
 msgid "Receiving profile"
 msgstr ""
 
+#, fuzzy
+#| msgid "Recently released"
+msgid "Recent searches"
+msgstr "Hiljuti avaldatud"
+
 msgid "Recently played"
 msgstr "Hiljuti esitatud"
 
@@ -2733,6 +2756,11 @@ msgstr "Eemalda esitusjärjekorrast"
 msgid "Remove rule"
 msgstr "Eemalda reegel"
 
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove search"
+msgstr "Eemalda kaust"
+
 msgid "Remove"
 msgstr "Eemalda"
 
@@ -2742,9 +2770,17 @@ msgstr "Eemaldatud lemmikute seast"
 msgid "Removed from"
 msgstr "Eemaldatud asukohast"
 
+msgid "Rename Playlist"
+msgstr "Muuda esitusloendi nime"
+
 #, fuzzy
 #| msgid "Rename"
 msgid "Rename file"
+msgstr "Muuda nime"
+
+#, fuzzy
+#| msgid "Rename"
+msgid "Rename"
 msgstr "Muuda nime"
 
 msgid "Repeat all"
@@ -2974,6 +3010,11 @@ msgstr "Otsi esitusjärjekorrast"
 #| msgid "Search Lyrics"
 msgid "Search tracks"
 msgstr "Otsi laulusõnu"
+
+#, fuzzy
+#| msgid "Search is unavailable"
+msgid "Search unavailable"
+msgstr "Otsing pole saadaval"
 
 msgid "Search"
 msgstr "Otsi"
@@ -3621,6 +3662,11 @@ msgstr "Versioonide ajalugu"
 msgid "Via relay"
 msgstr ""
 
+#, fuzzy
+#| msgid "View all tracks"
+msgid "View all"
+msgstr "Vaata kõiki lugusid"
+
 msgid "View"
 msgstr "Vaade"
 
@@ -3879,9 +3925,6 @@ msgstr ""
 
 #~ msgid "Lyrics settings"
 #~ msgstr "Laulusõnade seadistused"
-
-#~ msgid "Rename Playlist"
-#~ msgstr "Muuda esitusloendi nime"
 
 #~ msgid "Enable equalizer"
 #~ msgstr "Kasuta ekvalaiserit"
@@ -4397,9 +4440,6 @@ msgstr ""
 
 #~ msgid "Use server streams only"
 #~ msgstr "Kasuta vaid voogedastust serverist"
-
-#~ msgid "View all tracks"
-#~ msgstr "Vaata kõiki lugusid"
 
 #~ msgid "Website"
 #~ msgstr "Veebisait"

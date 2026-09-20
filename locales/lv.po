@@ -653,6 +653,11 @@ msgstr "Notīrīt rindu"
 msgid "Clear title"
 msgstr "Notīrīt nosaukumu"
 
+#, fuzzy
+#| msgid "Clear queue"
+msgid "Clear"
+msgstr "Notīrīt rindu"
+
 msgid "Clearing queue also clears the current song"
 msgstr "Rindas notīrīšana arī notīra pašreizējo dziesmu"
 
@@ -1903,6 +1908,11 @@ msgstr "Vēl nav iecienītāko izpildītāju"
 msgid "No favorites yet"
 msgstr "Vēl nav pievienots nevienas dziesmas izlasē"
 
+#, fuzzy
+#| msgid "No folder selected"
+msgid "No file linked"
+msgstr "Nav izvēlēta mape"
+
 msgid "No folder selected"
 msgstr "Nav izvēlēta mape"
 
@@ -1944,6 +1954,9 @@ msgstr "Tīkla ierīces nav atrastas"
 
 msgid "No related tracks found"
 msgstr "Nav atrasts neviens saistīts celiņš"
+
+msgid "No results for \"{query}\""
+msgstr ""
 
 msgid "No results"
 msgstr "Nav atrasts neviens rezultāts"
@@ -2096,6 +2109,11 @@ msgstr "Atver Last.fm autorizāciju…"
 
 msgid "Opening Libre.fm authorization..."
 msgstr "Atver Libre.fm autorizāciju…"
+
+#, fuzzy
+#| msgid "Actions"
+msgid "Options"
+msgstr "Darbības"
 
 msgid "Orange"
 msgstr "Oranžs"
@@ -2420,6 +2438,11 @@ msgstr "Diapazona atlase"
 msgid "Receiving profile"
 msgstr ""
 
+#, fuzzy
+#| msgid "Recently released"
+msgid "Recent searches"
+msgstr "Nesen izdotie"
+
 msgid "Recently played"
 msgstr "Nesen atskaņotie"
 
@@ -2546,6 +2569,11 @@ msgstr "Noņemt no rindas"
 msgid "Remove rule"
 msgstr "Noņemt noteikumu"
 
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove search"
+msgstr "Dzēst mapi"
+
 msgid "Remove"
 msgstr "Noņemt"
 
@@ -2555,8 +2583,16 @@ msgstr "Noņemts no izlases"
 msgid "Removed from"
 msgstr "Noņemts no"
 
+msgid "Rename Playlist"
+msgstr "Pārdēvēt atskaņošanas sarakstu"
+
 msgid "Rename file"
 msgstr "Pārdēvēt failu"
+
+#, fuzzy
+#| msgid "Filename"
+msgid "Rename"
+msgstr "Faila nosaukums"
 
 msgid "Repeat all"
 msgstr "Atkārtot visus"
@@ -2762,6 +2798,11 @@ msgstr "Meklēt rindā"
 
 msgid "Search tracks"
 msgstr "Meklēt dziesmas"
+
+#, fuzzy
+#| msgid "Search is unavailable"
+msgid "Search unavailable"
+msgstr "Meklēšana nav pieejama"
 
 msgid "Search"
 msgstr "Meklēt"
@@ -3367,6 +3408,11 @@ msgstr "Versiju vēsture"
 msgid "Via relay"
 msgstr ""
 
+#, fuzzy
+#| msgid "View all tracks"
+msgid "View all"
+msgstr "Skatīt visas dziesmas"
+
 msgid "View"
 msgstr "Skats"
 
@@ -3641,9 +3687,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 
 #~ msgid "Lyrics settings"
 #~ msgstr "Tekstu iestatījumi"
-
-#~ msgid "Rename Playlist"
-#~ msgstr "Pārdēvēt atskaņošanas sarakstu"
 
 #~ msgid "Enable equalizer"
 #~ msgstr "Iespējot ekvalaizeru"
@@ -4170,9 +4213,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 
 #~ msgid "Use server streams only"
 #~ msgstr "Izmantot tikai servera straumes"
-
-#~ msgid "View all tracks"
-#~ msgstr "Skatīt visas dziesmas"
 
 #~ msgid "Website"
 #~ msgstr "Tīmekļa vietne"
