@@ -16,13 +16,13 @@ use crate::{
     LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings, available_sort_fields,
 };
 use localization::{msgid, tr};
-use ui_shared::controls::{ADD_ICON, sort_order_icon};
+use ui_shared::controls::sort_order_icon;
 use ui_shared::layout::{
     configure_fill_width_clip, large_popup_content_height, large_popup_content_width,
     width_allocation_owner,
 };
 use ui_shared::localization::{
-    bind_drop_down_options_with, bind_widget_tooltip, bind_widget_tooltip_with, localized_label,
+    bind_drop_down_options_with, bind_widget_tooltip, bind_widget_tooltip_with,
 };
 use ui_shared::mounted_route::{MountedRoute, MountedRouteCommand, MountedRouteResume};
 use ui_shared::popup::present_light_dismiss_dialog;
@@ -38,7 +38,6 @@ const LIBRARY_TOOLBAR_SORT_MIN_WIDTH: i32 = 112;
 const LIBRARY_TOOLBAR_SORT_CHAR_WIDTH: i32 = 8;
 const LIBRARY_TOOLBAR_SORT_HORIZONTAL_PADDING: i32 = 44;
 const LIBRARY_TOOLBAR_SORT_WIDTH_SHARE: i32 = 4;
-const LIBRARY_TOOLBAR_COMPACT_COMMAND_WIDTH: i32 = 760;
 
 ui_shared::composite_box!(
     pub LibraryPageView,
@@ -317,8 +316,6 @@ impl CatalogUi {
             .import_button
             .set_action_name(Some("win.import-playlist"));
         let command_button = toolbar.imp().command_button.get();
-        set_library_command_button_content(&command_button, false, ADD_ICON, "New Playlist");
-        bind_widget_tooltip(&command_button, "New Playlist");
         command_button.set_visible(matches!(
             key,
             LibraryListKey::Playlists | LibraryListKey::SmartPlaylists
@@ -457,16 +454,22 @@ impl CatalogUi {
                 shell.present_library_config_dialog_with_detail(state.key, state.include_detail);
             });
         }
-        let command_compact = Cell::new(false);
-        apply_library_command_button_layout(&command_button, &command_compact, 1);
         let applied_sort_width = Cell::new(sort_dropdown.width_request());
         let sort_dropdown_for_width = sort_dropdown.clone();
-        let command_button_for_width = command_button.clone();
+        let toolbar_for_width = toolbar.downgrade();
         let preferred_sort_width_for_allocation = Rc::clone(&preferred_sort_width);
         let owner = width_allocation_owner(&toolbar, move |width| {
-            apply_library_command_button_layout(&command_button_for_width, &command_compact, width);
+            let Some(toolbar) = toolbar_for_width.upgrade() else {
+                return;
+            };
+            let toolbar_minimum = toolbar.measure(gtk::Orientation::Horizontal, -1).0;
+            let sort_minimum = sort_dropdown_for_width
+                .measure(gtk::Orientation::Horizontal, -1)
+                .0;
+            let available = (width - (toolbar_minimum - sort_minimum)).max(1);
             let sort_width =
-                responsive_toolbar_sort_width(width, preferred_sort_width_for_allocation.get());
+                responsive_toolbar_sort_width(width, preferred_sort_width_for_allocation.get())
+                    .min(available);
             if applied_sort_width.replace(sort_width) != sort_width {
                 sort_dropdown_for_width.set_width_request(sort_width);
             }
@@ -713,9 +716,6 @@ where
     }
 }
 
-fn library_toolbar_compact_for_width(width: i32) -> bool {
-    width < LIBRARY_TOOLBAR_COMPACT_COMMAND_WIDTH
-}
 pub fn toolbar_sort_width_for_labels<'a>(labels: impl IntoIterator<Item = &'a str>) -> i32 {
     labels
         .into_iter()
@@ -786,18 +786,6 @@ fn configure_sort_dropdown_factory(dropdown: &gtk::DropDown) {
     dropdown.set_factory(Some(&factory));
 }
 
-fn apply_library_command_button_layout(
-    command_button: &gtk::Button,
-    command_compact: &Cell<bool>,
-    width: i32,
-) {
-    let width = width.max(1);
-    let compact = library_toolbar_compact_for_width(width);
-    if command_compact.replace(compact) != compact {
-        set_library_command_button_content(command_button, compact, ADD_ICON, "New Playlist");
-    }
-}
-
 fn configure_library_toolbar_icon_button(button: &gtk::Button, tooltip: &str) {
     button.add_css_class("flat");
     button.add_css_class("icon-button");
@@ -805,32 +793,6 @@ fn configure_library_toolbar_icon_button(button: &gtk::Button, tooltip: &str) {
     button.add_css_class("library-toolbar-icon-button");
     button.set_width_request(LIBRARY_TOOLBAR_ICON_BUTTON_WIDTH);
     bind_widget_tooltip(button, tooltip);
-}
-
-fn set_library_command_button_content(
-    button: &gtk::Button,
-    compact: bool,
-    icon_name: &str,
-    label: &str,
-) {
-    button.add_css_class("flat");
-    if compact {
-        button.remove_css_class("pill-button");
-        button.remove_css_class("pill");
-        button.add_css_class("icon-button");
-        button.add_css_class("circular");
-        button.set_child(Some(&gtk::Image::from_icon_name(icon_name)));
-        return;
-    }
-
-    button.remove_css_class("icon-button");
-    button.remove_css_class("circular");
-    button.add_css_class("pill-button");
-    button.add_css_class("pill");
-    let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    content.append(&gtk::Image::from_icon_name(icon_name));
-    content.append(&localized_label(label));
-    button.set_child(Some(&content));
 }
 
 #[cfg(test)]
