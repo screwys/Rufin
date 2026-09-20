@@ -19,6 +19,10 @@ msgstr ""
 "X-Generator: Weblate 2026.10.dev0\n"
 
 msgid ""
+"Approving gives this device access to your profile and saved source logins."
+msgstr ""
+
+msgid ""
 "Backup file may contain sensitive information. Do you want to set a password?"
 msgstr ""
 "Rezerves kopijas failā var būt sensitīva informācija. Vai vēlaties iestatīt "
@@ -30,6 +34,21 @@ msgid ""
 msgstr ""
 "Rezerves kopija atjaunota, izlaižot {entries} atskaņošanas saraksta "
 "ierakstus un {listens} atskaņošanas reizes."
+
+msgid ""
+"Choose where this device stores local music received through Connect. "
+"Matching files already in the folder are reused; missing files are "
+"downloaded here."
+msgstr ""
+
+msgid ""
+"Connecting an existing profile will remove all data in this device, do you "
+"really want to continue?"
+msgstr ""
+
+msgid ""
+"Devices using Rufin Connect are no longer compatible. Please update Rufin."
+msgstr ""
 
 msgid ""
 "Downloads from this server will be removed, and automatic rules will be "
@@ -68,6 +87,11 @@ msgid ""
 msgstr ""
 "Tikai šī noteikuma ietvarā lejupielādētie faili tiks dzēsti. Koplietotie un "
 "manuāli lejupielādētie faili paliks"
+
+msgid ""
+"Open Rufin Connect on another device, connect via Join button or by copying "
+"invitation code"
+msgstr ""
 
 msgid ""
 "Remove Local and its cached library from Rufin? Your music files will not be "
@@ -130,6 +154,11 @@ msgstr ""
 "atveriet problēmu vietnē Github."
 
 msgid ""
+"The folder is relative to the selected account. Applying it changes storage "
+"on all devices."
+msgstr ""
+
+msgid ""
 "These folders are combined into the Local source and shown through folder "
 "browsing"
 msgstr ""
@@ -148,6 +177,10 @@ msgid ""
 msgstr ""
 "Šī ir Rufin īpašumā. Tajā var iekļaut ierakstus no visiem konfigurētajiem "
 "avotiem, taču tā netiek sinhronizēta ar attālajām ierīcēm."
+
+msgid ""
+"This only takes affect for new local files that are added by another device"
+msgstr ""
 
 msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
@@ -235,6 +268,9 @@ msgstr "Akcenta krāsa"
 
 msgid "Access token"
 msgstr "Piekļuves žetons"
+
+msgid "Action required"
+msgstr ""
 
 msgid "Actions"
 msgstr "Darbības"
@@ -344,6 +380,11 @@ msgstr "Anonīms (WebDAV / SMB)"
 msgid "Anonymous"
 msgstr "Anonīms"
 
+#, fuzzy
+#| msgid "On this device"
+msgid "Another device"
+msgstr "Šajā ierīcē"
+
 msgid "Any genre"
 msgstr "Jebkurš žanrs"
 
@@ -362,10 +403,20 @@ msgstr "Parādās ierakstos"
 msgid "Application name"
 msgstr "Lietotnes nosaukums"
 
+#, fuzzy
+#| msgid "Apply"
+msgid "Applied"
+msgstr "Pielietot"
+
 msgid "Apply Template"
 msgstr "Lietot veidni"
 
 msgid "Apply"
+msgstr "Pielietot"
+
+#, fuzzy
+#| msgid "Apply"
+msgid "Applying..."
 msgstr "Pielietot"
 
 msgid "Approve sign-in in your browser"
@@ -530,6 +581,9 @@ msgstr "Izmaiņas stāsies spēkā pēc Rufin restartēšanas"
 msgid "Changing source"
 msgstr "Mainot avotu"
 
+msgid "Changing this will redownload all local files."
+msgstr ""
+
 msgid "Check for updates every"
 msgstr "Pārbaudīt jaunumus ik pēc"
 
@@ -542,6 +596,9 @@ msgstr "Izvēlēties mapi"
 msgid "Choose Server"
 msgstr "Izvēlēties serveri"
 
+msgid "Choose a connection for profile storage."
+msgstr ""
+
 msgid "Choose a local music folder"
 msgstr "Izvēlieties lokālo mūzikas mapi"
 
@@ -553,6 +610,16 @@ msgstr "Izvēlieties esošu lokālu mapi"
 
 msgid "Choose at least one local music folder"
 msgstr "Izvēlieties vismaz vienu lokālo mūzikas mapi"
+
+#, fuzzy
+#| msgid "Connection"
+msgid "Choose connection"
+msgstr "Savienojums"
+
+#, fuzzy
+#| msgid "Choose Folder"
+msgid "Choose folder"
+msgstr "Izvēlēties mapi"
 
 msgid "Choose one or more folders to scan and play directly from this computer"
 msgstr ""
@@ -634,11 +701,39 @@ msgstr "Komentārs"
 msgid "Compact"
 msgstr "Kompakts"
 
+msgid "Compare these emoji on both devices"
+msgstr ""
+
 msgid "Complete sign-in in your browser"
 msgstr "Pabeidziet pieteikšanos savā pārlūkprogrammā"
 
+#, fuzzy
+#| msgid "Configure columns"
+msgid "Configure another"
+msgstr "Konfigurēt kolonnas"
+
 msgid "Confirm"
 msgstr "Apstiprināt"
+
+#, fuzzy
+#| msgid "Connecting to {device}..."
+msgid "Connect a device"
+msgstr "Izveido savienojumu ar {device}..."
+
+#, fuzzy
+#| msgid "Connection failed"
+msgid "Connect file"
+msgstr "Savienojums neizdevās"
+
+#, fuzzy
+#| msgid "Connection failed"
+msgid "Connect folder"
+msgstr "Savienojums neizdevās"
+
+#, fuzzy
+#| msgid "Connection failed"
+msgid "Connect is not enabled"
+msgstr "Savienojums neizdevās"
 
 msgid "Connect manually"
 msgstr "Savienot manuāli"
@@ -655,8 +750,18 @@ msgstr "Savienot"
 msgid "Connected as {username}"
 msgstr "Pieslēdzies kā {username}"
 
+#, fuzzy
+#| msgid "Connected"
+msgid "Connected devices"
+msgstr "Savienots"
+
 msgid "Connected"
 msgstr "Savienots"
+
+#, fuzzy
+#| msgid "Connecting to {device}..."
+msgid "Connecting devices"
+msgstr "Izveido savienojumu ar {device}..."
 
 msgid "Connecting to music server..."
 msgstr "Savienojas ar mūzikas serveri…"
@@ -667,14 +772,34 @@ msgstr "Izveido savienojumu ar {device}..."
 msgid "Connecting"
 msgstr "Savienojas"
 
+#, fuzzy
+#| msgid "Connecting"
+msgid "Connecting..."
+msgstr "Savienojas"
+
 msgid "Connection failed"
 msgstr "Savienojums neizdevās"
 
 msgid "Connection lost. Reconnecting..."
 msgstr "Savienojums pārtraukts. Atjaunojam savienojumu..."
 
+#, fuzzy
+#| msgid "Connection failed"
+msgid "Connection name"
+msgstr "Savienojums neizdevās"
+
 msgid "Connection options"
 msgstr "Savienojuma opcijas"
+
+#, fuzzy
+#| msgid "Connection options"
+msgid "Connection settings"
+msgstr "Savienojuma opcijas"
+
+#, fuzzy
+#| msgid "Connection failed"
+msgid "Connection test has failed"
+msgstr "Savienojums neizdevās"
 
 msgid "Connection"
 msgstr "Savienojums"
@@ -684,6 +809,12 @@ msgstr "Saturs"
 
 msgid "Context Menus"
 msgstr "Konteksta izvēlnes"
+
+msgid "Continue from where {device} left off"
+msgstr ""
+
+msgid "Continue from where {device} left off?"
+msgstr ""
 
 msgid "Continue"
 msgstr "Turpināt"
@@ -699,6 +830,9 @@ msgstr "Kontrolieris"
 
 msgid "Copy access token"
 msgstr "Kopēt piekļuves marķieri"
+
+msgid "Copy invitation"
+msgstr ""
 
 msgid "Copy link"
 msgstr "Kopēt saiti"
@@ -817,11 +951,24 @@ msgstr "Detalizētas celiņu kolonnas"
 msgid "Detail"
 msgstr "Sīkāka informācija"
 
+msgid "Device invitation"
+msgstr ""
+
+#, fuzzy
+#| msgid "Filename"
+msgid "Device name"
+msgstr "Faila nosaukums"
+
 msgid "Diagnostic log saved"
 msgstr "Diagnostikas žurnāls saglabāts"
 
 msgid "Diagnostic log"
 msgstr "Diagnostikas žurnāls"
+
+#, fuzzy
+#| msgid "Direction"
+msgid "Direct"
+msgstr "Virziens"
 
 msgid "Direction"
 msgstr "Virziens"
@@ -847,6 +994,16 @@ msgstr "Diskogrāfija"
 msgid "Disconnect from Rufin?"
 msgstr "Atvienoties no Rufin?"
 
+#, fuzzy
+#| msgid "On this device"
+msgid "Disconnect this device"
+msgstr "Šajā ierīcē"
+
+#, fuzzy
+#| msgid "On this device"
+msgid "Disconnect this device?"
+msgstr "Šajā ierīcē"
+
 msgid "Disconnect"
 msgstr "Atvienot"
 
@@ -858,6 +1015,9 @@ msgstr "Discord"
 
 msgid "Do not encrypt"
 msgstr "Nešifrēt"
+
+msgid "Do you want to use the existing configuration?"
+msgstr ""
 
 msgid "Don't duplicate"
 msgstr "Nedublēt"
@@ -949,6 +1109,11 @@ msgstr "Ieslēgt kontrolieri"
 msgid "Enable EBU R128 Analysis?"
 msgstr "Ieslēgt EBU R128 analīzi?"
 
+#, fuzzy
+#| msgid "Emby Connect"
+msgid "Enable Rufin Connect"
+msgstr "Emby Connect"
+
 msgid "Enable automatic backups"
 msgstr "Iespējot automātiskās dublējumu izveidi"
 
@@ -989,6 +1154,9 @@ msgstr "Ekvalaizers"
 
 msgid "Everything, including new tracks"
 msgstr "Viss, ieskaitot jaunās dziesmas"
+
+msgid "Existing profile file"
+msgstr ""
 
 msgid "Expand lyrics and visualizer"
 msgstr "Atvērt tekstus un vizualizāciju"
@@ -1060,6 +1228,16 @@ msgstr "Izlase"
 
 msgid "Featured genres"
 msgstr "Ieteicamie žanri"
+
+#, fuzzy
+#| msgid "Connection"
+msgid "File connection"
+msgstr "Savienojums"
+
+#, fuzzy
+#| msgid "Allow remote connections"
+msgid "File connections"
+msgstr "Atļaut attālinātās savienojumus"
 
 msgid "Filename"
 msgstr "Faila nosaukums"
@@ -1279,8 +1457,22 @@ msgstr "Instrumentāls"
 msgid "Integrations"
 msgstr "Integrācijas"
 
+msgid "Invite"
+msgstr ""
+
 msgid "Jellyfin"
 msgstr "Jellyfin"
+
+#, fuzzy
+#| msgid "Home Profile"
+msgid "Join profile"
+msgstr "Sākums Profils"
+
+msgid "Join using"
+msgstr ""
+
+msgid "Join"
+msgstr ""
 
 msgid "Karaoke Playback"
 msgstr "Karaoke atskaņošana"
@@ -1413,6 +1605,11 @@ msgstr[1] ""
 msgstr[2] ""
 "Lokālo failu atbilžu noteikšana: {matched} no {total} servera ceļiem"
 
+#, fuzzy
+#| msgid "Local Folders"
+msgid "Local folder"
+msgstr "Lokālās mapes"
+
 msgid "Local imports and access"
 msgstr "Lokālie importi un piekļuve"
 
@@ -1425,8 +1622,23 @@ msgstr "Lokālā mūzikas mape nav pieejama"
 msgid "Local music folder"
 msgstr "Lokālā mūzikas mape"
 
+#, fuzzy
+#| msgid "Local music folder"
+msgid "Local music folders"
+msgstr "Lokālā mūzikas mape"
+
+#, fuzzy
+#| msgid "Searching Local Network"
+msgid "Local network"
+msgstr "Meklē lokālajā tīklā"
+
 msgid "Local playback saved"
 msgstr "Lokālā atskaņošana saglabāta"
+
+#, fuzzy
+#| msgid "Lyrics storage"
+msgid "Local storage"
+msgstr "Tekstu krātuve"
 
 msgid "Local"
 msgstr "Lokāls"
@@ -1461,6 +1673,9 @@ msgstr "Teksti tiks parādīti šeit."
 msgid "Lyrics"
 msgstr "Teksti"
 
+msgid "MP3"
+msgstr ""
+
 msgid "Manage"
 msgstr "Pārvaldīt"
 
@@ -1472,6 +1687,14 @@ msgstr "Norādītā lokālā faila nav atrasts"
 
 msgid "Maximum year"
 msgstr "Maksimālais gads"
+
+#, fuzzy
+#| msgid "Artist unavailable"
+msgid "Media available"
+msgstr "Izpildītājs nav pieejams"
+
+msgid "Media transferring: {received} / {total} bytes"
+msgstr ""
 
 msgid "Menu"
 msgstr "Izvēlne"
@@ -1554,6 +1777,11 @@ msgstr "Mūzikas mape"
 msgid "Music folders on the Rufin machine"
 msgstr "Mūzikas mapes Rufin ierīcē"
 
+#, fuzzy
+#| msgid "On this device"
+msgid "Music on this device"
+msgstr "Šajā ierīcē"
+
 msgid "MusicBrainz + Last.fm"
 msgstr "MusicBrainz + Last.fm"
 
@@ -1607,6 +1835,14 @@ msgstr "Pāriet uz meklēšanu"
 
 msgid "Navigation"
 msgstr "Navigācija"
+
+#, fuzzy
+#| msgid "Next audio device"
+msgid "Nearby devices"
+msgstr "Nākamā skaņas ierīce"
+
+msgid "Nearby discovery"
+msgstr ""
 
 msgid "Needs attention"
 msgstr "Prasās uzmanība"
@@ -1810,6 +2046,11 @@ msgstr "Atvērt vadības paneli"
 
 msgid "Open Folder"
 msgstr "Atvērt mapi"
+
+#, fuzzy
+#| msgid "Quick Connect"
+msgid "Open Rufin Connect"
+msgstr "Ātrā savienošana"
 
 msgid "Open approval page"
 msgstr "Atvērt apstiprināšanas lapu"
@@ -2059,6 +2300,11 @@ msgstr "Iestatījumi"
 msgid "Preparing library..."
 msgstr "Sagatavo bibliotēku…"
 
+#, fuzzy
+#| msgid "Preparing library..."
+msgid "Preparing smaller media"
+msgstr "Sagatavo bibliotēku…"
+
 msgid "Preserve pitch"
 msgstr "Saglabāt toni"
 
@@ -2116,6 +2362,14 @@ msgstr "Privātais režīms"
 msgid "Profile PIN"
 msgstr "Profila PIN kods"
 
+#, fuzzy
+#| msgid "Secure storage"
+msgid "Profile storage"
+msgstr "Droša krātuve"
+
+msgid "Profile up to date"
+msgstr ""
+
 msgid "Pronunciation"
 msgstr "Izruna"
 
@@ -2157,6 +2411,14 @@ msgstr "Vērtējums"
 
 msgid "Ready"
 msgstr "Gatavs"
+
+#, fuzzy
+#| msgid "Range selection"
+msgid "Receiving collection"
+msgstr "Diapazona atlase"
+
+msgid "Receiving profile"
+msgstr ""
 
 msgid "Recently played"
 msgstr "Nesen atskaņotie"
@@ -2202,6 +2464,16 @@ msgstr "Saistīts"
 
 msgid "Relative"
 msgstr "Relatīvs"
+
+#, fuzzy
+#| msgid "Choose an address"
+msgid "Relay address"
+msgstr "Izvēlēties adresi"
+
+#, fuzzy
+#| msgid "Related"
+msgid "Relay"
+msgstr "Saistīts"
 
 msgid "Release date"
 msgstr "Izdošanas datums"
@@ -2250,6 +2522,11 @@ msgstr "Dzēst visas lejupielādes"
 
 msgid "Remove and Delete"
 msgstr "Noņemt un dzēst"
+
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove device"
+msgstr "Dzēst mapi"
 
 msgid "Remove folder"
 msgstr "Dzēst mapi"
@@ -2357,6 +2634,11 @@ msgstr "Noapaļoti vizuālie elementi"
 
 msgid "Rows"
 msgstr "Rindas"
+
+#, fuzzy
+#| msgid "Quick Connect"
+msgid "Rufin Connect"
+msgstr "Ātrā savienošana"
 
 msgid "Rufin data folder"
 msgstr "Rufin datu mape"
@@ -2550,6 +2832,9 @@ msgstr "Atlasītās mapes"
 msgid "Selection"
 msgstr "Atlasīšana"
 
+msgid "Self-host an Iroh Relay"
+msgstr ""
+
 msgid "Separate .lrc file"
 msgstr "Atsevišķs .lrc fails"
 
@@ -2594,6 +2879,11 @@ msgstr "Serveri"
 
 msgid "Set the Discord activity type to Listening"
 msgstr "Iestatīt Discord aktivitātes veidu uz Klausīšanās"
+
+#, fuzzy
+#| msgid "On this device"
+msgid "Set up this device"
+msgstr "Šajā ierīcē"
 
 msgid "Settings and sources"
 msgstr "Iestatījumi un avoti"
@@ -2781,6 +3071,14 @@ msgstr "Sākas..."
 msgid "Status display"
 msgstr "Statuss"
 
+msgid "Stop"
+msgstr "Apturēt"
+
+#, fuzzy
+#| msgid "Secret storage"
+msgid "Storage"
+msgstr "Slēptā krātuve"
+
 msgid "Store calculated loudness in supported Local music files"
 msgstr "Saglabāt aprēķināto skaļumu atbalstītajos lokālajos mūzikas failos"
 
@@ -2826,6 +3124,11 @@ msgstr "Tehno"
 msgid "Template"
 msgstr "Veidne"
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Test connection"
+msgstr "Savienojums"
+
 msgid "Text"
 msgstr "Teksts"
 
@@ -2834,6 +3137,12 @@ msgstr "API atslēga netika pieņemta. Lūdzu, vēlreiz izveidojiet savienojumu.
 
 msgid "Theme"
 msgstr "Tēma"
+
+msgid "These emoji match"
+msgstr ""
+
+msgid "This can be turned off after pairing if you want"
+msgstr ""
 
 msgid "This device"
 msgstr "Šī ierīce"
@@ -2863,6 +3172,9 @@ msgstr "Nosaukums (apvienots)"
 
 msgid "Title"
 msgstr "Nosaukums"
+
+msgid "To use a file-sync app, choose a folder it synchronizes."
+msgstr ""
 
 msgid "Toggle Fullscreen"
 msgstr "Pārslēgt pilnekrāna režīmu"
@@ -2977,14 +3289,32 @@ msgstr "Izmantot šo avotu"
 msgid "Use a number above zero"
 msgstr "Izmantojiet skaitli, kas ir lielāka par nulli"
 
+msgid "Use a public relay"
+msgstr ""
+
 msgid "Use accent color"
 msgstr "Izmantot akcenta krāsu"
+
+#, fuzzy
+#| msgid "Waiting for connection"
+msgid "Use an existing connection?"
+msgstr "Gaida savienojumu"
 
 msgid "Use different layout below a threshold width"
 msgstr "Izmantot citu izkārtojumu zem sliekšņa platuma"
 
 msgid "Use each track's own cover when available"
 msgstr "Izmantot katras dziesmas individuālo vāciņu, ja tas ir pieejams"
+
+#, fuzzy
+#| msgid "Use source setting"
+msgid "Use existing"
+msgstr "Izmantot avota iestatījumu"
+
+#, fuzzy
+#| msgid "folders"
+msgid "Use folder"
+msgstr "mapes"
 
 msgid "Use listening activity"
 msgstr "Izmantot klausīšanās aktivitāti"
@@ -3034,6 +3364,9 @@ msgstr "Pārbaudīt servera sertifikātu"
 msgid "Version History"
 msgstr "Versiju vēsture"
 
+msgid "Via relay"
+msgstr ""
+
 msgid "View"
 msgstr "Skats"
 
@@ -3055,11 +3388,32 @@ msgstr "Skaļuma skala"
 msgid "Volume"
 msgstr "Skaļums"
 
+#, fuzzy
+#| msgid "Waiting for connection"
+msgid "Waiting for a peer"
+msgstr "Gaida savienojumu"
+
 msgid "Waiting for connection"
 msgstr "Gaida savienojumu"
 
+#, fuzzy
+#| msgid "Searching for devices..."
+msgid "Waiting for device"
+msgstr "Tiek meklētas ierīces..."
+
+#, fuzzy
+#| msgid "Waiting for connection"
+msgid "Waiting for media provider"
+msgstr "Gaida savienojumu"
+
+msgid "Waiting for the other device to approve"
+msgstr ""
+
 msgid "Waveform seekbar"
 msgstr "Viļņa formas meklēšanas josla"
+
+msgid "WebDAV / Nextcloud"
+msgstr ""
 
 msgid "WebDAV"
 msgstr "WebDAV"
@@ -3686,9 +4040,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 #~ msgid "Clears cached data for the server, login stays saved"
 #~ msgstr "Notīra kešotos datus serverim, pieteikšanās paliek saglabāta"
 
-#~ msgid "Configure columns"
-#~ msgstr "Konfigurēt kolonnas"
-
 #~ msgid "Configure local folder access"
 #~ msgstr "Konfigurēt piekļuvi lokālajām mapēm"
 
@@ -3778,9 +4129,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 #~ msgid "Search server lyrics before external providers"
 #~ msgstr "Meklēt servera tekstus pirms ārējiem pakalpojuma sniedzējiem"
 
-#~ msgid "Stop"
-#~ msgstr "Apturēt"
-
 #~ msgid ""
 #~ "Stop playback reporting, external lyrics, external metadata, "
 #~ "notifications, and Discord IPC"
@@ -3834,9 +4182,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 
 #~ msgid "appears on"
 #~ msgstr "parādās ierakstos"
-
-#~ msgid "folders"
-#~ msgstr "mapes"
 
 #~ msgid "folders selected"
 #~ msgstr "izvēlētas mapes"

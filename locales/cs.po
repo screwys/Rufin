@@ -18,6 +18,10 @@ msgstr ""
 "X-Generator: Weblate 2026.10.dev0\n"
 
 msgid ""
+"Approving gives this device access to your profile and saved source logins."
+msgstr ""
+
+msgid ""
 "Backup file may contain sensitive information. Do you want to set a password?"
 msgstr ""
 "Soubory zálohy mohou obsahovat citlivé informace. Chcete nastavit heslo?"
@@ -25,6 +29,21 @@ msgstr ""
 msgid ""
 "Backup restored with {entries} skipped playlist entries and {listens} "
 "skipped listens."
+msgstr ""
+
+msgid ""
+"Choose where this device stores local music received through Connect. "
+"Matching files already in the folder are reused; missing files are "
+"downloaded here."
+msgstr ""
+
+msgid ""
+"Connecting an existing profile will remove all data in this device, do you "
+"really want to continue?"
+msgstr ""
+
+msgid ""
+"Devices using Rufin Connect are no longer compatible. Please update Rufin."
 msgstr ""
 
 msgid ""
@@ -60,6 +79,11 @@ msgid ""
 msgstr ""
 "Smazány budou pouze soubory stažené na základě tohoto pravidla. Sdílené a "
 "ručně stažené soubory zůstanou zachovány"
+
+msgid ""
+"Open Rufin Connect on another device, connect via Join button or by copying "
+"invitation code"
+msgstr ""
 
 msgid ""
 "Remove Local and its cached library from Rufin? Your music files will not be "
@@ -106,6 +130,11 @@ msgstr ""
 "otevřete prosím issue na Githubu."
 
 msgid ""
+"The folder is relative to the selected account. Applying it changes storage "
+"on all devices."
+msgstr ""
+
+msgid ""
 "These folders are combined into the Local source and shown through folder "
 "browsing"
 msgstr ""
@@ -120,6 +149,10 @@ msgstr ""
 msgid ""
 "This is owned by Rufin. It can include entries from all configured sources "
 "but it is not synced to remotes."
+msgstr ""
+
+msgid ""
+"This only takes affect for new local files that are added by another device"
 msgstr ""
 
 msgid ""
@@ -207,6 +240,9 @@ msgstr "Barva zvýraznění"
 #| msgid "Get token"
 msgid "Access token"
 msgstr "Získat token"
+
+msgid "Action required"
+msgstr ""
 
 #, fuzzy
 #| msgid "Server Actions"
@@ -328,6 +364,11 @@ msgstr ""
 msgid "Anonymous"
 msgstr ""
 
+#, fuzzy
+#| msgid "This device"
+msgid "Another device"
+msgstr "Toto zařízení"
+
 msgid "Any genre"
 msgstr "Všechny žánry"
 
@@ -346,6 +387,9 @@ msgstr "Objevuje se v"
 msgid "Application name"
 msgstr "Název aplikace"
 
+msgid "Applied"
+msgstr ""
+
 #, fuzzy
 #| msgid "Slate"
 msgid "Apply Template"
@@ -353,6 +397,11 @@ msgstr "Šedá"
 
 msgid "Apply"
 msgstr ""
+
+#, fuzzy
+#| msgid "Saving..."
+msgid "Applying..."
+msgstr "Ukládání..."
 
 msgid "Approve sign-in in your browser"
 msgstr ""
@@ -548,6 +597,9 @@ msgstr ""
 msgid "Changing source"
 msgstr "Uložené zdroje"
 
+msgid "Changing this will redownload all local files."
+msgstr ""
+
 msgid "Check for updates every"
 msgstr ""
 
@@ -564,6 +616,9 @@ msgstr "Vyhledat složku"
 msgid "Choose Server"
 msgstr "Vyhledat složku"
 
+msgid "Choose a connection for profile storage."
+msgstr ""
+
 msgid "Choose a local music folder"
 msgstr "Vyberte místní hudební složku"
 
@@ -577,6 +632,16 @@ msgstr "Vyberte existující lokální složku"
 
 msgid "Choose at least one local music folder"
 msgstr "Zvolte alespoň jednu lokální hudební složku"
+
+#, fuzzy
+#| msgid "Connection"
+msgid "Choose connection"
+msgstr "Spojení"
+
+#, fuzzy
+#| msgid "Locate Folder"
+msgid "Choose folder"
+msgstr "Vyhledat složku"
 
 msgid "Choose one or more folders to scan and play directly from this computer"
 msgstr ""
@@ -664,11 +729,37 @@ msgstr "Komentář"
 msgid "Compact"
 msgstr "Kompaktní"
 
+msgid "Compare these emoji on both devices"
+msgstr ""
+
 msgid "Complete sign-in in your browser"
+msgstr ""
+
+msgid "Configure another"
 msgstr ""
 
 msgid "Confirm"
 msgstr ""
+
+#, fuzzy
+#| msgid "Connecting to {device}..."
+msgid "Connect a device"
+msgstr "Připojování k {device}..."
+
+#, fuzzy
+#| msgid "Connection failed"
+msgid "Connect file"
+msgstr "Spojení selhalo"
+
+#, fuzzy
+#| msgid "Connection failed"
+msgid "Connect folder"
+msgstr "Spojení selhalo"
+
+#, fuzzy
+#| msgid "Connection failed"
+msgid "Connect is not enabled"
+msgstr "Spojení selhalo"
 
 #, fuzzy
 #| msgid "Connection"
@@ -691,8 +782,18 @@ msgstr "Připojit"
 msgid "Connected as {username}"
 msgstr "Připojen jako {username}"
 
+#, fuzzy
+#| msgid "Connected"
+msgid "Connected devices"
+msgstr "Připojeno"
+
 msgid "Connected"
 msgstr "Připojeno"
+
+#, fuzzy
+#| msgid "Connecting to {device}..."
+msgid "Connecting devices"
+msgstr "Připojování k {device}..."
 
 msgid "Connecting to music server..."
 msgstr "Připojování k hudebnímu serveru..."
@@ -705,6 +806,11 @@ msgstr "Připojování k {device}..."
 msgid "Connecting"
 msgstr "Spojení"
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Connecting..."
+msgstr "Spojení"
+
 msgid "Connection failed"
 msgstr "Spojení selhalo"
 
@@ -714,9 +820,24 @@ msgid "Connection lost. Reconnecting..."
 msgstr "Připojování k {device}..."
 
 #, fuzzy
+#| msgid "Connection failed"
+msgid "Connection name"
+msgstr "Spojení selhalo"
+
+#, fuzzy
 #| msgid "Connection"
 msgid "Connection options"
 msgstr "Spojení"
+
+#, fuzzy
+#| msgid "Connection"
+msgid "Connection settings"
+msgstr "Spojení"
+
+#, fuzzy
+#| msgid "Connection failed"
+msgid "Connection test has failed"
+msgstr "Spojení selhalo"
 
 msgid "Connection"
 msgstr "Spojení"
@@ -728,6 +849,12 @@ msgstr "Kontextové menu"
 
 msgid "Context Menus"
 msgstr "Kontextové menu"
+
+msgid "Continue from where {device} left off"
+msgstr ""
+
+msgid "Continue from where {device} left off?"
+msgstr ""
 
 msgid "Continue"
 msgstr "Pokračovat"
@@ -744,6 +871,9 @@ msgid "Controller"
 msgstr ""
 
 msgid "Copy access token"
+msgstr ""
+
+msgid "Copy invitation"
 msgstr ""
 
 #, fuzzy
@@ -879,11 +1009,24 @@ msgstr "Sloupce s podrobnostmi o skladbě"
 msgid "Detail"
 msgstr "Podrobnosti"
 
+msgid "Device invitation"
+msgstr ""
+
+#, fuzzy
+#| msgid "Rename"
+msgid "Device name"
+msgstr "Přejmenovat"
+
 msgid "Diagnostic log saved"
 msgstr "Diagnostický protokol uložen"
 
 msgid "Diagnostic log"
 msgstr "Diagnostický protokol"
+
+#, fuzzy
+#| msgid "DirectSound"
+msgid "Direct"
+msgstr "DirectSound"
 
 #, fuzzy
 #| msgid "DirectSound"
@@ -914,6 +1057,16 @@ msgid "Disconnect from Rufin?"
 msgstr ""
 
 #, fuzzy
+#| msgid "This device"
+msgid "Disconnect this device"
+msgstr "Toto zařízení"
+
+#, fuzzy
+#| msgid "This device"
+msgid "Disconnect this device?"
+msgstr "Toto zařízení"
+
+#, fuzzy
 #| msgid "Reconnect"
 msgid "Disconnect"
 msgstr "Znovu se připojit"
@@ -930,6 +1083,9 @@ msgstr "Discord"
 #| msgid "is not empty"
 msgid "Do not encrypt"
 msgstr "není prázdné"
+
+msgid "Do you want to use the existing configuration?"
+msgstr ""
 
 msgid "Don't duplicate"
 msgstr "Neduplikujte"
@@ -1037,6 +1193,11 @@ msgstr "Zapnout equalizer"
 msgid "Enable EBU R128 Analysis?"
 msgstr ""
 
+#, fuzzy
+#| msgid "Connect"
+msgid "Enable Rufin Connect"
+msgstr "Připojit"
+
 msgid "Enable automatic backups"
 msgstr ""
 
@@ -1075,6 +1236,9 @@ msgstr "Ekvalizér"
 
 msgid "Everything, including new tracks"
 msgstr "Vše, včetně nových skladeb"
+
+msgid "Existing profile file"
+msgstr ""
 
 msgid "Expand lyrics and visualizer"
 msgstr ""
@@ -1156,6 +1320,16 @@ msgstr "Oblíbené"
 
 msgid "Featured genres"
 msgstr "Vybrané žánry"
+
+#, fuzzy
+#| msgid "Connection"
+msgid "File connection"
+msgstr "Spojení"
+
+#, fuzzy
+#| msgid "Connection"
+msgid "File connections"
+msgstr "Spojení"
 
 #, fuzzy
 #| msgid "Rename"
@@ -1390,8 +1564,22 @@ msgstr "Instrumentální"
 msgid "Integrations"
 msgstr "Integrace"
 
+msgid "Invite"
+msgstr ""
+
 msgid "Jellyfin"
 msgstr "Jellyfin"
+
+#, fuzzy
+#| msgid "Saved Sources"
+msgid "Join profile"
+msgstr "Uložené zdroje"
+
+msgid "Join using"
+msgstr ""
+
+msgid "Join"
+msgstr ""
 
 #, fuzzy
 #| msgid "Playback"
@@ -1534,6 +1722,11 @@ msgstr[1] ""
 msgstr[2] ""
 
 #, fuzzy
+#| msgid "Local Folders"
+msgid "Local folder"
+msgstr "Místní složky"
+
+#, fuzzy
 #| msgid "Local File Access"
 msgid "Local imports and access"
 msgstr "Přístup k místním souborům"
@@ -1548,9 +1741,24 @@ msgid "Local music folder"
 msgstr "Místní hudební složka"
 
 #, fuzzy
+#| msgid "Local music folder"
+msgid "Local music folders"
+msgstr "Místní hudební složka"
+
+#, fuzzy
+#| msgid "Searching Local Network"
+msgid "Local network"
+msgstr "Prohledávání místní sítě"
+
+#, fuzzy
 #| msgid "Playback speed"
 msgid "Local playback saved"
 msgstr "Rychlost přehrávání"
+
+#, fuzzy
+#| msgid "Lyrics loaded"
+msgid "Local storage"
+msgstr "Texty skladeb načteny"
 
 msgid "Local"
 msgstr "Místní"
@@ -1587,6 +1795,9 @@ msgstr ""
 msgid "Lyrics"
 msgstr "Text skladby"
 
+msgid "MP3"
+msgstr ""
+
 msgid "Manage"
 msgstr "Spravovat"
 
@@ -1598,6 +1809,14 @@ msgstr ""
 
 msgid "Maximum year"
 msgstr "Maximální rok"
+
+#, fuzzy
+#| msgid "This isn't available"
+msgid "Media available"
+msgstr "Toto není dostupné"
+
+msgid "Media transferring: {received} / {total} bytes"
+msgstr ""
 
 msgid "Menu"
 msgstr "Menu"
@@ -1692,6 +1911,11 @@ msgstr "Hudební složka"
 msgid "Music folders on the Rufin machine"
 msgstr ""
 
+#, fuzzy
+#| msgid "This device"
+msgid "Music on this device"
+msgstr "Toto zařízení"
+
 msgid "MusicBrainz + Last.fm"
 msgstr "MusicBrainz + Last.fm"
 
@@ -1747,6 +1971,14 @@ msgstr "Zadejte text pro vyhledání"
 
 msgid "Navigation"
 msgstr "Navigace"
+
+#, fuzzy
+#| msgid "Next audio device"
+msgid "Nearby devices"
+msgstr "Další zvukové zařízení"
+
+msgid "Nearby discovery"
+msgstr ""
 
 msgid "Needs attention"
 msgstr "Vyžaduje pozornost"
@@ -1976,6 +2208,11 @@ msgstr "Složka"
 #| msgid "Folder"
 msgid "Open Folder"
 msgstr "Složka"
+
+#, fuzzy
+#| msgid "Connect"
+msgid "Open Rufin Connect"
+msgstr "Připojit"
 
 msgid "Open approval page"
 msgstr ""
@@ -2259,6 +2496,11 @@ msgstr "Nastavení"
 msgid "Preparing library..."
 msgstr "Příprava knihovny..."
 
+#, fuzzy
+#| msgid "Preparing library..."
+msgid "Preparing smaller media"
+msgstr "Příprava knihovny..."
+
 msgid "Preserve pitch"
 msgstr "Zachovat výšku tónu"
 
@@ -2332,6 +2574,14 @@ msgstr "Soukromý režim"
 msgid "Profile PIN"
 msgstr ""
 
+#, fuzzy
+#| msgid "Secure storage"
+msgid "Profile storage"
+msgstr "Bezpečné úložiště"
+
+msgid "Profile up to date"
+msgstr ""
+
 msgid "Pronunciation"
 msgstr "Výslovnost"
 
@@ -2379,6 +2629,14 @@ msgstr "Hodnocení"
 
 msgid "Ready"
 msgstr "Připraveno"
+
+#, fuzzy
+#| msgid "Selection"
+msgid "Receiving collection"
+msgstr "Výběr"
+
+msgid "Receiving profile"
+msgstr ""
 
 msgid "Recently played"
 msgstr "Nedávno přehrané"
@@ -2435,6 +2693,16 @@ msgstr "Šedá"
 msgid "Relative"
 msgstr "Šedá"
 
+#, fuzzy
+#| msgid "Locate Folder"
+msgid "Relay address"
+msgstr "Vyhledat složku"
+
+#, fuzzy
+#| msgid "Slate"
+msgid "Relay"
+msgstr "Šedá"
+
 msgid "Release date"
 msgstr "Datum vydání"
 
@@ -2488,6 +2756,11 @@ msgstr "Odstranit všechny stažené soubory"
 
 msgid "Remove and Delete"
 msgstr "Odebrat a smazat"
+
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove device"
+msgstr "Odebrat složku"
 
 msgid "Remove folder"
 msgstr "Odebrat složku"
@@ -2599,6 +2872,11 @@ msgstr ""
 
 msgid "Rows"
 msgstr "Řádky"
+
+#, fuzzy
+#| msgid "Connect"
+msgid "Rufin Connect"
+msgstr "Připojit"
 
 msgid "Rufin data folder"
 msgstr "Složka s daty aplikace Rufin"
@@ -2830,6 +3108,9 @@ msgstr "Vybrat složku s hudbou"
 msgid "Selection"
 msgstr "Výběr"
 
+msgid "Self-host an Iroh Relay"
+msgstr ""
+
 msgid "Separate .lrc file"
 msgstr ""
 
@@ -2874,6 +3155,11 @@ msgstr "Servery"
 
 msgid "Set the Discord activity type to Listening"
 msgstr "Nastavte typ aktivity v Discordu na „Poslech“"
+
+#, fuzzy
+#| msgid "This device"
+msgid "Set up this device"
+msgstr "Toto zařízení"
 
 #, fuzzy
 #| msgid "Metadata source"
@@ -3081,6 +3367,14 @@ msgstr "Ukládání..."
 msgid "Status display"
 msgstr "Zobrazení stavu"
 
+msgid "Stop"
+msgstr ""
+
+#, fuzzy
+#| msgid "Secret storage"
+msgid "Storage"
+msgstr "Tajné úložiště"
+
 msgid "Store calculated loudness in supported Local music files"
 msgstr ""
 
@@ -3128,6 +3422,11 @@ msgstr "Techno"
 msgid "Template"
 msgstr "Šedá"
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Test connection"
+msgstr "Spojení"
+
 msgid "Text"
 msgstr "Text"
 
@@ -3136,6 +3435,12 @@ msgstr ""
 
 msgid "Theme"
 msgstr "Téma"
+
+msgid "These emoji match"
+msgstr ""
+
+msgid "This can be turned off after pairing if you want"
+msgstr ""
 
 msgid "This device"
 msgstr "Toto zařízení"
@@ -3163,6 +3468,9 @@ msgstr "Název (sloučeno)"
 
 msgid "Title"
 msgstr "Název"
+
+msgid "To use a file-sync app, choose a folder it synchronizes."
+msgstr ""
 
 msgid "Toggle Fullscreen"
 msgstr "Přepnout do režimu celé obrazovky"
@@ -3287,16 +3595,34 @@ msgstr ""
 msgid "Use a number above zero"
 msgstr "Zadejte číslo větší než nula"
 
+msgid "Use a public relay"
+msgstr ""
+
 #, fuzzy
 #| msgid "Accent color"
 msgid "Use accent color"
 msgstr "Barva zvýraznění"
+
+#, fuzzy
+#| msgid "Waiting for connection"
+msgid "Use an existing connection?"
+msgstr "Čekání na připojení"
 
 msgid "Use different layout below a threshold width"
 msgstr "Při šířce menší než stanovená hodnota použít jiné rozložení"
 
 msgid "Use each track's own cover when available"
 msgstr ""
+
+#, fuzzy
+#| msgid "Lyrics settings"
+msgid "Use existing"
+msgstr "Nastavení textu skladeb"
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "Use folder"
+msgstr "Přidat složku"
 
 msgid "Use listening activity"
 msgstr "Využít funkci poslechu"
@@ -3353,6 +3679,9 @@ msgstr "Ověřit certifikát serveru"
 msgid "Version History"
 msgstr "Historie verzí"
 
+msgid "Via relay"
+msgstr ""
+
 msgid "View"
 msgstr "Pohled"
 
@@ -3376,11 +3705,32 @@ msgstr "Stupnice hlasitosti"
 msgid "Volume"
 msgstr "Zvýšit hlasitost"
 
+#, fuzzy
+#| msgid "Waiting for connection"
+msgid "Waiting for a peer"
+msgstr "Čekání na připojení"
+
 msgid "Waiting for connection"
 msgstr "Čekání na připojení"
 
+#, fuzzy
+#| msgid "Searching for devices..."
+msgid "Waiting for device"
+msgstr "Hledání zařízení..."
+
+#, fuzzy
+#| msgid "Waiting for connection"
+msgid "Waiting for media provider"
+msgstr "Čekání na připojení"
+
+msgid "Waiting for the other device to approve"
+msgstr ""
+
 msgid "Waveform seekbar"
 msgstr "Indikátor průběhu ve formě vlnové křivky"
+
+msgid "WebDAV / Nextcloud"
+msgstr ""
 
 msgid "WebDAV"
 msgstr ""

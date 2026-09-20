@@ -18,6 +18,10 @@ msgstr ""
 "X-Generator: Weblate 2026.10.dev0\n"
 
 msgid ""
+"Approving gives this device access to your profile and saved source logins."
+msgstr ""
+
+msgid ""
 "Backup file may contain sensitive information. Do you want to set a password?"
 msgstr ""
 "Les fichiers de sauvegarde peuvent contenir des informations sensible. "
@@ -29,6 +33,21 @@ msgid ""
 msgstr ""
 "Sauvegarde restaurée avec {entries} entrées de playlist sautées et {listens} "
 "écoutes sautées."
+
+msgid ""
+"Choose where this device stores local music received through Connect. "
+"Matching files already in the folder are reused; missing files are "
+"downloaded here."
+msgstr ""
+
+msgid ""
+"Connecting an existing profile will remove all data in this device, do you "
+"really want to continue?"
+msgstr ""
+
+msgid ""
+"Devices using Rufin Connect are no longer compatible. Please update Rufin."
+msgstr ""
 
 msgid ""
 "Downloads from this server will be removed, and automatic rules will be "
@@ -63,6 +82,11 @@ msgstr ""
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
 "stay"
+msgstr ""
+
+msgid ""
+"Open Rufin Connect on another device, connect via Join button or by copying "
+"invitation code"
 msgstr ""
 
 msgid ""
@@ -121,6 +145,11 @@ msgstr ""
 "avez des suggestions, n'hésitez pas à créer un ticket sur GitHub."
 
 msgid ""
+"The folder is relative to the selected account. Applying it changes storage "
+"on all devices."
+msgstr ""
+
+msgid ""
 "These folders are combined into the Local source and shown through folder "
 "browsing"
 msgstr ""
@@ -133,6 +162,10 @@ msgstr ""
 msgid ""
 "This is owned by Rufin. It can include entries from all configured sources "
 "but it is not synced to remotes."
+msgstr ""
+
+msgid ""
+"This only takes affect for new local files that are added by another device"
 msgstr ""
 
 msgid ""
@@ -212,6 +245,9 @@ msgstr ""
 
 msgid "Access token"
 msgstr "Jeton d'accès"
+
+msgid "Action required"
+msgstr ""
 
 msgid "Actions"
 msgstr "Actions"
@@ -321,6 +357,11 @@ msgstr "Anonyme (WebDAV / SMB)"
 msgid "Anonymous"
 msgstr "Anonyme"
 
+#, fuzzy
+#| msgid "This device"
+msgid "Another device"
+msgstr "Cet appareil"
+
 msgid "Any genre"
 msgstr "Tous les genres"
 
@@ -339,10 +380,16 @@ msgstr ""
 msgid "Application name"
 msgstr "Nom de l'application"
 
+msgid "Applied"
+msgstr ""
+
 msgid "Apply Template"
 msgstr ""
 
 msgid "Apply"
+msgstr ""
+
+msgid "Applying..."
 msgstr ""
 
 msgid "Approve sign-in in your browser"
@@ -506,6 +553,9 @@ msgstr "Les changements prendrons effets lors du redémarrage de Rufin"
 msgid "Changing source"
 msgstr "Changer de source"
 
+msgid "Changing this will redownload all local files."
+msgstr ""
+
 msgid "Check for updates every"
 msgstr "Rechercher les mises à jour tous les"
 
@@ -518,6 +568,9 @@ msgstr "Choisissez le dossier"
 msgid "Choose Server"
 msgstr "Choisissez le serveur"
 
+msgid "Choose a connection for profile storage."
+msgstr ""
+
 msgid "Choose a local music folder"
 msgstr "Choisissez un dossier local de musique"
 
@@ -529,6 +582,16 @@ msgstr "Choisissez un dossier local existant"
 
 msgid "Choose at least one local music folder"
 msgstr "Choisissez au moins un dossier musique local"
+
+#, fuzzy
+#| msgid "Connection"
+msgid "Choose connection"
+msgstr "Connexion"
+
+#, fuzzy
+#| msgid "Choose Folder"
+msgid "Choose folder"
+msgstr "Choisissez le dossier"
 
 msgid "Choose one or more folders to scan and play directly from this computer"
 msgstr ""
@@ -610,11 +673,37 @@ msgstr "Commentaire"
 msgid "Compact"
 msgstr ""
 
+msgid "Compare these emoji on both devices"
+msgstr ""
+
 msgid "Complete sign-in in your browser"
+msgstr ""
+
+msgid "Configure another"
 msgstr ""
 
 msgid "Confirm"
 msgstr "Confirmer"
+
+#, fuzzy
+#| msgid "Connecting to {device}..."
+msgid "Connect a device"
+msgstr "Connexion à {device}..."
+
+#, fuzzy
+#| msgid "Connection failed"
+msgid "Connect file"
+msgstr "La connexion a échouée"
+
+#, fuzzy
+#| msgid "Connection failed"
+msgid "Connect folder"
+msgstr "La connexion a échouée"
+
+#, fuzzy
+#| msgid "Connection failed"
+msgid "Connect is not enabled"
+msgstr "La connexion a échouée"
 
 msgid "Connect manually"
 msgstr "Se connecter manuellement"
@@ -631,8 +720,18 @@ msgstr "Connecter"
 msgid "Connected as {username}"
 msgstr "Connecté en tant que {nom d'utilisateur}"
 
+#, fuzzy
+#| msgid "Connected"
+msgid "Connected devices"
+msgstr "Connecté"
+
 msgid "Connected"
 msgstr "Connecté"
+
+#, fuzzy
+#| msgid "Connecting to {device}..."
+msgid "Connecting devices"
+msgstr "Connexion à {device}..."
 
 msgid "Connecting to music server..."
 msgstr "Connexion au serveur de musique..."
@@ -643,14 +742,34 @@ msgstr "Connexion à {device}..."
 msgid "Connecting"
 msgstr "Connexion"
 
+#, fuzzy
+#| msgid "Connecting"
+msgid "Connecting..."
+msgstr "Connexion"
+
 msgid "Connection failed"
 msgstr "La connexion a échouée"
 
 msgid "Connection lost. Reconnecting..."
 msgstr "Connexion perdue. Reconnexion..."
 
+#, fuzzy
+#| msgid "Connection failed"
+msgid "Connection name"
+msgstr "La connexion a échouée"
+
 msgid "Connection options"
 msgstr "Options de connexion"
+
+#, fuzzy
+#| msgid "Connection options"
+msgid "Connection settings"
+msgstr "Options de connexion"
+
+#, fuzzy
+#| msgid "Connection failed"
+msgid "Connection test has failed"
+msgstr "La connexion a échouée"
 
 msgid "Connection"
 msgstr "Connexion"
@@ -660,6 +779,12 @@ msgstr ""
 
 msgid "Context Menus"
 msgstr "Menus contextuels"
+
+msgid "Continue from where {device} left off"
+msgstr ""
+
+msgid "Continue from where {device} left off?"
+msgstr ""
 
 msgid "Continue"
 msgstr "Continuer"
@@ -675,6 +800,9 @@ msgstr ""
 
 msgid "Copy access token"
 msgstr "Copier le token d'accès"
+
+msgid "Copy invitation"
+msgstr ""
 
 msgid "Copy link"
 msgstr "Copier le lien"
@@ -793,11 +921,24 @@ msgstr ""
 msgid "Detail"
 msgstr "Détail"
 
+msgid "Device invitation"
+msgstr ""
+
+#, fuzzy
+#| msgid "Files"
+msgid "Device name"
+msgstr "Fichiers"
+
 msgid "Diagnostic log saved"
 msgstr "Journal de diagnostic enregistré"
 
 msgid "Diagnostic log"
 msgstr "Journal de diagnostic"
+
+#, fuzzy
+#| msgid "Direction"
+msgid "Direct"
+msgstr "Direction"
 
 msgid "Direction"
 msgstr "Direction"
@@ -823,6 +964,16 @@ msgstr ""
 msgid "Disconnect from Rufin?"
 msgstr "Se déconnecter de Rufin ?"
 
+#, fuzzy
+#| msgid "Playing on this device"
+msgid "Disconnect this device"
+msgstr "Jouer sur cet appareil"
+
+#, fuzzy
+#| msgid "Playing on this device"
+msgid "Disconnect this device?"
+msgstr "Jouer sur cet appareil"
+
 msgid "Disconnect"
 msgstr "Déconnecter"
 
@@ -833,6 +984,9 @@ msgid "Discord"
 msgstr "Discord"
 
 msgid "Do not encrypt"
+msgstr ""
+
+msgid "Do you want to use the existing configuration?"
 msgstr ""
 
 msgid "Don't duplicate"
@@ -927,6 +1081,9 @@ msgstr ""
 msgid "Enable EBU R128 Analysis?"
 msgstr "Activer l'analyse EBU R128 ?"
 
+msgid "Enable Rufin Connect"
+msgstr ""
+
 msgid "Enable automatic backups"
 msgstr "Activer les sauvegardes automatiques"
 
@@ -965,6 +1122,9 @@ msgstr "Égaliseur"
 
 msgid "Everything, including new tracks"
 msgstr "Tout, y compris les nouvelles pistes"
+
+msgid "Existing profile file"
+msgstr ""
 
 msgid "Expand lyrics and visualizer"
 msgstr ""
@@ -1034,6 +1194,16 @@ msgstr "Favoris"
 
 msgid "Featured genres"
 msgstr ""
+
+#, fuzzy
+#| msgid "Connection"
+msgid "File connection"
+msgstr "Connexion"
+
+#, fuzzy
+#| msgid "Allow remote connections"
+msgid "File connections"
+msgstr "Autoriser les connections à distance"
 
 #, fuzzy
 #| msgid "Files"
@@ -1256,8 +1426,22 @@ msgstr "Instrumental"
 msgid "Integrations"
 msgstr "Intégrations"
 
+msgid "Invite"
+msgstr ""
+
 msgid "Jellyfin"
 msgstr "Jellyfin"
+
+#, fuzzy
+#| msgid "Change Profile"
+msgid "Join profile"
+msgstr "Changer de profile"
+
+msgid "Join using"
+msgstr ""
+
+msgid "Join"
+msgstr ""
 
 msgid "Karaoke Playback"
 msgstr ""
@@ -1391,6 +1575,11 @@ msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
 msgstr[1] ""
 
+#, fuzzy
+#| msgid "Local Folders"
+msgid "Local folder"
+msgstr "Dossiers locaux"
+
 msgid "Local imports and access"
 msgstr ""
 
@@ -1403,8 +1592,23 @@ msgstr "Le dossier musique local n'est pas disponible"
 msgid "Local music folder"
 msgstr "Dossier de musique local"
 
+#, fuzzy
+#| msgid "Local music folder"
+msgid "Local music folders"
+msgstr "Dossier de musique local"
+
+#, fuzzy
+#| msgid "Searching Local Network"
+msgid "Local network"
+msgstr "Recherche du réseau local"
+
 msgid "Local playback saved"
 msgstr ""
+
+#, fuzzy
+#| msgid "Lyrics storage"
+msgid "Local storage"
+msgstr "Stockage des paroles"
 
 msgid "Local"
 msgstr "Local"
@@ -1439,6 +1643,9 @@ msgstr ""
 msgid "Lyrics"
 msgstr "Paroles"
 
+msgid "MP3"
+msgstr ""
+
 msgid "Manage"
 msgstr "Gérer"
 
@@ -1450,6 +1657,14 @@ msgstr ""
 
 msgid "Maximum year"
 msgstr "Année maximale"
+
+#, fuzzy
+#| msgid "Artist unavailable"
+msgid "Media available"
+msgstr "Artiste non disponible"
+
+msgid "Media transferring: {received} / {total} bytes"
+msgstr ""
 
 msgid "Menu"
 msgstr "Menu"
@@ -1534,6 +1749,11 @@ msgstr "Dossier de musique"
 msgid "Music folders on the Rufin machine"
 msgstr "Dossiers de musique sur la machine Rufin"
 
+#, fuzzy
+#| msgid "Playing on this device"
+msgid "Music on this device"
+msgstr "Jouer sur cet appareil"
+
 msgid "MusicBrainz + Last.fm"
 msgstr "MusicBrainz + Last.fm"
 
@@ -1586,6 +1806,14 @@ msgid "Navigate to Search"
 msgstr ""
 
 msgid "Navigation"
+msgstr ""
+
+#, fuzzy
+#| msgid "Next audio device"
+msgid "Nearby devices"
+msgstr "Appareil audio suivant"
+
+msgid "Nearby discovery"
 msgstr ""
 
 msgid "Needs attention"
@@ -1787,6 +2015,9 @@ msgid "Open Controller"
 msgstr ""
 
 msgid "Open Folder"
+msgstr ""
+
+msgid "Open Rufin Connect"
 msgstr ""
 
 msgid "Open approval page"
@@ -2037,6 +2268,11 @@ msgstr "Préférences"
 msgid "Preparing library..."
 msgstr "Préparation de la bibliothèque..."
 
+#, fuzzy
+#| msgid "Preparing library..."
+msgid "Preparing smaller media"
+msgstr "Préparation de la bibliothèque..."
+
 msgid "Preserve pitch"
 msgstr ""
 
@@ -2094,6 +2330,14 @@ msgstr "Mode privé"
 msgid "Profile PIN"
 msgstr ""
 
+#, fuzzy
+#| msgid "Secure storage"
+msgid "Profile storage"
+msgstr "Stockage sécurisé"
+
+msgid "Profile up to date"
+msgstr ""
+
 msgid "Pronunciation"
 msgstr "Prononciation"
 
@@ -2135,6 +2379,14 @@ msgstr "Note"
 
 msgid "Ready"
 msgstr "Prêt"
+
+#, fuzzy
+#| msgid "Collection"
+msgid "Receiving collection"
+msgstr "Collection"
+
+msgid "Receiving profile"
+msgstr ""
 
 msgid "Recently played"
 msgstr "Récemment joué"
@@ -2180,6 +2432,16 @@ msgstr "Correspondant"
 
 msgid "Relative"
 msgstr ""
+
+#, fuzzy
+#| msgid "Choose an address"
+msgid "Relay address"
+msgstr "Choisissez une adresse"
+
+#, fuzzy
+#| msgid "Related"
+msgid "Relay"
+msgstr "Correspondant"
 
 msgid "Release date"
 msgstr "Date de sortie"
@@ -2228,6 +2490,11 @@ msgstr "Supprimer tous les téléchargements"
 
 msgid "Remove and Delete"
 msgstr "Supprimer et effacer"
+
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove device"
+msgstr "Supprimer le dossier"
 
 msgid "Remove folder"
 msgstr "Supprimer le dossier"
@@ -2335,6 +2602,11 @@ msgstr ""
 
 msgid "Rows"
 msgstr ""
+
+#, fuzzy
+#| msgid "Connect"
+msgid "Rufin Connect"
+msgstr "Connecter"
 
 msgid "Rufin data folder"
 msgstr ""
@@ -2528,6 +2800,9 @@ msgstr "Sélectionner les dossiers"
 msgid "Selection"
 msgstr "Sélection"
 
+msgid "Self-host an Iroh Relay"
+msgstr ""
+
 msgid "Separate .lrc file"
 msgstr ""
 
@@ -2572,6 +2847,11 @@ msgstr ""
 
 msgid "Set the Discord activity type to Listening"
 msgstr ""
+
+#, fuzzy
+#| msgid "This device"
+msgid "Set up this device"
+msgstr "Cet appareil"
 
 msgid "Settings and sources"
 msgstr ""
@@ -2763,6 +3043,14 @@ msgstr "Démarrage..."
 msgid "Status display"
 msgstr ""
 
+msgid "Stop"
+msgstr ""
+
+#, fuzzy
+#| msgid "Secure storage"
+msgid "Storage"
+msgstr "Stockage sécurisé"
+
 msgid "Store calculated loudness in supported Local music files"
 msgstr ""
 
@@ -2808,6 +3096,11 @@ msgstr "Techno"
 msgid "Template"
 msgstr "Modèle"
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Test connection"
+msgstr "Connexion"
+
 msgid "Text"
 msgstr "Texte"
 
@@ -2816,6 +3109,12 @@ msgstr "Le jeton d'API n'a pas été accepté. Veuillez vous connecter à nouvea
 
 msgid "Theme"
 msgstr "Thème"
+
+msgid "These emoji match"
+msgstr ""
+
+msgid "This can be turned off after pairing if you want"
+msgstr ""
 
 msgid "This device"
 msgstr "Cet appareil"
@@ -2843,6 +3142,9 @@ msgstr "Titre (fusionné)"
 
 msgid "Title"
 msgstr "Titre"
+
+msgid "To use a file-sync app, choose a folder it synchronizes."
+msgstr ""
 
 msgid "Toggle Fullscreen"
 msgstr "Afficher en plein écran"
@@ -2955,14 +3257,32 @@ msgstr "Utiliser cette source"
 msgid "Use a number above zero"
 msgstr "Utiliser un nombre supérieur à zéro"
 
+msgid "Use a public relay"
+msgstr ""
+
 msgid "Use accent color"
 msgstr "Utilisez une couleur de contrast"
+
+#, fuzzy
+#| msgid "Choose an existing local folder"
+msgid "Use an existing connection?"
+msgstr "Choisissez un dossier local existant"
 
 msgid "Use different layout below a threshold width"
 msgstr ""
 
 msgid "Use each track's own cover when available"
 msgstr ""
+
+#, fuzzy
+#| msgid "Lyrics settings"
+msgid "Use existing"
+msgstr "Paramètres des paroles"
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "Use folder"
+msgstr "Ajouter un dossier"
 
 msgid "Use listening activity"
 msgstr ""
@@ -3011,6 +3331,9 @@ msgstr ""
 msgid "Version History"
 msgstr ""
 
+msgid "Via relay"
+msgstr ""
+
 msgid "View"
 msgstr ""
 
@@ -3034,10 +3357,27 @@ msgstr ""
 msgid "Volume"
 msgstr ""
 
+msgid "Waiting for a peer"
+msgstr ""
+
 msgid "Waiting for connection"
 msgstr ""
 
+#, fuzzy
+#| msgid "Searching for devices..."
+msgid "Waiting for device"
+msgstr "Recherche des appareils..."
+
+msgid "Waiting for media provider"
+msgstr ""
+
+msgid "Waiting for the other device to approve"
+msgstr ""
+
 msgid "Waveform seekbar"
+msgstr ""
+
+msgid "WebDAV / Nextcloud"
 msgstr ""
 
 msgid "WebDAV"
