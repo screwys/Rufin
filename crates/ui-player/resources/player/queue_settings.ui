@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+  <object class="AdwPreferencesDialog" id="dialog">
+    <property name="title" translatable="yes">Customize display</property>
+    <property name="search-enabled">false</property>
+    <child><object class="AdwPreferencesPage">
+      <property name="title" translatable="yes">Queue</property>
+      <child><object class="AdwPreferencesGroup" id="fields_group">
+        <property name="title" translatable="yes">Columns</property>
+        <property name="header-suffix"><object class="GtkButton" id="reset">
+          <property name="label" translatable="yes">Reset</property>
+          <property name="tooltip-text" translatable="yes">Reset to defaults</property>
+          <property name="valign">end</property>
+          <style><class name="destructive-action"/></style>
+        </object></property>
+      </object></child>
+    </object></child>
+  </object>
+</interface>

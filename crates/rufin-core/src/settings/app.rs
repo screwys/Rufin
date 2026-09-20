@@ -229,6 +229,8 @@ pub struct Settings {
     #[serde(default)]
     pub queue_lyrics_height: Option<i32>,
     #[serde(default)]
+    pub right_panel: super::right_panel::RightPanelSettings,
+    #[serde(default)]
     pub library_lists: Vec<LibraryListSettingsEntry>,
 }
 
@@ -288,6 +290,7 @@ impl Default for Settings {
             fullscreen_dynamic_background: false,
             fullscreen_background_image: true,
             queue_lyrics_height: None,
+            right_panel: super::right_panel::RightPanelSettings::default(),
             library_lists: default_library_list_settings(),
         }
     }
@@ -346,6 +349,7 @@ impl Settings {
             .map(str::to_string);
         self.layout.sanitize();
         self.sidebar.sanitize();
+        self.right_panel.sanitize();
         self.context_menu.sanitize();
         if self.keep_running_after_close {
             self.tray_enabled = true;

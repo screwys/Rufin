@@ -20,7 +20,7 @@ impl Shell {
 
     pub(crate) fn set_right_sidebar_visible(self: &Rc<Self>, visible: bool) {
         if !visible {
-            self.player_ui.remember_queue_lyrics_open_position();
+            self.player_ui.save_sidebar_panel_sizes();
         }
         let active_profile =
             resolve_layout(&self.settings.current.borrow().layout, self.layout_width()).profile;

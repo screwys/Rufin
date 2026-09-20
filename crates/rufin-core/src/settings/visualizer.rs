@@ -105,12 +105,14 @@ impl VisualizerPreset {
 pub struct VisualizerSettings {
     pub appearance: VisualizerAppearance,
     pub presets: Vec<VisualizerPreset>,
+    pub selected_preset: Option<usize>,
 }
 
 impl Default for VisualizerSettings {
     fn default() -> Self {
         Self {
             appearance: VisualizerAppearance::default(),
+            selected_preset: None,
             presets: (0..5)
                 .map(|slot| VisualizerPreset {
                     appearance: default_preset(slot),
@@ -163,6 +165,19 @@ fn default_preset(slot: usize) -> VisualizerAppearance {
 }
 
 impl VisualizerSettings {
+    pub fn selected_preset(&self) -> usize {
+        self.selected_preset.unwrap_or_else(|| {
+            (0..5)
+                .find(|slot| self.preset(*slot) == self.appearance)
+                .unwrap_or(0)
+        })
+    }
+
+    pub fn select_preset(&mut self, slot: usize) {
+        self.appearance = self.preset(slot);
+        self.selected_preset = Some(slot);
+    }
+
     pub fn preset(&self, slot: usize) -> VisualizerAppearance {
         self.presets
             .get(slot)
@@ -177,12 +192,35 @@ impl VisualizerSettings {
             });
         }
         self.presets[slot].appearance = self.appearance.clone();
+        self.selected_preset = Some(slot);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selected_slot_survives_edits_and_reload_even_when_presets_match() {
+        let mut settings = VisualizerSettings::default();
+        settings.presets[4] = settings.presets[0].clone();
+        settings.select_preset(4);
+        settings.appearance.spacing = 4.5;
+        let restored: VisualizerSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(restored.selected_preset(), 4);
+        assert_eq!(restored.appearance.spacing, 4.5);
+    }
+
+    #[test]
+    fn existing_settings_infer_the_selected_preset_from_appearance() {
+        let mut settings = VisualizerSettings::default();
+        settings.appearance = settings.preset(4);
+        let mut value = serde_json::to_value(&settings).unwrap();
+        value.as_object_mut().unwrap().remove("selected_preset");
+        let restored: VisualizerSettings = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.selected_preset(), 4);
+    }
 
     #[test]
     fn missing_settings_preserve_motion_and_follow_accent() {

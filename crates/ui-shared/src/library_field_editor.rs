@@ -110,7 +110,16 @@ pub fn library_field_config_row(
                 return;
             };
             if settings.update_library_list_settings(key, |settings| {
-                set_field_enabled(settings, field_set, field, check.is_active());
+                if key == LibraryListKey::Queue
+                    && field == LibraryField::RowIndex
+                    && check.is_active()
+                {
+                    let fields = active_fields_for_set_mut(settings, field_set);
+                    fields.retain(|candidate| *candidate != field);
+                    fields.insert(0, field);
+                } else {
+                    set_field_enabled(settings, field_set, field, check.is_active());
+                }
             }) {
                 changed();
             }

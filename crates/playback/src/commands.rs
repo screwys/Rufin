@@ -128,6 +128,7 @@ impl RadioPlayRequest {
 }
 
 pub trait QueueCommandPort: Send + Sync {
+    fn media_uris(&self) -> Result<Vec<String>, String>;
     fn play(&self, request: PlayRequest);
     fn insert(&self, input: library::QueueInput, target: QueueReorderTarget);
     fn remove(&self, occurrence: OccurrenceId);

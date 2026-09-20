@@ -409,7 +409,9 @@ impl crate::PlayerUi {
     pub fn apply_visualizer_appearance(&self) {
         let appearance = self.settings.current.borrow().visualizer.appearance.clone();
         let sidebar_opacity = appearance.opacity
-            * if self.lyrics.panel_visible.get() {
+            * if self.lyrics.panel_visible.get()
+                && self.settings.current.borrow().right_panel.combined
+            {
                 appearance.sidebar_lyrics_opacity
             } else {
                 1.0

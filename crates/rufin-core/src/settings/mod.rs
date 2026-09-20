@@ -2,6 +2,7 @@ pub mod app;
 mod connect;
 pub mod context_menu;
 pub mod layout;
+pub mod right_panel;
 mod secret_storage;
 pub use secret_storage::KeyringSecretStore;
 pub mod sidebar;

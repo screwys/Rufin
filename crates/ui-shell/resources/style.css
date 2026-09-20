@@ -2,6 +2,8 @@
 
 :root {
   --dim-opacity: 70%;
+  --shell-base-bg-color: var(--view-bg-color);
+  --shell-panel-bg-color: var(--sidebar-bg-color);
   --shell-separator-color: color-mix(in srgb, var(--window-fg-color) 4%, transparent);
 }
 
@@ -250,7 +252,7 @@ button.release-note-update:hover {
 }
 
 .app-root {
-  background: var(--window-bg-color);
+  background: var(--shell-base-bg-color);
   color: var(--window-fg-color);
 }
 
@@ -271,8 +273,8 @@ button.release-note-update:hover {
 .compact-rail-slot,
 .wide-sidebar,
 .compact-rail {
-  background: var(--view-bg-color);
-  color: var(--view-fg-color);
+  background: var(--shell-panel-bg-color);
+  color: var(--window-fg-color);
 }
 
 .wide-sidebar-slot,
@@ -318,8 +320,8 @@ overlay-split-view > .sidebar-pane {
 
 .main-area,
 .route-content {
-  background: var(--view-bg-color);
-  color: var(--view-fg-color);
+  background: var(--shell-panel-bg-color);
+  color: var(--window-fg-color);
 }
 
 .main-area {
@@ -481,10 +483,14 @@ row:focus {
 }
 
 headerbar.shared-topbar {
-  background: var(--window-bg-color);
+  background: var(--shell-base-bg-color);
   color: var(--window-fg-color);
   border-bottom: none;
   box-shadow: none;
+}
+
+headerbar.shared-topbar:backdrop > windowhandle {
+  filter: none;
 }
 
 headerbar.shared-topbar button.topbar-button,
@@ -492,6 +498,19 @@ headerbar.shared-topbar menubutton.topbar-button > button {
   min-width: 28px;
   min-height: 28px;
   padding: 2px;
+}
+
+entry.search {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+entry.search > image:first-child {
+  margin: 0 8px 0 0;
+}
+
+entry.search:dir(rtl) > image:first-child {
+  margin: 0 0 0 8px;
 }
 
 headerbar.shared-topbar .topbar-search > entry.search {
@@ -742,7 +761,7 @@ row.artist-search-result button.search-preview-play {
 }
 
 .startup-loading-root {
-  background: var(--view-bg-color);
+  background: var(--shell-panel-bg-color);
 }
 
 .startup-loading-status {
@@ -755,14 +774,14 @@ row.artist-search-result button.search-preview-play {
 }
 
 .right-panel {
-  background: var(--view-bg-color);
-  color: var(--view-fg-color);
+  background: var(--shell-panel-bg-color);
+  color: var(--window-fg-color);
   border-radius: 8px;
 }
 
 .sidebar-header {
   min-height: 48px;
-  color: var(--window-fg-color);
+  color: inherit;
 }
 
 .sidebar-header {
@@ -773,10 +792,24 @@ row.artist-search-result button.search-preview-play {
   min-height: 34px;
 }
 
+.queue-toolbar button image {
+  opacity: var(--dim-opacity);
+}
+
+.queue-toolbar button:focus image,
+.queue-toolbar button:active image {
+  opacity: 1;
+}
+
 .queue-search {
   min-height: 30px;
   padding-top: 0;
   padding-bottom: 0;
+}
+
+.queue-search:not(:focus-within):not(.has-query) {
+  background: transparent;
+  box-shadow: none;
 }
 
 .route-title {
@@ -953,7 +986,7 @@ row.artist-search-result button.search-preview-play {
   min-height: 40px;
   padding-left: 4px;
   border-radius: 7px;
-  background: color-mix(in srgb, currentColor 8%, var(--view-bg-color));
+  background: color-mix(in srgb, currentColor 8%, var(--shell-panel-bg-color));
 }
 
 .icon-button.sidebar-pin-control {
@@ -1595,10 +1628,6 @@ popover.slider-value-popover label {
 }
 
 .lyrics-lines {
-  padding: 20px 0 140px;
-}
-
-.lyrics-lines.lyrics-placeholder {
   padding: 0;
 }
 
@@ -2047,11 +2076,11 @@ button.download-queue-pause image {
   min-height: 80px;
 }
 
-.queue-lyrics-surface {
-  background: var(--view-bg-color);
+.sidebar-media {
+  background: var(--shell-panel-bg-color);
 }
 
-.queue-lyrics-split > separator {
+.sidebar-split > separator {
   min-height: 10px;
   background: transparent;
   box-shadow: inset 0 1px var(--shell-separator-color);
@@ -2178,6 +2207,8 @@ listview.queue-list row {
 }
 
 .lyrics-panel:hover .lyrics-controls,
+.sidebar-media:hover .lyrics-controls,
+.sidebar-media .lyrics-controls:focus-within,
 .lyrics-top-controls:focus-within,
 .lyrics-control-bar:focus-within {
   opacity: 1;
@@ -2265,7 +2296,7 @@ entry.lyrics-offset-value.flat:focus-within {
 
 .bottom-player {
   padding: 2px 8px;
-  background: var(--window-bg-color);
+  background: var(--shell-base-bg-color);
   color: var(--window-fg-color);
   border-top: none;
 }
@@ -2417,10 +2448,6 @@ scale.equalizer-surface-scale trough {
 
 .fullscreen-player .lyrics-panel {
   margin: 0;
-}
-
-.fullscreen-player .lyrics-lines {
-  padding: 8px 0 96px;
 }
 
 .fullscreen-player-queue-panel {

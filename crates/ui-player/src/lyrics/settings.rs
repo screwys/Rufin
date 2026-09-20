@@ -111,9 +111,17 @@ impl PlayerUi {
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum MediaSettingsPages {
+    Lyrics,
+    Visualizer,
+    Combined,
+}
+
 pub fn present_lyrics_settings_dialog(
     shell: &Rc<crate::PlayerUi>,
     window: &gtk::ApplicationWindow,
+    pages: MediaSettingsPages,
     uses_local_storage: Rc<dyn Fn() -> bool>,
     appearance_changed: Rc<dyn Fn()>,
 ) {
@@ -126,18 +134,31 @@ pub fn present_lyrics_settings_dialog(
     }
     drop(lyrics);
 
-    let (dialog, page) =
-        build_lyrics_settings(shell, window, uses_local_storage, appearance_changed);
-    dialog.add(&page);
-    let visualizer_page = crate::visualizer_settings::build_visualizer_settings(shell);
-    dialog.add(&visualizer_page);
-    let lyrics_visible = if shell.fullscreen_player_visible() {
-        shell.views.fullscreen_player.lyrics_enabled.get()
-    } else {
-        shell.lyrics.panel_visible.get()
-    };
-    if !lyrics_visible {
-        dialog.set_visible_page(&visualizer_page);
+    let resource = crate::ui_resource::LYRICS_SETTINGS_RESOURCE;
+    let builder = ui_shared::ui_resource::builder(resource);
+    let dialog: adw::PreferencesDialog =
+        ui_shared::ui_resource::object(&builder, resource, "dialog");
+    dialog.set_content_width(lyrics_popup_content_width());
+    dialog.set_content_height(lyrics_popup_content_height(window.height()));
+    if matches!(
+        pages,
+        MediaSettingsPages::Lyrics | MediaSettingsPages::Combined
+    ) {
+        dialog.add(&build_lyrics_settings(
+            shell,
+            window,
+            &builder,
+            uses_local_storage,
+            appearance_changed,
+        ));
+    }
+    if matches!(
+        pages,
+        MediaSettingsPages::Visualizer | MediaSettingsPages::Combined
+    ) {
+        dialog.add(&crate::visualizer_settings::build_visualizer_settings(
+            shell,
+        ));
     }
     if let Some(lyrics) = shell.selected_lyrics() {
         lyrics.settings_dialog.set(Some(&dialog));
@@ -159,14 +180,13 @@ use crate::lyrics::{lyrics_popup_content_height, lyrics_popup_content_width};
 fn build_lyrics_settings(
     shell: &Rc<crate::PlayerUi>,
     window: &gtk::ApplicationWindow,
+    builder: &gtk::Builder,
     uses_local_storage: Rc<dyn Fn() -> bool>,
     appearance_changed: Rc<dyn Fn()>,
-) -> (adw::PreferencesDialog, adw::PreferencesPage) {
+) -> adw::PreferencesPage {
     let settings = shell.settings.current.borrow().lyrics.clone();
     let resource = crate::ui_resource::LYRICS_SETTINGS_RESOURCE;
-    let builder = ui_shared::ui_resource::builder(resource);
     ui_shared::objects!(builder, resource, {
-        dialog: adw::PreferencesDialog,
         page: adw::PreferencesPage,
         sources: adw::PreferencesGroup,
         external: adw::SwitchRow,
@@ -190,8 +210,6 @@ fn build_lyrics_settings(
         size_adjustment: gtk::Adjustment,
     });
 
-    dialog.set_content_width(lyrics_popup_content_width());
-    dialog.set_content_height(lyrics_popup_content_height(window.height()));
     external.set_active(settings.external_lyrics_enabled);
     prefer_server.set_active(settings.prefer_server_lyrics);
     prefer_server.set_sensitive(settings.external_lyrics_enabled);
@@ -453,7 +471,7 @@ fn build_lyrics_settings(
             appearance_changed();
         }
     });
-    (dialog, page)
+    page
 }
 
 fn populate_provider_rows(

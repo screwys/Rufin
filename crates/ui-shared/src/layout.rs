@@ -15,6 +15,7 @@ mod allocation_owner_imp {
     pub struct AllocationOwner {
         pub(super) on_width: RefCell<Option<Rc<dyn Fn(i32)>>>,
         pub(super) on_size: RefCell<Option<Rc<dyn Fn(i32, i32)>>>,
+        pub(super) after_size: RefCell<Option<Rc<dyn Fn()>>>,
     }
 
     #[glib::object_subclass]
@@ -28,6 +29,7 @@ mod allocation_owner_imp {
         fn dispose(&self) {
             self.on_width.take();
             self.on_size.take();
+            self.after_size.take();
             while let Some(child) = self.obj().first_child() {
                 child.unparent();
             }
@@ -72,6 +74,10 @@ mod allocation_owner_imp {
                 self.apply_size(width, height);
             }
             child.allocate(width, height, baseline, None);
+            let after_size = self.after_size.borrow().clone();
+            if let Some(after_size) = after_size {
+                after_size();
+            }
         }
 
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
@@ -116,6 +122,14 @@ impl AllocationOwner {
         use gtk::subclass::prelude::ObjectSubclassIsExt;
 
         self.imp().on_size.replace(Some(std::rc::Rc::new(on_size)));
+    }
+
+    pub fn set_after_allocate_callback(&self, callback: impl Fn() + 'static) {
+        use gtk::subclass::prelude::ObjectSubclassIsExt;
+
+        self.imp()
+            .after_size
+            .replace(Some(std::rc::Rc::new(callback)));
     }
 }
 

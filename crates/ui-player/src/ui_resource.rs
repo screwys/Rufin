@@ -6,6 +6,9 @@ pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     COLOR_CHOOSER_RESOURCE,
     LYRICS_SETTINGS_RESOURCE,
     RIGHT_PANEL_RESOURCE,
+    QUEUE_SETTINGS_RESOURCE,
+    SIDEBAR_CONTROLS_RESOURCE,
+    SIDEBAR_SPLIT_RESOURCE,
     LYRICS_SEARCH_RESOURCE,
     LYRICS_EDIT_RESOURCE,
     LYRICS_DICTIONARY_RESOURCE,
@@ -36,6 +39,10 @@ pub const LYRICS_EDIT_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/lyric
 pub const LYRICS_SEARCH_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/lyrics/search.ui";
 
 pub const RIGHT_PANEL_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/right_panel.ui";
+pub const QUEUE_SETTINGS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/queue_settings.ui";
+pub const SIDEBAR_CONTROLS_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/player/sidebar_controls.ui";
+pub const SIDEBAR_SPLIT_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/sidebar_split.ui";
 
 pub const LYRICS_SETTINGS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/lyrics/settings.ui";
 

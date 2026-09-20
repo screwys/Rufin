@@ -51,6 +51,7 @@ pub fn populate_context_playlist_picker(
         list: gtk::ListView,
         spinner: gtk::Spinner,
     });
+    crate::controls::configure_search_entry(&search);
     search.set_placeholder_text(Some(&tr("Search")));
     let skip_duplicates_label = tr("Don't duplicate");
     skip_duplicates.set_tooltip_text(Some(&skip_duplicates_label));
@@ -211,6 +212,7 @@ pub fn playlist_picker_dialog(
         cancel: gtk::Button,
         add: gtk::Button,
     });
+    crate::controls::configure_search_entry(&search);
     let rows = Rc::new(RefCell::new(Vec::<PickerRow>::new()));
     replace_picker_rows(&artwork, &settings, &list, &create, &rows, &add, playlists);
 

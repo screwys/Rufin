@@ -15,6 +15,7 @@ pub fn home_block_title(value: HomeBlockKind) -> &'static str {
 
 pub fn library_list_title(value: LibraryListKey) -> &'static str {
     match value {
+        LibraryListKey::Queue => msgid("Queue"),
         LibraryListKey::Albums => msgid("Albums"),
         LibraryListKey::Artists => msgid("Artists"),
         LibraryListKey::AlbumArtists => msgid("Album artists"),

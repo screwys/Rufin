@@ -176,6 +176,7 @@ impl CatalogUi {
         wrapper.set_width_request(1);
 
         let search = gtk::SearchEntry::new();
+        ui_shared::controls::configure_search_entry(&search);
         bind_search_placeholder(&search, "Search");
         search.set_hexpand(true);
         search.set_width_request(1);

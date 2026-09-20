@@ -34,6 +34,7 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
         saved_message: gtk::Label,
     });
 
+    presets.set_selected(shell.settings.current.borrow().visualizer.selected_preset() as u32);
     let syncing = Rc::new(Cell::new(false));
     // The dialog owns the controls. Refresh callbacks retain only weak references to them.
     let refresh: Rc<dyn Fn()> = {
@@ -266,13 +267,14 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
         let Some(shell) = weak_shell.upgrade() else {
             return;
         };
-        let preset = shell
+        shell
             .settings
-            .current
-            .borrow()
-            .visualizer
-            .preset(row.selected() as usize);
-        update_appearance(&shell, |appearance| *appearance = preset);
+            .update_app_settings("select visualizer preset", |settings| {
+                let previous = settings.visualizer.clone();
+                settings.visualizer.select_preset(row.selected() as usize);
+                settings.visualizer != previous
+            });
+        shell.apply_visualizer_appearance();
         refresh_applied();
     });
     let weak_shell = Rc::downgrade(shell);
@@ -367,9 +369,10 @@ fn update_appearance(shell: &PlayerUi, update: impl FnOnce(&mut VisualizerAppear
     shell
         .settings
         .update_app_settings("visualizer appearance", |settings| {
-            let previous = settings.visualizer.appearance.clone();
+            let previous = settings.visualizer.clone();
+            settings.visualizer.selected_preset = Some(settings.visualizer.selected_preset());
             update(&mut settings.visualizer.appearance);
-            previous != settings.visualizer.appearance
+            previous != settings.visualizer
         });
     shell.apply_visualizer_appearance();
 }

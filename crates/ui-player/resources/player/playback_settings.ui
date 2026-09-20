@@ -38,4 +38,7 @@
   <object class="AdwSwitchRow" id="visualizer">
     <property name="title" translatable="yes">Show visualizer</property>
   </object>
+  <object class="AdwSwitchRow" id="combine">
+    <property name="title" translatable="yes">Combine lyrics and visualizer</property>
+  </object>
 </interface>

@@ -54,6 +54,7 @@ impl Topbar {
             controller: gtk::MenuButton,
             casting_host: gtk::Box,
         });
+        ui_shared::controls::configure_search_entry(&search);
         Self {
             window_content,
             content_host,

@@ -4,7 +4,7 @@ use gtk::{gio, glib};
 use library::QueuePageRow;
 use localization::tr;
 use playback::{OccurrenceId, QueueReorderRequest, QueueReorderTarget};
-use rufin_core::settings::layout::LibraryField;
+use rufin_core::settings::layout::{LibraryField, LibraryListKey, LibraryListSettings};
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -790,19 +790,9 @@ fn build_queue_table(
         table.append_column(&favorite);
         ui_shared::table_sizing::install_column_view_width_fit(&table, columns, 1)
     } else {
-        let title = queue_title_column(shell);
-        let year = queue_year_column(shell);
-        table.append_column(&title);
-        table.append_column(&year);
         ui_shared::table_sizing::install_column_view_width_fit(
             &table,
-            vec![
-                (
-                    title,
-                    ui_shared::library_fields::column_width(LibraryField::TitleMerged),
-                ),
-                (year, 62),
-            ],
+            configure_queue_columns(shell, &table),
             1,
         )
     };
@@ -836,6 +826,148 @@ fn build_queue_table(
     table.add_controller(end_drop);
 
     (table, width_fit)
+}
+
+fn configure_queue_columns(
+    shell: &Rc<crate::PlayerUi>,
+    table: &gtk::ColumnView,
+) -> Vec<(gtk::ColumnViewColumn, i32)> {
+    while let Some(column) = table
+        .columns()
+        .item(0)
+        .and_downcast::<gtk::ColumnViewColumn>()
+    {
+        table.remove_column(&column);
+    }
+    shell
+        .settings
+        .current
+        .borrow()
+        .library_list(LibraryListKey::Queue)
+        .row_fields
+        .iter()
+        .map(|field| {
+            let column = match field {
+                LibraryField::TitleMerged => queue_title_column(shell),
+                LibraryField::RowIndex => queue_index_column(shell),
+                LibraryField::Duration => queue_duration_column(shell),
+                LibraryField::Favorite => queue_favorite_column(shell),
+                LibraryField::Year => queue_year_column(shell),
+                _ => queue_text_column(shell, *field),
+            };
+            let width = if *field == LibraryField::Year {
+                62
+            } else {
+                ui_shared::library_fields::column_width(*field)
+            };
+            table.append_column(&column);
+            (column, width)
+        })
+        .collect()
+}
+
+fn queue_text_column(shell: &Rc<crate::PlayerUi>, field: LibraryField) -> gtk::ColumnViewColumn {
+    use ui_shared::recycled_cells::RecycledTextCell;
+    let factory = gtk::SignalListItemFactory::new();
+    let weak = Rc::downgrade(shell);
+    factory.connect_setup(move |_, object| {
+        let Some(item) = object.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let cell = RecycledTextCell::new();
+        if let Some(shell) = weak.upgrade() {
+            cell.enable_links(Rc::clone(&shell.navigate));
+            install_queue_row_interactions(cell.upcast_ref(), &shell, item, None);
+        }
+        item.set_child(Some(&cell));
+    });
+    connect_sparse_bind(&factory, move |item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let Some(cell) = item.child().and_downcast::<RecycledTextCell>() else {
+            return;
+        };
+        let Some(row) = queue_row_from_item(&item.downgrade()) else {
+            return;
+        };
+        cell.bind_links(row.links(field));
+    });
+    factory.connect_unbind(|_, object| {
+        if let Some(item) = object.downcast_ref::<gtk::ListItem>()
+            && let Some(cell) = item.child().and_downcast::<RecycledTextCell>()
+        {
+            cell.clear();
+        }
+    });
+    gtk::ColumnViewColumn::new(
+        Some(&tr(ui_shared::settings::library_field_title(field))),
+        Some(factory),
+    )
+}
+
+impl crate::PlayerUi {
+    fn present_queue_settings(self: &Rc<Self>) {
+        let Some(window) = self.window.upgrade() else {
+            return;
+        };
+        let resource = crate::ui_resource::QUEUE_SETTINGS_RESOURCE;
+        let builder = ui_shared::ui_resource::builder(resource);
+        ui_shared::objects!(builder, resource, {
+            dialog: adw::PreferencesDialog,
+            fields_group: adw::PreferencesGroup,
+            reset: gtk::Button,
+        });
+        dialog.set_content_width(ui_shared::layout::large_popup_content_width(560));
+        dialog.set_content_height(ui_shared::layout::large_popup_content_height(
+            window.height(),
+            640,
+        ));
+        let rows = Rc::new(RefCell::new(Vec::new()));
+        let weak = Rc::downgrade(self);
+        let changed: Rc<dyn Fn()> = Rc::new(move || {
+            let Some(shell) = weak.upgrade() else {
+                return;
+            };
+            let Some(table) = queue_panel_scroller(&shell.right_panel.queue_panel)
+                .and_then(|scroller| scroller.child())
+                .and_downcast::<gtk::ColumnView>()
+            else {
+                return;
+            };
+            let columns = configure_queue_columns(&shell, &table);
+            if let Some(fit) = shell.right_panel.queue_width_fit.borrow().as_ref() {
+                fit.replace(columns);
+            }
+        });
+        ui_shared::library_field_editor::populate_library_field_rows(
+            &self.settings,
+            Rc::clone(&changed),
+            LibraryListKey::Queue,
+            &fields_group,
+            &rows,
+        );
+        let settings = Rc::clone(&self.settings);
+        let fields_group = fields_group.downgrade();
+        reset.connect_clicked(move |_| {
+            let Some(fields_group) = fields_group.upgrade() else {
+                return;
+            };
+            if settings.update_library_list_settings(LibraryListKey::Queue, |settings| {
+                *settings = LibraryListSettings::for_key(LibraryListKey::Queue);
+            }) {
+                changed();
+            }
+            ui_shared::library_field_editor::populate_library_field_rows(
+                &settings,
+                Rc::clone(&changed),
+                LibraryListKey::Queue,
+                &fields_group,
+                &rows,
+            );
+        });
+        ui_shared::popup::present_light_dismiss_dialog(&dialog, &window);
+    }
 }
 
 fn queue_overlay_empty_label(
@@ -1073,6 +1205,12 @@ fn render_panel(
         table
     } else {
         let (table, width_fit) = build_queue_table(shell, model, selection, fullscreen);
+        if !fullscreen {
+            shell
+                .right_panel
+                .queue_width_fit
+                .replace(Some(width_fit.clone()));
+        }
         ui_shared::layout::configure_fill_width_clip(&scroller, gtk::PolicyType::Automatic);
         scroller.set_child(Some(&table));
         let overlay = scroller
@@ -1081,9 +1219,28 @@ fn render_panel(
             .expect("queue overlay");
         panel.remove(&overlay);
         let weak = scroller.downgrade();
-        let owner = ui_shared::layout::allocation_owner(&overlay, move |width, _| {
+        let previous_height = Cell::new(0);
+        let resize_offset = Rc::new(Cell::new(None));
+        let before_offset = Rc::clone(&resize_offset);
+        let owner = ui_shared::layout::allocation_owner(&overlay, move |width, height| {
             if let Some(scroller) = weak.upgrade() {
+                let previous = previous_height.replace(height);
+                before_offset.set(
+                    (previous > 0 && previous != height).then(|| scroller.vadjustment().value()),
+                );
                 width_fit.fit_scroller_allocation(&scroller, width);
+            }
+        });
+        let weak = scroller.downgrade();
+        owner.set_after_allocate_callback(move || {
+            if let Some(value) = resize_offset.take()
+                && let Some(scroller) = weak.upgrade()
+            {
+                // GtkColumnView otherwise keeps a row at a fractional viewport
+                // position, which slides the tracks when a divider changes height.
+                let adjustment = scroller.vadjustment();
+                let maximum = (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
+                adjustment.set_value(value.clamp(adjustment.lower(), maximum));
             }
         });
         panel.append(&owner);
@@ -1188,6 +1345,15 @@ pub fn clear_queue_panel_children(panel: &gtk::Box) {
 }
 
 pub fn connect_queue_panel_controls(shell: &Rc<crate::PlayerUi>) {
+    let weak = Rc::downgrade(shell);
+    shell
+        .right_panel
+        .queue_customize_button
+        .connect_clicked(move |_| {
+            if let Some(shell) = weak.upgrade() {
+                shell.present_queue_settings();
+            }
+        });
     let sidebar_shell = Rc::downgrade(shell);
     shell
         .right_panel

@@ -50,6 +50,7 @@ fn playback_settings_popover(
         settings_group: adw::PreferencesGroup,
         lyrics: adw::SwitchRow,
         visualizer: adw::SwitchRow,
+        combine: adw::SwitchRow,
         audio_output: adw::ActionRow,
     });
     if !local_output {
@@ -124,6 +125,14 @@ fn playback_settings_popover(
         set_media_visibility(visualizer_shell.lyrics.panel_visible.get(), row.is_active());
     });
     settings_group.add(&visualizer);
+    combine.set_active(settings.right_panel.combined);
+    let weak = Rc::downgrade(shell);
+    combine.connect_active_notify(move |row| {
+        if let Some(shell) = weak.upgrade() {
+            shell.set_right_panel_combined(row.is_active());
+        }
+    });
+    settings_group.add(&combine);
     popover
 }
 
