@@ -26,6 +26,33 @@ impl Shell {
                 };
             let resource = ui_shared::ui_resource::PLAYLIST_NAME_DIALOG_RESOURCE;
             let builder = ui_shared::ui_resource::builder(resource);
+            if !settings.can_link {
+                ui_shared::objects!(builder, resource, {
+                    rename_dialog: adw::AlertDialog, rename_entry: gtk::Entry,
+                });
+                rename_entry.set_text(&current_name);
+                ui_shared::popup::install_light_dismiss(&rename_dialog);
+                if rename_dialog
+                    .choose_future(Some(&shell.chrome.window))
+                    .await
+                    == "rename"
+                {
+                    let name = rename_entry.text().trim().to_owned();
+                    if !name.is_empty() {
+                        if let Ok(Err(error)) = rufin_core::playlists::rename_playlist(
+                            &shell.products.source,
+                            playlist_id,
+                            name,
+                        )
+                        .recv()
+                        .await
+                        {
+                            shell.control_feedback.show_feedback_toast(error);
+                        }
+                    }
+                }
+                return;
+            }
             ui_shared::objects!(builder, resource, {
                 edit_dialog: adw::Dialog, name_entry: gtk::Entry,
                 save_edit: gtk::Button, cancel_edit: gtk::Button,
@@ -33,6 +60,7 @@ impl Shell {
                 auto_save: adw::ComboRow, path_mode: adw::ComboRow,
                 link_file: gtk::Button, unlink_file: gtk::Button, save_file: gtk::Button,
                 reload_file: gtk::Button, delete_file: gtk::Button, file_error: gtk::Label,
+                file_actions: gtk::Box,
             });
             let dialog = edit_dialog.downgrade();
             cancel_edit.connect_clicked(move |_| {
@@ -41,19 +69,20 @@ impl Shell {
                 }
             });
             name_entry.set_text(&current_name);
-            linked_file.set_subtitle(settings.display_path.as_deref().unwrap_or(""));
-            link_file.set_visible(settings.can_link);
-            linked_file.set_visible(settings.can_link);
+            let unlinked_subtitle = linked_file.subtitle().unwrap_or_default();
+            linked_file.set_subtitle(
+                settings
+                    .display_path
+                    .as_deref()
+                    .unwrap_or(&unlinked_subtitle),
+            );
             let linked = settings.link.is_some();
             let linked_rows = [
                 auto_refresh.clone().upcast::<gtk::Widget>(),
                 file_name.clone().upcast(),
                 auto_save.clone().upcast(),
                 path_mode.clone().upcast(),
-                unlink_file.clone().upcast(),
-                save_file.clone().upcast(),
-                reload_file.clone().upcast(),
-                delete_file.clone().upcast(),
+                file_actions.upcast(),
             ]
             .map(|row| {
                 row.set_visible(linked);
@@ -131,6 +160,7 @@ impl Shell {
                 let rows = linked_rows.clone();
                 let linked_row = linked_file.downgrade();
                 let error_label = file_error.downgrade();
+                let unlinked_subtitle = unlinked_subtitle.clone();
                 button.connect_clicked(move |_| {
                     if let Some(shell) = weak_shell.upgrade() {
                         let name = entry.text().trim().to_owned();
@@ -158,6 +188,7 @@ impl Shell {
                         let linked_row = linked_row.clone();
                         let error_label = error_label.clone();
                         let entry = entry.clone();
+                        let unlinked_subtitle = unlinked_subtitle.clone();
                         gtk::glib::spawn_future_local(async move {
                             match result.recv().await {
                                 Ok(Ok(())) => {
@@ -192,7 +223,10 @@ impl Shell {
                                         }
                                         if let Some(row) = linked_row.upgrade() {
                                             row.set_subtitle(
-                                                settings.display_path.as_deref().unwrap_or(""),
+                                                settings
+                                                    .display_path
+                                                    .as_deref()
+                                                    .unwrap_or(&unlinked_subtitle),
                                             );
                                         }
                                         if let Some(label) = error_label.upgrade() {

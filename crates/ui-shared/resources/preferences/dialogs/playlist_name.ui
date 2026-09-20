@@ -40,6 +40,19 @@
     </responses>
   </object>
 
+  <object class="AdwAlertDialog" id="rename_dialog">
+    <property name="heading" translatable="yes">Rename Playlist</property>
+    <property name="close-response">cancel</property>
+    <property name="default-response">rename</property>
+    <property name="extra-child"><object class="GtkEntry" id="rename_entry">
+      <property name="placeholder-text" translatable="yes">Playlist name</property>
+      <property name="activates-default">true</property>
+    </object></property>
+    <responses>
+      <response id="cancel" translatable="yes">Cancel</response>
+      <response id="rename" translatable="yes" appearance="suggested">Rename</response>
+    </responses>
+  </object>
   <object class="AdwDialog" id="edit_dialog">
     <property name="title" translatable="yes">Edit Playlist</property>
     <property name="content-width">600</property>
@@ -59,7 +72,7 @@
           <property name="margin-start">18</property>
           <property name="margin-end">18</property>
           <property name="margin-bottom">18</property>
-          <child><object class="GtkEntry" id="name_entry"><property name="activates-default">true</property></object></child>
+          <child><object class="GtkEntry" id="name_entry"><property name="activates-default">true</property><property name="placeholder-text" translatable="yes">Playlist name</property></object></child>
           <child>
       <object class="GtkScrolledWindow">
         <property name="hscrollbar-policy">never</property>
@@ -74,6 +87,7 @@
           <child>
             <object class="AdwActionRow" id="linked_file">
               <property name="title" translatable="yes">Linked file</property>
+              <property name="subtitle" translatable="yes">No file linked</property>
               <property name="subtitle-lines">2</property>
               <child type="suffix">
                 <object class="GtkButton" id="link_file">
