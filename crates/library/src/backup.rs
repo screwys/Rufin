@@ -2,7 +2,7 @@
 use crate::{Database, LibraryError, LibraryResult, PlaylistKey};
 use sqlx::Connection;
 use std::fs::{self, File, OpenOptions};
-use std::io::BufReader;
+use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,7 +44,7 @@ pub struct BackupRestoreReport {
     pub warnings: Vec<String>,
 }
 
-fn private_file(path: &Path) -> LibraryResult<File> {
+fn private_file(path: &Path) -> LibraryResult<BufWriter<File>> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -52,7 +52,7 @@ fn private_file(path: &Path) -> LibraryResult<File> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    Ok(options.open(path)?)
+    Ok(BufWriter::new(options.open(path)?))
 }
 impl Database {
     pub async fn export_state(
@@ -61,63 +61,52 @@ impl Database {
         contents: StateGroups,
     ) -> LibraryResult<u64> {
         fs::create_dir(directory.join("playlists"))?;
-        let mut connection = self.acquire_reader().await?;
+        let (_export, mut connection) = self.acquire_export().await?;
         let mut transaction = connection.begin().await?;
         let mut ordinal = 0;
         if contents.playlists {
-            crate::playlists::export_playlist_order_jsonl_on(
-                &mut transaction,
-                private_file(&directory.join("playlist-order.jsonl"))?,
-            )
-            .await?;
+            let mut output = private_file(&directory.join("playlist-order.jsonl"))?;
+            crate::playlists::export_playlist_order_jsonl_on(&mut transaction, &mut output).await?;
+            output.flush()?;
             let mut cursor = -1;
             while let Some(key) = sqlx::query_scalar::<_, PlaylistKey>(
                 "SELECT playlist_key FROM main.playlists WHERE playlist_key>?1 AND name IS NOT NULL ORDER BY playlist_key LIMIT 1")
                 .bind(cursor).fetch_optional(&mut *transaction).await? {
                 let path = directory.join(format!("playlists/{ordinal}.m3u8"));
-                crate::playlist_format::export_playlist_on(&mut transaction, key, &path, crate::PlaylistPathMode::Absolute, private_file(&path)?).await?;
+                let mut output = private_file(&path)?;
+                crate::playlist_format::export_playlist_on(&mut transaction, key, &path, crate::PlaylistPathMode::Absolute, &mut output).await?;
+                output.flush()?;
                 cursor = key.raw();
                 ordinal += 1;
             }
-            crate::smart_playlists::export_smart_playlists_jsonl_on(
-                &mut transaction,
-                private_file(&directory.join("smart.jsonl"))?,
-            )
-            .await?;
+            let mut output = private_file(&directory.join("smart.jsonl"))?;
+            crate::smart_playlists::export_smart_playlists_jsonl_on(&mut transaction, &mut output)
+                .await?;
+            output.flush()?;
         }
         if contents.favorites {
-            crate::favorites::export_user_media_state_jsonl_on(
-                &mut transaction,
-                private_file(&directory.join("user-state.jsonl"))?,
-            )
-            .await?;
+            let mut output = private_file(&directory.join("user-state.jsonl"))?;
+            crate::favorites::export_user_media_state_jsonl_on(&mut transaction, &mut output)
+                .await?;
+            output.flush()?;
         }
         if contents.queue {
-            crate::queue::export_queue_jsonl_on(
-                &mut transaction,
-                private_file(&directory.join("queue.jsonl"))?,
-            )
-            .await?;
+            let mut output = private_file(&directory.join("queue.jsonl"))?;
+            crate::queue::export_queue_jsonl_on(&mut transaction, &mut output).await?;
+            output.flush()?;
         }
         if contents.activity {
-            crate::activity::export_activity_jsonl_on(
-                &mut transaction,
-                private_file(&directory.join("activity.jsonl"))?,
-                None,
-            )
-            .await?;
-            crate::activity::export_legacy_activity_jsonl_on(
-                &mut transaction,
-                private_file(&directory.join("legacy-activity.jsonl"))?,
-            )
-            .await?;
+            let mut output = private_file(&directory.join("activity.jsonl"))?;
+            crate::activity::export_activity_jsonl_on(&mut transaction, &mut output, None).await?;
+            output.flush()?;
+            let mut output = private_file(&directory.join("legacy-activity.jsonl"))?;
+            crate::activity::export_legacy_activity_jsonl_on(&mut transaction, &mut output).await?;
+            output.flush()?;
         }
         if contents.local_imports {
-            crate::local::export_local_locators_jsonl_on(
-                &mut transaction,
-                private_file(&directory.join("local-locators.jsonl"))?,
-            )
-            .await?;
+            let mut output = private_file(&directory.join("local-locators.jsonl"))?;
+            crate::local::export_local_locators_jsonl_on(&mut transaction, &mut output).await?;
+            output.flush()?;
         }
         transaction.commit().await?;
         drop(connection);
@@ -252,13 +241,14 @@ mod tests {
         (directory, count)
     }
     #[tokio::test]
-    async fn export_leaves_the_route_lane_free_and_releases_its_reader() {
+    async fn export_runs_alongside_browsing_and_playback_and_releases_its_reader() {
         let directory = tempfile::tempdir().unwrap();
         let database = database(directory.path(), "export").await;
         let (_permit, _foreground) = database
             .acquire_general(&crate::ReadCancellation::new())
             .await
             .unwrap();
+        let mut playback = database.acquire_reader().await.unwrap();
         let output = tempfile::tempdir().unwrap();
         tokio::time::timeout(
             std::time::Duration::from_secs(2),
@@ -267,8 +257,15 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT 1")
+                .fetch_one(&mut *playback)
+                .await
+                .unwrap(),
+            1
+        );
         let _reader =
-            tokio::time::timeout(std::time::Duration::from_secs(2), database.acquire_reader())
+            tokio::time::timeout(std::time::Duration::from_secs(2), database.acquire_export())
                 .await
                 .expect("Export must return its reader before archive output begins")
                 .unwrap();

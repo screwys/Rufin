@@ -494,6 +494,12 @@ fn local_path(owner: &SourceOwner, link: &PlaylistFileLink) -> Option<PathBuf> {
 }
 
 async fn revision(owner: &SourceOwner, link: &PlaylistFileLink) -> Result<String, String> {
+    if let Some(path) = local_path(owner, link) {
+        return tokio::task::spawn_blocking(move || sources::playlist_file_revision(&path))
+            .await
+            .map_err(string_error)?
+            .map_err(string_error);
+    }
     match &link.source_id {
         None => sources::playlist_file_revision(Path::new(&link.path)).map_err(string_error),
         Some(source) => owner
@@ -528,21 +534,26 @@ pub(crate) async fn import_local_on(
     current: Option<&sources::SourceConfiguration>,
 ) -> Result<library::PlaylistImportReport, String> {
     let (_, _, access) = local_location(owner, path);
-    let mut document = library::PlaylistFile::read(
-        BufReader::new(std::fs::File::open(&access).map_err(string_error)?),
-        &access,
-    )
-    .map_err(string_error)?;
-    if target.is_none() {
-        document.identity = None;
-    }
-    let before = document.entries.len();
-    document.entries.retain(|entry| {
-        library::playlist_locator(&entry.locator, access.parent().unwrap_or(Path::new(".")))
-            .and_then(|uri| library::file_media_path(&uri))
-            .is_none_or(|path| !sources::playlist_file_is_non_audio(&path))
-    });
-    let rejected = before - document.entries.len();
+    let (document, access, rejected) = tokio::task::spawn_blocking(move || {
+        let mut document = library::PlaylistFile::read(
+            BufReader::new(std::fs::File::open(&access).map_err(string_error)?),
+            &access,
+        )
+        .map_err(string_error)?;
+        if target.is_none() {
+            document.identity = None;
+        }
+        let before = document.entries.len();
+        document.entries.retain(|entry| {
+            library::playlist_locator(&entry.locator, access.parent().unwrap_or(Path::new(".")))
+                .and_then(|uri| library::file_media_path(&uri))
+                .is_none_or(|path| !sources::playlist_file_is_non_audio(&path))
+        });
+        let rejected = before - document.entries.len();
+        Ok::<_, String>((document, access, rejected))
+    })
+    .await
+    .map_err(string_error)??;
     let mut report = owner
         .shared
         .database

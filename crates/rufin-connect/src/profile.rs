@@ -228,7 +228,7 @@ impl ProfileStore {
         for bytes in updates {
             let update: Update = serde_json::from_slice(bytes).context("invalid Connect update")?;
             validate_version(update.version)?;
-            changed |= import_on(&mut transaction, &update, self.peer_id).await?;
+            changed |= import_on(&mut transaction, &update, self.peer_id, None).await?;
         }
         transaction.commit().await?;
         Ok(changed)
@@ -344,7 +344,7 @@ impl ProfileStore {
         validate_version(update.version)?;
         let mut connection = self.connection.lock().await;
         let mut transaction = connection.begin().await?;
-        let changed = import_on(&mut transaction, &update, self.peer_id).await?;
+        let changed = import_on(&mut transaction, &update, self.peer_id, None).await?;
         transaction.commit().await?;
         Ok(changed)
     }
@@ -421,8 +421,13 @@ impl ProfileStore {
     }
 
     async fn export_documents(&self, path: &Path, setup: bool, peer: Option<&str>) -> Result<()> {
-        let mut output = BufWriter::new(std::fs::File::create(path)?);
-        writeln!(output, "{FORMAT}")?;
+        let path = path.to_owned();
+        let mut output = tokio::task::spawn_blocking(move || -> Result<_> {
+            let mut output = BufWriter::new(std::fs::File::create(path)?);
+            writeln!(output, "{FORMAT}")?;
+            Ok(output)
+        })
+        .await??;
         let mut author = peer.map(str::to_owned);
         // A WAL read transaction gives the file a consistent snapshot without
         // holding the writer connection throughout a full catalog export.
@@ -485,9 +490,14 @@ impl ProfileStore {
     /// Check an imported snapshot for local edits it does not contain. Exports
     /// order documents by name, so both histories can be compared a page at a time.
     pub async fn snapshot_contains_current(&self, path: &Path) -> Result<bool> {
-        let mut input = BufReader::new(std::fs::File::open(path)?);
-        let mut line = String::new();
-        input.read_line(&mut line)?;
+        let path = path.to_owned();
+        let (mut input, mut line) = tokio::task::spawn_blocking(move || -> Result<_> {
+            let mut input = BufReader::new(std::fs::File::open(path)?);
+            let mut line = String::new();
+            input.read_line(&mut line)?;
+            Ok((input, line))
+        })
+        .await??;
         let mut remote: Option<Update> = None;
         let mut connection =
             SqliteConnection::connect_with(&self.options.clone().read_only(true)).await?;
@@ -504,35 +514,44 @@ impl ProfileStore {
             if rows.is_empty() {
                 return Ok(true);
             }
-            for row in rows {
-                cursor = row.get(0);
-                while remote
-                    .as_ref()
-                    .is_none_or(|update| update.document < cursor)
-                {
-                    line.clear();
-                    if input.read_line(&mut line)? == 0 || line.trim_end() == "END" {
-                        return Ok(false);
+            cursor = rows.last().unwrap().get(0);
+            let compared = tokio::task::spawn_blocking(move || -> Result<_> {
+                for row in rows {
+                    let cursor: String = row.get(0);
+                    while remote
+                        .as_ref()
+                        .is_none_or(|update| update.document < cursor)
+                    {
+                        line.clear();
+                        if input.read_line(&mut line)? == 0 || line.trim_end() == "END" {
+                            return Ok(None);
+                        }
+                        remote = Some(serde_json::from_str(&line)?);
                     }
-                    remote = Some(serde_json::from_str(&line)?);
+                    let update = remote.as_ref().unwrap();
+                    if update.document != cursor {
+                        return Ok(None);
+                    }
+                    let incoming = LoroDoc::decode_import_blob_meta(&update.bytes, true)?;
+                    let local = VersionVector::decode(&row.get::<Vec<u8>, _>(1))?;
+                    if !incoming.partial_end_vv.includes_vv(&local) {
+                        return Ok(None);
+                    }
+                    let saved = LoroDoc::decode_import_blob_meta(&row.get::<Vec<u8>, _>(2), true)?;
+                    if !incoming
+                        .partial_start_vv
+                        .includes_vv(&saved.partial_start_vv)
+                    {
+                        return Ok(None);
+                    }
                 }
-                let update = remote.as_ref().unwrap();
-                if update.document != cursor {
-                    return Ok(false);
-                }
-                let incoming = LoroDoc::decode_import_blob_meta(&update.bytes, true)?;
-                let local = VersionVector::decode(&row.get::<Vec<u8>, _>(1))?;
-                if !incoming.partial_end_vv.includes_vv(&local) {
-                    return Ok(false);
-                }
-                let saved = LoroDoc::decode_import_blob_meta(&row.get::<Vec<u8>, _>(2), true)?;
-                if !incoming
-                    .partial_start_vv
-                    .includes_vv(&saved.partial_start_vv)
-                {
-                    return Ok(false);
-                }
-            }
+                Ok(Some((input, line, remote)))
+            })
+            .await??;
+            let Some(state) = compared else {
+                return Ok(false);
+            };
+            (input, line, remote) = state;
         }
     }
 
@@ -541,14 +560,19 @@ impl ProfileStore {
     }
 
     async fn read_snapshot(&self, path: &Path, replace: bool) -> Result<bool> {
-        let mut input = BufReader::new(std::fs::File::open(path)?);
-        let mut line = String::new();
-        input.read_line(&mut line)?;
-        validate_version(
-            line.trim()
-                .parse()
-                .context("invalid Connect snapshot header")?,
-        )?;
+        let path = path.to_owned();
+        let mut input = tokio::task::spawn_blocking(move || -> Result<_> {
+            let mut input = BufReader::new(std::fs::File::open(path)?);
+            let mut line = String::new();
+            input.read_line(&mut line)?;
+            validate_version(
+                line.trim()
+                    .parse()
+                    .context("invalid Connect snapshot header")?,
+            )?;
+            Ok(input)
+        })
+        .await??;
         let mut peer = None;
         let mut connection = self.connection.lock().await;
         let mut transaction = connection.begin().await?;
@@ -561,35 +585,50 @@ impl ProfileStore {
         }
         let mut changed = false;
         loop {
-            line.clear();
-            if input.read_line(&mut line)? == 0 {
-                bail!("Connect snapshot is incomplete");
+            // Only file and CPU work moves to the blocking pool. The caller
+            // retains the transaction so cancellation still rolls back the import.
+            let (reader, page, ended) = tokio::task::spawn_blocking(move || -> Result<_> {
+                let mut page = Vec::with_capacity(CONNECT_PAGE_SIZE);
+                let mut line = String::new();
+                for _ in 0..CONNECT_PAGE_SIZE {
+                    line.clear();
+                    if input.read_line(&mut line)? == 0 {
+                        bail!("Connect snapshot is incomplete");
+                    }
+                    if line.trim_end() == "END" {
+                        return Ok((input, page, true));
+                    }
+                    let update: Update = serde_json::from_str(&line)?;
+                    validate_version(update.version)?;
+                    let meta = LoroDoc::decode_import_blob_meta(&update.bytes, true)?;
+                    page.push((update, meta.partial_end_vv));
+                }
+                Ok((input, page, false))
+            })
+            .await??;
+            input = reader;
+            for (update, version) in page {
+                if let Some(author) = &update.author {
+                    peer = Some(author.clone());
+                }
+                changed |=
+                    import_on(&mut transaction, &update, self.peer_id, Some(&version)).await?;
+                if let Some(peer) = &peer {
+                    history::acknowledge_on(&mut transaction, peer, &update.document, &version)
+                        .await?;
+                }
             }
-            if line.trim_end() == "END" {
+            if ended {
                 break;
-            }
-            let update: Update = serde_json::from_str(&line)?;
-            validate_version(update.version)?;
-            if let Some(author) = &update.author {
-                peer = Some(author.clone());
-            }
-            changed |= import_on(&mut transaction, &update, self.peer_id).await?;
-            if let Some(peer) = &peer {
-                let meta = LoroDoc::decode_import_blob_meta(&update.bytes, true)?;
-                history::acknowledge_on(
-                    &mut transaction,
-                    peer,
-                    &update.document,
-                    &meta.partial_end_vv,
-                )
-                .await?;
             }
         }
         if let Some(peer) = &peer {
-            line.clear();
-            input.read_line(&mut line)?;
-            let mut members: Vec<String> =
-                serde_json::from_str(&line).context("missing Connect snapshot membership")?;
+            let mut members: Vec<String> = tokio::task::spawn_blocking(move || -> Result<_> {
+                let mut line = String::new();
+                input.read_line(&mut line)?;
+                serde_json::from_str(&line).context("missing Connect snapshot membership")
+            })
+            .await??;
             members.push(peer.to_owned());
             history::register_on(&mut transaction, &members).await?;
         }
@@ -685,15 +724,32 @@ async fn save_document(
     document: &LoroDoc,
 ) -> Result<()> {
     let snapshot = document.export(ExportMode::Snapshot)?;
+    save_snapshot(
+        connection,
+        name,
+        snapshot,
+        document.oplog_vv().encode(),
+        name.starts_with("device:") && records(document)?.is_empty(),
+    )
+    .await
+}
+
+async fn save_snapshot(
+    connection: &mut SqliteConnection,
+    name: &str,
+    snapshot: Vec<u8>,
+    version: Vec<u8>,
+    removed_device: bool,
+) -> Result<()> {
     let revision = next_revision(connection).await?;
     sqlx::query("INSERT INTO documents(name,snapshot,revision,version) VALUES(?1,?2,?3,?4) ON CONFLICT(name) DO UPDATE SET snapshot=excluded.snapshot,revision=excluded.revision,version=excluded.version")
-        .bind(name).bind(snapshot).bind(revision).bind(document.oplog_vv().encode())
+        .bind(name).bind(snapshot).bind(revision).bind(version)
         .execute(&mut *connection).await?;
     sqlx::query("INSERT OR IGNORE INTO history_pending(name) VALUES(?1)")
         .bind(name)
         .execute(&mut *connection)
         .await?;
-    if name.starts_with("device:") && records(document)?.is_empty() {
+    if removed_device {
         sqlx::query("DELETE FROM history_acknowledgements WHERE peer=?1")
             .bind(name.strip_prefix("device:").unwrap())
             .execute(&mut *connection)
@@ -920,46 +976,92 @@ async fn import_on(
     connection: &mut SqliteConnection,
     update: &Update,
     peer_id: u64,
+    incoming: Option<&VersionVector>,
 ) -> Result<bool> {
-    let incoming = LoroDoc::decode_import_blob_meta(&update.bytes, true)?;
     let saved: Option<Vec<u8>> = sqlx::query_scalar("SELECT version FROM documents WHERE name=?1")
         .bind(&update.document)
         .fetch_optional(&mut *connection)
         .await?;
+    let decoded;
+    let incoming = match incoming {
+        Some(incoming) => incoming,
+        None => {
+            let bytes = update.bytes.clone();
+            decoded = tokio::task::spawn_blocking(move || -> Result<_> {
+                Ok(LoroDoc::decode_import_blob_meta(&bytes, true)?.partial_end_vv)
+            })
+            .await??;
+            &decoded
+        }
+    };
     if let Some(saved) = saved
-        && VersionVector::decode(&saved)?.includes_vv(&incoming.partial_end_vv)
+        && VersionVector::decode(&saved)?.includes_vv(incoming)
     {
         return Ok(false);
     }
-    let document = load_document(connection, &update.document, peer_id).await?;
-    let before = records(&document)?;
-    let version = document.oplog_vv();
-    document.import(&update.bytes)?;
-    if version == document.oplog_vv() {
+    let saved: Option<Vec<u8>> = sqlx::query_scalar("SELECT snapshot FROM documents WHERE name=?1")
+        .bind(&update.document)
+        .fetch_optional(&mut *connection)
+        .await?;
+    let name = update.document.clone();
+    let bytes = update.bytes.clone();
+    let prepared = tokio::task::spawn_blocking(move || -> Result<_> {
+        let document = LoroDoc::new();
+        if let Some(saved) = saved {
+            document.import(&saved)?;
+        }
+        document.set_peer_id(peer_id)?;
+        let before = records(&document)?;
+        let version = document.oplog_vv();
+        document.import(&bytes)?;
+        if version == document.oplog_vv() {
+            return Ok(None);
+        }
+        let after = records(&document)?;
+        let mut projection = Vec::new();
+        for key in before.keys().chain(after.keys()).collect::<BTreeSet<_>>() {
+            if before.get(key) == after.get(key) {
+                continue;
+            }
+            let record = ConnectRecord {
+                kind: key.0.clone(),
+                key: key.1.clone(),
+                value: after.get(key).cloned(),
+            };
+            if document_name(&record)? != name {
+                bail!("Connect document contains another object's records");
+            }
+            let payload = record
+                .value
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?;
+            projection.push((record.kind, record.key, payload));
+        }
+        Ok(Some((
+            projection,
+            document.export(ExportMode::Snapshot)?,
+            document.oplog_vv().encode(),
+            name.starts_with("device:") && after.is_empty(),
+            before != after,
+        )))
+    })
+    .await??;
+    let Some((projection, snapshot, version, removed_device, changed)) = prepared else {
         return Ok(false);
+    };
+    for (kind, key, payload) in projection {
+        sqlx::query("INSERT INTO projection(kind,object_key,payload) VALUES(?1,?2,?3) ON CONFLICT(kind,object_key) DO UPDATE SET payload=excluded.payload").bind(kind).bind(key).bind(payload).execute(&mut *connection).await?;
     }
-    let after = records(&document)?;
-    for key in before.keys().chain(after.keys()).collect::<BTreeSet<_>>() {
-        if before.get(key) == after.get(key) {
-            continue;
-        }
-        let record = ConnectRecord {
-            kind: key.0.clone(),
-            key: key.1.clone(),
-            value: after.get(key).cloned(),
-        };
-        if document_name(&record)? != update.document {
-            bail!("Connect document contains another object's records");
-        }
-        let payload = record
-            .value
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()?;
-        sqlx::query("INSERT INTO projection(kind,object_key,payload) VALUES(?1,?2,?3) ON CONFLICT(kind,object_key) DO UPDATE SET payload=excluded.payload").bind(record.kind).bind(record.key).bind(payload).execute(&mut *connection).await?;
-    }
-    save_document(connection, &update.document, &document).await?;
-    Ok(before != after)
+    save_snapshot(
+        connection,
+        &update.document,
+        snapshot,
+        version,
+        removed_device,
+    )
+    .await?;
+    Ok(changed)
 }
 
 #[cfg(test)]
@@ -1934,6 +2036,17 @@ mod tests {
             value: Some(json!(value)),
         };
         a.write_records(&[record("dark")]).await.unwrap();
+        a.write_records(
+            &(0..CONNECT_PAGE_SIZE)
+                .map(|index| ConnectRecord {
+                    kind: "preference".into(),
+                    key: format!("setting-{index:04}"),
+                    value: Some(json!(index)),
+                })
+                .collect::<Vec<_>>(),
+        )
+        .await
+        .unwrap();
         let snapshot = directory.path().join("profile.jsonl");
         a.export_snapshot(&snapshot).await.unwrap();
         let complete = std::fs::read(&snapshot).unwrap();

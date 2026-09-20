@@ -6,7 +6,6 @@ use sqlx::Connection;
 
 use crate::{
     Database, LibraryError, LibraryResult, PlaylistEntryWrite, PlaylistIdentity, PlaylistKey,
-    ReadCancellation,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -352,7 +351,7 @@ impl Database {
         mode: PlaylistPathMode,
         output: impl Write,
     ) -> LibraryResult<u64> {
-        let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
+        let (_export, mut connection) = self.acquire_export().await?;
         export_playlist_on(&mut connection, playlist, file, mode, output).await
     }
 }
@@ -1088,7 +1087,7 @@ mod tests {
             assert_eq!(imported.playlist, original.playlist);
             assert_eq!(imported.imported, 5);
             let (_permit, mut connection) = database
-                .acquire_general(&ReadCancellation::new())
+                .acquire_general(&crate::ReadCancellation::new())
                 .await
                 .unwrap();
             let actual: Vec<String> = sqlx::query_scalar(

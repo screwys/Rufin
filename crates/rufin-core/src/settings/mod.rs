@@ -306,6 +306,7 @@ pub struct SettingsFile {
     path: Option<PathBuf>,
     config_dir: PathBuf,
     value: Arc<Mutex<StoredSettings>>,
+    persistence: Arc<Mutex<()>>,
     pub(crate) secret_storage_fallbacks: (
         async_channel::Sender<KeyringSecretStore>,
         async_channel::Receiver<KeyringSecretStore>,
@@ -342,6 +343,7 @@ impl SettingsFile {
                 .to_path_buf(),
             path: Some(path),
             value: Arc::new(Mutex::new(value)),
+            persistence: Arc::new(Mutex::new(())),
             secret_storage_fallbacks: async_channel::unbounded(),
         };
         if changed {
@@ -368,6 +370,7 @@ impl SettingsFile {
             web_controller: tokio::sync::watch::channel(value.ui.web_controller.clone()).0,
             config_dir,
             value: Arc::new(Mutex::new(value)),
+            persistence: Arc::new(Mutex::new(())),
             secret_storage_fallbacks: async_channel::unbounded(),
         }
     }
@@ -392,11 +395,12 @@ impl SettingsFile {
         &self,
         operation: impl FnOnce(&mut StoredSettings) -> Result<T, String>,
     ) -> Result<T, String> {
-        let mut current = self
-            .value
+        // Serialize saves while readers keep using the last committed settings.
+        let _persistence = self
+            .persistence
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let mut next = current.clone();
+        let mut next = self.load();
         let output = operation(&mut next)?;
         next.migrate_defaults();
         if next.ui.backup.schedule.frequency != backup::BackupFrequency::Off
@@ -418,12 +422,20 @@ impl SettingsFile {
         if let Some(path) = &self.path {
             write_settings(path, &next)?;
         }
+        let mut current = self
+            .value
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         *current = next;
         self.publish_changes(&current);
         Ok(output)
     }
 
     fn write(&self, value: &StoredSettings) -> Result<(), String> {
+        let _persistence = self
+            .persistence
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(path) = &self.path {
             write_settings(path, value)?;
         }
@@ -945,6 +957,89 @@ mod tests {
     use super::*;
     use secrets::{SecretError, SecretResult};
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn pending_settings_update_leaves_committed_values_readable_and_serializes_saves() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let file = SettingsFile {
+            path: Some(path.clone()),
+            ..SettingsFile::memory_at(directory.path().to_path_buf())
+        };
+        let initial = file.load();
+        let (entered, pending) = mpsc::channel();
+        let (release, resume) = mpsc::channel();
+        let writer_file = file.clone();
+        let writer = std::thread::spawn(move || {
+            writer_file.update(|stored| {
+                stored.ui.shuffle_enabled = true;
+                entered.send(()).unwrap();
+                resume.recv().unwrap();
+                Ok(())
+            })
+        });
+        pending.recv().unwrap();
+        let (read, result) = mpsc::channel();
+        let reader_file = file.clone();
+        let reader = std::thread::spawn(move || read.send(reader_file.load()).unwrap());
+        let observed = result.recv_timeout(Duration::from_secs(5));
+        let next_file = file.clone();
+        let next_writer = std::thread::spawn(move || {
+            next_file.update(|stored| {
+                let previous_shuffle = stored.ui.shuffle_enabled;
+                stored.ui.private_mode = true;
+                Ok(previous_shuffle)
+            })
+        });
+        // Always release the writer, including when a blocked reader times out.
+        release.send(()).unwrap();
+        writer.join().unwrap().unwrap();
+        reader.join().unwrap();
+        assert!(next_writer.join().unwrap().unwrap());
+        assert_eq!(observed.unwrap(), initial);
+        let committed = file.load();
+        assert!(committed.ui.shuffle_enabled);
+        assert!(committed.ui.private_mode);
+        assert_eq!(read_startup_settings(&path).unwrap(), committed);
+    }
+
+    #[test]
+    fn failed_settings_save_does_not_publish_and_later_saves_succeed() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        // A directory at the target path makes the atomic replacement fail.
+        fs::create_dir(&path).unwrap();
+        let file = SettingsFile {
+            path: Some(path.clone()),
+            ..SettingsFile::memory_at(directory.path().to_path_buf())
+        };
+        let initial = file.load();
+        let changes = file.web_controller_changes();
+        assert!(
+            file.update(|stored| {
+                stored.ui.web_controller.enabled = !stored.ui.web_controller.enabled;
+                Ok(())
+            })
+            .is_err()
+        );
+        assert_eq!(file.load(), initial);
+        assert!(!changes.has_changed().unwrap());
+
+        fs::remove_dir(&path).unwrap();
+        file.update(|stored| {
+            stored.ui.web_controller.enabled = !stored.ui.web_controller.enabled;
+            Ok(())
+        })
+        .unwrap();
+        let committed = file.load();
+        assert_ne!(committed.ui.web_controller, initial.ui.web_controller);
+        assert!(changes.has_changed().unwrap());
+        assert_eq!(*changes.borrow(), committed.ui.web_controller);
+        assert_eq!(read_startup_settings(&path).unwrap(), committed);
+    }
 
     #[derive(Default)]
     struct CountingSecretStore {

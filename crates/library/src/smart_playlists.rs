@@ -1998,7 +1998,7 @@ async fn smart_policy_sql(
         let direction = if definition.descending { "DESC" } else { "ASC" };
         let order = format!("sort_value {direction} NULLS LAST,sort_text,media_uri");
         let limited = if let Some(limit) = definition.limit {
-            format!("SELECT * FROM ({branches}) ORDER BY {order} LIMIT {limit}")
+            format!("{branches} ORDER BY {order} LIMIT {limit}")
         } else {
             branches
         };
@@ -2186,7 +2186,7 @@ impl Database {
         output: impl std::io::Write,
     ) -> LibraryResult<u64> {
         use futures_util::TryStreamExt;
-        let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
+        let (_export, mut connection) = self.acquire_export().await?;
         let mut output =
             crate::playlist_format::PlaylistWriter::new(output, file, mode, None, None)?;
         let policy =

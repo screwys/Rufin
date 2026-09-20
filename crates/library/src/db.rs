@@ -63,6 +63,8 @@ impl ReadCancellation {
 struct DatabaseInner {
     writer: Arc<Mutex<Option<SqliteConnection>>>,
     readers: SqlitePool,
+    export_readers: SqlitePool,
+    export_read: tokio::sync::Mutex<()>,
     general_read: Arc<Semaphore>,
     active_scan: AtomicU64,
     next_scan: AtomicU64,
@@ -213,7 +215,10 @@ impl Database {
     }
 
     pub async fn close(self) -> LibraryResult<()> {
-        self.inner.readers.close().await;
+        tokio::join!(
+            self.inner.export_readers.close(),
+            self.inner.readers.close()
+        );
         if let Some(writer) = self.inner.writer.lock().await.take() {
             writer.close().await?;
         }
@@ -240,11 +245,14 @@ impl Database {
         };
         writer.close().await?;
         let (catalog, temporary_catalog, writer) = prepare_catalog(path, catalog).await?;
-        let readers = open_readers(path, &catalog).await?;
+        let readers = open_readers(path, &catalog, MIN_READERS, MAX_READERS).await?;
+        let export_readers = open_readers(path, &catalog, 0, 1).await?;
         Ok(Self {
             inner: Arc::new(DatabaseInner {
                 writer: Arc::new(Mutex::new(Some(writer))),
                 readers,
+                export_readers,
+                export_read: tokio::sync::Mutex::new(()),
                 general_read: Arc::new(Semaphore::new(1)),
                 active_scan: AtomicU64::new(0),
                 next_scan: AtomicU64::new(1),
@@ -355,9 +363,16 @@ impl Database {
         Ok((permit, connection))
     }
 
-    // Playback and bulk exports bypass the route-read permit, sharing the bounded pool.
+    // Playback point reads bypass the route-read permit.
     pub(crate) async fn acquire_reader(&self) -> LibraryResult<PoolConnection<Sqlite>> {
         Ok(self.inner.readers.acquire().await?)
+    }
+
+    pub(crate) async fn acquire_export(
+        &self,
+    ) -> LibraryResult<(tokio::sync::MutexGuard<'_, ()>, PoolConnection<Sqlite>)> {
+        let permit = self.inner.export_read.lock().await;
+        Ok((permit, self.inner.export_readers.acquire().await?))
     }
 
     pub(crate) async fn clear_progress(
@@ -448,11 +463,16 @@ fn base_options(path: &Path) -> SqliteConnectOptions {
         .row_buffer_size(ROW_BUFFER)
 }
 
-async fn open_readers(path: &Path, catalog: &Path) -> LibraryResult<SqlitePool> {
+async fn open_readers(
+    path: &Path,
+    catalog: &Path,
+    minimum: u32,
+    maximum: u32,
+) -> LibraryResult<SqlitePool> {
     let catalog = catalog.to_path_buf();
     Ok(SqlitePoolOptions::new()
-        .min_connections(MIN_READERS)
-        .max_connections(MAX_READERS)
+        .min_connections(minimum)
+        .max_connections(maximum)
         .acquire_timeout(ACQUIRE_TIMEOUT)
         .idle_timeout(READER_IDLE_TIMEOUT)
         .max_lifetime(None)
@@ -591,6 +611,24 @@ mod tests {
             .await
             .expect("open SQLx Library");
         (directory, database)
+    }
+
+    #[tokio::test]
+    async fn close_waits_for_exports_and_closes_both_reader_pools() {
+        use futures_util::FutureExt;
+
+        let (_directory, database) = database().await;
+        let export = database.acquire_export().await.unwrap();
+        let mut closing = Box::pin(database.clone().close());
+        assert!(closing.as_mut().now_or_never().is_none());
+        assert!(database.inner.readers.is_closed());
+        assert!(database.inner.export_readers.is_closed());
+        drop(export);
+        timeout(Duration::from_secs(1), closing)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(database.acquire_export().await.is_err());
     }
 
     #[tokio::test]

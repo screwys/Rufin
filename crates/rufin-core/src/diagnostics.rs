@@ -5,7 +5,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::sync::{
-    Arc, Mutex,
+    Arc, Condvar, Mutex,
     atomic::{AtomicBool, Ordering},
 };
 
@@ -19,7 +19,115 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry, fmt as tracing_fmt};
 
 mod stderr;
-pub use stderr::Guard as StderrGuard;
+/// Drains persistent logs before releasing the bounded stderr shutdown guard.
+pub struct StderrGuard {
+    _persistent: PersistentGuard,
+    _stderr: stderr::Guard,
+}
+
+struct PersistentGuard(Arc<DiagnosticState>, Option<std::thread::JoinHandle<()>>);
+
+impl Drop for PersistentGuard {
+    fn drop(&mut self) {
+        self.0
+            .output
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .closed = true;
+        self.0.ready.notify_all();
+        self.0.space.notify_all();
+        if let Some(worker) = self.1.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+struct DiagnosticState {
+    output: Mutex<DiagnosticOutput>,
+    ready: Condvar,
+    space: Condvar,
+}
+
+impl DiagnosticState {
+    fn new(log_dir: &Path) -> (Arc<Self>, PersistentGuard) {
+        let (output, file) = DiagnosticOutput::new(log_dir);
+        let state = Arc::new(Self {
+            output: Mutex::new(output),
+            ready: Condvar::new(),
+            space: Condvar::new(),
+        });
+        let worker_state = Arc::clone(&state);
+        let worker = std::thread::Builder::new()
+            .name("diagnostic-file".into())
+            .spawn(move || worker_state.run(file))
+            .expect("start diagnostic file writer");
+        let guard = PersistentGuard(Arc::clone(&state), Some(worker));
+        (state, guard)
+    }
+
+    fn append(&self, text: String) {
+        let mut output = self.output.lock().unwrap_or_else(|p| p.into_inner());
+        // A full queue applies backpressure without holding the snapshot mutex.
+        // Keeping every record and bounded memory requires waiting if disk stalls.
+        let bytes = text.len().min(BUFFER_MAX_BYTES);
+        while output.pending_bytes + bytes > BUFFER_MAX_BYTES && !output.closed {
+            output = self.space.wait(output).unwrap_or_else(|p| p.into_inner());
+        }
+        output.push_bounded(text);
+        if !output.closed {
+            let record = output
+                .entries
+                .back()
+                .expect("appended diagnostic record")
+                .clone();
+            output.pending_bytes += record.len();
+            output.pending.push_back(record);
+            self.ready.notify_one();
+        }
+        output.revision = output.revision.wrapping_add(1);
+    }
+
+    fn flush(&self) {
+        let mut output = self.output.lock().unwrap_or_else(|p| p.into_inner());
+        while !output.pending.is_empty() || output.writing {
+            output = self.space.wait(output).unwrap_or_else(|p| p.into_inner());
+        }
+    }
+
+    fn run(&self, mut file: Option<RotatingLog>) {
+        loop {
+            let record = {
+                let mut output = self.output.lock().unwrap_or_else(|p| p.into_inner());
+                while output.pending.is_empty() && !output.closed {
+                    output = self.ready.wait(output).unwrap_or_else(|p| p.into_inner());
+                }
+                let Some(record) = output.pending.pop_front() else {
+                    return;
+                };
+                output.pending_bytes -= record.len();
+                output.writing = true;
+                self.space.notify_all();
+                record
+            };
+            if let Some(log) = &mut file
+                && let Err(error) = log.append(record.as_bytes())
+            {
+                file = None;
+                let warning = sanitize_free_text(&format!(
+                    "WARN rufin::diagnostics: local log file is unavailable: {error}\n"
+                ));
+                let mut output = self.output.lock().unwrap_or_else(|p| p.into_inner());
+                output.push_bounded(warning);
+                output.revision = output.revision.wrapping_add(1);
+            }
+            self.output
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .writing = false;
+            self.space.notify_all();
+        }
+    }
+}
 
 const BUFFER_MAX_BYTES: usize = 2 * 1024 * 1024;
 const LOG_SEGMENT_MAX_BYTES: u64 = 2 * 1024 * 1024;
@@ -63,7 +171,7 @@ const DEBUG_FILTER: &str = concat!(
 type FilterHandle = reload::Handle<EnvFilter, Registry>;
 
 pub struct Diagnostics {
-    output: Arc<Mutex<DiagnosticOutput>>,
+    output: Arc<DiagnosticState>,
     filter: FilterHandle,
     debug_enabled: AtomicBool,
 }
@@ -71,7 +179,7 @@ pub struct Diagnostics {
 impl Diagnostics {
     pub fn install(state_dir: PathBuf) -> (Arc<Self>, StderrGuard) {
         let log_dir = state_dir.join("logs");
-        let output = Arc::new(Mutex::new(DiagnosticOutput::new(&log_dir)));
+        let (output, persistent) = DiagnosticState::new(&log_dir);
         let debug_enabled = startup_debug_enabled();
         let filter = startup_filter(debug_enabled);
         let (filter_layer, filter_handle) = reload::Layer::new(filter);
@@ -97,14 +205,17 @@ impl Diagnostics {
             .expect("install Rufin diagnostics subscriber");
 
         install_panic_hook(log_dir, stderr);
-        install_glib_log_capture();
+        install_glib_log_capture(Arc::clone(&output));
         (
             Arc::new(Self {
                 output,
                 filter: filter_handle,
                 debug_enabled: AtomicBool::new(debug_enabled),
             }),
-            stderr_guard,
+            StderrGuard {
+                _persistent: persistent,
+                _stderr: stderr_guard,
+            },
         )
     }
 }
@@ -125,6 +236,7 @@ impl Diagnostics {
 
     pub fn snapshot(&self) -> String {
         self.output
+            .output
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .snapshot()
@@ -132,19 +244,26 @@ impl Diagnostics {
 
     pub fn revision(&self) -> u64 {
         self.output
+            .output
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .revision
     }
 }
 
-fn install_glib_log_capture() {
+fn install_glib_log_capture(output: Arc<DiagnosticState>) {
     use glib::translate::IntoGlib as _;
 
     // Older supported GLib versions expose the fatal mask only through this setter.
     let fatal = glib::log_set_always_fatal(glib::LogLevels::LEVEL_ERROR);
     glib::log_set_always_fatal(fatal);
-    glib::log_set_default_handler(record_glib_log);
+    let record = move |domain: Option<&str>, level: glib::LogLevel, message: &str| {
+        record_glib_log(domain, level, message);
+        if fatal.bits() & level.into_glib() != 0 {
+            output.flush();
+        }
+    };
+    glib::log_set_default_handler(record.clone());
     glib::log_set_writer_func(move |level, fields| {
         let field = |key| {
             fields
@@ -152,7 +271,7 @@ fn install_glib_log_capture() {
                 .find(|field| field.key() == key)
                 .and_then(glib::LogField::value_str)
         };
-        record_glib_log(
+        record(
             field("GLIB_DOMAIN"),
             level,
             field("MESSAGE").unwrap_or_default(),
@@ -206,44 +325,42 @@ fn profile_filter(debug_enabled: bool) -> EnvFilter {
     })
 }
 
+#[derive(Default)]
 struct DiagnosticOutput {
     entries: VecDeque<String>,
     bytes: usize,
     revision: u64,
-    file: Option<RotatingLog>,
+    pending: VecDeque<String>,
+    pending_bytes: usize,
+    closed: bool,
+    writing: bool,
 }
 
 impl DiagnosticOutput {
-    fn new(log_dir: &Path) -> Self {
-        let mut output = match RotatingLog::open(log_dir) {
-            Ok(file) => Self {
-                entries: VecDeque::new(),
-                bytes: 0,
-                revision: 0,
-                file: Some(file),
-            },
+    fn new(log_dir: &Path) -> (Self, Option<RotatingLog>) {
+        let mut output = Self::default();
+        let mut file = match RotatingLog::open(log_dir) {
+            Ok(file) => Some(file),
             Err(error) => {
-                let warning = sanitize_free_text(&format!(
+                output.append(sanitize_free_text(&format!(
                     "WARN rufin::diagnostics: local log file is unavailable: {error}\n"
-                ));
-                Self {
-                    bytes: warning.len(),
-                    entries: VecDeque::from([warning]),
-                    revision: 1,
-                    file: None,
-                }
+                )));
+                None
             }
         };
         import_previous_panic_report(log_dir, &mut output);
-        output
+        if let Some(log) = &mut file
+            && let Err(error) = log.append(output.snapshot().as_bytes())
+        {
+            output.append(sanitize_free_text(&format!(
+                "WARN rufin::diagnostics: local log file is unavailable: {error}\n"
+            )));
+            file = None;
+        }
+        (output, file)
     }
 
     fn append(&mut self, text: String) {
-        if let Some(file) = &mut self.file
-            && file.append(text.as_bytes()).is_err()
-        {
-            self.file = None;
-        }
         self.push_bounded(text);
         self.revision = self.revision.wrapping_add(1);
     }
@@ -361,7 +478,7 @@ fn rotate_files(directory: &Path, base: &str) -> io::Result<()> {
 
 #[derive(Clone)]
 struct DiagnosticWriterFactory {
-    output: Arc<Mutex<DiagnosticOutput>>,
+    output: Arc<DiagnosticState>,
 }
 
 impl<'writer> MakeWriter<'writer> for DiagnosticWriterFactory {
@@ -376,7 +493,7 @@ impl<'writer> MakeWriter<'writer> for DiagnosticWriterFactory {
 }
 
 struct DiagnosticWriter {
-    output: Arc<Mutex<DiagnosticOutput>>,
+    output: Arc<DiagnosticState>,
     pending: Vec<u8>,
 }
 
@@ -388,10 +505,7 @@ impl DiagnosticWriter {
 
         let text = String::from_utf8_lossy(&self.pending).into_owned();
         self.pending.clear();
-        self.output
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .append(text);
+        self.output.append(text);
     }
 }
 
@@ -782,6 +896,53 @@ mod tests {
     use super::*;
 
     #[test]
+    fn persistent_logs_keep_snapshot_order_and_drain_through_rotation() {
+        use std::io::Write as _;
+
+        let directory = tempfile::tempdir().unwrap();
+        let (output, guard) = DiagnosticState::new(directory.path());
+        std::thread::scope(|scope| {
+            for producer in 0..4 {
+                let output = Arc::clone(&output);
+                scope.spawn(move || {
+                    let factory = DiagnosticWriterFactory { output };
+                    for index in 0..256 {
+                        writeln!(
+                            factory.make_writer(),
+                            "{producer}:{index}:{}",
+                            "x".repeat(4096)
+                        )
+                        .unwrap();
+                    }
+                });
+            }
+        });
+        drop(guard);
+        let snapshot = output.output.lock().unwrap().snapshot();
+        let mut persisted = String::new();
+        for name in ["rufin.log.2", "rufin.log.1", LOG_FILE] {
+            persisted.push_str(&fs::read_to_string(directory.path().join(name)).unwrap());
+        }
+        assert_eq!(persisted.lines().count(), 1024);
+        assert!(persisted.ends_with(&snapshot));
+        assert!(snapshot.len() <= BUFFER_MAX_BYTES);
+    }
+
+    #[test]
+    fn persistent_log_failure_is_reported_in_snapshot() {
+        let directory = tempfile::tempdir().unwrap();
+        let (output, guard) = DiagnosticState::new(directory.path());
+        // A directory at the rotation destination makes rotation fail on all platforms.
+        fs::create_dir(directory.path().join("rufin.log.2")).unwrap();
+        output.append("x".repeat(BUFFER_MAX_BYTES));
+        output.append("rotation triggers here\n".into());
+        drop(guard);
+        let snapshot = output.output.lock().unwrap().snapshot();
+        assert!(snapshot.contains("rotation triggers here"));
+        assert!(snapshot.contains("local log file is unavailable"));
+    }
+
+    #[test]
     fn redirected_diagnostics_drain_to_file_on_shutdown() {
         let file = tempfile::NamedTempFile::new().unwrap();
         let (writer, guard) = stderr::Writer::new(file.reopen().unwrap());
@@ -808,7 +969,7 @@ mod tests {
         use std::time::Duration;
 
         let directory = tempfile::tempdir().unwrap();
-        let output = Arc::new(Mutex::new(DiagnosticOutput::new(directory.path())));
+        let (output, persistent) = DiagnosticState::new(directory.path());
         let (reader, pipe) = io::pipe().unwrap();
         let (writer, guard) = stderr::Writer::new(pipe);
         let subscriber = Registry::default()
@@ -826,6 +987,7 @@ mod tests {
                 }
                 tracing::error!("local log still available");
             });
+            drop(persistent);
             drop(guard);
             finished.send(()).unwrap();
         });
@@ -836,6 +998,7 @@ mod tests {
         result.expect("stderr blocked the logging caller or shutdown");
         assert!(
             output
+                .output
                 .lock()
                 .unwrap()
                 .snapshot()
@@ -850,12 +1013,11 @@ mod tests {
 
     #[test]
     fn curated_debug_keeps_public_requests_private_and_suppresses_http2_frames() {
-        let output = Arc::new(Mutex::new(DiagnosticOutput {
-            entries: VecDeque::new(),
-            bytes: 0,
-            revision: 0,
-            file: None,
-        }));
+        let output = Arc::new(DiagnosticState {
+            output: Mutex::new(DiagnosticOutput::default()),
+            ready: Condvar::new(),
+            space: Condvar::new(),
+        });
         let subscriber = Registry::default().with(profile_filter(true)).with(
             tracing_fmt::layer()
                 .compact()
@@ -882,6 +1044,7 @@ mod tests {
         });
 
         let snapshot = output
+            .output
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .snapshot();
@@ -951,12 +1114,7 @@ mod tests {
 
     #[test]
     fn diagnostic_buffer_keeps_a_bounded_tail() {
-        let mut output = DiagnosticOutput {
-            entries: VecDeque::new(),
-            bytes: 0,
-            revision: 0,
-            file: None,
-        };
+        let mut output = DiagnosticOutput::default();
         output.push_bounded("a".repeat(BUFFER_MAX_BYTES));
         output.push_bounded("tail".to_string());
 
@@ -971,12 +1129,7 @@ mod tests {
         let panic_path = directory.path().join(PANIC_FILE);
         fs::write(&panic_path, "panic at /home/example/Rufin/src/main.rs:20")
             .expect("pending panic report");
-        let mut output = DiagnosticOutput {
-            entries: VecDeque::new(),
-            bytes: 0,
-            revision: 0,
-            file: None,
-        };
+        let mut output = DiagnosticOutput::default();
 
         import_previous_panic_report(directory.path(), &mut output);
 

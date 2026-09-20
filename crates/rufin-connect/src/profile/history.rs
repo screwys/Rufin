@@ -39,11 +39,16 @@ impl ProfileStore {
         let mut connection = self.connection.lock().await;
         register_on(&mut connection, members).await?;
         let members = participants(&mut connection).await?;
-        let mut file = std::fs::OpenOptions::new().append(true).open(path)?;
-        serde_json::to_writer(&mut file, &members)?;
-        file.write_all(b"\n")?;
-        file.sync_all()?;
-        Ok(())
+        drop(connection);
+        let path = path.to_owned();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let mut file = std::fs::OpenOptions::new().append(true).open(path)?;
+            serde_json::to_writer(&mut file, &members)?;
+            file.write_all(b"\n")?;
+            file.sync_all()?;
+            Ok(())
+        })
+        .await?
     }
 
     /// Process a bounded page without projecting values or invalidating the UI.
@@ -103,13 +108,17 @@ impl ProfileStore {
                 continue;
             }
             let snapshot: Vec<u8> = row.get(0);
-            let document = LoroDoc::new();
-            document.import(&snapshot)?;
-            let pruned =
-                document.export(ExportMode::shallow_snapshot(&document.oplog_frontiers()))?;
-            if pruned.len() >= snapshot.len() {
+            let pruned = tokio::task::spawn_blocking(move || -> Result<_> {
+                let document = LoroDoc::new();
+                document.import(&snapshot)?;
+                let pruned =
+                    document.export(ExportMode::shallow_snapshot(&document.oplog_frontiers()))?;
+                Ok((pruned.len() < snapshot.len()).then_some(pruned))
+            })
+            .await??;
+            let Some(pruned) = pruned else {
                 continue;
-            }
+            };
             sqlx::query("UPDATE documents SET snapshot=?2 WHERE name=?1")
                 .bind(name)
                 .bind(pruned)

@@ -1262,7 +1262,7 @@ impl Database {
 
     pub async fn export_queue_jsonl(&self, output: impl std::io::Write) -> LibraryResult<()> {
         self.restore_queue().await?;
-        let mut connection = self.acquire_reader().await?;
+        let (_export, mut connection) = self.acquire_export().await?;
         export_queue_jsonl_on(&mut connection, output).await
     }
 
