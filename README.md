@@ -120,14 +120,16 @@ rufin --headless --listen
 
 # Screenshots
 
-| | | | |
-|:---:|:---:|:---:|:---:|
-| ![Home](data/screenshots/Rufin.png) | ![Albums](data/screenshots/albums.png) | ![Artist details](data/screenshots/artist_detail.png) | ![Album details](data/screenshots/album_detail.png) |
-| **Home** | **Albums** | **Artist details** | **Album details** |
-| ![Genres](data/screenshots/genres.png) | ![Smart playlists](data/screenshots/smart_playlists.png) | ![Appearance settings](data/screenshots/appearance_settings.png) | ![Customize display](data/screenshots/customize_display.png) |
-| **Genres** | **Smart playlists** | **Appearance settings** | **Customize display** |
-| ![Download settings](data/screenshots/download_settings.png) | ![Playback settings](data/screenshots/playback_settings.png) | ![Keyboard shortcuts](data/screenshots/keyboard_shortcuts.png) | ![Fullscreen player](data/screenshots/visualizer.png) |
-| **Download settings** | **Playback settings** | **Keyboard shortcuts** | **Fullscreen player** |
+| | |
+|:---:|:---:|
+| ![Artist details](data/screenshots/artist_detail.png) | ![Genres](data/screenshots/genres.png) |
+| **Artist details** | **Genres** |
+| ![Smart playlists](data/screenshots/smart_playlists.png) | ![Playback settings](data/screenshots/playback_settings.png) |
+| **Smart playlists** | **Playback settings** |
+| ![Fullscreen player](data/screenshots/fullscreen_player.png) | ![Visualizer settings](data/screenshots/visualizer_settings.png) |
+| **Fullscreen player** | **Visualizer settings** |
+| ![Integrations](data/screenshots/integrations.png) | ![Playlist settings](data/screenshots/playlist_settings.png) |
+| **Integrations** | **Playlist settings** |
 
 # Installation
 
