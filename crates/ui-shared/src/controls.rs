@@ -14,6 +14,14 @@ pub const MORE_ICON: &str = "rufin-more-symbolic";
 const SORT_ORDER_ICON: &str = "rufin-sort-name-symbolic";
 const SORT_ORDER_DESCENDING_ICON: &str = "rufin-sort-name-descending-symbolic";
 
+pub fn set_search_entry_icon(entry: &gtk::SearchEntry) {
+    entry
+        .first_child()
+        .and_downcast::<gtk::Image>()
+        .expect("search entry icon")
+        .set_icon_name(Some("rufin-search-symbolic"));
+}
+
 pub fn sort_order_icon(descending: bool) -> &'static str {
     if descending {
         SORT_ORDER_DESCENDING_ICON

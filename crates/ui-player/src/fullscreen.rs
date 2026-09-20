@@ -463,9 +463,9 @@ pub fn connect_fullscreen_player_controls(shell: &Rc<crate::PlayerUi>) {
         .focus_button
         .connect_toggled(move |button| {
             button.set_icon_name(if button.is_active() {
-                "rufin-view-restore-symbolic"
+                "rufin-view-restore-corners-symbolic"
             } else {
-                "rufin-view-fullscreen-symbolic"
+                "rufin-view-fullscreen-corners-symbolic"
             });
             let Some(shell) = weak.upgrade() else {
                 return;

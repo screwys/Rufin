@@ -117,8 +117,7 @@ impl Shell {
         let lyrics = self.player_ui.lyric_content.borrow();
         self.player_ui
             .right_panel
-            .lyrics_host
-            .append(lyrics.right_pane.widget());
+            .attach_lyrics_pane(&lyrics.right_pane);
         self.player_ui
             .views
             .fullscreen_player

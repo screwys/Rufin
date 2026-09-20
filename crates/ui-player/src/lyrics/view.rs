@@ -272,6 +272,7 @@ use karaoke_text::KaraokeText;
 #[derive(Clone)]
 pub struct LyricsPane {
     root: gtk::Overlay,
+    layout: ui_shared::layout::AllocationOwner,
     scroller: gtk::ScrolledWindow,
     controls: gtk::Box,
     pub(crate) settings_controls: gtk::Box,
@@ -398,9 +399,13 @@ impl LyricsPane {
         edit_button.set_tooltip_text(Some(&edit_label));
         edit_button.update_property(&[gtk::accessible::Property::Label(&edit_label)]);
         root.set_measure_overlay(&controls, false);
+        root.set_child(gtk::Widget::NONE);
+        let layout = ui_shared::layout::allocation_owner(&scroller, |_, _| {});
+        root.set_child(Some(&layout));
 
         let pane = Self {
             root,
+            layout,
             scroller,
             controls,
             settings_controls,
@@ -424,7 +429,56 @@ impl LyricsPane {
             scrollbar_dragging: Rc::new(Cell::new(false)),
         };
         pane.connect_user_scroll_pause();
+        pane.connect_viewport_layout();
         pane
+    }
+
+    fn connect_viewport_layout(&self) {
+        let scroller = self.scroller.downgrade();
+        let body = self.body.downgrade();
+        let rows = Rc::clone(&self.rows);
+        let content = Rc::clone(&self.content);
+        let index = Rc::clone(&self.scroll_index);
+        let generation = Rc::clone(&self.scroll_generation);
+        let pause = Rc::clone(&self.follow_pause_until);
+        let dragging = Rc::clone(&self.scrollbar_dragging);
+        let previous_size = Cell::new((0, 0));
+        self.layout.set_size_callback(move |width, height| {
+            let (Some(scroller), Some(body)) = (scroller.upgrade(), body.upgrade()) else {
+                return;
+            };
+            // Half a viewport at either end makes every lyric's text center reachable,
+            // including wrapped rows with pronunciation above or below the main text.
+            let padding = if matches!(*content.borrow(), Some(LyricsPaneContent::Document { .. })) {
+                height / 2
+            } else {
+                0
+            };
+            let resized = previous_size.replace((width, height)) != (width, height);
+            let padding_changed = body.margin_top() != padding;
+            body.set_margin_top(padding);
+            body.set_margin_bottom(padding);
+            if !resized && !padding_changed {
+                return;
+            }
+            if lyrics_follow_scroll_pause_state(pause.get(), dragging.get(), Instant::now())
+                == LyricsFollowScrollPause::Active
+            {
+                return;
+            }
+            let row = rows
+                .borrow()
+                .iter()
+                .find(|row| {
+                    row.track == LyricsRowTrack::Primary && Some(row.line_index) == index.get()
+                })
+                .map(|row| row.row.clone());
+            if let Some(row) = row {
+                let next = generation.get().saturating_add(1);
+                generation.set(next);
+                scroll_row_into_view_after_layout(scroller, row, 0, Rc::clone(&generation), next);
+            }
+        });
     }
 
     pub fn widget(&self) -> &gtk::Overlay {
@@ -446,7 +500,8 @@ impl LyricsPane {
     pub fn set_lyrics_visible(&self, visible: bool) {
         self.scroller.set_visible(visible);
         self.search_button.set_visible(visible);
-        self.edit_button.set_visible(visible);
+        self.edit_button
+            .set_visible(visible && self.edit_button.is_sensitive());
         self.controls.set_visible(visible);
     }
 
@@ -489,7 +544,8 @@ impl LyricsPane {
     }
 
     pub fn set_edit_action(&self, enabled: bool) {
-        self.edit_button.set_visible(enabled);
+        self.edit_button
+            .set_visible(enabled && self.scroller.is_visible());
         self.edit_button.set_sensitive(enabled);
     }
 
@@ -567,11 +623,6 @@ impl LyricsPane {
         self.scroll_index.set(None);
         self.active_row.borrow_mut().take();
         self.cancel_scroll_animation();
-        if !matches!(&content, LyricsPaneContent::Document { .. }) {
-            self.body.add_css_class("lyrics-placeholder");
-        } else {
-            self.body.remove_css_class("lyrics-placeholder");
-        }
 
         if let LyricsPaneContent::Document {
             lyrics: current_lyrics,
@@ -609,6 +660,7 @@ impl LyricsPane {
             let indicator = gtk::Box::new(gtk::Orientation::Vertical, 20);
             indicator.set_halign(gtk::Align::Center);
             indicator.set_valign(gtk::Align::Center);
+            indicator.set_vexpand(true);
 
             let icon = gtk::Image::from_icon_name("rufin-audio-x-generic-symbolic");
             icon.set_pixel_size(36);
@@ -643,6 +695,7 @@ impl LyricsPane {
             self.body.append(&status);
         }
         self.content.replace(Some(content));
+        self.layout.queue_allocate();
     }
 
     fn append_document_rows(
@@ -946,19 +999,7 @@ impl LyricsPane {
         };
 
         if let Some((row, duration)) = scroll_target {
-            if active_index.is_none() {
-                self.cancel_scroll_animation();
-                let adjustment = self.scroller.vadjustment();
-                animate_lyrics_scroll(
-                    adjustment.clone(),
-                    adjustment.lower(),
-                    duration,
-                    Rc::clone(&self.scroll_generation),
-                    self.scroll_generation.get(),
-                );
-            } else {
-                self.scroll_row_into_view(row, duration);
-            }
+            self.scroll_row_into_view(row, duration);
         }
     }
 
@@ -1406,7 +1447,7 @@ fn lyric_line_has_text(line: &LyricsLine) -> bool {
 mod tests {
     #[test]
     #[ignore = "requires a GTK display"]
-    fn repeat_intro_returns_the_scroller_to_the_top() {
+    fn repeat_intro_centers_the_first_line_without_highlighting_it() {
         use super::*;
         adw::init().expect("GTK display");
         crate::register_resources().expect("player resources");
@@ -1467,8 +1508,29 @@ mod tests {
             }
         };
         settle(200);
+        let assert_centered = |index: usize| {
+            let row = pane.rows.borrow()[index].row.clone();
+            let first = first_lyrics_scroll_surface(&row)
+                .unwrap()
+                .compute_bounds(&pane.scroller)
+                .unwrap();
+            let last = last_lyrics_scroll_surface(&row)
+                .unwrap()
+                .compute_bounds(&pane.scroller)
+                .unwrap();
+            let center = (first.y() + last.y() + last.height()) / 2.0;
+            assert!(
+                (center - pane.scroller.height() as f32 / 2.0).abs() < 1.0,
+                "line={index}, center={center}, viewport={}",
+                pane.scroller.height()
+            );
+        };
+        pane.refocus_highlight(Some(&document), 15_000);
+        settle(100);
+        assert_centered(0);
         pane.update_highlight(Some(&document), 260_000);
         settle(400);
+        assert_centered(49);
         let adjustment = pane.scroller.vadjustment();
         let end = adjustment.value();
         assert!(end > 400.0, "end={end}");
@@ -1487,15 +1549,30 @@ mod tests {
             "during={during}, end={end}"
         );
         settle(350);
-        assert!(
-            (adjustment.value() - adjustment.lower()).abs() < 1.0,
-            "intro={}",
-            adjustment.value()
-        );
+        assert_centered(0);
+        let intro = adjustment.value();
         pane.update_highlight(Some(&document), 10_000);
         settle(350);
-        assert!((adjustment.value() - adjustment.lower()).abs() < 1.0);
+        assert!((adjustment.value() - intro).abs() < 1.0);
         assert_eq!(pane.active_index.get(), None);
+        window.set_default_size(300, 800);
+        settle(150);
+        assert_centered(0);
+        pane.refocus_highlight(Some(&document), 260_000);
+        settle(100);
+        assert_centered(49);
+        pane.set_content(LyricsPaneContent::Instrumental, Rc::new(|_| {}));
+        settle(100);
+        let indicator = pane
+            .body
+            .first_child()
+            .unwrap()
+            .compute_bounds(&pane.scroller)
+            .unwrap();
+        assert!(
+            (indicator.y() + indicator.height() / 2.0 - pane.scroller.height() as f32 / 2.0).abs()
+                < 1.0
+        );
         window.close();
     }
 

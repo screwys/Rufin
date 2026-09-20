@@ -862,6 +862,21 @@ impl PlaybackOwner {
 }
 
 impl QueueCommandPort for PlaybackOwner {
+    fn media_uris(&self) -> Result<Vec<String>, String> {
+        let Some(active) = self.active() else {
+            return Ok(Vec::new());
+        };
+        let (queue, _, _) = active
+            .playback
+            .handoff_snapshot()
+            .map_err(|error| error.to_string())?;
+        Ok(queue
+            .order
+            .iter()
+            .map(|index| queue.entries[*index as usize].media_uri.to_string())
+            .collect())
+    }
+
     fn play(&self, mut request: PlayRequest) {
         if self.play_plex(&request) {
             return;

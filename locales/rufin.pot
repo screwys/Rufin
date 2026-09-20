@@ -636,6 +636,9 @@ msgstr ""
 msgid "Columns"
 msgstr ""
 
+msgid "Combine lyrics and visualizer"
+msgstr ""
+
 msgid "Comment text"
 msgstr ""
 
@@ -806,6 +809,9 @@ msgid "Couldn't search for lyrics"
 msgstr ""
 
 msgid "Couldn\342\200\231t download Japanese dictionary"
+msgstr ""
+
+msgid "Create a playlist from queue"
 msgstr ""
 
 msgid "Create"

@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use ui_player::outputs::{default_audio_output_options, warm_audio_output_cache};
 use ui_player::right_panel::build_right_panel;
-use ui_player::right_panel::{apply_sidebar_media_visibility, connect_queue_lyrics_split};
+use ui_player::right_panel::{apply_sidebar_media_visibility, connect_sidebar_controls};
 use ui_player::{
     PlayerDesktopWidgets,
     bottom::{BOTTOM_PLAYER_HEIGHT, build_bottom_player},
@@ -233,14 +233,8 @@ pub async fn build(
     compact_nav_scroller.set_max_content_width(COMPACT_RAIL_WIDTH);
     compact_nav.set_width_request(COMPACT_RAIL_WIDTH);
     let visualizer = build_visualizer();
-    let right_panel_parts = build_right_panel(&visualizer.sidebar_area);
-    let right_panel = right_panel_parts.root;
-    let queue_panel = right_panel_parts.queue_panel;
-    let queue_search = right_panel_parts.queue_search;
-    let queue_clear_button = right_panel_parts.queue_clear_button;
-    let queue_lyrics_split = right_panel_parts.queue_lyrics_split;
-    let lyrics_surface = right_panel_parts.lyrics_surface;
-    let lyrics_host = right_panel_parts.lyrics_host;
+    let player_right_panel = build_right_panel(&visualizer.sidebar_area, &settings);
+    let right_panel = player_right_panel.root.clone();
 
     let content_chrome = build_content_chrome(&right_panel);
     let route_host = content_chrome.route_host;
@@ -315,17 +309,6 @@ pub async fn build(
         compact_nav,
     };
     let route_viewport = RouteViewport::new(route_host, route_loading);
-    let player_right_panel = ui_player::right_panel::RightPanelWidgets {
-        queue_loading: right_panel_parts.queue_loading,
-        root: right_panel,
-        queue_panel,
-        queue_search,
-        queue_clear_button,
-        queue_lyrics_split,
-        lyrics_surface,
-        lyrics_host,
-        visualizer_visible: Cell::new(settings.visualizer_panel_visible),
-    };
     let right_panel = RightPanelWidgets {
         right_split,
         right_panel_slot,
@@ -516,7 +499,8 @@ pub async fn build(
     install_application_quit(&shell);
     install_desktop_lifecycle(&shell);
     connect_queue_panel_controls(&shell.player_ui);
-    connect_queue_lyrics_split(&shell.player_ui);
+    crate::player::queue::connect_queue_playlist_button(&shell);
+    connect_sidebar_controls(&shell.player_ui);
     shell.connect_route_keyboard();
     connect_transient_entry_focus_dismissal(&shell);
     connect_fullscreen_player_controls(&shell.player_ui);

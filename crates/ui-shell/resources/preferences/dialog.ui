@@ -38,7 +38,7 @@
         <property name="spacing">4</property>
         <child>
           <object class="GtkToggleButton" id="search_button">
-            <property name="icon-name">rufin-system-search-symbolic</property>
+            <property name="icon-name">rufin-search-symbolic</property>
             <property name="tooltip-text" translatable="yes">Search</property>
             <style>
               <class name="flat"/>

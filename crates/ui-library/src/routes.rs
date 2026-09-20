@@ -260,6 +260,7 @@ impl CatalogUi {
         let models = Rc::new(RefCell::new(models));
 
         let search = gtk::SearchEntry::new();
+        ui_shared::controls::set_search_entry_icon(&search);
         bind_search_placeholder(&search, "Search");
         let query = Rc::new(RefCell::new(String::new()));
         let content = album_collection_projection(self, models.clone(), key);
@@ -713,6 +714,7 @@ impl CatalogUi {
         sparse.seed_matching_at(first_row_position, first_rows, |row| row.artist_key);
         let content = artist_collection_projection(self, Rc::clone(&sparse), key);
         let search = gtk::SearchEntry::new();
+        ui_shared::controls::set_search_entry_icon(&search);
         bind_search_placeholder(&search, "Search");
         let query = Rc::new(RefCell::new(String::new()));
         let mut page = self.library_page_shell(LibraryPageShellOptions {
@@ -1033,6 +1035,7 @@ impl CatalogUi {
     ) -> TrackListProjection<T> {
         let persistent_search = options.search.is_some();
         let search = options.search.unwrap_or_else(gtk::SearchEntry::new);
+        ui_shared::controls::set_search_entry_icon(&search);
         bind_search_placeholder(&search, "Search");
         search.set_hexpand(true);
         if !persistent_search {
