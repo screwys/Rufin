@@ -29,7 +29,6 @@ pub use layout::{
 };
 pub use sidebar::{SidebarPin, SidebarRouteItem, SidebarRouteItemSettings, SidebarSettings};
 
-use std::ffi::OsString;
 use std::fs;
 use std::io::{ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
@@ -176,33 +175,6 @@ impl Default for StoredSettings {
             legacy_home_sections: None,
             legacy_track_table: None,
         }
-    }
-}
-
-#[derive(Deserialize)]
-struct SourceAuthorizationRecovery {
-    #[serde(default)]
-    sources: SourceSettings,
-    #[serde(default)]
-    secret_scope_id: String,
-    #[serde(default)]
-    jellyfin_device_id: String,
-    #[serde(default)]
-    secret_storage_mode: Option<SecretStorageMode>,
-}
-
-impl SourceAuthorizationRecovery {
-    fn into_stored_settings(self) -> StoredSettings {
-        let mut stored = StoredSettings {
-            sources: self.sources,
-            secret_scope_id: self.secret_scope_id,
-            jellyfin_device_id: self.jellyfin_device_id,
-            ..StoredSettings::default()
-        };
-        if let Some(mode) = self.secret_storage_mode {
-            stored.ui.secret_storage_mode = mode;
-        }
-        stored
     }
 }
 
@@ -873,73 +845,150 @@ fn random_identity(prefix: &str) -> Result<String, String> {
     }
     Ok(value)
 }
-fn read_startup_settings(path: &Path) -> Result<StoredSettings, String> {
-    let raw = match fs::read_to_string(path) {
-        Ok(raw) if raw.trim().is_empty() => {
-            return Ok(StoredSettings::default());
-        }
-        Ok(raw) => raw,
-        Err(error) if error.kind() == ErrorKind::NotFound => {
-            return Ok(StoredSettings::default());
-        }
-        Err(error) => return Err(error.to_string()),
-    };
-    match serde_json::from_str(&raw) {
-        Ok(stored) => Ok(stored),
-        Err(error) => {
-            let recovered = serde_json::from_str::<SourceAuthorizationRecovery>(&raw)
-                .ok()
-                .filter(|recovered| !recovered.sources.configured.is_empty());
-            let preserved = preserve_unreadable_settings(path)?;
-            if let Some(recovered) = recovered {
-                let mut stored = recovered.into_stored_settings();
-                stored.migrate_defaults();
-                write_settings(path, &stored)?;
-                warn!(
-                    %error,
-                    path = %path.display(),
-                    preserved_path = %preserved.display(),
-                    configured_sources = stored.sources.configured.len(),
-                    "preserved incompatible settings and recovered source authorization"
-                );
-                return Ok(stored);
-            }
-            warn!(
-                %error,
-                path = %path.display(),
-                preserved_path = %preserved.display(),
-                "preserved unreadable settings and continued with defaults"
-            );
-            Ok(StoredSettings::default())
-        }
+fn read_settings_json(path: &Path) -> Result<Option<serde_json::Value>, String> {
+    match fs::read_to_string(path) {
+        Ok(raw) if raw.trim().is_empty() => Ok(None),
+        Ok(raw) => serde_json::from_str(&raw)
+            .map(Some)
+            .map_err(|error| error.to_string()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.to_string()),
     }
 }
 
-fn preserve_unreadable_settings(path: &Path) -> Result<PathBuf, String> {
-    let parent = path.parent().filter(|path| !path.as_os_str().is_empty());
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| "settings path has no file name".to_string())?;
-    let mut number = 0_u64;
-    loop {
-        let mut candidate_name = OsString::from(file_name);
-        candidate_name.push(format!(".damaged-{}-{number}", std::process::id()));
-        let candidate = parent.map_or_else(
-            || PathBuf::from(&candidate_name),
-            |parent| parent.join(&candidate_name),
-        );
-        if !candidate.exists() {
-            fs::rename(path, &candidate).map_err(|error| error.to_string())?;
-            return Ok(candidate);
+fn replace_setting(
+    root: &mut serde_json::Value,
+    path: &[String],
+    value: Option<serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let (key, parents) = path.split_last().unwrap();
+    let parent = parents.iter().fold(root, |parent, key| &mut parent[key]);
+    let fields = parent.as_object_mut().unwrap();
+    match value {
+        Some(value) => fields.insert(key.clone(), value),
+        None => fields.remove(key),
+    }
+}
+
+fn recover_setting(
+    accepted: &mut serde_json::Value,
+    path: Vec<String>,
+    value: &serde_json::Value,
+    unsupported: &mut Vec<Vec<String>>,
+) {
+    let previous = replace_setting(accepted, &path, Some(value.clone()));
+    if serde_json::from_value::<StoredSettings>(accepted.clone()).is_ok() {
+        return;
+    }
+    let recover_children = previous.as_ref().is_some_and(serde_json::Value::is_object);
+    replace_setting(accepted, &path, previous);
+    if recover_children && let Some(fields) = value.as_object() {
+        for (key, value) in fields {
+            let mut child = path.clone();
+            child.push(key.clone());
+            recover_setting(accepted, child, value, unsupported);
         }
-        number = number
-            .checked_add(1)
-            .ok_or_else(|| "could not choose a preserved settings path".to_string())?;
+    } else {
+        unsupported.push(path);
+    }
+}
+
+fn decode_settings(raw: &serde_json::Value) -> Result<(StoredSettings, Vec<Vec<String>>), String> {
+    if let Ok(stored) = serde_json::from_value(raw.clone()) {
+        return Ok((stored, Vec::new()));
+    }
+    let fields = raw.as_object().ok_or("settings must be a JSON object")?;
+    let mut accepted =
+        serde_json::to_value(StoredSettings::default()).map_err(|error| error.to_string())?;
+    // Missing legacy markers still need their deserializer defaults.
+    accepted
+        .as_object_mut()
+        .unwrap()
+        .remove("scrobbling_secrets_present");
+    let mut unsupported = Vec::new();
+    for (key, value) in fields {
+        recover_setting(&mut accepted, vec![key.clone()], value, &mut unsupported);
+    }
+    serde_json::from_value(accepted)
+        .map(|stored| (stored, unsupported))
+        .map_err(|error| error.to_string())
+}
+
+fn read_startup_settings(path: &Path) -> Result<StoredSettings, String> {
+    let Some(raw) = read_settings_json(path)? else {
+        return Ok(StoredSettings::default());
+    };
+    let (stored, unsupported) = decode_settings(&raw)?;
+    if !unsupported.is_empty() {
+        warn!(?unsupported, path = %path.display(),
+            "using defaults for incompatible preferences; saved values remain intact");
+    }
+    Ok(stored)
+}
+
+// Apply typed changes without dropping fields this version does not understand.
+// Arrays are whole preferences: replacing their contents is an explicit change.
+fn merge_settings(
+    saved: &mut serde_json::Value,
+    previous: &serde_json::Value,
+    next: &serde_json::Value,
+) {
+    if previous == next {
+        return;
+    }
+    if let (Some(saved), Some(previous), Some(next)) = (
+        saved.as_object_mut(),
+        previous.as_object(),
+        next.as_object(),
+    ) {
+        for key in previous.keys() {
+            if !next.contains_key(key) {
+                saved.remove(key);
+            }
+        }
+        for (key, value) in next {
+            match (saved.get_mut(key), previous.get(key)) {
+                (Some(saved), Some(previous)) => merge_settings(saved, previous, value),
+                _ => {
+                    saved.insert(key.clone(), value.clone());
+                }
+            }
+        }
+    } else {
+        *saved = next.clone();
     }
 }
 
 pub(crate) fn write_settings(path: &Path, value: &StoredSettings) -> Result<(), String> {
-    let mut json = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
+    let next = serde_json::to_value(value).map_err(|error| error.to_string())?;
+    let merged = match read_settings_json(path)? {
+        None => next,
+        Some(mut saved) => {
+            let (mut previous, unsupported) = decode_settings(&saved)?;
+            let mut before = serde_json::to_value(&previous).map_err(|error| error.to_string())?;
+            // These decoded legacy fields are consumed by migration and never serialized.
+            for (key, present) in [
+                ("home_sections", previous.legacy_home_sections.is_some()),
+                ("track_table", previous.legacy_track_table.is_some()),
+            ] {
+                if present {
+                    before[key] = saved[key].clone();
+                }
+            }
+            previous.migrate_defaults();
+            let defaults = serde_json::to_value(&previous).map_err(|error| error.to_string())?;
+            // Sanitizing a runtime default must not overwrite an unsupported saved value.
+            for path in unsupported {
+                let default = path
+                    .iter()
+                    .try_fold(&defaults, |parent, key| parent.get(key));
+                replace_setting(&mut before, &path, default.cloned());
+            }
+            merge_settings(&mut saved, &before, &next);
+            saved
+        }
+    };
+    let mut json = serde_json::to_vec_pretty(&merged).map_err(|error| error.to_string())?;
     json.push(b'\n');
     write_private(path, &json)
 }

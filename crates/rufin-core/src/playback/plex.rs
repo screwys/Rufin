@@ -1046,6 +1046,7 @@ impl PlaybackOwner {
                     plex.source_owner.clone(),
                     library::RadioSeed::Track(request.seed_media_uri),
                     request.requested_count,
+                    &library::ReadCancellation::new(),
                 )
                 .await?;
                 let _guard = plex.commands.lock().await;
@@ -1089,6 +1090,7 @@ impl PlaybackOwner {
                     plex.source_owner.clone(),
                     request.seed,
                     20,
+                    &library::ReadCancellation::new(),
                 )
                 .await?;
                 let _guard = plex.commands.lock().await;

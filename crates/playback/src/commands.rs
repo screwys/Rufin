@@ -144,6 +144,7 @@ pub trait RadioCommandPort: Send + Sync {
         &self,
         seed: RadioSeed,
         requested: usize,
+        cancellation: library::ReadCancellation,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<String>, String>> + Send>>;
     fn play_random(&self, request: RandomPlayRequest);
     fn play_radio(&self, request: RadioPlayRequest);

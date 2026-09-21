@@ -90,14 +90,15 @@ pub struct FullscreenPlayerParts {
     related_retry: gtk::Button,
     related_empty: gtk::Label,
     related_error: gtk::Label,
-    related_loading: gtk::Label,
+    related_loading: adw::Spinner,
     related_seed: RefCell<Option<String>>,
-    related_task: RefCell<Option<tokio::task::AbortHandle>>,
+    related_task: RefCell<Option<(library::ReadCancellation, tokio::task::AbortHandle)>>,
 }
 
 impl Drop for FullscreenPlayerParts {
     fn drop(&mut self) {
-        if let Some(task) = self.related_task.get_mut().take() {
+        if let Some((cancellation, task)) = self.related_task.get_mut().take() {
+            cancellation.cancel();
             task.abort();
         }
     }
@@ -209,13 +210,13 @@ pub fn build_fullscreen_player(visualizer_area: &gtk::DrawingArea) -> Fullscreen
         lyrics_host: gtk::Box,
         visualizer_panel: gtk::Box,
         equalizer_panel: gtk::ScrolledWindow,
-        related_panel: gtk::Box,
+        related_panel: gtk::Overlay,
         related_list: gtk::Box,
         related_status: gtk::Label,
         related_retry: gtk::Button,
         related_empty: gtk::Label,
         related_error: gtk::Label,
-        related_loading: gtk::Label,
+        related_loading: adw::Spinner,
     });
     let background = crate::fullscreen_background::FullscreenBackground::new();
     root.set_child(None::<&gtk::Widget>);
@@ -570,10 +571,7 @@ pub fn connect_fullscreen_player_controls(shell: &Rc<crate::PlayerUi>) {
 impl crate::PlayerUi {
     fn refresh_related_tracks(self: &Rc<Self>) {
         let parts = &self.views.fullscreen_player;
-        if !self.fullscreen_player_visible()
-            || parts.stack.visible_child_name().as_deref() != Some("related")
-            || !parts.right_pane.is_visible()
-        {
+        if !self.fullscreen_player_visible() {
             return;
         }
         let seed = self.selected_playback().and_then(|player| {
@@ -586,33 +584,37 @@ impl crate::PlayerUi {
         if *parts.related_seed.borrow() == seed {
             return;
         }
-        if let Some(task) = parts.related_task.borrow_mut().take() {
+        if let Some((cancellation, task)) = parts.related_task.borrow_mut().take() {
+            cancellation.cancel();
             task.abort();
         }
         *parts.related_seed.borrow_mut() = seed.clone();
         while let Some(child) = parts.related_list.first_child() {
             parts.related_list.remove(&child);
         }
-        parts.related_status.set_visible(true);
+        parts.related_status.set_visible(seed.is_none());
+        parts.related_loading.set_visible(seed.is_some());
         parts.related_retry.set_visible(false);
         let Some(seed) = seed else {
             parts.related_status.set_text(&parts.related_empty.text());
             return;
         };
-        parts.related_status.set_text(&parts.related_loading.text());
-        let candidates = self
-            .playback_handles
-            .radio
-            .candidates(library::RadioSeed::Track(seed.clone()), 20);
+        let cancellation = library::ReadCancellation::new();
+        let candidates = self.playback_handles.radio.candidates(
+            library::RadioSeed::Track(seed.clone()),
+            20,
+            cancellation.clone(),
+        );
         let database = self.database.clone();
+        let read_cancellation = cancellation.clone();
         let task = self.runtime.spawn(async move {
             let uris = candidates.await?;
             database
-                .track_rows_by_uri(&uris, &library::ReadCancellation::new())
+                .track_rows_by_uri(&uris, &read_cancellation)
                 .await
                 .map_err(|error| error.to_string())
         });
-        *parts.related_task.borrow_mut() = Some(task.abort_handle());
+        *parts.related_task.borrow_mut() = Some((cancellation, task.abort_handle()));
         let task_id = task.id();
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
@@ -625,12 +627,13 @@ impl crate::PlayerUi {
                 .related_task
                 .borrow()
                 .as_ref()
-                .map(tokio::task::AbortHandle::id)
+                .map(|(_, task)| task.id())
                 != Some(task_id)
             {
                 return;
             }
             parts.related_task.borrow_mut().take();
+            parts.related_loading.set_visible(false);
             match result {
                 Ok(Ok(items)) => {
                     parts.related_status.set_text(&parts.related_empty.text());
@@ -642,6 +645,7 @@ impl crate::PlayerUi {
                 }
                 _ => {
                     parts.related_status.set_text(&parts.related_error.text());
+                    parts.related_status.set_visible(true);
                     parts.related_retry.set_visible(true);
                 }
             }
@@ -718,6 +722,12 @@ impl crate::PlayerUi {
     pub fn close_fullscreen_player(self: &Rc<Self>) {
         if !self.views.fullscreen_player.visible.replace(false) {
             return;
+        }
+        let parts = &self.views.fullscreen_player;
+        if let Some((cancellation, task)) = parts.related_task.borrow_mut().take() {
+            cancellation.cancel();
+            task.abort();
+            parts.related_seed.borrow_mut().take();
         }
         self.animate_fullscreen_player(false);
         self.sync_visualizer_state();
