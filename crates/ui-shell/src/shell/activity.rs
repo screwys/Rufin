@@ -14,6 +14,9 @@ use ui_shared::{mounted_route::route_current_track, route::Route};
 pub(super) struct ActivityView {
     root: gtk::Box,
     report: gtk::Overlay,
+    content: adw::Clamp,
+    outgoing_content: gtk::Picture,
+    transition: adw::TimedAnimation,
     background: FullscreenBackground,
     collections: ActivityCollections,
     sections: [gtk::Box; 4],
@@ -42,6 +45,7 @@ pub(super) struct ActivityView {
 
 impl Drop for ActivityView {
     fn drop(&mut self) {
+        self.transition.skip();
         if let Some(task) = self.task.get_mut().take() {
             task.abort();
         }
@@ -142,6 +146,7 @@ impl ActivityView {
         let builder = ui_shared::ui_resource::builder(resource);
         ui_shared::objects!(builder, resource, {
             root: gtk::Box, report: gtk::Overlay, content_clamp: adw::Clamp,
+            outgoing_content: gtk::Picture,
             report_host: adw::Bin, heading_row: gtk::Box, artwork_row: gtk::Box, ranking_row: gtk::Box,
             minimize: gtk::Button, period_kind: gtk::DropDown, period: gtk::DropDown,
             previous: gtk::Button, next: gtk::Button, export: gtk::Button,
@@ -161,6 +166,26 @@ impl ActivityView {
         report.set_child(Some(&background));
         report.add_overlay(&content_clamp);
         report.set_measure_overlay(&content_clamp, true);
+        report.add_overlay(&outgoing_content);
+        report.set_clip_overlay(&outgoing_content, true);
+        let content_weak = content_clamp.downgrade();
+        let outgoing_weak = outgoing_content.downgrade();
+        let target = adw::CallbackAnimationTarget::new(move |value| {
+            if let Some(content) = content_weak.upgrade() {
+                content.set_opacity(value);
+            }
+            if let Some(outgoing) = outgoing_weak.upgrade() {
+                outgoing.set_opacity(1.0 - value);
+            }
+        });
+        let transition = adw::TimedAnimation::new(&report, 0.0, 1.0, 220, target);
+        let outgoing_weak = outgoing_content.downgrade();
+        transition.connect_done(move |_| {
+            if let Some(outgoing) = outgoing_weak.upgrade() {
+                outgoing.set_visible(false);
+                outgoing.set_paintable(None::<&gdk::Paintable>);
+            }
+        });
         let columns = [heading_row, artwork_row, ranking_row].map(|row| row.downgrade());
         let owner = ui_shared::layout::width_allocation_owner(&report, move |width| {
             let orientation = if width < 760 {
@@ -192,6 +217,9 @@ impl ActivityView {
         let view = Rc::new(Self {
             root,
             report,
+            content: content_clamp,
+            outgoing_content,
+            transition,
             background,
             collections,
             sections: [
@@ -497,9 +525,11 @@ impl ActivityView {
             task.abort();
         }
         self.export.set_sensitive(false);
-        self.report.set_visible(false);
-        self.status.set_text(&tr("Loading..."));
-        self.status.set_visible(true);
+        if self.data.borrow().is_none() || !self.report.is_visible() {
+            self.report.set_visible(false);
+            self.status.set_text(&tr("Loading..."));
+            self.status.set_visible(true);
+        }
         self.previous
             .set_sensitive((self.period.selected() as usize + 1) < self.periods.borrow().len());
         self.next.set_sensitive(self.period.selected() > 0);
@@ -526,8 +556,20 @@ impl ActivityView {
             match result {
                 Ok(data) => {
                     let top = data.tracks.first().map(|row| row.media_uri.clone());
+                    view.transition.skip();
+                    let animate = view.report.is_visible() && view.report.is_mapped();
+                    if animate {
+                        let image = gtk::WidgetPaintable::new(Some(&view.content)).current_image();
+                        view.outgoing_content.set_paintable(Some(&image));
+                        view.outgoing_content
+                            .set_height_request(view.content.height());
+                    }
                     view.data.replace(Some(data));
                     view.apply_data();
+                    if animate {
+                        view.outgoing_content.set_visible(true);
+                        view.transition.play();
+                    }
                     if autoplay
                         && let Some(uri) = top
                         && let Some(shell) = view.shell.upgrade()
@@ -542,6 +584,8 @@ impl ActivityView {
                 Err(error) => {
                     tracing::warn!(%error, "Could not load Activity overview");
                     view.status.set_text(&view.error_text.text());
+                    view.status.set_visible(true);
+                    view.report.set_visible(false);
                 }
             }
         });
@@ -662,6 +706,7 @@ impl ActivityView {
     }
 
     fn export_png(self: &Rc<Self>) {
+        self.transition.skip();
         let Some(shell) = self.shell.upgrade() else {
             return;
         };

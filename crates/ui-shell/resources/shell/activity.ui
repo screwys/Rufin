@@ -569,6 +569,13 @@
       </object>
     </property>
   </object>
+  <object class="GtkPicture" id="outgoing_content">
+    <property name="can-target">false</property>
+    <property name="can-shrink">true</property>
+    <property name="content-fit">fill</property>
+    <property name="valign">start</property>
+    <property name="visible">false</property>
+  </object>
   <object class="GtkLabel" id="empty_text">
     <property name="label" translatable="yes">No listening activity in this period</property>
   </object>
