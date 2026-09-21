@@ -1482,6 +1482,12 @@ impl Shell {
         let mount_started = render_started.as_ref().map(|_| Instant::now());
         let widget = view.widget();
         if let Some(previous) = previous {
+            if gtk::prelude::RootExt::focus(&self.chrome.window).is_some_and(|focus| {
+                focus == previous.surface || focus.is_ancestor(&previous.surface)
+            }) {
+                // Clear focus before removal so GTK does not move it into the new page.
+                gtk::prelude::RootExt::set_focus(&self.chrome.window, None::<&gtk::Widget>);
+            }
             self.route_viewport.route_host.remove(&previous.surface);
             drop(previous);
         }
