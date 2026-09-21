@@ -2894,9 +2894,7 @@ impl Source {
         local_prefix: Option<&str>,
         sample_source_path: Option<&str>,
         cancelled: Arc<AtomicBool>,
-    ) -> SourceResult<PathBuf> {
-        let root =
-            std::fs::canonicalize(root).map_err(|error| SourceError::Other(error.to_string()))?;
+    ) -> SourceResult<(PathBuf, Option<String>)> {
         if cancelled.load(Ordering::Acquire) {
             return Err(SourceError::Cancelled);
         }
@@ -2913,12 +2911,40 @@ impl Source {
             .ok_or(SourceError::InvalidRequest(
                 "No representative Track matches this mapping",
             ))?;
-        let access = mapped_track_access(&root, server_prefix, local_prefix, sample)?.ok_or(
-            SourceError::InvalidRequest("The representative Track does not map to a local file"),
-        )?;
+        let root = root.to_path_buf();
+        let server_prefix = server_prefix.map(str::to_owned);
+        let local_prefix = local_prefix.map(str::to_owned);
+        let (root, server_prefix, access) = tokio::task::spawn_blocking(move || {
+            let root = std::fs::canonicalize(root)
+                .map_err(|error| SourceError::Other(error.to_string()))?;
+            let server_prefix = match_local_access_sample(
+                &root,
+                server_prefix.as_deref(),
+                local_prefix.as_deref(),
+                &sample.source_path,
+            )
+            .ok_or(SourceError::InvalidRequest(
+                "The representative Track does not map to a local file",
+            ))?;
+            let access = mapped_track_access(
+                &root,
+                server_prefix.as_deref(),
+                local_prefix.as_deref(),
+                sample,
+            )?
+            .ok_or(SourceError::InvalidRequest(
+                "The representative Track does not map to a local file",
+            ))?;
+            Ok::<_, SourceError>((root, server_prefix, access))
+        })
+        .await
+        .map_err(|error| SourceError::Other(error.to_string()))??;
+        if cancelled.load(Ordering::Acquire) {
+            return Err(SourceError::Cancelled);
+        }
         database.clear_mapping_access(source).await?;
         database.upsert_local_access(Some(source), &access).await?;
-        Ok(root)
+        Ok((root, server_prefix))
     }
 
     pub async fn complete_local_mapping(
@@ -2930,8 +2956,9 @@ impl Source {
         local_prefix: Option<&str>,
         cancelled: Arc<AtomicBool>,
     ) -> SourceResult<usize> {
-        let root =
-            std::fs::canonicalize(root).map_err(|error| SourceError::Other(error.to_string()))?;
+        let root = tokio::fs::canonicalize(root)
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))?;
         let mut after = None;
         let mut accepted = 0;
         loop {
@@ -2945,16 +2972,35 @@ impl Source {
                 break;
             }
             after = tracks.last().map(|track| track.track_key);
-            for track in tracks {
+            let root = root.clone();
+            let server_prefix = server_prefix.map(str::to_owned);
+            let local_prefix = local_prefix.map(str::to_owned);
+            let worker_cancelled = Arc::clone(&cancelled);
+            let accesses = tokio::task::spawn_blocking(move || {
+                let mut accesses = Vec::new();
+                for track in tracks {
+                    if worker_cancelled.load(Ordering::Acquire) {
+                        return Err(SourceError::Cancelled);
+                    }
+                    if let Some(access) = mapped_track_access(
+                        &root,
+                        server_prefix.as_deref(),
+                        local_prefix.as_deref(),
+                        track,
+                    )? {
+                        accesses.push(access);
+                    }
+                }
+                Ok(accesses)
+            })
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))??;
+            for access in accesses {
                 if cancelled.load(Ordering::Acquire) {
                     return Err(SourceError::Cancelled);
                 }
-                if let Some(access) =
-                    mapped_track_access(&root, server_prefix, local_prefix, track)?
-                {
-                    database.upsert_local_access(Some(source), &access).await?;
-                    accepted += 1;
-                }
+                database.upsert_local_access(Some(source), &access).await?;
+                accepted += 1;
             }
         }
         Ok(accepted)
@@ -3051,7 +3097,7 @@ fn mapped_local_path(
     mapped_file(root, candidate)
 }
 
-pub fn match_local_access_sample(
+fn match_local_access_sample(
     root: &std::path::Path,
     server_prefix: Option<&str>,
     local_prefix: Option<&str>,
@@ -3319,6 +3365,159 @@ pub(crate) fn edited_source_name(requested: &str, current: &str) -> String {
 #[cfg(test)]
 mod refresh_laws {
     use super::*;
+
+    #[tokio::test]
+    async fn reload_infers_one_mapping_and_preserves_access_when_a_location_is_unavailable() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("mounted-share");
+        std::fs::create_dir_all(root.join("Artist")).unwrap();
+        for name in ["one", "two", "other"] {
+            std::fs::write(root.join("Artist").join(format!("{name}.flac")), b"media").unwrap();
+        }
+        let database = Database::open(directory.path().join("library.sqlite"))
+            .await
+            .unwrap();
+        let source = Source::new(
+            SourceId::new("mapping-test"),
+            Implementation::Local(
+                crate::file::local::LocalSource::from_roots(vec![root.clone()]).unwrap(),
+            ),
+        );
+        let mut scan = Scan::begin(&database, "mapping-test", "Music", "music", None)
+            .await
+            .unwrap();
+        for (id, path) in [
+            ("one", "/server/music/Artist/one.flac"),
+            ("two", "/server/music/Artist/two.flac"),
+            ("other", "/different/root/Artist/other.flac"),
+        ] {
+            scan.write_track(
+                id,
+                None,
+                id,
+                id,
+                "Album",
+                "Artist",
+                id,
+                1000,
+                1,
+                1,
+                None,
+                None,
+                None,
+                None,
+                Some("flac"),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(path),
+                [0; 32],
+            )
+            .await
+            .unwrap();
+        }
+        let ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
+            panic!("publish tracks")
+        };
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let sample = Some("/server/music/Artist/one.flac");
+        let (mapped_root, prefix) = source
+            .apply_local_mapping(
+                &database,
+                publication.source,
+                &root,
+                None,
+                None,
+                sample,
+                Arc::clone(&cancelled),
+            )
+            .await
+            .unwrap();
+        assert_eq!(prefix.as_deref(), Some("/server/music"));
+        assert_eq!(
+            source
+                .complete_local_mapping(
+                    &database,
+                    publication.source,
+                    &mapped_root,
+                    prefix.as_deref(),
+                    None,
+                    Arc::clone(&cancelled),
+                )
+                .await
+                .unwrap(),
+            2
+        );
+        let tracks = database
+            .mapping_track_page(
+                publication.source,
+                None,
+                None,
+                3,
+                &library::ReadCancellation::new(),
+            )
+            .await
+            .unwrap();
+        for track in &tracks {
+            assert_eq!(
+                database
+                    .playback_access(&track.media_uri)
+                    .await
+                    .unwrap()
+                    .is_some(),
+                track.object_id != "other"
+            );
+        }
+        assert!(
+            source
+                .apply_local_mapping(
+                    &database,
+                    publication.source,
+                    &directory.path().join("unavailable-share"),
+                    prefix.as_deref(),
+                    None,
+                    sample,
+                    Arc::clone(&cancelled),
+                )
+                .await
+                .is_err()
+        );
+        assert!(
+            source
+                .apply_local_mapping(
+                    &database,
+                    publication.source,
+                    &root,
+                    Some("/wrong/prefix"),
+                    None,
+                    sample,
+                    cancelled,
+                )
+                .await
+                .is_err()
+        );
+        for track in &tracks {
+            assert_eq!(
+                database
+                    .playback_access(&track.media_uri)
+                    .await
+                    .unwrap()
+                    .is_some(),
+                track.object_id != "other"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn cancelled_jellyfin_feed_releases_a_pending_connection() {

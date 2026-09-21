@@ -679,6 +679,7 @@ impl<T: NamedCollectionRow> ReusableCollectionGridCell<T> for NamedCollectionGri
     }
 
     fn bind(&self, _: u32, item: T) {
+        self.body.bind_playing_target(&self.shell, item.playback());
         let artwork = item.artwork(
             self.shell
                 .settings

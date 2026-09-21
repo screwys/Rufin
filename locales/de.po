@@ -607,9 +607,6 @@ msgstr "Lokalen Musikordner auswählen"
 msgid "Choose an address"
 msgstr "Adresse auswählen"
 
-msgid "Choose an existing local folder"
-msgstr "Vorhandenen lokalen Ordner auswählen"
-
 msgid "Choose at least one local music folder"
 msgstr "Mindestens einen lokalen Musikordner auswählen"
 
@@ -1709,9 +1706,6 @@ msgstr "Verwalten"
 msgid "Mapped Local Path"
 msgstr "Verknüpfter lokaler Pfad"
 
-msgid "Mapped local file not found"
-msgstr "Zugeordnete lokale Datei nicht gefunden"
-
 msgid "Maximum year"
 msgstr "Maximaljahr"
 
@@ -1935,9 +1929,6 @@ msgstr "Noch keine Favoriten"
 #, fuzzy
 #| msgid "No folder selected"
 msgid "No file linked"
-msgstr "Kein Ordner ausgewählt"
-
-msgid "No folder selected"
 msgstr "Kein Ordner ausgewählt"
 
 msgid "No folders selected"
@@ -2566,6 +2557,9 @@ msgstr "Veröffentlichung"
 msgid "Reload from file"
 msgstr "Aus Favoriten entfernt"
 
+msgid "Reload to apply changes"
+msgstr ""
+
 msgid "Reload"
 msgstr ""
 
@@ -2758,9 +2752,6 @@ msgstr "Diagnoseprotokoll speichern"
 msgid "Save Lyrics"
 msgstr "Songtexte speichern"
 
-msgid "Save Mapping"
-msgstr "Zuordnung speichern"
-
 msgid "Save Server Settings"
 msgstr "Servereinstellungen speichern"
 
@@ -2779,9 +2770,6 @@ msgstr "Liedtexte automatisch speichern"
 #| msgid "Save lyrics automatically"
 msgid "Save playlist changes automatically"
 msgstr "Liedtexte automatisch speichern"
-
-msgid "Save to rescan"
-msgstr "Zum erneuten Scannen speichern"
 
 msgid "Save"
 msgstr "Speichern"
@@ -3032,6 +3020,11 @@ msgstr "Pausierten Status anzeigen"
 
 msgid "Show peak markers"
 msgstr ""
+
+#, fuzzy
+#| msgid "Choose playback output"
+msgid "Show playback queue"
+msgstr "Wiedergabeausgabe auswählen"
 
 msgid "Show ratings in the bottom bar"
 msgstr "Bewertungen in der unteren Leiste anzeigen"
@@ -3752,6 +3745,21 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#~ msgid "Choose an existing local folder"
+#~ msgstr "Vorhandenen lokalen Ordner auswählen"
+
+#~ msgid "Mapped local file not found"
+#~ msgstr "Zugeordnete lokale Datei nicht gefunden"
+
+#~ msgid "No folder selected"
+#~ msgstr "Kein Ordner ausgewählt"
+
+#~ msgid "Save Mapping"
+#~ msgstr "Zuordnung speichern"
+
+#~ msgid "Save to rescan"
+#~ msgstr "Zum erneuten Scannen speichern"
 
 #, fuzzy
 #~| msgid "Import Backup"

@@ -2319,7 +2319,7 @@ impl SourceOwner {
 
     pub fn save_local_access(
         &self,
-        input: SourceLocalAccess,
+        mut input: SourceLocalAccess,
         wait_until_mapped: bool,
     ) -> Receiver<Result<(), String>> {
         let (sender, receiver) = async_channel::bounded(1);
@@ -2336,7 +2336,7 @@ impl SourceOwner {
                     .source
                     .as_ref()
                     .ok_or_else(source_access_unavailable)?;
-                let root_path = source
+                let (root_path, server_prefix) = source
                     .apply_local_mapping(
                         &selected.database,
                         selected.source_key,
@@ -2348,6 +2348,7 @@ impl SourceOwner {
                     )
                     .await
                     .map_err(string_error)?;
+                input.server_prefix = server_prefix;
                 owner.shared.settings.update(|stored| {
                     let configured = stored
                         .sources

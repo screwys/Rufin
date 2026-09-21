@@ -26,7 +26,7 @@ struct LocalAccessRecoveryView {
 pub struct LocalAccessEditor {
     source: SourceHandle,
     source_id: SourceId,
-    folder: Rc<RefCell<Option<PathBuf>>>,
+    folder: RefCell<Option<PathBuf>>,
     server_prefix: glib::WeakRef<adw::EntryRow>,
     local_prefix: Option<glib::WeakRef<adw::EntryRow>>,
     sample_source_path: Option<String>,
@@ -49,7 +49,7 @@ impl LocalAccessEditor {
         Rc::new(Self {
             source: source.clone(),
             source_id,
-            folder: Rc::new(RefCell::new(folder)),
+            folder: RefCell::new(folder),
             server_prefix: server_prefix.downgrade(),
             local_prefix: local_prefix.map(|row| row.downgrade()),
             sample_source_path,
@@ -88,23 +88,81 @@ impl LocalAccessEditor {
         self.operation.replace(LocalAccessOperation::Editing);
     }
 
-    pub fn connect_folder_button(
+    pub fn connect_folder_row(
         self: &Rc<Self>,
         window: &gtk::ApplicationWindow,
         button: &gtk::Button,
-        row: &adw::ActionRow,
-        path_tooltip: bool,
+        row: &adw::EntryRow,
+        edit: &gtk::ToggleButton,
         update: Rc<dyn Fn()>,
     ) {
-        let editor = Rc::clone(self);
-        let row_for_tooltip = row.downgrade();
-        connect_folder_button(window, button, row, Rc::clone(&self.folder), move |path| {
-            if path_tooltip && let Some(row) = row_for_tooltip.upgrade() {
-                row.set_tooltip_text(Some(&crate::path_display::display_path(&path)));
+        if let Some(path) = self.folder.borrow().as_deref() {
+            row.set_text(&path.to_string_lossy());
+        }
+        edit.connect_toggled({
+            let row = row.downgrade();
+            move |edit| {
+                if let Some(row) = row.upgrade() {
+                    row.set_editable(edit.is_active());
+                    if edit.is_active() {
+                        row.grab_focus();
+                    }
+                }
             }
-            editor.begin_editing();
-            editor.match_sample();
-            update();
+        });
+        row.connect_text_notify({
+            let editor = Rc::clone(self);
+            let update = Rc::clone(&update);
+            move |row| {
+                let text = row.text();
+                *editor.folder.borrow_mut() =
+                    (!text.is_empty()).then(|| PathBuf::from(text.as_str()));
+                editor.begin_editing();
+                update();
+            }
+        });
+        let window = window.downgrade();
+        let row = row.downgrade();
+        let edit = edit.downgrade();
+        let editor = Rc::clone(self);
+        button.connect_clicked(move |_| {
+            let Some(window) = window.upgrade() else {
+                return;
+            };
+            let selected_folder = editor
+                .folder
+                .borrow()
+                .as_ref()
+                .map(gtk::gio::File::for_path);
+            let row = row.clone();
+            let edit = edit.clone();
+            let editor = Rc::downgrade(&editor);
+            let update = Rc::downgrade(&update);
+            glib::spawn_future_local(async move {
+                let dialog = gtk::FileDialog::builder()
+                    .title(tr("Select Music Folder"))
+                    .build();
+                if let Some(folder) = selected_folder.as_ref() {
+                    dialog.set_initial_folder(Some(folder));
+                }
+                let Ok(folder) = dialog.select_folder_future(Some(&window)).await else {
+                    return;
+                };
+                let Some(path) = folder.path() else { return };
+                let (Some(row), Some(edit), Some(editor), Some(update)) = (
+                    row.upgrade(),
+                    edit.upgrade(),
+                    editor.upgrade(),
+                    update.upgrade(),
+                ) else {
+                    return;
+                };
+                row.set_text(&path.to_string_lossy());
+                *editor.folder.borrow_mut() = Some(path);
+                edit.set_active(false);
+                editor.begin_editing();
+                update();
+            });
         });
     }
 
@@ -161,31 +219,6 @@ impl LocalAccessEditor {
             }
         });
     }
-
-    pub fn match_sample(&self) {
-        let draft = self.draft();
-        let (Some(root), Some(source_path)) =
-            (draft.folder.as_deref(), self.sample_source_path.as_deref())
-        else {
-            return;
-        };
-        let matched = sources::match_local_access_sample(
-            root,
-            normalized_prefix(&draft.server_prefix).as_deref(),
-            normalized_prefix(&draft.local_prefix).as_deref(),
-            source_path,
-        );
-        let Some(server_prefix) = matched else {
-            self.operation.replace(LocalAccessOperation::Failed(tr(
-                "Mapped local file not found",
-            )));
-            return;
-        };
-        self.operation.replace(LocalAccessOperation::Editing);
-        if let Some(row) = self.server_prefix.upgrade() {
-            row.set_text(server_prefix.as_deref().unwrap_or_default());
-        }
-    }
 }
 
 pub fn mount_metadata_local_access_mapping(
@@ -212,7 +245,8 @@ pub fn mount_metadata_local_access_mapping(
     crate::objects!(builder, resource, {
         mapping_group: adw::PreferencesGroup,
         mapping_expander: adw::ExpanderRow,
-        folder_row: adw::ActionRow,
+        folder_row: adw::EntryRow,
+        folder_edit: gtk::ToggleButton,
         folder_button: gtk::Button,
         server_prefix: adw::EntryRow,
         local_prefix: adw::EntryRow,
@@ -233,16 +267,6 @@ pub fn mount_metadata_local_access_mapping(
     local_prefix.set_text(&local_prefix_text);
     sample_row.set_subtitle(source_path);
     sample_row.set_tooltip_text(Some(source_path));
-    folder_row.set_subtitle(
-        &folder
-            .as_deref()
-            .map(crate::path_display::display_path)
-            .unwrap_or_else(|| tr("No folder selected")),
-    );
-    if let Some(path) = folder.as_deref() {
-        folder_row.set_tooltip_text(Some(&crate::path_display::display_path(path)));
-    }
-    folder_row.set_activatable_widget(Some(&folder_button));
     preview_row.set_subtitle(&preview_local_path_text(
         Some(source_path),
         &server_prefix_text,
@@ -264,7 +288,7 @@ pub fn mount_metadata_local_access_mapping(
         let editor = Rc::clone(&editor);
         let server_prefix = server_prefix.downgrade();
         let local_prefix = local_prefix.downgrade();
-        let folder_button = folder_button.downgrade();
+        let folder_row = folder_row.downgrade();
         let sample_row = sample_row.downgrade();
         let preview_row = preview_row.downgrade();
         let status = status.downgrade();
@@ -273,7 +297,7 @@ pub fn mount_metadata_local_access_mapping(
             let (
                 Some(server_prefix),
                 Some(local_prefix),
-                Some(folder_button),
+                Some(folder_row),
                 Some(sample_row),
                 Some(preview_row),
                 Some(status),
@@ -281,7 +305,7 @@ pub fn mount_metadata_local_access_mapping(
             ) = (
                 server_prefix.upgrade(),
                 local_prefix.upgrade(),
-                folder_button.upgrade(),
+                folder_row.upgrade(),
                 sample_row.upgrade(),
                 preview_row.upgrade(),
                 status.upgrade(),
@@ -292,18 +316,10 @@ pub fn mount_metadata_local_access_mapping(
             };
             let draft = editor.draft();
             let sample_source_path = editor.sample_source_path();
-            let view = local_access_recovery_view(
-                local_access_replacement_state(
-                    sample_source_path.as_deref().unwrap_or_default(),
-                    draft.server_prefix.as_str(),
-                    draft.local_prefix.as_str(),
-                    draft.folder.as_deref(),
-                ),
-                &editor.operation(),
-            );
+            let view = local_access_recovery_view(draft.folder.is_some(), &editor.operation());
             server_prefix.set_sensitive(view.controls_sensitive);
             local_prefix.set_sensitive(view.controls_sensitive);
-            folder_button.set_sensitive(view.controls_sensitive);
+            folder_row.set_sensitive(view.controls_sensitive);
             save.set_sensitive(view.continue_sensitive);
             status.set_text(&view.message);
             status.set_visible(!view.message.is_empty());
@@ -318,11 +334,11 @@ pub fn mount_metadata_local_access_mapping(
             ));
         }
     });
-    editor.connect_folder_button(
+    editor.connect_folder_row(
         window,
         &folder_button,
         &folder_row,
-        true,
+        &folder_edit,
         Rc::clone(&update),
     );
     editor.connect_changes(Rc::clone(&update));
@@ -332,18 +348,6 @@ pub fn mount_metadata_local_access_mapping(
         move |_| editor.save(Rc::clone(&update))
     });
 
-    let draft = editor.draft();
-    if draft.folder.is_some()
-        && !validate_local_access_path(
-            editor.sample_source_path().as_deref(),
-            draft.server_prefix.as_str(),
-            draft.local_prefix.as_str(),
-            draft.folder.as_deref(),
-        )
-        .saveable
-    {
-        editor.match_sample();
-    }
     update();
 }
 pub fn connect_mapping_expander_visibility(
@@ -387,66 +391,21 @@ fn normalized_prefix(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
 
-pub fn local_prefix_is_directory(draft: &LocalAccessDraft) -> bool {
-    let prefix = draft.local_prefix.trim();
-    if prefix.is_empty() {
-        return true;
-    }
-    let path = Path::new(prefix);
-    if path.is_absolute() {
-        path.is_dir()
-    } else {
-        draft
-            .folder
-            .as_deref()
-            .is_some_and(|root| root.join(path).is_dir())
-    }
-}
-
 fn local_access_recovery_view(
-    validation: (bool, String),
+    has_location: bool,
     operation: &LocalAccessOperation,
 ) -> LocalAccessRecoveryView {
-    let (mapping_ready, validation_message) = validation;
     let pending = matches!(operation, LocalAccessOperation::Pending);
     let message = match operation {
         LocalAccessOperation::Failed(error) => error.clone(),
-        LocalAccessOperation::Editing | LocalAccessOperation::Pending => validation_message,
+        _ if !has_location => tr("Choose a local music folder"),
+        _ => String::new(),
     };
     LocalAccessRecoveryView {
         controls_sensitive: !pending,
-        continue_sensitive: mapping_ready && !pending,
+        continue_sensitive: has_location && !pending,
         message,
     }
-}
-
-fn local_access_replacement_state(
-    source_path: &str,
-    server_prefix: &str,
-    local_prefix: &str,
-    root: Option<&Path>,
-) -> (bool, String) {
-    let Some(root) = root else {
-        return (false, tr("Choose a local music folder"));
-    };
-    let local_prefix = local_prefix.trim();
-    let local_base = if Path::new(local_prefix).is_absolute() {
-        PathBuf::from(local_prefix)
-    } else {
-        root.join(local_prefix)
-    };
-    if !local_prefix.is_empty() && !local_base.is_dir() {
-        return (false, tr("Choose an existing local folder"));
-    }
-    let validation =
-        validate_local_access_path(Some(source_path), server_prefix, local_prefix, Some(root));
-    if validation.projected.is_some() && !validation.saveable {
-        return (false, tr("Mapped local file not found"));
-    }
-    if validation.projected.is_none() {
-        return (false, validation.message);
-    }
-    (true, String::new())
 }
 
 pub fn preview_local_path_text(
@@ -455,39 +414,16 @@ pub fn preview_local_path_text(
     local_prefix: &str,
     folder: Option<&Path>,
 ) -> String {
-    validate_local_access_path(sample_source_path, server_prefix, local_prefix, folder).message
-}
-
-pub struct LocalAccessPathValidation {
-    pub message: String,
-    pub projected: Option<PathBuf>,
-    pub saveable: bool,
-}
-
-pub fn validate_local_access_path(
-    sample_source_path: Option<&str>,
-    server_prefix: &str,
-    local_prefix: &str,
-    folder: Option<&Path>,
-) -> LocalAccessPathValidation {
     let Some(sample) = sample_source_path
         .map(str::trim)
         .filter(|path| !path.is_empty())
     else {
-        return LocalAccessPathValidation {
-            message: tr("No cached server path yet"),
-            projected: None,
-            saveable: false,
-        };
+        return tr("No cached server path yet");
     };
     let server_prefix = server_prefix.trim();
     let local_prefix = local_prefix.trim();
     let Some(folder) = folder else {
-        return LocalAccessPathValidation {
-            message: tr("Choose a local music folder"),
-            projected: None,
-            saveable: false,
-        };
+        return tr("Choose a local music folder");
     };
     let projected = sources::project_local_access_path(
         folder,
@@ -497,95 +433,47 @@ pub fn validate_local_access_path(
     );
 
     if !server_prefix.is_empty() {
-        return match projected {
-            Some(path) => {
-                let message = crate::path_display::display_path(&path);
-                let saveable = mapped_file_exists(folder, &path);
-                LocalAccessPathValidation {
-                    message,
-                    projected: Some(path),
-                    saveable,
-                }
-            }
-            _ => LocalAccessPathValidation {
-                message: tr("Server prefix doesn't match"),
-                projected: None,
-                saveable: false,
-            },
-        };
+        return projected
+            .as_deref()
+            .map(crate::path_display::display_path)
+            .unwrap_or_else(|| tr("Server prefix doesn't match"));
     }
 
     let sample_path = Path::new(sample);
     if !sources::reported_path_is_absolute(sample) {
         let path = projected.unwrap_or_else(|| folder.join(sample_path));
-        let saveable = mapped_file_exists(folder, &path);
-        return LocalAccessPathValidation {
-            message: crate::path_display::display_path(&path),
-            projected: Some(path),
-            saveable,
-        };
+        return crate::path_display::display_path(&path);
     }
     if sample_path.starts_with(folder) {
-        return LocalAccessPathValidation {
-            message: crate::path_display::display_path(sample_path),
-            projected: Some(sample_path.to_path_buf()),
-            saveable: mapped_file_exists(folder, sample_path),
-        };
+        return crate::path_display::display_path(sample_path);
     }
-    LocalAccessPathValidation {
-        message: tr("Add a matching server prefix"),
-        projected,
-        saveable: false,
-    }
-}
-
-fn mapped_file_exists(root: &Path, candidate: &Path) -> bool {
-    let (Ok(root), Ok(candidate)) = (root.canonicalize(), candidate.canonicalize()) else {
-        return false;
-    };
-    candidate.starts_with(root) && candidate.is_file()
+    tr("Add a matching server prefix")
 }
 
 pub fn local_access_status_text(
     draft: &LocalAccessDraft,
-    remote: bool,
     changed: bool,
     status: &LocalAccessStatus,
 ) -> String {
     if draft.folder.is_none() {
         return tr("Choose a local music folder");
     }
-    if !remote {
-        return if changed {
-            tr("Save to rescan")
-        } else {
-            tr("Saved")
-        };
-    }
-    if !local_prefix_is_directory(draft) {
-        return tr("Choose an existing local folder");
+    if changed {
+        return tr("Reload to apply changes");
     }
     if status.total_track_count == 0 {
-        return if changed {
-            tr("Save to rescan")
-        } else {
-            tr("Saved")
-        };
+        return tr("Saved");
     }
 
     let total = status.total_track_count.to_string();
     let matched = status.matched_track_count.to_string();
     let args = [("matched", matched.as_str()), ("total", total.as_str())];
-    if changed {
-        tr("Save to rescan")
-    } else {
-        trn_with(
-            "Saved mapping. {matched} of {total} server path matches",
-            "Saved mapping. {matched} of {total} server paths match",
-            status.total_track_count as u64,
-            &args,
-        )
-    }
+    trn_with(
+        "Saved mapping. {matched} of {total} server path matches",
+        "Saved mapping. {matched} of {total} server paths match",
+        status.total_track_count as u64,
+        &args,
+    )
 }
 
 #[cfg(test)]
@@ -593,85 +481,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn representative_mapping_requires_one_existing_local_file() {
-        let directory = tempfile::tempdir().expect("temporary local mapping");
-        let root = directory.path().join("Music");
-        std::fs::create_dir_all(&root).expect("create mapped music folder");
-        let track = root.join("Artist/Track.flac");
-        std::fs::create_dir_all(track.parent().expect("Track parent")).expect("create Artist");
-        std::fs::write(&track, b"media").expect("write Track");
-
-        assert!(
-            local_access_replacement_state(
-                "/server/music/Artist/Track.flac",
-                "/server/music",
+    fn preview_does_not_require_an_available_folder_or_file() {
+        let directory = tempfile::tempdir().expect("temporary mapping path");
+        let root = directory.path().join("unmounted-share");
+        let projected = root.join("Artist/Track.flac");
+        assert_eq!(
+            preview_local_path_text(
+                Some("/server/Artist/Track.flac"),
+                "/server",
                 "",
-                Some(&root),
-            )
-            .0
+                Some(&root)
+            ),
+            crate::path_display::display_path(&projected),
         );
-        assert!(
-            !local_access_replacement_state(
-                "/server/music/Artist/Missing.flac",
-                "/server/music",
-                "",
-                Some(&root),
-            )
-            .0
+        assert_eq!(
+            preview_local_path_text(Some("Artist/Track.flac"), "", "", Some(&root)),
+            crate::path_display::display_path(&projected),
         );
-        assert!(
-            !local_access_replacement_state(
-                "/server/music/Artist/Track.flac",
-                "/different/root",
-                "",
-                Some(&root),
-            )
-            .0
-        );
+        assert!(!root.exists());
     }
 
     #[test]
-    fn direct_same_path_mapping_does_not_require_prefixes() {
-        let directory = tempfile::tempdir().expect("temporary local mapping");
-        let root = directory.path().join("Music");
-        std::fs::create_dir_all(&root).expect("create local music folder");
-        let track = root.join("Track.flac");
-        std::fs::write(&track, b"media").expect("write Track");
-
-        let state =
-            local_access_replacement_state(track.to_string_lossy().as_ref(), "", "", Some(&root));
-
-        assert_eq!(state, (true, String::new()));
-    }
-
-    #[test]
-    fn relative_server_paths_use_the_selected_music_folder() {
-        let directory = tempfile::tempdir().expect("temporary local mapping");
-        let track = directory.path().join("Artist/Album/01-01 - Track.flac");
-        std::fs::create_dir_all(track.parent().expect("Track parent")).expect("create Album");
-        std::fs::write(&track, b"media").expect("write Track");
-        let state = local_access_replacement_state(
-            "Artist/Album/01-01 - Track.flac",
-            "",
-            "",
-            Some(directory.path()),
+    fn rooted_server_paths_need_a_prefix_for_an_unrelated_folder() {
+        let directory = tempfile::tempdir().expect("temporary mapping path");
+        assert_eq!(
+            preview_local_path_text(
+                Some(r"D:\Music\Artist\Track.flac"),
+                "",
+                "",
+                Some(directory.path())
+            ),
+            "Add a matching server prefix",
         );
-
-        assert_eq!(state, (true, String::new()));
-    }
-
-    #[test]
-    fn rooted_server_paths_are_not_appended_to_an_unrelated_folder() {
-        let directory = tempfile::tempdir().expect("temporary local mapping");
-        let validation = validate_local_access_path(
-            Some(r"D:\Music\Artist\Track.flac"),
-            "",
-            "",
-            Some(directory.path()),
-        );
-
-        assert!(!validation.saveable);
-        assert_eq!(validation.message, "Add a matching server prefix");
     }
 
     #[test]
@@ -696,7 +537,7 @@ mod tests {
     #[test]
     fn completion_error_stays_visible_for_a_valid_mapping() {
         let view = local_access_recovery_view(
-            (true, String::new()),
+            true,
             &LocalAccessOperation::Failed("Check failed".to_string()),
         );
 
@@ -707,63 +548,10 @@ mod tests {
 
     #[test]
     fn pending_state_disables_every_mapping_control() {
-        let view =
-            local_access_recovery_view((true, String::new()), &LocalAccessOperation::Pending);
+        let view = local_access_recovery_view(true, &LocalAccessOperation::Pending);
 
         assert!(!view.controls_sensitive);
         assert!(!view.continue_sensitive);
         assert!(view.message.is_empty());
     }
-
-    #[test]
-    fn mapping_validation_requires_the_representative_file() {
-        let directory = tempfile::tempdir().expect("temporary local mapping");
-        let projected = directory.path().join("Artist/Missing.flac");
-        let validation =
-            validate_local_access_path(Some("Artist/Missing.flac"), "", "", Some(directory.path()));
-
-        assert!(!validation.saveable);
-        assert_eq!(validation.projected.as_deref(), Some(projected.as_path()));
-    }
-}
-
-pub fn connect_folder_button(
-    window: &gtk::ApplicationWindow,
-    button: &gtk::Button,
-    row: &adw::ActionRow,
-    target: Rc<RefCell<Option<PathBuf>>>,
-    on_changed: impl Fn(PathBuf) + 'static,
-) {
-    let window = window.downgrade();
-    let row = row.downgrade();
-    let on_changed: Rc<dyn Fn(PathBuf)> = Rc::new(on_changed);
-    button.connect_clicked(move |_| {
-        let Some(window) = window.upgrade() else {
-            return;
-        };
-        let target = Rc::clone(&target);
-        let row = row.clone();
-        let on_changed = Rc::downgrade(&on_changed);
-        gtk::glib::spawn_future_local(async move {
-            let selected_folder = target.borrow().as_ref().map(gtk::gio::File::for_path);
-            let dialog = gtk::FileDialog::builder()
-                .title(tr("Select Music Folder"))
-                .build();
-            if let Some(folder) = selected_folder.as_ref() {
-                dialog.set_initial_folder(Some(folder));
-            }
-            let Ok(folder) = dialog.select_folder_future(Some(&window)).await else {
-                return;
-            };
-            let Some(path) = folder.path() else {
-                return;
-            };
-            let (Some(row), Some(on_changed)) = (row.upgrade(), on_changed.upgrade()) else {
-                return;
-            };
-            row.set_subtitle(&crate::path_display::display_path(&path));
-            *target.borrow_mut() = Some(path.clone());
-            on_changed(path);
-        });
-    });
 }

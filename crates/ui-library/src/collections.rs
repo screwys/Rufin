@@ -405,7 +405,7 @@ impl<T: TrackPresentation> TrackTablePlayingState<T> {
                 })
                 .unwrap_or(gtk::INVALID_LIST_POSITION);
             inner.position.set(position);
-            inner.indicator.set_position(position);
+            inner.indicator.set_current(track_id.as_deref(), position);
         });
         inner.model_handler.replace(Some(handler));
         Self { inner }
@@ -413,7 +413,9 @@ impl<T: TrackPresentation> TrackTablePlayingState<T> {
 
     fn set_position(&self, position: u32) {
         self.inner.position.set(position);
-        self.inner.indicator.set_position(position);
+        self.inner
+            .indicator
+            .set_current(self.inner.track_id.borrow().as_deref(), position);
     }
 
     fn clear_now_playing(&self) {

@@ -24,6 +24,7 @@ impl SidebarPanel {
 #[serde(default)]
 pub struct RightPanelSettings {
     pub order: Vec<SidebarPanel>,
+    pub queue_visible: bool,
     pub combined: bool,
     pub lyrics_height: Option<i32>,
     pub visualizer_height: Option<i32>,
@@ -33,6 +34,7 @@ impl Default for RightPanelSettings {
     fn default() -> Self {
         Self {
             order: SidebarPanel::ALL.to_vec(),
+            queue_visible: true,
             combined: true,
             lyrics_height: None,
             visualizer_height: None,
@@ -56,7 +58,7 @@ impl RightPanelSettings {
             .iter()
             .copied()
             .filter(|panel| match panel {
-                SidebarPanel::Queue => true,
+                SidebarPanel::Queue => self.queue_visible,
                 SidebarPanel::Lyrics => lyrics || self.combined && visualizer,
                 SidebarPanel::Visualizer => visualizer && !self.combined,
             })
@@ -98,6 +100,27 @@ impl RightPanelSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn queue_visibility_defaults_on_and_preserves_panel_order() {
+        use SidebarPanel::*;
+        let mut settings: RightPanelSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.visible_panels(false, false), [Queue]);
+        settings.queue_visible = false;
+        assert!(settings.visible_panels(false, false).is_empty());
+        assert_eq!(settings.visible_panels(true, true), [Lyrics]);
+        settings.combined = false;
+        assert_eq!(settings.visible_panels(true, true), [Lyrics, Visualizer]);
+        assert!(settings.move_panel(Visualizer, -1, true, true));
+        let restored: RightPanelSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(restored, settings);
+        settings.queue_visible = true;
+        assert_eq!(
+            settings.visible_panels(true, true),
+            [Queue, Visualizer, Lyrics]
+        );
+    }
 
     #[test]
     fn moving_combined_panel_keeps_the_separate_visualizer_position() {
