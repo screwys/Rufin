@@ -660,9 +660,6 @@ msgstr "Collections"
 msgid "Color for the active word during playback"
 msgstr "Couleur pour le mot actif pendant la lecture"
 
-msgid "Color scheme"
-msgstr ""
-
 msgid "Columns"
 msgstr "Colonnes"
 
@@ -833,6 +830,11 @@ msgstr "Impossible de charger des morceaux correspondants"
 
 msgid "Could not load this page"
 msgstr "Impossible de charger cette page"
+
+#, fuzzy
+#| msgid "Could not open folder: {error}"
+msgid "Could not open file: {error}"
+msgstr "Impossible d'ouvrir le dossier: {error}"
 
 msgid "Could not open folder: {error}"
 msgstr "Impossible d'ouvrir le dossier: {error}"
@@ -1088,6 +1090,11 @@ msgid "Edit lyrics"
 msgstr "Modifier les paroles"
 
 msgid "Edit metadata"
+msgstr "Modifier les métadonnées"
+
+#, fuzzy
+#| msgid "Edit metadata"
+msgid "Edit theme"
 msgstr "Modifier les métadonnées"
 
 msgid "Edit"
@@ -2092,6 +2099,9 @@ msgstr ""
 msgid "Open automatically"
 msgstr "Rafraîchir automatiquement"
 
+msgid "Open custom themes folder"
+msgstr ""
+
 msgid "Open fullscreen player"
 msgstr ""
 
@@ -2541,6 +2551,11 @@ msgstr ""
 
 msgid "Reload from file"
 msgstr ""
+
+#, fuzzy
+#| msgid "Reload"
+msgid "Reload themes"
+msgstr "Recharger"
 
 msgid "Reload to apply changes"
 msgstr ""

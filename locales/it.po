@@ -673,9 +673,6 @@ msgstr "Collezioni"
 msgid "Color for the active word during playback"
 msgstr "Colore per la parola attiva durante il playback"
 
-msgid "Color scheme"
-msgstr "Schema di colori"
-
 msgid "Columns"
 msgstr "Colonne"
 
@@ -844,6 +841,11 @@ msgstr "Non è stato possibile caricare le relative tracce"
 
 msgid "Could not load this page"
 msgstr "Non è stato possibile caricare questa pagina"
+
+#, fuzzy
+#| msgid "Could not open folder: {error}"
+msgid "Could not open file: {error}"
+msgstr "Non è stato possibile aprire la cartella: {error}"
 
 msgid "Could not open folder: {error}"
 msgstr "Non è stato possibile aprire la cartella: {error}"
@@ -1101,6 +1103,9 @@ msgid "Edit lyrics"
 msgstr ""
 
 msgid "Edit metadata"
+msgstr ""
+
+msgid "Edit theme"
 msgstr ""
 
 msgid "Edit"
@@ -2074,6 +2079,9 @@ msgstr ""
 msgid "Open automatically"
 msgstr ""
 
+msgid "Open custom themes folder"
+msgstr ""
+
 msgid "Open fullscreen player"
 msgstr ""
 
@@ -2512,6 +2520,9 @@ msgid "Release"
 msgstr ""
 
 msgid "Reload from file"
+msgstr ""
+
+msgid "Reload themes"
 msgstr ""
 
 msgid "Reload to apply changes"
@@ -3688,6 +3699,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Color scheme"
+#~ msgstr "Schema di colori"
 
 #, fuzzy
 #~| msgid "Delete Playlist"

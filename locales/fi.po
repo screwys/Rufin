@@ -662,9 +662,6 @@ msgstr "Kokoelmat"
 msgid "Color for the active word during playback"
 msgstr ""
 
-msgid "Color scheme"
-msgstr "Väriteema"
-
 msgid "Columns"
 msgstr "Sarakkeet"
 
@@ -853,6 +850,11 @@ msgstr "Tätä kansiota ei voitu ladata"
 #| msgid "Couldn't load this folder"
 msgid "Could not load this page"
 msgstr "Tätä kansiota ei voitu ladata"
+
+#, fuzzy
+#| msgid "Could not open folder: {error}"
+msgid "Could not open file: {error}"
+msgstr "Kansiota ei voitu avata: {error}"
 
 msgid "Could not open folder: {error}"
 msgstr "Kansiota ei voitu avata: {error}"
@@ -1122,6 +1124,11 @@ msgid "Edit lyrics"
 msgstr "Muokkaa sanoituksia"
 
 msgid "Edit metadata"
+msgstr "Muokkaa metatietoja"
+
+#, fuzzy
+#| msgid "Edit metadata"
+msgid "Edit theme"
 msgstr "Muokkaa metatietoja"
 
 msgid "Edit"
@@ -2144,6 +2151,9 @@ msgstr ""
 msgid "Open automatically"
 msgstr "Tallenna sanoitukset automaattisesti"
 
+msgid "Open custom themes folder"
+msgstr ""
+
 msgid "Open fullscreen player"
 msgstr ""
 
@@ -2632,6 +2642,11 @@ msgstr ""
 #, fuzzy
 #| msgid "Removed from favorites"
 msgid "Reload from file"
+msgstr "Poistettu suosikeista"
+
+#, fuzzy
+#| msgid "Removed from favorites"
+msgid "Reload themes"
 msgstr "Poistettu suosikeista"
 
 msgid "Reload to apply changes"
@@ -3886,6 +3901,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#~ msgid "Color scheme"
+#~ msgstr "Väriteema"
 
 #~ msgid "Rename Playlist"
 #~ msgstr "Nimeä soittolista uudelleen"

@@ -716,9 +716,6 @@ msgstr "Sbírky"
 msgid "Color for the active word during playback"
 msgstr ""
 
-msgid "Color scheme"
-msgstr "Schéma barev"
-
 msgid "Columns"
 msgstr "Sloupce"
 
@@ -911,6 +908,11 @@ msgstr "Nelze načíst tuto složku"
 #| msgid "Couldn't load this folder"
 msgid "Could not load this page"
 msgstr "Nelze načíst tuto složku"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Could not open file: {error}"
+msgstr "Nelze aktualizovat oblíbené"
 
 #, fuzzy
 #| msgid "Could not update favorites"
@@ -1196,6 +1198,11 @@ msgid "Edit lyrics"
 msgstr "Skrýt text skladby"
 
 msgid "Edit metadata"
+msgstr "Upravit metadata"
+
+#, fuzzy
+#| msgid "Edit metadata"
+msgid "Edit theme"
 msgstr "Upravit metadata"
 
 msgid "Edit"
@@ -2280,6 +2287,9 @@ msgstr ""
 msgid "Open automatically"
 msgstr "Vyhledávání se spustí automaticky"
 
+msgid "Open custom themes folder"
+msgstr ""
+
 msgid "Open fullscreen player"
 msgstr "Otevřít přehrávač na celou obrazovku"
 
@@ -2796,6 +2806,11 @@ msgstr "Vydání"
 #, fuzzy
 #| msgid "Removed from favorites"
 msgid "Reload from file"
+msgstr "Odebrat z oblíbených"
+
+#, fuzzy
+#| msgid "Removed from favorites"
+msgid "Reload themes"
 msgstr "Odebrat z oblíbených"
 
 msgid "Reload to apply changes"
@@ -4101,6 +4116,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Color scheme"
+#~ msgstr "Schéma barev"
 
 #~ msgid "Rename Playlist"
 #~ msgstr "Přejmenovat Playlist"
