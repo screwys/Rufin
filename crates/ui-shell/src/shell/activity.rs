@@ -507,9 +507,14 @@ impl ActivityView {
             .position(|period| Some(*period) == selected)
             .or_else(|| {
                 selected.and_then(|selected| {
+                    let year = |period| match period {
+                        CalendarActivityPeriod::Month { year, .. }
+                        | CalendarActivityPeriod::Year(year) => Some(year),
+                        CalendarActivityPeriod::Lifetime => None,
+                    };
                     periods
                         .iter()
-                        .position(|period| period_key(*period)[..4] == period_key(selected)[..4])
+                        .position(|period| year(*period) == year(selected))
                 })
             })
             .unwrap_or(0);
