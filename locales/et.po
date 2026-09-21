@@ -888,6 +888,11 @@ msgstr "Kopeeri"
 
 #, fuzzy
 #| msgid "Couldn't load this folder"
+msgid "Could not load listening overview"
+msgstr "Selle kausta laadimine ei õnnestunud"
+
+#, fuzzy
+#| msgid "Couldn't load this folder"
 msgid "Could not load related tracks"
 msgstr "Selle kausta laadimine ei õnnestunud"
 
@@ -969,6 +974,18 @@ msgstr "Tume kujundus"
 
 msgid "Date added"
 msgstr "Lisamise kuupäev"
+
+msgid "Days after month ends"
+msgstr ""
+
+msgid "Days after year ends"
+msgstr ""
+
+msgid "Days before month ends"
+msgstr ""
+
+msgid "Days before year ends"
+msgstr ""
 
 msgid "Debug logging"
 msgstr "Silumislogi"
@@ -1247,6 +1264,11 @@ msgid "Export Backup"
 msgstr ""
 
 #, fuzzy
+#| msgid "Support"
+msgid "Export PNG"
+msgstr "Kasutajatugi"
+
+#, fuzzy
 #| msgid "Smart Playlist"
 msgid "Export Playlist"
 msgstr "Nutikas esitusloend"
@@ -1499,6 +1521,9 @@ msgstr "Avaleht"
 msgid "Hour"
 msgstr ""
 
+msgid "Hours"
+msgstr ""
+
 msgid "Identify"
 msgstr "Tuvasta"
 
@@ -1667,6 +1692,11 @@ msgid "ListenBrainz"
 msgstr "ListenBrainz"
 
 #, fuzzy
+#| msgid "Searching for devices..."
+msgid "Listening overview"
+msgstr "Otsin seadmeid…"
+
+#, fuzzy
 #| msgid "No folder contents found."
 msgid "Load file contents"
 msgstr "Kaustasisu ei leidu."
@@ -1814,6 +1844,9 @@ msgstr "Metateabe allikas"
 msgid "Metadata"
 msgstr "Metateave"
 
+msgid "Minimize overview"
+msgstr ""
+
 msgid "Minimum year"
 msgstr "Minimaalne aasta"
 
@@ -1821,6 +1854,12 @@ msgid "Mirrored bars"
 msgstr ""
 
 msgid "Monday"
+msgstr ""
+
+msgid "Month"
+msgstr ""
+
+msgid "Monthly"
 msgstr ""
 
 msgid "Mood tracks"
@@ -1985,6 +2024,11 @@ msgid "Next page"
 msgstr "Järgmine leht"
 
 #, fuzzy
+#| msgid "Next page"
+msgid "Next period"
+msgstr "Järgmine leht"
+
+#, fuzzy
 #| msgid "No source"
 msgid "Next source"
 msgstr "Allikat pole"
@@ -2025,6 +2069,11 @@ msgstr "Piirang puudub"
 #| msgid "No Servers Found"
 msgid "No linked servers found"
 msgstr "Ühtegi serverit ei leidu"
+
+#, fuzzy
+#| msgid "Use listening activity"
+msgid "No listening activity in this period"
+msgstr "Kasuta kuulamisaktiivsust"
 
 msgid "No local file mapping"
 msgstr "Kohalike failide vastendust pole"
@@ -2186,6 +2235,11 @@ msgstr "Ühenda"
 
 msgid "Open approval page"
 msgstr ""
+
+#, fuzzy
+#| msgid "Save lyrics automatically"
+msgid "Open automatically"
+msgstr "Salvesta laulusõnad automaatselt"
 
 msgid "Open fullscreen player"
 msgstr "Ava muusikaesitaja täisekraanivaates"
@@ -2527,6 +2581,11 @@ msgstr "Eelmine heliseade"
 msgid "Previous page"
 msgstr "Eelmine leht"
 
+#, fuzzy
+#| msgid "Previous page"
+msgid "Previous period"
+msgstr "Eelmine leht"
+
 msgid "Previous"
 msgstr "Eelmine"
 
@@ -2840,6 +2899,11 @@ msgstr "Taasta vaikimisi väärtus"
 
 msgid "Restore"
 msgstr "Taasta"
+
+#, fuzzy
+#| msgid "Refresh section"
+msgid "Results per section"
+msgstr "Uuenda ploki andmeid"
 
 msgid "Resume"
 msgstr "Jätka"
@@ -3157,11 +3221,21 @@ msgstr ""
 msgid "Shared secret"
 msgstr "Jagatud saladus"
 
+#, fuzzy
+#| msgid "Show Rufin"
+msgid "Show Rufin in headline"
+msgstr "Näita Rufinit"
+
 msgid "Show Rufin"
 msgstr "Näita Rufinit"
 
 msgid "Show artwork"
 msgstr ""
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Show comparison"
+msgstr "Näita süsteemisalve ikooni"
 
 msgid "Show downloaded badge"
 msgstr "Näita allalaaditud märki"
@@ -3453,6 +3527,26 @@ msgstr ""
 msgid "Toggle Fullscreen"
 msgstr "Lülita täisekraanivaade sisse/välja"
 
+#, fuzzy
+#| msgid "albums"
+msgid "Top albums"
+msgstr "albumit"
+
+#, fuzzy
+#| msgid "Album artists"
+msgid "Top artists"
+msgstr "Albumi esitajad"
+
+#, fuzzy
+#| msgid "Any genre"
+msgid "Top genres"
+msgstr "Iga žanr"
+
+#, fuzzy
+#| msgid "Mood tracks"
+msgid "Top tracks"
+msgstr "Meeleolu sättivad lood"
+
 msgid "Track number"
 msgstr "Loo number"
 
@@ -3736,6 +3830,11 @@ msgstr "Kirjuta EBU R128 sildid failidesse"
 msgid "Year"
 msgstr "Aasta"
 
+#, fuzzy
+#| msgid "Year"
+msgid "Yearly"
+msgstr "Aasta"
+
 msgid "Yellow"
 msgstr "Kollane"
 
@@ -3746,6 +3845,12 @@ msgid "Your music belongs here"
 msgstr ""
 
 msgid "Your queue is empty."
+msgstr ""
+
+msgid "Your {period} in Rufin"
+msgstr ""
+
+msgid "Your {period}"
 msgstr ""
 
 msgid "above"
@@ -3824,6 +3929,14 @@ msgid "{count} month ago"
 msgid_plural "{count} months ago"
 msgstr[0] "{count} kuu tagasi"
 msgstr[1] "{count} kuud tagasi"
+
+#, fuzzy
+#| msgid "{count} day ago"
+#| msgid_plural "{count} days ago"
+msgid "{count} play"
+msgid_plural "{count} plays"
+msgstr[0] "{count} päev tagasi"
+msgstr[1] "{count} päeva tagasi"
 
 msgid "{count} result"
 msgid_plural "{count} results"
@@ -4461,9 +4574,6 @@ msgstr ""
 
 #~ msgid "Website"
 #~ msgstr "Veebisait"
-
-#~ msgid "albums"
-#~ msgstr "albumit"
 
 #~ msgid "appears on"
 #~ msgstr "esineb"

@@ -823,6 +823,11 @@ msgstr ""
 msgid "Copy"
 msgstr "Copier"
 
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Could not load listening overview"
+msgstr "Impossible de charger cette page"
+
 msgid "Could not load related tracks"
 msgstr "Impossible de charger des morceaux correspondants"
 
@@ -896,6 +901,18 @@ msgstr "Sombre"
 
 msgid "Date added"
 msgstr "Date d'ajout"
+
+msgid "Days after month ends"
+msgstr ""
+
+msgid "Days after year ends"
+msgstr ""
+
+msgid "Days before month ends"
+msgstr ""
+
+msgid "Days before year ends"
+msgstr ""
 
 msgid "Debug logging"
 msgstr "Logging de débogage"
@@ -1155,6 +1172,11 @@ msgstr ""
 msgid "Export Backup"
 msgstr "Exporter la sauvegarde"
 
+#, fuzzy
+#| msgid "Export"
+msgid "Export PNG"
+msgstr "Exporter"
+
 msgid "Export Playlist"
 msgstr "Exporter la playlist"
 
@@ -1392,6 +1414,11 @@ msgstr ""
 msgid "Hour"
 msgstr "Heure"
 
+#, fuzzy
+#| msgid "Hour"
+msgid "Hours"
+msgstr "Heure"
+
 msgid "Identify"
 msgstr "Identification"
 
@@ -1555,6 +1582,11 @@ msgid "ListenBrainz"
 msgstr "ListenBrainz"
 
 #, fuzzy
+#| msgid "Searching for devices..."
+msgid "Listening overview"
+msgstr "Recherche des appareils..."
+
+#, fuzzy
 #| msgid "Local File Access"
 msgid "Load file contents"
 msgstr "Accès aux fichiers locaux"
@@ -1691,6 +1723,9 @@ msgstr "Source de métadonnées"
 msgid "Metadata"
 msgstr "Métadonnées"
 
+msgid "Minimize overview"
+msgstr ""
+
 msgid "Minimum year"
 msgstr "Année minimum"
 
@@ -1699,6 +1734,12 @@ msgstr ""
 
 msgid "Monday"
 msgstr "Lundi"
+
+msgid "Month"
+msgstr ""
+
+msgid "Monthly"
+msgstr ""
 
 msgid "Mood tracks"
 msgstr ""
@@ -1859,6 +1900,11 @@ msgstr "Appareil audio suivant"
 msgid "Next page"
 msgstr "Page suivante"
 
+#, fuzzy
+#| msgid "Next page"
+msgid "Next period"
+msgstr "Page suivante"
+
 msgid "Next source"
 msgstr "Source suivante"
 
@@ -1896,6 +1942,9 @@ msgstr "Aucune limite"
 
 msgid "No linked servers found"
 msgstr "Aucun serveur lié trouvé"
+
+msgid "No listening activity in this period"
+msgstr ""
 
 msgid "No local file mapping"
 msgstr ""
@@ -2037,6 +2086,11 @@ msgstr ""
 
 msgid "Open approval page"
 msgstr ""
+
+#, fuzzy
+#| msgid "Refresh automatically"
+msgid "Open automatically"
+msgstr "Rafraîchir automatiquement"
 
 msgid "Open fullscreen player"
 msgstr ""
@@ -2332,6 +2386,11 @@ msgstr "Appareil audio précédent"
 msgid "Previous page"
 msgstr "Page précédente"
 
+#, fuzzy
+#| msgid "Previous page"
+msgid "Previous period"
+msgstr "Page précédente"
+
 msgid "Previous"
 msgstr "Précédent"
 
@@ -2622,6 +2681,11 @@ msgstr ""
 msgid "Restore"
 msgstr ""
 
+#, fuzzy
+#| msgid "Multi-selection"
+msgid "Results per section"
+msgstr "Multisélection"
+
 msgid "Resume"
 msgstr ""
 
@@ -2909,10 +2973,16 @@ msgstr ""
 msgid "Shared secret"
 msgstr ""
 
+msgid "Show Rufin in headline"
+msgstr ""
+
 msgid "Show Rufin"
 msgstr ""
 
 msgid "Show artwork"
+msgstr ""
+
+msgid "Show comparison"
 msgstr ""
 
 msgid "Show downloaded badge"
@@ -3196,6 +3266,26 @@ msgstr ""
 msgid "Toggle Fullscreen"
 msgstr "Afficher en plein écran"
 
+#, fuzzy
+#| msgid "Albums"
+msgid "Top albums"
+msgstr "Albums"
+
+#, fuzzy
+#| msgid "Album artists"
+msgid "Top artists"
+msgstr "Artistes de l'album"
+
+#, fuzzy
+#| msgid "Any genre"
+msgid "Top genres"
+msgstr "Tous les genres"
+
+#, fuzzy
+#| msgid "Tracks"
+msgid "Top tracks"
+msgstr "Morceaux"
+
 msgid "Track number"
 msgstr "Numéro de piste"
 
@@ -3451,6 +3541,11 @@ msgstr ""
 msgid "Year"
 msgstr "Année"
 
+#, fuzzy
+#| msgid "Year"
+msgid "Yearly"
+msgstr "Année"
+
 msgid "Yellow"
 msgstr "Jaune"
 
@@ -3462,6 +3557,12 @@ msgstr ""
 
 msgid "Your queue is empty."
 msgstr "Votre file d'attente est vide."
+
+msgid "Your {period} in Rufin"
+msgstr ""
+
+msgid "Your {period}"
+msgstr ""
 
 msgid "above"
 msgstr "dessus"
@@ -3539,6 +3640,14 @@ msgid "{count} month ago"
 msgid_plural "{count} months ago"
 msgstr[0] ""
 msgstr[1] ""
+
+#, fuzzy
+#| msgid "{count} day ago"
+#| msgid_plural "{count} days ago"
+msgid "{count} play"
+msgid_plural "{count} plays"
+msgstr[0] "depuis {count} jour"
+msgstr[1] "depuis {count} jours"
 
 msgid "{count} result"
 msgid_plural "{count} results"

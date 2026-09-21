@@ -866,6 +866,11 @@ msgstr "複製"
 
 #, fuzzy
 #| msgid "Couldn't load this folder"
+msgid "Could not load listening overview"
+msgstr "無法載入此資料夾"
+
+#, fuzzy
+#| msgid "Couldn't load this folder"
 msgid "Could not load related tracks"
 msgstr "無法載入此資料夾"
 
@@ -947,6 +952,18 @@ msgstr "深色"
 
 msgid "Date added"
 msgstr "新增日期"
+
+msgid "Days after month ends"
+msgstr ""
+
+msgid "Days after year ends"
+msgstr ""
+
+msgid "Days before month ends"
+msgstr ""
+
+msgid "Days before year ends"
+msgstr ""
 
 msgid "Debug logging"
 msgstr "除錯記錄"
@@ -1234,6 +1251,11 @@ msgstr ""
 
 #, fuzzy
 #| msgid "Smart Playlist"
+msgid "Export PNG"
+msgstr "智慧播放清單"
+
+#, fuzzy
+#| msgid "Smart Playlist"
 msgid "Export Playlist"
 msgstr "智慧播放清單"
 
@@ -1481,6 +1503,9 @@ msgstr "首頁"
 msgid "Hour"
 msgstr ""
 
+msgid "Hours"
+msgstr ""
+
 msgid "Identify"
 msgstr "認證"
 
@@ -1642,6 +1667,11 @@ msgstr ""
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
 
+#, fuzzy
+#| msgid "Searching for devices..."
+msgid "Listening overview"
+msgstr "正在尋找裝置..."
+
 msgid "Load file contents"
 msgstr ""
 
@@ -1786,6 +1816,9 @@ msgstr "元資料來源"
 msgid "Metadata"
 msgstr "元資料"
 
+msgid "Minimize overview"
+msgstr ""
+
 msgid "Minimum year"
 msgstr "最小年份"
 
@@ -1793,6 +1826,12 @@ msgid "Mirrored bars"
 msgstr ""
 
 msgid "Monday"
+msgstr ""
+
+msgid "Month"
+msgstr ""
+
+msgid "Monthly"
 msgstr ""
 
 msgid "Mood tracks"
@@ -1963,6 +2002,11 @@ msgid "Next page"
 msgstr "下一頁"
 
 #, fuzzy
+#| msgid "Next page"
+msgid "Next period"
+msgstr "下一頁"
+
+#, fuzzy
 #| msgid "No source"
 msgid "Next source"
 msgstr "無來源"
@@ -2007,6 +2051,9 @@ msgstr "無上限"
 #| msgid "No Servers Found"
 msgid "No linked servers found"
 msgstr "未找到伺服器"
+
+msgid "No listening activity in this period"
+msgstr ""
 
 msgid "No local file mapping"
 msgstr ""
@@ -2168,6 +2215,9 @@ msgid "Open Rufin Connect"
 msgstr "連接"
 
 msgid "Open approval page"
+msgstr ""
+
+msgid "Open automatically"
 msgstr ""
 
 msgid "Open fullscreen player"
@@ -2510,6 +2560,11 @@ msgstr "上一個音訊裝置"
 msgid "Previous page"
 msgstr "上一頁"
 
+#, fuzzy
+#| msgid "Previous page"
+msgid "Previous period"
+msgstr "上一頁"
+
 msgid "Previous"
 msgstr "上一首"
 
@@ -2815,6 +2870,11 @@ msgstr ""
 
 msgid "Restore"
 msgstr "復原"
+
+#, fuzzy
+#| msgid "Refresh section"
+msgid "Results per section"
+msgstr "重新整理區塊"
 
 msgid "Resume"
 msgstr "繼續"
@@ -3131,11 +3191,21 @@ msgstr ""
 msgid "Shared secret"
 msgstr ""
 
+#, fuzzy
+#| msgid "Show Rufin"
+msgid "Show Rufin in headline"
+msgstr "顯示 Rufin"
+
 msgid "Show Rufin"
 msgstr "顯示 Rufin"
 
 msgid "Show artwork"
 msgstr ""
+
+#, fuzzy
+#| msgid "Show lyrics"
+msgid "Show comparison"
+msgstr "顯示歌詞"
 
 msgid "Show downloaded badge"
 msgstr "顯示已下載圖示"
@@ -3432,6 +3502,26 @@ msgstr ""
 msgid "Toggle Fullscreen"
 msgstr "切換全螢幕"
 
+#, fuzzy
+#| msgid "Albums"
+msgid "Top albums"
+msgstr "專輯"
+
+#, fuzzy
+#| msgid "Album artists"
+msgid "Top artists"
+msgstr "專輯藝人"
+
+#, fuzzy
+#| msgid "Any genre"
+msgid "Top genres"
+msgstr "任何曲風"
+
+#, fuzzy
+#| msgid "Mood tracks"
+msgid "Top tracks"
+msgstr "氛圍曲目"
+
 msgid "Track number"
 msgstr "曲序"
 
@@ -3703,6 +3793,11 @@ msgstr ""
 msgid "Year"
 msgstr "年份"
 
+#, fuzzy
+#| msgid "Year"
+msgid "Yearly"
+msgstr "年份"
+
 msgid "Yellow"
 msgstr "黃色"
 
@@ -3713,6 +3808,12 @@ msgid "Your music belongs here"
 msgstr ""
 
 msgid "Your queue is empty."
+msgstr ""
+
+msgid "Your {period} in Rufin"
+msgstr ""
+
+msgid "Your {period}"
 msgstr ""
 
 msgid "above"
@@ -3787,6 +3888,13 @@ msgstr[0] "已選擇 {count} 個資料夾"
 msgid "{count} month ago"
 msgid_plural "{count} months ago"
 msgstr[0] "{count} 個月之前"
+
+#, fuzzy
+#| msgid "{count} day ago"
+#| msgid_plural "{count} days ago"
+msgid "{count} play"
+msgid_plural "{count} plays"
+msgstr[0] "{count} 天之前"
 
 msgid "{count} result"
 msgid_plural "{count} results"

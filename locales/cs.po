@@ -899,6 +899,11 @@ msgstr "Kopírovat"
 
 #, fuzzy
 #| msgid "Couldn't load this folder"
+msgid "Could not load listening overview"
+msgstr "Nelze načíst tuto složku"
+
+#, fuzzy
+#| msgid "Couldn't load this folder"
 msgid "Could not load related tracks"
 msgstr "Nelze načíst tuto složku"
 
@@ -980,6 +985,18 @@ msgstr "Tmavý"
 
 msgid "Date added"
 msgstr "Datum přidání"
+
+msgid "Days after month ends"
+msgstr ""
+
+msgid "Days after year ends"
+msgstr ""
+
+msgid "Days before month ends"
+msgstr ""
+
+msgid "Days before year ends"
+msgstr ""
 
 msgid "Debug logging"
 msgstr "Protokol ladění"
@@ -1268,6 +1285,11 @@ msgid "Export Backup"
 msgstr ""
 
 #, fuzzy
+#| msgid "Support"
+msgid "Export PNG"
+msgstr "Uživatelská podpora"
+
+#, fuzzy
 #| msgid "Smart Playlist"
 msgid "Export Playlist"
 msgstr "Chytrý Playlist"
@@ -1520,6 +1542,9 @@ msgstr "Domovská stránka"
 msgid "Hour"
 msgstr ""
 
+msgid "Hours"
+msgstr ""
+
 msgid "Identify"
 msgstr "Identifikovat"
 
@@ -1690,6 +1715,11 @@ msgid "ListenBrainz"
 msgstr "ListenBrainz"
 
 #, fuzzy
+#| msgid "Searching for devices..."
+msgid "Listening overview"
+msgstr "Hledání zařízení..."
+
+#, fuzzy
 #| msgid "Local File Access"
 msgid "Load file contents"
 msgstr "Přístup k místním souborům"
@@ -1839,6 +1869,9 @@ msgstr "Zdroj metadat"
 msgid "Metadata"
 msgstr "Metadata"
 
+msgid "Minimize overview"
+msgstr ""
+
 msgid "Minimum year"
 msgstr "Minimální rok"
 
@@ -1846,6 +1879,12 @@ msgid "Mirrored bars"
 msgstr ""
 
 msgid "Monday"
+msgstr ""
+
+msgid "Month"
+msgstr ""
+
+msgid "Monthly"
 msgstr ""
 
 msgid "Mood tracks"
@@ -2018,6 +2057,11 @@ msgid "Next page"
 msgstr "Další strana"
 
 #, fuzzy
+#| msgid "Next page"
+msgid "Next period"
+msgstr "Další strana"
+
+#, fuzzy
 #| msgid "No source"
 msgid "Next source"
 msgstr "Žádný zdroj"
@@ -2062,6 +2106,11 @@ msgstr "Bez omezení"
 #| msgid "No Servers Found"
 msgid "No linked servers found"
 msgstr "Nebyly nalezeny žádné servery"
+
+#, fuzzy
+#| msgid "Use listening activity"
+msgid "No listening activity in this period"
+msgstr "Využít funkci poslechu"
 
 msgid "No local file mapping"
 msgstr "Žádné mapování místních souborů"
@@ -2225,6 +2274,11 @@ msgstr "Připojit"
 
 msgid "Open approval page"
 msgstr ""
+
+#, fuzzy
+#| msgid "Searching will start automatically"
+msgid "Open automatically"
+msgstr "Vyhledávání se spustí automaticky"
 
 msgid "Open fullscreen player"
 msgstr "Otevřít přehrávač na celou obrazovku"
@@ -2570,6 +2624,11 @@ msgstr "Předchozí zvukové zařízení"
 msgid "Previous page"
 msgstr "Předchozí stránka"
 
+#, fuzzy
+#| msgid "Previous page"
+msgid "Previous period"
+msgstr "Předchozí stránka"
+
 msgid "Previous"
 msgstr "Předchozí"
 
@@ -2883,6 +2942,11 @@ msgstr ""
 
 msgid "Restore"
 msgstr "Obnovit"
+
+#, fuzzy
+#| msgid "Refresh section"
+msgid "Results per section"
+msgstr "Obnovit sekci"
 
 msgid "Resume"
 msgstr "Pokračovat"
@@ -3211,11 +3275,21 @@ msgstr ""
 msgid "Shared secret"
 msgstr "Sdílený tajný klíč"
 
+#, fuzzy
+#| msgid "Show Rufin"
+msgid "Show Rufin in headline"
+msgstr "Zobrazit Rufin"
+
 msgid "Show Rufin"
 msgstr "Zobrazit Rufin"
 
 msgid "Show artwork"
 msgstr ""
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Show comparison"
+msgstr "Zobrazit ikonu v systémové liště"
 
 msgid "Show downloaded badge"
 msgstr "Zobrazit odznak stažení"
@@ -3514,6 +3588,26 @@ msgstr ""
 msgid "Toggle Fullscreen"
 msgstr "Přepnout do režimu celé obrazovky"
 
+#, fuzzy
+#| msgid "Albums"
+msgid "Top albums"
+msgstr "Alba"
+
+#, fuzzy
+#| msgid "Album artists"
+msgid "Top artists"
+msgstr "Interpreti alba"
+
+#, fuzzy
+#| msgid "Any genre"
+msgid "Top genres"
+msgstr "Všechny žánry"
+
+#, fuzzy
+#| msgid "Mood tracks"
+msgid "Top tracks"
+msgstr "Skladby podle nálady"
+
 msgid "Track number"
 msgstr "Číslo skladby"
 
@@ -3797,6 +3891,11 @@ msgstr ""
 msgid "Year"
 msgstr "Rok"
 
+#, fuzzy
+#| msgid "Year"
+msgid "Yearly"
+msgstr "Rok"
+
 msgid "Yellow"
 msgstr "Žlutá"
 
@@ -3807,6 +3906,12 @@ msgid "Your music belongs here"
 msgstr ""
 
 msgid "Your queue is empty."
+msgstr ""
+
+msgid "Your {period} in Rufin"
+msgstr ""
+
+msgid "Your {period}"
 msgstr ""
 
 msgid "above"
@@ -3889,6 +3994,15 @@ msgid_plural "{count} months ago"
 msgstr[0] "před {count} měsícem"
 msgstr[1] "před {count} měsíci"
 msgstr[2] "před {count} měsíci"
+
+#, fuzzy
+#| msgid "{count} day ago"
+#| msgid_plural "{count} days ago"
+msgid "{count} play"
+msgid_plural "{count} plays"
+msgstr[0] "{count} dnem"
+msgstr[1] "{count} dny"
+msgstr[2] "{count} dny"
 
 msgid "{count} result"
 msgid_plural "{count} results"

@@ -834,6 +834,11 @@ msgstr ""
 msgid "Copy"
 msgstr "Copia"
 
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Could not load listening overview"
+msgstr "Non è stato possibile caricare questa pagina"
+
 msgid "Could not load related tracks"
 msgstr "Non è stato possibile caricare le relative tracce"
 
@@ -907,6 +912,18 @@ msgstr "Scuro"
 
 msgid "Date added"
 msgstr "Data aggiunta"
+
+msgid "Days after month ends"
+msgstr ""
+
+msgid "Days after year ends"
+msgstr ""
+
+msgid "Days before month ends"
+msgstr ""
+
+msgid "Days before year ends"
+msgstr ""
 
 msgid "Debug logging"
 msgstr "Scrivendo il log di debug"
@@ -1164,6 +1181,9 @@ msgstr ""
 msgid "Export Backup"
 msgstr ""
 
+msgid "Export PNG"
+msgstr ""
+
 msgid "Export Playlist"
 msgstr ""
 
@@ -1393,6 +1413,11 @@ msgstr ""
 msgid "Hour"
 msgstr ""
 
+#, fuzzy
+#| msgid "6 hours"
+msgid "Hours"
+msgstr "6 ore"
+
 msgid "Identify"
 msgstr ""
 
@@ -1550,6 +1575,11 @@ msgstr ""
 msgid "ListenBrainz"
 msgstr ""
 
+#, fuzzy
+#| msgid "Connecting to {device}..."
+msgid "Listening overview"
+msgstr "Connettendo a {device}..."
+
 msgid "Load file contents"
 msgstr ""
 
@@ -1685,6 +1715,9 @@ msgstr ""
 msgid "Metadata"
 msgstr ""
 
+msgid "Minimize overview"
+msgstr ""
+
 msgid "Minimum year"
 msgstr ""
 
@@ -1692,6 +1725,12 @@ msgid "Mirrored bars"
 msgstr ""
 
 msgid "Monday"
+msgstr ""
+
+msgid "Month"
+msgstr ""
+
+msgid "Monthly"
 msgstr ""
 
 msgid "Mood tracks"
@@ -1849,6 +1888,9 @@ msgstr ""
 msgid "Next page"
 msgstr ""
 
+msgid "Next period"
+msgstr ""
+
 msgid "Next source"
 msgstr ""
 
@@ -1883,6 +1925,9 @@ msgid "No limit"
 msgstr ""
 
 msgid "No linked servers found"
+msgstr ""
+
+msgid "No listening activity in this period"
 msgstr ""
 
 msgid "No local file mapping"
@@ -2024,6 +2069,9 @@ msgid "Open Rufin Connect"
 msgstr ""
 
 msgid "Open approval page"
+msgstr ""
+
+msgid "Open automatically"
 msgstr ""
 
 msgid "Open fullscreen player"
@@ -2318,6 +2366,9 @@ msgstr ""
 msgid "Previous page"
 msgstr ""
 
+msgid "Previous period"
+msgstr ""
+
 msgid "Previous"
 msgstr ""
 
@@ -2594,6 +2645,9 @@ msgid "Restore player layout"
 msgstr ""
 
 msgid "Restore"
+msgstr ""
+
+msgid "Results per section"
 msgstr ""
 
 msgid "Resume"
@@ -2880,10 +2934,16 @@ msgstr ""
 msgid "Shared secret"
 msgstr ""
 
+msgid "Show Rufin in headline"
+msgstr ""
+
 msgid "Show Rufin"
 msgstr ""
 
 msgid "Show artwork"
+msgstr ""
+
+msgid "Show comparison"
 msgstr ""
 
 msgid "Show downloaded badge"
@@ -3163,6 +3223,26 @@ msgstr ""
 msgid "Toggle Fullscreen"
 msgstr ""
 
+#, fuzzy
+#| msgid "Albums"
+msgid "Top albums"
+msgstr "Album"
+
+#, fuzzy
+#| msgid "Album artists"
+msgid "Top artists"
+msgstr "Artisti dell'album"
+
+#, fuzzy
+#| msgid "Any genre"
+msgid "Top genres"
+msgstr "Qualunque genere"
+
+#, fuzzy
+#| msgid "All tracks"
+msgid "Top tracks"
+msgstr "Tutte le Tracce"
+
 msgid "Track number"
 msgstr ""
 
@@ -3414,6 +3494,9 @@ msgstr ""
 msgid "Year"
 msgstr ""
 
+msgid "Yearly"
+msgstr ""
+
 msgid "Yellow"
 msgstr ""
 
@@ -3424,6 +3507,12 @@ msgid "Your music belongs here"
 msgstr ""
 
 msgid "Your queue is empty."
+msgstr ""
+
+msgid "Your {period} in Rufin"
+msgstr ""
+
+msgid "Your {period}"
 msgstr ""
 
 msgid "above"
@@ -3500,6 +3589,11 @@ msgstr[1] ""
 
 msgid "{count} month ago"
 msgid_plural "{count} months ago"
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "{count} play"
+msgid_plural "{count} plays"
 msgstr[0] ""
 msgstr[1] ""
 

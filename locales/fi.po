@@ -841,6 +841,11 @@ msgstr "Kopioi"
 
 #, fuzzy
 #| msgid "Couldn't load this folder"
+msgid "Could not load listening overview"
+msgstr "Tätä kansiota ei voitu ladata"
+
+#, fuzzy
+#| msgid "Couldn't load this folder"
 msgid "Could not load related tracks"
 msgstr "Tätä kansiota ei voitu ladata"
 
@@ -920,6 +925,18 @@ msgstr "Tumma"
 
 msgid "Date added"
 msgstr "Lisäyspäivä"
+
+msgid "Days after month ends"
+msgstr ""
+
+msgid "Days after year ends"
+msgstr ""
+
+msgid "Days before month ends"
+msgstr ""
+
+msgid "Days before year ends"
+msgstr ""
 
 msgid "Debug logging"
 msgstr ""
@@ -1189,6 +1206,11 @@ msgstr ""
 msgid "Export Backup"
 msgstr ""
 
+#, fuzzy
+#| msgid "Export"
+msgid "Export PNG"
+msgstr "Vie"
+
 msgid "Export Playlist"
 msgstr "Vie soittolista"
 
@@ -1426,6 +1448,11 @@ msgstr "Koti"
 msgid "Hour"
 msgstr "Tunti"
 
+#, fuzzy
+#| msgid "Hour"
+msgid "Hours"
+msgstr "Tunti"
+
 msgid "Identify"
 msgstr ""
 
@@ -1585,6 +1612,11 @@ msgstr ""
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
 
+#, fuzzy
+#| msgid "Searching for devices..."
+msgid "Listening overview"
+msgstr "Haetaan laitteita..."
+
 msgid "Load file contents"
 msgstr ""
 
@@ -1726,6 +1758,9 @@ msgstr "Metatietojen lähde"
 msgid "Metadata"
 msgstr "Metatieto"
 
+msgid "Minimize overview"
+msgstr ""
+
 msgid "Minimum year"
 msgstr "Vuosi vähintään"
 
@@ -1734,6 +1769,12 @@ msgstr ""
 
 msgid "Monday"
 msgstr "Maanantai"
+
+msgid "Month"
+msgstr ""
+
+msgid "Monthly"
+msgstr ""
 
 msgid "Mood tracks"
 msgstr ""
@@ -1894,6 +1935,11 @@ msgstr "Seuraava äänilaite"
 msgid "Next page"
 msgstr "Seuraava sivu"
 
+#, fuzzy
+#| msgid "Next page"
+msgid "Next period"
+msgstr "Seuraava sivu"
+
 msgid "Next source"
 msgstr "Seuraava lähde"
 
@@ -1933,6 +1979,9 @@ msgstr ""
 #| msgid "No Servers Found"
 msgid "No linked servers found"
 msgstr "Palvelimia ei löytynyt"
+
+msgid "No listening activity in this period"
+msgstr ""
 
 msgid "No local file mapping"
 msgstr ""
@@ -2089,6 +2138,11 @@ msgstr "Yhdistä"
 
 msgid "Open approval page"
 msgstr ""
+
+#, fuzzy
+#| msgid "Save lyrics automatically"
+msgid "Open automatically"
+msgstr "Tallenna sanoitukset automaattisesti"
 
 msgid "Open fullscreen player"
 msgstr ""
@@ -2410,6 +2464,11 @@ msgstr "Edellinen äänilaite"
 msgid "Previous page"
 msgstr "Edellinen sivu"
 
+#, fuzzy
+#| msgid "Previous page"
+msgid "Previous period"
+msgstr "Edellinen sivu"
+
 msgid "Previous"
 msgstr "Edellinen"
 
@@ -2713,6 +2772,11 @@ msgstr ""
 
 msgid "Restore"
 msgstr ""
+
+#, fuzzy
+#| msgid "Multi-selection"
+msgid "Results per section"
+msgstr "Monivalinta"
 
 msgid "Resume"
 msgstr ""
@@ -3018,11 +3082,21 @@ msgstr ""
 msgid "Shared secret"
 msgstr "Jaettu salaisuus"
 
+#, fuzzy
+#| msgid "Show Rufin"
+msgid "Show Rufin in headline"
+msgstr "Näytä Rufin"
+
 msgid "Show Rufin"
 msgstr "Näytä Rufin"
 
 msgid "Show artwork"
 msgstr ""
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Show comparison"
+msgstr "Näytä ilmoitusalueen kuvake"
 
 msgid "Show downloaded badge"
 msgstr ""
@@ -3315,6 +3389,26 @@ msgstr ""
 msgid "Toggle Fullscreen"
 msgstr "Koko näyttö päällä/pois"
 
+#, fuzzy
+#| msgid "Albums"
+msgid "Top albums"
+msgstr "Albumit"
+
+#, fuzzy
+#| msgid "Album artists"
+msgid "Top artists"
+msgstr "Albumiesittäjät"
+
+#, fuzzy
+#| msgid "Any genre"
+msgid "Top genres"
+msgstr "Mikä tahansa tyylilaji"
+
+#, fuzzy
+#| msgid "Tracks"
+msgid "Top tracks"
+msgstr "Kappaleet"
+
 msgid "Track number"
 msgstr ""
 
@@ -3588,6 +3682,11 @@ msgstr ""
 msgid "Year"
 msgstr "Vuosi"
 
+#, fuzzy
+#| msgid "Year"
+msgid "Yearly"
+msgstr "Vuosi"
+
 msgid "Yellow"
 msgstr "Keltainen"
 
@@ -3598,6 +3697,12 @@ msgid "Your music belongs here"
 msgstr ""
 
 msgid "Your queue is empty."
+msgstr ""
+
+msgid "Your {period} in Rufin"
+msgstr ""
+
+msgid "Your {period}"
 msgstr ""
 
 msgid "above"
@@ -3676,6 +3781,14 @@ msgid "{count} month ago"
 msgid_plural "{count} months ago"
 msgstr[0] "{count} kuukausi sitten"
 msgstr[1] "{count} kuukautta sitten"
+
+#, fuzzy
+#| msgid "{count} day ago"
+#| msgid_plural "{count} days ago"
+msgid "{count} play"
+msgid_plural "{count} plays"
+msgstr[0] "{count} päivä sitten"
+msgstr[1] "{count} päivää sitten"
 
 msgid "{count} result"
 msgid_plural "{count} results"
