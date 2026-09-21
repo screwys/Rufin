@@ -3291,6 +3291,9 @@ msgstr ""
 msgid "Toggle Fullscreen"
 msgstr "Pārslēgt pilnekrāna režīmu"
 
+msgid "Tools"
+msgstr ""
+
 #, fuzzy
 #| msgid "albums"
 msgid "Top albums"

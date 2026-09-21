@@ -3583,6 +3583,9 @@ msgstr ""
 msgid "Toggle Fullscreen"
 msgstr "Přepnout do režimu celé obrazovky"
 
+msgid "Tools"
+msgstr ""
+
 #, fuzzy
 #| msgid "Albums"
 msgid "Top albums"
