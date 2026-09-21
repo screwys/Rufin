@@ -59,7 +59,7 @@ pub(crate) struct NavigationState {
     pin_generation: Cell<u64>,
     pin_identity: RefCell<Option<SidebarPinIdentity>>,
     pin_items: RefCell<Vec<SidebarPinItem>>,
-    pin_cancellation: RefCell<Option<library::ReadCancellation>>,
+    pub(super) pin_cancellation: RefCell<Option<library::ReadCancellation>>,
 }
 
 impl NavigationState {
@@ -876,6 +876,7 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
     if pins.is_empty() {
         shell.navigation.pin_items.borrow_mut().clear();
         reconcile_sidebar_pin_widgets(shell, &[]);
+        shell.try_reveal_startup_route();
         return;
     }
     let cancellation = library::ReadCancellation::new();
@@ -998,7 +999,6 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
         ) {
             return;
         }
-        shell.navigation.pin_cancellation.borrow_mut().take();
         match items {
             Some(items) => {
                 reconcile_sidebar_pin_widgets(&shell, &items);
@@ -1009,6 +1009,8 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
                 warn!("failed to load sidebar Pins");
             }
         }
+        shell.navigation.pin_cancellation.borrow_mut().take();
+        shell.try_reveal_startup_route();
     });
 }
 

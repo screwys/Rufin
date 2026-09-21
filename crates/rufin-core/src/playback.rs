@@ -633,10 +633,14 @@ impl PlaybackOwner {
                 track: track.map(Box::new),
                 album: album.map(Box::new),
             };
-            let result = prepare_stream(&database, request, move |source_id| {
-                source_owner
-                    .ok_or_else(crate::source::source_access_unavailable)?
-                    .client(source_id)
+            let result = prepare_stream(&database, request, move |source_id| async move {
+                tokio::task::spawn_blocking(move || {
+                    source_owner
+                        .ok_or_else(crate::source::source_access_unavailable)?
+                        .client(&source_id)
+                })
+                .await
+                .map_err(string_error)?
             })
             .await
             .map(|stream| prepare_media_stream(stream, loudness, occurrence));
@@ -1130,11 +1134,14 @@ impl TransportCommandPort for PlaybackOwner {
     }
 }
 
-pub(crate) async fn prepare_stream(
+pub(crate) async fn prepare_stream<F>(
     database: &Database,
     request: StreamRequest,
-    source: impl FnOnce(&sources::SourceId) -> Result<Arc<sources::Source>, String> + Send + 'static,
-) -> Result<playback::ResolvedStream, String> {
+    source: impl FnOnce(sources::SourceId) -> F + Send,
+) -> Result<playback::ResolvedStream, String>
+where
+    F: std::future::Future<Output = Result<Arc<sources::Source>, String>> + Send,
+{
     let access = database
         .playback_access(&request.media_uri)
         .await
@@ -1172,9 +1179,7 @@ pub(crate) async fn prepare_stream(
     if kind != "track" {
         return Err(crate::source::source_access_unavailable());
     }
-    let source = tokio::task::spawn_blocking(move || source(&source_id))
-        .await
-        .map_err(string_error)??;
+    let source = source(source_id).await?;
     source.stream(database, request).await.map_err(string_error)
 }
 
@@ -1373,7 +1378,7 @@ mod tests {
                 occurrence.media_uri.clone(),
                 playback::StreamQuality::Original,
             ),
-            |_| panic!("a completed download must resolve without contacting its source"),
+            |_| async { panic!("a completed download must resolve without contacting its source") },
         )
         .await
         .unwrap();

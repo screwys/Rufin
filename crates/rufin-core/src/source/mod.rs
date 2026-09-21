@@ -69,6 +69,7 @@ pub struct ActiveSource {
     shared: Weak<Shared>,
     current: Mutex<Option<Arc<SelectedSourceState>>>,
     retirement: tokio::sync::watch::Sender<bool>,
+    access_initialized: tokio::sync::watch::Sender<bool>,
 }
 
 pub(crate) type WeakActiveSource = Weak<ActiveSource>;
@@ -76,11 +77,24 @@ pub(crate) type WeakActiveSource = Weak<ActiveSource>;
 impl ActiveSource {
     fn new(shared: &Arc<Shared>, current: Arc<SelectedSourceState>) -> Arc<Self> {
         let (retirement, _) = tokio::sync::watch::channel(false);
+        let (access_initialized, _) = tokio::sync::watch::channel(current.source.is_some());
         Arc::new(Self {
             shared: Arc::downgrade(shared),
             current: Mutex::new(Some(current)),
             retirement,
+            access_initialized,
         })
+    }
+
+    pub(crate) async fn initialized_source(&self) -> Result<Arc<Source>, String> {
+        self.access_initialized
+            .subscribe()
+            .wait_for(|initialized| *initialized)
+            .await
+            .map_err(|_| source_access_unavailable())?;
+        self.resolve()
+            .and_then(|state| state.source.clone())
+            .ok_or_else(source_access_unavailable)
     }
 
     pub(crate) fn resolve(&self) -> Option<Arc<SelectedSourceState>> {
@@ -129,6 +143,7 @@ impl ActiveSource {
 
     fn retire(&self) {
         self.retirement.send_replace(true);
+        self.access_initialized.send_replace(true);
         self.current
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -821,6 +836,7 @@ impl SourceOwner {
             let source = match opened {
                 Ok(source) => source,
                 Err(error) => {
+                    session.access_initialized.send_replace(true);
                     owner.shared.warn_nonfatal(&error);
                     return;
                 }
@@ -830,6 +846,7 @@ impl SourceOwner {
             }) else {
                 return;
             };
+            session.access_initialized.send_replace(true);
             if let Err(error) = owner
                 .shared
                 .downloads
@@ -4276,6 +4293,29 @@ mod artwork_preparation_tests {
                 .unwrap();
             let session = owner.shared.selected_session().unwrap();
             assert!(session.resolve().unwrap().source.is_none());
+            let mut waiting = Box::pin(session.initialized_source());
+            assert!(matches!(
+                std::future::poll_fn(|context| {
+                    std::task::Poll::Ready(waiting.as_mut().poll(context))
+                })
+                .await,
+                std::task::Poll::Pending
+            ));
+            let local_uri = url::Url::from_file_path(directory.path().join("local.flac"))
+                .unwrap()
+                .to_string();
+            let local_stream = tokio::time::timeout(
+                Duration::from_secs(2),
+                crate::playback::prepare_stream(
+                    &database,
+                    playback::StreamRequest::new(&local_uri, playback::StreamQuality::Original),
+                    |_| session.initialized_source(),
+                ),
+            )
+            .await
+            .expect("local streams do not wait for credentials")
+            .unwrap();
+            assert_eq!(local_stream.uri(), local_uri);
             owner
                 .shared
                 .settings
@@ -4469,6 +4509,7 @@ mod artwork_preparation_tests {
                 );
                 assert!(session.resolve().is_none());
                 assert!(old_state.upgrade().is_none());
+                assert!(waiting.await.is_err());
                 release.send(()).unwrap();
                 tokio::time::timeout(Duration::from_secs(2), async {
                     while Arc::strong_count(&session) > 1 {
@@ -4482,6 +4523,10 @@ mod artwork_preparation_tests {
                 continue;
             }
             release.send(()).unwrap();
+            tokio::time::timeout(Duration::from_secs(2), waiting)
+                .await
+                .expect("live access resumes after credential initialization")
+                .unwrap();
             tokio::time::timeout(Duration::from_secs(2), async {
                 while session.resolve().unwrap().source.is_none() {
                     tokio::task::yield_now().await;
@@ -4718,6 +4763,7 @@ mod artwork_preparation_tests {
                 shared: Weak::new(),
                 current: Mutex::new(Some(selected)),
                 retirement,
+                access_initialized: tokio::sync::watch::channel(true).0,
             });
             assert!(session.resolve().is_some());
             session.retire();

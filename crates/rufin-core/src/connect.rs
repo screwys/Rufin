@@ -484,6 +484,9 @@ impl ConnectOwner {
                     Ok(changed) => busy |= changed,
                     Err(error) => owner.failed(error),
                 }
+                if let Err(error) = owner.configure_network().await {
+                    owner.failed(error);
+                }
                 if let Some(session) = owner.session.read().await.clone() {
                     match session
                         .documents
@@ -857,11 +860,56 @@ impl ConnectOwner {
             .ok_or_else(|| "Create or join a Connect profile first".into())
     }
 
+    async fn configure_network(self: &Arc<Self>) -> Result<(), String> {
+        let mut current = self.network.lock().await;
+        let settings = self.status().settings;
+        let Some(network) = current.as_ref() else {
+            return Ok(());
+        };
+        if network
+            .matches_configuration(
+                settings.nearby,
+                settings.relay.as_deref(),
+                settings.public_relay,
+            )
+            .map_err(error)?
+        {
+            return Ok(());
+        }
+        // Iroh fixes the available transports at bind time. An empty relay map
+        // still allows connections to peers' relays, so rebuild when disabled.
+        current.take().unwrap().shutdown().await.map_err(error)?;
+        drop(current);
+        let network = self.network().await?;
+        if let Some(session) = self.session.read().await.clone() {
+            let key = self
+                .secret(file_key(&self.identity_reference()?, &session.profile))
+                .await?
+                .ok_or("The Connect file key is unavailable")?;
+            network
+                .open_profile(
+                    &session.profile,
+                    false,
+                    serde_json::to_vec(&Enrollment { file_key: key }).map_err(error)?,
+                )
+                .await
+                .map_err(error)?;
+            if !settings.setup_pending {
+                network
+                    .attach_documents(session.documents.clone())
+                    .await
+                    .map_err(error)?;
+            }
+        }
+        Ok(())
+    }
+
     async fn close_network(&self) -> Result<(), String> {
-        let network = self.network.lock().await.take();
-        if let Some(network) = network {
+        let mut current = self.network.lock().await;
+        if let Some(network) = current.take() {
             network.shutdown().await.map_err(error)?;
         }
+        drop(current);
         if let Some(session) = self.session.read().await.as_ref() {
             session
                 .receiving
@@ -1229,7 +1277,6 @@ impl ConnectOwner {
                 if let Some(relay) = &relay {
                     reqwest::Url::parse(relay).map_err(error)?;
                 }
-                let changed_discovery = self.status().settings.nearby != nearby;
                 if let Some(session) = self.session.read().await.clone() {
                     session
                         .documents
@@ -1249,23 +1296,12 @@ impl ConnectOwner {
                         .map_err(error)?;
                     self.synchronize().await?;
                 }
-                if let Some(network) = self.network.lock().await.as_ref() {
-                    network
-                        .set_relay(relay.as_deref(), public_relay)
-                        .await
-                        .map_err(error)?;
-                }
                 self.save(|config| {
                     config.nearby = nearby;
                     config.relay = relay;
                     config.public_relay = public_relay;
                 })?;
-                if changed_discovery {
-                    self.close_network().await?;
-                    if let Some(profile) = self.status().settings.profile {
-                        self.open(profile, false).await?;
-                    }
-                }
+                self.configure_network().await?;
             }
             Action::Continue { peer } => self.continue_from(&peer).await?,
             Action::Control { peer, command } => {
@@ -1762,17 +1798,7 @@ impl ConnectOwner {
             .capture(&self.database)
             .await
             .map_err(error)?;
-        let network = self.network.lock().await.clone();
         let projected = self.project(&session).await?;
-        if let Some(network) = network {
-            network
-                .set_relay(
-                    self.status().settings.relay.as_deref(),
-                    self.status().settings.public_relay,
-                )
-                .await
-                .map_err(error)?;
-        }
         Ok(captured > 0 || projected)
     }
 

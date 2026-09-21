@@ -8,7 +8,7 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use futures_util::StreamExt;
 use iroh::{
-    Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey, Watcher,
+    Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey, TransportAddr, Watcher,
     address_lookup::{
         AddressLookup, DnsAddressLookup, EndpointData, PkarrPublisher, PkarrResolver,
         memory::MemoryLookup,
@@ -50,11 +50,94 @@ impl AddressLookup for PublicAddressPublisher {
 }
 
 fn relay_mode(address: Option<&str>, public: bool) -> Result<RelayMode> {
-    Ok(match address {
+    let mode = match address {
         Some(address) => RelayMode::custom([address.parse::<iroh::RelayUrl>()?]),
         None if public => RelayMode::Default,
         None => RelayMode::Disabled,
-    })
+    };
+    if matches!(mode, RelayMode::Disabled) {
+        return Ok(mode);
+    }
+    Ok(RelayMode::Custom(
+        mode.relay_map()
+            .relays::<Vec<_>>()
+            .into_iter()
+            .map(|config| {
+                let mut config = (*config).clone();
+                config.url = canonical_relay(config.url);
+                config
+            })
+            .collect(),
+    ))
+}
+
+fn canonical_relay(relay: iroh::RelayUrl) -> iroh::RelayUrl {
+    let mut url = (*relay).clone();
+    if let Some(domain) = url.domain().map(str::to_owned) {
+        url.set_host(Some(domain.trim_end_matches('.')))
+            .expect("an existing domain is valid");
+    }
+    url.into()
+}
+
+fn canonical_address(mut address: EndpointAddr) -> EndpointAddr {
+    address.addrs = address
+        .addrs
+        .into_iter()
+        .map(|addr| match addr {
+            TransportAddr::Relay(url) => TransportAddr::Relay(canonical_relay(url)),
+            other => other,
+        })
+        .collect();
+    address
+}
+
+// DNS permits a trailing dot, but Iroh keys relay connections by the URL.
+// Normalize lookup results too, so one server cannot receive two connections
+// claiming the same device identity.
+#[derive(Debug)]
+struct CanonicalRelays<T>(T);
+
+impl<T: AddressLookup> AddressLookup for CanonicalRelays<T> {
+    fn publish(&self, data: &EndpointData) {
+        self.0.publish(data);
+    }
+
+    fn resolve(
+        &self,
+        id: EndpointId,
+    ) -> Option<
+        futures_util::stream::BoxStream<
+            'static,
+            std::result::Result<iroh::address_lookup::Item, iroh::address_lookup::Error>,
+        >,
+    > {
+        Some(
+            self.0
+                .resolve(id)?
+                .map(|result| {
+                    result.map(|item| {
+                        let mut info = item.endpoint_info().clone();
+                        let relays = info
+                            .data
+                            .relay_urls()
+                            .cloned()
+                            .map(canonical_relay)
+                            .collect::<Vec<_>>();
+                        info.data.clear_relay_urls();
+                        for relay in relays {
+                            info.data.add_relay_url(relay);
+                        }
+                        iroh::address_lookup::Item::new(
+                            info,
+                            item.provenance(),
+                            item.last_updated(),
+                        )
+                    })
+                })
+                .boxed(),
+        )
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -135,7 +218,8 @@ pub struct ConnectNetwork {
     addresses: MemoryLookup,
     media: MediaStore,
     stop: CancellationToken,
-    relay: Mutex<RelayMode>,
+    relay: RelayMode,
+    nearby: bool,
     router: Mutex<Option<Router>>,
     pairing_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
@@ -192,17 +276,13 @@ impl ConnectNetwork {
             .await?
         {
             let addr: EndpointAddr = serde_json::from_str(row.get::<&str, _>(0))?;
-            addresses.add_endpoint_info(addr);
+            addresses.add_endpoint_info(canonical_address(addr));
         }
         let relay = relay_mode(config.relay.as_deref(), config.public_relay)?;
         let mut builder = Endpoint::builder(presets::Minimal)
             .secret_key(credentials.clone())
             .address_lookup(addresses.clone())
-            .address_lookup(PkarrResolver::n0_dns())
-            .address_lookup(DnsAddressLookup::n0_dns())
-            // Keep the relay transport available when its server list is empty,
-            // so enabling relays later can use insert_relay without a restart.
-            .relay_mode(RelayMode::Custom(relay.relay_map()));
+            .relay_mode(relay.clone());
         let mut discovery_error = None;
         let discoveries = if config.nearby {
             match MdnsAddressLookup::builder()
@@ -213,7 +293,7 @@ impl ConnectNetwork {
                     // mDNS does not replay peers found before subscription.
                     // Subscribe before endpoint and media startup can yield.
                     let discoveries = mdns.subscribe().await;
-                    builder = builder.address_lookup(mdns);
+                    builder = builder.address_lookup(CanonicalRelays(mdns));
                     Some(discoveries)
                 }
                 Err(error) => {
@@ -228,6 +308,12 @@ impl ConnectNetwork {
             builder = builder.user_data_for_address_lookup(name);
         }
         let endpoint = builder.bind().await?;
+        endpoint.address_lookup()?.add(CanonicalRelays(
+            PkarrResolver::n0_dns().build(endpoint.tls_config().clone()),
+        ));
+        endpoint
+            .address_lookup()?
+            .add(CanonicalRelays(DnsAddressLookup::n0_dns().build()));
         endpoint.address_lookup()?.add(PublicAddressPublisher(
             PkarrPublisher::n0_dns().build(credentials.clone(), endpoint.tls_config().clone()),
         ));
@@ -244,7 +330,8 @@ impl ConnectNetwork {
             addresses,
             media,
             stop: CancellationToken::new(),
-            relay: Mutex::new(relay),
+            relay,
+            nearby: config.nearby,
             router: Mutex::new(None),
             pairing_task: Mutex::new(None),
         });
@@ -361,24 +448,13 @@ impl ConnectNetwork {
             .set_user_data_for_address_lookup(name.parse().ok());
         *self.name.write().await = name;
     }
-    pub async fn set_relay(&self, relay: Option<&str>, public: bool) -> Result<()> {
-        let relay = relay_mode(relay, public)?;
-        let mut previous = self.relay.lock().await;
-        if *previous == relay {
-            return Ok(());
-        }
-        let next = relay.relay_map();
-        for config in next.relays::<Vec<_>>() {
-            self.endpoint.insert_relay(config.url.clone(), config).await;
-        }
-        let next_urls = next.urls::<HashSet<_>>();
-        for url in previous.relay_map().urls::<Vec<_>>() {
-            if !next_urls.contains(&url) {
-                self.endpoint.remove_relay(&url).await;
-            }
-        }
-        *previous = relay;
-        Ok(())
+    pub fn matches_configuration(
+        &self,
+        nearby: bool,
+        relay: Option<&str>,
+        public: bool,
+    ) -> Result<bool> {
+        Ok(self.nearby == nearby && self.relay == relay_mode(relay, public)?)
     }
     pub async fn set_enrollment_data(&self, data: Vec<u8>) {
         *self.enrollment_data.write().await = data;
@@ -387,6 +463,7 @@ impl ConnectNetwork {
         Ok(serde_json::to_string(&self.endpoint.addr())?)
     }
     async fn remember_address(&self, address: &EndpointAddr) -> Result<()> {
+        let address = canonical_address(address.clone());
         let mut db = self.database.lock().await;
         self.addresses.add_endpoint_info(address.clone());
         let remembered: EndpointAddr = self
@@ -1139,6 +1216,72 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn relay_aliases_share_one_address_and_disabled_transport_stays_direct() {
+        let root = tempfile::tempdir().unwrap();
+        let (network, _events) = ConnectNetwork::spawn(
+            NetworkConfig {
+                database: root.path().join("network.sqlite"),
+                media_directory: root.path().join("media"),
+                name: "Direct device".into(),
+                nearby: false,
+                relay: None,
+                public_relay: false,
+            },
+            SecretKey::generate(),
+        )
+        .await
+        .unwrap();
+        let peer = Endpoint::builder(presets::Minimal)
+            .relay_mode(RelayMode::Disabled)
+            .alpns(vec![RPC_PROTOCOL.to_vec()])
+            .bind()
+            .await
+            .unwrap();
+        let address = peer
+            .addr()
+            .with_relay_url("https://relay.example./".parse().unwrap())
+            .with_relay_url("https://relay.example/".parse().unwrap());
+        network.remember_address(&address).await.unwrap();
+        let remembered: EndpointAddr = network
+            .addresses
+            .get_endpoint_info(peer.id())
+            .unwrap()
+            .into();
+        assert_eq!(remembered.relay_urls().count(), 1);
+        let raw_lookup = MemoryLookup::new();
+        raw_lookup.add_endpoint_info(address);
+        let lookup = CanonicalRelays(raw_lookup);
+        let item = lookup
+            .resolve(peer.id())
+            .unwrap()
+            .next()
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(item.to_endpoint_addr().relay_urls().count(), 1);
+        assert_eq!(
+            item.to_endpoint_addr()
+                .relay_urls()
+                .next()
+                .unwrap()
+                .as_str(),
+            "https://relay.example/"
+        );
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (outgoing, incoming) =
+                tokio::join!(network.endpoint.connect(peer.id(), RPC_PROTOCOL), async {
+                    peer.accept().await.unwrap().await
+                });
+            outgoing.unwrap().close(0u32.into(), b"done");
+            incoming.unwrap().close(0u32.into(), b"done");
+        })
+        .await
+        .unwrap();
+        network.shutdown().await.unwrap();
+        peer.close().await;
+    }
+
+    #[tokio::test]
     async fn direct_sync_acknowledges_committed_state_for_pruning() {
         tokio::time::timeout(Duration::from_secs(20), async {
             let directory = tempfile::tempdir().unwrap();
@@ -1226,7 +1369,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "connects to the public Iroh relay service"]
-    async fn public_relay_can_be_enabled_after_starting_without_relays() {
+    async fn public_relay_publishes_an_address_for_id_lookup() {
         let directory = tempfile::tempdir().unwrap();
         let (network, _events) = ConnectNetwork::spawn(
             NetworkConfig {
@@ -1235,24 +1378,13 @@ mod tests {
                 name: "Relay check".into(),
                 nearby: false,
                 relay: None,
-                public_relay: false,
+                public_relay: true,
             },
             SecretKey::generate(),
         )
         .await
         .unwrap();
         let identity = network.identity();
-        assert!(network.endpoint.addr().relay_urls().next().is_none());
-        assert!(
-            network
-                .relay
-                .lock()
-                .await
-                .relay_map()
-                .urls::<Vec<_>>()
-                .is_empty()
-        );
-        network.set_relay(None, true).await.unwrap();
         tokio::time::timeout(Duration::from_secs(30), network.endpoint.online())
             .await
             .expect("the endpoint should connect to a public relay after enabling it");
