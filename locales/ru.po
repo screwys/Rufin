@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-21 11:27+0000\n"
+"PO-Revision-Date: 2026-09-21 12:45+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
 "Language: ru\n"
@@ -917,16 +917,16 @@ msgid "Date added"
 msgstr "Дата добавления"
 
 msgid "Days after month ends"
-msgstr ""
+msgstr "Дни после конца месяца"
 
 msgid "Days after year ends"
-msgstr ""
+msgstr "Дни после конца года"
 
 msgid "Days before month ends"
-msgstr ""
+msgstr "Дни до конца месяца"
 
 msgid "Days before year ends"
-msgstr ""
+msgstr "Дни до конца года"
 
 msgid "Debug logging"
 msgstr "Отладочное журналирование"
@@ -1174,10 +1174,8 @@ msgstr "Экспортировать действия"
 msgid "Export Backup"
 msgstr "Экспортировать резервную копию"
 
-#, fuzzy
-#| msgid "Export"
 msgid "Export PNG"
-msgstr "Экспорт"
+msgstr "Экспорт PNG"
 
 msgid "Export Playlist"
 msgstr "Экспортировать плейлист"
@@ -1410,10 +1408,8 @@ msgstr "Главная"
 msgid "Hour"
 msgstr "Час"
 
-#, fuzzy
-#| msgid "Hour"
 msgid "Hours"
-msgstr "Час"
+msgstr "Часы"
 
 msgid "Identify"
 msgstr "Идентифицировать"
@@ -2403,6 +2399,9 @@ msgstr "Произношение"
 msgid "Proxy casting through Rufin"
 msgstr "Прокси-трансляция через Rufin"
 
+msgid "Public"
+msgstr ""
+
 msgid "Purple"
 msgstr "Фиолетовый"
 
@@ -2583,14 +2582,8 @@ msgstr "Удалено из избранного"
 msgid "Removed from"
 msgstr "Удалено из"
 
-msgid "Rename Playlist"
-msgstr "Переименовать плейлист"
-
 msgid "Rename file"
 msgstr "Переименовать файл"
-
-msgid "Rename"
-msgstr "Переименовать"
 
 msgid "Repeat all"
 msgstr "Повторять все"
@@ -3717,6 +3710,12 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Rename Playlist"
+#~ msgstr "Переименовать плейлист"
+
+#~ msgid "Rename"
+#~ msgstr "Переименовать"
 
 #~ msgid "Choose an existing local folder"
 #~ msgstr "Выбрать существующую локальную папку"
