@@ -61,6 +61,7 @@ pub(crate) fn request_auto_dj(
             source_owner,
             RadioSeed::Track(request.seed_media_uri),
             request.requested_count,
+            &ReadCancellation::new(),
         )
         .await;
         match candidates {
@@ -93,8 +94,14 @@ pub(crate) fn play_radio(
     let placement = request.placement;
     let reservation = playback.reserve_materialization(placement).ok()?;
     Some(runtime.spawn(async move {
-        let candidates =
-            radio_candidates(&database, source_owner, request.seed, MANUAL_RADIO_COUNT).await;
+        let candidates = radio_candidates(
+            &database,
+            source_owner,
+            request.seed,
+            MANUAL_RADIO_COUNT,
+            &ReadCancellation::new(),
+        )
+        .await;
         complete_materialization(
             playback,
             reservation,
@@ -149,54 +156,63 @@ pub(crate) async fn radio_candidates(
     source_owner: Weak<SourceOwner>,
     seed: RadioSeed,
     requested: usize,
+    cancellation: &ReadCancellation,
 ) -> Result<Vec<String>, String> {
     let requested = requested.min(library::QUEUE_CONTEXT_LIMIT);
-    let (source_key, source_id, object_id) = database
-        .radio_source(&seed, &ReadCancellation::new())
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or("Radio seed is unavailable")?;
-    let source =
-        tokio::task::spawn_blocking(move || source_owner.upgrade()?.client(&source_id).ok())
-            .await
-            .map_err(|error| error.to_string())?;
-    let source = source.as_deref();
-    let native_seed = source_seed(source, &seed, object_id);
-    let mut native = if let (Some(source), Some(native_seed)) = (source, native_seed) {
-        match source
-            .generated_track_object_ids(&native_seed, requested.min(256))
-            .await
-        {
-            Ok(ids) => database
-                .admit_radio_candidates(source_key, &seed, &ids, &ReadCancellation::new())
-                .await
-                .map_err(|error| error.to_string())?,
-            Err(_) => Vec::new(),
-        }
-    } else {
-        Vec::new()
-    };
-    native.truncate(requested);
-    if native.len() == requested {
-        return Ok(native);
-    }
-    let mut excluded = native.clone();
-    excluded.sort();
-    excluded.dedup();
-    let fallback = database
-        .radio_candidates(
-            source_key,
-            seed,
-            &excluded,
-            requested - native.len(),
-            source.is_none(),
-            random_u64() as i64,
-            &ReadCancellation::new(),
-        )
+    let owner = source_owner.upgrade();
+    let selected = owner
+        .as_ref()
+        .and_then(|owner| owner.current_session())
+        .and_then(|session| session.resolve());
+    let seed_source = database
+        .radio_source(&seed, cancellation)
         .await
         .map_err(|error| error.to_string())?;
-    native.extend(fallback);
-    Ok(native)
+    let mut candidates = Vec::new();
+    let seed_source_key = seed_source.as_ref().map(|(key, _, _)| *key);
+    let mut fallback_sources = Vec::new();
+    if let Some((source_key, source_id, object_id)) = seed_source {
+        let source = tokio::task::spawn_blocking(move || owner?.client(&source_id).ok())
+            .await
+            .map_err(|error| error.to_string())?;
+        let native_seed = source_seed(source.as_deref(), &seed, object_id);
+        if let (Some(source), Some(native_seed)) = (source.as_deref(), native_seed)
+            && let Ok(ids) = source
+                .generated_track_object_ids(&native_seed, requested.min(256))
+                .await
+        {
+            candidates = database
+                .admit_radio_candidates(source_key, &seed, &ids, cancellation)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        fallback_sources.push((source_key, source.is_none()));
+    }
+    if let Some(selected) = selected
+        && Some(selected.source_key) != seed_source_key
+    {
+        fallback_sources.push((selected.source_key, selected.source.is_none()));
+    }
+    candidates.truncate(requested);
+    for (source_key, require_media) in fallback_sources {
+        if candidates.len() == requested {
+            break;
+        }
+        let fallback = database
+            .radio_candidates(
+                source_key,
+                seed.clone(),
+                &candidates,
+                requested - candidates.len(),
+                require_media,
+                random_u64() as i64,
+                cancellation,
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        candidates.extend(fallback);
+    }
+    Ok(candidates)
 }
 
 fn source_seed(

@@ -155,11 +155,7 @@ impl Database {
         let (seed_kind, seed_raw) = if let RadioSeed::Playlist(playlist) = seed {
             let first = sqlx::query_scalar::<_, TrackKey>("SELECT track.track_key FROM playlist_entries entry JOIN tracks track ON track.media_uri=entry.media_uri AND track.source_key=?1 WHERE entry.playlist_key=?2 ORDER BY entry.position LIMIT 1")
                 .bind(source).bind(playlist).fetch_optional(&mut *connection).await?;
-            let Some(first) = first else {
-                Database::clear_progress(&mut connection).await?;
-                return Ok(Vec::new());
-            };
-            (0, first.raw())
+            (0, first.map(|key| key.raw()))
         } else {
             match seed {
                 RadioSeed::Track(media_uri) => {
@@ -170,16 +166,12 @@ impl Database {
                     .bind(media_uri)
                     .fetch_optional(&mut *connection)
                     .await?;
-                    let Some(key) = key else {
-                        Database::clear_progress(&mut connection).await?;
-                        return Ok(Vec::new());
-                    };
-                    (0, key.raw())
+                    (0, key.map(|key| key.raw()))
                 }
-                RadioSeed::Album(key) => (1, key.raw()),
-                RadioSeed::Artist(key) => (2, key.raw()),
-                RadioSeed::AlbumArtist(key) => (5, key.raw()),
-                RadioSeed::Genre(key) => (3, key.raw()),
+                RadioSeed::Album(key) => (1, Some(key.raw())),
+                RadioSeed::Artist(key) => (2, Some(key.raw())),
+                RadioSeed::AlbumArtist(key) => (5, Some(key.raw())),
+                RadioSeed::Genre(key) => (3, Some(key.raw())),
                 RadioSeed::Playlist(_) => unreachable!(),
             }
         };
@@ -197,7 +189,7 @@ impl Database {
         let mut result = Vec::with_capacity(requested);
         let mut after = pivot - 1;
         let mut wrapped = false;
-        let mut related = true;
+        let mut related = seed_raw.is_some();
         loop {
             let mut query = QueryBuilder::<Sqlite>::new("");
             if related {
@@ -231,7 +223,7 @@ impl Database {
                 .push_bind(after)
                 .push(" AND (")
                 .push_bind(seed_kind)
-                .push("<>0 OR track.track_key<>")
+                .push("<>0 OR track.track_key IS NOT ")
                 .push_bind(seed_raw)
                 .push(")")
                 .push(" AND (")

@@ -934,6 +934,7 @@ impl RadioCommandPort for PlaybackOwner {
         &self,
         seed: library::RadioSeed,
         requested: usize,
+        cancellation: library::ReadCancellation,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<String>, String>> + Send>>
     {
         let database = self.database.clone();
@@ -942,9 +943,9 @@ impl RadioCommandPort for PlaybackOwner {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .clone();
-        Box::pin(
-            async move { crate::radio::radio_candidates(&database, source, seed, requested).await },
-        )
+        Box::pin(async move {
+            crate::radio::radio_candidates(&database, source, seed, requested, &cancellation).await
+        })
     }
 
     fn play_random(&self, request: RandomPlayRequest) {

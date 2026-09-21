@@ -958,7 +958,7 @@ impl CatalogUi {
                     LibraryField::RowIndex,
                     LibraryField::TitleMerged,
                     LibraryField::Duration,
-                    LibraryField::Favorite,
+                    LibraryField::Tools,
                 ]),
             },
             selection,

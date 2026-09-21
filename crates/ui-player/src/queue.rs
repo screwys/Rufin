@@ -759,29 +759,20 @@ fn build_queue_table(
         let index = queue_index_column(shell);
         let title = queue_title_column(shell);
         let duration = queue_duration_column(shell);
-        let mut columns = vec![
+        let tools = queue_favorite_column(shell);
+        let columns = vec![
             (index.clone(), column_width(LibraryField::RowIndex)),
             (
                 title.clone(),
                 column_width(LibraryField::TitleMerged).saturating_add(72),
             ),
             (duration.clone(), column_width(LibraryField::Duration)),
+            (tools.clone(), ui_shared::recycled_cells::ROW_ACTIONS_WIDTH),
         ];
         table.append_column(&index);
         table.append_column(&title);
         table.append_column(&duration);
-        if shell
-            .settings
-            .current
-            .borrow()
-            .library_list(LibraryListKey::Queue)
-            .row_fields
-            .contains(&LibraryField::Tools)
-        {
-            let tools = queue_favorite_column(shell);
-            table.append_column(&tools);
-            columns.push((tools, ui_shared::recycled_cells::ROW_ACTIONS_WIDTH));
-        }
+        table.append_column(&tools);
         ui_shared::table_sizing::install_column_view_width_fit(&table, columns, 1)
     } else {
         ui_shared::table_sizing::install_column_view_width_fit(

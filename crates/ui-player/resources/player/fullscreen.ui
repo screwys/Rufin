@@ -183,30 +183,47 @@
       </object>
     </property>
   </object>
-  <object class="GtkBox" id="related_panel">
-    <property name="orientation">vertical</property>
-    <property name="spacing">8</property>
+  <object class="GtkOverlay" id="related_panel">
     <style>
       <class name="fullscreen-player-pane" />
     </style>
-    <child>
-      <object class="GtkLabel" id="related_status">
-        <property name="label" translatable="yes">Loading related tracks...</property>
-        <property name="wrap">true</property>
-        <property name="margin-top">12</property>
-      </object>
-    </child>
-    <child>
-      <object class="GtkButton" id="related_retry">
-        <property name="label" translatable="yes">Retry</property>
-        <property name="halign">center</property>
-        <property name="visible">false</property>
-      </object>
-    </child>
-    <child>
-      <object class="GtkBox" id="related_list">
+    <property name="child">
+      <object class="GtkBox">
         <property name="orientation">vertical</property>
-        <property name="vexpand">true</property>
+        <property name="spacing">8</property>
+        <child>
+          <object class="GtkLabel" id="related_status">
+            <property name="visible">false</property>
+            <property name="wrap">true</property>
+            <property name="margin-top">12</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="related_retry">
+            <property name="label" translatable="yes">Retry</property>
+            <property name="halign">center</property>
+            <property name="visible">false</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox" id="related_list">
+            <property name="orientation">vertical</property>
+            <property name="vexpand">true</property>
+          </object>
+        </child>
+      </object>
+    </property>
+    <child type="overlay">
+      <object class="AdwSpinner" id="related_loading">
+        <property name="can-target">false</property>
+        <property name="visible">false</property>
+        <property name="halign">center</property>
+        <property name="valign">center</property>
+        <property name="width-request">32</property>
+        <property name="height-request">32</property>
+        <accessibility>
+          <property name="label" translatable="yes">Loading related tracks...</property>
+        </accessibility>
       </object>
     </child>
   </object>
@@ -215,9 +232,6 @@
   </object>
   <object class="GtkLabel" id="related_error">
     <property name="label" translatable="yes">Could not load related tracks</property>
-  </object>
-  <object class="GtkLabel" id="related_loading">
-    <property name="label" translatable="yes">Loading related tracks...</property>
   </object>
   <object class="GtkBox" id="hero_content">
                         <property name="orientation">horizontal</property>
