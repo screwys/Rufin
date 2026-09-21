@@ -944,6 +944,12 @@ fn context_menu_has_submenu_side(
 
 pub fn install_context_menu_openers(target: &impl IsA<gtk::Widget>, open: ContextMenuOpen) {
     let target = target.as_ref();
+    if let Some(actions) = target.downcast_ref::<crate::recycled_cells::RowActions>() {
+        let menu_open = Rc::clone(&open);
+        actions
+            .menu()
+            .connect_clicked(move |button| menu_open(button.upcast_ref(), None));
+    }
     let target_weak = target.downgrade();
     let click_open = Rc::clone(&open);
     let click = gtk::GestureClick::new();

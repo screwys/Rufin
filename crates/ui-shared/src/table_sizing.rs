@@ -291,6 +291,10 @@ fn fit_preferred_column_widths(state: &ColumnViewWidthState) {
 }
 
 fn column_header_minimum_width(column: &gtk::ColumnViewColumn, preferred: i32) -> i32 {
+    // Headerless action columns need room for their buttons even in narrow tables.
+    if column.title().is_none() {
+        return preferred;
+    }
     let fallback = preferred.clamp(MIN_TABLE_COLUMN_WIDTH, TABLE_TARGET_WIDTH);
     let header = column
         .title()

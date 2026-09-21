@@ -10,6 +10,48 @@ use crate::{downloads::DownloadsState, route::Route};
 
 use crate::detail_links::{DetailLinkBinding, DetailLinks};
 
+pub const ROW_ACTIONS_WIDTH: i32 = 80;
+
+crate::composite_box!(
+    pub RowActions,
+    row_actions_imp,
+    "RufinRowActions",
+    "/io/github/screwys/Rufin/ui/routes/row_actions.ui",
+    { favorite_slot: gtk::Box, menu: gtk::Button }
+);
+
+impl RowActions {
+    pub fn menu_only() -> Self {
+        Self::new()
+    }
+    pub fn with_favorite(button: &gtk::Button) -> Self {
+        let actions = Self::new();
+        actions.imp().favorite_slot.append(button);
+        actions
+    }
+
+    pub fn favorite(&self) -> Option<gtk::Button> {
+        self.imp()
+            .favorite_slot
+            .first_child()
+            .and_downcast::<gtk::Button>()
+    }
+
+    pub fn menu(&self) -> gtk::Button {
+        self.imp().menu.get()
+    }
+}
+
+pub fn row_actions_column(factory: &gtk::SignalListItemFactory) -> gtk::ColumnViewColumn {
+    let column = gtk::ColumnViewColumn::new(None, Some(factory.clone()));
+    column.set_fixed_width(ROW_ACTIONS_WIDTH);
+    column
+}
+
+pub fn row_favorite_button(item: &gtk::ListItem) -> Option<gtk::Button> {
+    list_cell::<RowActions>(item)?.favorite()
+}
+
 pub fn list_cell<T: IsA<gtk::Widget>>(item: &gtk::ListItem) -> Option<T> {
     item.child()?.downcast().ok()
 }
@@ -186,7 +228,6 @@ crate::composite_box!(
 impl RecycledBadgedTextCell {
     pub fn with_downloads(downloads: &Rc<DownloadsState>) -> Self {
         let cell = Self::new();
-        install_playing_indicator(&cell.imp().label, &cell);
         downloads.register_download_badge(&cell.imp().downloaded);
         cell
     }
@@ -266,7 +307,6 @@ impl RecycledMergedCell {
     ) -> Self {
         let cell: Self = glib::Object::new();
         let imp = cell.imp();
-        install_playing_indicator(&imp.title, &*imp.title_row);
         imp.cover.artwork().set_square_size(cover_size);
         imp.links
             .replace(Some(DetailLinkBinding::new(&imp.subtitle, navigate)));
@@ -281,7 +321,6 @@ impl RecycledMergedCell {
     pub fn without_downloads(navigate: Rc<dyn Fn(Route)>, cover_size: i32) -> Self {
         let cell: Self = glib::Object::new();
         let imp = cell.imp();
-        install_playing_indicator(&imp.title, &*imp.title_row);
         imp.cover.artwork().set_square_size(cover_size);
         imp.links
             .replace(Some(DetailLinkBinding::new(&imp.subtitle, navigate)));
@@ -393,6 +432,7 @@ pub fn track_row_index_cell(text: &str, activate: impl Fn(&gtk::Button) + 'stati
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, { cell: gtk::Overlay, number: gtk::Label, play: gtk::Button });
     let click_cell = cell.downgrade();
+    install_index_playing_indicator(&cell);
     play.connect_clicked(move |button| {
         if click_cell
             .upgrade()
@@ -476,6 +516,22 @@ pub fn install_playing_indicator(title: &gtk::Label, title_row: &impl IsA<gtk::B
             indicator.replace(Some(widget));
         } else if !playing && let Some(widget) = indicator.take() {
             title_row.remove(&widget);
+        }
+    });
+}
+
+pub fn install_index_playing_indicator(cell: &gtk::Overlay) {
+    let indicator = RefCell::new(None::<crate::playing_indicator::PlayingIndicator>);
+    cell.connect_css_classes_notify(move |cell| {
+        let playing =
+            cell.has_css_class("track-row-playing") && !cell.has_css_class("track-row-paused");
+        if playing && indicator.borrow().is_none() {
+            let widget = crate::playing_indicator::PlayingIndicator::new();
+            widget.set_halign(gtk::Align::Center);
+            cell.add_overlay(&widget);
+            indicator.replace(Some(widget));
+        } else if !playing && let Some(widget) = indicator.take() {
+            cell.remove_overlay(&widget);
         }
     });
 }

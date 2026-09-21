@@ -967,7 +967,7 @@ fn search_column(
         };
         return search_merged_column(shell, category, width, playing.cloned());
     }
-    if field == LibraryField::Favorite {
+    if field == LibraryField::Tools {
         return search_favorite_column(shell);
     }
     let playing = (field == LibraryField::Title)
@@ -983,7 +983,6 @@ fn search_column(
         let label = cell.label();
         if field == LibraryField::Title && category == CollectionCategory::Tracks {
             cell.set_spacing(5);
-            ui_shared::recycled_cells::install_playing_indicator(&label, &cell);
         }
         label.set_halign(gtk::Align::Fill);
         label.set_hexpand(true);
@@ -1169,11 +1168,12 @@ fn search_favorite_column(shell: &Rc<CatalogUi>) -> gtk::ColumnViewColumn {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let button = ui_shared::favorites::column_favorite_icon_button("Favorite");
+        let button = ui_shared::favorites::row_favorite_icon_button("Favorite");
+        let actions = ui_shared::recycled_cells::RowActions::with_favorite(&button);
         let context_shell = Rc::downgrade(&setup_shell);
         let context_item = item.downgrade();
         install_context_menu_openers(
-            &button,
+            &actions,
             Rc::new(move |target, position| {
                 if let (Some(shell), Some(item)) = (context_shell.upgrade(), context_item.upgrade())
                     && let Some(value) = item_at_from_item::<SearchItem>(&item)
@@ -1200,7 +1200,7 @@ fn search_favorite_column(shell: &Rc<CatalogUi>) -> gtk::ColumnViewColumn {
                 Some(button),
             );
         });
-        item.set_child(Some(&button));
+        item.set_child(Some(&actions));
     });
     connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
@@ -1209,7 +1209,7 @@ fn search_favorite_column(shell: &Rc<CatalogUi>) -> gtk::ColumnViewColumn {
         let Some(value) = item_at_from_item::<SearchItem>(item) else {
             return;
         };
-        let Some(button) = item.child().and_downcast::<gtk::Button>() else {
+        let Some(button) = ui_shared::recycled_cells::row_favorite_button(item) else {
             return;
         };
         let favorite = value.favorite();
@@ -1223,17 +1223,12 @@ fn search_favorite_column(shell: &Rc<CatalogUi>) -> gtk::ColumnViewColumn {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        if let Some(button) = item.child().and_downcast::<gtk::Button>() {
+        if let Some(button) = ui_shared::recycled_cells::row_favorite_button(item) {
             set_favorite_button_active(&button, false);
             button.set_sensitive(false);
         }
     });
-    let column = gtk::ColumnViewColumn::new(
-        Some(ui_shared::favorites::FAVORITE_COLUMN_TITLE),
-        Some(factory),
-    );
-    column.set_fixed_width(column_width(LibraryField::Favorite));
-    column
+    ui_shared::recycled_cells::row_actions_column(&factory)
 }
 
 async fn acquire_search(

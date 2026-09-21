@@ -147,6 +147,7 @@
     <file compressed="true">routes/recycled_merged_cell.ui</file>
     <file compressed="true">routes/recycled_text_cell.ui</file>
     <file compressed="true">routes/track_row_index.ui</file>
+    <file compressed="true">routes/row_actions.ui</file>
     <file compressed="true">preferences/dialogs/metadata.ui</file>
     <file compressed="true">preferences/dialogs/playlist_name.ui</file>
     <file compressed="true">preferences/dialogs/playlist_delete.ui</file>

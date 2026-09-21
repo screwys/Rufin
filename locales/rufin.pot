@@ -3118,6 +3118,9 @@ msgstr ""
 msgid "Toggle Fullscreen"
 msgstr ""
 
+msgid "Tools"
+msgstr ""
+
 msgid "Top albums"
 msgstr ""
 

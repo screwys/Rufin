@@ -239,6 +239,13 @@ pub struct SourceOwner {
     pub(crate) shared: Arc<Shared>,
 }
 
+struct CachedSource {
+    configuration: SourceConfiguration,
+    credential: Option<String>,
+    jellyfin_device_id: String,
+    source: Arc<Source>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ArtworkPreparationKey {
     source: SourceKey,
@@ -327,6 +334,7 @@ pub(crate) struct Shared {
     downloads: Downloads,
     pub(crate) settings: SettingsFile,
     pub(crate) secrets: Arc<SwitchableSecretStore>,
+    clients: Mutex<HashMap<SourceId, CachedSource>>,
     plex_logins: Mutex<HashMap<String, Arc<tokio::sync::Mutex<sources::PlexLogin>>>>,
     runtime: tokio::runtime::Handle,
     outputs: SourceOutputs,
@@ -520,6 +528,7 @@ impl SourceOwner {
             downloads,
             settings,
             secrets,
+            clients: Mutex::new(HashMap::new()),
             plex_logins: Mutex::new(HashMap::new()),
             runtime,
             outputs,
@@ -597,6 +606,13 @@ impl SourceOwner {
             self.release_selected(true).await;
         }
         let result = restore().await;
+        if setup {
+            self.shared
+                .clients
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .clear();
+        }
         if result.is_ok()
             && let Err(error) = self.shared.load_source_counts().await
         {
@@ -628,6 +644,13 @@ impl SourceOwner {
     /// publish catalog events or rebuild the selected source.
     pub(crate) async fn connect_changed(&self, sources_changed: bool) -> Result<(), String> {
         let _lane = self.shared.lane.lock().await;
+        if sources_changed {
+            self.shared
+                .clients
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .clear();
+        }
         let current = self.shared.settings.load();
         let catalog = self
             .shared
@@ -708,6 +731,11 @@ impl SourceOwner {
         source_id: &SourceId,
         credential_ref: Option<crate::settings::CredentialRef>,
     ) {
+        self.shared
+            .clients
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(source_id);
         self.shared
             .catalog_counts
             .lock()
@@ -805,27 +833,13 @@ impl SourceOwner {
         let Some(session) = self.shared.selected_session() else {
             return Ok(());
         };
-        let secrets = Arc::clone(&self.shared.secrets);
-        let device = self.shared.settings.load().jellyfin_device_id;
         let owner = self.clone();
         self.shared.runtime.spawn(async move {
             let opener = owner.clone();
             let opened = owner
                 .shared
                 .runtime
-                .spawn_blocking(move || {
-                    let credential = configured
-                        .credential_ref
-                        .as_ref()
-                        .map(|reference| load_provider_secret(&secrets, reference))
-                        .transpose()?
-                        .flatten();
-                    let mut source =
-                        Source::open(configured.configuration.clone(), credential, Some(device))
-                            .map_err(string_error)?;
-                    opener.bind_plex_login(&configured, &mut source)?;
-                    Ok(Arc::new(source))
-                })
+                .spawn_blocking(move || opener.client(&configured.configuration.source_id))
                 .await
                 .map_err(string_error)
                 .and_then(|opened| opened);
@@ -2249,6 +2263,12 @@ impl SourceOwner {
             if changed {
                 owner
                     .shared
+                    .clients
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .clear();
+                owner
+                    .shared
                     .plex_logins
                     .lock()
                     .unwrap_or_else(|p| p.into_inner())
@@ -3045,14 +3065,50 @@ impl SourceOwner {
             .map(|reference| load_provider_secret(&self.shared.secrets, reference))
             .transpose()?
             .flatten();
+        let mut clients = self
+            .shared
+            .clients
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if let Some(cached) = clients.get(source_id)
+            && cached.configuration == configured.configuration
+            && cached.credential == credential
+            && cached.jellyfin_device_id == stored.jellyfin_device_id
+        {
+            return Ok(Arc::clone(&cached.source));
+        }
+        clients.remove(source_id);
         let mut source = Source::open(
             configured.configuration.clone(),
-            credential,
-            Some(self.shared.settings.load().jellyfin_device_id),
+            credential.clone(),
+            Some(stored.jellyfin_device_id.clone()),
         )
         .map_err(string_error)?;
         self.bind_plex_login(&configured, &mut source)?;
-        Ok(Arc::new(source))
+        let source = Arc::new(source);
+        let current = self.shared.settings.load();
+        if current.jellyfin_device_id == stored.jellyfin_device_id
+            && current
+                .sources
+                .configured
+                .iter()
+                .chain(&current.sources.integrations)
+                .any(|item| {
+                    item.configuration == configured.configuration
+                        && item.credential_ref == configured.credential_ref
+                })
+        {
+            clients.insert(
+                source_id.clone(),
+                CachedSource {
+                    configuration: configured.configuration,
+                    credential,
+                    jellyfin_device_id: stored.jellyfin_device_id,
+                    source: Arc::clone(&source),
+                },
+            );
+        }
+        Ok(source)
     }
 
     fn bind_plex_login(

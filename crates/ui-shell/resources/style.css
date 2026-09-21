@@ -651,7 +651,6 @@ button.search-preview-play {
 row.search-result:hover button.search-preview-play,
 row.search-result:selected button.search-preview-play,
 row.search-result:focus-within button.search-preview-play,
-row.search-result.track-row-playing:not(.track-row-paused) button.search-preview-play,
 row.search-result.context-menu-hover-held button.search-preview-play {
   opacity: 1;
 }
@@ -744,15 +743,36 @@ row:focus-within .track-row-index-number,
 
 row:hover .track-row-play,
 row:focus-within .track-row-play,
-.track-row-index-cell.track-row-playing:not(.track-row-paused) .track-row-play,
 .album-detail-track-row:hover .track-row-play,
 .album-detail-track-row:focus-within .track-row-play {
+  opacity: 1;
+}
+
+.track-row-index-cell.track-row-playing:not(.track-row-paused) .track-row-play {
+  opacity: 0;
+}
+
+.track-row-index-cell.track-row-playing:not(.track-row-paused):hover .track-row-play,
+.track-row-index-cell.track-row-playing:not(.track-row-paused):focus-within .track-row-play {
   opacity: 1;
 }
 
 playing-indicator {
   color: var(--accent-color);
 }
+
+.track-row-index-cell:hover playing-indicator,
+.track-row-index-cell:focus-within playing-indicator {
+  opacity: 0;
+}
+
+.row-actions button { min-width: 30px; min-height: 30px; padding: 0; }
+
+.row-menu-button { opacity: 0; }
+
+row:hover .row-menu-button,
+.album-detail-track-row:hover .row-menu-button,
+.row-menu-button:focus-visible { opacity: 1; }
 
 gridview.album-grid {
   background: transparent;
@@ -2133,16 +2153,6 @@ button.download-queue-pause image {
   min-width: 30px;
   min-height: 30px;
   padding: 0;
-}
-
-columnview > listview > row > cell > .row-favorite-button {
-  margin-right: 1px;
-  margin-left: 1px;
-  transform: translateX(-8px);
-}
-
-columnview > listview > row > cell > .row-favorite-button image {
-  transform: translateX(8px);
 }
 
 .row-favorite-button {

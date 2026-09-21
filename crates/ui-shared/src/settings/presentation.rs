@@ -59,5 +59,6 @@ pub fn library_field_title(value: LibraryField) -> &'static str {
         LibraryField::AlbumCount => msgid("Albums"),
         LibraryField::Duration => msgid("Duration"),
         LibraryField::Favorite => msgid("Favorite"),
+        LibraryField::Tools => msgid("Tools"),
     }
 }
