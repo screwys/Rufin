@@ -211,8 +211,8 @@ impl HomeRouteProjection {
                 HomeBlockKind::Explore,
                 HomeSectionKind::Explore,
                 HomeSectionRows {
-                    tracks: home.explore.clone(),
-                    albums: Vec::new(),
+                    tracks: Vec::new(),
+                    albums: home.explore.clone(),
                 },
             ),
             (

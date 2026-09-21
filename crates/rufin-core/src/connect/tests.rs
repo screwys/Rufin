@@ -1689,19 +1689,16 @@ fn profiles_adopt_only_after_verification_and_offline_edits_survive_enrollment()
             .await
             .expect("received tracks should select a library automatically");
             assert_eq!(selected.source_id, shared_source);
-            let home = selected
+            let track = selected
                 .database
-                .home_page(
+                .track_key_by_object(
                     selected.source_key,
-                    selected.music_folder_key,
-                    0,
-                    0,
-                    &[crate::settings::HomeBlockKind::Explore],
+                    "native-track",
                     &library::ReadCancellation::new(),
                 )
                 .await
                 .unwrap();
-            assert!(!home.explore.is_empty());
+            assert!(track.is_some());
             let bytes = b"original direct queue media";
             let path = root.path().join("direct.flac");
             std::fs::write(&path, bytes).unwrap();

@@ -1035,7 +1035,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(home.newly_added.albums.len(), 1);
-            assert_eq!(home.explore.len(), 2);
+            assert_eq!(home.explore.len(), 1);
             assert_eq!(
                 progress
                     .lock()
@@ -1124,7 +1124,7 @@ mod tests {
                             .unwrap()
                             .explore
                             .len(),
-                        2
+                        1
                     );
                 }
             }

@@ -320,6 +320,7 @@ CREATE INDEX IF NOT EXISTS albums_order_idx ON albums(source_key, sort_text, alb
 CREATE INDEX IF NOT EXISTS albums_source_favorites_idx ON albums(source_key, object_id) WHERE source_favorite=1;
 
 CREATE INDEX IF NOT EXISTS albums_key_idx ON albums(source_key, album_key);
+CREATE INDEX IF NOT EXISTS albums_shuffle_idx ON albums(source_key,((album_key*1103515245)%2147483647),album_key);
 
 CREATE INDEX IF NOT EXISTS albums_artwork_idx ON albums(source_key, artwork_binding)
     WHERE artwork_binding IS NOT NULL;
