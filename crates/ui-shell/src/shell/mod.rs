@@ -44,7 +44,6 @@ impl Shell {
 
 pub(crate) struct Shell {
     activity: std::cell::RefCell<Option<Rc<activity::ActivityView>>>,
-    activity_reminder: std::cell::RefCell<Option<gtk::glib::SourceId>>,
     pub(crate) quitting: Rc<Cell<bool>>,
     pub(crate) diagnostics: DiagnosticsHandle,
     pub(crate) appearance: crate::application::style::ApplicationAppearance,

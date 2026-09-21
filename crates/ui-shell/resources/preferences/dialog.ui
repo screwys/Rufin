@@ -48,7 +48,8 @@
         </child>
         <child>
           <object class="GtkButton" id="back">
-            <property name="visible">false</property>
+            <property name="opacity">0</property>
+            <property name="sensitive">false</property>
             <property name="icon-name">rufin-go-previous-symbolic</property>
             <style>
               <class name="flat"/>

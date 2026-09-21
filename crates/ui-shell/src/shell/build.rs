@@ -463,7 +463,6 @@ pub async fn build(
             )),
             preferences,
             activity: RefCell::new(None),
-            activity_reminder: RefCell::new(None),
             downloads,
             download_feedback: Default::default(),
             control_feedback,
@@ -480,18 +479,6 @@ pub async fn build(
     });
 
     shell.connect_operation_feedback();
-    shell.connect_activity_reminders(
-        ui_shared::ui_resource::object(
-            &shell_root_builder,
-            shell_root_resource,
-            "activity_month_banner",
-        ),
-        ui_shared::ui_resource::object(
-            &shell_root_builder,
-            shell_root_resource,
-            "activity_year_banner",
-        ),
-    );
     shell.bind_controller_appearance();
     shell.bind_sidebar_settings();
     let weak = Rc::downgrade(&shell);
@@ -499,9 +486,6 @@ pub async fn build(
         if let Some(shell) = weak.upgrade() {
             shell.web_controller.stop();
             shell.close_activity();
-            if let Some(source) = shell.activity_reminder.borrow_mut().take() {
-                source.remove();
-            }
         }
     });
     let weak = Rc::downgrade(&shell);
@@ -609,6 +593,19 @@ pub async fn build(
     }
     if !shell.chrome.window.is_visible() {
         present_initial_window(&shell, force_initial_presentation);
+    }
+    if shell.chrome.window.is_mapped() {
+        shell.open_startup_activity();
+    } else {
+        let pending = Cell::new(true);
+        let weak = Rc::downgrade(&shell);
+        shell.chrome.window.connect_map(move |_| {
+            if pending.replace(false)
+                && let Some(shell) = weak.upgrade()
+            {
+                shell.open_startup_activity();
+            }
+        });
     }
     schedule_periodic_release_checks(&shell);
     if defer_initial_route && !shell.source.operation.borrow().blocks_library() {

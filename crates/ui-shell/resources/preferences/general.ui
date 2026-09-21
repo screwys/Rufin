@@ -45,6 +45,13 @@
             </property>
           </object>
         </child>
+        <child>
+          <object class="AdwActionRow" id="activity_overview_row">
+            <property name="title" translatable="yes">Listening overview</property>
+            <property name="activatable">true</property>
+            <child type="suffix"><object class="GtkImage"><property name="icon-name">rufin-go-next-symbolic</property></object></child>
+          </object>
+        </child>
       </object>
     </child>
     <child>

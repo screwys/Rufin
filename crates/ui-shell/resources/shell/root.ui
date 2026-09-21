@@ -34,16 +34,6 @@
                 <property name="hexpand">true</property>
                 <property name="vexpand">true</property>
                 <style><class name="app-root"/></style>
-                <child><object class="AdwBanner" id="activity_month_banner">
-                  <property name="title" translatable="yes">Your monthly listening overview is ready</property>
-                  <property name="button-label" translatable="yes">View</property>
-                  <property name="revealed">false</property>
-                </object></child>
-                <child><object class="AdwBanner" id="activity_year_banner">
-                  <property name="title" translatable="yes">Your yearly listening overview is ready</property>
-                  <property name="button-label" translatable="yes">View</property>
-                  <property name="revealed">false</property>
-                </object></child>
                 <child>
                   <object class="AdwBanner" id="temporary_storage_banner">
                     <property name="title" translatable="yes">Temporary library storage is in use. Changes may be lost when Rufin closes.</property>

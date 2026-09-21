@@ -52,93 +52,55 @@ impl Drop for ActivityView {
 }
 
 impl Shell {
-    pub(super) fn connect_activity_reminders(
-        self: &Rc<Self>,
-        month_banner: adw::Banner,
-        year_banner: adw::Banner,
-    ) {
-        for (banner, yearly) in [(&month_banner, false), (&year_banner, true)] {
-            let weak = Rc::downgrade(self);
-            banner.connect_button_clicked(move |banner| {
-                if let Some(shell) = weak.upgrade() {
-                    let now = glib::DateTime::now_local().expect("local clock");
-                    let period = if yearly {
-                        CalendarActivityPeriod::Year(now.year() - 1)
-                    } else {
-                        CalendarActivityPeriod::Month {
-                            year: now.year(),
-                            month: now.month() as u8,
-                        }
-                        .previous()
-                    };
-                    banner.set_revealed(false);
-                    shell.open_activity(Some(period));
-                }
-            });
+    pub(super) fn open_startup_activity(self: &Rc<Self>) {
+        let now = glib::DateTime::now_local().expect("local clock");
+        let periods = self
+            .settings
+            .current
+            .borrow()
+            .activity_overview
+            .startup_periods(&now);
+        if periods.iter().all(Option::is_none) {
+            return;
         }
+        let db = self.products.library.clone();
+        let (sender, receiver) = async_channel::bounded(1);
+        self.products.runtime.spawn(async move {
+            let _ = sender.send(db.activity_months().await).await;
+        });
         let weak = Rc::downgrade(self);
-        let mut checked = String::new();
-        let mut check = move || {
+        glib::spawn_future_local(async move {
+            let Ok(Ok(months)) = receiver.recv().await else {
+                return;
+            };
             let Some(shell) = weak.upgrade() else {
-                return glib::ControlFlow::Break;
+                return;
             };
-            let now = glib::DateTime::now_local().expect("local clock");
-            let current = CalendarActivityPeriod::Month {
-                year: now.year(),
-                month: now.month() as u8,
+            let period = periods.into_iter().flatten().find(|period| match period {
+                CalendarActivityPeriod::Month { .. } => months.contains(&period_key(*period)),
+                CalendarActivityPeriod::Year(year) => months
+                    .iter()
+                    .any(|month| month.starts_with(&format!("{year}-"))),
+                CalendarActivityPeriod::Lifetime => false,
+            });
+            let Some(period) = period else {
+                return;
             };
-            let key = period_key(current);
-            if checked == key {
-                return glib::ControlFlow::Continue;
-            }
-            checked = key.clone();
-            let settings = shell.settings.current.borrow().activity_overview.clone();
-            let month_due = settings.offered_month.as_ref() != Some(&key);
-            let year_due = settings.offered_year != Some(now.year());
-            if !month_due && !year_due {
-                return glib::ControlFlow::Continue;
-            }
-            let db = shell.products.library.clone();
-            let (sender, receiver) = async_channel::bounded(1);
-            shell.products.runtime.spawn(async move {
-                let _ = sender.send(db.activity_months().await).await;
-            });
-            let weak = Rc::downgrade(&shell);
-            let month_banner = month_banner.downgrade();
-            let year_banner = year_banner.downgrade();
-            glib::spawn_future_local(async move {
-                let Ok(Ok(months)) = receiver.recv().await else {
-                    return;
-                };
-                let Some(shell) = weak.upgrade() else {
-                    return;
-                };
-                if month_due
-                    && months.contains(&period_key(current.previous()))
-                    && let Some(banner) = month_banner.upgrade()
-                {
-                    banner.set_revealed(true);
-                }
-                let previous_year = format!("{}-", now.year() - 1);
-                if year_due
-                    && months.iter().any(|month| month.starts_with(&previous_year))
-                    && let Some(banner) = year_banner.upgrade()
-                {
-                    banner.set_revealed(true);
-                }
-                shell
-                    .settings
-                    .update_app_settings("listening overview reminders", |settings| {
-                        settings.activity_overview.offered_month = Some(key);
-                        settings.activity_overview.offered_year = Some(now.year());
-                        true
-                    });
-            });
-            glib::ControlFlow::Continue
-        };
-        check();
-        self.activity_reminder
-            .replace(Some(glib::timeout_add_seconds_local(60, check)));
+            shell.open_activity(Some(period));
+            shell
+                .settings
+                .update_app_settings("automatic activity overview", |settings| {
+                    let settings = &mut settings.activity_overview;
+                    match period {
+                        CalendarActivityPeriod::Month { .. } => {
+                            settings.opened_month = Some(period_key(period))
+                        }
+                        CalendarActivityPeriod::Year(year) => settings.opened_year = Some(year),
+                        CalendarActivityPeriod::Lifetime => {}
+                    }
+                    true
+                });
+        });
     }
 
     pub(crate) fn open_activity(self: &Rc<Self>, requested: Option<CalendarActivityPeriod>) {

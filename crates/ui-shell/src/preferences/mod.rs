@@ -1,4 +1,5 @@
 use ui_player::outputs::casting_network_dropdown;
+mod activity;
 pub(crate) mod backup;
 use crate::shell::Shell;
 use crate::{
@@ -212,6 +213,7 @@ pub(crate) struct PreferencesNavigationControls {
 impl PreferencesNavigationControls {
     fn new(back: gtk::Button) -> Self {
         back.update_property(&[gtk::accessible::Property::Label(&tr("Back"))]);
+        set_preferences_back_visible(&back, false);
 
         let controls = Self {
             back,
@@ -222,7 +224,7 @@ impl PreferencesNavigationControls {
             if let Some(navigation) = navigation.upgrade() {
                 navigation.pop();
             }
-            button.set_visible(false);
+            set_preferences_back_visible(button, false);
         });
         controls
     }
@@ -232,15 +234,22 @@ impl PreferencesNavigationControls {
     }
 
     pub(crate) fn set_nested_page_visible(&self, visible: bool) {
-        self.back.set_visible(visible);
+        set_preferences_back_visible(&self.back, visible);
     }
 
     fn return_to_root(&self) {
         if let Some(navigation) = self.navigation.upgrade() {
             while navigation.pop() {}
         }
-        self.back.set_visible(false);
+        set_preferences_back_visible(&self.back, false);
     }
+}
+
+fn set_preferences_back_visible(button: &gtk::Button, visible: bool) {
+    // Keep its allocation so opening a subpage cannot move the category tabs.
+    button.set_opacity(if visible { 1.0 } else { 0.0 });
+    button.set_sensitive(visible);
+    button.update_state(&[gtk::accessible::State::Hidden(!visible)]);
 }
 
 fn present_preferences_dialog_with_page(
@@ -858,7 +867,10 @@ fn mount_preferences_page(
         if *slot_kind == kind || slot.first_child().is_none() {
             continue;
         }
-        if *slot_kind == PreferencesPageKind::Library {
+        if matches!(
+            slot_kind,
+            PreferencesPageKind::Library | PreferencesPageKind::General
+        ) {
             navigation_controls.return_to_root();
         }
         while let Some(page) = slot.first_child() {
@@ -872,7 +884,7 @@ fn mount_preferences_page(
         return;
     }
     let page: gtk::Widget = match kind {
-        PreferencesPageKind::General => general_page(shell, dialog).upcast(),
+        PreferencesPageKind::General => general_page(shell, dialog, navigation_controls),
         PreferencesPageKind::Appearance => appearance_page(shell).upcast(),
         PreferencesPageKind::Integrations => scrobbling_page(shell, credential_drafts).upcast(),
         PreferencesPageKind::Playback => playback_page(shell).upcast(),
@@ -886,13 +898,18 @@ fn mount_preferences_page(
     };
     slot.append(&page);
 }
-fn general_page(shell: &Rc<Shell>, dialog: &adw::Dialog) -> adw::PreferencesPage {
+fn general_page(
+    shell: &Rc<Shell>,
+    dialog: &adw::Dialog,
+    navigation_controls: &PreferencesNavigationControls,
+) -> gtk::Widget {
     let resource = crate::ui_resource::GENERAL_PREFERENCES_RESOURCE;
     let builder = ui_shared::ui_resource::builder(resource);
     ui_shared::objects!(builder, resource, {
         page: adw::PreferencesPage,
         language_row: adw::ComboRow,
         window_group: adw::PreferencesGroup,
+        activity_overview_row: adw::ActionRow,
         tray_row: adw::SwitchRow,
         keep_running_row: adw::SwitchRow,
         start_minimized_row: adw::SwitchRow,
@@ -1341,7 +1358,7 @@ fn general_page(shell: &Rc<Shell>, dialog: &adw::Dialog) -> adw::PreferencesPage
             },
         );
     });
-    page
+    activity::wrap_general(shell, &page, &activity_overview_row, navigation_controls)
 }
 fn secret_storage_mode_index(mode: SecretStorageMode) -> u32 {
     match mode {

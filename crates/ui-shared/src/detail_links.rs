@@ -187,7 +187,8 @@ impl DetailLinkBinding {
 
         let activate_links = Rc::clone(&links);
         label.connect_activate_link(move |_, link| {
-            if let Some(route) = activate_links.borrow().route_for_link(link) {
+            let route = activate_links.borrow().route_for_link(link);
+            if let Some(route) = route {
                 navigate(route);
             }
             glib::Propagation::Stop
@@ -323,6 +324,32 @@ pub fn album_artist_links(album: &AlbumRow) -> DetailLinks {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires a GTK display"]
+    fn activating_a_link_allows_navigation_to_clear_its_binding() {
+        gtk::init().expect("GTK display");
+        let label = gtk::Label::new(None);
+        let active = Rc::new(RefCell::new(None::<DetailLinkBinding>));
+        let active_for_navigation = Rc::clone(&active);
+        let binding = DetailLinkBinding::new(
+            &label,
+            Rc::new(move |route| {
+                assert_eq!(route, Route::AlbumDetail("album:one".into()));
+                let binding = active_for_navigation.borrow().as_ref().unwrap().clone();
+                binding.clear();
+            }),
+        );
+        binding.bind(DetailLinks::route(
+            "Album",
+            Some(Route::AlbumDetail("album:one".into())),
+        ));
+        active.replace(Some(binding.clone()));
+
+        assert!(label.emit_by_name::<bool>("activate-link", &[&"0"]));
+        assert!(binding.links().text.is_empty());
+        assert!(label.text().is_empty());
+    }
     #[test]
     fn credited_case_preserves_display_text_and_unicode_link_boundaries() {
         for (display, credited) in [

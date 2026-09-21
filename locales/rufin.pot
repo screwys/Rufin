@@ -850,6 +850,18 @@ msgstr ""
 msgid "Date added"
 msgstr ""
 
+msgid "Days after month ends"
+msgstr ""
+
+msgid "Days after year ends"
+msgstr ""
+
+msgid "Days before month ends"
+msgstr ""
+
+msgid "Days before year ends"
+msgstr ""
+
 msgid "Debug logging"
 msgstr ""
 
@@ -1629,6 +1641,9 @@ msgstr ""
 msgid "Month"
 msgstr ""
 
+msgid "Monthly"
+msgstr ""
+
 msgid "Mood tracks"
 msgstr ""
 
@@ -1964,6 +1979,9 @@ msgid "Open Rufin Connect"
 msgstr ""
 
 msgid "Open approval page"
+msgstr ""
+
+msgid "Open automatically"
 msgstr ""
 
 msgid "Open fullscreen player"
@@ -3361,22 +3379,19 @@ msgstr ""
 msgid "Year"
 msgstr ""
 
+msgid "Yearly"
+msgstr ""
+
 msgid "Yellow"
 msgstr ""
 
 msgid "Yes"
 msgstr ""
 
-msgid "Your monthly listening overview is ready"
-msgstr ""
-
 msgid "Your music belongs here"
 msgstr ""
 
 msgid "Your queue is empty."
-msgstr ""
-
-msgid "Your yearly listening overview is ready"
 msgstr ""
 
 #, rust-format

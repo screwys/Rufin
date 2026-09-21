@@ -32,8 +32,14 @@ pub struct ActivityOverviewSettings {
     pub result_count: usize,
     pub show_comparison: bool,
     pub show_rufin_in_headline: bool,
-    pub offered_month: Option<String>,
-    pub offered_year: Option<i32>,
+    pub monthly_enabled: bool,
+    pub yearly_enabled: bool,
+    pub monthly_days_before_end: u32,
+    pub monthly_days_after_end: u32,
+    pub yearly_days_before_end: u32,
+    pub yearly_days_after_end: u32,
+    pub opened_month: Option<String>,
+    pub opened_year: Option<i32>,
 }
 
 impl Default for ActivityOverviewSettings {
@@ -48,8 +54,14 @@ impl Default for ActivityOverviewSettings {
             result_count: 3,
             show_comparison: true,
             show_rufin_in_headline: true,
-            offered_month: None,
-            offered_year: None,
+            monthly_enabled: true,
+            yearly_enabled: true,
+            monthly_days_before_end: 0,
+            monthly_days_after_end: 5,
+            yearly_days_before_end: 6,
+            yearly_days_after_end: 7,
+            opened_month: None,
+            opened_year: None,
         }
     }
 }

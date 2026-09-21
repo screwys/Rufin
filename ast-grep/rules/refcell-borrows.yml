@@ -11,6 +11,16 @@ constraints:
       - not:
           regex: ^drop$
 ---
+id: finish-refcell-borrow-before-conditional-callback
+language: Rust
+severity: error
+message: Resolve the borrowed value before the if-let; its temporary borrow survives callback-driven teardown.
+rule:
+  pattern: "if let Some($VALUE) = $CELL.borrow().$METHOD($$$ARGS) { $$$BEFORE $CALL($VALUE); $$$AFTER }"
+constraints:
+  CALL:
+    kind: identifier
+---
 id: finish-refcell-borrow-before-widget-update
 language: Rust
 severity: error

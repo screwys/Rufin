@@ -1717,13 +1717,13 @@ link.inline-detail-link:active {
   text-decoration: none;
 }
 
-link.inline-detail-link:hover {
+label:hover link.inline-detail-link:hover {
   color: inherit;
   text-decoration-line: underline;
   text-decoration-color: color-mix(in srgb, currentColor 65%, var(--window-bg-color));
 }
 
-link.inline-detail-link:focus:focus-visible {
+label link.inline-detail-link:focus:focus-visible {
   outline: none;
   text-decoration-line: underline;
   text-decoration-color: var(--accent-color);

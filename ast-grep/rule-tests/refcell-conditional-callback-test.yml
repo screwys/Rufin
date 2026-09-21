@@ -1,0 +1,22 @@
+id: finish-refcell-borrow-before-conditional-callback
+valid:
+  - |
+      fn paint(texture: &RefCell<Option<Texture>>, snapshot: &Snapshot) {
+          if let Some(texture) = texture.borrow().as_ref() {
+              draw_texture(snapshot, texture);
+          }
+      }
+  - |
+      fn activate(links: &RefCell<Links>, navigate: impl Fn(Route), link: &str) {
+          let route = links.borrow().route_for_link(link);
+          if let Some(route) = route {
+              navigate(route);
+          }
+      }
+invalid:
+  - |
+      fn activate(links: &RefCell<Links>, navigate: impl Fn(Route), link: &str) {
+          if let Some(route) = links.borrow().route_for_link(link) {
+              navigate(route);
+          }
+      }
