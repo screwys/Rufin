@@ -486,6 +486,9 @@ pub async fn build(
         if let Some(shell) = weak.upgrade() {
             shell.web_controller.stop();
             shell.close_activity();
+            if let Err(error) = shell.products.release_updates.install_on_exit() {
+                tracing::warn!(%error, "could not start update on exit");
+            }
         }
     });
     let weak = Rc::downgrade(&shell);

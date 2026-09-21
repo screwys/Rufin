@@ -26,6 +26,7 @@ ui_shared::composite_box!(
         version: gtk::Button,
         version_text: gtk::Label,
         status: gtk::Box,
+        restart: gtk::Button,
         date: gtk::Label,
         body: gtk::Box,
     }
@@ -444,6 +445,14 @@ fn release_note_row(
     });
     row.imp().date.set_label(&release_relative_date(&note.date));
     match release_row_status(history, note) {
+        _ if release_updates.ready_version().as_deref() == Some(note.version.as_str()) => {
+            let restart = row.imp().restart.get();
+            restart.set_visible(true);
+            restart.set_cursor_from_name(Some("pointer"));
+            let version = note.version.clone();
+            let release_updates = release_updates.clone();
+            restart.connect_clicked(move |_| release_updates.update(version.clone()));
+        }
         ReleaseRowStatus::Installed => {
             let installed = gtk::Label::new(Some(&tr("Installed")));
             installed.add_css_class("release-note-installed");
@@ -709,6 +718,18 @@ pub(crate) fn apply_release_update(shell: &Rc<Shell>, update: ReleaseUpdate) {
             *shell.preferences.release_updating.borrow_mut() = Some(version);
             refresh_open_release_notes(shell);
         }
+        ReleaseUpdate::Ready { version } => {
+            clear_updating_version(shell, &version);
+            refresh_open_release_notes(shell);
+            dismiss_release_notification(shell);
+            let resource = crate::ui_resource::UPDATE_READY_RESOURCE;
+            let builder = ui_shared::ui_resource::builder(resource);
+            ui_shared::objects!(builder, resource, { toast: adw::Toast });
+            let release_updates = shell.products.release_updates.clone();
+            toast.connect_button_clicked(move |_| release_updates.update(version.clone()));
+            shell.chrome.toast_overlay.add_toast(toast.clone());
+            *shell.preferences.release_notification_toast.borrow_mut() = Some(toast);
+        }
         ReleaseUpdate::Updated {
             version,
             restart_required,
@@ -724,10 +745,10 @@ pub(crate) fn apply_release_update(shell: &Rc<Shell>, update: ReleaseUpdate) {
             shell
                 .control_feedback
                 .show_feedback_toast(if restart_required {
-                    tr_with(
-                        "Updated Rufin to {version}. Restart to apply.",
-                        &[("version", version.as_str())],
-                    )
+                    let resource = crate::ui_resource::UPDATE_READY_RESOURCE;
+                    let builder = ui_shared::ui_resource::builder(resource);
+                    ui_shared::objects!(builder, resource, { toast: adw::Toast });
+                    toast.title().expect("update toast title").to_string()
                 } else {
                     tr_with(
                         "Updated Rufin to {version}",

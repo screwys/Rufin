@@ -5,7 +5,7 @@ pub(super) enum InstallOutcome {
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Updated { restart_required: bool },
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    Restarting,
+    Ready,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -37,6 +37,23 @@ impl ReleaseInstaller {
 
     pub(super) fn supports_automatic_updates(&self) -> bool {
         platform::supports_automatic_updates(&self.0)
+    }
+
+    pub(super) fn ready_version(&self) -> Option<String> {
+        #[cfg(target_os = "windows")]
+        return self.0.inner.ready_version();
+        #[cfg(not(target_os = "windows"))]
+        None
+    }
+
+    pub(super) fn install_ready(&self, relaunch: bool) -> Result<(), String> {
+        #[cfg(target_os = "windows")]
+        return self.0.inner.install_ready(relaunch);
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = relaunch;
+            Ok(())
+        }
     }
 }
 
@@ -130,7 +147,7 @@ mod platform {
 
     #[derive(Clone)]
     pub(super) struct Installer {
-        inner: windows_updater::InstalledUpdater,
+        pub(super) inner: windows_updater::InstalledUpdater,
     }
 
     pub(super) fn detect(cache_dir: PathBuf) -> Option<Installer> {
@@ -141,8 +158,8 @@ mod platform {
     }
 
     pub(super) fn install(installer: &Installer, version: &str) -> Result<InstallOutcome, String> {
-        installer.inner.install(version)?;
-        Ok(InstallOutcome::Restarting)
+        installer.inner.prepare(version)?;
+        Ok(InstallOutcome::Ready)
     }
 
     pub(super) fn supports_automatic_updates(installer: &Installer) -> bool {
