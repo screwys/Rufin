@@ -698,9 +698,6 @@ msgstr "Коллекции"
 msgid "Color for the active word during playback"
 msgstr "Цвет для активного слова во время воспроизведения"
 
-msgid "Color scheme"
-msgstr "Цветовая схема"
-
 msgid "Columns"
 msgstr "Столбцы"
 
@@ -849,6 +846,11 @@ msgstr "Не удалось загрузить похожие треки"
 
 msgid "Could not load this page"
 msgstr "Не удалось загрузить эту страницу"
+
+#, fuzzy
+#| msgid "Could not open folder: {error}"
+msgid "Could not open file: {error}"
+msgstr "Не удалось открыть папку: {error}"
 
 msgid "Could not open folder: {error}"
 msgstr "Не удалось открыть папку: {error}"
@@ -1094,6 +1096,11 @@ msgid "Edit lyrics"
 msgstr "Редактировать текст песни"
 
 msgid "Edit metadata"
+msgstr "Редактировать метаданные"
+
+#, fuzzy
+#| msgid "Edit metadata"
+msgid "Edit theme"
 msgstr "Редактировать метаданные"
 
 msgid "Edit"
@@ -2072,6 +2079,9 @@ msgstr "Открыть страницу подтверждения"
 msgid "Open automatically"
 msgstr "Автоматическое обновление"
 
+msgid "Open custom themes folder"
+msgstr ""
+
 msgid "Open fullscreen player"
 msgstr "Открыть полноэкранный плеер"
 
@@ -2509,6 +2519,11 @@ msgstr "Выпуск"
 
 msgid "Reload from file"
 msgstr "Перезагрузить из файла"
+
+#, fuzzy
+#| msgid "Reload"
+msgid "Reload themes"
+msgstr "Перезагрузить"
 
 msgid "Reload to apply changes"
 msgstr "Перегрузка для применения изменений"
@@ -3713,6 +3728,9 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Color scheme"
+#~ msgstr "Цветовая схема"
 
 #~ msgid "Rename Playlist"
 #~ msgstr "Переименовать плейлист"

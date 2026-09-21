@@ -688,9 +688,6 @@ msgstr "Kolekcijas"
 msgid "Color for the active word during playback"
 msgstr "Krāsa aktīvajam vārdam atskaņošanas laikā"
 
-msgid "Color scheme"
-msgstr "Krāsu shēma"
-
 msgid "Columns"
 msgstr "Kolonnas"
 
@@ -863,6 +860,11 @@ msgstr "Nevarēja ielādēt saistītās dziesmas"
 
 msgid "Could not load this page"
 msgstr "Šo lapu nevarēja ielādēt"
+
+#, fuzzy
+#| msgid "Could not open folder: {error}"
+msgid "Could not open file: {error}"
+msgstr "Nevar atvērt mapi: {error}"
 
 msgid "Could not open folder: {error}"
 msgstr "Nevar atvērt mapi: {error}"
@@ -1118,6 +1120,11 @@ msgid "Edit lyrics"
 msgstr "Rediģēt tekstus"
 
 msgid "Edit metadata"
+msgstr "Rediģēt metadatus"
+
+#, fuzzy
+#| msgid "Edit metadata"
+msgid "Edit theme"
 msgstr "Rediģēt metadatus"
 
 msgid "Edit"
@@ -2122,6 +2129,9 @@ msgstr "Atvērt apstiprināšanas lapu"
 msgid "Open automatically"
 msgstr "Atjaunot automātiski"
 
+msgid "Open custom themes folder"
+msgstr ""
+
 msgid "Open fullscreen player"
 msgstr "Atvērt pilnekrāna atskaņotāju"
 
@@ -2571,6 +2581,11 @@ msgstr "Izdevums"
 
 msgid "Reload from file"
 msgstr "Ielādēt no faila vēlreiz"
+
+#, fuzzy
+#| msgid "Reload"
+msgid "Reload themes"
+msgstr "Pārlādēt"
 
 msgid "Reload to apply changes"
 msgstr ""
@@ -3798,6 +3813,9 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "Color scheme"
+#~ msgstr "Krāsu shēma"
 
 #~ msgid "Rename Playlist"
 #~ msgstr "Pārdēvēt atskaņošanas sarakstu"

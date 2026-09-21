@@ -685,9 +685,6 @@ msgstr "收藏"
 msgid "Color for the active word during playback"
 msgstr ""
 
-msgid "Color scheme"
-msgstr "色彩配置"
-
 msgid "Columns"
 msgstr ""
 
@@ -878,6 +875,11 @@ msgstr "無法載入此資料夾"
 #| msgid "Couldn't load this folder"
 msgid "Could not load this page"
 msgstr "無法載入此資料夾"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Could not open file: {error}"
+msgstr "無法更新最愛"
 
 #, fuzzy
 #| msgid "Could not update favorites"
@@ -1161,6 +1163,11 @@ msgid "Edit lyrics"
 msgstr "無歌詞"
 
 msgid "Edit metadata"
+msgstr "編輯元資料"
+
+#, fuzzy
+#| msgid "Edit metadata"
+msgid "Edit theme"
 msgstr "編輯元資料"
 
 msgid "Edit"
@@ -2220,6 +2227,9 @@ msgstr ""
 msgid "Open automatically"
 msgstr ""
 
+msgid "Open custom themes folder"
+msgstr ""
+
 msgid "Open fullscreen player"
 msgstr "開啟全螢幕播放器"
 
@@ -2724,6 +2734,11 @@ msgstr ""
 #, fuzzy
 #| msgid "Removed from favorites"
 msgid "Reload from file"
+msgstr "從最愛中移除"
+
+#, fuzzy
+#| msgid "Removed from favorites"
+msgid "Reload themes"
 msgstr "從最愛中移除"
 
 msgid "Reload to apply changes"
@@ -3985,6 +4000,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Color scheme"
+#~ msgstr "色彩配置"
 
 #~ msgid "Rename Playlist"
 #~ msgstr "重新命名播放清單"

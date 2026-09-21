@@ -696,9 +696,6 @@ msgstr "Sammlungen"
 msgid "Color for the active word during playback"
 msgstr "Farbe des aktuellen Wortes während der Wiedergabe"
 
-msgid "Color scheme"
-msgstr "Farbschema"
-
 msgid "Columns"
 msgstr "Spalten"
 
@@ -845,6 +842,11 @@ msgstr "Verwandte Titel konnten nicht geladen werden"
 
 msgid "Could not load this page"
 msgstr "Diese Seite konnte nicht geladen werden"
+
+#, fuzzy
+#| msgid "Could not open folder: {error}"
+msgid "Could not open file: {error}"
+msgstr "Ordner konnte nicht geöffnet werden: {error}"
 
 msgid "Could not open folder: {error}"
 msgstr "Ordner konnte nicht geöffnet werden: {error}"
@@ -1090,6 +1092,11 @@ msgid "Edit lyrics"
 msgstr "Liedtexte bearbeiten"
 
 msgid "Edit metadata"
+msgstr "Metadaten bearbeiten"
+
+#, fuzzy
+#| msgid "Edit metadata"
+msgid "Edit theme"
 msgstr "Metadaten bearbeiten"
 
 msgid "Edit"
@@ -2058,6 +2065,9 @@ msgstr "Bestätigungsseite öffnen"
 msgid "Open automatically"
 msgstr "Automatisch öffnen"
 
+msgid "Open custom themes folder"
+msgstr ""
+
 msgid "Open fullscreen player"
 msgstr "Vollbildmodus aktivieren"
 
@@ -2492,6 +2502,11 @@ msgstr "Veröffentlichung"
 
 msgid "Reload from file"
 msgstr "Aus Datei neu laden"
+
+#, fuzzy
+#| msgid "Reload"
+msgid "Reload themes"
+msgstr "Neu laden"
 
 msgid "Reload to apply changes"
 msgstr "Neu laden, um Änderungen anzuwenden"
@@ -3664,6 +3679,9 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#~ msgid "Color scheme"
+#~ msgstr "Farbschema"
 
 #~ msgid "Rename Playlist"
 #~ msgstr "Playlist umbenennen"

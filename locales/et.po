@@ -703,9 +703,6 @@ msgstr "Kogud"
 msgid "Color for the active word during playback"
 msgstr "Taasesituse ajal värvi aktiivsed sõnad"
 
-msgid "Color scheme"
-msgstr "Kasutatavad värvid"
-
 msgid "Columns"
 msgstr "Veerud"
 
@@ -900,6 +897,11 @@ msgstr "Selle kausta laadimine ei õnnestunud"
 #| msgid "Couldn't load this folder"
 msgid "Could not load this page"
 msgstr "Selle kausta laadimine ei õnnestunud"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Could not open file: {error}"
+msgstr "Lemmikute uuendamine ei õnnestunud"
 
 #, fuzzy
 #| msgid "Could not update favorites"
@@ -1175,6 +1177,11 @@ msgid "Edit lyrics"
 msgstr "Muuda laulusõnu"
 
 msgid "Edit metadata"
+msgstr "Muuda metateavet"
+
+#, fuzzy
+#| msgid "Edit metadata"
+msgid "Edit theme"
 msgstr "Muuda metateavet"
 
 msgid "Edit"
@@ -2241,6 +2248,9 @@ msgstr ""
 msgid "Open automatically"
 msgstr "Salvesta laulusõnad automaatselt"
 
+msgid "Open custom themes folder"
+msgstr ""
+
 msgid "Open fullscreen player"
 msgstr "Ava muusikaesitaja täisekraanivaates"
 
@@ -2751,6 +2761,11 @@ msgstr "Väljalase"
 #, fuzzy
 #| msgid "Removed from favorites"
 msgid "Reload from file"
+msgstr "Eemaldatud lemmikute seast"
+
+#, fuzzy
+#| msgid "Removed from favorites"
+msgid "Reload themes"
 msgstr "Eemaldatud lemmikute seast"
 
 msgid "Reload to apply changes"
@@ -4031,6 +4046,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Color scheme"
+#~ msgstr "Kasutatavad värvid"
 
 #~ msgid "Rename Playlist"
 #~ msgstr "Muuda esitusloendi nime"
