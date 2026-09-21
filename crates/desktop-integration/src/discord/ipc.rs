@@ -175,7 +175,7 @@ mod transport {
 use transport::IpcStream;
 
 pub const DEFAULT_CLIENT_ID: &str = "1505345384686419979";
-pub(crate) const APP_ICON_URL: &str = "https://raw.githubusercontent.com/screwys/Rufin/main/resources/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg";
+pub(crate) const APP_ICON_ASSET: &str = "rufin";
 pub(crate) const SUPPORTED: bool = cfg!(any(unix, windows));
 
 const MAX_TEXT_LENGTH: usize = 127;
@@ -496,12 +496,18 @@ fn worker_ipc_paths() -> Vec<PathBuf> {
 
 fn activity_json(activity: &Activity) -> Value {
     let track = &activity.media;
+    let (small_image, small_text) = match activity.playback_state {
+        PlaybackState::Playing => ("playing", "Playing"),
+        PlaybackState::Paused => ("paused", "Paused"),
+    };
     let mut value = json!({
         "details": discord_text(&track.title, "Idle"),
         "state": discord_text(&track.artist, "Unknown artist"),
         "assets": {
             "large_image": activity.large_image,
             "large_text": discord_text(&track.album, "Unknown album"),
+            "small_image": small_image,
+            "small_text": small_text,
         },
         "timestamps": {},
         "instance": false,
@@ -690,7 +696,7 @@ mod tests {
             playback_state: PlaybackState::Playing,
             started_at_millis: None,
             ended_at_millis: None,
-            large_image: APP_ICON_URL.to_string(),
+            large_image: APP_ICON_ASSET.to_string(),
         };
 
         let (details, state) = activity_urls(&activity);
@@ -713,7 +719,7 @@ mod tests {
             playback_state: PlaybackState::Playing,
             started_at_millis: None,
             ended_at_millis: None,
-            large_image: APP_ICON_URL.to_string(),
+            large_image: APP_ICON_ASSET.to_string(),
         };
 
         let (details, state) = activity_urls(&activity);
@@ -775,7 +781,7 @@ mod tests {
             playback_state: PlaybackState::Playing,
             started_at_millis: None,
             ended_at_millis: None,
-            large_image: APP_ICON_URL.to_string(),
+            large_image: APP_ICON_ASSET.to_string(),
         };
 
         assert!(connection.apply(Some(&activity)));

@@ -17,6 +17,8 @@ pub(crate) const PREFERENCES_DIALOG_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/dialog.ui";
 pub(crate) const GENERAL_PREFERENCES_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/general.ui";
+pub(crate) const DISCORD_FLATPAK_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/preferences/dialogs/discord_flatpak.ui";
 pub(crate) const ACTIVITY_PREFERENCES_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/activity.ui";
 pub(crate) const INTEGRATIONS_RESOURCE: &str =
@@ -96,6 +98,7 @@ pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     THEME_ACCENT_RESOURCE,
     PREFERENCES_DIALOG_RESOURCE,
     GENERAL_PREFERENCES_RESOURCE,
+    DISCORD_FLATPAK_RESOURCE,
     ACTIVITY_PREFERENCES_RESOURCE,
     CONTENT_CHROME_RESOURCE,
     DIAGNOSTICS_RESOURCE,

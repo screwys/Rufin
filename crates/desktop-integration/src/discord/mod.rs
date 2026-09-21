@@ -221,7 +221,7 @@ impl Presence {
             &state.settings,
             view,
             now_millis,
-            ipc::APP_ICON_URL.to_string(),
+            ipc::APP_ICON_ASSET.to_string(),
         ) else {
             self.clear(state);
             return;
@@ -250,7 +250,7 @@ impl Presence {
         else {
             state.artwork = ArtworkState::Empty;
             self.inner.artwork.clear();
-            return ipc::APP_ICON_URL.to_string();
+            return ipc::APP_ICON_ASSET.to_string();
         };
         match &state.artwork {
             ArtworkState::Pending { key: pending, .. } if pending == &key => {
@@ -258,10 +258,12 @@ impl Presence {
                     .activity
                     .as_ref()
                     .map(|activity| activity.large_image.clone())
-                    .unwrap_or_else(|| ipc::APP_ICON_URL.to_string());
+                    .unwrap_or_else(|| ipc::APP_ICON_ASSET.to_string());
             }
             ArtworkState::Ready { key: ready, url } if ready == &key => {
-                return url.clone().unwrap_or_else(|| ipc::APP_ICON_URL.to_string());
+                return url
+                    .clone()
+                    .unwrap_or_else(|| ipc::APP_ICON_ASSET.to_string());
             }
             ArtworkState::Empty | ArtworkState::Pending { .. } | ArtworkState::Ready { .. } => {}
         }
@@ -278,7 +280,7 @@ impl Presence {
             queued_at: Instant::now(),
             owner: Arc::downgrade(&self.inner),
         });
-        ipc::APP_ICON_URL.to_string()
+        ipc::APP_ICON_ASSET.to_string()
     }
 }
 
@@ -362,7 +364,7 @@ impl State {
             key: key.clone(),
             url: url.clone(),
         };
-        let image = url.unwrap_or_else(|| ipc::APP_ICON_URL.to_string());
+        let image = url.unwrap_or_else(|| ipc::APP_ICON_ASSET.to_string());
         let activity = self.activity.as_mut()?;
         Arc::make_mut(activity).large_image = image;
         Some(Arc::clone(activity))

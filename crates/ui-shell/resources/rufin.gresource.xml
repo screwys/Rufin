@@ -13,6 +13,7 @@
     <file compressed="true">preferences/theme_accent.ui</file>
     <file compressed="true">preferences/dialog.ui</file>
     <file compressed="true">preferences/general.ui</file>
+    <file compressed="true">preferences/dialogs/discord_flatpak.ui</file>
     <file compressed="true">preferences/activity.ui</file>
     <file compressed="true">preferences/dialogs/playlist_file.ui</file>
     <file compressed="true">preferences/dialogs/release_note_row.ui</file>
