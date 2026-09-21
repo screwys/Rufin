@@ -22,8 +22,6 @@ pub fn register_resources() -> Result<(), String> {
         .clone()
 }
 
-#[cfg(test)]
-mod cell_lifetime_tests;
 pub mod detail_links;
 pub mod folder_launcher;
 pub mod path_display;

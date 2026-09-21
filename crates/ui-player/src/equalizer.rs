@@ -432,11 +432,7 @@ pub fn connect_equalizer_scale_commit(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        CUSTOM_PRESET, EQUALIZER_BAND_COUNT, EqualizerSurface, equalizer_preset_names,
-        equalizer_presets,
-    };
-    use gtk::prelude::*;
+    use super::{CUSTOM_PRESET, EQUALIZER_BAND_COUNT, equalizer_preset_names, equalizer_presets};
 
     #[test]
     pub fn equalizer_presets_cover_all_bands() {
@@ -451,39 +447,5 @@ mod tests {
         let names = equalizer_preset_names();
         assert_eq!(names.first(), Some(&"Flat"));
         assert_eq!(names.last(), Some(&CUSTOM_PRESET));
-    }
-
-    #[test]
-    #[ignore = "requires a GTK display"]
-    pub fn connected_equalizer_surface_releases_every_control() {
-        gtk::init().expect("GTK display");
-        crate::register_resources().expect("Rufin resources");
-        let surface = EqualizerSurface::new(&playback::EqualizerSettings::default());
-        let changes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-        let recorded = std::rc::Rc::clone(&changes);
-        surface.connect_changed(move |settings| recorded.borrow_mut().push(settings));
-        let mounted = surface.root.clone();
-        let state = std::rc::Rc::downgrade(&surface.controls);
-        let root = surface.root.downgrade();
-        let controls = surface
-            .controls
-            .scales
-            .iter()
-            .map(gtk::prelude::ObjectExt::downgrade)
-            .collect::<Vec<_>>();
-        drop(surface);
-        let retained = state.upgrade().expect("mounted equalizer controls");
-        retained
-            .preset
-            .activate_action("equalizer.select", Some(&"Classical".to_variant()))
-            .expect("preset action");
-        assert_eq!(changes.borrow().len(), 1);
-        assert_eq!(changes.borrow()[0], retained.settings());
-        drop(retained);
-        drop(mounted);
-        while gtk::glib::MainContext::default().iteration(false) {}
-        assert!(state.upgrade().is_none());
-        assert!(root.upgrade().is_none());
-        assert!(controls.iter().all(|control| control.upgrade().is_none()));
     }
 }

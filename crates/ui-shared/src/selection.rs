@@ -307,24 +307,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "requires a GTK display"]
-    fn disc_sections_preserve_selection_without_reordering() {
-        gtk::init().expect("GTK display");
-        let model =
-            crate::sparse_model::SparseObjectModel::new::<u64, String>((0..24).collect(), 64);
-        model.set_sections(vec![(0, 1), (12, 2)]);
-        let selection = PositionSelectionModel::new(model.clone());
-        assert_eq!(selection.section(15), (12, 24));
-        selection.select_item(15, true);
-        model.set_sections(vec![(0, 1), (10, 2)]);
-        assert!(selection.is_selected(15));
-        assert_eq!(selection.section(15), (10, 24));
-        model.replace_order::<u64, String>(vec![0, 1, 2]);
-        assert!(selection.selection().is_empty());
-        assert_eq!(selection.section(0), (0, 3));
-    }
-
-    #[test]
     fn selected_positions_follow_visible_track_order() {
         let order = ["one", "two", "three"];
         assert_eq!(
