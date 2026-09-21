@@ -213,7 +213,7 @@ impl CatalogUi {
         let refresh_order = tracks.connect_read(
             self,
             move |request| (request_membership.borrow().clone(), request),
-            move |(membership, request): (Arc<[String]>, TrackProjectionRequest)| {
+            move |(membership, request): (Arc<[String]>, TrackProjectionRequest), cancellation| {
                 let database = database.clone();
                 async move {
                     prepare_smart_playlist_projection(
@@ -221,7 +221,7 @@ impl CatalogUi {
                         &membership,
                         request,
                         library::RouteSeedWindow::top(),
-                        &ReadCancellation::new(),
+                        &cancellation,
                     )
                     .await
                 }
@@ -295,45 +295,53 @@ impl CatalogUi {
         let tracks_widget = entries.widget();
         let database = Arc::clone(&self.library);
         let runtime = self.runtime.clone();
-        let request_order: Rc<
-            dyn Fn(
-                std::rc::Weak<super::playlist_entries::PlaylistEntriesView>,
+        let load = Arc::new(
+            move |(_, request): (
                 u64,
                 crate::playlist_entry_model::PlaylistEntryProjectionRequest,
             ),
-        > = Rc::new(move |entries, generation, request| {
-            let database = Arc::clone(&database);
-            let cancellation = ReadCancellation::new();
-            let task = runtime.spawn(async move {
-                database
-                    .playlist_entry_order(
-                        key,
-                        None,
-                        request.settings.sort_key.playlist_entry_sort(),
-                        request.settings.descending,
-                        &request.query,
-                        &cancellation,
-                    )
-                    .await
-            });
-            glib::spawn_future_local(async move {
-                if let Ok(Ok(order)) = task.await
-                    && let Some(entries) = entries.upgrade()
-                {
-                    entries.replace_order(generation, order);
-                }
-            });
+                  cancellation: ReadCancellation| {
+                let database = Arc::clone(&database);
+                Box::pin(async move {
+                    database
+                        .playlist_entry_order(
+                            key,
+                            None,
+                            request.settings.sort_key.playlist_entry_sort(),
+                            request.settings.descending,
+                            &request.query,
+                            &cancellation,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())
+                }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
+            },
+        );
+        let apply_entries = Rc::downgrade(&entries);
+        let apply = Rc::new(move |(generation, _), result| {
+            if let Ok(order) = result
+                && let Some(entries) = apply_entries.upgrade()
+            {
+                entries.replace_order(generation, order);
+            }
         });
-        let search_request = Rc::clone(&request_order);
-        let search_entries = Rc::downgrade(&entries);
+        let read = LatestMountedRouteRead::new_with_request(
+            runtime,
+            apply,
+            load,
+            "mounted Playlist order",
+        );
+        let search_read = Rc::downgrade(&read);
         entries.connect_search_request(move |generation, request| {
-            search_request(search_entries.clone(), generation, request);
+            if let Some(read) = search_read.upgrade() {
+                read.request_with((generation, request));
+            }
         });
         let apply_entries = Rc::clone(&entries);
         let refresh_entries = Rc::clone(&entries);
         let refresh = Rc::new(move || {
             let (generation, request) = refresh_entries.begin_order_request();
-            request_order(Rc::downgrade(&refresh_entries), generation, request);
+            read.request_with((generation, request));
         }) as Rc<dyn Fn()>;
         let apply_refresh = Rc::clone(&refresh);
         let apply = Rc::new(move |settings: &LibraryListSettings| {
@@ -607,36 +615,44 @@ impl CatalogUi {
                 },
             );
             let database = Arc::clone(&self.library);
-            let load = Arc::new(move |owner_key: PlaylistDetailOwner| {
-                let database = Arc::clone(&database);
-                Box::pin(async move {
-                    let cancellation = ReadCancellation::new();
-                    match owner_key {
-                        PlaylistDetailOwner::Saved { key, .. } => database
-                            .playlist_rows(&[key], &cancellation)
-                            .await
-                            .map_err(|error| error.to_string())?
-                            .pop()
-                            .map(|summary| (PlaylistDetailOwner::Saved { key, summary }, None)),
-                        PlaylistDetailOwner::Smart { key, .. } => {
-                            let now = SystemTime::now()
-                                .duration_since(UNIX_EPOCH)
-                                .map_or(0, |duration| duration.as_secs() as i64);
-                            database
-                                .smart_playlist_membership(source, key, folder, now, &cancellation)
+            let load = Arc::new(
+                move |owner_key: PlaylistDetailOwner, cancellation: ReadCancellation| {
+                    let database = Arc::clone(&database);
+                    Box::pin(async move {
+                        match owner_key {
+                            PlaylistDetailOwner::Saved { key, .. } => database
+                                .playlist_rows(&[key], &cancellation)
                                 .await
                                 .map_err(|error| error.to_string())?
-                                .map(|(summary, membership)| {
-                                    (
-                                        PlaylistDetailOwner::Smart { key, summary },
-                                        Some(membership),
+                                .pop()
+                                .map(|summary| (PlaylistDetailOwner::Saved { key, summary }, None)),
+                            PlaylistDetailOwner::Smart { key, .. } => {
+                                let now = SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .map_or(0, |duration| duration.as_secs() as i64);
+                                database
+                                    .smart_playlist_membership(
+                                        source,
+                                        key,
+                                        folder,
+                                        now,
+                                        &cancellation,
                                     )
-                                })
+                                    .await
+                                    .map_err(|error| error.to_string())?
+                                    .map(|(summary, membership)| {
+                                        (
+                                            PlaylistDetailOwner::Smart { key, summary },
+                                            Some(membership),
+                                        )
+                                    })
+                            }
                         }
-                    }
-                    .ok_or_else(|| "Playlist no longer exists".to_string())
-                }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
-            });
+                        .ok_or_else(|| "Playlist no longer exists".to_string())
+                    })
+                        as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
+                },
+            );
             let read = LatestMountedRouteRead::new_with_request(
                 self.runtime.clone(),
                 apply,

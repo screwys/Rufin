@@ -442,10 +442,6 @@ impl<T: TrackPresentation> TrackTablePlayingState<T> {
     pub fn set_paused(&self, paused: bool) {
         self.inner.indicator.set_paused(paused);
     }
-
-    pub fn is_bound(&self) -> bool {
-        true
-    }
 }
 
 impl<T: TrackPresentation> Drop for TrackTablePlayingStateInner<T> {
@@ -998,12 +994,13 @@ pub fn track_table<T: TrackPresentation>(
     let playing_indicator = TrackRowPlayingIndicator::new();
     let playing_state = TrackTablePlayingState::new(&model, playing_indicator.clone());
     let selection_context_base = options.context_id.clone();
-    let selection_model = model.clone();
-    let current_playing_state = playing_state.clone();
+    let current_playing_state = Rc::downgrade(&playing_state.inner);
     shell.register_current_route_track_selection(Rc::new(move |current| {
-        if !current_playing_state.is_bound() {
+        let Some(inner) = current_playing_state.upgrade() else {
             return false;
-        }
+        };
+        let current_playing_state = TrackTablePlayingState { inner };
+        let selection_model = &current_playing_state.inner.model;
         let position = current.and_then(|current| {
             let expected_context_id = selection_model.visible_context_id(&selection_context_base);
             let source_rank = matching_context_rank(
@@ -1072,6 +1069,9 @@ pub fn track_table<T: TrackPresentation>(
         column_view_initial_width(shell, options.content_inset),
     );
     table.table.add_css_class("track-list");
+    let _ = table
+        .table
+        .add_weak_ref_notify_local(move || drop(playing_state));
     if key == LibraryListKey::AlbumDetailTracks {
         table.table.add_css_class("album-track-table");
         let factory = gtk::SignalListItemFactory::new();

@@ -710,7 +710,7 @@ fn toggle_shuffle_shortcut(shell: &Shell) {
     else {
         return;
     };
-    shell.products.playback.transport.toggle_shuffle();
+    shell.products.playback.transport.set_shuffle(enabled);
     let title = if enabled {
         tr("Shuffle on")
     } else {

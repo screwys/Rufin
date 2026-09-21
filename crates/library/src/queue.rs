@@ -1057,12 +1057,18 @@ impl Database {
             .into_iter()
             .map(|row| (row.object_id, row.item))
             .collect::<std::collections::HashMap<_, _>>();
-        let mut transaction = reader.begin().await?;
         let identities = entries
             .iter()
-            .map(|entry| entry.playlist_entry_id.as_deref())
+            .map(|entry| {
+                (!saved.contains_key(entry.occurrence.as_str()))
+                    .then_some(entry.playlist_entry_id.as_deref())
+                    .flatten()
+            })
             .collect::<Vec<_>>();
-        let keys=sqlx::query_as::<_,(i64,crate::PlaylistEntryKey)>(
+        let mut playlist_items = std::collections::HashMap::new();
+        if identities.iter().any(Option::is_some) {
+            let mut transaction = reader.begin().await?;
+            let keys=sqlx::query_as::<_,(i64,crate::PlaylistEntryKey)>(
             "SELECT requested.key,entry.playlist_entry_key FROM json_each(?1) requested
              CROSS JOIN main.playlists playlist ON playlist.object_id=json_extract(requested.value,'$[1]')
                AND playlist.source_key IS (SELECT source_key FROM main.source_ids WHERE object_id=json_extract(requested.value,'$[0]'))
@@ -1075,16 +1081,12 @@ impl Database {
              CROSS JOIN catalog.native_playlist_entries entry ON entry.playlist_key=playlist.playlist_key AND entry.object_id=json_extract(requested.value,'$[2]')
              ORDER BY 1")
             .bind(serde_json::to_string(&identities)?).fetch_all(&mut *transaction).await?;
-        let playlist_keys = keys.iter().map(|(_, key)| *key).collect::<Vec<_>>();
-        let mut playlist_items = keys
-            .iter()
-            .zip(
-                crate::playlists::load_playlist_entry_rows(&mut transaction, &playlist_keys)
-                    .await?,
-            )
-            .map(|((index, _), row)| (*index as usize, QueueItem::from(row)))
-            .collect::<std::collections::HashMap<_, _>>();
-        transaction.commit().await?;
+            let playlist_keys = keys.iter().map(|(_, key)| *key).collect::<Vec<_>>();
+            for (ordinal, item) in playlist_queue_items(&mut transaction, &playlist_keys).await? {
+                playlist_items.insert(keys[ordinal].0 as usize, item);
+            }
+            transaction.commit().await?;
+        }
         drop(reader);
         let missing = entries
             .iter()
@@ -1300,6 +1302,45 @@ impl Database {
     }
 }
 
+async fn playlist_queue_items(
+    connection: &mut sqlx::Transaction<'_, Sqlite>,
+    keys: &[crate::PlaylistEntryKey],
+) -> LibraryResult<Vec<(usize, QueueItem)>> {
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut query = crate::playlists::playlist_entries_query(keys);
+    query.push("entry.ordinal,entry.media_uri,
+        COALESCE(track.title,entry.title,'') title,
+        COALESCE(track.display_artist,entry.artist,'') artist,
+        COALESCE(track.display_album,entry.album,'') album,
+        COALESCE(album.display_artist,entry.album_display_artist) album_display_artist,
+        track.artwork_binding,COALESCE(track.duration_millis,entry.duration_millis,0) duration_millis,
+        COALESCE(track.disc_number,entry.disc_number) disc_number,
+        COALESCE(track.track_number,entry.track_number) track_number,
+        COALESCE(track.year,entry.year) year,
+        COALESCE(track.release_date,entry.release_date) release_date,
+        COALESCE(track.source_format,entry.source_format) source_format,
+        COALESCE(track.musicbrainz_recording_id,entry.musicbrainz_recording_id) musicbrainz_recording_id,
+        COALESCE(track.musicbrainz_release_track_id,entry.musicbrainz_release_track_id) musicbrainz_release_track_id,
+        NULL musicbrainz_album_id,NULL musicbrainz_release_group_id,NULL primary_artist_musicbrainz_id
+        FROM entries entry LEFT JOIN tracks track USING(media_uri)
+        LEFT JOIN albums album USING(album_key) ORDER BY entry.ordinal");
+    query
+        .build()
+        .persistent(false)
+        .fetch_all(&mut **connection)
+        .await?
+        .iter()
+        .map(|row| {
+            Ok((
+                row.try_get::<i64, _>("ordinal")? as usize,
+                QueueItem::from_row(row)?,
+            ))
+        })
+        .collect()
+}
+
 async fn capture_input(
     database: Option<&Database>,
     connection: &mut sqlx::Transaction<'_, Sqlite>,
@@ -1465,24 +1506,20 @@ async fn capture_input(
         QueueInput::PlaylistEntries { order, context_id } => {
             for (chunk_index, keys) in order.chunks(100).enumerate() {
                 let mut snapshots = Vec::new();
-                for row in crate::playlists::load_playlist_entry_rows(connection, keys).await? {
-                    let rank = chunk_index * 100
-                        + keys
-                            .iter()
-                            .position(|key| *key == row.playlist_entry_key)
-                            .unwrap_or(0);
-                    let identity = playlist_identity(connection, row.playlist_entry_key).await?;
+                for (ordinal, item) in playlist_queue_items(connection, keys).await? {
+                    let rank = chunk_index * 100 + ordinal;
+                    let identity = playlist_identity(connection, keys[ordinal]).await?;
                     let entry = push_entry(
                         entries,
                         namespace,
-                        row.media_uri.clone(),
+                        item.media_uri.clone(),
                         identity,
                         QueueProvenance::Context {
                             context_id: context_id.clone(),
                             source_rank: rank,
                         },
                     );
-                    snapshots.push(supplied_snapshot(entry, row.into()));
+                    snapshots.push(supplied_snapshot(entry, item));
                 }
                 admit_snapshots(database, connection, &snapshots).await?;
             }

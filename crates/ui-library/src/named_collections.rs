@@ -54,6 +54,7 @@ pub struct NamedReadRequest {
 pub type NamedOrderLoad<K, R> = Arc<
     dyn Fn(
             NamedReadRequest,
+            library::ReadCancellation,
         ) -> Pin<Box<dyn Future<Output = Result<(Vec<K>, usize, Vec<R>), String>> + Send>>
         + Send
         + Sync,
@@ -82,24 +83,24 @@ impl CatalogUi {
             },
         );
         let order_database = Arc::clone(&selected.database);
-        let order_load: NamedOrderLoad<GenreKey, GenreRow> = Arc::new(move |request| {
-            let database = Arc::clone(&order_database);
-            Box::pin(async move {
-                let cancellation = library::ReadCancellation::new();
-                database
-                    .genre_route_page(
-                        source,
-                        folder,
-                        &request.query,
-                        request.settings.sort_key.genre_sort(),
-                        request.settings.descending,
-                        library::RouteSeedWindow::top(),
-                        &cancellation,
-                    )
-                    .await
-                    .map_err(|error| error.to_string())
-            })
-        });
+        let order_load: NamedOrderLoad<GenreKey, GenreRow> =
+            Arc::new(move |request, cancellation| {
+                let database = Arc::clone(&order_database);
+                Box::pin(async move {
+                    database
+                        .genre_route_page(
+                            source,
+                            folder,
+                            &request.query,
+                            request.settings.sort_key.genre_sort(),
+                            request.settings.descending,
+                            library::RouteSeedWindow::top(),
+                            &cancellation,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())
+                })
+            });
         self.named_collection_route(
             LibraryListKey::Genres,
             msgid("Nothing here yet"),
@@ -134,24 +135,24 @@ impl CatalogUi {
             },
         );
         let order_database = Arc::clone(&selected.database);
-        let order_load: NamedOrderLoad<MoodKey, MoodRow> = Arc::new(move |request| {
-            let database = Arc::clone(&order_database);
-            Box::pin(async move {
-                let cancellation = library::ReadCancellation::new();
-                database
-                    .mood_route_page(
-                        source,
-                        folder,
-                        &request.query,
-                        request.settings.sort_key.mood_sort(),
-                        request.settings.descending,
-                        library::RouteSeedWindow::top(),
-                        &cancellation,
-                    )
-                    .await
-                    .map_err(|error| error.to_string())
-            })
-        });
+        let order_load: NamedOrderLoad<MoodKey, MoodRow> =
+            Arc::new(move |request, cancellation| {
+                let database = Arc::clone(&order_database);
+                Box::pin(async move {
+                    database
+                        .mood_route_page(
+                            source,
+                            folder,
+                            &request.query,
+                            request.settings.sort_key.mood_sort(),
+                            request.settings.descending,
+                            library::RouteSeedWindow::top(),
+                            &cancellation,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())
+                })
+            });
         self.named_collection_route(
             LibraryListKey::Moods,
             msgid("Nothing here yet"),

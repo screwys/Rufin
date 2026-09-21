@@ -187,12 +187,14 @@ impl SecretStore for CachedSecretStore {
 #[derive(Clone)]
 pub struct SwitchableSecretStore {
     inner: Arc<Mutex<Arc<dyn SecretStore>>>,
+    revision: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl SwitchableSecretStore {
     pub fn new(inner: Arc<dyn SecretStore>) -> Self {
         Self {
             inner: Arc::new(Mutex::new(inner)),
+            revision: Default::default(),
         }
     }
 
@@ -201,7 +203,14 @@ impl SwitchableSecretStore {
             .inner
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        std::mem::replace(&mut *current, inner)
+        let previous = std::mem::replace(&mut *current, inner);
+        self.revision
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
+        previous
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision.load(std::sync::atomic::Ordering::Acquire)
     }
 
     pub fn current(&self) -> SecretResult<Arc<dyn SecretStore>> {
@@ -215,7 +224,10 @@ impl SecretStore for SwitchableSecretStore {
     }
 
     fn save_secret(&self, key: &SecretKey, secret: &str) -> SecretResult<()> {
-        self.current()?.save_secret(key, secret)
+        self.current()?.save_secret(key, secret)?;
+        self.revision
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
+        Ok(())
     }
 
     fn load_secret(&self, key: &SecretKey) -> SecretResult<Option<String>> {
@@ -223,7 +235,10 @@ impl SecretStore for SwitchableSecretStore {
     }
 
     fn delete_secret(&self, key: &SecretKey) -> SecretResult<()> {
-        self.current()?.delete_secret(key)
+        self.current()?.delete_secret(key)?;
+        self.revision
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
+        Ok(())
     }
 }
 

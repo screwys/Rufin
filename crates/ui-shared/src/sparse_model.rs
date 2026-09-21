@@ -71,12 +71,15 @@ pub struct SparseRouteModel<K, R> {
 struct SparseWindowDemand {
     active: Option<usize>,
     pending: VecDeque<usize>,
+    failed: Vec<usize>,
 }
 
 impl SparseWindowDemand {
     fn replace(&mut self, mut demanded: Vec<usize>) -> bool {
         demanded.sort_unstable();
         demanded.dedup();
+        self.failed
+            .retain(|window| demanded.binary_search(window).is_ok());
         let cancelled_active = self
             .active
             .is_some_and(|active| demanded.binary_search(&active).is_err());
@@ -87,7 +90,10 @@ impl SparseWindowDemand {
             demanded.binary_search(window).is_ok() && self.active != Some(*window)
         });
         for window in demanded {
-            if self.active == Some(window) || self.pending.contains(&window) {
+            if self.active == Some(window)
+                || self.pending.contains(&window)
+                || self.failed.contains(&window)
+            {
                 continue;
             }
             if self.pending.len() == SPARSE_PENDING_WINDOW_CAP {
@@ -118,6 +124,7 @@ impl SparseWindowDemand {
     fn reset(&mut self) {
         self.active = None;
         self.pending.clear();
+        self.failed.clear();
     }
 }
 
@@ -1048,8 +1055,10 @@ where
             {
                 route.cancellation.borrow_mut().take();
             }
-            if let Some(rows) = rows {
-                route.model.accept::<K, R>(&page, rows);
+            if !rows.is_some_and(|rows| route.model.accept::<K, R>(&page, rows)) {
+                // Retry when this window is requested again after leaving the
+                // viewport, or when a catalog refresh replaces the order.
+                route.windows.borrow_mut().failed.push(first);
             }
             let _ = route
                 .windows

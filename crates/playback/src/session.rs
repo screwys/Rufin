@@ -2092,8 +2092,15 @@ impl PlaybackSession {
         } else {
             millis.min(current.duration_millis)
         };
+        let changed = self.sequence.progress_millis() != playhead_millis;
+        if !changed && current.status == TransportStatus::Paused {
+            return SessionUpdate::default();
+        }
         self.sequence.set_progress_millis(playhead_millis);
-        let mut update = SessionUpdate::changed();
+        let mut update = SessionUpdate {
+            view_changed: changed,
+            ..Default::default()
+        };
         self.emit_progress_facts(&mut update.effects);
         update
     }

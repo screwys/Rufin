@@ -302,6 +302,7 @@ fn default_home_sections() -> Vec<HomeSectionKind> {
 
 #[derive(Clone)]
 pub struct SettingsFile {
+    revision: Arc<std::sync::atomic::AtomicU64>,
     sidebar: tokio::sync::watch::Sender<SidebarSettings>,
     web_controller: tokio::sync::watch::Sender<crate::api::ControllerSettings>,
     path: Option<PathBuf>,
@@ -336,6 +337,7 @@ impl SettingsFile {
             }
         }
         let file = Self {
+            revision: Default::default(),
             sidebar: tokio::sync::watch::channel(value.ui.sidebar.clone()).0,
             web_controller: tokio::sync::watch::channel(value.ui.web_controller.clone()).0,
             config_dir: path
@@ -367,6 +369,7 @@ impl SettingsFile {
         value.jellyfin_device_id = random_identity("rufin-").unwrap_or_default();
         Self {
             path: None,
+            revision: Default::default(),
             sidebar: tokio::sync::watch::channel(value.ui.sidebar.clone()).0,
             web_controller: tokio::sync::watch::channel(value.ui.web_controller.clone()).0,
             config_dir,
@@ -456,6 +459,12 @@ pub struct SettingsOwner {
 }
 
 impl SettingsOwner {
+    pub(crate) fn revision(&self) -> u64 {
+        self.file
+            .revision
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
     pub(crate) fn new(
         file: SettingsFile,
         on_change: impl Fn(&StoredSettings, &StoredSettings, bool) + Send + Sync + 'static,
@@ -496,6 +505,8 @@ impl SettingsOwner {
 
 impl SettingsFile {
     fn publish_changes(&self, stored: &StoredSettings) {
+        self.revision
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
         self.sidebar.send_if_modified(|current| {
             if *current == stored.ui.sidebar {
                 return false;
@@ -632,7 +643,12 @@ pub(crate) fn persist_scrobbling_settings(
     // change disconnected rather than pairing a new username with an old session.
     if stored.scrobbling_secrets_present {
         for (_, key, _) in &changed_secrets {
-            delete_secret(Arc::clone(secrets), key.clone())
+            let result = delete_secret(Arc::clone(secrets), key.clone());
+            // This captured backend bypasses SwitchableSecretStore. Publish even
+            // a partial credential change if a later write fails.
+            file.revision
+                .fetch_add(1, std::sync::atomic::Ordering::Release);
+            result
                 .map_err(|error| format!("failed to replace scrobbling secret {key:?}: {error}"))?;
         }
     }
@@ -641,8 +657,10 @@ pub(crate) fn persist_scrobbling_settings(
     // login must not pair a new username with the old keyring token after restart.
     for (_, key, value) in changed_secrets {
         if !value.is_empty() {
-            save_secret(Arc::clone(secrets), key.clone(), value)
-                .map_err(|error| format!("failed to save scrobbling secret {key:?}: {error}"))?;
+            let result = save_secret(Arc::clone(secrets), key.clone(), value);
+            file.revision
+                .fetch_add(1, std::sync::atomic::Ordering::Release);
+            result.map_err(|error| format!("failed to save scrobbling secret {key:?}: {error}"))?;
         }
     }
     let mut persisted = input.clone();

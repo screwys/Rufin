@@ -138,7 +138,7 @@ impl<T: TrackPresentation> TrackListProjection<T> {
         &self,
         shell: &Rc<CatalogUi>,
         request: impl Fn(TrackProjectionRequest) -> R + 'static,
-        load: impl Fn(R) -> F + Send + Sync + 'static,
+        load: impl Fn(R, library::ReadCancellation) -> F + Send + Sync + 'static,
         context: &'static str,
     ) -> Rc<dyn Fn()>
     where
@@ -162,8 +162,8 @@ impl<T: TrackPresentation> TrackListProjection<T> {
                 Err(error) => warn!(%error, context, "failed to read Track order"),
             }
         });
-        let load = Arc::new(move |request| {
-            Box::pin(load(request))
+        let load = Arc::new(move |request, cancellation| {
+            Box::pin(load(request, cancellation))
                 as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
         });
         let read = LatestMountedRouteRead::new_with_request(runtime, apply, load, context);
@@ -338,56 +338,57 @@ impl CatalogUi {
         let database = Arc::clone(&selected.database);
         let source = selected.source_key;
         let folder = selected.music_folder_key;
-        let load = Arc::new(move |request: CollectionReadRequest| {
-            let database = Arc::clone(&database);
-            Box::pin(async move {
-                let cancellation = library::ReadCancellation::new();
-                if request.settings.layout == LibraryLayout::Detail {
-                    database
-                        .album_detail_route_order(
-                            source,
-                            folder,
-                            favorites_only,
-                            &request.query,
-                            request.settings.sort_key.album_sort(),
-                            request.settings.descending,
-                            &cancellation,
-                        )
-                        .await
-                        .map(|(media_uris, albums, albums_with_genres)| {
-                            (
-                                AlbumCollectionOrder::Detail {
-                                    media_uris,
-                                    albums,
-                                    albums_with_genres,
-                                },
-                                0,
-                                Vec::new(),
+        let load = Arc::new(
+            move |request: CollectionReadRequest, cancellation: library::ReadCancellation| {
+                let database = Arc::clone(&database);
+                Box::pin(async move {
+                    if request.settings.layout == LibraryLayout::Detail {
+                        database
+                            .album_detail_route_order(
+                                source,
+                                folder,
+                                favorites_only,
+                                &request.query,
+                                request.settings.sort_key.album_sort(),
+                                request.settings.descending,
+                                &cancellation,
                             )
-                        })
-                        .map_err(|error| error.to_string())
-                } else {
-                    let (order, first_row_position, first_rows) = database
-                        .album_route_page(
-                            source,
-                            folder,
-                            favorites_only,
-                            &request.query,
-                            request.settings.sort_key.album_sort(),
-                            request.settings.descending,
-                            library::RouteSeedWindow::top(),
-                            &cancellation,
-                        )
-                        .await
-                        .map_err(|error| error.to_string())?;
-                    Ok((
-                        AlbumCollectionOrder::Rows(order),
-                        first_row_position,
-                        first_rows,
-                    ))
-                }
-            }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
-        });
+                            .await
+                            .map(|(media_uris, albums, albums_with_genres)| {
+                                (
+                                    AlbumCollectionOrder::Detail {
+                                        media_uris,
+                                        albums,
+                                        albums_with_genres,
+                                    },
+                                    0,
+                                    Vec::new(),
+                                )
+                            })
+                            .map_err(|error| error.to_string())
+                    } else {
+                        let (order, first_row_position, first_rows) = database
+                            .album_route_page(
+                                source,
+                                folder,
+                                favorites_only,
+                                &request.query,
+                                request.settings.sort_key.album_sort(),
+                                request.settings.descending,
+                                library::RouteSeedWindow::top(),
+                                &cancellation,
+                            )
+                            .await
+                            .map_err(|error| error.to_string())?;
+                        Ok((
+                            AlbumCollectionOrder::Rows(order),
+                            first_row_position,
+                            first_rows,
+                        ))
+                    }
+                }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
+            },
+        );
         let read = LatestMountedRouteRead::new_with_request(
             selected.runtime.clone(),
             apply,
@@ -610,7 +611,8 @@ impl CatalogUi {
             }
         });
         let load = Arc::new(
-            move |request: (TrackProjectionRequest, Option<library::SourceId>)| {
+            move |request: (TrackProjectionRequest, Option<library::SourceId>),
+                  cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&database);
                 Box::pin(async move {
                     let rows = database
@@ -618,7 +620,7 @@ impl CatalogUi {
                             request.1.as_ref(),
                             &request.0.query,
                             request.0.settings.descending,
-                            &library::ReadCancellation::new(),
+                            &cancellation,
                         )
                         .await
                         .map_err(|error| error.to_string())?;
@@ -771,26 +773,27 @@ impl CatalogUi {
             )
         };
         let order_database = Arc::clone(&database);
-        let load = Arc::new(move |request: CollectionReadRequest| {
-            let database = Arc::clone(&order_database);
-            Box::pin(async move {
-                let cancellation = library::ReadCancellation::new();
-                database
-                    .artist_route_page(
-                        source,
-                        folder,
-                        album_artist,
-                        favorites_only,
-                        &request.query,
-                        request.settings.sort_key.artist_sort(),
-                        request.settings.descending,
-                        library::RouteSeedWindow::top(),
-                        &cancellation,
-                    )
-                    .await
-                    .map_err(|error| error.to_string())
-            }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
-        });
+        let load = Arc::new(
+            move |request: CollectionReadRequest, cancellation: library::ReadCancellation| {
+                let database = Arc::clone(&order_database);
+                Box::pin(async move {
+                    database
+                        .artist_route_page(
+                            source,
+                            folder,
+                            album_artist,
+                            favorites_only,
+                            &request.query,
+                            request.settings.sort_key.artist_sort(),
+                            request.settings.descending,
+                            library::RouteSeedWindow::top(),
+                            &cancellation,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())
+                }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
+            },
+        );
         let read = LatestMountedRouteRead::new_with_request(
             selected.runtime.clone(),
             apply,
@@ -913,10 +916,9 @@ impl CatalogUi {
         );
         let order_database = Arc::clone(&database);
         let order_load: NamedOrderLoad<library::PlaylistKey, library::PlaylistRow> =
-            Arc::new(move |request: NamedReadRequest| {
+            Arc::new(move |request: NamedReadRequest, cancellation| {
                 let database = Arc::clone(&order_database);
                 Box::pin(async move {
-                    let cancellation = library::ReadCancellation::new();
                     database
                         .playlist_route_page(
                             source,
@@ -970,10 +972,9 @@ impl CatalogUi {
         );
         let order_database = Arc::clone(&database);
         let order_load: NamedOrderLoad<library::SmartPlaylistKey, library::SmartPlaylistRow> =
-            Arc::new(move |request: NamedReadRequest| {
+            Arc::new(move |request: NamedReadRequest, cancellation| {
                 let database = Arc::clone(&order_database);
                 Box::pin(async move {
-                    let cancellation = library::ReadCancellation::new();
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map_or(0, |duration| duration.as_secs().min(i64::MAX as u64) as i64);
@@ -1099,32 +1100,33 @@ impl CatalogUi {
         let database = Arc::clone(&selected.database);
         let source_key = selected.source_key;
         let folder = selected.music_folder_key;
-        let load = Arc::new(move |request: TrackProjectionRequest| {
-            let database = Arc::clone(&database);
-            Box::pin(async move {
-                let cancellation = library::ReadCancellation::new();
-                let page = database
-                    .track_route_page(
-                        source_key,
-                        folder,
-                        favorites_only,
-                        &request.query,
-                        request.settings.sort_key.track_sort(),
-                        request.settings.descending,
-                        library::RouteSeedWindow::top(),
-                        &cancellation,
-                    )
-                    .await
-                    .map_err(|error| error.to_string())?;
-                Ok::<PreparedTrackProjection, String>(PreparedTrackProjection {
-                    disc_sections: Vec::new(),
-                    order: page.order,
-                    first_row_position: page.first_row_position,
-                    first_rows: page.first_rows,
-                    request,
-                })
-            }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
-        });
+        let load = Arc::new(
+            move |request: TrackProjectionRequest, cancellation: library::ReadCancellation| {
+                let database = Arc::clone(&database);
+                Box::pin(async move {
+                    let page = database
+                        .track_route_page(
+                            source_key,
+                            folder,
+                            favorites_only,
+                            &request.query,
+                            request.settings.sort_key.track_sort(),
+                            request.settings.descending,
+                            library::RouteSeedWindow::top(),
+                            &cancellation,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    Ok::<PreparedTrackProjection, String>(PreparedTrackProjection {
+                        disc_sections: Vec::new(),
+                        order: page.order,
+                        first_row_position: page.first_row_position,
+                        first_rows: page.first_rows,
+                        request,
+                    })
+                }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
+            },
+        );
         let read = LatestMountedRouteRead::new_with_request(
             selected.runtime.clone(),
             apply,

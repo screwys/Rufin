@@ -192,7 +192,10 @@ impl QueueState {
     pub fn update_current(&self, current: Option<OccurrenceId>) -> bool {
         let previous = self.current.replace(current.clone());
         let changed = previous != current;
-        for occurrence in [previous, current].into_iter().flatten() {
+        for occurrence in [previous.filter(|_| changed), current]
+            .into_iter()
+            .flatten()
+        {
             let row = self
                 .rows
                 .borrow()
@@ -643,8 +646,11 @@ fn queue_favorite_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
         let actions = ui_shared::recycled_cells::RowActions::with_favorite(&button);
         install_queue_row_interactions(actions.upcast_ref(), &shell, item, None);
         let click_item = item.downgrade();
-        let click_shell = Rc::clone(&shell);
+        let click_shell = Rc::downgrade(&shell);
         button.connect_clicked(move |button| {
+            let Some(click_shell) = click_shell.upgrade() else {
+                return;
+            };
             let Some(row) = queue_row_from_item(&click_item) else {
                 return;
             };

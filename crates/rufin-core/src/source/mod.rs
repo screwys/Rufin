@@ -1364,7 +1364,13 @@ impl SourceOwner {
                 .retain(|item| item.configuration.source_id != configured.configuration.source_id);
             stored.sources.configured.push(configured.clone());
             Ok(())
-        })
+        })?;
+        self.shared
+            .clients
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&configured.configuration.source_id);
+        Ok(())
     }
 
     async fn edit_configured_source(
