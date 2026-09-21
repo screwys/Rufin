@@ -211,6 +211,7 @@ pub fn create_playlist(
     source_id: Option<SourceId>,
     name: String,
     media_uris: Vec<String>,
+    public: Option<bool>,
 ) -> Receiver<Result<Option<String>, String>> {
     let (sender, receiver) = async_channel::bounded(1);
     owner.spawn_serialized(move |owner| async move {
@@ -245,7 +246,7 @@ pub fn create_playlist(
             Ok(PlaylistOwner::Server(source, key)) => {
                 async {
                     let (changed, outcome, object_id) = source
-                        .create_playlist(&owner.shared.database, key, &name, &media_uris)
+                        .create_playlist(&owner.shared.database, key, &name, &media_uris, public)
                         .await
                         .map_err(string_error)?;
                     let playlist = if let Some(id) = object_id.as_deref() {
@@ -285,39 +286,62 @@ pub fn create_playlist(
     receiver
 }
 
-pub fn rename_playlist(
+pub fn playlist_public(
     owner: &SourceOwner,
     playlist: PlaylistKey,
-    name: String,
-) -> Receiver<Result<bool, String>> {
-    crate::playlist_files::run(owner, move |owner| async move {
-        rename_playlist_on(&owner, playlist, &name).await
+) -> Receiver<Result<Option<bool>, String>> {
+    owner.reply(move |owner, database| async move {
+        match playlist_source(&owner, playlist).await? {
+            PlaylistOwner::Local(_) => Ok(None),
+            PlaylistOwner::Server(source, key) => source
+                .playlist_public(&database, key, playlist)
+                .await
+                .map_err(string_error),
+        }
     })
 }
 
-pub(crate) async fn rename_playlist_on(
+pub fn update_playlist(
     owner: &SourceOwner,
     playlist: PlaylistKey,
-    name: &str,
+    name: Option<String>,
+    public: Option<bool>,
+) -> Receiver<Result<bool, String>> {
+    crate::playlist_files::run(owner, move |owner| async move {
+        update_playlist_on(&owner, playlist, name.as_deref(), public).await
+    })
+}
+
+pub(crate) async fn update_playlist_on(
+    owner: &SourceOwner,
+    playlist: PlaylistKey,
+    name: Option<&str>,
+    public: Option<bool>,
 ) -> Result<bool, String> {
     let target = playlist_source(owner, playlist).await?;
     let source_key = target.source_key();
     let result = match target {
-        PlaylistOwner::Local(source) => owner
-            .shared
-            .database
-            .rename_playlist(source, playlist, name)
-            .await
-            .map(|changed| (changed, None))
-            .map_err(string_error),
+        PlaylistOwner::Local(source) => {
+            if let Some(name) = name {
+                owner
+                    .shared
+                    .database
+                    .rename_playlist(source, playlist, name)
+                    .await
+                    .map(|changed| (changed, None))
+                    .map_err(string_error)
+            } else {
+                Ok((false, None))
+            }
+        }
         PlaylistOwner::Server(source, key) => source
-            .rename_playlist(&owner.shared.database, key, playlist, name)
+            .update_playlist(&owner.shared.database, key, playlist, name, public)
             .await
             .map_err(string_error),
     };
     let reply = result
         .as_ref()
-        .map(|(changed, _)| *changed)
+        .map(|(changed, _)| *changed || public.is_some())
         .map_err(Clone::clone);
     accept_playlist_result(owner, source_key, Some(playlist), result).await;
     reply

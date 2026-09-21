@@ -85,6 +85,7 @@ impl JellyfinEmbySource {
         &self,
         name: &str,
         tracks: &[String],
+        public: Option<bool>,
     ) -> SourceResult<PlaylistId> {
         let mut url = endpoint(&self.base_url, "Playlists")?;
         url.query_pairs_mut()
@@ -93,7 +94,11 @@ impl JellyfinEmbySource {
             .append_pair("UserId", &self.user_id)
             .append_pair("MediaType", "Audio");
         let result: PlaylistCreationResult = self.send_json(self.client.post(url)).await?;
-        Ok(self.kind.object_id("playlist", &result.id))
+        let playlist = self.kind.object_id("playlist", &result.id);
+        if let Some(public) = public {
+            self.update_playlist(&playlist, None, Some(public)).await?;
+        }
+        Ok(playlist)
     }
 
     pub(super) async fn emby_rename_playlist(
@@ -444,7 +449,7 @@ mod tests {
             .mount(&server)
             .await;
         source
-            .rename_playlist("emby:playlist:playlist", "New")
+            .update_playlist("emby:playlist:playlist", Some("New"), None)
             .await
             .unwrap();
         Mock::given(path("/emby/Users/listener/Items/11")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"Id":"11","MediaSources":[null,{"Id":"without-lyrics"},{"Id":"media-source","DefaultSubtitleStreamIndex":"2","MediaStreams":[{"Type":"Audio","Index":0},{"Type":"Subtitle","Index":{}},{"Type":"Subtitle","Index":1},{"Type":"Subtitle","Index":2,"Language":"eng"}]}]}))).mount(&server).await;

@@ -143,7 +143,7 @@ pub fn update(
                 .await
                 .map_err(string_error)?;
         }
-        if !crate::playlists::rename_playlist_on(&owner, playlist, &name).await? {
+        if !crate::playlists::update_playlist_on(&owner, playlist, Some(&name), None).await? {
             after_edit(&owner, playlist).await;
             if settings_changed {
                 publish(&owner, Some(playlist)).await;

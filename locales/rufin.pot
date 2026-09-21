@@ -2306,6 +2306,9 @@ msgstr ""
 msgid "Proxy casting through Rufin"
 msgstr ""
 
+msgid "Public"
+msgstr ""
+
 msgid "Purple"
 msgstr ""
 
@@ -2486,13 +2489,7 @@ msgstr ""
 msgid "Removed from"
 msgstr ""
 
-msgid "Rename Playlist"
-msgstr ""
-
 msgid "Rename file"
-msgstr ""
-
-msgid "Rename"
 msgstr ""
 
 msgid "Repeat all"

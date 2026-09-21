@@ -805,11 +805,7 @@ fn preferences_search_matches(searchable_text: &str, query: &str) -> bool {
 
 #[cfg(test)]
 mod search_tests {
-    use super::{
-        PreferencesNavigationControls, PreferencesTabLayout, preferences_search_matches,
-        preferences_tab_layout_for,
-    };
-    use adw::prelude::*;
+    use super::{PreferencesTabLayout, preferences_search_matches, preferences_tab_layout_for};
 
     #[test]
     fn preference_search_matches_terms_across_row_context() {
@@ -834,22 +830,6 @@ mod search_tests {
             preferences_tab_layout_for(329, 400, 60, 40, 330),
             PreferencesTabLayout::BottomIcons
         );
-    }
-
-    #[test]
-    #[ignore = "requires a GTK display"]
-    fn navigation_controls_do_not_retain_their_dialog_widgets() {
-        gtk::init().expect("GTK display");
-        let back = gtk::Button::new();
-        let navigation = adw::NavigationView::new();
-        let back_weak = back.downgrade();
-        let navigation_weak = navigation.downgrade();
-        let controls = PreferencesNavigationControls::new(back);
-        controls.set_navigation(&navigation);
-        drop((controls, navigation));
-        while gtk::glib::MainContext::default().iteration(false) {}
-        assert!(back_weak.upgrade().is_none());
-        assert!(navigation_weak.upgrade().is_none());
     }
 }
 

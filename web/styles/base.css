@@ -281,10 +281,11 @@ dialog::backdrop {
 .connect-check { display: flex; align-items: center; gap: 10px; margin: 0; }
 .connect-check input { width: 18px; height: 18px; accent-color: var(--blue); }
 .connect-check:has([role="switch"]) { flex-direction: row-reverse; justify-content: space-between; }
-:is(.connect-check, .connect-relay-heading) input[role="switch"] { appearance: none; flex: 0 0 38px; width: 38px; height: 22px; padding: 3px; border: 0; border-radius: 11px; background: var(--muted); cursor: pointer; }
-:is(.connect-check, .connect-relay-heading) input[role="switch"]::before { content: ""; display: block; width: 16px; height: 16px; border-radius: 50%; background: white; transition: transform 150ms; }
-:is(.connect-check, .connect-relay-heading) input[role="switch"]:checked { background: var(--blue); }
-:is(.connect-check, .connect-relay-heading) input[role="switch"]:checked::before { transform: translateX(16px); }
+#playlist-public-row:not([hidden]) { display: flex; align-items: center; gap: 8px; }
+:is(.connect-check, .connect-relay-heading, #playlist-public-row) input[role="switch"] { appearance: none; flex: 0 0 38px; width: 38px; height: 22px; padding: 3px; border: 0; border-radius: 11px; background: var(--muted); cursor: pointer; }
+:is(.connect-check, .connect-relay-heading, #playlist-public-row) input[role="switch"]::before { content: ""; display: block; width: 16px; height: 16px; border-radius: 50%; background: white; transition: transform 150ms; }
+:is(.connect-check, .connect-relay-heading, #playlist-public-row) input[role="switch"]:checked { background: var(--blue); }
+:is(.connect-check, .connect-relay-heading, #playlist-public-row) input[role="switch"]:checked::before { transform: translateX(16px); }
 #connect-dialog .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .connect-device-controls { display: flex; flex-wrap: wrap; gap: 8px; }
 .connect-device-controls button { flex: 1; }

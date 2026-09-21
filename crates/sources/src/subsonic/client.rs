@@ -484,6 +484,7 @@ impl SubsonicSource {
         &self,
         name: &str,
         track_ids: &[String],
+        public: Option<bool>,
     ) -> SourceResult<PlaylistId> {
         let mut extra = vec![("name", name.trim().to_string())];
         extra.extend(
@@ -492,20 +493,41 @@ impl SubsonicSource {
                 .map(|track_id| ("songId", raw_item_id(track_id).to_string())),
         );
         let body: Value = self.get_json("createPlaylist", &extra).await?;
-        json::id(&body["playlist"]["id"])
+        let playlist = json::id(&body["playlist"]["id"])
             .map(|id| self.id("playlist", &id))
-            .ok_or(SourceError::NotFound)
+            .ok_or(SourceError::NotFound)?;
+        if let Some(public) = public
+            && json::boolean(&body["playlist"]["public"]) != Some(public)
+        {
+            self.update_playlist(&playlist, None, Some(public)).await?;
+        }
+        Ok(playlist)
     }
-    pub(crate) async fn rename_playlist(&self, playlist_id: &str, name: &str) -> SourceResult<()> {
-        self.get_unit(
-            "updatePlaylist",
-            &[
-                ("playlistId", raw_item_id(playlist_id).to_string()),
-                ("name", name.trim().to_string()),
-            ],
-        )
-        .await
+    pub(crate) async fn update_playlist(
+        &self,
+        playlist_id: &str,
+        name: Option<&str>,
+        public: Option<bool>,
+    ) -> SourceResult<()> {
+        let mut fields = vec![("playlistId", raw_item_id(playlist_id).to_string())];
+        if let Some(name) = name {
+            fields.push(("name", name.trim().to_string()));
+        }
+        if let Some(public) = public {
+            fields.push(("public", public.to_string()));
+        }
+        self.get_unit("updatePlaylist", &fields).await
     }
+    pub(crate) async fn playlist_public(&self, playlist_id: &str) -> SourceResult<Option<bool>> {
+        // getPlaylist includes every track; getPlaylists returns only playlist metadata.
+        let body: Value = self.get_json("getPlaylists", &[]).await?;
+        let playlist = json::items(&body["playlists"]["playlist"])
+            .iter()
+            .find(|item| json::id(&item["id"]).as_deref() == Some(raw_item_id(playlist_id)))
+            .ok_or(SourceError::NotFound)?;
+        Ok(json::boolean(&playlist["public"]))
+    }
+
     pub(crate) async fn delete_playlist(&self, playlist_id: &str) -> SourceResult<()> {
         self.get_unit(
             "deletePlaylist",

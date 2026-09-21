@@ -2116,6 +2116,7 @@ impl Source {
         source: library::SourceKey,
         name: &str,
         media_uris: &[String],
+        public: Option<bool>,
     ) -> SourceResult<(bool, Option<ScanOutcome>, Option<String>)> {
         let mut pages = media_uris.chunks(PROVIDER_PLAYLIST_PAGE);
         let first_ids = match pages.next() {
@@ -2125,10 +2126,10 @@ impl Source {
         let playlist = match &self.implementation {
             Implementation::Plex(provider) => provider.create_playlist(name, &first_ids).await?,
             Implementation::JellyfinEmby(provider) => {
-                provider.create_playlist(name, &first_ids).await?
+                provider.create_playlist(name, &first_ids, public).await?
             }
             Implementation::OpenSubsonic(provider) => {
-                provider.create_playlist(name, &first_ids).await?
+                provider.create_playlist(name, &first_ids, public).await?
             }
             Implementation::Local(_) | Implementation::Files(_) => unreachable!(),
         };
@@ -2153,19 +2154,55 @@ impl Source {
         Ok((true, Some(outcome), Some(playlist)))
     }
 
-    pub async fn rename_playlist(
+    pub async fn playlist_public(
         &self,
         database: &Database,
         source: library::SourceKey,
         playlist: library::PlaylistKey,
-        name: &str,
-    ) -> SourceResult<(bool, Option<ScanOutcome>)> {
-        let id = source_playlist_id(database, source, playlist).await?;
+    ) -> SourceResult<Option<bool>> {
+        let id = database
+            .source_playlist_object_id(source, playlist, &library::ReadCancellation::new())
+            .await?
+            .ok_or(SourceError::NotFound)?;
         match &self.implementation {
-            Implementation::Plex(provider) => provider.rename_playlist(&id, name).await?,
-            Implementation::JellyfinEmby(provider) => provider.rename_playlist(&id, name).await?,
-            Implementation::OpenSubsonic(provider) => provider.rename_playlist(&id, name).await?,
+            Implementation::JellyfinEmby(provider) => provider.playlist_public(&id).await,
+            Implementation::OpenSubsonic(provider) => provider.playlist_public(&id).await,
+            _ => Ok(None),
+        }
+    }
+
+    pub async fn update_playlist(
+        &self,
+        database: &Database,
+        source: library::SourceKey,
+        playlist: library::PlaylistKey,
+        name: Option<&str>,
+        public: Option<bool>,
+    ) -> SourceResult<(bool, Option<ScanOutcome>)> {
+        let id = if name.is_some() {
+            source_playlist_id(database, source, playlist).await?
+        } else {
+            database
+                .source_playlist_object_id(source, playlist, &library::ReadCancellation::new())
+                .await?
+                .ok_or(SourceError::NotFound)?
+        };
+        match &self.implementation {
+            Implementation::Plex(provider) => {
+                if let Some(name) = name {
+                    provider.rename_playlist(&id, name).await?
+                }
+            }
+            Implementation::JellyfinEmby(provider) => {
+                provider.update_playlist(&id, name, public).await?
+            }
+            Implementation::OpenSubsonic(provider) => {
+                provider.update_playlist(&id, name, public).await?
+            }
             Implementation::Local(_) | Implementation::Files(_) => unreachable!(),
+        }
+        if name.is_none() {
+            return Ok((false, None));
         }
         self.accept_playlist_change(database, Some(id), None)
             .await

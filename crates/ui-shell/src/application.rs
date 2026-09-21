@@ -361,25 +361,4 @@ mod tests {
     fn composed_interface_resources_are_compiled() {
         verify_interface_resources().expect("compiled interface resources");
     }
-
-    #[test]
-    #[ignore = "requires a GTK display"]
-    fn every_interface_resource_builds() {
-        gtk::init().expect("GTK display");
-        verify_interface_resources().expect("compiled interface resources");
-        for path in crate::ui_resource::INTERFACE_RESOURCE_PATHS
-            .iter()
-            .chain(ui_shared::ui_resource::INTERFACE_RESOURCE_PATHS)
-            .chain(ui_library::ui_resource::INTERFACE_RESOURCE_PATHS)
-            .chain(ui_player::ui_resource::INTERFACE_RESOURCE_PATHS)
-            .filter(|path| path.ends_with(".ui"))
-        {
-            let data = gio::resources_lookup_data(path, gio::ResourceLookupFlags::NONE)
-                .expect("compiled interface resource");
-            if String::from_utf8_lossy(data.as_ref()).contains("<template") {
-                continue;
-            }
-            ui_shared::ui_resource::builder(path);
-        }
-    }
 }

@@ -281,6 +281,7 @@ async function openPlaylistTransfer(playlist = null) {
 
 let newPlaylistUris = { uris: [] };
 let playlistSource = null;
+let playlistPublic = null;
 
 async function openName(playlist = null, uris = []) {
   editingPlaylist = playlist;
@@ -293,6 +294,19 @@ async function openName(playlist = null, uris = []) {
   $("playlist-name").value = playlist?.name || "";
   $("playlist-owner").hidden = !!playlist;
   $("playlist-file-options").hidden = !playlist;
+  $("playlist-public-row").hidden = true;
+  $("playlist-public").checked = false;
+  playlistPublic = null;
+  if (playlist) {
+    try {
+      const visibility = await api(`/playlists/public?id=${playlist.id}`);
+      playlistPublic = visibility.public;
+      $("playlist-public-row").hidden = playlistPublic == null;
+      $("playlist-public").checked = playlistPublic === true;
+    } catch (error) {
+      notice(error.message);
+    }
+  }
   if (playlist) await loadPlaylistFile();
   if (!playlist) {
     const configured = await api("/sources");
@@ -301,7 +315,7 @@ async function openName(playlist = null, uris = []) {
     $("playlist-owner").disabled = !playlistSource;
     $("playlist-owner").setAttribute(
       "aria-pressed",
-      String(!!playlistSource && configured.new_playlist_current),
+      String(!!playlistSource),
     );
     showPlaylistOwner();
   }
@@ -328,6 +342,7 @@ async function loadPlaylistFile() {
 function showPlaylistOwner() {
   const owner = $("playlist-owner");
   const current = owner.getAttribute("aria-pressed") === "true";
+  $("playlist-public-row").hidden = !(current && playlistSource?.supports_playlist_public);
   const image = current
     ? sourceIcon(playlistSource.kind)
     : el("img", "source-icon");
@@ -431,11 +446,20 @@ function init() {
     run(async () => {
       const name = $("playlist-name").value.trim();
       if (!name) return;
+      const remoteEdit = editingPlaylist && $("playlist-file-options").hidden;
+      const changedName = editingPlaylist && name !== editingPlaylist.name;
+      const changedPublic = playlistPublic != null && playlistPublic !== $("playlist-public").checked;
+      if (remoteEdit && !changedName && !changedPublic) {
+        $("name-dialog").close();
+        return;
+      }
       const result = await api(
-        editingPlaylist ? "/playlists/file" : "/playlists",
+        editingPlaylist && !remoteEdit ? "/playlists/file" : "/playlists",
         editingPlaylist ? "PATCH" : "POST",
         editingPlaylist
-          ? playlistEditInput()
+          ? remoteEdit
+            ? { id: editingPlaylist.id, name: changedName ? name : null, public: changedPublic ? $("playlist-public").checked : null }
+            : playlistEditInput()
           : {
               name,
               ...newPlaylistUris,
@@ -446,11 +470,12 @@ function init() {
                   : null,
               current:
                 $("playlist-owner").getAttribute("aria-pressed") === "true",
+              public: $("playlist-public-row").hidden ? null : $("playlist-public").checked,
             },
       );
       $("name-dialog").close();
       if (result.settings_error) notice(result.settings_error);
-      await loadView();
+      if (!remoteEdit || changedName) await loadView();
     });
   });
 }

@@ -514,17 +514,66 @@ impl JellyfinEmbySource {
         &self,
         name: &str,
         tracks: &[String],
+        public: Option<bool>,
     ) -> SourceResult<PlaylistId> {
         match self.kind {
-            ServerKind::Jellyfin => self.jellyfin_create_playlist(name, tracks).await,
-            ServerKind::Emby => self.emby_create_playlist(name, tracks).await,
+            ServerKind::Jellyfin => self.jellyfin_create_playlist(name, tracks, public).await,
+            ServerKind::Emby => self.emby_create_playlist(name, tracks, public).await,
         }
     }
 
-    pub(crate) async fn rename_playlist(&self, playlist: &str, name: &str) -> SourceResult<()> {
+    pub(crate) async fn update_playlist(
+        &self,
+        playlist: &str,
+        name: Option<&str>,
+        public: Option<bool>,
+    ) -> SourceResult<()> {
         match self.kind {
-            ServerKind::Jellyfin => self.jellyfin_rename_playlist(playlist, name).await,
-            ServerKind::Emby => self.emby_rename_playlist(playlist, name).await,
+            ServerKind::Jellyfin => self.jellyfin_update_playlist(playlist, name, public).await,
+            ServerKind::Emby => {
+                if let Some(name) = name {
+                    self.emby_rename_playlist(playlist, name).await?;
+                }
+                if let Some(public) = public {
+                    let raw = raw_item_id(playlist);
+                    let action = if public { "MakePublic" } else { "MakePrivate" };
+                    self.send_unit(
+                        self.client
+                            .post(endpoint(&self.base_url, &format!("Items/{raw}/{action}"))?),
+                    )
+                    .await?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    pub(crate) async fn playlist_public(&self, playlist: &str) -> SourceResult<Option<bool>> {
+        let raw = raw_item_id(playlist);
+        match self.kind {
+            ServerKind::Jellyfin => {
+                let item: Value = match self
+                    .get_json(endpoint(&self.base_url, &format!("Playlists/{raw}"))?)
+                    .await
+                {
+                    Ok(item) => item,
+                    // Older Jellyfin releases have no playlist visibility read endpoint.
+                    Err(SourceError::NotFound) => return Ok(None),
+                    Err(error) => return Err(error),
+                };
+                Ok(item["OpenAccess"].as_bool())
+            }
+            ServerKind::Emby => {
+                let mut url = self.item_url(raw)?;
+                url.query_pairs_mut().append_pair("Fields", "ShareLevel");
+                let item: Value = self.get_json(url).await?;
+                // Emby's own access dialog uses CanMakePublic for the current visibility.
+                Ok(if item["CanManageAccess"].as_bool() == Some(true) {
+                    Some(!item["CanMakePublic"].as_bool().unwrap_or(false))
+                } else {
+                    None
+                })
+            }
         }
     }
 }

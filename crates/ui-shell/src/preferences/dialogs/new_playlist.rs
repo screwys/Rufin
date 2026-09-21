@@ -9,19 +9,27 @@ impl Shell {
         name: String,
         media_uris: Vec<String>,
         source_id: Option<library::SourceId>,
+        public: Option<bool>,
     ) {
         let result = rufin_core::playlists::create_playlist(
             &self.products.source,
             source_id.clone(),
             name,
             media_uris,
+            public,
         );
         let shell = Rc::downgrade(self);
         gtk::glib::spawn_future_local(async move {
-            let Ok(Ok(Some(playlist_id))) = result.recv().await else {
-                return;
-            };
+            let result = result.recv().await;
             if let Some(shell) = shell.upgrade() {
+                let playlist_id = match result {
+                    Ok(Ok(Some(id))) => id,
+                    Ok(Err(error)) => {
+                        shell.control_feedback.show_feedback_toast(error);
+                        return;
+                    }
+                    _ => return,
+                };
                 shell.set_sidebar_pin(
                     SidebarPin::Playlist {
                         source_id,
@@ -49,15 +57,9 @@ impl Shell {
         let dialog = ui_shared::playlists::new_playlist_dialog(
             &name,
             selected,
-            self.settings.persistence.load().new_playlist_current,
-            move |name, current, source_id| {
+            move |name, source_id, public| {
                 if let Some(shell) = shell.upgrade() {
-                    shell
-                        .settings
-                        .set_app_setting("playlist destination", current, |settings| {
-                            &mut settings.new_playlist_current
-                        });
-                    shell.create_playlist_and_pin(name, media_uris.clone(), source_id);
+                    shell.create_playlist_and_pin(name, media_uris.clone(), source_id, public);
                 }
             },
         );
