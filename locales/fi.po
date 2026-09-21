@@ -3057,6 +3057,11 @@ msgstr ""
 msgid "Show peak markers"
 msgstr ""
 
+#, fuzzy
+#| msgid "Choose playback output"
+msgid "Show playback queue"
+msgstr "Valitse toiston ulostulo"
+
 msgid "Show ratings in the bottom bar"
 msgstr "Näytä arviot alapalkissa"
 

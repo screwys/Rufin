@@ -2911,6 +2911,9 @@ msgstr ""
 msgid "Show peak markers"
 msgstr ""
 
+msgid "Show playback queue"
+msgstr ""
+
 msgid "Show ratings in the bottom bar"
 msgstr ""
 

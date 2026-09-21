@@ -2972,6 +2972,11 @@ msgstr "Rādīt pauzes statusu"
 msgid "Show peak markers"
 msgstr "Rādīt maksimālā līmeņa marķierus"
 
+#, fuzzy
+#| msgid "Choose playback output"
+msgid "Show playback queue"
+msgstr "Izvēlēties atskaņošanas izvadi"
+
 msgid "Show ratings in the bottom bar"
 msgstr "Rādīt vērtējumus apakšējā joslā"
 

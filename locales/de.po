@@ -3033,6 +3033,11 @@ msgstr "Pausierten Status anzeigen"
 msgid "Show peak markers"
 msgstr ""
 
+#, fuzzy
+#| msgid "Choose playback output"
+msgid "Show playback queue"
+msgstr "Wiedergabeausgabe auswählen"
+
 msgid "Show ratings in the bottom bar"
 msgstr "Bewertungen in der unteren Leiste anzeigen"
 

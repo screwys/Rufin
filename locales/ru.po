@@ -101,8 +101,8 @@ msgid ""
 "Open Rufin Connect on another device, connect via Join button or by copying "
 "invitation code"
 msgstr ""
-"Откройте Rufin Connect на другом устройстве, подключитесь с помощью кнопки «"
-"Присоединиться» или путём копирования кода приглашения"
+"Откройте Rufin Connect на другом устройстве, подключитесь с помощью кнопки "
+"«Присоединиться» или путём копирования кода приглашения"
 
 msgid ""
 "Remove Local and its cached library from Rufin? Your music files will not be "
@@ -2904,6 +2904,11 @@ msgstr "Показывать статус \"на паузе\""
 
 msgid "Show peak markers"
 msgstr "Показывать пиковые отметки"
+
+#, fuzzy
+#| msgid "Choose playback output"
+msgid "Show playback queue"
+msgstr "Выбрать устройство воспроизведения"
 
 msgid "Show ratings in the bottom bar"
 msgstr "Показать оценку в нижней панели"

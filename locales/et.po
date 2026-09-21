@@ -3196,6 +3196,11 @@ msgstr "Näita peatamise olekut"
 msgid "Show peak markers"
 msgstr ""
 
+#, fuzzy
+#| msgid "Choose playback output"
+msgid "Show playback queue"
+msgstr "Vali taasesituse väljund"
+
 msgid "Show ratings in the bottom bar"
 msgstr "Näita alumisel ribal hinnanguid"
 

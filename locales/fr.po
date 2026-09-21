@@ -2948,6 +2948,11 @@ msgstr ""
 msgid "Show peak markers"
 msgstr ""
 
+#, fuzzy
+#| msgid "Choose playback output"
+msgid "Show playback queue"
+msgstr "Choisir la sortie de lecture"
+
 msgid "Show ratings in the bottom bar"
 msgstr ""
 
