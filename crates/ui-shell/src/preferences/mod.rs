@@ -39,6 +39,33 @@ use layout::{
 };
 pub(crate) use library::locate_local_folder;
 
+fn show_discord_flatpak_help(row: &adw::SwitchRow) {
+    if !row.is_active() || std::env::var_os("FLATPAK_ID").is_none() {
+        return;
+    }
+    let resource = crate::ui_resource::DISCORD_FLATPAK_RESOURCE;
+    let builder = ui_shared::ui_resource::builder(resource);
+    ui_shared::objects!(builder, resource, {
+        dialog: adw::AlertDialog,
+        user_command: gtk::Label,
+        system_command: gtk::Label,
+        copy_user: gtk::Button,
+        copy_system: gtk::Button,
+        copy_user_icon: gtk::Image,
+        copy_system_icon: gtk::Image,
+    });
+    for (button, icon, command) in [
+        (copy_user, copy_user_icon, user_command),
+        (copy_system, copy_system_icon, system_command),
+    ] {
+        let copy = controller::copy_action(button.upcast_ref(), &icon);
+        button.connect_clicked(move |_| {
+            copy(&command.text());
+        });
+    }
+    present_light_dismiss_dialog(&dialog, row);
+}
+
 const LASTFM_API_CREATE_URL: &str = "https://www.last.fm/api/account/create";
 const LISTENBRAINZ_TOKEN_URL: &str = "https://listenbrainz.org/settings/";
 const INTEGRATIONS_ICON_NAME: &str = "rufin-network-workgroup-symbolic";
@@ -1198,6 +1225,7 @@ fn general_page(
             row.is_active(),
             |settings| &mut settings.rich_presence.enabled,
         );
+        show_discord_flatpak_help(row);
     });
     let display_titles = [tr("Application name"), tr("Song title"), tr("Artist name")];
     let display_refs = display_titles

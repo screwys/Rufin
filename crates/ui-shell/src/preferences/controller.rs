@@ -314,7 +314,7 @@ fn bind_address_action(
     });
 }
 
-fn copy_action(button: &gtk::Widget, icon: &gtk::Image) -> impl Fn(&str) + use<> {
+pub(super) fn copy_action(button: &gtk::Widget, icon: &gtk::Image) -> impl Fn(&str) + use<> {
     let reset = Rc::new(RefCell::new(None::<gtk::glib::SourceId>));
     let pending = reset.clone();
     let image = icon.downgrade();

@@ -28,6 +28,14 @@ tooltip.background label {
   color: white;
 }
 
+.command-block {
+  background: var(--view-bg-color);
+  color: var(--view-fg-color);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+}
+
 .table-header,
 columnview > header > button > box {
   font-family: "Adwaita Sans", sans-serif;

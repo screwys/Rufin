@@ -851,6 +851,7 @@ fn source_choice_selector(shell: &Rc<Shell>, context: &SetupViewContext) -> gtk:
                 row.is_active(),
                 |settings| &mut settings.rich_presence.enabled,
             );
+            crate::preferences::show_discord_flatpak_help(row);
         }
     });
 
