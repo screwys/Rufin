@@ -853,6 +853,11 @@ msgstr ""
 msgid "Copy"
 msgstr "Kopie"
 
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Could not load listening overview"
+msgstr "Diese Seite konnte nicht geladen werden"
+
 msgid "Could not load related tracks"
 msgstr "Verwandte Titel konnten nicht geladen werden"
 
@@ -926,6 +931,18 @@ msgstr "Dunkel"
 
 msgid "Date added"
 msgstr "Hinzugefügt am"
+
+msgid "Days after month ends"
+msgstr ""
+
+msgid "Days after year ends"
+msgstr ""
+
+msgid "Days before month ends"
+msgstr ""
+
+msgid "Days before year ends"
+msgstr ""
 
 msgid "Debug logging"
 msgstr "Debug-Protokollierung"
@@ -1189,6 +1206,11 @@ msgstr "Aktivität exportieren"
 msgid "Export Backup"
 msgstr "Sicherung exportieren"
 
+#, fuzzy
+#| msgid "Export"
+msgid "Export PNG"
+msgstr "Exportieren"
+
 msgid "Export Playlist"
 msgstr "Wiedergabeliste exportieren"
 
@@ -1429,6 +1451,11 @@ msgstr "Übersicht"
 msgid "Hour"
 msgstr "Stunde"
 
+#, fuzzy
+#| msgid "Hour"
+msgid "Hours"
+msgstr "Stunde"
+
 msgid "Identify"
 msgstr "Erkennen"
 
@@ -1592,6 +1619,11 @@ msgid "ListenBrainz"
 msgstr "ListenBrainz"
 
 #, fuzzy
+#| msgid "Searching for devices..."
+msgid "Listening overview"
+msgstr "Nach Geräten wird gesucht …"
+
+#, fuzzy
 #| msgid "No folder contents found."
 msgid "Load file contents"
 msgstr "Keine Ordnerinhalte gefunden."
@@ -1732,6 +1764,9 @@ msgstr "Metadatenquelle"
 msgid "Metadata"
 msgstr "Metadaten"
 
+msgid "Minimize overview"
+msgstr ""
+
 msgid "Minimum year"
 msgstr "Mindestjahr"
 
@@ -1740,6 +1775,12 @@ msgstr ""
 
 msgid "Monday"
 msgstr "Montag"
+
+msgid "Month"
+msgstr ""
+
+msgid "Monthly"
+msgstr ""
 
 msgid "Mood tracks"
 msgstr "Titel nach Stimmung"
@@ -1902,6 +1943,11 @@ msgstr "Nächstes Audiogerät"
 msgid "Next page"
 msgstr "Nächste Seite"
 
+#, fuzzy
+#| msgid "Next page"
+msgid "Next period"
+msgstr "Nächste Seite"
+
 msgid "Next source"
 msgstr "Nächste Quelle"
 
@@ -1939,6 +1985,11 @@ msgstr "Unbegrenzt"
 
 msgid "No linked servers found"
 msgstr "Keine verbundenen Server gefunden"
+
+#, fuzzy
+#| msgid "Use listening activity"
+msgid "No listening activity in this period"
+msgstr "Höraktivität nutzen"
 
 msgid "No local file mapping"
 msgstr "Keine Zuordnung lokaler Dateien"
@@ -2085,6 +2136,11 @@ msgstr "Quick Connect"
 
 msgid "Open approval page"
 msgstr "Bestätigungsseite öffnen"
+
+#, fuzzy
+#| msgid "Save lyrics automatically"
+msgid "Open automatically"
+msgstr "Liedtexte automatisch speichern"
 
 msgid "Open fullscreen player"
 msgstr "Vollbildmodus aktivieren"
@@ -2403,6 +2459,11 @@ msgstr "Vorheriges Audiogerät"
 msgid "Previous page"
 msgstr "Vorherige Seite"
 
+#, fuzzy
+#| msgid "Previous page"
+msgid "Previous period"
+msgstr "Vorherige Seite"
+
 msgid "Previous"
 msgstr "Vorheriger Titel"
 
@@ -2699,6 +2760,11 @@ msgstr "Player-Layout wiederherstellen"
 msgid "Restore"
 msgstr "Wiederherstellen"
 
+#, fuzzy
+#| msgid "Refresh section"
+msgid "Results per section"
+msgstr "Bereich aktualisieren"
+
 msgid "Resume"
 msgstr "Fortsetzen"
 
@@ -2994,11 +3060,21 @@ msgstr "Freigabe"
 msgid "Shared secret"
 msgstr "Shared Secret"
 
+#, fuzzy
+#| msgid "Show Rufin"
+msgid "Show Rufin in headline"
+msgstr "Rufin anzeigen"
+
 msgid "Show Rufin"
 msgstr "Rufin anzeigen"
 
 msgid "Show artwork"
 msgstr "Cover anzeigen"
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Show comparison"
+msgstr "Symbol im Infobereich anzeigen"
 
 msgid "Show downloaded badge"
 msgstr "Heruntergeladen-Symbol anzeigen"
@@ -3283,6 +3359,26 @@ msgstr ""
 msgid "Toggle Fullscreen"
 msgstr "Vollbildmodus"
 
+#, fuzzy
+#| msgid "Albums"
+msgid "Top albums"
+msgstr "Alben"
+
+#, fuzzy
+#| msgid "Album artists"
+msgid "Top artists"
+msgstr "Album-Künstler"
+
+#, fuzzy
+#| msgid "Any genre"
+msgid "Top genres"
+msgstr "Beliebiges Genre"
+
+#, fuzzy
+#| msgid "Mood tracks"
+msgid "Top tracks"
+msgstr "Titel nach Stimmung"
+
 msgid "Track number"
 msgstr "Titelnummer"
 
@@ -3549,6 +3645,11 @@ msgstr "EBU-R128-Tags in Dateien schreiben"
 msgid "Year"
 msgstr "Jahr"
 
+#, fuzzy
+#| msgid "Year"
+msgid "Yearly"
+msgstr "Jahr"
+
 msgid "Yellow"
 msgstr "Gelb"
 
@@ -3560,6 +3661,12 @@ msgstr "Deine Musik gehört hierhin"
 
 msgid "Your queue is empty."
 msgstr "Deine Warteschlange ist leer."
+
+msgid "Your {period} in Rufin"
+msgstr ""
+
+msgid "Your {period}"
+msgstr ""
 
 msgid "above"
 msgstr "größer als"
@@ -3637,6 +3744,14 @@ msgid "{count} month ago"
 msgid_plural "{count} months ago"
 msgstr[0] "vor {count} Monat"
 msgstr[1] "vor {count} Monaten"
+
+#, fuzzy
+#| msgid "{count} day ago"
+#| msgid_plural "{count} days ago"
+msgid "{count} play"
+msgid_plural "{count} plays"
+msgstr[0] "vor {count} Tag"
+msgstr[1] "vor {count} Tagen"
 
 msgid "{count} result"
 msgid_plural "{count} results"

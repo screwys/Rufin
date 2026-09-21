@@ -839,6 +839,11 @@ msgstr "Скопировать текущий внешний вид в буфе�
 msgid "Copy"
 msgstr "Копировать"
 
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Could not load listening overview"
+msgstr "Не удалось загрузить эту страницу"
+
 msgid "Could not load related tracks"
 msgstr "Не удалось загрузить похожие треки"
 
@@ -910,6 +915,18 @@ msgstr "Темная тема"
 
 msgid "Date added"
 msgstr "Дата добавления"
+
+msgid "Days after month ends"
+msgstr ""
+
+msgid "Days after year ends"
+msgstr ""
+
+msgid "Days before month ends"
+msgstr ""
+
+msgid "Days before year ends"
+msgstr ""
 
 msgid "Debug logging"
 msgstr "Отладочное журналирование"
@@ -1157,6 +1174,11 @@ msgstr "Экспортировать действия"
 msgid "Export Backup"
 msgstr "Экспортировать резервную копию"
 
+#, fuzzy
+#| msgid "Export"
+msgid "Export PNG"
+msgstr "Экспорт"
+
 msgid "Export Playlist"
 msgstr "Экспортировать плейлист"
 
@@ -1388,6 +1410,11 @@ msgstr "Главная"
 msgid "Hour"
 msgstr "Час"
 
+#, fuzzy
+#| msgid "Hour"
+msgid "Hours"
+msgstr "Час"
+
 msgid "Identify"
 msgstr "Идентифицировать"
 
@@ -1545,6 +1572,11 @@ msgstr "Отправка данных о прослушивании в ListenBra
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
 
+#, fuzzy
+#| msgid "Waiting for device"
+msgid "Listening overview"
+msgstr "Ожидание подключения устройства"
+
 msgid "Load file contents"
 msgstr "Загрузить содержимое файла"
 
@@ -1677,6 +1709,9 @@ msgstr "Источник метаданных"
 msgid "Metadata"
 msgstr "Метаданные"
 
+msgid "Minimize overview"
+msgstr ""
+
 msgid "Minimum year"
 msgstr "Минимальный год"
 
@@ -1685,6 +1720,12 @@ msgstr "Отражённые панели"
 
 msgid "Monday"
 msgstr "Понедельник"
+
+msgid "Month"
+msgstr ""
+
+msgid "Monthly"
+msgstr ""
 
 msgid "Mood tracks"
 msgstr "Треки по настроениям"
@@ -1841,6 +1882,11 @@ msgstr "Следующее аудиоустройство"
 msgid "Next page"
 msgstr "Следующая страница"
 
+#, fuzzy
+#| msgid "Next page"
+msgid "Next period"
+msgstr "Следующая страница"
+
 msgid "Next source"
 msgstr "Следующий источник"
 
@@ -1876,6 +1922,11 @@ msgstr "Без ограничений"
 
 msgid "No linked servers found"
 msgstr "Не найдено связанных серверов"
+
+#, fuzzy
+#| msgid "Use listening activity"
+msgid "No listening activity in this period"
+msgstr "Использовать данные о прослушиваниях"
 
 msgid "No local file mapping"
 msgstr "Нет сопоставлений для локального файла"
@@ -2019,6 +2070,11 @@ msgstr "Открыть Rufin Connect"
 
 msgid "Open approval page"
 msgstr "Открыть страницу подтверждения"
+
+#, fuzzy
+#| msgid "Refresh automatically"
+msgid "Open automatically"
+msgstr "Автоматическое обновление"
 
 msgid "Open fullscreen player"
 msgstr "Открыть полноэкранный плеер"
@@ -2312,6 +2368,11 @@ msgstr "Предыдущее аудиоустройство"
 msgid "Previous page"
 msgstr "Предыдущая страница"
 
+#, fuzzy
+#| msgid "Previous page"
+msgid "Previous period"
+msgstr "Предыдущая страница"
+
 msgid "Previous"
 msgstr "Предыдущий"
 
@@ -2581,6 +2642,11 @@ msgstr "Восстановить макет плеера"
 
 msgid "Restore"
 msgstr "Восстановить"
+
+#, fuzzy
+#| msgid "Refresh section"
+msgid "Results per section"
+msgstr "Обновить раздел"
 
 msgid "Resume"
 msgstr "Возобновить"
@@ -2865,11 +2931,21 @@ msgstr "Поделиться"
 msgid "Shared secret"
 msgstr "Общий секретный ключ"
 
+#, fuzzy
+#| msgid "Show Rufin"
+msgid "Show Rufin in headline"
+msgstr "Показать Rufin"
+
 msgid "Show Rufin"
 msgstr "Показать Rufin"
 
 msgid "Show artwork"
 msgstr "Показать обложку"
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Show comparison"
+msgstr "Показывать значок в системном трее"
 
 msgid "Show downloaded badge"
 msgstr "Показывать значок \"Загружено\""
@@ -3151,6 +3227,26 @@ msgstr ""
 msgid "Toggle Fullscreen"
 msgstr "Полноэкранный режим"
 
+#, fuzzy
+#| msgid "albums"
+msgid "Top albums"
+msgstr "альбомы"
+
+#, fuzzy
+#| msgid "Album artists"
+msgid "Top artists"
+msgstr "Авторы альбома"
+
+#, fuzzy
+#| msgid "Any genre"
+msgid "Top genres"
+msgstr "Любой жанр"
+
+#, fuzzy
+#| msgid "Mood tracks"
+msgid "Top tracks"
+msgstr "Треки по настроениям"
+
 msgid "Track number"
 msgstr "Номер трека"
 
@@ -3398,6 +3494,11 @@ msgstr "Записывать теги EBU R128 в файлы"
 msgid "Year"
 msgstr "Год"
 
+#, fuzzy
+#| msgid "Year"
+msgid "Yearly"
+msgstr "Год"
+
 msgid "Yellow"
 msgstr "Жёлтый"
 
@@ -3409,6 +3510,12 @@ msgstr "Ваша музыка - здесь"
 
 msgid "Your queue is empty."
 msgstr "Ваша очередь воспроизведения пуста."
+
+msgid "Your {period} in Rufin"
+msgstr ""
+
+msgid "Your {period}"
+msgstr ""
 
 msgid "above"
 msgstr "выше"
@@ -3490,6 +3597,15 @@ msgid_plural "{count} months ago"
 msgstr[0] "{count} месяц назад"
 msgstr[1] "{count} месяца назад"
 msgstr[2] "{count} месяцев назад"
+
+#, fuzzy
+#| msgid "{count} day ago"
+#| msgid_plural "{count} days ago"
+msgid "{count} play"
+msgid_plural "{count} plays"
+msgstr[0] "{count} день назад"
+msgstr[1] "{count} дня назад"
+msgstr[2] "{count} дней назад"
 
 msgid "{count} result"
 msgid_plural "{count} results"
@@ -4169,9 +4285,6 @@ msgstr "Добро пожаловать в программу установки
 
 #~ msgid "Website"
 #~ msgstr "Веб-сайт"
-
-#~ msgid "albums"
-#~ msgstr "альбомы"
 
 #~ msgid "appears on"
 #~ msgstr "появляется в"

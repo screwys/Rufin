@@ -853,6 +853,11 @@ msgstr "Kopēt pašreizējo izskatu starplaikā"
 msgid "Copy"
 msgstr "Kopēt"
 
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Could not load listening overview"
+msgstr "Šo lapu nevarēja ielādēt"
+
 msgid "Could not load related tracks"
 msgstr "Nevarēja ielādēt saistītās dziesmas"
 
@@ -926,6 +931,18 @@ msgstr "Tumšs"
 
 msgid "Date added"
 msgstr "Pievienošanas datums"
+
+msgid "Days after month ends"
+msgstr ""
+
+msgid "Days after year ends"
+msgstr ""
+
+msgid "Days before month ends"
+msgstr ""
+
+msgid "Days before year ends"
+msgstr ""
 
 msgid "Debug logging"
 msgstr "Atkļūdošanas žurnāls"
@@ -1185,6 +1202,11 @@ msgstr "Eksportēt aktivitātes"
 msgid "Export Backup"
 msgstr "Eksportēt rezerves kopiju"
 
+#, fuzzy
+#| msgid "Export"
+msgid "Export PNG"
+msgstr "Eksportēt"
+
 msgid "Export Playlist"
 msgstr "Eksportēt atskaņošanas sarakstu"
 
@@ -1421,6 +1443,11 @@ msgstr "Sākums"
 msgid "Hour"
 msgstr "Stunda"
 
+#, fuzzy
+#| msgid "Hour"
+msgid "Hours"
+msgstr "Stunda"
+
 msgid "Identify"
 msgstr "Identificēt"
 
@@ -1578,6 +1605,11 @@ msgstr "ListenBrainz skroblēšana"
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
 
+#, fuzzy
+#| msgid "Searching for devices..."
+msgid "Listening overview"
+msgstr "Tiek meklētas ierīces..."
+
 msgid "Load file contents"
 msgstr "Ielādēt faila saturu"
 
@@ -1717,6 +1749,9 @@ msgstr "Metadatu avots"
 msgid "Metadata"
 msgstr "Metadati"
 
+msgid "Minimize overview"
+msgstr ""
+
 msgid "Minimum year"
 msgstr "Minimālais gads"
 
@@ -1725,6 +1760,12 @@ msgstr "Atspoguļotas joslas"
 
 msgid "Monday"
 msgstr "Pirmdiena"
+
+msgid "Month"
+msgstr ""
+
+msgid "Monthly"
+msgstr ""
 
 msgid "Mood tracks"
 msgstr "Noskaņu dziesmas"
@@ -1885,6 +1926,11 @@ msgstr "Nākamā skaņas ierīce"
 msgid "Next page"
 msgstr "Nākamā lapa"
 
+#, fuzzy
+#| msgid "Next page"
+msgid "Next period"
+msgstr "Nākamā lapa"
+
 msgid "Next source"
 msgstr "Nākamais avots"
 
@@ -1922,6 +1968,11 @@ msgstr "Nav ierobežojuma"
 
 msgid "No linked servers found"
 msgstr "Nav atrasts neviens saistīts serveris"
+
+#, fuzzy
+#| msgid "Use listening activity"
+msgid "No listening activity in this period"
+msgstr "Izmantot klausīšanās aktivitāti"
 
 msgid "No local file mapping"
 msgstr "Nav lokālu failu sasaistījumu"
@@ -2065,6 +2116,11 @@ msgstr "Ātrā savienošana"
 
 msgid "Open approval page"
 msgstr "Atvērt apstiprināšanas lapu"
+
+#, fuzzy
+#| msgid "Refresh automatically"
+msgid "Open automatically"
+msgstr "Atjaunot automātiski"
 
 msgid "Open fullscreen player"
 msgstr "Atvērt pilnekrāna atskaņotāju"
@@ -2360,6 +2416,11 @@ msgstr "Iepriekšējā skaņas ierīce"
 msgid "Previous page"
 msgstr "Iepriekšējā lapa"
 
+#, fuzzy
+#| msgid "Previous page"
+msgid "Previous period"
+msgstr "Iepriekšējā lapa"
+
 msgid "Previous"
 msgstr "Iepriekšējais"
 
@@ -2648,6 +2709,11 @@ msgstr "Atjaunot atskaņotāja izkārtojumu"
 msgid "Restore"
 msgstr "Atjaunot"
 
+#, fuzzy
+#| msgid "Refresh section"
+msgid "Results per section"
+msgstr "Atsvaidzināt sadaļu"
+
 msgid "Resume"
 msgstr "Turpināt"
 
@@ -2933,11 +2999,21 @@ msgstr "Dalīties"
 msgid "Shared secret"
 msgstr "Slepenā atslēga"
 
+#, fuzzy
+#| msgid "Show Rufin"
+msgid "Show Rufin in headline"
+msgstr "Rādīt Rufin"
+
 msgid "Show Rufin"
 msgstr "Rādīt Rufin"
 
 msgid "Show artwork"
 msgstr "Rādīt albuma vāciņu"
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Show comparison"
+msgstr "Rādīt sistēmas joslas ikonu"
 
 msgid "Show downloaded badge"
 msgstr "Rādīt lejupielādes ikonu"
@@ -3220,6 +3296,26 @@ msgstr ""
 msgid "Toggle Fullscreen"
 msgstr "Pārslēgt pilnekrāna režīmu"
 
+#, fuzzy
+#| msgid "albums"
+msgid "Top albums"
+msgstr "albumi"
+
+#, fuzzy
+#| msgid "Album artists"
+msgid "Top artists"
+msgstr "Albumu izpildītāji"
+
+#, fuzzy
+#| msgid "Any genre"
+msgid "Top genres"
+msgstr "Jebkurš žanrs"
+
+#, fuzzy
+#| msgid "Mood tracks"
+msgid "Top tracks"
+msgstr "Noskaņu dziesmas"
+
 msgid "Track number"
 msgstr "Dziesmas numurs"
 
@@ -3482,6 +3578,11 @@ msgstr "Ierakstīt EBU R128 tagus failos"
 msgid "Year"
 msgstr "Gads"
 
+#, fuzzy
+#| msgid "Year"
+msgid "Yearly"
+msgstr "Gads"
+
 msgid "Yellow"
 msgstr "Dzeltens"
 
@@ -3493,6 +3594,12 @@ msgstr "Šeit ir paredzēts jūsu mūzikas atskaņošanai"
 
 msgid "Your queue is empty."
 msgstr "Jūsu rinda ir tukša."
+
+msgid "Your {period} in Rufin"
+msgstr ""
+
+msgid "Your {period}"
+msgstr ""
 
 msgid "above"
 msgstr "virs"
@@ -3574,6 +3681,15 @@ msgid_plural "{count} months ago"
 msgstr[0] "pirms {count} menēšiem"
 msgstr[1] "pirms {count} menēša"
 msgstr[2] "pirms {count} menēšiem"
+
+#, fuzzy
+#| msgid "{count} day ago"
+#| msgid_plural "{count} days ago"
+msgid "{count} play"
+msgid_plural "{count} plays"
+msgstr[0] "pirms {count} dienām"
+msgstr[1] "{count} albums"
+msgstr[2] "pirms {count} dienām"
 
 msgid "{count} result"
 msgid_plural "{count} results"
@@ -4234,9 +4350,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 
 #~ msgid "Website"
 #~ msgstr "Tīmekļa vietne"
-
-#~ msgid "albums"
-#~ msgstr "albumi"
 
 #~ msgid "appears on"
 #~ msgstr "parādās ierakstos"
