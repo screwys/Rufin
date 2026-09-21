@@ -23,10 +23,7 @@ use super::collections::{
     CollectionTableProjection, LibraryCollectionProjection, LibraryPresentationProjection,
     dynamic_collection_table, library_route_inset,
 };
-use super::columns::{
-    TrackRowPlayingIndicator, set_track_row_index_text, track_column_fit_width,
-    track_row_index_cell,
-};
+use super::columns::{TrackRowPlayingIndicator, set_track_row_index_text, track_column_fit_width};
 use super::grid_cells::{
     CollectionGridCardCell, CollectionGridProjection, ReusableCollectionGridCell,
     collection_grid_with_selection_and_demand,
@@ -247,7 +244,7 @@ fn playlist_entry_collection(
                 )
             })
             .unwrap_or(gtk::INVALID_LIST_POSITION);
-        current_playing.set_position(position);
+        current_playing.set_current(current.map(|current| current.media_uri.as_str()), position);
         current_playing.set_paused(current.is_some_and(|current| current.paused));
         true
     }));
@@ -262,9 +259,15 @@ fn playlist_entry_collection(
                 playing.clone(),
                 selection.clone(),
             )),
-            LibraryLayout::Grid | LibraryLayout::Detail => LibraryPresentationProjection::Grid(
-                playlist_entry_grid(&shell, model.clone(), playlist, selection.clone()),
-            ),
+            LibraryLayout::Grid | LibraryLayout::Detail => {
+                LibraryPresentationProjection::Grid(playlist_entry_grid(
+                    &shell,
+                    model.clone(),
+                    playlist,
+                    selection.clone(),
+                    playing.clone(),
+                ))
+            }
         }),
     )
 }
@@ -320,7 +323,7 @@ fn playlist_entry_column(
         LibraryField::Image => playlist_entry_image_column(shell, playlist, width),
         LibraryField::TitleMerged => playlist_entry_title_column(shell, playlist, width, playing),
         LibraryField::Favorite => playlist_entry_favorite_column(shell, playlist, width),
-        _ => playlist_entry_text_column(shell, field, width, playlist),
+        _ => playlist_entry_text_column(shell, field, width, playlist, playing),
     }
 }
 
@@ -336,7 +339,7 @@ fn playlist_entry_number_column(
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let cell = track_row_index_cell("");
+        let cell = ui_shared::recycled_cells::track_list_row_index_cell(item);
         let current = list_item_entry(item);
         install_playlist_entry_context(&cell, &setup_shell, playlist, Rc::clone(&current));
         install_playlist_entry_drag(&cell, &setup_shell, playlist, current);
@@ -348,22 +351,22 @@ fn playlist_entry_number_column(
             return;
         };
         let entry = item_at_from_item::<PlaylistEntryRow>(item);
-        let Some(_entry) = entry else {
+        let Some(entry) = entry else {
             return;
         };
         let Some(cell) = item.child().and_downcast::<gtk::Overlay>() else {
             return;
         };
         set_track_row_index_text(&cell, &playlist_entry_number(item.position(), true));
-        bind_playing.bind(cell.upcast_ref(), item.position());
+        bind_playing.bind(cell.upcast_ref(), item.position(), &entry.media_uri);
     });
     factory.connect_unbind(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
         if let Some(cell) = item.child().and_downcast::<gtk::Overlay>() {
-            set_track_row_index_text(&cell, "");
             playing.unbind(cell.upcast_ref());
+            set_track_row_index_text(&cell, "");
         }
     });
     let column =
@@ -550,7 +553,7 @@ fn playlist_entry_title_column(
             &cell.downloaded().expect("playlist title badge"),
             ui_shared::downloads::media_download_badge(&entry.media_uri, entry.is_downloaded),
         );
-        bind_playing.bind(title.upcast_ref(), item.position());
+        bind_playing.bind(title.upcast_ref(), item.position(), &entry.media_uri);
     });
     let clear_shell = Rc::clone(shell);
     factory.connect_unbind(move |_, item| {
@@ -578,6 +581,7 @@ fn playlist_entry_text_column(
     field: LibraryField,
     width: i32,
     playlist: PlaylistKey,
+    playing: TrackRowPlayingIndicator,
 ) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
     let setup_shell = Rc::clone(shell);
@@ -587,6 +591,10 @@ fn playlist_entry_text_column(
         };
         let cell = RecycledTextCell::new();
         let label = cell.label();
+        if field == LibraryField::Title {
+            cell.set_spacing(5);
+            ui_shared::recycled_cells::install_playing_indicator(&label, &cell);
+        }
         add_field_skeleton_class(&label, field);
         label.add_css_class("muted");
         label.set_xalign(0.0);
@@ -608,6 +616,7 @@ fn playlist_entry_text_column(
         install_playlist_entry_drag(&cell, &setup_shell, playlist, current);
         item.set_child(Some(&cell));
     });
+    let bind_playing = playing.clone();
     connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
@@ -620,6 +629,9 @@ fn playlist_entry_text_column(
             return;
         };
         let label = cell.label();
+        if field == LibraryField::Title {
+            bind_playing.bind(label.upcast_ref(), item.position(), &entry.media_uri);
+        }
         if matches!(
             field,
             LibraryField::Album | LibraryField::Artist | LibraryField::AlbumArtist
@@ -634,6 +646,9 @@ fn playlist_entry_text_column(
             return;
         };
         if let Some(cell) = list_cell::<RecycledTextCell>(item) {
+            if field == LibraryField::Title {
+                playing.unbind(cell.label().upcast_ref());
+            }
             cell.clear();
         }
     });
@@ -764,10 +779,16 @@ struct PlaylistEntryGridCell {
     shell: Rc<CatalogUi>,
     cover: ui_shared::artwork::ArtworkTile,
     current: Rc<RefCell<Option<PlaylistEntryRow>>>,
+    playing: TrackRowPlayingIndicator,
 }
 
 impl PlaylistEntryGridCell {
-    fn new(shell: Rc<CatalogUi>, fields: &[LibraryField], playlist: PlaylistKey) -> Self {
+    fn new(
+        shell: Rc<CatalogUi>,
+        fields: &[LibraryField],
+        playlist: PlaylistKey,
+        playing: TrackRowPlayingIndicator,
+    ) -> Self {
         let cover = ui_shared::artwork::ArtworkTile::new_elastic_square();
         let cover_frame = super::cards::square_cover_frame(&cover.widget(), None);
         let body = CollectionGridCardCell::new(&shell, fields, cover_frame.upcast());
@@ -792,6 +813,7 @@ impl PlaylistEntryGridCell {
             shell,
             cover,
             current,
+            playing,
         }
     }
 
@@ -825,7 +847,9 @@ impl ReusableCollectionGridCell<PlaylistEntryRow> for PlaylistEntryGridCell {
         self.body.widget()
     }
 
-    fn bind(&self, _: u32, entry: PlaylistEntryRow) {
+    fn bind(&self, position: u32, entry: PlaylistEntryRow) {
+        self.playing
+            .bind(self.body.title.upcast_ref(), position, &entry.media_uri);
         self.body.bind(&entry.title, |field| {
             playlist_entry_field_links(&entry, field)
         });
@@ -838,6 +862,7 @@ impl ReusableCollectionGridCell<PlaylistEntryRow> for PlaylistEntryGridCell {
     }
 
     fn clear(&self) {
+        self.playing.unbind(self.body.title.upcast_ref());
         self.release_artwork();
         self.body.clear(&self.shell);
         self.current.take();
@@ -862,6 +887,7 @@ fn playlist_entry_grid(
     model: PlaylistEntryModel,
     playlist: PlaylistKey,
     selection: PlaylistEntrySelection,
+    playing: TrackRowPlayingIndicator,
 ) -> CollectionGridProjection {
     let fields = shell
         .settings
@@ -876,7 +902,9 @@ fn playlist_entry_grid(
         model.list_model(),
         Some(selection.selection_model()),
         &fields,
-        move |fields| PlaylistEntryGridCell::new(Rc::clone(&cell_shell), fields, playlist),
+        move |fields| {
+            PlaylistEntryGridCell::new(Rc::clone(&cell_shell), fields, playlist, playing.clone())
+        },
         move |position, _: PlaylistEntryRow| activate_model.activate(position, queue.clone()),
         |_| {},
     )

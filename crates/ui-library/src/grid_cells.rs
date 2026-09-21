@@ -717,6 +717,8 @@ impl<T: ui_shared::library_fields::TrackPresentation> ReusableCollectionGridCell
         );
         self.body
             .bind(row.title(), |value| (self.field)(position, &row, value));
+        self.body
+            .bind_playing_target(&shell, PlaybackTarget::Track(row.media_uri().to_owned()));
         self.body.set_download_target(&shell, row.download_badge());
         set_grid_favorite(&self.favorite, Some(row.favorite()));
         self.current.replace(Some(row));
@@ -752,6 +754,7 @@ pub struct AlbumGridCell {
     cover: ArtworkTile,
     favorite: gtk::Button,
     current: Rc<RefCell<Option<AlbumRow>>>,
+    context: Option<String>,
 }
 
 impl AlbumGridCell {
@@ -819,13 +822,14 @@ impl AlbumGridCell {
                 )
             },
         );
+        let play_context = context.clone();
         install_grid_play(
             shell,
             &current,
             [play, play_next, play_last],
             move |shell, row, placement| {
                 (shell.media_menus.play_target)(
-                    &album_playback_target(row.media_uri.clone(), context.as_deref()),
+                    &album_playback_target(row.media_uri.clone(), play_context.as_deref()),
                     placement,
                     false,
                 );
@@ -845,6 +849,7 @@ impl AlbumGridCell {
             cover,
             favorite,
             current,
+            context,
         }
     }
 }
@@ -855,6 +860,7 @@ pub struct ArtistGridCell {
     cover: ArtworkTile,
     favorite: gtk::Button,
     current: Rc<RefCell<Option<ArtistRow>>>,
+    album_artist: bool,
 }
 
 impl ArtistGridCell {
@@ -930,6 +936,7 @@ impl ArtistGridCell {
             cover,
             favorite,
             current,
+            album_artist,
         }
     }
 }
@@ -942,6 +949,14 @@ impl ReusableCollectionGridCell<ArtistRow> for ArtistGridCell {
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
+        self.body.bind_playing_target(
+            &shell,
+            if self.album_artist {
+                PlaybackTarget::AlbumArtist(row.media_uri.clone())
+            } else {
+                PlaybackTarget::Artist(row.media_uri.clone())
+            },
+        );
         shell.artwork.bind_artwork_tile(
             &self.cover,
             opaque_artwork(row.artwork_binding.as_deref()),
@@ -990,6 +1005,10 @@ impl ReusableCollectionGridCell<AlbumRow> for AlbumGridCell {
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
+        self.body.bind_playing_target(
+            &shell,
+            album_playback_target(row.media_uri.clone(), self.context.as_deref()),
+        );
         shell.artwork.bind_artwork_tile(
             &self.cover,
             opaque_artwork(row.artwork_binding.as_deref()),
@@ -1037,13 +1056,50 @@ impl ReusableCollectionGridCell<AlbumRow> for AlbumGridCell {
     }
 }
 
+enum GridPlayingTarget {
+    Track(String),
+    Collection(String),
+}
+
+pub struct GridPlayingBinding {
+    title: glib::WeakRef<gtk::Label>,
+    target: RefCell<Option<GridPlayingTarget>>,
+}
+
+impl GridPlayingBinding {
+    pub fn refresh(&self, current: Option<&ui_shared::mounted_route::RouteCurrentTrack>) {
+        let Some(title) = self.title.upgrade() else {
+            return;
+        };
+        let playing = current.is_some_and(|current| match self.target.borrow().as_ref() {
+            Some(GridPlayingTarget::Track(uri)) => uri == &current.media_uri,
+            Some(GridPlayingTarget::Collection(expected)) => {
+                current.context.as_ref().is_some_and(|context| {
+                    context.context_id == *expected
+                        || context
+                            .context_id
+                            .strip_prefix(expected)
+                            .is_some_and(|suffix| suffix.starts_with("|query="))
+                })
+            }
+            None => false,
+        });
+        ui_shared::recycled_cells::set_track_playing(
+            title.upcast_ref(),
+            playing,
+            current.is_some_and(|current| current.paused),
+        );
+    }
+}
+
 pub struct CollectionGridCardCell {
     pub card: CollectionGridCardView,
-    title: gtk::Label,
+    pub title: gtk::Label,
     title_row: gtk::Box,
     downloaded: RefCell<Option<gtk::Image>>,
     fields: RefCell<Vec<CollectionGridFieldCell>>,
     ready: Cell<bool>,
+    playing_target: RefCell<Option<Rc<GridPlayingBinding>>>,
 }
 
 impl CollectionGridCardCell {
@@ -1053,6 +1109,7 @@ impl CollectionGridCardCell {
         let title = card.imp().title.get();
         connect_label_tooltip(&title);
         let title_row = card.imp().title_row.get();
+        ui_shared::recycled_cells::install_playing_indicator(&title, &title_row);
         let field_cells = fields
             .iter()
             .copied()
@@ -1068,6 +1125,7 @@ impl CollectionGridCardCell {
             downloaded: RefCell::new(None),
             fields: RefCell::new(field_cells),
             ready: Cell::new(false),
+            playing_target: RefCell::new(None),
         };
         cell
     }
@@ -1077,6 +1135,25 @@ impl CollectionGridCardCell {
             self.title_row.remove(&previous);
         }
         self.title_row.append(&badge);
+    }
+
+    pub fn bind_playing_target(&self, shell: &CatalogUi, target: PlaybackTarget) {
+        let mut binding = self.playing_target.borrow_mut();
+        let binding = binding.get_or_insert_with(|| {
+            let binding = Rc::new(GridPlayingBinding {
+                title: self.title.downgrade(),
+                target: RefCell::new(None),
+            });
+            let mut cells = shell.grid_playing_cells.borrow_mut();
+            cells.retain(|cell| cell.strong_count() != 0);
+            cells.push(Rc::downgrade(&binding));
+            binding
+        });
+        binding.target.replace(Some(match target {
+            PlaybackTarget::Track(uri) => GridPlayingTarget::Track(uri),
+            target => GridPlayingTarget::Collection(target.context_id()),
+        }));
+        binding.refresh(shell.current.borrow().as_ref());
     }
 
     pub fn set_download_target(&self, shell: &Rc<CatalogUi>, downloaded: bool) {
@@ -1097,6 +1174,10 @@ impl CollectionGridCardCell {
     }
 
     pub fn clear(&self, shell: &Rc<CatalogUi>) {
+        if let Some(binding) = self.playing_target.borrow().as_ref() {
+            binding.target.take();
+        }
+        ui_shared::recycled_cells::set_track_playing(self.title.upcast_ref(), false, false);
         self.title.set_text("");
         if let Some(downloaded) = self.downloaded.borrow().as_ref() {
             shell.downloads.clear_download_badge(downloaded);

@@ -7,14 +7,13 @@ use rufin_core::runtime::source::SourceSummary;
 
 use localization::tr;
 use sources::SourceId;
-use ui_shared::local_access::local_prefix_is_directory;
 
 use super::login::source_settings_group;
 use crate::shell::Shell;
 use ui_shared::layout::large_popup_content_width;
 use ui_shared::local_access::{
     LocalAccessDraft, LocalAccessEditor, LocalAccessOperation, connect_mapping_expander_visibility,
-    local_access_status_text, preview_local_path_text, validate_local_access_path,
+    local_access_status_text, preview_local_path_text,
 };
 
 const MANAGE_SERVER_CLAMP_WIDTH: i32 = 560;
@@ -75,7 +74,8 @@ fn manage_server_content(
         content: gtk::Box,
         mapping_group: adw::PreferencesGroup,
         mapping_expander: adw::ExpanderRow,
-        folder_row: adw::ActionRow,
+        folder_row: adw::EntryRow,
+        folder_edit: gtk::ToggleButton,
         folder_button: gtk::Button,
         server_prefix: adw::EntryRow,
         local_prefix: adw::EntryRow,
@@ -131,14 +131,6 @@ fn manage_server_content(
         local_prefix: saved_local_prefix.trim().to_string(),
     };
 
-    folder_row.set_subtitle(
-        &access
-            .as_ref()
-            .map(|access| ui_shared::path_display::display_path(&access.root_path))
-            .unwrap_or_else(|| tr("No folder selected")),
-    );
-    folder_row.set_activatable_widget(Some(&folder_button));
-
     server_prefix.set_text(&display_server_prefix);
 
     local_prefix.set_text(&display_local_prefix);
@@ -193,7 +185,7 @@ fn manage_server_content(
         let status = status.downgrade();
         let save = save.downgrade();
         let remove = remove.downgrade();
-        let folder_button = folder_button.downgrade();
+        let folder_row = folder_row.downgrade();
         let server_prefix = server_prefix.downgrade();
         let local_prefix = local_prefix.downgrade();
         let initial_draft = initial_draft.clone();
@@ -205,7 +197,7 @@ fn manage_server_content(
                 Some(status),
                 Some(save),
                 Some(remove),
-                Some(folder_button),
+                Some(folder_row),
                 Some(server_prefix),
                 Some(local_prefix),
             ) = (
@@ -214,7 +206,7 @@ fn manage_server_content(
                 status.upgrade(),
                 save.upgrade(),
                 remove.upgrade(),
-                folder_button.upgrade(),
+                folder_row.upgrade(),
                 server_prefix.upgrade(),
                 local_prefix.upgrade(),
             )
@@ -224,9 +216,8 @@ fn manage_server_content(
             let draft = editor.draft();
             let sample_source_path = editor.sample_source_path();
             let has_location = draft.folder.is_some();
-            let local_prefix_exists = local_prefix_is_directory(&draft);
             let changed = draft != initial_draft;
-            let preview = validate_local_access_path(
+            let preview = preview_local_path_text(
                 sample_source_path.as_deref(),
                 draft.server_prefix.as_str(),
                 draft.local_prefix.as_str(),
@@ -237,30 +228,25 @@ fn manage_server_content(
             );
             let operation = editor.operation();
             let pending = matches!(operation, LocalAccessOperation::Pending);
-            folder_button.set_sensitive(!pending);
+            folder_row.set_sensitive(!pending);
             server_prefix.set_sensitive(!pending);
             local_prefix.set_sensitive(!pending);
             remove.set_sensitive(!pending);
-            save.set_sensitive(has_location && local_prefix_exists && preview.saveable && !pending);
-            preview_row.set_subtitle(&preview.message);
+            save.set_sensitive(has_location && !pending);
+            preview_row.set_subtitle(&preview);
             status.set_text(&match operation {
                 LocalAccessOperation::Failed(error) => error,
-                LocalAccessOperation::Editing | LocalAccessOperation::Pending
-                    if preview.projected.is_some() && !preview.saveable =>
-                {
-                    tr("Mapped local file not found")
-                }
                 LocalAccessOperation::Editing | LocalAccessOperation::Pending => {
-                    local_access_status_text(&draft, true, changed, &access_status)
+                    local_access_status_text(&draft, changed, &access_status)
                 }
             });
         }
     });
-    editor.connect_folder_button(
+    editor.connect_folder_row(
         &shell.chrome.window,
         &folder_button,
         &folder_row,
-        false,
+        &folder_edit,
         Rc::clone(&update_state),
     );
     editor.connect_changes(Rc::clone(&update_state));
@@ -279,21 +265,7 @@ fn manage_server_content(
         move |_| editor.save(Rc::clone(&update_state))
     });
 
-    let draft = editor.draft();
-    if draft.folder.is_some()
-        && !validate_local_access_path(
-            editor.sample_source_path().as_deref(),
-            draft.server_prefix.as_str(),
-            draft.local_prefix.as_str(),
-            draft.folder.as_deref(),
-        )
-        .saveable
-    {
-        editor.match_sample();
-        update_state();
-    } else {
-        update_state();
-    }
+    update_state();
     scroller.upcast()
 }
 

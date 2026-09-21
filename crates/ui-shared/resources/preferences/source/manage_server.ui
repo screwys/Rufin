@@ -33,9 +33,15 @@
       <object class="AdwExpanderRow" id="mapping_expander">
         <property name="title" translatable="yes">Local File Mapping</property>
         <child>
-          <object class="AdwActionRow" id="folder_row">
+          <object class="AdwEntryRow" id="folder_row">
             <property name="title" translatable="yes">Local music folder</property>
-            <property name="use-markup">false</property>
+            <property name="editable">false</property>
+            <child type="suffix">
+              <object class="GtkToggleButton" id="folder_edit">
+                <property name="label" translatable="yes">Edit</property>
+                <property name="valign">center</property>
+              </object>
+            </child>
             <child type="suffix">
               <object class="GtkButton" id="folder_button">
                 <property name="label" translatable="yes">Choose</property>
@@ -74,12 +80,12 @@
     </child>
     <child>
       <object class="GtkButton" id="save">
-        <property name="tooltip-text" translatable="yes">Save Mapping</property>
+        <property name="tooltip-text" translatable="yes">Reload</property>
         <style><class name="pill-button"/><class name="pill"/><class name="suggested-action"/></style>
         <child>
           <object class="GtkBox"><property name="spacing">6</property>
-            <child><object class="GtkImage"><property name="icon-name">rufin-document-save-symbolic</property></object></child>
-            <child><object class="GtkLabel" id="save_label"><property name="label" translatable="yes">Save Mapping</property></object></child>
+            <child><object class="GtkImage"><property name="icon-name">rufin-view-refresh-symbolic</property></object></child>
+            <child><object class="GtkLabel" id="save_label"><property name="label" translatable="yes">Reload</property></object></child>
           </object>
         </child>
       </object>

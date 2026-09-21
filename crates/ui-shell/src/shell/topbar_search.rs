@@ -16,7 +16,7 @@ ui_shared::composite_box!(
     search_preview_row_imp,
     "RufinSearchPreviewRow",
     "/io/github/screwys/Rufin/ui/shell/search_row.ui",
-    { cover_host: gtk::Box, title: gtk::Label, subtitle: gtk::Label, separator: gtk::Label, kind: gtk::Stack, remove: gtk::Button, play: gtk::Button, menu: gtk::Button }
+    { cover_host: gtk::Box, title_row: gtk::Box, title: gtk::Label, subtitle: gtk::Label, separator: gtk::Label, kind: gtk::Stack, remove: gtk::Button, play: gtk::Button, menu: gtk::Button }
 );
 
 struct PreviewRow {
@@ -28,6 +28,10 @@ struct PreviewRow {
 impl PreviewRow {
     fn new(history: bool) -> Self {
         let body = SearchPreviewRow::new();
+        ui_shared::recycled_cells::install_playing_indicator(
+            &body.imp().title,
+            &*body.imp().title_row,
+        );
         let cover = ArtworkTile::new(SEARCH_COVER_SIZE);
         body.imp().cover_host.append(&cover.widget());
         let row = gtk::ListBoxRow::builder()
@@ -40,6 +44,27 @@ impl PreviewRow {
         row.add_css_class("search-result");
         row.add_css_class(ui_shared::interactions::CONTEXT_MENU_HOVER_OWNER_CLASS);
         Self { row, body, cover }
+    }
+
+    fn set_playing(&self, current: bool, paused: bool) {
+        let imp = self.body.imp();
+        if imp.title.has_css_class("track-row-playing") == current
+            && imp.title.has_css_class("track-row-paused") == (current && paused)
+        {
+            return;
+        }
+        ui_shared::recycled_cells::set_track_playing(imp.title.upcast_ref(), current, paused);
+        ui_shared::recycled_cells::set_track_playing(self.row.upcast_ref(), current, paused);
+        let playing = current && !paused;
+        imp.play.set_icon_name(if playing {
+            "rufin-media-playback-pause-symbolic"
+        } else {
+            "rufin-media-playback-start-symbolic"
+        });
+        ui_shared::localization::bind_widget_tooltip(
+            &*imp.play,
+            if playing { "Pause" } else { "Play" },
+        );
     }
 }
 
@@ -138,8 +163,17 @@ impl SearchPopup {
             });
             for (position, row) in self.previews[index].iter().enumerate() {
                 let weak = Rc::downgrade(self);
-                row.body.imp().play.connect_clicked(move |_| {
+                row.body.imp().play.connect_clicked(move |button| {
                     if let Some(popup) = weak.upgrade() {
+                        if popup.previews[index][position]
+                            .body
+                            .imp()
+                            .title
+                            .has_css_class("track-row-playing")
+                        {
+                            let _ = button.activate_action("win.play-pause", None);
+                            return;
+                        }
                         if let Some(catalog) = popup.catalog() {
                             popup.session.play(category, position, &catalog);
                         }
@@ -348,8 +382,12 @@ impl SearchPopup {
             });
             let weak = Rc::downgrade(self);
             let target = row.row.downgrade();
-            row.body.imp().play.connect_clicked(move |_| {
+            row.body.imp().play.connect_clicked(move |button| {
                 if let (Some(popup), Some(row)) = (weak.upgrade(), target.upgrade()) {
+                    if row.has_css_class("track-row-playing") {
+                        let _ = button.activate_action("win.play-pause", None);
+                        return;
+                    }
                     if let (Some(SearchAction::Recent(result)), Some(catalog)) =
                         (popup.action(&row), popup.catalog())
                     {
@@ -416,6 +454,14 @@ impl SearchPopup {
         if !self.popover.is_visible() {
             self.render();
             self.popover.popup();
+            if let Some(shell) = self.shell.upgrade() {
+                self.refresh_playback(
+                    ui_shared::mounted_route::route_current_track(
+                        shell.player_ui.selected_playback().as_deref(),
+                    )
+                    .as_ref(),
+                );
+            }
             self.entry
                 .update_state(&[gtk::accessible::State::Expanded(Some(true))]);
         }
@@ -425,6 +471,38 @@ impl SearchPopup {
         if self.popover.is_visible() {
             self.resize();
             self.popover.present();
+        }
+    }
+
+    pub fn refresh_playback(&self, current: Option<&ui_shared::mounted_route::RouteCurrentTrack>) {
+        if !self.popover.is_visible() {
+            return;
+        }
+        let actions = self.actions.borrow();
+        for (row, action) in actions.iter() {
+            let preview = match action {
+                SearchAction::Result(category, position) => {
+                    &self.previews[*category as usize][*position]
+                }
+                SearchAction::Recent(_) => {
+                    let Some(preview) = self.history.iter().find(|preview| preview.row == *row)
+                    else {
+                        continue;
+                    };
+                    preview
+                }
+                SearchAction::Category(_) => continue,
+            };
+            let playing = current.is_some_and(|current| match action {
+                SearchAction::Result(category, position) => {
+                    self.session.preview_matches(*category, *position, current)
+                }
+                SearchAction::Recent(result) => {
+                    ui_library::SearchSession::recent_matches(result, current)
+                }
+                _ => false,
+            });
+            preview.set_playing(playing, current.is_some_and(|current| current.paused));
         }
     }
 
@@ -461,6 +539,7 @@ impl SearchPopup {
         self.list.unselect_all();
         for row in self.previews.iter().flatten().chain(&self.history) {
             row.cover.cancel_artwork_request();
+            row.set_playing(false, false);
         }
     }
 
@@ -500,6 +579,7 @@ impl SearchPopup {
         self.history_footer
             .set_visible(query.is_empty() && !history.is_empty());
         for (index, row) in self.history.iter().enumerate() {
+            row.set_playing(false, false);
             let recent = history.get(index).filter(|_| query.is_empty());
             row.row.set_visible(recent.is_some());
             if let Some(result) = recent {
@@ -551,6 +631,7 @@ impl SearchPopup {
             let previews = &previews[index];
             self.headings[index].set_visible(!query.is_empty() && !previews.is_empty());
             for (position, row) in self.previews[index].iter().enumerate() {
+                row.set_playing(false, false);
                 let preview = previews.get(position).filter(|_| !query.is_empty());
                 let skeleton = loading && category == CollectionCategory::Tracks && position < 3;
                 row.row.set_visible(preview.is_some() || skeleton);
@@ -599,6 +680,12 @@ impl SearchPopup {
         self.scroller
             .set_visible(loading || count > 0 || (query.is_empty() && !history.is_empty()));
         self.list.unselect_all();
+        self.refresh_playback(
+            ui_shared::mounted_route::route_current_track(
+                shell.player_ui.selected_playback().as_deref(),
+            )
+            .as_ref(),
+        );
     }
 
     fn catalog(&self) -> Option<Rc<ui_library::CatalogUi>> {

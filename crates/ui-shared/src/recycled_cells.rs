@@ -186,6 +186,7 @@ crate::composite_box!(
 impl RecycledBadgedTextCell {
     pub fn with_downloads(downloads: &Rc<DownloadsState>) -> Self {
         let cell = Self::new();
+        install_playing_indicator(&cell.imp().label, &cell);
         downloads.register_download_badge(&cell.imp().downloaded);
         cell
     }
@@ -213,7 +214,7 @@ pub mod merged_imp {
         #[template_child]
         pub(super) cover: TemplateChild<RecycledArtworkCell>,
         #[template_child]
-        pub(super) labels: TemplateChild<gtk::Box>,
+        pub(super) title_row: TemplateChild<gtk::Box>,
         #[template_child]
         pub(super) title: TemplateChild<gtk::Label>,
         #[template_child]
@@ -265,16 +266,13 @@ impl RecycledMergedCell {
     ) -> Self {
         let cell: Self = glib::Object::new();
         let imp = cell.imp();
+        install_playing_indicator(&imp.title, &*imp.title_row);
         imp.cover.artwork().set_square_size(cover_size);
         imp.links
             .replace(Some(DetailLinkBinding::new(&imp.subtitle, navigate)));
         if downloaded {
-            let title_row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
             let badge = downloads.download_badge(false);
-            imp.labels.remove(&*imp.title);
-            imp.labels.prepend(&title_row);
-            title_row.append(&*imp.title);
-            title_row.append(&badge);
+            imp.title_row.append(&badge);
             imp.downloaded.replace(Some(badge));
         }
         cell
@@ -283,6 +281,7 @@ impl RecycledMergedCell {
     pub fn without_downloads(navigate: Rc<dyn Fn(Route)>, cover_size: i32) -> Self {
         let cell: Self = glib::Object::new();
         let imp = cell.imp();
+        install_playing_indicator(&imp.title, &*imp.title_row);
         imp.cover.artwork().set_square_size(cover_size);
         imp.links
             .replace(Some(DetailLinkBinding::new(&imp.subtitle, navigate)));
@@ -389,37 +388,96 @@ impl RecycledFolderCell {
     }
 }
 
-pub fn track_row_index_cell(text: &str) -> gtk::Overlay {
-    let cell = gtk::Overlay::new();
-    cell.add_css_class("track-row-index-cell");
-    cell.set_hexpand(true);
-    cell.set_halign(gtk::Align::Fill);
-
-    let label = gtk::Label::new(Some(text));
-    label.add_css_class("muted");
-    label.add_css_class("track-row-index-number");
-    label.set_xalign(0.5);
-    label.set_halign(gtk::Align::Fill);
-    label.set_hexpand(true);
-    label.set_single_line_mode(true);
-    cell.set_child(Some(&label));
-
-    let playing = gtk::Image::from_icon_name("rufin-media-playback-start-symbolic");
-    playing.add_css_class("track-row-index-playing");
-    playing.set_pixel_size(14);
-    playing.set_halign(gtk::Align::Center);
-    playing.set_valign(gtk::Align::Center);
-    playing.set_margin_start(2);
-    cell.add_overlay(&playing);
-
-    let paused = gtk::Image::from_icon_name("rufin-media-playback-pause-symbolic");
-    paused.add_css_class("track-row-index-paused");
-    paused.set_pixel_size(14);
-    paused.set_halign(gtk::Align::Center);
-    paused.set_valign(gtk::Align::Center);
-    paused.set_margin_start(2);
-    cell.add_overlay(&paused);
+pub fn track_row_index_cell(text: &str, activate: impl Fn(&gtk::Button) + 'static) -> gtk::Overlay {
+    let resource = crate::ui_resource::TRACK_ROW_INDEX_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::objects!(builder, resource, { cell: gtk::Overlay, number: gtk::Label, play: gtk::Button });
+    let click_cell = cell.downgrade();
+    play.connect_clicked(move |button| {
+        if click_cell
+            .upgrade()
+            .is_some_and(|cell| cell.has_css_class("track-row-playing"))
+        {
+            let _ = button.activate_action("win.play-pause", None);
+        } else {
+            activate(button);
+        }
+    });
+    let number_play = play.downgrade();
+    number.connect_label_notify(move |number| {
+        if let Some(play) = number_play.upgrade() {
+            play.set_visible(!number.text().is_empty());
+        }
+    });
+    let weak_play = play.downgrade();
+    cell.connect_css_classes_notify(move |cell| {
+        let Some(play) = weak_play.upgrade() else {
+            return;
+        };
+        let playing =
+            cell.has_css_class("track-row-playing") && !cell.has_css_class("track-row-paused");
+        play.set_icon_name(if playing {
+            "rufin-media-playback-pause-symbolic"
+        } else {
+            "rufin-media-playback-start-symbolic"
+        });
+        crate::localization::bind_widget_tooltip(
+            &play,
+            if playing { "Pause" } else { "Play track" },
+        );
+    });
+    number.set_text(text);
+    play.set_visible(!text.is_empty());
     cell
+}
+
+pub fn track_list_row_index_cell(item: &gtk::ListItem) -> gtk::Overlay {
+    let item = item.downgrade();
+    track_row_index_cell("", move |button| {
+        if let Some(item) = item.upgrade()
+            && item.is_activatable()
+        {
+            let _ =
+                button.activate_action("list.activate-item", Some(&item.position().to_variant()));
+        }
+    })
+}
+
+pub fn set_track_playing(title: &gtk::Widget, playing: bool, paused: bool) {
+    let mut classes = [
+        ("track-row-playing", playing),
+        ("track-row-paused", playing && paused),
+    ];
+    // Set paused first so a newly bound paused title never starts an indicator.
+    if playing && paused {
+        classes.swap(0, 1);
+    }
+    for (class, active) in classes {
+        if active {
+            title.add_css_class(class);
+        } else {
+            title.remove_css_class(class);
+        }
+    }
+}
+
+pub fn install_playing_indicator(title: &gtk::Label, title_row: &impl IsA<gtk::Box>) {
+    let title_row = title_row.as_ref().downgrade();
+    let indicator = RefCell::new(None::<crate::playing_indicator::PlayingIndicator>);
+    title.connect_css_classes_notify(move |title| {
+        let Some(title_row) = title_row.upgrade() else {
+            return;
+        };
+        let playing =
+            title.has_css_class("track-row-playing") && !title.has_css_class("track-row-paused");
+        if playing && indicator.borrow().is_none() {
+            let widget = crate::playing_indicator::PlayingIndicator::new();
+            title_row.prepend(&widget);
+            indicator.replace(Some(widget));
+        } else if !playing && let Some(widget) = indicator.take() {
+            title_row.remove(&widget);
+        }
+    });
 }
 
 pub fn set_track_row_index_text(cell: &gtk::Overlay, text: &str) {

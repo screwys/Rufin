@@ -627,9 +627,6 @@ msgstr "Vyberte místní hudební složku"
 msgid "Choose an address"
 msgstr "Vyhledat složku"
 
-msgid "Choose an existing local folder"
-msgstr "Vyberte existující lokální složku"
-
 msgid "Choose at least one local music folder"
 msgstr "Zvolte alespoň jednu lokální hudební složku"
 
@@ -1814,9 +1811,6 @@ msgstr "Spravovat"
 msgid "Mapped Local Path"
 msgstr "Mapovaná lokální cesta"
 
-msgid "Mapped local file not found"
-msgstr ""
-
 msgid "Maximum year"
 msgstr "Maximální rok"
 
@@ -2056,9 +2050,6 @@ msgstr "Zatím žádné oblíbené položky"
 #, fuzzy
 #| msgid "No folder selected"
 msgid "No file linked"
-msgstr "Nebyla vybrána žádná složka"
-
-msgid "No folder selected"
 msgstr "Nebyla vybrána žádná složka"
 
 msgid "No folders selected"
@@ -2745,6 +2736,9 @@ msgstr "Vydání"
 msgid "Reload from file"
 msgstr "Odebrat z oblíbených"
 
+msgid "Reload to apply changes"
+msgstr ""
+
 msgid "Reload"
 msgstr ""
 
@@ -2943,9 +2937,6 @@ msgstr "Uložit diagnostický protokol"
 msgid "Save Lyrics"
 msgstr "Uložit texty skladeb"
 
-msgid "Save Mapping"
-msgstr "Uložit mapování"
-
 msgid "Save Server Settings"
 msgstr "Uložit nastavení serveru"
 
@@ -2966,9 +2957,6 @@ msgstr "Vyhledávání se spustí automaticky"
 #| msgid "Searching will start automatically"
 msgid "Save playlist changes automatically"
 msgstr "Vyhledávání se spustí automaticky"
-
-msgid "Save to rescan"
-msgstr "Uložit pro opětovné naskenování"
 
 msgid "Save"
 msgstr "Uložit"
@@ -3249,6 +3237,11 @@ msgstr "Zobrazit stav pozastaveno"
 
 msgid "Show peak markers"
 msgstr ""
+
+#, fuzzy
+#| msgid "Choose playback output"
+msgid "Show playback queue"
+msgstr "Vyberte výstup přehrávání"
 
 #, fuzzy
 #| msgid "Show lyrics in the right panel"
@@ -3996,6 +3989,18 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Choose an existing local folder"
+#~ msgstr "Vyberte existující lokální složku"
+
+#~ msgid "No folder selected"
+#~ msgstr "Nebyla vybrána žádná složka"
+
+#~ msgid "Save Mapping"
+#~ msgstr "Uložit mapování"
+
+#~ msgid "Save to rescan"
+#~ msgstr "Uložit pro opětovné naskenování"
 
 #, fuzzy
 #~| msgid "Smart Playlist"

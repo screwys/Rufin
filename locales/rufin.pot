@@ -552,9 +552,6 @@ msgstr ""
 msgid "Choose an address"
 msgstr ""
 
-msgid "Choose an existing local folder"
-msgstr ""
-
 msgid "Choose at least one local music folder"
 msgstr ""
 
@@ -1580,9 +1577,6 @@ msgstr ""
 msgid "Mapped Local Path"
 msgstr ""
 
-msgid "Mapped local file not found"
-msgstr ""
-
 msgid "Maximum year"
 msgstr ""
 
@@ -1795,9 +1789,6 @@ msgid "No favorites yet"
 msgstr ""
 
 msgid "No file linked"
-msgstr ""
-
-msgid "No folder selected"
 msgstr ""
 
 msgid "No folders selected"
@@ -2378,6 +2369,9 @@ msgstr ""
 msgid "Reload from file"
 msgstr ""
 
+msgid "Reload to apply changes"
+msgstr ""
+
 msgid "Reload"
 msgstr ""
 
@@ -2559,9 +2553,6 @@ msgstr ""
 msgid "Save Lyrics"
 msgstr ""
 
-msgid "Save Mapping"
-msgstr ""
-
 msgid "Save Server Settings"
 msgstr ""
 
@@ -2575,9 +2566,6 @@ msgid "Save lyrics automatically"
 msgstr ""
 
 msgid "Save playlist changes automatically"
-msgstr ""
-
-msgid "Save to rescan"
 msgstr ""
 
 msgid "Save"
@@ -2822,6 +2810,9 @@ msgid "Show paused status"
 msgstr ""
 
 msgid "Show peak markers"
+msgstr ""
+
+msgid "Show playback queue"
 msgstr ""
 
 msgid "Show ratings in the bottom bar"

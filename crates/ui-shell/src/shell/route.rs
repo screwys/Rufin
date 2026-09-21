@@ -462,10 +462,10 @@ impl Shell {
     }
 
     pub(crate) fn refresh_current_route_now_playing_selections(&self) {
+        let current = route_current_track(self.player_ui.selected_playback().as_deref());
+        self.chrome.topbar.refresh_search_playback(current.as_ref());
         if let Some(catalog) = self.route_viewport.catalog.borrow().as_ref() {
-            catalog.refresh_current_route_now_playing_selections(route_current_track(
-                self.player_ui.selected_playback().as_deref(),
-            ));
+            catalog.refresh_current_route_now_playing_selections(current);
         }
     }
 

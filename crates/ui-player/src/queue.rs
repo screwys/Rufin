@@ -22,7 +22,7 @@ use ui_shared::{
     media_drag::{
         MediaDragPreviewBinding, MediaDragSource, media_drag_content_provider, media_drag_source,
     },
-    recycled_cells::{RecycledMergedCell, set_track_row_index_text, track_row_index_cell},
+    recycled_cells::{RecycledMergedCell, set_track_row_index_text, track_list_row_index_cell},
     sparse_model::{SparseObjectItem, connect_sparse_bind},
 };
 
@@ -448,7 +448,7 @@ fn queue_index_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let cell = track_row_index_cell("");
+        let cell = track_list_row_index_cell(item);
         if let Some(shell) = setup_shell.upgrade() {
             install_queue_row_interactions(cell.upcast_ref(), &shell, item, None);
         }
@@ -462,44 +462,27 @@ fn queue_index_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
         let Some(cell) = item.child().and_downcast::<gtk::Overlay>() else {
             return;
         };
-        let Some(object) = item
-            .item()
-            .and_then(|item| item.downcast::<SparseObjectItem>().ok())
-        else {
-            return;
-        };
-        let row = object.value::<Arc<QueuePageRow>>().expect("Queue row");
-        let Some(shell) = bind_shell.upgrade() else {
-            return;
-        };
-        let current = shell
-            .selected_playback()
-            .as_deref()
-            .and_then(|player| player.queue.current_occurrence.clone());
-        let is_current = current.as_ref() == Some(&row.occurrence);
-        let is_paused = shell
-            .selected_playback()
-            .as_deref()
-            .is_some_and(|p| !p.transport.desired_playing);
-        if is_current {
-            cell.add_css_class("track-row-playing");
-            if is_paused {
-                cell.add_css_class("track-row-paused");
-            } else {
-                cell.remove_css_class("track-row-paused");
-            }
-        } else {
-            cell.remove_css_class("track-row-playing");
-            cell.remove_css_class("track-row-paused");
-            set_track_row_index_text(&cell, &(item.position() + 1).to_string());
+        set_track_row_index_text(&cell, &(item.position() + 1).to_string());
+        if let Some(shell) = bind_shell.upgrade() {
+            let row = queue_row_from_item(&item.downgrade());
+            let player = shell.selected_playback();
+            let current = row
+                .as_ref()
+                .zip(player.as_ref())
+                .is_some_and(|(row, player)| {
+                    player.queue.current_occurrence.as_ref() == Some(&row.occurrence)
+                });
+            let paused = player
+                .as_ref()
+                .is_some_and(|player| !player.transport.desired_playing);
+            ui_shared::recycled_cells::set_track_playing(cell.upcast_ref(), current, paused);
         }
     });
     factory.connect_unbind(|_, item| {
         if let Some(item) = item.downcast_ref::<gtk::ListItem>()
             && let Some(cell) = item.child().and_downcast::<gtk::Overlay>()
         {
-            cell.remove_css_class("track-row-playing");
-            cell.remove_css_class("track-row-paused");
+            ui_shared::recycled_cells::set_track_playing(cell.upcast_ref(), false, false);
             set_track_row_index_text(&cell, "");
         }
     });
@@ -560,11 +543,11 @@ fn queue_title_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
         let is_current = current.as_ref() == Some(&row.occurrence);
         let title = cell.title();
         title.set_text(&row.title);
-        if is_current {
-            title.add_css_class("track-row-playing");
-        } else {
-            title.remove_css_class("track-row-playing");
-        }
+        let paused = shell
+            .selected_playback()
+            .as_ref()
+            .is_some_and(|p| !p.transport.desired_playing);
+        ui_shared::recycled_cells::set_track_playing(title.upcast_ref(), is_current, paused);
         let subtitle = cell.subtitle();
         subtitle.set_text(&row.artist);
         subtitle.set_visible(!row.artist.is_empty());
