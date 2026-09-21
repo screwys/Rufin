@@ -67,6 +67,7 @@ jobs:
             mingw-w64-ucrt-x86_64-hicolor-icon-theme
             mingw-w64-ucrt-x86_64-just
             mingw-w64-ucrt-x86_64-libadwaita
+            mingw-w64-ucrt-x86_64-libgfortran
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-nsis
             mingw-w64-ucrt-x86_64-perl
