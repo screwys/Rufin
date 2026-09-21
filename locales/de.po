@@ -2496,6 +2496,9 @@ msgstr "Aussprache"
 msgid "Proxy casting through Rufin"
 msgstr "Übertragung über Rufin-Proxy"
 
+msgid "Public"
+msgstr ""
+
 msgid "Purple"
 msgstr "Lila"
 
@@ -2694,17 +2697,9 @@ msgstr "Aus Favoriten entfernt"
 msgid "Removed from"
 msgstr "Entfernt aus"
 
-msgid "Rename Playlist"
-msgstr "Playlist umbenennen"
-
 #, fuzzy
 #| msgid "Rename"
 msgid "Rename file"
-msgstr "Umbenennen"
-
-#, fuzzy
-#| msgid "Rename"
-msgid "Rename"
 msgstr "Umbenennen"
 
 msgid "Repeat all"
@@ -3860,6 +3855,14 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#~ msgid "Rename Playlist"
+#~ msgstr "Playlist umbenennen"
+
+#, fuzzy
+#~| msgid "Rename"
+#~ msgid "Rename"
+#~ msgstr "Umbenennen"
 
 #~ msgid "Choose an existing local folder"
 #~ msgstr "Vorhandenen lokalen Ordner auswählen"

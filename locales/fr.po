@@ -2423,6 +2423,9 @@ msgstr "Prononciation"
 msgid "Proxy casting through Rufin"
 msgstr ""
 
+msgid "Public"
+msgstr ""
+
 msgid "Purple"
 msgstr "Violet"
 
@@ -2615,18 +2618,8 @@ msgstr "Supprimé des favoris"
 msgid "Removed from"
 msgstr "Supprimé de"
 
-#, fuzzy
-#| msgid "Remove from Playlist"
-msgid "Rename Playlist"
-msgstr "Supprimer de la playlist"
-
 msgid "Rename file"
 msgstr ""
-
-#, fuzzy
-#| msgid "Files"
-msgid "Rename"
-msgstr "Fichiers"
 
 msgid "Repeat all"
 msgstr "Répétez tout"
@@ -3742,6 +3735,16 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Remove from Playlist"
+#~ msgid "Rename Playlist"
+#~ msgstr "Supprimer de la playlist"
+
+#, fuzzy
+#~| msgid "Files"
+#~ msgid "Rename"
+#~ msgstr "Fichiers"
 
 #~ msgid "Choose an existing local folder"
 #~ msgstr "Choisissez un dossier local existant"

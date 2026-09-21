@@ -2399,6 +2399,9 @@ msgstr "Произношение"
 msgid "Proxy casting through Rufin"
 msgstr "Прокси-трансляция через Rufin"
 
+msgid "Public"
+msgstr ""
+
 msgid "Purple"
 msgstr "Фиолетовый"
 
@@ -2579,14 +2582,8 @@ msgstr "Удалено из избранного"
 msgid "Removed from"
 msgstr "Удалено из"
 
-msgid "Rename Playlist"
-msgstr "Переименовать плейлист"
-
 msgid "Rename file"
 msgstr "Переименовать файл"
-
-msgid "Rename"
-msgstr "Переименовать"
 
 msgid "Repeat all"
 msgstr "Повторять все"
@@ -3713,6 +3710,12 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Rename Playlist"
+#~ msgstr "Переименовать плейлист"
+
+#~ msgid "Rename"
+#~ msgstr "Переименовать"
 
 #~ msgid "Choose an existing local folder"
 #~ msgstr "Выбрать существующую локальную папку"

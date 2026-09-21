@@ -2618,6 +2618,9 @@ msgstr "Hääldus"
 msgid "Proxy casting through Rufin"
 msgstr "Puhverad meediumilevi läbi Rufini"
 
+msgid "Public"
+msgstr ""
+
 msgid "Purple"
 msgstr "Purpurpunane"
 
@@ -2828,17 +2831,9 @@ msgstr "Eemaldatud lemmikute seast"
 msgid "Removed from"
 msgstr "Eemaldatud asukohast"
 
-msgid "Rename Playlist"
-msgstr "Muuda esitusloendi nime"
-
 #, fuzzy
 #| msgid "Rename"
 msgid "Rename file"
-msgstr "Muuda nime"
-
-#, fuzzy
-#| msgid "Rename"
-msgid "Rename"
 msgstr "Muuda nime"
 
 msgid "Repeat all"
@@ -4033,6 +4028,14 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Rename Playlist"
+#~ msgstr "Muuda esitusloendi nime"
+
+#, fuzzy
+#~| msgid "Rename"
+#~ msgid "Rename"
+#~ msgstr "Muuda nime"
 
 #~ msgid "Choose an existing local folder"
 #~ msgstr "Vali olemasolev kohalik kaust"

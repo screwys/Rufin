@@ -2501,6 +2501,9 @@ msgstr ""
 msgid "Proxy casting through Rufin"
 msgstr ""
 
+msgid "Public"
+msgstr ""
+
 msgid "Purple"
 msgstr "Violetti"
 
@@ -2707,17 +2710,9 @@ msgstr "Poistettu suosikeista"
 msgid "Removed from"
 msgstr ""
 
-msgid "Rename Playlist"
-msgstr "Nimeä soittolista uudelleen"
-
 #, fuzzy
 #| msgid "Rename"
 msgid "Rename file"
-msgstr "Nimeä uudelleen"
-
-#, fuzzy
-#| msgid "Rename"
-msgid "Rename"
 msgstr "Nimeä uudelleen"
 
 msgid "Repeat all"
@@ -3888,6 +3883,14 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#~ msgid "Rename Playlist"
+#~ msgstr "Nimeä soittolista uudelleen"
+
+#, fuzzy
+#~| msgid "Rename"
+#~ msgid "Rename"
+#~ msgstr "Nimeä uudelleen"
 
 #~ msgid "Choose an existing local folder"
 #~ msgstr "Valitse olemassa oleva paikallinen kansio"

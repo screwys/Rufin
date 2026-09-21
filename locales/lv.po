@@ -2453,6 +2453,9 @@ msgstr "Izruna"
 msgid "Proxy casting through Rufin"
 msgstr "Pārsūtīšana caur Rufin izmantojot starpniekserveri"
 
+msgid "Public"
+msgstr ""
+
 msgid "Purple"
 msgstr "Violets"
 
@@ -2645,16 +2648,8 @@ msgstr "Noņemts no izlases"
 msgid "Removed from"
 msgstr "Noņemts no"
 
-msgid "Rename Playlist"
-msgstr "Pārdēvēt atskaņošanas sarakstu"
-
 msgid "Rename file"
 msgstr "Pārdēvēt failu"
-
-#, fuzzy
-#| msgid "Filename"
-msgid "Rename"
-msgstr "Faila nosaukums"
 
 msgid "Repeat all"
 msgstr "Atkārtot visus"
@@ -3800,6 +3795,14 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "Rename Playlist"
+#~ msgstr "Pārdēvēt atskaņošanas sarakstu"
+
+#, fuzzy
+#~| msgid "Filename"
+#~ msgid "Rename"
+#~ msgstr "Faila nosaukums"
 
 #~ msgid "Choose an existing local folder"
 #~ msgstr "Izvēlieties esošu lokālu mapi"

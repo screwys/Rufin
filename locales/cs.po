@@ -2661,6 +2661,9 @@ msgstr "Výslovnost"
 msgid "Proxy casting through Rufin"
 msgstr "Proxy casting přes Rufin"
 
+msgid "Public"
+msgstr ""
+
 msgid "Purple"
 msgstr "Fialová"
 
@@ -2877,17 +2880,9 @@ msgstr "Odebrat z oblíbených"
 msgid "Removed from"
 msgstr "Odepnout"
 
-msgid "Rename Playlist"
-msgstr "Přejmenovat Playlist"
-
 #, fuzzy
 #| msgid "Rename"
 msgid "Rename file"
-msgstr "Přejmenovat"
-
-#, fuzzy
-#| msgid "Rename"
-msgid "Rename"
 msgstr "Přejmenovat"
 
 msgid "Repeat all"
@@ -4103,6 +4098,14 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Rename Playlist"
+#~ msgstr "Přejmenovat Playlist"
+
+#, fuzzy
+#~| msgid "Rename"
+#~ msgid "Rename"
+#~ msgstr "Přejmenovat"
 
 #~ msgid "Choose an existing local folder"
 #~ msgstr "Vyberte existující lokální složku"

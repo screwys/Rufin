@@ -2597,6 +2597,9 @@ msgstr ""
 msgid "Proxy casting through Rufin"
 msgstr ""
 
+msgid "Public"
+msgstr ""
+
 msgid "Purple"
 msgstr ""
 
@@ -2805,17 +2808,9 @@ msgstr "從最愛中移除"
 msgid "Removed from"
 msgstr "從釘選中移除"
 
-msgid "Rename Playlist"
-msgstr "重新命名播放清單"
-
 #, fuzzy
 #| msgid "Rename"
 msgid "Rename file"
-msgstr "重新命名"
-
-#, fuzzy
-#| msgid "Rename"
-msgid "Rename"
 msgstr "重新命名"
 
 msgid "Repeat all"
@@ -3987,6 +3982,14 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Rename Playlist"
+#~ msgstr "重新命名播放清單"
+
+#, fuzzy
+#~| msgid "Rename"
+#~ msgid "Rename"
+#~ msgstr "重新命名"
 
 #~ msgid "Choose an existing local folder"
 #~ msgstr "選擇已存在的本地資料夾"
