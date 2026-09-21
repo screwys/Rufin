@@ -191,8 +191,12 @@ impl RightPanelWidgets {
         if !queue_last {
             traversal.reverse();
         }
-        let mut child: gtk::Widget = self.modules[traversal[0].index()].clone().upcast();
-        let mut remainder = vec![traversal[0]];
+        let Some(first) = traversal.first() else {
+            self.visible_panels.replace(order);
+            return;
+        };
+        let mut child: gtk::Widget = self.modules[first.index()].clone().upcast();
+        let mut remainder = vec![*first];
         for panel in traversal.iter().skip(1) {
             let resource = crate::ui_resource::SIDEBAR_SPLIT_RESOURCE;
             let builder = ui_shared::ui_resource::builder(resource);
@@ -319,6 +323,15 @@ impl crate::PlayerUi {
             });
         self.arrange_sidebar_panels();
         self.sync_visualizer_state();
+    }
+
+    pub fn set_sidebar_queue_visible(&self, visible: bool) {
+        self.save_sidebar_panel_sizes();
+        self.settings
+            .set_app_setting("sidebar queue visibility", visible, |settings| {
+                &mut settings.right_panel.queue_visible
+            });
+        self.arrange_sidebar_panels();
     }
 
     fn move_sidebar_panel(self: &Rc<Self>, panel: SidebarPanel, direction: isize) {

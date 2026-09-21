@@ -730,7 +730,9 @@ fn folder_index_column(
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(|_, item| {
         if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
-            item.set_child(Some(&super::columns::track_row_index_cell("")));
+            item.set_child(Some(&ui_shared::recycled_cells::track_list_row_index_cell(
+                item,
+            )));
         }
     });
     connect_sparse_bind(&factory, move |item| {

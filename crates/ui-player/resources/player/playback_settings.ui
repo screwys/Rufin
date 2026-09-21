@@ -14,7 +14,6 @@
         <property name="min-content-width">400</property>
         <property name="propagate-natural-width">false</property>
         <property name="propagate-natural-height">true</property>
-        <property name="max-content-height">520</property>
         <property name="child">
           <object class="GtkBox">
             <property name="orientation">vertical</property>
@@ -32,6 +31,9 @@
     </property>
   </object>
 
+  <object class="AdwSwitchRow" id="queue">
+    <property name="title" translatable="yes">Show playback queue</property>
+  </object>
   <object class="AdwSwitchRow" id="lyrics">
     <property name="title" translatable="yes">Show lyrics</property>
   </object>

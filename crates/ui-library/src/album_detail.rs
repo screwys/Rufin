@@ -651,17 +651,7 @@ impl AlbumDetailTrackSelection {
 }
 
 fn apply_album_detail_track_selection(row: &gtk::Widget, selected: bool, paused: bool) {
-    if selected {
-        row.add_css_class("album-detail-track-selected");
-        if paused {
-            row.add_css_class("track-row-paused");
-        } else {
-            row.remove_css_class("track-row-paused");
-        }
-    } else {
-        row.remove_css_class("album-detail-track-selected");
-        row.remove_css_class("track-row-paused");
-    }
+    ui_shared::recycled_cells::set_track_playing(row, selected, paused);
 }
 
 impl AlbumDetailVirtualList {
@@ -1340,27 +1330,29 @@ fn album_track_cells(
     row.add_css_class("album-detail-track-row");
     row.set_height_request(ALBUM_TRACK_HEIGHT);
     row.set_hexpand(true);
-    selection.bind(row.upcast_ref(), &track.media_uri);
     for (field, width) in field_widths {
-        row.append(&album_track_cell(shell, track, index, *field, *width));
+        row.append(&album_track_cell(
+            shell, track, index, *field, *width, selection,
+        ));
     }
     let menu_shell = Rc::clone(shell);
-    let menu_track = track.clone();
+    let menu_uri = track.media_uri.clone();
     install_context_menu_openers(
         &row,
         Rc::new(move |target, position| {
-            present_track_context_menu(target, &menu_shell, menu_track.media_uri.clone(), position);
+            present_track_context_menu(target, &menu_shell, menu_uri.clone(), position);
         }),
     );
     let click_shell = Rc::clone(shell);
-    let click_track = track.clone();
+    let click_album = track.album_key;
+    let click_uri = track.media_uri.clone();
     let click = gtk::GestureClick::new();
     click.set_propagation_phase(gtk::PropagationPhase::Capture);
     click.set_button(1);
     click.connect_pressed(move |gesture, presses, _, _| {
         if album_detail_play_click(presses) {
             gesture.set_state(gtk::EventSequenceState::Claimed);
-            play_album_track(&click_shell, click_track.clone());
+            play_album_track(&click_shell, click_album, &click_uri);
         }
     });
     row.add_controller(click);
@@ -1377,6 +1369,7 @@ fn album_track_cell(
     index: usize,
     field: LibraryField,
     width: i32,
+    selection: &AlbumDetailTrackSelection,
 ) -> gtk::Widget {
     match field {
         LibraryField::Favorite => {
@@ -1407,11 +1400,28 @@ fn album_track_cell(
             );
             fixed_album_track_cell(width, ALBUM_TRACK_HEIGHT, cover.widget())
         }
-        LibraryField::RowIndex => fixed_album_track_cell(
-            width,
-            ALBUM_TRACK_HEIGHT,
-            super::columns::track_row_index_cell(&(index + 1).to_string()).upcast(),
-        ),
+        LibraryField::RowIndex => {
+            let shell = Rc::clone(shell);
+            let uri = track.media_uri.clone();
+            let play_uri = uri.clone();
+            let album = track.album_key;
+            let cell = super::columns::track_row_index_cell(&(index + 1).to_string(), move |_| {
+                play_album_track(&shell, album, &play_uri);
+            });
+            selection.bind(cell.upcast_ref(), &uri);
+            fixed_album_track_cell(width, ALBUM_TRACK_HEIGHT, cell.upcast())
+        }
+        LibraryField::Title | LibraryField::TitleMerged => {
+            let label = album_track_label(&track.title, field, 1);
+            label.set_hexpand(true);
+            let cell = fixed_album_track_cell(width, ALBUM_TRACK_HEIGHT, label.clone().upcast())
+                .downcast::<gtk::Box>()
+                .expect("album track cell");
+            cell.set_spacing(5);
+            ui_shared::recycled_cells::install_playing_indicator(&label, &cell);
+            selection.bind(label.upcast_ref(), &track.media_uri);
+            cell.upcast()
+        }
         _ => fixed_album_track_cell(
             width,
             ALBUM_TRACK_HEIGHT,
@@ -1525,11 +1535,11 @@ fn album_track_column_width(field: LibraryField) -> i32 {
     }
 }
 
-fn play_album_track(shell: &Rc<CatalogUi>, anchor: TrackRow) {
+fn play_album_track(shell: &Rc<CatalogUi>, album: Option<library::AlbumKey>, media_uri: &str) {
     let Some(selected) = shell.selected_library().as_deref().cloned() else {
         return;
     };
-    let Some(album) = anchor.album_key else {
+    let Some(album) = album else {
         return;
     };
     let queue = shell.queue.clone();
@@ -1549,7 +1559,7 @@ fn play_album_track(shell: &Rc<CatalogUi>, anchor: TrackRow) {
             sort: settings.sort_key.track_sort(),
             descending: settings.descending,
             context_id: format!("album:{album}").into(),
-            anchor_uri: Some(anchor.media_uri),
+            anchor_uri: Some(media_uri.to_owned()),
         },
         0,
         QueuePlacement::Now,

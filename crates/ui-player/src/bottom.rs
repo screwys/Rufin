@@ -774,8 +774,8 @@ pub fn build_player_action_controls(
     root.set_measure_overlay(rating.widget(), false);
 
     bind_widget_accessible_label(&output_button, msgid("Choose playback output"));
-    bind_widget_tooltip(&settings_button, "Playback settings");
-    bind_widget_accessible_label(&settings_button, "Playback settings");
+    bind_widget_tooltip(&settings_button, "Settings");
+    bind_widget_accessible_label(&settings_button, "Settings");
     volume_group.set_spacing(BOTTOM_PLAYER_VOLUME_SPACING);
     volume_group.set_valign(gtk::Align::Center);
     let favorite_button = favorite_icon_button("Favorite");

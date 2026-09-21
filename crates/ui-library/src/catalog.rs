@@ -48,6 +48,7 @@ pub struct CatalogUi {
 
     pub current: RefCell<Option<RouteCurrentTrack>>,
     pub current_track_selections: RefCell<Vec<RouteCurrentTrackSelection>>,
+    pub grid_playing_cells: RefCell<Vec<std::rc::Weak<crate::grid_cells::GridPlayingBinding>>>,
     pub track_selections: RefCell<Vec<TrackSelection>>,
     pub playlist_entry_selection: RefCell<Option<PlaylistEntrySelection>>,
 }
@@ -129,10 +130,7 @@ impl CatalogUi {
 
     pub fn refresh_current_route_now_playing_selections(&self, current: Option<RouteCurrentTrack>) {
         self.current.replace(current);
-        let current = self.current.borrow();
-        self.current_track_selections
-            .borrow_mut()
-            .retain(|selection| selection(current.as_ref()));
+        self.reapply_current_track();
     }
 }
 
@@ -204,6 +202,13 @@ impl CatalogUi {
     }
     pub fn reapply_current_track(&self) {
         let current = self.current.borrow();
+        self.grid_playing_cells.borrow_mut().retain(|cell| {
+            let Some(cell) = cell.upgrade() else {
+                return false;
+            };
+            cell.refresh(current.as_ref());
+            true
+        });
         self.current_track_selections
             .borrow_mut()
             .retain(|selection| selection(current.as_ref()));

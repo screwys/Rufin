@@ -17,11 +17,16 @@
         <property name="halign">fill</property>
         <property name="width-request">1</property>
         <child>
-          <object class="GtkLabel" id="title">
-            <property name="xalign">0</property>
-            <property name="wrap">false</property>
-            <property name="single-line-mode">true</property>
-            <property name="ellipsize">end</property>
+          <object class="GtkBox" id="title_row">
+            <property name="spacing">5</property>
+            <child>
+              <object class="GtkLabel" id="title">
+                <property name="xalign">0</property>
+                <property name="wrap">false</property>
+                <property name="single-line-mode">true</property>
+                <property name="ellipsize">end</property>
+              </object>
+            </child>
           </object>
         </child>
         <child>

@@ -48,6 +48,7 @@ fn playback_settings_popover(
     ui_shared::objects!(builder, resource, {
         popover: gtk::Popover,
         settings_group: adw::PreferencesGroup,
+        queue: adw::SwitchRow,
         lyrics: adw::SwitchRow,
         visualizer: adw::SwitchRow,
         combine: adw::SwitchRow,
@@ -107,6 +108,15 @@ fn playback_settings_popover(
     );
     volume_scale_row.set_sensitive(local_output);
     settings_group.add(&volume_scale_row);
+
+    queue.set_active(settings.right_panel.queue_visible);
+    let queue_shell = Rc::downgrade(shell);
+    queue.connect_active_notify(move |row| {
+        if let Some(shell) = queue_shell.upgrade() {
+            shell.set_sidebar_queue_visible(row.is_active());
+        }
+    });
+    settings_group.add(&queue);
 
     lyrics.set_active(settings.lyrics_panel_visible);
     let lyrics_shell = Rc::clone(shell);

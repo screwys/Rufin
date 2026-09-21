@@ -247,7 +247,7 @@ impl<T: TrackPresentation> TrackCollectionModel<T> {
             .filter(|position| {
                 self.0
                     .sparse
-                    .ready(*position)
+                    .peek_ready(*position as usize)
                     .is_some_and(|row| row.media_uri() == media_uri)
             })
             .or_else(|| {
@@ -259,10 +259,10 @@ impl<T: TrackPresentation> TrackCollectionModel<T> {
 
     pub fn selection_position_after_point_change(
         &self,
-        _: &str,
+        media_uri: &str,
         selected_position: u32,
     ) -> Option<u32> {
-        Some(selected_position)
+        self.position_for_current_uri(media_uri, Some(selected_position as usize))
     }
 }
 
@@ -309,6 +309,18 @@ mod tests {
             Arc::new(|_, _| panic!("seeded rows must not request hydration")),
         );
         let pending = model.projection_request();
+        assert_eq!(
+            model.position_for_current_uri("test:track", Some(0)),
+            Some(0)
+        );
+        assert_eq!(
+            model.position_for_current_uri("test:track", Some(1)),
+            Some(0)
+        );
+        assert_eq!(
+            model.position_for_current_uri("test:missing", Some(0)),
+            None
+        );
         let mut presentation = model.settings();
         presentation.layout = rufin_core::settings::LibraryLayout::Grid;
         presentation.row_fields.reverse();
