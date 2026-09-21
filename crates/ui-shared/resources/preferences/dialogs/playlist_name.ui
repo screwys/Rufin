@@ -3,18 +3,26 @@
   <requires lib="gtk" version="4.20"/>
   <requires lib="libadwaita" version="1.9"/>
 
-  <object class="AdwAlertDialog" id="new_dialog">
-    <property name="heading" translatable="yes">New Playlist</property>
-    <property name="close-response">cancel</property>
-    <property name="extra-child">
+  <object class="AdwDialog" id="new_dialog">
+    <property name="title" translatable="yes">New Playlist</property>
+    <property name="content-width">320</property>
+    <property name="default-widget">new_create</property>
+    <property name="focus-widget">new_entry</property>
+    <property name="child"><object class="AdwToolbarView">
+      <child type="top"><object class="AdwHeaderBar"/></child>
+      <property name="content">
       <object class="GtkBox">
         <property name="orientation">vertical</property>
         <property name="spacing">12</property>
+        <property name="margin-start">18</property>
+        <property name="margin-end">18</property>
+        <property name="margin-bottom">18</property>
         <child>
           <object class="GtkOverlay">
             <property name="child">
               <object class="GtkEntry" id="new_entry">
                 <property name="placeholder-text" translatable="yes">Playlist name</property>
+                <property name="activates-default">true</property>
                 <style><class name="playlist-name-owner-entry"/></style>
               </object>
             </property>
@@ -32,26 +40,62 @@
             </child>
           </object>
         </child>
+        <child><object class="GtkBox" id="new_public_options">
+          <property name="visible">false</property>
+          <property name="spacing">8</property>
+          <child><object class="GtkSwitch" id="new_public">
+            <property name="valign">center</property>
+            <accessibility><relation name="labelled-by">new_public_label</relation></accessibility>
+          </object></child>
+          <child><object class="GtkLabel" id="new_public_label"><property name="label" translatable="yes">Public</property></object></child>
+        </object></child>
+        <child><object class="GtkBox">
+          <property name="halign">end</property>
+          <property name="spacing">8</property>
+          <property name="margin-top">6</property>
+          <child><object class="GtkButton" id="new_cancel"><property name="label" translatable="yes">Cancel</property></object></child>
+          <child><object class="GtkButton" id="new_create"><property name="label" translatable="yes">Create</property><style><class name="suggested-action"/></style></object></child>
+        </object></child>
       </object>
-    </property>
-    <responses>
-      <response id="cancel" translatable="yes">Cancel</response>
-      <response id="create" translatable="yes" appearance="suggested">Create</response>
-    </responses>
+      </property>
+    </object></property>
   </object>
 
-  <object class="AdwAlertDialog" id="rename_dialog">
-    <property name="heading" translatable="yes">Rename Playlist</property>
-    <property name="close-response">cancel</property>
-    <property name="default-response">rename</property>
-    <property name="extra-child"><object class="GtkEntry" id="rename_entry">
+  <object class="AdwDialog" id="rename_dialog">
+    <property name="title" translatable="yes">Edit Playlist</property>
+    <property name="content-width">320</property>
+    <property name="default-widget">rename_apply</property>
+    <property name="focus-widget">rename_entry</property>
+    <property name="child"><object class="AdwToolbarView">
+      <child type="top"><object class="AdwHeaderBar"/></child>
+      <property name="content"><object class="GtkBox">
+      <property name="orientation">vertical</property>
+      <property name="spacing">12</property>
+      <property name="margin-start">18</property>
+      <property name="margin-end">18</property>
+      <property name="margin-bottom">18</property>
+      <child><object class="GtkEntry" id="rename_entry">
       <property name="placeholder-text" translatable="yes">Playlist name</property>
       <property name="activates-default">true</property>
+      </object></child>
+      <child><object class="GtkBox" id="playlist_public_options">
+        <property name="visible">false</property>
+        <property name="spacing">8</property>
+        <child><object class="GtkSwitch" id="playlist_public">
+          <property name="valign">center</property>
+          <accessibility><relation name="labelled-by">playlist_public_label</relation></accessibility>
+        </object></child>
+        <child><object class="GtkLabel" id="playlist_public_label"><property name="label" translatable="yes">Public</property></object></child>
+      </object></child>
+      <child><object class="GtkBox">
+        <property name="halign">end</property>
+        <property name="spacing">8</property>
+        <property name="margin-top">6</property>
+        <child><object class="GtkButton" id="rename_cancel"><property name="label" translatable="yes">Cancel</property></object></child>
+        <child><object class="GtkButton" id="rename_apply"><property name="label" translatable="yes">Apply</property><style><class name="suggested-action"/></style></object></child>
+      </object></child>
+      </object></property>
     </object></property>
-    <responses>
-      <response id="cancel" translatable="yes">Cancel</response>
-      <response id="rename" translatable="yes" appearance="suggested">Rename</response>
-    </responses>
   </object>
   <object class="AdwDialog" id="edit_dialog">
     <property name="title" translatable="yes">Edit Playlist</property>

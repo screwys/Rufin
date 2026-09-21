@@ -28,29 +28,66 @@ impl Shell {
             let builder = ui_shared::ui_resource::builder(resource);
             if !settings.can_link {
                 ui_shared::objects!(builder, resource, {
-                    rename_dialog: adw::AlertDialog, rename_entry: gtk::Entry,
+                    rename_dialog: adw::Dialog, rename_entry: gtk::Entry,
+                    playlist_public: gtk::Switch, playlist_public_options: gtk::Box,
+                    rename_cancel: gtk::Button, rename_apply: gtk::Button,
                 });
-                rename_entry.set_text(&current_name);
-                ui_shared::popup::install_light_dismiss(&rename_dialog);
-                if rename_dialog
-                    .choose_future(Some(&shell.chrome.window))
-                    .await
-                    == "rename"
+                let public = match rufin_core::playlists::playlist_public(
+                    &shell.products.source,
+                    playlist_id,
+                )
+                .recv()
+                .await
                 {
+                    Ok(Ok(public)) => public,
+                    Ok(Err(error)) => {
+                        shell.control_feedback.show_feedback_toast(error);
+                        None
+                    }
+                    Err(_) => return,
+                };
+                playlist_public_options.set_visible(public.is_some());
+                playlist_public.set_active(public.unwrap_or(false));
+                rename_entry.set_text(&current_name);
+                let dialog = rename_dialog.downgrade();
+                rename_cancel.connect_clicked(move |_| {
+                    if let Some(dialog) = dialog.upgrade() {
+                        dialog.close();
+                    }
+                });
+                let dialog = rename_dialog.downgrade();
+                let weak_shell = Rc::downgrade(&shell);
+                rename_apply.connect_clicked(move |_| {
                     let name = rename_entry.text().trim().to_owned();
-                    if !name.is_empty() {
-                        if let Ok(Err(error)) = rufin_core::playlists::rename_playlist(
-                            &shell.products.source,
-                            playlist_id,
-                            name,
-                        )
-                        .recv()
-                        .await
+                    if name.is_empty() {
+                        return;
+                    }
+                    let changed_name = name != current_name;
+                    let changed_public = public
+                        .is_some_and(|value| value != playlist_public.is_active())
+                        .then_some(playlist_public.is_active());
+                    if let Some(dialog) = dialog.upgrade() {
+                        dialog.close();
+                    }
+                    let Some(shell) = weak_shell.upgrade() else {
+                        return;
+                    };
+                    gtk::glib::spawn_future_local(async move {
+                        if (changed_name || changed_public.is_some())
+                            && let Ok(Err(error)) = rufin_core::playlists::update_playlist(
+                                &shell.products.source,
+                                playlist_id,
+                                changed_name.then_some(name),
+                                changed_public,
+                            )
+                            .recv()
+                            .await
                         {
                             shell.control_feedback.show_feedback_toast(error);
                         }
-                    }
-                }
+                    });
+                });
+                shell.present_selected_dialog(&rename_dialog);
                 return;
             }
             ui_shared::objects!(builder, resource, {

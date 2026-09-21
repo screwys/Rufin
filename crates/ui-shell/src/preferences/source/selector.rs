@@ -329,6 +329,7 @@ mod tests {
             name: id.to_string(),
             transcoded_download_bitrate_limit_kbps: None,
             half_stars_enabled: false,
+            supports_playlist_public: false,
         }
     }
 
@@ -403,6 +404,7 @@ mod tests {
             name: "Local".to_string(),
             transcoded_download_bitrate_limit_kbps: None,
             half_stars_enabled: false,
+            supports_playlist_public: false,
         };
 
         assert_eq!(source_menu_label(&local), "Local");

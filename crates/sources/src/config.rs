@@ -197,6 +197,13 @@ impl SourceConfiguration {
         matches!(self.kind.as_str(), "local" | "smb" | "webdav")
     }
 
+    pub fn supports_playlist_public(&self) -> bool {
+        matches!(
+            self.kind.as_str(),
+            "jellyfin" | "emby" | "navidrome" | "subsonic"
+        )
+    }
+
     pub fn transcoded_download_bitrate_limit_kbps(&self) -> Option<u32> {
         (self.kind == crate::jellyfin_emby::JELLYFIN_SOURCE_ID)
             .then_some(crate::jellyfin_emby::JELLYFIN_TRANSCODED_DOWNLOAD_BITRATE_LIMIT_KBPS)

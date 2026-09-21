@@ -3388,6 +3388,7 @@ fn configured_sources(
                 .configuration
                 .transcoded_download_bitrate_limit_kbps(),
             half_stars_enabled: half_stars_enabled(configured),
+            supports_playlist_public: configured.configuration.supports_playlist_public(),
         })
         .collect::<Vec<_>>();
     let local_folders = stored
@@ -3489,6 +3490,7 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
                 transcoded_download_bitrate_limit_kbps: configuration
                     .transcoded_download_bitrate_limit_kbps(),
                 half_stars_enabled: true,
+                supports_playlist_public: configuration.supports_playlist_public(),
             },
             credentials: CredentialPreset {
                 source_name: settings.name.clone(),
@@ -3517,6 +3519,7 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
                 transcoded_download_bitrate_limit_kbps: configuration
                     .transcoded_download_bitrate_limit_kbps(),
                 half_stars_enabled: matches!(configuration.kind.as_str(), "jellyfin" | "emby"),
+                supports_playlist_public: configuration.supports_playlist_public(),
             },
             credentials: CredentialPreset {
                 source_name: credentials.server_name,
@@ -3536,6 +3539,7 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
                 name: configuration.name.clone(),
                 transcoded_download_bitrate_limit_kbps: None,
                 half_stars_enabled: false,
+                supports_playlist_public: configuration.supports_playlist_public(),
             },
             credentials: CredentialPreset {
                 source_name: configuration.name.clone(),

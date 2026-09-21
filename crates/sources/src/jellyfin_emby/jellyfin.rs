@@ -55,6 +55,7 @@ impl JellyfinEmbySource {
         &self,
         name: &str,
         track_ids: &[String],
+        public: Option<bool>,
     ) -> SourceResult<PlaylistId> {
         let url = endpoint(&self.base_url, "Playlists")?;
         let body = CreatePlaylistDto {
@@ -62,7 +63,7 @@ impl JellyfinEmbySource {
             ids: raw_track_ids(track_ids),
             user_id: Some(self.user_id.clone()),
             media_type: Some("Audio".to_string()),
-            is_public: false,
+            is_public: public.unwrap_or(false),
         };
         let result = self
             .send_json::<PlaylistCreationResult>(self.client.post(url).json(&body))
@@ -70,17 +71,19 @@ impl JellyfinEmbySource {
         Ok(String::from(self.kind.object_id("playlist", &result.id)))
     }
 
-    pub(crate) async fn jellyfin_rename_playlist(
+    pub(crate) async fn jellyfin_update_playlist(
         &self,
         playlist_id: &str,
-        name: &str,
+        name: Option<&str>,
+        public: Option<bool>,
     ) -> SourceResult<()> {
         let url = endpoint(
             &self.base_url,
             &format!("Playlists/{}", raw_item_id(playlist_id)),
         )?;
         let body = UpdatePlaylistDto {
-            name: Some(name.to_string()),
+            name: name.map(str::to_owned),
+            is_public: public,
         };
         self.send_unit(self.client.post(url).json(&body)).await
     }
@@ -206,7 +209,10 @@ pub(super) struct CreatePlaylistDto {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub(super) struct UpdatePlaylistDto {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) is_public: Option<bool>,
 }
 
 #[cfg(test)]

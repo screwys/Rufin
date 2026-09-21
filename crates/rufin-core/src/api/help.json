@@ -88,12 +88,15 @@
       "source": null,
       "uris": ["track URI"]
     },
-    "Playlist ownership": "POST /api/playlists accepts source (owner, null for Rufin), selection_source (origin of a collection being added), and current (optional saved destination preference). Newly created playlists are pinned like in the desktop app.",
+    "Playlist ownership": "POST /api/playlists accepts source (owner, null for Rufin), selection_source (origin of a collection being added), current (optional saved destination preference), and public (optional visibility for supported server playlists). Omit public to keep the existing creation default. Newly created playlists are pinned like in the desktop app.",
     "PATCH /api/playlists": {
       "id": 1,
-      "name": "New name"
+      "name": "New name",
+      "public": false
     },
+    "Playlist updates": "name and public are optional; omitted fields are unchanged. public applies to supported server playlists.",
     "DELETE /api/playlists?id=...": "Delete a playlist through its owner. Rufin-owned linked playlists are removed from Rufin and their files remain on disk.",
+    "GET /api/playlists/public?id=...": "Read playlist visibility. public is a boolean, or null when unavailable.",
     "GET /api/playlists/file?id=...": "Read the linked file, path display, saved error, refresh, save, and path options.",
     "GET /api/playlists/source-settings?source=...": "Read the source default for automatic playlist saving.",
     "PATCH /api/playlists/source-settings": "Set {source,auto_save}; linked playlists without an override inherit this setting.",

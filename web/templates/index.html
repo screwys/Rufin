@@ -525,6 +525,7 @@
           <input id="playlist-name" required />
           <button type="button" id="playlist-owner" class="icon-button" aria-pressed="false"></button>
         </div>
+        <label id="playlist-public-row" hidden><input type="checkbox" role="switch" id="playlist-public" />{{ localization::tr("Public") }}</label>
         <fieldset id="playlist-file-options" hidden>
           <legend>{{ localization::tr("Linked file") }}</legend>
           <div class="playlist-link-fields">

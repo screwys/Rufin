@@ -81,6 +81,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
         )
         .route("/api/playlists/import", post(import_file))
         .route("/api/playlists/export", post(export_file))
+        .route("/api/playlists/public", get(public))
         .route(
             "/api/playlists",
             get(list).post(create).patch(rename).delete(delete),
@@ -130,6 +131,18 @@ async fn source_file_update(
     ))
     .await?;
     Ok(json_response(StatusCode::OK, json!({"changed":true})))
+}
+
+async fn public(
+    State(products): State<ProductHandles>,
+    Query(parameters): Query<HashMap<String, String>>,
+) -> Result<Response<Body>, Error> {
+    let public = completion(crate::playlists::playlist_public(
+        &products.source,
+        key(&parameters, "id")?,
+    ))
+    .await?;
+    Ok(json_response(StatusCode::OK, json!({"public": public})))
 }
 
 async fn file_settings(
@@ -410,6 +423,7 @@ async fn create(
         source: Option<sources::SourceId>,
         selection_source: Option<String>,
         current: Option<bool>,
+        public: Option<bool>,
         name: String,
         #[serde(default)]
         uris: Vec<String>,
@@ -433,6 +447,7 @@ async fn create(
         input.source,
         input.name,
         uris,
+        input.public,
     ))
     .await?;
     let mut settings_error = None;
@@ -478,13 +493,15 @@ async fn rename(
     #[derive(Deserialize)]
     struct Input {
         id: PlaylistKey,
-        name: String,
+        name: Option<String>,
+        public: Option<bool>,
     }
     let input: Input = body(request).await?;
-    let changed = completion(crate::playlists::rename_playlist(
+    let changed = completion(crate::playlists::update_playlist(
         &products.source,
         input.id,
         input.name,
+        input.public,
     ))
     .await?;
     Ok(json_response(StatusCode::OK, json!({"changed":changed})))
