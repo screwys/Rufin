@@ -58,6 +58,11 @@ msgstr ""
 "atslēgtas"
 
 msgid ""
+"If Discord is not installed as a flatpak, you need to give socket access to "
+"Rufin. If it is installed as a flatpak, this is not needed."
+msgstr ""
+
+msgid ""
 "List shared folders on this server using the entered credentials or guest "
 "access"
 msgstr ""
@@ -1043,6 +1048,9 @@ msgstr "Atvienot"
 
 msgid "Discord Rich Presence"
 msgstr "Discord bagātīgā klātbūtne"
+
+msgid "Discord access in Flatpak"
+msgstr ""
 
 msgid "Discord"
 msgstr "Discord"
@@ -3242,6 +3250,11 @@ msgstr "Sinhronizēti teksti"
 msgid "System default"
 msgstr "Sistēmas noklusējums"
 
+#, fuzzy
+#| msgid "System default"
+msgid "System flatpak:"
+msgstr "Sistēmas noklusējums"
+
 msgid "System"
 msgstr "Sistēma"
 
@@ -3487,6 +3500,11 @@ msgstr "Izmantot avota iestatījumu"
 msgid "Use the server's Instant Mix for Radio and Auto DJ."
 msgstr ""
 "Izmantot servera funkciju Instant Mix” radio un automātiskajam DJ režīmam."
+
+#, fuzzy
+#| msgid "User token"
+msgid "User flatpak:"
+msgstr "Lietotāja žetons"
 
 msgid "User token"
 msgstr "Lietotāja žetons"

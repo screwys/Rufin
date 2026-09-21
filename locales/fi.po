@@ -53,6 +53,11 @@ msgstr ""
 "käytöstä"
 
 msgid ""
+"If Discord is not installed as a flatpak, you need to give socket access to "
+"Rufin. If it is installed as a flatpak, this is not needed."
+msgstr ""
+
+msgid ""
 "List shared folders on this server using the entered credentials or guest "
 "access"
 msgstr ""
@@ -1041,6 +1046,9 @@ msgstr "Yhdistä uudelleen"
 
 msgid "Discord Rich Presence"
 msgstr "Discordin rikastettu läsnäolo"
+
+msgid "Discord access in Flatpak"
+msgstr ""
 
 msgid "Discord"
 msgstr "Discord"
@@ -3307,6 +3315,11 @@ msgstr "Synkronoidut sanoitukset"
 msgid "System default"
 msgstr "Järjestelmän oletus"
 
+#, fuzzy
+#| msgid "System default"
+msgid "System flatpak:"
+msgstr "Järjestelmän oletus"
+
 msgid "System"
 msgstr "Järjestelmä"
 
@@ -3559,6 +3572,11 @@ msgstr "Sanoitusten asetukset"
 
 msgid "Use the server's Instant Mix for Radio and Auto DJ."
 msgstr ""
+
+#, fuzzy
+#| msgid "User token"
+msgid "User flatpak:"
+msgstr "Käyttäjäpoletti"
 
 msgid "User token"
 msgstr "Käyttäjäpoletti"

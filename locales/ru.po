@@ -67,6 +67,11 @@ msgstr ""
 "отключены"
 
 msgid ""
+"If Discord is not installed as a flatpak, you need to give socket access to "
+"Rufin. If it is installed as a flatpak, this is not needed."
+msgstr ""
+
+msgid ""
 "List shared folders on this server using the entered credentials or guest "
 "access"
 msgstr ""
@@ -1019,6 +1024,9 @@ msgstr "Отключить"
 
 msgid "Discord Rich Presence"
 msgstr "Discord Rich Presence"
+
+msgid "Discord access in Flatpak"
+msgstr ""
 
 msgid "Discord"
 msgstr "Discord"
@@ -3171,6 +3179,11 @@ msgstr "Синхронизированные тексты песен"
 msgid "System default"
 msgstr "Системные настройки"
 
+#, fuzzy
+#| msgid "System default"
+msgid "System flatpak:"
+msgstr "Системные настройки"
+
 msgid "System"
 msgstr "Система"
 
@@ -3411,6 +3424,11 @@ msgstr "Использовать настройки источника"
 
 msgid "Use the server's Instant Mix for Radio and Auto DJ."
 msgstr "Использовать «Мгновенный микс» сервера для радио и «Авто-DJ»."
+
+#, fuzzy
+#| msgid "User token"
+msgid "User flatpak:"
+msgstr "Токен пользователя"
 
 msgid "User token"
 msgstr "Токен пользователя"
