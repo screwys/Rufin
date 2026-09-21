@@ -3,8 +3,8 @@
 </h1>
 <p align="center">
   <a href="https://matrix.to/#/#rufin:matrix.org"><img alt="Matrix" src="https://img.shields.io/badge/matrix-%23rufin-red?logo=matrix"></a>
-  <a href="Cargo.toml"><img alt="Rust 1.96+" src="https://img.shields.io/badge/rust-1.96%2B-f74c00?logo=rust"></a>
   <a href="LICENSE"><img alt="License: GPL-3.0+" src="https://img.shields.io/badge/license-GPL--3.0%2B-blue.svg"></a>
+  <a href="Cargo.toml"><img alt="Rust 1.96+" src="https://img.shields.io/badge/rust-1.96%2B-f74c00?logo=rust"></a>
   <a href="https://gstreamer.freedesktop.org/"><img alt="GStreamer 1.26+" src="https://img.shields.io/badge/GStreamer-1.26%2B-3584E4?logo=gstreamer&amp;logoColor=white&amp;labelColor=2E3436"></a>
   <br>
   <a href="https://flathub.org/apps/io.github.screwys.Rufin"><img alt="Flathub installs" src="https://img.shields.io/flathub/downloads/io.github.screwys.Rufin?logo=flathub&amp;label=flathub&amp;color=4A86CF"></a>
@@ -13,9 +13,13 @@
   <a href="https://hosted.weblate.org/projects/rufin/"><img alt="Translate Rufin on Weblate" src="https://img.shields.io/badge/translate-Weblate-2ECCAA?logo=weblate&amp;logoColor=white"></a>
 </p>
 
-<img align="right" alt="Rufin" src="resources/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="80" height="80">
+<img align="right" alt="Rufin" src="resources/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="80" height="196">
 
-Rufin is a native music player for local and remote folders and music servers, available on [multiple platforms](#installation). Browse and manage your libraries, combine sources in playlists and smart playlists, and sync devices with Rufin Connect. Rufin also supports headless use, scripting and browser control through a Web UI.
+<p align="left">
+  Rufin is a powerful, fast and easy to use native music player for local/remote folders and music servers, available on <a href="#installation">multiple platforms</a>.
+  Rufin offers a rich library browsing and management experience while making the most of each source's unique features.
+  It can be run headless, scripted, or controlled from its Web UI; and can be securely synced with other devices with Rufin Connect.
+</p>
 
 <br clear="all">
 
