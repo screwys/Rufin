@@ -37,7 +37,9 @@ impl Shell {
     }
 
     fn route_keyboard_available(&self) -> bool {
-        !self.fullscreen_player_visible() && !self.transient_route_input_active()
+        self.activity.borrow().is_none()
+            && !self.fullscreen_player_visible()
+            && !self.transient_route_input_active()
     }
 
     fn playback_keyboard_available(&self) -> bool {

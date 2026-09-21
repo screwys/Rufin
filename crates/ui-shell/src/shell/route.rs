@@ -462,6 +462,7 @@ impl Shell {
     }
 
     pub(crate) fn refresh_current_route_now_playing_selections(&self) {
+        self.refresh_activity_playback();
         let current = route_current_track(self.player_ui.selected_playback().as_deref());
         self.chrome.topbar.refresh_search_playback(current.as_ref());
         if let Some(catalog) = self.route_viewport.catalog.borrow().as_ref() {
@@ -470,6 +471,7 @@ impl Shell {
     }
 
     pub(crate) fn navigate(self: &Rc<Self>, route: Route) {
+        self.close_activity();
         debug!(?route, "navigate");
         self.player_ui.close_fullscreen_player();
         self.navigation.routes.borrow_mut().navigate(route);
@@ -486,6 +488,7 @@ impl Shell {
     }
 
     pub(crate) fn reset_navigation_to_home(self: &Rc<Self>) {
+        self.close_activity();
         debug!("reset navigation to Home");
         self.player_ui.close_fullscreen_player();
         self.release_selected_navigation();
@@ -498,6 +501,9 @@ impl Shell {
     }
 
     pub(crate) fn go_back(self: &Rc<Self>) {
+        if self.close_activity() {
+            return;
+        }
         let route = self.navigation.routes.borrow_mut().back().cloned();
         if let Some(route) = route {
             debug!(?route, "navigate back");
@@ -507,6 +513,9 @@ impl Shell {
     }
 
     pub(crate) fn go_forward(self: &Rc<Self>) {
+        if self.close_activity() {
+            return;
+        }
         let route = self.navigation.routes.borrow_mut().forward().cloned();
         if let Some(route) = route {
             debug!(?route, "navigate forward");

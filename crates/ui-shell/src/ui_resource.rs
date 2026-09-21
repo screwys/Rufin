@@ -1,4 +1,7 @@
 pub(crate) const BASE_CSS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/style.css";
+pub(crate) const ACTIVITY_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/activity.ui";
+pub(crate) const ACTIVITY_GENRE_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/shell/activity_genre.ui";
 #[cfg(test)]
 pub(crate) const SHOWCASE_CSS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/showcase.css";
 pub(crate) const ABOUT_RESOURCE: &str = "/io/github/screwys/Rufin/ui/application/about.ui";
@@ -75,6 +78,8 @@ pub(crate) const SHELL_ROOT_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/
 pub(crate) const SHORTCUTS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/shortcuts.ui";
 #[cfg(test)]
 pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
+    ACTIVITY_RESOURCE,
+    ACTIVITY_GENRE_RESOURCE,
     BASE_CSS_RESOURCE,
     SHOWCASE_CSS_RESOURCE,
     ABOUT_RESOURCE,

@@ -2,6 +2,8 @@
 //! Provider acquisition, playback transport, and presentation remain outside this crate.
 
 mod activity;
+mod activity_overview;
+pub use activity_overview::{ActivityOverview, ActivityTotals};
 mod artwork;
 mod backup;
 mod collections;

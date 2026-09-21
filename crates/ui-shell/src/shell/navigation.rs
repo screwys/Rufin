@@ -516,6 +516,12 @@ fn replace_primary_menu_model(menu: &gio::Menu, shell: &Rc<Shell>) {
     let window = gio::Menu::new();
     append_menu_action(
         &window,
+        &tr("Listening overview"),
+        "win.listening-overview",
+        "rufin-activity-overview-symbolic",
+    );
+    append_menu_action(
+        &window,
         &tr("Toggle Fullscreen"),
         "win.toggle-fullscreen",
         if shell.chrome.window.is_fullscreen() {

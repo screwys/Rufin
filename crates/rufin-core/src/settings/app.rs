@@ -21,6 +21,40 @@ use super::{
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct ActivityOverviewSettings {
+    pub dynamic_background: bool,
+    pub background_image: bool,
+    pub tracks: bool,
+    pub artists: bool,
+    pub albums: bool,
+    pub genres: bool,
+    pub result_count: usize,
+    pub show_comparison: bool,
+    pub show_rufin_in_headline: bool,
+    pub offered_month: Option<String>,
+    pub offered_year: Option<i32>,
+}
+
+impl Default for ActivityOverviewSettings {
+    fn default() -> Self {
+        Self {
+            dynamic_background: true,
+            background_image: true,
+            tracks: true,
+            artists: true,
+            albums: true,
+            genres: true,
+            result_count: 3,
+            show_comparison: true,
+            show_rufin_in_headline: true,
+            offered_month: None,
+            offered_year: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ExternalSiteLinkSettings {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -227,6 +261,8 @@ pub struct Settings {
     #[serde(default = "default_lyrics_panel_visible")]
     pub fullscreen_background_image: bool,
     #[serde(default)]
+    pub activity_overview: ActivityOverviewSettings,
+    #[serde(default)]
     pub queue_lyrics_height: Option<i32>,
     #[serde(default)]
     pub right_panel: super::right_panel::RightPanelSettings,
@@ -289,6 +325,7 @@ impl Default for Settings {
             fullscreen_visualizer_visible: false,
             fullscreen_dynamic_background: false,
             fullscreen_background_image: true,
+            activity_overview: ActivityOverviewSettings::default(),
             queue_lyrics_height: None,
             right_panel: super::right_panel::RightPanelSettings::default(),
             library_lists: default_library_list_settings(),

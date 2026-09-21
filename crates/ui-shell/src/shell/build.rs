@@ -295,6 +295,7 @@ pub async fn build(
         operation_feedback_action,
         root_stack,
         app_root_overlay,
+        app_content_overlay,
         app_content_stack,
         startup_loading_host,
         startup_loading_status,
@@ -461,6 +462,8 @@ pub async fn build(
                 &chrome.app_content_stack,
             )),
             preferences,
+            activity: RefCell::new(None),
+            activity_reminder: RefCell::new(None),
             downloads,
             download_feedback: Default::default(),
             control_feedback,
@@ -477,12 +480,28 @@ pub async fn build(
     });
 
     shell.connect_operation_feedback();
+    shell.connect_activity_reminders(
+        ui_shared::ui_resource::object(
+            &shell_root_builder,
+            shell_root_resource,
+            "activity_month_banner",
+        ),
+        ui_shared::ui_resource::object(
+            &shell_root_builder,
+            shell_root_resource,
+            "activity_year_banner",
+        ),
+    );
     shell.bind_controller_appearance();
     shell.bind_sidebar_settings();
     let weak = Rc::downgrade(&shell);
     app.connect_shutdown(move |_| {
         if let Some(shell) = weak.upgrade() {
             shell.web_controller.stop();
+            shell.close_activity();
+            if let Some(source) = shell.activity_reminder.borrow_mut().take() {
+                source.remove();
+            }
         }
     });
     let weak = Rc::downgrade(&shell);
