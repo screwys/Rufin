@@ -1,0 +1,47 @@
+{
+  "name": "Gruvbox",
+  "mode": "dark",
+  "colors": {
+    "window-bg-color": "rgb(40, 40, 40)",
+    "window-fg-color": "rgb(235, 219, 178)",
+    "view-bg-color": "rgb(40, 40, 40)",
+    "view-fg-color": "rgb(235, 219, 178)",
+    "headerbar-bg-color": "rgb(29, 32, 33)",
+    "headerbar-fg-color": "rgb(235, 219, 178)",
+    "sidebar-bg-color": "rgb(29, 32, 33)",
+    "sidebar-fg-color": "rgb(235, 219, 178)",
+    "secondary-sidebar-bg-color": "rgb(29, 32, 33)",
+    "secondary-sidebar-fg-color": "rgb(235, 219, 178)",
+    "card-bg-color": "rgb(50, 48, 47)",
+    "card-fg-color": "rgb(235, 219, 178)",
+    "dialog-bg-color": "rgb(50, 48, 47)",
+    "dialog-fg-color": "rgb(235, 219, 178)",
+    "popover-bg-color": "rgb(50, 48, 47)",
+    "popover-fg-color": "rgb(235, 219, 178)",
+    "thumbnail-bg-color": "rgb(50, 48, 47)",
+    "thumbnail-fg-color": "rgb(235, 219, 178)",
+    "active-toggle-bg-color": "rgb(50, 48, 47)",
+    "active-toggle-fg-color": "rgb(235, 219, 178)",
+    "overview-bg-color": "rgb(29, 32, 33)",
+    "overview-fg-color": "rgb(235, 219, 178)",
+    "headerbar-backdrop-color": "rgb(29, 32, 33)",
+    "sidebar-backdrop-color": "rgb(29, 32, 33)",
+    "secondary-sidebar-backdrop-color": "rgb(29, 32, 33)",
+    "error-bg-color": "rgb(251, 73, 52)",
+    "error-fg-color": "rgb(40, 40, 40)",
+    "error-color": "oklab(from var(--error-bg-color) var(--standalone-color-oklab))",
+    "success-bg-color": "rgb(184, 187, 38)",
+    "success-fg-color": "rgb(40, 40, 40)",
+    "success-color": "oklab(from var(--success-bg-color) var(--standalone-color-oklab))",
+    "warning-bg-color": "rgb(250, 189, 47)",
+    "warning-fg-color": "rgb(40, 40, 40)",
+    "warning-color": "oklab(from var(--warning-bg-color) var(--standalone-color-oklab))"
+  },
+  "accents": [
+    {
+      "name": "Gruvbox",
+      "color": "rgb(250, 189, 47)",
+      "foreground": "rgb(40, 40, 40)"
+    }
+  ]
+}

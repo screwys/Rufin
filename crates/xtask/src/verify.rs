@@ -137,7 +137,7 @@ fn release_metadata(args: Vec<String>) -> Result<()> {
 
 fn verify_release_metadata_at(root: &Path, tag: &str) -> Result<()> {
     let cargo_toml = read_to_string(&root.join("Cargo.toml"))?;
-    let metainfo = read_to_string(&root.join("data/io.github.screwys.Rufin.metainfo.xml"))?;
+    let metainfo = read_to_string(&root.join("resources/io.github.screwys.Rufin.metainfo.xml"))?;
     verify_release_metadata_contents(tag, &cargo_toml, &metainfo)
 }
 
@@ -214,9 +214,8 @@ fn release_tag(args: Vec<String>) -> Result<()> {
     }
 
     let cargo_path = format!("{tag_ref}:Cargo.toml");
-    let metainfo_path = format!("{tag_ref}:data/io.github.screwys.Rufin.metainfo.xml");
     let cargo_toml = command_stdout("git", ["show", cargo_path.as_str()])?;
-    let metainfo = command_stdout("git", ["show", metainfo_path.as_str()])?;
+    let metainfo = crate::release::metainfo_at_ref(&tag_ref)?;
     verify_release_metadata_contents(&tag, &cargo_toml, &metainfo)?;
 
     run_command(

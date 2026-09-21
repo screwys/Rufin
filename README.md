@@ -13,29 +13,29 @@
   <a href="https://hosted.weblate.org/projects/rufin/"><img alt="Translate Rufin on Weblate" src="https://img.shields.io/badge/translate-Weblate-2ECCAA?logo=weblate&amp;logoColor=white"></a>
 </p>
 
-<img align="right" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="80" height="80">
+<img align="right" alt="Rufin" src="resources/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="80" height="80">
 
 Rufin is a native music player for local and remote folders and music servers, available on [multiple platforms](#installation). Browse and manage your libraries, combine sources in playlists and smart playlists, and sync devices with Rufin Connect. Rufin also supports headless use, scripting and browser control through a Web UI.
 
 <br clear="all">
 
-![Rufin](data/screenshots/Rufin_full.png)
+![Rufin](resources/screenshots/Rufin_full.png)
 
 ## 📂 Sources
 
-- <img src="data/icons/hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg" width="20" height="20" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Local libraries</strong>: Rufin provides favorites, playlists, activity history, Auto DJ recommendations and metadata editing.
+- <img src="resources/icons/hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg" width="20" height="20" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Local libraries</strong>: Rufin provides favorites, playlists, activity history, Auto DJ recommendations and metadata editing.
 
-- <img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.jellyfin.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Jellyfin</strong>: Supports library separation, Jellyfin WebSocket for incremental scans, metadata editing over API and Instant Mix.
+- <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.jellyfin.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Jellyfin</strong>: Supports library separation, Jellyfin WebSocket for incremental scans, metadata editing over API and Instant Mix.
 
-- <img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.navidrome.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Navidrome</strong> / <img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.opensubsonic.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>OpenSubsonic</strong>: Supports API key authorization, normal/legacy passwords, Navidrome's own API and OpenSubsonic v2 APIs. Metadata editing is available if library can be matched to local files.
+- <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.navidrome.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Navidrome</strong> / <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.opensubsonic.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>OpenSubsonic</strong>: Supports API key authorization, normal/legacy passwords, Navidrome's own API and OpenSubsonic v2 APIs. Metadata editing is available if library can be matched to local files.
 
-- <img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.emby.svg" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Emby</strong>: Supports library separation, incremental scans, metadata editing, and Instant Mix. Ratings are saved locally.
+- <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.emby.svg" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Emby</strong>: Supports library separation, incremental scans, metadata editing, and Instant Mix. Ratings are saved locally.
 
-- <img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.plex.svg" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Plex</strong>: Supports password and browser sign-in, shared libraries and Plex Home profiles, library separation, incremental scans, server playlists and ratings, and locally stored favorites. Includes Plex recommendations for Auto DJ, downloads where permitted, Plex Companion controls and queue handoff.
+- <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.plex.svg" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Plex</strong>: Supports password and browser sign-in, shared libraries and Plex Home profiles, library separation, incremental scans, server playlists and ratings, and locally stored favorites. Includes Plex recommendations for Auto DJ, downloads where permitted, Plex Companion controls and queue handoff.
 
-- <img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.webdav.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>WebDAV</strong>: Direct read/write access to WebDAV and Nextcloud libraries without filesystem mounts, including downloads, tags/ lyrics editing. Supports HTTPS, custom certificates and headers, password or bearer-token authentication, Nextcloud browser sign-in, and alternate addresses for LAN, VPN, or Tailscale connections.
+- <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.webdav.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>WebDAV</strong>: Direct read/write access to WebDAV and Nextcloud libraries without filesystem mounts, including downloads, tags/ lyrics editing. Supports HTTPS, custom certificates and headers, password or bearer-token authentication, Nextcloud browser sign-in, and alternate addresses for LAN, VPN, or Tailscale connections.
 
-- <img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.smb.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>SMB / Samba</strong>: Direct read/write access to Windows, Samba, and NAS shares without filesystem mounts, including downloads, tags/lyrics editing. Supports share discovery, guest and domain-qualified logins, signing and encryption, and alternate addresses for LAN, VPN, or Tailscale connections.
+- <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.smb.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>SMB / Samba</strong>: Direct read/write access to Windows, Samba, and NAS shares without filesystem mounts, including downloads, tags/lyrics editing. Supports share discovery, guest and domain-qualified logins, signing and encryption, and alternate addresses for LAN, VPN, or Tailscale connections.
 
 ## 🎵 Playback
 
@@ -122,13 +122,13 @@ rufin --headless --listen
 
 | | |
 |:---:|:---:|
-| ![Artist details](data/screenshots/artist_detail.png) | ![Genres](data/screenshots/genres.png) |
+| ![Artist details](resources/screenshots/artist_detail.png) | ![Genres](resources/screenshots/genres.png) |
 | **Artist details** | **Genres** |
-| ![Smart playlists](data/screenshots/smart_playlists.png) | ![Playback settings](data/screenshots/playback_settings.png) |
+| ![Smart playlists](resources/screenshots/smart_playlists.png) | ![Playback settings](resources/screenshots/playback_settings.png) |
 | **Smart playlists** | **Playback settings** |
-| ![Fullscreen player](data/screenshots/fullscreen_player.png) | ![Visualizer settings](data/screenshots/visualizer_settings.png) |
+| ![Fullscreen player](resources/screenshots/fullscreen_player.png) | ![Visualizer settings](resources/screenshots/visualizer_settings.png) |
 | **Fullscreen player** | **Visualizer settings** |
-| ![Integrations](data/screenshots/integrations.png) | ![Playlist settings](data/screenshots/playlist_settings.png) |
+| ![Integrations](resources/screenshots/integrations.png) | ![Playlist settings](resources/screenshots/playlist_settings.png) |
 | **Integrations** | **Playlist settings** |
 
 # Installation

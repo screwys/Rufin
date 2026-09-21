@@ -14,6 +14,7 @@ pub mod runtime;
 pub mod scrobbling;
 pub mod settings;
 pub mod source;
+pub mod themes;
 mod waveform;
 pub use settings::SettingsHandle;
 

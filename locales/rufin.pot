@@ -627,9 +627,6 @@ msgstr ""
 msgid "Color for the active word during playback"
 msgstr ""
 
-msgid "Color scheme"
-msgstr ""
-
 msgid "Columns"
 msgstr ""
 
@@ -779,6 +776,10 @@ msgid "Could not load related tracks"
 msgstr ""
 
 msgid "Could not load this page"
+msgstr ""
+
+#, rust-format
+msgid "Could not open file: {error}"
 msgstr ""
 
 #, rust-format
@@ -1030,6 +1031,9 @@ msgid "Edit lyrics"
 msgstr ""
 
 msgid "Edit metadata"
+msgstr ""
+
+msgid "Edit theme"
 msgstr ""
 
 msgid "Edit"
@@ -1984,6 +1988,9 @@ msgstr ""
 msgid "Open automatically"
 msgstr ""
 
+msgid "Open custom themes folder"
+msgstr ""
+
 msgid "Open fullscreen player"
 msgstr ""
 
@@ -2415,6 +2422,9 @@ msgid "Release"
 msgstr ""
 
 msgid "Reload from file"
+msgstr ""
+
+msgid "Reload themes"
 msgstr ""
 
 msgid "Reload to apply changes"

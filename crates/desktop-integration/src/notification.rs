@@ -526,7 +526,7 @@ mod tests {
     fn notification_artwork_is_square_and_thumbnail_sized() {
         let cover = include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png"
+            "/../../resources/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png"
         ));
         let bytes = notification_icon_bytes(cover).expect("notification bytes");
         let icon = artwork::decode_rgba(&bytes, u32::MAX).expect("notification image");

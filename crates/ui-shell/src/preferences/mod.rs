@@ -28,6 +28,7 @@ mod layout;
 mod library;
 pub(crate) mod persistence;
 pub(crate) mod source;
+mod themes;
 
 use general::{ScrobblingCredentialDrafts, appearance_page, playback_page, scrobbling_page};
 

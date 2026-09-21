@@ -7,7 +7,46 @@
     <property name="title" translatable="yes">Appearance</property>
     <property name="icon-name">rufin-preferences-desktop-appearance-symbolic</property>
     <child>
-      <object class="AdwPreferencesGroup" id="theme_group"><property name="title" translatable="yes">Theme</property></object>
+      <object class="AdwPreferencesGroup" id="theme_group">
+        <property name="title" translatable="yes">Theme</property>
+        <property name="header-suffix">
+          <object class="GtkBox">
+            <property name="spacing">6</property>
+            <child><object class="GtkButton" id="themes_folder">
+              <property name="icon-name">rufin-folders-symbolic</property>
+              <property name="tooltip-text" translatable="yes">Open custom themes folder</property>
+              <style><class name="flat"/></style>
+            </object></child>
+            <child><object class="GtkButton" id="themes_reload">
+              <property name="icon-name">rufin-view-refresh-symbolic</property>
+              <property name="tooltip-text" translatable="yes">Reload themes</property>
+              <style><class name="flat"/></style>
+            </object></child>
+          </object>
+        </property>
+        <child><object class="GtkBox">
+          <property name="orientation">vertical</property>
+          <property name="spacing">8</property>
+          <style><class name="card"/><class name="theme-options"/></style>
+          <child><object class="GtkFlowBox" id="theme_grid">
+            <property name="selection-mode">none</property>
+            <property name="homogeneous">true</property>
+            <property name="min-children-per-line">1</property>
+            <property name="max-children-per-line">4</property>
+            <property name="column-spacing">12</property>
+            <property name="row-spacing">12</property>
+            <style><class name="theme-grid"/></style>
+          </object></child>
+          <child><object class="GtkLabel" id="theme_errors">
+            <property name="visible">false</property>
+            <property name="wrap">true</property>
+            <property name="wrap-mode">word-char</property>
+            <property name="selectable">true</property>
+            <property name="xalign">0</property>
+            <style><class name="error"/><class name="caption"/></style>
+          </object></child>
+        </object></child>
+      </object>
     </child>
     <child>
       <object class="AdwPreferencesGroup" id="seekbar_group">
@@ -51,6 +90,18 @@
       </object>
     </child>
   </object>
+
+  <object class="GtkStringList" id="standard_themes"><items>
+    <item translatable="yes">System</item><item translatable="yes">Light</item><item translatable="yes">Dark</item>
+  </items></object>
+  <object class="GtkSingleSelection" id="standard_accent">
+    <property name="model">accent_names</property>
+  </object>
+  <object class="GtkStringList" id="accent_names"><items>
+    <item translatable="yes">System</item><item translatable="yes">Blue</item><item translatable="yes">Teal</item>
+    <item translatable="yes">Green</item><item translatable="yes">Yellow</item><item translatable="yes">Orange</item>
+    <item translatable="yes">Red</item><item translatable="yes">Pink</item><item translatable="yes">Purple</item><item translatable="yes">Slate</item>
+  </items></object>
 
   <object class="AdwSwitchRow" id="lyrics_panel_row"><property name="title" translatable="yes">Show lyrics</property></object>
   <object class="AdwSwitchRow" id="visualizer_panel_row"><property name="title" translatable="yes">Show visualizer</property></object>

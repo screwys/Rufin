@@ -348,7 +348,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
             get(|| async {
                 asset(
                     "text/css; charset=utf-8",
-                    include_bytes!("../../../../data/showcase.css"),
+                    include_bytes!("../../../../resources/showcase.css"),
                 )
             }),
         )
@@ -463,7 +463,7 @@ async fn source_icon(
             asset(
                 "image/png",
                 include_bytes!(concat!(
-                    "../../../../data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.",
+                    "../../../../resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.",
                     $name,
                     ".png"
                 )),
@@ -475,7 +475,7 @@ async fn source_icon(
             asset(
                 "image/svg+xml",
                 include_bytes!(concat!(
-                    "../../../../data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.",
+                    "../../../../resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.",
                     $name,
                     ".svg"
                 )),
@@ -510,13 +510,13 @@ async fn icon(
         return Ok(asset(
             "image/svg+xml",
             include_bytes!(
-                "../../../../data/icons/hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg"
+                "../../../../resources/icons/hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg"
             ),
         ));
     }
     if name == "rufin.svg" || name == "favicon.svg" {
         let svg = include_str!(
-            "../../../../data/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg"
+            "../../../../resources/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg"
         )
         .replacen("viewBox=\"0 0 128 128\"", "viewBox=\"0 0 112 112\"", 1)
         .replacen(" transform=\"translate(4,4)\"", "", 1);
@@ -529,7 +529,7 @@ async fn icon(
             (
                 $name,
                 include_bytes!(concat!(
-                    "../../../../data/icons/hicolor/scalable/actions/",
+                    "../../../../resources/icons/hicolor/scalable/actions/",
                     $name
                 )) as &'static [u8],
             )
@@ -562,7 +562,7 @@ async fn icon(
         (
             "rufin-edit-clear-symbolic.svg",
             include_bytes!(
-                "../../../../data/icons/hicolor/16x16/actions/rufin-edit-clear-symbolic.svg"
+                "../../../../resources/icons/hicolor/16x16/actions/rufin-edit-clear-symbolic.svg"
             ) as &'static [u8],
         ),
         icon!("rufin-window-close-symbolic.svg"),

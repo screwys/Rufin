@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <object class="GtkBox" id="tile">
+    <property name="orientation">vertical</property>
+    <property name="spacing">6</property>
+    <property name="width-request">124</property>
+    <child><object class="GtkToggleButton" id="select">
+      <property name="vexpand">false</property>
+      <property name="valign">start</property>
+      <style><class name="theme-select"/><class name="flat"/></style>
+      <property name="child"><object class="GtkBox" id="preview">
+        <property name="orientation">vertical</property>
+        <property name="height-request">96</property>
+        <property name="overflow">hidden</property>
+        <property name="can-target">false</property>
+        <style><class name="theme-preview"/></style>
+        <child><object class="GtkBox">
+          <property name="spacing">4</property>
+          <style><class name="theme-header"/></style>
+          <child><object class="GtkBox"><style><class name="theme-dot"/></style></object></child>
+          <child><object class="GtkBox"><style><class name="theme-dot"/></style></object></child>
+          <child><object class="GtkBox"><property name="hexpand">true</property></object></child>
+          <child><object class="GtkBox"><property name="width-request">38</property><style><class name="theme-search"/></style></object></child>
+        </object></child>
+        <child><object class="GtkBox">
+          <property name="vexpand">true</property>
+          <child><object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">5</property>
+            <property name="width-request">28</property>
+            <style><class name="theme-sidebar"/></style>
+            <child><object class="GtkBox"><property name="spacing">3</property><style><class name="theme-nav-selected"/></style>
+              <child><object class="GtkBox"><style><class name="theme-nav-icon"/></style></object></child>
+              <child><object class="GtkBox"><property name="hexpand">true</property><property name="valign">center</property><style><class name="theme-mini-line"/></style></object></child>
+            </object></child>
+            <child><object class="GtkBox"><property name="spacing">3</property>
+              <child><object class="GtkBox"><style><class name="theme-nav-icon"/></style></object></child>
+              <child><object class="GtkBox"><property name="hexpand">true</property><property name="valign">center</property><style><class name="theme-mini-line"/></style></object></child>
+            </object></child>
+            <child><object class="GtkBox"><property name="spacing">3</property>
+              <child><object class="GtkBox"><style><class name="theme-nav-icon"/></style></object></child>
+              <child><object class="GtkBox"><property name="hexpand">true</property><property name="valign">center</property><style><class name="theme-mini-line"/></style></object></child>
+            </object></child>
+          </object></child>
+          <child><object class="GtkBox">
+            <property name="hexpand">true</property>
+            <property name="orientation">vertical</property>
+            <property name="spacing">4</property>
+            <style><class name="theme-content"/></style>
+            <child><object class="GtkBox"><property name="spacing">5</property>
+              <child><object class="GtkBox"><property name="width-request">18</property><property name="height-request">18</property><style><class name="theme-cover"/></style></object></child>
+              <child><object class="GtkBox"><property name="hexpand">true</property><property name="orientation">vertical</property><property name="spacing">4</property><property name="valign">center</property>
+                <child><object class="GtkBox"><style><class name="theme-mini-line"/></style></object></child>
+                <child><object class="GtkBox"><property name="margin-end">10</property><style><class name="theme-mini-line"/></style></object></child>
+              </object></child>
+            </object></child>
+            <child><object class="GtkBox"><style><class name="theme-track"/></style>
+              <child><object class="GtkBox"><property name="hexpand">true</property><property name="margin-end">8</property><style><class name="theme-mini-line"/></style></object></child>
+            </object></child>
+            <child><object class="GtkBox"><style><class name="theme-track"/><class name="theme-track-selected"/></style>
+              <child><object class="GtkBox"><property name="hexpand">true</property><property name="margin-end">14</property><style><class name="theme-mini-line"/></style></object></child>
+            </object></child>
+            <child><object class="GtkBox"><style><class name="theme-track"/></style>
+              <child><object class="GtkBox"><property name="hexpand">true</property><style><class name="theme-mini-line"/></style></object></child>
+            </object></child>
+          </object></child>
+        </object></child>
+        <child><object class="GtkBox">
+          <property name="spacing">6</property>
+          <style><class name="theme-player"/></style>
+          <child><object class="GtkBox"><property name="width-request">12</property><property name="height-request">12</property><style><class name="theme-cover"/></style></object></child>
+          <child><object class="GtkImage"><property name="icon-name">rufin-media-playback-start-symbolic</property><property name="pixel-size">10</property></object></child>
+          <child><object class="GtkBox"><property name="hexpand">true</property><property name="valign">center</property><style><class name="theme-progress"/></style></object></child>
+        </object></child>
+      </object></property>
+    </object></child>
+    <child><object class="GtkBox">
+      <property name="spacing">4</property>
+      <property name="height-request">34</property>
+      <child><object class="GtkLabel" id="name">
+      <property name="hexpand">true</property>
+      <property name="wrap">true</property>
+      <property name="wrap-mode">word-char</property>
+      <property name="max-width-chars">16</property>
+      <property name="lines">2</property>
+      <property name="ellipsize">end</property>
+      <property name="xalign">0</property>
+      <style><class name="caption"/></style>
+    </object></child>
+    <child><object class="GtkButton" id="edit">
+      <property name="visible">false</property>
+      <property name="valign">center</property>
+      <property name="icon-name">rufin-document-edit-symbolic</property>
+      <property name="tooltip-text" translatable="yes">Edit theme</property>
+      <accessibility><property name="label" translatable="yes">Edit theme</property></accessibility>
+      <style><class name="flat"/><class name="theme-edit"/></style>
+    </object></child>
+    <child><object class="GtkDropDown" id="accent">
+      <property name="valign">center</property>
+      <property name="tooltip-text" translatable="yes">Accent color</property>
+      <accessibility><property name="label" translatable="yes">Accent color</property></accessibility>
+      <style><class name="theme-accent"/></style>
+    </object></child>
+    </object></child>
+  </object>
+</interface>

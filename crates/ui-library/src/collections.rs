@@ -1277,6 +1277,7 @@ fn install_playlist_order_drop(
         reorder(dragged, current);
         true
     });
+    ui_shared::media_drag::style_media_drop_target(widget);
     widget.add_controller(drop);
 }
 fn collection_grid_field_class(field: LibraryField) -> &'static str {

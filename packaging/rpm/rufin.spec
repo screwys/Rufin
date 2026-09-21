@@ -78,8 +78,8 @@ find "%{buildroot}%{_datadir}/icons/hicolor" -type f -print \
   | LC_ALL=C sort >> rufin.lang
 
 %check
-desktop-file-validate data/io.github.screwys.Rufin.desktop
-appstreamcli validate --no-net data/io.github.screwys.Rufin.metainfo.xml
+desktop-file-validate resources/io.github.screwys.Rufin.desktop
+appstreamcli validate --no-net resources/io.github.screwys.Rufin.metainfo.xml
 
 %files -f rufin.lang
 %license LICENSE

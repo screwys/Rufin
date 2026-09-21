@@ -768,6 +768,7 @@ fn install_playlist_entry_drag(
         );
         true
     });
+    ui_shared::media_drag::style_media_drop_target(target);
     target.as_ref().add_controller(drop_target);
 }
 
