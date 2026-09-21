@@ -1017,18 +1017,6 @@ impl TransportCommandPort for PlaybackOwner {
     fn set_muted(&self, muted: bool) {
         self.send(SessionCommand::SetMuted(muted))
     }
-    fn toggle_shuffle(&self) {
-        match self.settings.update(|stored| {
-            stored.ui.shuffle_enabled = !stored.ui.shuffle_enabled;
-            Ok(stored.ui.shuffle_enabled)
-        }) {
-            Ok(enabled) => self.send(SessionCommand::SetShuffle {
-                enabled,
-                seed: random_u64(),
-            }),
-            Err(_) => self.set_shuffle(false),
-        }
-    }
     fn set_shuffle(&self, enabled: bool) {
         let _ = self.settings.update(|stored| {
             stored.ui.shuffle_enabled = enabled;

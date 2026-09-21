@@ -1163,7 +1163,6 @@ impl crate::PlayerUi {
         controls
             .album
             .set_sensitive(presentation.current && !presentation.album.is_empty());
-        controls.favorite_button.set_sensitive(presentation.current);
         let rating_visible =
             self.settings.current.borrow().show_bottom_bar_rating && presentation.current;
         controls.rating.widget().set_visible(rating_visible);
@@ -2135,7 +2134,10 @@ pub fn connect_player_controls(shell: &Rc<crate::PlayerUi>) {
             else {
                 return;
             };
-            feedback_shell.playback_handles.transport.toggle_shuffle();
+            feedback_shell
+                .playback_handles
+                .transport
+                .set_shuffle(enabled);
             feedback_shell
                 .control_feedback
                 .show_control_feedback_toast(if enabled {

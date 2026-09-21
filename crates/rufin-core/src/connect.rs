@@ -268,6 +268,7 @@ struct Enrollment {
 }
 
 struct Session {
+    settings_revision: Mutex<Option<(u64, u64)>>,
     profile: String,
     documents: Arc<ProfileStore>,
     identity: String,
@@ -740,6 +741,7 @@ impl ConnectOwner {
         ));
         let documents = Arc::new(ProfileStore::open(&path, peer).await.map_err(error)?);
         *self.session.write().await = Some(Arc::new(Session {
+            settings_revision: Mutex::new(None),
             profile: profile.clone(),
             documents: documents.clone(),
             identity,
@@ -1783,16 +1785,28 @@ impl ConnectOwner {
         let Some(session) = self.session.read().await.clone() else {
             return Ok(false);
         };
-        let settings = self.settings_apply.clone();
-        let secrets = Arc::clone(&self.secrets);
-        let records = tokio::task::spawn_blocking(move || settings.connect_records(&secrets))
-            .await
-            .map_err(error)??;
-        session
-            .documents
-            .write_settings(&records)
-            .await
-            .map_err(error)?;
+        let revision = (self.settings_apply.revision(), self.secrets.revision());
+        if *session
+            .settings_revision
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            != Some(revision)
+        {
+            let settings = self.settings_apply.clone();
+            let secrets = Arc::clone(&self.secrets);
+            let records = tokio::task::spawn_blocking(move || settings.connect_records(&secrets))
+                .await
+                .map_err(error)??;
+            session
+                .documents
+                .write_settings(&records)
+                .await
+                .map_err(error)?;
+            *session
+                .settings_revision
+                .lock()
+                .unwrap_or_else(|p| p.into_inner()) = Some(revision);
+        }
         let captured = session
             .documents
             .capture(&self.database)

@@ -1241,13 +1241,7 @@ mod point_projection_tests {
     }
 }
 
-pub(crate) async fn load_playlist_entry_rows(
-    transaction: &mut sqlx::Transaction<'_, Sqlite>,
-    keys: &[PlaylistEntryKey],
-) -> LibraryResult<Vec<PlaylistEntryRow>> {
-    if keys.is_empty() {
-        return Ok(Vec::new());
-    }
+pub(crate) fn playlist_entries_query(keys: &[PlaylistEntryKey]) -> QueryBuilder<Sqlite> {
     let mut query = QueryBuilder::<Sqlite>::new("WITH requested(playlist_entry_key,ordinal) AS (");
     query.push_values(keys.iter().enumerate(), |mut row, (ordinal, key)| {
         row.push_bind(*key).push_bind(ordinal as i64);
@@ -1263,6 +1257,17 @@ pub(crate) async fn load_playlist_entry_rows(
         FROM requested JOIN catalog.native_playlist_entries entry
           ON entry.playlist_entry_key=-requested.playlist_entry_key WHERE requested.playlist_entry_key<0
     ) SELECT ");
+    query
+}
+
+pub(crate) async fn load_playlist_entry_rows(
+    transaction: &mut sqlx::Transaction<'_, Sqlite>,
+    keys: &[PlaylistEntryKey],
+) -> LibraryResult<Vec<PlaylistEntryRow>> {
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut query = playlist_entries_query(keys);
     query.push(crate::tracks::TRACK_LINK_COLUMNS);
     query.push("entry.playlist_entry_key,entry.media_uri,entry.position,source.object_id source_id,
                       COALESCE(track.title,entry.title,'') title,

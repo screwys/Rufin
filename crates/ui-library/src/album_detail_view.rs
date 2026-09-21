@@ -215,10 +215,9 @@ impl CatalogUi {
         let database = Arc::clone(&self.library);
         let source = album.source_key;
         let folder = None;
-        let load = move |request: TrackProjectionRequest| {
+        let load = move |request: TrackProjectionRequest, cancellation| {
             let database = Arc::clone(&database);
             async move {
-                let cancellation = library::ReadCancellation::new();
                 let page = database
                     .album_track_route_page(
                         source,

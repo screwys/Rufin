@@ -161,7 +161,6 @@ pub trait TransportCommandPort: Send + Sync {
     fn set_volume(&self, volume: f64);
     fn persist_volume(&self, volume: f64);
     fn set_muted(&self, muted: bool);
-    fn toggle_shuffle(&self);
     fn set_shuffle(&self, enabled: bool);
     fn cycle_repeat(&self);
     fn set_repeat(&self, repeat: RepeatMode);

@@ -92,11 +92,15 @@ pub fn item_navigation_entry_position(
 /// request while the route still owns this value.
 pub struct LatestMountedRouteRead<T: Send + 'static, R: Send + 'static = ()> {
     apply: Rc<dyn Fn(R, T)>,
-    load: Arc<dyn Fn(R) -> Pin<Box<dyn Future<Output = T> + Send>> + Send + Sync>,
+    load: Arc<
+        dyn Fn(R, library::ReadCancellation) -> Pin<Box<dyn Future<Output = T> + Send>>
+            + Send
+            + Sync,
+    >,
     runtime: tokio::runtime::Handle,
     context: &'static str,
     generation: Cell<u64>,
-    running: Cell<Option<u64>>,
+    running: RefCell<Option<(library::ReadCancellation, tokio::task::AbortHandle)>>,
     pending: RefCell<Option<(u64, R)>>,
 }
 
@@ -104,7 +108,11 @@ impl<T: Send + 'static, R: Clone + Send + 'static> LatestMountedRouteRead<T, R> 
     pub fn new_with_request(
         runtime: tokio::runtime::Handle,
         apply: Rc<dyn Fn(R, T)>,
-        load: Arc<dyn Fn(R) -> Pin<Box<dyn Future<Output = T> + Send>> + Send + Sync>,
+        load: Arc<
+            dyn Fn(R, library::ReadCancellation) -> Pin<Box<dyn Future<Output = T> + Send>>
+                + Send
+                + Sync,
+        >,
         context: &'static str,
     ) -> Rc<Self> {
         Rc::new(Self {
@@ -113,7 +121,7 @@ impl<T: Send + 'static, R: Clone + Send + 'static> LatestMountedRouteRead<T, R> 
             runtime,
             context,
             generation: Cell::new(0),
-            running: Cell::new(None),
+            running: RefCell::new(None),
             pending: RefCell::new(None),
         })
     }
@@ -127,26 +135,31 @@ impl<T: Send + 'static, R: Clone + Send + 'static> LatestMountedRouteRead<T, R> 
         let generation = self.generation.get().wrapping_add(1);
         self.generation.set(generation);
         self.pending.replace(Some((generation, request)));
+        if let Some((cancellation, _)) = self.running.borrow().as_ref() {
+            cancellation.cancel();
+        }
     }
 
     fn start(self: &Rc<Self>) {
-        if self.running.get().is_some() {
+        if self.running.borrow().is_some() {
             return;
         }
         let Some((generation, request)) = self.pending.borrow_mut().take() else {
             return;
         };
-        self.running.set(Some(generation));
-        let load = Arc::clone(&self.load);
-        let runtime = self.runtime.clone();
+        let cancellation = library::ReadCancellation::new();
+        let task = self
+            .runtime
+            .spawn((self.load)(request.clone(), cancellation.clone()));
+        self.running
+            .replace(Some((cancellation, task.abort_handle())));
         let read = Rc::downgrade(self);
         glib::spawn_future_local(async move {
-            let load_request = request.clone();
-            let result = runtime.spawn(async move { load(load_request).await }).await;
+            let result = task.await;
             let Some(read) = read.upgrade() else {
                 return;
             };
-            read.running.set(None);
+            read.running.borrow_mut().take();
             let value = match result {
                 Ok(value) => value,
                 Err(_) => {
@@ -164,6 +177,15 @@ impl<T: Send + 'static, R: Clone + Send + 'static> LatestMountedRouteRead<T, R> 
     }
 }
 
+impl<T: Send + 'static, R: Send + 'static> Drop for LatestMountedRouteRead<T, R> {
+    fn drop(&mut self) {
+        if let Some((cancellation, task)) = self.running.get_mut().take() {
+            cancellation.cancel();
+            task.abort();
+        }
+    }
+}
+
 #[cfg(test)]
 mod latest_mounted_route_read_tests {
     use super::*;
@@ -178,7 +200,7 @@ mod latest_mounted_route_read_tests {
                     let (started_sender, started_receiver) = async_channel::bounded(2);
                     let (release_sender, release_receiver) = async_channel::bounded(2);
                     let (applied_sender, applied_receiver) = async_channel::bounded(2);
-                    let load = Arc::new(move |request: usize| {
+                    let load = Arc::new(move |request: usize, _| {
                         let started = started_sender.clone();
                         let release = release_receiver.clone();
                         Box::pin(async move {
@@ -230,17 +252,16 @@ mod latest_mounted_route_read_tests {
             .with_thread_default(|| {
                 context.block_on(async {
                     let (started_sender, started_receiver) = async_channel::bounded(1);
-                    let (release_sender, release_receiver) = async_channel::bounded(1);
                     let (dropped_sender, dropped_receiver) = async_channel::bounded(1);
                     let applied = Rc::new(Cell::new(false));
-                    let load = Arc::new(move |(): ()| {
+                    let load = Arc::new(move |(): (), _| {
                         let started = started_sender.clone();
-                        let release = release_receiver.clone();
                         let dropped = dropped_sender.clone();
                         Box::pin(async move {
+                            let notice = DropNotice(dropped);
                             started.send(()).await.expect("publish started read");
-                            release.recv().await.expect("release detached read");
-                            DropNotice(dropped)
+                            std::future::pending::<()>().await;
+                            notice
                         })
                             as Pin<Box<dyn Future<Output = DropNotice> + Send>>
                     });
@@ -255,7 +276,6 @@ mod latest_mounted_route_read_tests {
                     read.request_with(());
                     started_receiver.recv().await.unwrap();
                     drop(read);
-                    release_sender.send(()).await.unwrap();
                     dropped_receiver.recv().await.unwrap();
                     assert!(!applied.get());
                 })

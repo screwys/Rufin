@@ -215,6 +215,25 @@ fn scale_to_fit(
         .map_err(|_| ArtworkError::Decode("scaled artwork width was invalid".to_string()))?;
     let scaled_height = u32::try_from(scaled_height)
         .map_err(|_| ArtworkError::Decode("scaled artwork height was invalid".to_string()))?;
+    if filter == FilterType::Triangle {
+        // Keep cache normalization in byte pixels instead of allocating the
+        // resizer's full-width RGBA float intermediate. Final display scaling
+        // still uses the existing Lanczos filter.
+        let mut resized = if image.color().has_alpha() {
+            DynamicImage::new_rgba8(scaled_width, scaled_height)
+        } else {
+            DynamicImage::new_rgb8(scaled_width, scaled_height)
+        };
+        let options = fast_image_resize::ResizeOptions::new()
+            .resize_alg(fast_image_resize::ResizeAlg::Convolution(
+                fast_image_resize::FilterType::Bilinear,
+            ))
+            .use_alpha(false);
+        fast_image_resize::Resizer::new()
+            .resize(&image, &mut resized, &options)
+            .map_err(decode_error)?;
+        return Ok(resized);
+    }
     Ok(image.resize_exact(scaled_width, scaled_height, filter))
 }
 
