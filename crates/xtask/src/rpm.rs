@@ -342,7 +342,7 @@ fn verify_source_inputs(root: &Path, spec: &str, source_ref: &str, version: &str
     let metainfo = git_file(
         root,
         source_ref,
-        "data/io.github.screwys.Rufin.metainfo.xml",
+        "resources/io.github.screwys.Rufin.metainfo.xml",
     )?;
     let metainfo_version = latest_metainfo_version(&metainfo)?;
     if metainfo_version != version {

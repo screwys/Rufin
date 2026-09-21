@@ -10,6 +10,36 @@ use rufin_core::playback::PlaybackTarget;
 use std::{cell::RefCell, rc::Rc};
 const PLAYLIST_DRAG_ICON_WIDTH: i32 = 180;
 const PLAYLIST_DRAG_ICON_COVER_SIZE: i32 = 36;
+
+/// Highlight the complete table row when a drop controller belongs to one of its cells.
+/// Grid cards keep the highlight on the card itself.
+pub fn style_media_drop_target(widget: &impl IsA<gtk::Widget>) {
+    widget.add_css_class("media-drop-target");
+    widget.connect_state_flags_changed(|widget, previous| {
+        let active = widget.state_flags().contains(gtk::StateFlags::DROP_ACTIVE);
+        if active == previous.contains(gtk::StateFlags::DROP_ACTIVE) {
+            return;
+        }
+        let mut parent = widget.parent();
+        while let Some(ancestor) = parent {
+            if ancestor.css_name() == "row" {
+                if active {
+                    widget.add_css_class("media-drop-cell");
+                    ancestor.add_css_class("media-drop-row");
+                } else {
+                    widget.remove_css_class("media-drop-cell");
+                    ancestor.remove_css_class("media-drop-row");
+                }
+                break;
+            }
+            if ancestor.is::<gtk::GridView>() || ancestor.is::<gtk::ColumnView>() {
+                break;
+            }
+            parent = ancestor.parent();
+        }
+    });
+}
+
 #[derive(Clone, Default)]
 pub struct MediaDragPreviewBinding {
     prepared: Rc<RefCell<Option<PlaylistDragPreview>>>,

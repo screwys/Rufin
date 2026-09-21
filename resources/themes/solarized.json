@@ -1,0 +1,47 @@
+{
+  "name": "Solarized",
+  "mode": "dark",
+  "colors": {
+    "window-bg-color": "rgb(0, 43, 54)",
+    "window-fg-color": "rgb(131, 148, 150)",
+    "view-bg-color": "rgb(0, 43, 54)",
+    "view-fg-color": "rgb(131, 148, 150)",
+    "headerbar-bg-color": "rgb(7, 54, 66)",
+    "headerbar-fg-color": "rgb(131, 148, 150)",
+    "sidebar-bg-color": "rgb(7, 54, 66)",
+    "sidebar-fg-color": "rgb(131, 148, 150)",
+    "secondary-sidebar-bg-color": "rgb(7, 54, 66)",
+    "secondary-sidebar-fg-color": "rgb(131, 148, 150)",
+    "card-bg-color": "rgb(14, 65, 78)",
+    "card-fg-color": "rgb(131, 148, 150)",
+    "dialog-bg-color": "rgb(14, 65, 78)",
+    "dialog-fg-color": "rgb(131, 148, 150)",
+    "popover-bg-color": "rgb(14, 65, 78)",
+    "popover-fg-color": "rgb(131, 148, 150)",
+    "thumbnail-bg-color": "rgb(14, 65, 78)",
+    "thumbnail-fg-color": "rgb(131, 148, 150)",
+    "active-toggle-bg-color": "rgb(14, 65, 78)",
+    "active-toggle-fg-color": "rgb(131, 148, 150)",
+    "overview-bg-color": "rgb(7, 54, 66)",
+    "overview-fg-color": "rgb(131, 148, 150)",
+    "headerbar-backdrop-color": "rgb(7, 54, 66)",
+    "sidebar-backdrop-color": "rgb(7, 54, 66)",
+    "secondary-sidebar-backdrop-color": "rgb(7, 54, 66)",
+    "error-bg-color": "rgb(220, 50, 47)",
+    "error-fg-color": "rgb(0, 43, 54)",
+    "error-color": "oklab(from var(--error-bg-color) var(--standalone-color-oklab))",
+    "success-bg-color": "rgb(133, 153, 0)",
+    "success-fg-color": "rgb(0, 43, 54)",
+    "success-color": "oklab(from var(--success-bg-color) var(--standalone-color-oklab))",
+    "warning-bg-color": "rgb(181, 137, 0)",
+    "warning-fg-color": "rgb(0, 43, 54)",
+    "warning-color": "oklab(from var(--warning-bg-color) var(--standalone-color-oklab))"
+  },
+  "accents": [
+    {
+      "name": "Solarized",
+      "color": "rgb(38, 139, 210)",
+      "foreground": "#1d1d20"
+    }
+  ]
+}

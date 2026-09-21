@@ -186,6 +186,8 @@ pub struct Settings {
     pub theme_preference: ThemePreference,
     #[serde(default)]
     pub accent_preference: AccentPreference,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub theme_accents: std::collections::BTreeMap<String, String>,
     #[serde(default = "default_language_preference")]
     pub language: String,
     pub private_mode: bool,
@@ -292,6 +294,7 @@ impl Default for Settings {
             context_menu: ContextMenuSettings::default(),
             theme_preference: ThemePreference::System,
             accent_preference: AccentPreference::System,
+            theme_accents: Default::default(),
             language: default_language_preference(),
             private_mode: false,
             cast_proxy_enabled: false,

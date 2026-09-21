@@ -44,7 +44,17 @@ pub(super) fn routes() -> Router<ProductHandles> {
 
 pub(super) fn appearance_data(products: &ProductHandles) -> Value {
     let settings = products.source.shared.settings.load().ui;
-    json!({"theme":settings.theme_preference,"accent":settings.accent_preference,"colors":*products.appearance.borrow()})
+    let colors = products.appearance.borrow();
+    let theme = match settings.theme_preference {
+        crate::settings::ThemePreference::System => "System",
+        crate::settings::ThemePreference::Light => "Light",
+        crate::settings::ThemePreference::Dark => "Dark",
+        crate::settings::ThemePreference::Named(_) => colors
+            .get("color-scheme")
+            .map(String::as_str)
+            .unwrap_or("System"),
+    };
+    json!({"theme":theme,"accent":settings.accent_preference,"colors":*colors})
 }
 
 async fn appearance(State(products): State<ProductHandles>) -> Result<Response<Body>, Error> {

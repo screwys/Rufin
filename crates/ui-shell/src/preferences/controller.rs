@@ -396,30 +396,7 @@ impl Shell {
             sample.color()
         };
         let mut colors = std::collections::BTreeMap::new();
-        for (property, value) in [
-            ("--window-bg-color", "var(--window-bg-color)"),
-            ("--window-fg-color", "var(--window-fg-color)"),
-            ("--card-bg-color", "var(--card-bg-color)"),
-            ("--accent-color", "var(--accent-color)"),
-            ("--bg", "var(--view-bg-color)"),
-            ("--sidebar", "var(--sidebar-bg-color)"),
-            ("--surface", "var(--card-bg-color)"),
-            ("--player", "var(--headerbar-bg-color)"),
-            ("--text", "var(--view-fg-color)"),
-            ("--accent", "var(--accent-color)"),
-            ("--blue", "var(--accent-bg-color)"),
-            ("--favorite", "var(--error-color)"),
-            ("--accent-foreground", "var(--accent-fg-color)"),
-            ("--popover", "var(--popover-bg-color)"),
-            ("--right-sidebar", "var(--secondary-sidebar-bg-color)"),
-            ("--line", "var(--sidebar-border-color)"),
-            ("--border-color", "var(--border-color)"),
-            ("--hover", "var(--shade-color)"),
-            (
-                "--muted",
-                "color-mix(in srgb, var(--view-fg-color) 60%, transparent)",
-            ),
-        ] {
+        for &(property, value) in rufin_core::themes::CONTROLLER_COLORS {
             colors.insert(property.into(), resolve(value).to_string());
         }
         let background = resolve("var(--view-bg-color)");

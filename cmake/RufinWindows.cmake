@@ -68,7 +68,7 @@ install(DIRECTORY "${RUFIN_WINDOWS_GTK_PREFIX}/share/gtk-4.0/" DESTINATION share
   PATTERN "gtk4builder.rng" EXCLUDE)
 install(DIRECTORY "${RUFIN_WINDOWS_GTK_PREFIX}/share/icons/hicolor/"
   DESTINATION share/icons/hicolor)
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data/icons/hicolor/"
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/hicolor/"
   DESTINATION share/icons/hicolor)
 install(DIRECTORY "${RUFIN_WINDOWS_GTK_PREFIX}/share/mime/" DESTINATION share/mime)
 install(DIRECTORY "${RUFIN_WINDOWS_GTK_PREFIX}/share/licenses/" DESTINATION share/licenses)

@@ -473,6 +473,7 @@ impl CatalogUi {
                     };
                     ui_shared::media_menus::add_drag_to_playlist(&menus, summary, source)
                 });
+                wrapper.add_css_class("media-drop-target");
                 wrapper.add_controller(drop);
 
                 let edit = detail_action_button(EDIT_ICON, "Edit");

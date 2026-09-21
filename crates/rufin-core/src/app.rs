@@ -298,7 +298,11 @@ where
         secret_storage_fallbacks,
         diagnostics,
         products: ProductHandles {
-            appearance: tokio::sync::watch::channel(std::collections::BTreeMap::new()).0,
+            appearance: tokio::sync::watch::channel(crate::themes::controller_colors(
+                &stored.ui,
+                &paths.config_dir().join("themes"),
+            ))
+            .0,
             backup,
             connect,
             library,

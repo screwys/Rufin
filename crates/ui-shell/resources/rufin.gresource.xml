@@ -5,10 +5,12 @@
   <gresource prefix="/io/github/screwys/Rufin/ui">
     <file compressed="true">shell/activity.ui</file>
     <file compressed="true">shell/activity_genre.ui</file>
-    <file alias="showcase.css" compressed="true">../../../data/showcase.css</file>
+    <file alias="showcase.css" compressed="true">../../../resources/showcase.css</file>
     <file compressed="true">application/about.ui</file>
     <file compressed="true">player/random_play.ui</file>
     <file compressed="true">preferences/appearance.ui</file>
+    <file compressed="true">preferences/theme_tile.ui</file>
+    <file compressed="true">preferences/theme_accent.ui</file>
     <file compressed="true">preferences/dialog.ui</file>
     <file compressed="true">preferences/general.ui</file>
     <file compressed="true">preferences/activity.ui</file>

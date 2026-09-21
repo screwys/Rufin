@@ -1,0 +1,47 @@
+{
+  "name": "Nord",
+  "mode": "dark",
+  "colors": {
+    "window-bg-color": "rgb(46, 52, 64)",
+    "window-fg-color": "rgb(236, 239, 244)",
+    "view-bg-color": "rgb(46, 52, 64)",
+    "view-fg-color": "rgb(236, 239, 244)",
+    "headerbar-bg-color": "rgb(37, 41, 54)",
+    "headerbar-fg-color": "rgb(236, 239, 244)",
+    "sidebar-bg-color": "rgb(37, 41, 54)",
+    "sidebar-fg-color": "rgb(236, 239, 244)",
+    "secondary-sidebar-bg-color": "rgb(37, 41, 54)",
+    "secondary-sidebar-fg-color": "rgb(236, 239, 244)",
+    "card-bg-color": "rgb(59, 66, 82)",
+    "card-fg-color": "rgb(236, 239, 244)",
+    "dialog-bg-color": "rgb(59, 66, 82)",
+    "dialog-fg-color": "rgb(236, 239, 244)",
+    "popover-bg-color": "rgb(59, 66, 82)",
+    "popover-fg-color": "rgb(236, 239, 244)",
+    "thumbnail-bg-color": "rgb(59, 66, 82)",
+    "thumbnail-fg-color": "rgb(236, 239, 244)",
+    "active-toggle-bg-color": "rgb(59, 66, 82)",
+    "active-toggle-fg-color": "rgb(236, 239, 244)",
+    "overview-bg-color": "rgb(37, 41, 54)",
+    "overview-fg-color": "rgb(236, 239, 244)",
+    "headerbar-backdrop-color": "rgb(37, 41, 54)",
+    "sidebar-backdrop-color": "rgb(37, 41, 54)",
+    "secondary-sidebar-backdrop-color": "rgb(37, 41, 54)",
+    "error-bg-color": "rgb(191, 97, 106)",
+    "error-fg-color": "rgb(46, 52, 64)",
+    "error-color": "oklab(from var(--error-bg-color) var(--standalone-color-oklab))",
+    "success-bg-color": "rgb(163, 190, 140)",
+    "success-fg-color": "rgb(46, 52, 64)",
+    "success-color": "oklab(from var(--success-bg-color) var(--standalone-color-oklab))",
+    "warning-bg-color": "rgb(235, 203, 139)",
+    "warning-fg-color": "rgb(46, 52, 64)",
+    "warning-color": "oklab(from var(--warning-bg-color) var(--standalone-color-oklab))"
+  },
+  "accents": [
+    {
+      "name": "Nord",
+      "color": "rgb(136, 192, 208)",
+      "foreground": "rgb(46, 52, 64)"
+    }
+  ]
+}

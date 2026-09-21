@@ -1568,26 +1568,8 @@ fn install_sidebar_pin_drag(
     target.add_controller(drag);
 
     let drop = gtk::DropTarget::new(glib::Variant::static_type(), gtk::gdk::DragAction::MOVE);
-    let weak_target = target.as_ref().downgrade();
-    let enter_target = weak_target.clone();
-    drop.connect_enter(move |_, _, _| {
-        if let Some(target) = enter_target.upgrade() {
-            target.add_css_class("sidebar-pin-reorder-target");
-        }
-        gtk::gdk::DragAction::MOVE
-    });
-    let leave_target = weak_target.clone();
-    drop.connect_leave(move |_| {
-        if let Some(target) = leave_target.upgrade() {
-            target.remove_css_class("sidebar-pin-reorder-target");
-        }
-    });
     let shell = Rc::downgrade(shell);
     drop.connect_drop(move |_, value, _, _| {
-        let Some(target) = weak_target.upgrade() else {
-            return false;
-        };
-        target.remove_css_class("sidebar-pin-reorder-target");
         let Some(moved) = sidebar_pin_from_drag_value(value) else {
             return false;
         };
@@ -1596,6 +1578,7 @@ fn install_sidebar_pin_drag(
         };
         shell.reorder_sidebar_pin(&moved, &pin)
     });
+    target.add_css_class("media-drop-target");
     target.add_controller(drop);
 }
 
@@ -1668,7 +1651,6 @@ fn install_playlist_pin_drop(
         return;
     };
     let playlist = playlist.clone();
-    let weak_target = target.as_ref().downgrade();
     let drop_target = gtk::DropTarget::new(
         glib::BoxedAnyObject::static_type(),
         gtk::gdk::DragAction::COPY,
@@ -1679,24 +1661,8 @@ fn install_playlist_pin_drop(
         formats.contains_type(glib::BoxedAnyObject::static_type())
             && !formats.contains_type(glib::Variant::static_type())
     });
-    let enter_target = weak_target.clone();
-    drop_target.connect_enter(move |_, _, _| {
-        if let Some(target) = enter_target.upgrade() {
-            target.add_css_class("playlist-pin-drop-target");
-        }
-        gtk::gdk::DragAction::COPY
-    });
-    let leave_target = weak_target.clone();
-    drop_target.connect_leave(move |_| {
-        if let Some(target) = leave_target.upgrade() {
-            target.remove_css_class("playlist-pin-drop-target");
-        }
-    });
     let shell = Rc::downgrade(shell);
     drop_target.connect_drop(move |_, value, _, _| {
-        if let Some(target) = weak_target.upgrade() {
-            target.remove_css_class("playlist-pin-drop-target");
-        }
         let Some(shell) = shell.upgrade() else {
             return false;
         };
@@ -1705,6 +1671,7 @@ fn install_playlist_pin_drop(
         };
         ui_shared::media_menus::add_drag_to_playlist(&shell.media_menus, playlist.clone(), source)
     });
+    target.add_css_class("media-drop-target");
     target.add_controller(drop_target);
 }
 
