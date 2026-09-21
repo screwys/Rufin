@@ -177,7 +177,7 @@
     </child>
     <child>
       <object class="GtkLabel" id="status">
-        <property name="label" translatable="yes">Loading…</property>
+        <property name="label" translatable="yes">Loading...</property>
         <property name="margin-top">16</property>
         <property name="margin-bottom">16</property>
       </object>

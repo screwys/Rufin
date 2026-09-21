@@ -536,7 +536,7 @@ impl ActivityView {
         }
         self.export.set_sensitive(false);
         self.report.set_visible(false);
-        self.status.set_text(&tr("Loading…"));
+        self.status.set_text(&tr("Loading..."));
         self.status.set_visible(true);
         self.previous
             .set_sensitive((self.period.selected() as usize + 1) < self.periods.borrow().len());

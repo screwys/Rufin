@@ -1496,9 +1496,6 @@ msgstr ""
 msgid "Loading..."
 msgstr ""
 
-msgid "Loading\342\200\246"
-msgstr ""
-
 msgid "Local File Access"
 msgstr ""
 
