@@ -27,6 +27,7 @@ mod cell_lifetime_tests;
 pub mod detail_links;
 pub mod folder_launcher;
 pub mod path_display;
+mod playing_indicator;
 pub mod recycled_cells;
 pub mod source_labels;
 

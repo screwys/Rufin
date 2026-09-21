@@ -102,9 +102,9 @@ impl SearchItem {
             },
         })
     }
-    fn media_uri(&self) -> Option<String> {
+    fn media_uri(&self) -> Option<&str> {
         match self {
-            Self::Track(row) => Some(row.media_uri.clone()),
+            Self::Track(row) => Some(&row.media_uri),
             _ => None,
         }
     }
@@ -385,6 +385,18 @@ impl ReusableCollectionGridCell<SearchItem> for SearchGridCell {
     }
 
     fn bind(&self, _: u32, item: SearchItem) {
+        let target = match &item {
+            SearchItem::Track(row) => {
+                rufin_core::playback::PlaybackTarget::Track(row.media_uri.clone())
+            }
+            SearchItem::Album(row) => {
+                rufin_core::playback::PlaybackTarget::Album(row.media_uri.clone())
+            }
+            SearchItem::Artist(row) => {
+                rufin_core::playback::PlaybackTarget::Artist(row.media_uri.clone())
+            }
+        };
+        self.body.bind_playing_target(&self.shell, target);
         self.body
             .bind(item.title(), |field| item.field_links(field));
         let favorite = item.favorite();
@@ -559,15 +571,19 @@ impl SearchRouteProjection {
             let position = current
                 .and_then(|current| {
                     (0..model.n_items()).find(|position| {
-                        matches!(
-                            ui_shared::sparse_model::item_at::<SearchItem>(&model, *position),
-                            Some(item @ SearchItem::Track(_))
-                                if item.media_uri().as_deref() == Some(current.media_uri.as_str())
-                        )
+                        model
+                            .item(*position)
+                            .and_then(|item| {
+                                ui_shared::sparse_model::object_item::<SearchItem, _>(
+                                    item,
+                                    |item| item.media_uri() == Some(current.media_uri.as_str()),
+                                )
+                            })
+                            .unwrap_or(false)
                     })
                 })
                 .unwrap_or(gtk::INVALID_LIST_POSITION);
-            indicator.set_position(position);
+            indicator.set_current(current.map(|current| current.media_uri.as_str()), position);
             indicator.set_paused(current.is_some_and(|current| current.paused));
             true
         }));
@@ -926,6 +942,7 @@ fn search_column(
             return super::columns::mapped_track_row_index_column_with_width::<SearchItem, _>(
                 super::columns::track_column_width(category.key(), field),
                 playing.clone(),
+                SearchItem::media_uri,
                 |position, item| {
                     matches!(item, SearchItem::Track(_)).then(|| (position + 1).to_string())
                 },
@@ -953,6 +970,9 @@ fn search_column(
     if field == LibraryField::Favorite {
         return search_favorite_column(shell);
     }
+    let playing = (field == LibraryField::Title)
+        .then(|| playing.cloned())
+        .flatten();
     let factory = gtk::SignalListItemFactory::new();
     let setup_shell = Rc::clone(shell);
     factory.connect_setup(move |_, item| {
@@ -961,6 +981,10 @@ fn search_column(
         };
         let cell = RecycledTextCell::new();
         let label = cell.label();
+        if field == LibraryField::Title && category == CollectionCategory::Tracks {
+            cell.set_spacing(5);
+            ui_shared::recycled_cells::install_playing_indicator(&label, &cell);
+        }
         label.set_halign(gtk::Align::Fill);
         label.set_hexpand(true);
         add_field_skeleton_class(&label, field);
@@ -975,6 +999,7 @@ fn search_column(
         });
         item.set_child(Some(&cell));
     });
+    let bind_playing = playing.clone();
     connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
@@ -984,7 +1009,15 @@ fn search_column(
         };
         if let Some(row) = item_at_from_item::<SearchItem>(item) {
             cell.bind_links(row.field_links(field));
+            if let Some(playing) = bind_playing.as_ref() {
+                if let Some(uri) = row.media_uri() {
+                    playing.bind(cell.label().upcast_ref(), item.position(), &uri);
+                }
+            }
         } else {
+            if let Some(playing) = bind_playing.as_ref() {
+                playing.unbind(cell.label().upcast_ref());
+            }
             cell.clear();
         }
     });
@@ -992,6 +1025,9 @@ fn search_column(
         if let Some(item) = item.downcast_ref::<gtk::ListItem>()
             && let Some(cell) = list_cell::<RecycledTextCell>(item)
         {
+            if let Some(playing) = playing.as_ref() {
+                playing.unbind(cell.label().upcast_ref());
+            }
             cell.clear();
         }
     });
@@ -1098,7 +1134,9 @@ fn search_merged_column(
                 .bind_download_badge(&downloaded, value.is_downloaded());
         }
         if let Some(playing) = bind_playing.as_ref() {
-            playing.bind(title.upcast_ref(), item.position());
+            if let Some(uri) = value.media_uri() {
+                playing.bind(title.upcast_ref(), item.position(), &uri);
+            }
         }
     });
     let clear_shell = Rc::clone(shell);

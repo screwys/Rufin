@@ -351,6 +351,7 @@ pub fn song_column_for_key<T: ui_shared::library_fields::TrackPresentation>(
         LibraryField::RowIndex => mapped_track_row_index_column_with_width::<T, _>(
             width,
             playing.clone(),
+            |item| Some(item.media_uri()),
             move |position, item| {
                 Some(if key == LibraryListKey::AlbumDetailTracks {
                     item.track_number()
@@ -681,6 +682,7 @@ pub fn mapped_row_index_column<T: Clone + 'static>(width: i32) -> gtk::ColumnVie
 pub fn mapped_track_row_index_column_with_width<T, Number>(
     width: i32,
     playing: TrackRowPlayingIndicator,
+    track: impl Fn(&T) -> Option<&str> + 'static,
     number: Number,
 ) -> gtk::ColumnViewColumn
 where
@@ -690,7 +692,9 @@ where
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(|_, item| {
         if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
-            item.set_child(Some(&track_row_index_cell("")));
+            item.set_child(Some(&ui_shared::recycled_cells::track_list_row_index_cell(
+                item,
+            )));
         }
     });
     let bind_playing = playing.clone();
@@ -704,14 +708,19 @@ where
         else {
             return;
         };
-        let text = item
+        let bound = item
             .item()
-            .and_then(|object| object_item::<T, _>(object, |row| number(item.position(), row)))
+            .and_then(|object| {
+                object_item::<T, _>(object, |row| {
+                    let text = number(item.position(), row)?;
+                    let uri = track(row)?;
+                    set_track_row_index_text(&cell, &text);
+                    bind_playing.bind(cell.upcast_ref(), item.position(), uri);
+                    Some(())
+                })
+            })
             .flatten();
-        if let Some(text) = text {
-            set_track_row_index_text(&cell, &text);
-            bind_playing.bind(cell.upcast_ref(), item.position());
-        } else {
+        if bound.is_none() {
             set_track_row_index_text(&cell, "");
             bind_playing.unbind(cell.upcast_ref());
         }
@@ -741,8 +750,9 @@ pub struct TrackRowPlayingIndicator {
 
 struct TrackRowPlayingIndicatorInner {
     position: std::cell::Cell<u32>,
+    media_uri: RefCell<Option<String>>,
     paused: std::cell::Cell<bool>,
-    cells: RefCell<HashMap<usize, (glib::WeakRef<gtk::Widget>, u32)>>,
+    cells: RefCell<HashMap<usize, (glib::WeakRef<gtk::Widget>, u32, String)>>,
 }
 
 impl TrackRowPlayingIndicator {
@@ -750,22 +760,37 @@ impl TrackRowPlayingIndicator {
         Self {
             inner: Rc::new(TrackRowPlayingIndicatorInner {
                 position: std::cell::Cell::new(gtk::INVALID_LIST_POSITION),
+                media_uri: RefCell::new(None),
                 paused: std::cell::Cell::new(false),
                 cells: RefCell::new(HashMap::new()),
             }),
         }
     }
 
-    pub fn bind(&self, widget: &gtk::Widget, position: u32) {
+    fn matches(&self, position: u32, media_uri: &str) -> bool {
+        self.inner.media_uri.borrow().as_deref() == Some(media_uri)
+            && (self.inner.position.get() == gtk::INVALID_LIST_POSITION
+                || self.inner.position.get() == position)
+    }
+
+    pub fn bind(&self, widget: &gtk::Widget, position: u32, media_uri: &str) {
         apply_track_row_playing(
             widget,
-            position == self.inner.position.get(),
+            self.matches(position, media_uri),
             self.inner.paused.get(),
         );
         self.inner
             .cells
             .borrow_mut()
-            .insert(widget.as_ptr() as usize, (widget.downgrade(), position));
+            .entry(widget.as_ptr() as usize)
+            .and_modify(|(bound_widget, bound_position, uri)| {
+                *bound_widget = widget.downgrade();
+                *bound_position = position;
+                if uri != media_uri {
+                    media_uri.clone_into(uri);
+                }
+            })
+            .or_insert_with(|| (widget.downgrade(), position, media_uri.to_owned()));
     }
 
     pub fn unbind(&self, widget: &gtk::Widget) {
@@ -777,18 +802,28 @@ impl TrackRowPlayingIndicator {
             .remove(&(widget.as_ptr() as usize));
     }
 
-    pub fn set_position(&self, position: u32) {
+    pub fn set_current(&self, media_uri: Option<&str>, position: u32) {
+        if self.inner.position.get() == position
+            && self.inner.media_uri.borrow().as_deref() == media_uri
+        {
+            return;
+        }
+        self.inner.media_uri.replace(media_uri.map(str::to_owned));
         self.inner.position.set(position);
+        self.refresh();
+    }
+
+    fn refresh(&self) {
         self.inner
             .cells
             .borrow_mut()
-            .retain(|_, (widget, bound_position)| {
+            .retain(|_, (widget, bound_position, uri)| {
                 let Some(widget) = widget.upgrade() else {
                     return false;
                 };
                 apply_track_row_playing(
                     &widget,
-                    *bound_position == position,
+                    self.matches(*bound_position, uri),
                     self.inner.paused.get(),
                 );
                 true
@@ -796,32 +831,14 @@ impl TrackRowPlayingIndicator {
     }
 
     pub fn set_paused(&self, paused: bool) {
-        self.inner.paused.set(paused);
-        let position = self.inner.position.get();
-        self.inner
-            .cells
-            .borrow_mut()
-            .retain(|_, (widget, bound_position)| {
-                let Some(widget) = widget.upgrade() else {
-                    return false;
-                };
-                apply_track_row_playing(&widget, *bound_position == position, paused);
-                true
-            });
+        if self.inner.paused.replace(paused) != paused {
+            self.refresh();
+        }
     }
 }
 
 fn apply_track_row_playing(cell: &gtk::Widget, playing: bool, paused: bool) {
-    if playing {
-        cell.add_css_class("track-row-playing");
-    } else {
-        cell.remove_css_class("track-row-playing");
-    }
-    if playing && paused {
-        cell.add_css_class("track-row-paused");
-    } else {
-        cell.remove_css_class("track-row-paused");
-    }
+    ui_shared::recycled_cells::set_track_playing(cell, playing, paused);
 }
 
 pub use ui_shared::recycled_cells::{set_track_row_index_text, track_row_index_cell};
@@ -1452,7 +1469,9 @@ where
                 .bind_download_badge(downloaded, downloaded_value(&data));
         }
         if let Some(playing) = bind_playing.as_ref() {
-            playing.bind(label.upcast_ref(), item.position());
+            if let Some(uri) = track_value(&data) {
+                playing.bind(label.upcast_ref(), item.position(), &uri);
+            }
         }
     });
 
@@ -1581,7 +1600,9 @@ where
             &cell.downloaded().expect("track cell badge"),
             downloaded_value(&value),
         );
-        bind_playing.bind(title.upcast_ref(), item.position());
+        if let Some(uri) = item_track(&value) {
+            bind_playing.bind(title.upcast_ref(), item.position(), &uri);
+        }
         if subtitle.trim().is_empty() {
             cell.clear_subtitle();
         } else {

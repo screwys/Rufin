@@ -38,6 +38,15 @@ impl Topbar {
         }
     }
 
+    pub fn refresh_search_playback(
+        &self,
+        current: Option<&ui_shared::mounted_route::RouteCurrentTrack>,
+    ) {
+        if let Some(popup) = self.search_popup.borrow().as_ref() {
+            popup.refresh_playback(current);
+        }
+    }
+
     pub fn new() -> Self {
         let resource = crate::ui_resource::TOPBAR_RESOURCE;
         let builder = ui_shared::ui_resource::builder(resource);

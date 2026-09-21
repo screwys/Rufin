@@ -1,5 +1,24 @@
 use super::*;
 
+fn search_result_matches(
+    kind: RecentSearchKind,
+    media_uri: &str,
+    current: &ui_shared::mounted_route::RouteCurrentTrack,
+) -> bool {
+    let prefix = match kind {
+        RecentSearchKind::Track => return media_uri == current.media_uri,
+        RecentSearchKind::Album => "album:",
+        RecentSearchKind::Artist => "artist:",
+    };
+    current.context.as_ref().is_some_and(|context| {
+        context
+            .context_id
+            .strip_prefix(prefix)
+            .and_then(|uri| uri.strip_prefix(media_uri))
+            .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with("|query="))
+    })
+}
+
 pub struct SearchPreview {
     pub title: String,
     pub subtitle: String,
@@ -275,6 +294,31 @@ impl SearchSession {
         if let Some(item) = item {
             item.play(catalog, QueuePlacement::Now);
         }
+    }
+
+    pub fn preview_matches(
+        &self,
+        category: CollectionCategory,
+        index: usize,
+        current: &ui_shared::mounted_route::RouteCurrentTrack,
+    ) -> bool {
+        self.items.borrow()[category as usize]
+            .get(index)
+            .is_some_and(|item| {
+                let (kind, uri) = match item {
+                    SearchItem::Track(row) => (RecentSearchKind::Track, row.media_uri.as_str()),
+                    SearchItem::Album(row) => (RecentSearchKind::Album, row.media_uri.as_str()),
+                    SearchItem::Artist(row) => (RecentSearchKind::Artist, row.media_uri.as_str()),
+                };
+                search_result_matches(kind, uri, current)
+            })
+    }
+
+    pub fn recent_matches(
+        result: &RecentSearchResult,
+        current: &ui_shared::mounted_route::RouteCurrentTrack,
+    ) -> bool {
+        search_result_matches(result.kind, &result.media_uri, current)
     }
 
     pub fn present_context(
