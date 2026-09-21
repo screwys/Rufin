@@ -598,9 +598,6 @@ msgstr "選擇本地音樂資料夾"
 msgid "Choose an address"
 msgstr "定位資料夾"
 
-msgid "Choose an existing local folder"
-msgstr "選擇已存在的本地資料夾"
-
 msgid "Choose at least one local music folder"
 msgstr "選擇至少一個本地音樂資料夾"
 
@@ -1761,9 +1758,6 @@ msgstr "管理"
 msgid "Mapped Local Path"
 msgstr ""
 
-msgid "Mapped local file not found"
-msgstr ""
-
 msgid "Maximum year"
 msgstr "最大年份"
 
@@ -2001,9 +1995,6 @@ msgstr "暫無最愛"
 #, fuzzy
 #| msgid "No folder selected"
 msgid "No file linked"
-msgstr "無資料夾被選擇"
-
-msgid "No folder selected"
 msgstr "無資料夾被選擇"
 
 msgid "No folders selected"
@@ -2677,6 +2668,9 @@ msgstr ""
 msgid "Reload from file"
 msgstr "從最愛中移除"
 
+msgid "Reload to apply changes"
+msgstr ""
+
 msgid "Reload"
 msgstr ""
 
@@ -2875,9 +2869,6 @@ msgstr ""
 msgid "Save Lyrics"
 msgstr "儲存歌詞"
 
-msgid "Save Mapping"
-msgstr ""
-
 msgid "Save Server Settings"
 msgstr "儲存伺服器設定"
 
@@ -2891,9 +2882,6 @@ msgid "Save lyrics automatically"
 msgstr ""
 
 msgid "Save playlist changes automatically"
-msgstr ""
-
-msgid "Save to rescan"
 msgstr ""
 
 msgid "Save"
@@ -3891,6 +3879,12 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Choose an existing local folder"
+#~ msgstr "選擇已存在的本地資料夾"
+
+#~ msgid "No folder selected"
+#~ msgstr "無資料夾被選擇"
 
 #, fuzzy
 #~| msgid "Smart Playlist"

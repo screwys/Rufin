@@ -577,9 +577,6 @@ msgstr "Choisissez un dossier local de musique"
 msgid "Choose an address"
 msgstr "Choisissez une adresse"
 
-msgid "Choose an existing local folder"
-msgstr "Choisissez un dossier local existant"
-
 msgid "Choose at least one local music folder"
 msgstr "Choisissez au moins un dossier musique local"
 
@@ -1668,9 +1665,6 @@ msgstr "Gérer"
 msgid "Mapped Local Path"
 msgstr ""
 
-msgid "Mapped local file not found"
-msgstr ""
-
 msgid "Maximum year"
 msgstr "Année maximale"
 
@@ -1892,9 +1886,6 @@ msgstr "Pas encore de favoris"
 #, fuzzy
 #| msgid "No folder selected"
 msgid "No file linked"
-msgstr "Pas de dossier sélectionné"
-
-msgid "No folder selected"
 msgstr "Pas de dossier sélectionné"
 
 msgid "No folders selected"
@@ -2489,6 +2480,9 @@ msgstr ""
 msgid "Reload from file"
 msgstr ""
 
+msgid "Reload to apply changes"
+msgstr ""
+
 msgid "Reload"
 msgstr "Recharger"
 
@@ -2681,9 +2675,6 @@ msgstr ""
 msgid "Save Lyrics"
 msgstr ""
 
-msgid "Save Mapping"
-msgstr ""
-
 msgid "Save Server Settings"
 msgstr ""
 
@@ -2697,9 +2688,6 @@ msgid "Save lyrics automatically"
 msgstr ""
 
 msgid "Save playlist changes automatically"
-msgstr ""
-
-msgid "Save to rescan"
 msgstr ""
 
 msgid "Save"
@@ -3645,6 +3633,12 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Choose an existing local folder"
+#~ msgstr "Choisissez un dossier local existant"
+
+#~ msgid "No folder selected"
+#~ msgstr "Pas de dossier sélectionné"
 
 #, fuzzy
 #~| msgid "Import Backup"
