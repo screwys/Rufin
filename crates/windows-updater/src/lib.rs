@@ -130,6 +130,14 @@ impl PreviousUpdateResult {
 #[derive(Clone, Debug)]
 pub struct InstalledUpdater {
     cache_dir: PathBuf,
+    prepared: std::sync::Arc<std::sync::Mutex<Option<PreparedUpdate>>>,
+}
+
+#[derive(Debug)]
+struct PreparedUpdate {
+    version: String,
+    #[cfg(target_os = "windows")]
+    installer: PathBuf,
 }
 
 impl InstalledUpdater {
@@ -151,13 +159,15 @@ impl InstalledUpdater {
                 cleanup_legacy_helpers(&install_root.join("updater"));
                 cleanup_downloaded_installers(&update_root(&cache_dir));
             }
-            Ok(install_root.map(|_| Self { cache_dir }))
+            Ok(install_root.map(|_| Self {
+                cache_dir,
+                prepared: Default::default(),
+            }))
         }
     }
 
-    /// Starts the downloaded installer in automatic-update mode. NSIS waits
-    /// for Rufin to exit, replaces the installation, and relaunches it.
-    pub fn install(&self, version: &str) -> Result<(), String> {
+    /// Downloads the installer while Rufin continues running.
+    pub fn prepare(&self, version: &str) -> Result<(), String> {
         #[cfg(not(target_os = "windows"))]
         {
             let _ = &self.cache_dir;
@@ -167,8 +177,44 @@ impl InstalledUpdater {
 
         #[cfg(target_os = "windows")]
         {
-            start_installed_update(version, &self.cache_dir).map_err(|error| error.to_string())
+            let version = normalize_version(version).map_err(|error| error.to_string())?;
+            let installer = download_installer(&version, &update_root(&self.cache_dir))
+                .map_err(|error| error.to_string())?;
+            *self
+                .prepared
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                Some(PreparedUpdate { version, installer });
+            Ok(())
         }
+    }
+
+    pub fn ready_version(&self) -> Option<String> {
+        self.prepared
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map(|update| update.version.clone())
+    }
+
+    /// Hands a completed download to NSIS immediately before Rufin exits.
+    pub fn install_ready(&self, relaunch: bool) -> Result<(), String> {
+        #[cfg(target_os = "windows")]
+        {
+            let mut prepared = self
+                .prepared
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(update) = prepared.as_ref() {
+                remove_file_if_present(&result_path(&self.cache_dir))
+                    .map_err(|error| error.to_string())?;
+                launch_installer(&update.installer, relaunch).map_err(|error| error.to_string())?;
+                *prepared = None;
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        let _ = relaunch;
+        Ok(())
     }
 
     /// The direct installer completes updates without user interaction.
@@ -239,18 +285,16 @@ struct GitHubAsset {
 }
 
 #[cfg(target_os = "windows")]
-fn start_installed_update(target_version: &str, cache_dir: &Path) -> Result<(), UpdateError> {
-    let target_version = normalize_version(target_version)?;
-    let update_root = update_root(cache_dir);
-    fs::create_dir_all(&update_root)?;
-    remove_file_if_present(&result_path(cache_dir))?;
-
-    let installer = download_installer(&target_version, &update_root)?;
-    let mut command = Command::new(&installer);
+fn launch_installer(installer: &Path, relaunch: bool) -> Result<(), UpdateError> {
+    let mut command = Command::new(installer);
     command
-        .current_dir(installer.parent().unwrap_or(&update_root))
+        .current_dir(installer.parent().expect("download directory"))
         .arg("/S")
-        .arg("/RUFINUPDATE=1")
+        .arg(if relaunch {
+            "/RUFINUPDATE=1"
+        } else {
+            "/RUFINUPDATE=2"
+        })
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

@@ -37,6 +37,8 @@ pub(crate) const RELEASE_NOTE_ROW_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/dialogs/release_note_row.ui";
 pub(crate) const RELEASE_NOTES_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/dialogs/release_notes.ui";
+pub(crate) const UPDATE_READY_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/preferences/dialogs/update_ready.ui";
 pub(crate) const PLAYBACK_PREFERENCES_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/playback.ui";
 #[cfg(test)]
@@ -106,6 +108,7 @@ pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     PLAYLIST_FILE_DIALOG_RESOURCE,
     RELEASE_NOTE_ROW_RESOURCE,
     RELEASE_NOTES_RESOURCE,
+    UPDATE_READY_RESOURCE,
     PLAYBACK_PREFERENCES_RESOURCE,
     PREFERENCES_REORDER_ROW_RESOURCE,
     CONNECTION_PROGRESS_RESOURCE,

@@ -256,6 +256,15 @@ impl ReleaseUpdateOwner {
 
     pub fn update(&self, version: String) {
         let version = version.trim().to_string();
+        if self.ready_version().as_deref() == Some(version.as_str()) {
+            let installer = self.installer.as_ref().expect("prepared installer");
+            let update = match installer.install_ready(true) {
+                Ok(()) => ReleaseUpdate::Restarting { version },
+                Err(error) => ReleaseUpdate::Failed { version, error },
+            };
+            let _ = self.events.try_send(update);
+            return;
+        }
         let installed_version = mutex_lock(&self.effective_installed_version).clone();
         let available = release_update_available(
             &mutex_lock(&self.cache),
@@ -287,6 +296,19 @@ impl ReleaseUpdateOwner {
     pub fn mark_seen(&self, version: String) -> Result<(), String> {
         mark_release_notification_seen(&self.settings, &version)
     }
+
+    pub fn ready_version(&self) -> Option<String> {
+        self.installer
+            .as_ref()
+            .and_then(ReleaseInstaller::ready_version)
+    }
+
+    pub fn install_on_exit(&self) -> Result<(), String> {
+        if let Some(installer) = &self.installer {
+            installer.install_ready(false)?;
+        }
+        Ok(())
+    }
 }
 
 fn run_update(
@@ -316,12 +338,12 @@ fn run_update(
                     restart_required,
                 }
             }
-            Ok(InstallOutcome::Restarting) => ReleaseUpdate::Restarting { version },
+            Ok(InstallOutcome::Ready) => ReleaseUpdate::Ready { version },
             Err(error) => ReleaseUpdate::Failed { version, error },
         };
-        let restarting = matches!(update, ReleaseUpdate::Restarting { .. });
+        let ready = matches!(update, ReleaseUpdate::Ready { .. });
         let _ = events.send(update).await;
-        if !restarting {
+        if !ready {
             update_in_flight.store(false, Ordering::Release);
         }
     });

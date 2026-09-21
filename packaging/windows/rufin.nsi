@@ -80,6 +80,7 @@ VIAddVersionKey /LANG=1033 "LegalCopyright" "GPL-3.0-or-later"
 Var LegacyInstallDir
 Var LegacyInstallOwned
 Var UpdateMode
+; Update mode 1 relaunches; mode 2 installs after a normal quit and stays closed.
 Var UpdateWaitAttempts
 Var PurgeCache
 Var PurgeCacheCheckbox
@@ -275,7 +276,8 @@ Function .onInit
     ClearErrors
     ${GetOptions} $0 "/RUFINUPDATE=" $1
     IfErrors update_mode_done
-    StrCmp $1 "1" update_mode_value_valid invalid_update_mode
+    StrCmp $1 "1" update_mode_value_valid
+    StrCmp $1 "2" update_mode_value_valid invalid_update_mode
 
 update_mode_value_valid:
     IfSilent update_mode_enabled invalid_update_mode
@@ -292,7 +294,7 @@ invalid_update_mode_silent:
     Abort
 
 update_mode_enabled:
-    StrCpy $UpdateMode 1
+    StrCpy $UpdateMode $1
 
 update_mode_done:
     !insertmacro MUI_LANGDLL_DISPLAY
@@ -386,7 +388,7 @@ runtime_check:
     Goto runtime_not_running
 
 runtime_is_running:
-    StrCmp $UpdateMode 1 runtime_wait
+    StrCmp $UpdateMode 0 0 runtime_wait
     IfSilent runtime_silent_abort runtime_show_running
 
 runtime_wait:

@@ -22,6 +22,13 @@
           </object>
         </child>
         <child><object class="GtkBox" id="status"><property name="orientation">horizontal</property></object></child>
+        <child>
+          <object class="GtkButton" id="restart">
+            <property name="visible">false</property>
+            <property name="label" translatable="yes">Restart now</property>
+            <style><class name="release-note-installed"/><class name="release-note-update"/></style>
+          </object>
+        </child>
         <child><object class="GtkBox"><property name="hexpand">true</property></object></child>
         <child><object class="GtkLabel" id="date"><style><class name="release-note-date"/></style></object></child>
       </object>

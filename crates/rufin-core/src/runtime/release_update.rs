@@ -32,6 +32,9 @@ pub enum ReleaseUpdate {
     Updating {
         version: String,
     },
+    Ready {
+        version: String,
+    },
     Updated {
         version: String,
         restart_required: bool,
