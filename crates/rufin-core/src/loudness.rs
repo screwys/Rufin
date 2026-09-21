@@ -247,7 +247,7 @@ async fn analyze_selected(
                     let mut analyses = Vec::with_capacity(work.tracks.len());
                     let mut track_tags = Vec::with_capacity(work.tracks.len());
                     for track in &work.tracks {
-                        match analyze_album_track(&state, track, &cancelled).await {
+                        match analyze_album_track(&state, &selected, track, &cancelled).await {
                             Ok(analysis) => {
                                 let value = analysis.measurement();
                                 let measurement = LoudnessMeasurement {
@@ -333,7 +333,7 @@ async fn analyze_selected(
             .next_missing_track_loudness(state.source_key, track_after, &ReadCancellation::new())
             .await
         {
-            Ok(Some(work)) => match analyze_track(&state, &work, &cancelled).await {
+            Ok(Some(work)) => match analyze_track(&state, &selected, &work, &cancelled).await {
                 Ok(value) => {
                     let measurement = LoudnessMeasurement {
                         analysis_key: work.expected_analysis_key,
@@ -404,31 +404,37 @@ async fn write_local_tags(
 
 async fn analyze_track(
     state: &SelectedSourceState,
+    selected: &WeakActiveSource,
     work: &TrackLoudnessWork,
     cancelled: &Arc<AtomicBool>,
 ) -> Result<audio_processing::AnalyzedLoudness, String> {
-    analyze_uri(state, &work.media_uri, cancelled)
+    analyze_uri(state, selected, &work.media_uri, cancelled)
         .await
         .map(|analysis| analysis.measurement())
 }
 
 async fn analyze_album_track(
     state: &SelectedSourceState,
+    selected: &WeakActiveSource,
     work: &TrackLoudnessWork,
     cancelled: &Arc<AtomicBool>,
 ) -> Result<LoudnessAnalysis, String> {
-    analyze_uri(state, &work.media_uri, cancelled).await
+    analyze_uri(state, selected, &work.media_uri, cancelled).await
 }
 
 async fn analyze_uri(
     state: &SelectedSourceState,
+    selected: &WeakActiveSource,
     media_uri: &str,
     cancelled: &Arc<AtomicBool>,
 ) -> Result<LoudnessAnalysis, String> {
     let request = StreamRequest::new(media_uri, StreamQuality::Original);
-    let source = state.source.clone();
-    let stream = prepare_stream(&state.database, request, move |_| {
-        source.ok_or_else(crate::source::source_access_unavailable)
+    let stream = prepare_stream(&state.database, request, move |_| async move {
+        selected
+            .upgrade()
+            .ok_or_else(crate::source::source_access_unavailable)?
+            .initialized_source()
+            .await
     })
     .await?;
     let cancelled = Arc::clone(cancelled);

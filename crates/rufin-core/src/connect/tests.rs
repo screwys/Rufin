@@ -45,6 +45,55 @@ impl PlaybackBackend for IdleBackend {
 }
 
 #[test]
+fn relay_changes_preserve_the_open_profile_and_device_identity() {
+    let root = tempfile::tempdir().unwrap();
+    app::with_runtime(|runtime| {
+        runtime.block_on(Box::pin(async {
+            let inputs = device(
+                root.path(),
+                "relay",
+                diagnostics(),
+                Arc::new(secrets::MemorySecretStore::new()),
+            )
+            .await;
+            let owner = &inputs.products.connect;
+            execute(owner, Action::Create).await.unwrap();
+            let session = owner.active().await.unwrap();
+            let identity = owner.status().identity;
+            for relay in [Some("http://127.0.0.1:9/".to_owned()), None] {
+                let previous = owner.connected_network().await.unwrap();
+                execute(
+                    owner,
+                    Action::Network {
+                        nearby: false,
+                        relay: relay.clone(),
+                        public_relay: false,
+                    },
+                )
+                .await
+                .unwrap();
+                let current = owner.connected_network().await.unwrap();
+                assert!(!Arc::ptr_eq(&previous, &current));
+                assert!(
+                    current
+                        .matches_configuration(false, relay.as_deref(), false)
+                        .unwrap()
+                );
+                assert!(Arc::ptr_eq(&session, &owner.active().await.unwrap()));
+                assert_eq!(owner.status().identity, identity);
+            }
+            owner.close_network().await.unwrap();
+            inputs.receivers.visualizer.close();
+            let playback = inputs.products.playback.transport.clone();
+            tokio::task::spawn_blocking(move || playback.shutdown())
+                .await
+                .unwrap();
+        }))
+    })
+    .unwrap();
+}
+
+#[test]
 fn connection_test_requires_the_peer_to_still_share_the_profile() {
     let root = tempfile::tempdir().unwrap();
     app::with_runtime(|runtime| {
@@ -803,7 +852,7 @@ async fn collection_media_downloads_and_reuses_configured_folders(
     let stream = crate::playback::prepare_stream(
         &guest.database,
         playback::StreamRequest::new(uri.clone(), playback::StreamQuality::Original),
-        |_| panic!("a Local track must resolve to its local copy"),
+        |_| async { panic!("a Local track must resolve to its local copy") },
     )
     .await
     .unwrap();

@@ -128,10 +128,14 @@ impl PlaybackOwner {
             connect.resolve_media(&occurrence).await?;
         }
         let source = self.source_owner();
-        let stream = prepare_stream(&self.database, request, move |source_id| {
-            source
-                .ok_or_else(crate::source::source_access_unavailable)?
-                .client(source_id)
+        let stream = prepare_stream(&self.database, request, move |source_id| async move {
+            tokio::task::spawn_blocking(move || {
+                source
+                    .ok_or_else(crate::source::source_access_unavailable)?
+                    .client(&source_id)
+            })
+            .await
+            .map_err(string_error)?
         })
         .await?;
         let (track, album) = self

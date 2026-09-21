@@ -110,6 +110,7 @@ impl Shell {
             && self.has_active_mounted_route()
             && self.startup.route_allocated.get()
             && width > 1
+            && self.navigation.pin_cancellation.borrow().is_none()
             && self.artwork.startup_cover_prime_pending_count() == 0
     }
 
