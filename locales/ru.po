@@ -621,9 +621,6 @@ msgstr "Выбрать локальную папку с музыкой"
 msgid "Choose an address"
 msgstr "Выбрать адрес"
 
-msgid "Choose an existing local folder"
-msgstr "Выбрать существующую локальную папку"
-
 msgid "Choose at least one local music folder"
 msgstr "Выберите хотя бы одну локальную папку с музыкой"
 
@@ -1656,9 +1653,6 @@ msgstr "Управление"
 msgid "Mapped Local Path"
 msgstr "Сопоставленный локальный путь"
 
-msgid "Mapped local file not found"
-msgstr "Сопоставленный локальный файл не найден"
-
 msgid "Maximum year"
 msgstr "Максимальный год"
 
@@ -1873,9 +1867,6 @@ msgstr "Пока нет избранных"
 
 msgid "No file linked"
 msgstr "Файл не привязан"
-
-msgid "No folder selected"
-msgstr "Папка не выбрана"
 
 msgid "No folders selected"
 msgstr "Папки не выбраны"
@@ -2459,6 +2450,9 @@ msgstr "Выпуск"
 msgid "Reload from file"
 msgstr "Перезагрузить из файла"
 
+msgid "Reload to apply changes"
+msgstr ""
+
 msgid "Reload"
 msgstr "Перезагрузить"
 
@@ -2639,9 +2633,6 @@ msgstr "Сохранить диагностический журнал"
 msgid "Save Lyrics"
 msgstr "Сохранить текст песни"
 
-msgid "Save Mapping"
-msgstr "Сохранить Сопоставления"
-
 msgid "Save Server Settings"
 msgstr "Сохранить Настройки Сервера"
 
@@ -2657,9 +2648,6 @@ msgstr "Автоматически сохранять текст песни"
 
 msgid "Save playlist changes automatically"
 msgstr "Автоматически сохранять изменения в плейлисте"
-
-msgid "Save to rescan"
-msgstr "Сохранить для повторного сканирования"
 
 msgid "Save"
 msgstr "Сохранить"
@@ -3615,6 +3603,21 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Choose an existing local folder"
+#~ msgstr "Выбрать существующую локальную папку"
+
+#~ msgid "Mapped local file not found"
+#~ msgstr "Сопоставленный локальный файл не найден"
+
+#~ msgid "No folder selected"
+#~ msgstr "Папка не выбрана"
+
+#~ msgid "Save Mapping"
+#~ msgstr "Сохранить Сопоставления"
+
+#~ msgid "Save to rescan"
+#~ msgstr "Сохранить для повторного сканирования"
 
 #~ msgid "Import a copy"
 #~ msgstr "Импортировать копию"

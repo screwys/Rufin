@@ -579,9 +579,6 @@ msgstr "Valitse paikallinen musiikkikansio"
 msgid "Choose an address"
 msgstr "Valitse kansio"
 
-msgid "Choose an existing local folder"
-msgstr "Valitse olemassa oleva paikallinen kansio"
-
 msgid "Choose at least one local music folder"
 msgstr "Valitse vähintään yksi paikallinen musiikkikansio"
 
@@ -1703,9 +1700,6 @@ msgstr "Hallitse"
 msgid "Mapped Local Path"
 msgstr ""
 
-msgid "Mapped local file not found"
-msgstr ""
-
 msgid "Maximum year"
 msgstr "Vuosi enintään"
 
@@ -1927,9 +1921,6 @@ msgstr "Ei suosikkeja vielä"
 #, fuzzy
 #| msgid "No folder selected"
 msgid "No file linked"
-msgstr "Kansiota ei ole valittu"
-
-msgid "No folder selected"
 msgstr "Kansiota ei ole valittu"
 
 msgid "No folders selected"
@@ -2581,6 +2572,9 @@ msgstr ""
 msgid "Reload from file"
 msgstr "Poistettu suosikeista"
 
+msgid "Reload to apply changes"
+msgstr ""
+
 msgid "Reload"
 msgstr ""
 
@@ -2773,9 +2767,6 @@ msgstr "Tallenna diagnostiikkaloki"
 msgid "Save Lyrics"
 msgstr "Tallenna sanoitukset"
 
-msgid "Save Mapping"
-msgstr ""
-
 msgid "Save Server Settings"
 msgstr "Tallenna palvelinasetukset"
 
@@ -2794,9 +2785,6 @@ msgstr "Tallenna sanoitukset automaattisesti"
 #| msgid "Save lyrics automatically"
 msgid "Save playlist changes automatically"
 msgstr "Tallenna sanoitukset automaattisesti"
-
-msgid "Save to rescan"
-msgstr ""
 
 msgid "Save"
 msgstr "Tallenna"
@@ -3787,6 +3775,12 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#~ msgid "Choose an existing local folder"
+#~ msgstr "Valitse olemassa oleva paikallinen kansio"
+
+#~ msgid "No folder selected"
+#~ msgstr "Kansiota ei ole valittu"
 
 #, fuzzy
 #~| msgid "Import Backup"

@@ -605,9 +605,6 @@ msgstr "Izvēlieties lokālo mūzikas mapi"
 msgid "Choose an address"
 msgstr "Izvēlēties adresi"
 
-msgid "Choose an existing local folder"
-msgstr "Izvēlieties esošu lokālu mapi"
-
 msgid "Choose at least one local music folder"
 msgstr "Izvēlieties vismaz vienu lokālo mūzikas mapi"
 
@@ -1694,9 +1691,6 @@ msgstr "Pārvaldīt"
 msgid "Mapped Local Path"
 msgstr "Nokartētais lokālais ceļš"
 
-msgid "Mapped local file not found"
-msgstr "Norādītā lokālā faila nav atrasts"
-
 msgid "Maximum year"
 msgstr "Maksimālais gads"
 
@@ -1918,9 +1912,6 @@ msgstr "Vēl nav pievienots nevienas dziesmas izlasē"
 #, fuzzy
 #| msgid "No folder selected"
 msgid "No file linked"
-msgstr "Nav izvēlēta mape"
-
-msgid "No folder selected"
 msgstr "Nav izvēlēta mape"
 
 msgid "No folders selected"
@@ -2517,6 +2508,9 @@ msgstr "Izdevums"
 msgid "Reload from file"
 msgstr "Ielādēt no faila vēlreiz"
 
+msgid "Reload to apply changes"
+msgstr ""
+
 msgid "Reload"
 msgstr "Pārlādēt"
 
@@ -2707,9 +2701,6 @@ msgstr "Saglabāt diagnostikas žurnālu"
 msgid "Save Lyrics"
 msgstr "Saglabāt tekstus"
 
-msgid "Save Mapping"
-msgstr "Saglabāt kartēšanu"
-
 msgid "Save Server Settings"
 msgstr "Saglabāt servera iestatījumus"
 
@@ -2724,9 +2715,6 @@ msgstr "Saglabāt tekstus automātiski"
 
 msgid "Save playlist changes automatically"
 msgstr "Automātiski saglabāt atskaņošanas saraksta izmaiņas"
-
-msgid "Save to rescan"
-msgstr "Saglabāt, lai atkārtoti skenētu"
 
 msgid "Save"
 msgstr "Saglabāt"
@@ -3696,6 +3684,21 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "Choose an existing local folder"
+#~ msgstr "Izvēlieties esošu lokālu mapi"
+
+#~ msgid "Mapped local file not found"
+#~ msgstr "Norādītā lokālā faila nav atrasts"
+
+#~ msgid "No folder selected"
+#~ msgstr "Nav izvēlēta mape"
+
+#~ msgid "Save Mapping"
+#~ msgstr "Saglabāt kartēšanu"
+
+#~ msgid "Save to rescan"
+#~ msgstr "Saglabāt, lai atkārtoti skenētu"
 
 #~ msgid "Import a copy"
 #~ msgstr "Importēt kopiju"

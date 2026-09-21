@@ -620,9 +620,6 @@ msgstr "Vali kohalik muusikakaust"
 msgid "Choose an address"
 msgstr "Vali kohalik prefiks."
 
-msgid "Choose an existing local folder"
-msgstr "Vali olemasolev kohalik kaust"
-
 msgid "Choose at least one local music folder"
 msgstr "Palun vali vähemalt üks kohaliku muusika kaust"
 
@@ -1789,9 +1786,6 @@ msgstr "Halda"
 msgid "Mapped Local Path"
 msgstr "Vastendatud kohalik kaust"
 
-msgid "Mapped local file not found"
-msgstr "Vastendatud kohalikku faili ei leidu"
-
 msgid "Maximum year"
 msgstr "Maksimaalne aasta"
 
@@ -2019,9 +2013,6 @@ msgstr "Lemmikuid veel pole"
 #, fuzzy
 #| msgid "No folder selected"
 msgid "No file linked"
-msgstr "Kaust on valimata"
-
-msgid "No folder selected"
 msgstr "Kaust on valimata"
 
 msgid "No folders selected"
@@ -2700,6 +2691,9 @@ msgstr "Väljalase"
 msgid "Reload from file"
 msgstr "Eemaldatud lemmikute seast"
 
+msgid "Reload to apply changes"
+msgstr ""
+
 msgid "Reload"
 msgstr ""
 
@@ -2900,9 +2894,6 @@ msgstr "Salvesta diagnostikalogi"
 msgid "Save Lyrics"
 msgstr "Salvesta laulusõnad"
 
-msgid "Save Mapping"
-msgstr "Salvesta vastendus"
-
 msgid "Save Server Settings"
 msgstr "Salvesta serveri seadistused"
 
@@ -2921,9 +2912,6 @@ msgstr "Salvesta laulusõnad automaatselt"
 #| msgid "Save lyrics automatically"
 msgid "Save playlist changes automatically"
 msgstr "Salvesta laulusõnad automaatselt"
-
-msgid "Save to rescan"
-msgstr "Salvestatud uuesti skaneerimiseks"
 
 msgid "Save"
 msgstr "Salvesta"
@@ -3932,6 +3920,21 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Choose an existing local folder"
+#~ msgstr "Vali olemasolev kohalik kaust"
+
+#~ msgid "Mapped local file not found"
+#~ msgstr "Vastendatud kohalikku faili ei leidu"
+
+#~ msgid "No folder selected"
+#~ msgstr "Kaust on valimata"
+
+#~ msgid "Save Mapping"
+#~ msgstr "Salvesta vastendus"
+
+#~ msgid "Save to rescan"
+#~ msgstr "Salvestatud uuesti skaneerimiseks"
 
 #, fuzzy
 #~| msgid "Smart Playlist"
