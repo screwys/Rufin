@@ -267,6 +267,9 @@ msgstr "5 последних альбомов"
 msgid "6 hours"
 msgstr "6 часов"
 
+msgid "A new update is available, restart to apply"
+msgstr ""
+
 msgid "API key (Subsonic)"
 msgstr "Ключ API (Subsonic)"
 
@@ -2639,6 +2642,9 @@ msgstr "Сбросить"
 msgid "Resource not found"
 msgstr "Ресурс не найден"
 
+msgid "Restart now"
+msgstr ""
+
 msgid "Restore User State"
 msgstr "Восстановить состояние пользователя"
 
@@ -3342,9 +3348,6 @@ msgstr "Обновить"
 msgid "Updated Rufin to {version}"
 msgstr "Rufin обновлён на {version}"
 
-msgid "Updated Rufin to {version}. Restart to apply."
-msgstr "Rufin обновлён на {version}. Перезапустите, чтобы применить."
-
 msgid "Updating Rufin to {version}..."
 msgstr "Обновляю Rufin на {version}..."
 
@@ -3728,6 +3731,9 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Updated Rufin to {version}. Restart to apply."
+#~ msgstr "Rufin обновлён на {version}. Перезапустите, чтобы применить."
 
 #~ msgid "Color scheme"
 #~ msgstr "Цветовая схема"

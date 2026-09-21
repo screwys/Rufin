@@ -268,6 +268,9 @@ msgstr "5 neueste Alben"
 msgid "6 hours"
 msgstr "sechs Stunden"
 
+msgid "A new update is available, restart to apply"
+msgstr ""
+
 msgid "API key (Subsonic)"
 msgstr "API-Schlüssel (Subsonic)"
 
@@ -2622,6 +2625,9 @@ msgstr "Zurücksetzen"
 msgid "Resource not found"
 msgstr "Ressource nicht gefunden"
 
+msgid "Restart now"
+msgstr ""
+
 msgid "Restore User State"
 msgstr "Benutzerstatus wiederherstellen"
 
@@ -3305,11 +3311,6 @@ msgstr "Update"
 msgid "Updated Rufin to {version}"
 msgstr "Rufin wurde auf {version} aktualisiert"
 
-msgid "Updated Rufin to {version}. Restart to apply."
-msgstr ""
-"Rufin wurde auf {version} aktualisiert. Neu starten, um die Änderungen zu "
-"übernehmen."
-
 msgid "Updating Rufin to {version}..."
 msgstr "Rufin wird auf {version} aktualisiert …"
 
@@ -3679,6 +3680,11 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#~ msgid "Updated Rufin to {version}. Restart to apply."
+#~ msgstr ""
+#~ "Rufin wurde auf {version} aktualisiert. Neu starten, um die Änderungen zu "
+#~ "übernehmen."
 
 #~ msgid "Color scheme"
 #~ msgstr "Farbschema"

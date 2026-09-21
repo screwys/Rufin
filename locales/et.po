@@ -222,6 +222,9 @@ msgstr "5 viimast albumit"
 msgid "6 hours"
 msgstr ""
 
+msgid "A new update is available, restart to apply"
+msgstr ""
+
 #, fuzzy
 #| msgid "API keys"
 msgid "API key (Subsonic)"
@@ -2894,6 +2897,9 @@ msgstr "Lähtesta"
 msgid "Resource not found"
 msgstr "Vastendatud kohalikku faili ei leidu"
 
+msgid "Restart now"
+msgstr ""
+
 #, fuzzy
 #| msgid "Restore Default"
 msgid "Restore User State"
@@ -3648,9 +3654,6 @@ msgid "Update"
 msgstr "Uuenda"
 
 msgid "Updated Rufin to {version}"
-msgstr ""
-
-msgid "Updated Rufin to {version}. Restart to apply."
 msgstr ""
 
 msgid "Updating Rufin to {version}..."

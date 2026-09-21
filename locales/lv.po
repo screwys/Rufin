@@ -248,6 +248,9 @@ msgstr "5 jaunākie albumi"
 msgid "6 hours"
 msgstr "6 stundas"
 
+msgid "A new update is available, restart to apply"
+msgstr ""
+
 msgid "API key (Subsonic)"
 msgstr "API atslēga (Subsonic)"
 
@@ -2705,6 +2708,9 @@ msgstr "Atiestatīt"
 msgid "Resource not found"
 msgstr "Resurss nav atrasts"
 
+msgid "Restart now"
+msgstr ""
+
 msgid "Restore User State"
 msgstr "Atjaunot lietotāja iestatījumus"
 
@@ -3413,11 +3419,6 @@ msgstr "Atjaunināt"
 msgid "Updated Rufin to {version}"
 msgstr "Atjaunināts Rufin uz {version}"
 
-msgid "Updated Rufin to {version}. Restart to apply."
-msgstr ""
-"Atjaunināts Rufin līdz versijai {version}. Lai izmaiņas stātos spēkā, "
-"restartējiet programmu."
-
 msgid "Updating Rufin to {version}..."
 msgstr "Atjauninu Rufin uz versiju {version}..."
 
@@ -3813,6 +3814,11 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "Updated Rufin to {version}. Restart to apply."
+#~ msgstr ""
+#~ "Atjaunināts Rufin līdz versijai {version}. Lai izmaiņas stātos spēkā, "
+#~ "restartējiet programmu."
 
 #~ msgid "Color scheme"
 #~ msgstr "Krāsu shēma"

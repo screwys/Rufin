@@ -207,6 +207,9 @@ msgstr "5 uusinta albumia"
 msgid "6 hours"
 msgstr "6 tuntia"
 
+msgid "A new update is available, restart to apply"
+msgstr ""
+
 #, fuzzy
 #| msgid "API keys"
 msgid "API key (Subsonic)"
@@ -2743,6 +2746,9 @@ msgstr "Palauta oletukset"
 msgid "Resource not found"
 msgstr "Resurssia ei löytynyt"
 
+msgid "Restart now"
+msgstr ""
+
 msgid "Restore User State"
 msgstr ""
 
@@ -3480,11 +3486,6 @@ msgstr "Päivitä"
 msgid "Updated Rufin to {version}"
 msgstr "Päivitetty Rufin versioon {version}"
 
-msgid "Updated Rufin to {version}. Restart to apply."
-msgstr ""
-"Päivitetty Rufin versioon {version}. Käynnistä uudelleen, jotta muutokset "
-"tulevat voimaan."
-
 msgid "Updating Rufin to {version}..."
 msgstr "Päivitetään Rufin versioon {version}..."
 
@@ -3882,6 +3883,11 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#~ msgid "Updated Rufin to {version}. Restart to apply."
+#~ msgstr ""
+#~ "Päivitetty Rufin versioon {version}. Käynnistä uudelleen, jotta muutokset "
+#~ "tulevat voimaan."
 
 #~ msgid "Color scheme"
 #~ msgstr "Väriteema"

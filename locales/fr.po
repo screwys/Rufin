@@ -225,6 +225,9 @@ msgstr "5 derniers Albums"
 msgid "6 hours"
 msgstr "6 heures"
 
+msgid "A new update is available, restart to apply"
+msgstr ""
+
 msgid "API key (Subsonic)"
 msgstr ""
 
@@ -2677,6 +2680,9 @@ msgstr ""
 msgid "Resource not found"
 msgstr "Ressource non trouvée"
 
+msgid "Restart now"
+msgstr ""
+
 msgid "Restore User State"
 msgstr ""
 
@@ -3381,9 +3387,6 @@ msgstr "Mise à jour"
 msgid "Updated Rufin to {version}"
 msgstr "Rufin à été mis à jour en {version}"
 
-msgid "Updated Rufin to {version}. Restart to apply."
-msgstr "Rufin à été mis à jour en {version}. Redémarrage requis."
-
 msgid "Updating Rufin to {version}..."
 msgstr "Mise à jour de Rufin en {version}..."
 
@@ -3753,6 +3756,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Updated Rufin to {version}. Restart to apply."
+#~ msgstr "Rufin à été mis à jour en {version}. Redémarrage requis."
 
 #, fuzzy
 #~| msgid "Remove from Playlist"

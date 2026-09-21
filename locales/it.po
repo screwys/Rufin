@@ -239,6 +239,9 @@ msgstr "5 Ultimi Album"
 msgid "6 hours"
 msgstr "6 ore"
 
+msgid "A new update is available, restart to apply"
+msgstr ""
+
 msgid "API key (Subsonic)"
 msgstr "Chiave API (Subsonic)"
 
@@ -2641,6 +2644,9 @@ msgstr ""
 msgid "Resource not found"
 msgstr ""
 
+msgid "Restart now"
+msgstr ""
+
 msgid "Restore User State"
 msgstr ""
 
@@ -3334,9 +3340,6 @@ msgid "Update"
 msgstr ""
 
 msgid "Updated Rufin to {version}"
-msgstr ""
-
-msgid "Updated Rufin to {version}. Restart to apply."
 msgstr ""
 
 msgid "Updating Rufin to {version}..."

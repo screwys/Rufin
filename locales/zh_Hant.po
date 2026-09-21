@@ -199,6 +199,9 @@ msgstr "最新的 5 張專輯"
 msgid "6 hours"
 msgstr ""
 
+msgid "A new update is available, restart to apply"
+msgstr ""
+
 #, fuzzy
 #| msgid "API keys"
 msgid "API key (Subsonic)"
@@ -2869,6 +2872,9 @@ msgstr "重置"
 msgid "Resource not found"
 msgstr ""
 
+msgid "Restart now"
+msgstr ""
+
 msgid "Restore User State"
 msgstr ""
 
@@ -3621,9 +3627,6 @@ msgid "Update"
 msgstr "更新"
 
 msgid "Updated Rufin to {version}"
-msgstr ""
-
-msgid "Updated Rufin to {version}. Restart to apply."
 msgstr ""
 
 msgid "Updating Rufin to {version}..."
