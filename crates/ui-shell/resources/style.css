@@ -51,6 +51,19 @@ columnview > header {
     inset 0 1px color-mix(in srgb, white 14%, transparent);
 }
 
+.media-drop-target:drop(active),
+.media-drop-row {
+  outline: 2px solid var(--accent-color);
+  outline-offset: -2px;
+  border-radius: 9px;
+  box-shadow: none;
+}
+
+.media-drop-cell:drop(active) {
+  outline: none;
+  box-shadow: none;
+}
+
 toastoverlay toast {
   background: color-mix(in srgb, var(--window-bg-color) 88%, var(--card-bg-color) 12%);
   color: var(--window-fg-color);
@@ -935,14 +948,6 @@ gridview.album-grid {
   padding: 0;
 }
 
-.sidebar-pin-row.playlist-pin-drop-target {
-  box-shadow: 0 0 0 2px var(--accent-color);
-}
-
-.sidebar-pin-row.sidebar-pin-reorder-target {
-  box-shadow: 0 0 0 2px var(--accent-color);
-}
-
 .compact-sidebar-pin {
   margin: 0 6px;
   border-radius: 12px;
@@ -1471,35 +1476,61 @@ dialog.alert.playlist-delete-dialog .message-area {
   font-feature-settings: "tnum";
 }
 
-scale.player-progress slider {
-  min-width: 11px;
-  min-height: 11px;
-  margin: -4px;
-  padding: 0;
-}
-
-scale.player-progress trough {
-  min-height: 4px;
-}
-
+scale.player-progress slider,
 scale.volume-slider slider {
-  min-width: 0;
-  min-height: 0;
-  margin: 0;
+  min-width: 12px;
+  min-height: 12px;
+  margin: -3px;
   padding: 0;
-  border: none;
-  box-shadow: none;
   opacity: 0;
 }
 
-scale.volume-slider trough {
-  min-height: 7px;
+scale.player-progress:hover slider,
+scale.player-progress slider:active,
+scale.player-progress:focus-visible slider,
+scale.volume-slider:hover slider,
+scale.volume-slider slider:active,
+scale.volume-slider:focus-visible slider {
+  opacity: 1;
+}
+
+scale.player-progress trough,
+scale.player-progress trough highlight,
+scale.volume-slider trough,
+scale.volume-slider trough highlight {
+  min-height: 6px;
   border-radius: 999px;
 }
 
+scale.player-progress trough highlight,
 scale.volume-slider trough highlight {
-  min-height: 7px;
+  background: var(--window-fg-color);
+}
+
+scale.player-progress trough fill,
+scale.volume-slider trough fill {
+  min-height: 6px;
   border-radius: 999px;
+  background: var(--window-fg-color);
+  opacity: 0;
+}
+
+scale.player-progress:hover trough fill,
+scale.volume-slider:hover trough fill {
+  opacity: 1;
+}
+
+scale.player-progress:hover trough highlight,
+scale.player-progress:focus-visible trough highlight,
+scale.volume-slider:hover trough highlight,
+scale.volume-slider:focus-visible trough highlight {
+  background: var(--accent-bg-color);
+}
+
+/* Keep the resting track neutral in themes that tint scale troughs. */
+scale.player-progress trough,
+scale.volume-slider trough {
+  background: color-mix(in srgb, var(--window-fg-color) 20%, transparent);
 }
 
 scale.playback-setting-scale > trough,
@@ -1546,6 +1577,10 @@ popover.slider-value-popover > contents {
 popover.slider-value-popover label {
   color: white;
   font-size: 11px;
+}
+
+popover.player-slider-preview label {
+  font-size: 14px;
 }
 
 .volume-slider-slot:dir(ltr) {
@@ -1609,12 +1644,23 @@ popover.slider-value-popover label {
 
 
 .player-play-button {
-  background: color-mix(in srgb, var(--window-fg-color) 92%, transparent);
+  border-radius: 0;
+  background: radial-gradient(circle closest-side,
+    color-mix(in srgb, var(--window-fg-color) 92%, transparent) calc(100% - 1px),
+    transparent 100%);
   color: var(--window-bg-color);
+  transform: scale(1);
+  transition: transform 120ms ease-out;
 }
 
 .player-play-button:hover {
-  background: var(--window-fg-color);
+  background: radial-gradient(circle closest-side,
+    var(--window-fg-color) calc(100% - 1px), transparent 100%);
+  transform: scale(1.05);
+}
+
+.player-play-button:active {
+  transform: scale(0.96);
 }
 
 .detail-title {
@@ -1827,13 +1873,13 @@ button.download-queue-pause image {
 
 .icon-button.player-transport-button {
   padding: 0;
-  min-width: 50px;
-  min-height: 50px;
+  min-width: 36px;
+  min-height: 36px;
 }
 
 .icon-button.player-play-button {
-  min-width: 45px;
-  min-height: 45px;
+  min-width: 44px;
+  min-height: 44px;
 }
 
 .album-detail-showcase,
@@ -2622,3 +2668,26 @@ button.connect-relay-link, button.connect-relay-link:visited { color: inherit; }
 .activity-report columnview, .activity-report listview, .activity-report flowbox { background: transparent; }
 .activity-report progressbar trough { min-height: 8px; border-radius: 4px; }
 .activity-report progressbar progress { min-height: 8px; border-radius: 4px; }
+.theme-options { padding: 9px; }
+.theme-grid > flowboxchild { padding: 3px; }
+.theme-select { padding: 3px; border-radius: 9px; }
+.theme-select:checked { box-shadow: 0 0 0 2px var(--accent-color); }
+.theme-preview { background: var(--window-bg-color); color: var(--window-fg-color); border-radius: 6px; }
+.theme-header { background: var(--headerbar-bg-color); color: var(--headerbar-fg-color); padding: 4px 5px; }
+.theme-dot { min-width: 3px; min-height: 3px; background: currentColor; opacity: 0.5; border-radius: 50%; }
+.theme-search { background: var(--view-bg-color); border-radius: 2px; }
+.theme-sidebar { background: var(--sidebar-bg-color); color: var(--sidebar-fg-color); padding: 7px 5px; }
+.theme-nav-icon { min-width: 4px; min-height: 5px; background: currentColor; opacity: 0.5; border-radius: 1px; }
+.theme-nav-selected { color: var(--accent-color); }
+.theme-content { background: var(--view-bg-color); color: var(--view-fg-color); padding: 5px; }
+.theme-cover { background: color-mix(in srgb, var(--accent-bg-color) 25%, var(--card-bg-color)); border-radius: 2px; }
+.theme-mini-line { min-height: 3px; background: currentColor; opacity: 0.4; border-radius: 2px; }
+.theme-track { padding: 2px 4px; border-radius: 2px; }
+.theme-track-selected { background: var(--accent-bg-color); color: var(--accent-fg-color); }
+.theme-track-selected .theme-mini-line { opacity: 0.9; }
+.theme-player { background: var(--headerbar-bg-color); color: var(--headerbar-fg-color); padding: 4px 6px; }
+.theme-progress { background: linear-gradient(to right, var(--accent-bg-color) 45%, color-mix(in srgb, var(--headerbar-fg-color) 20%, transparent) 45%); min-height: 3px; border-radius: 2px; }
+.theme-accent { font-size: 0.85em; }
+.theme-accent > button { min-width: 0; min-height: 26px; padding: 2px 4px; }
+.theme-edit { min-width: 20px; min-height: 26px; padding: 2px; }
+.theme-swatch { min-width: 10px; min-height: 10px; border-radius: 50%; }

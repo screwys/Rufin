@@ -257,11 +257,12 @@ impl<'de> Deserialize<'de> for LayoutSettings {
         Ok(settings)
     }
 }
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ThemePreference {
     System,
     Light,
     Dark,
+    Named(String),
 }
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub enum AccentPreference {
@@ -278,6 +279,20 @@ pub enum AccentPreference {
     Slate,
 }
 impl AccentPreference {
+    pub fn color(self) -> Option<&'static str> {
+        match self {
+            Self::System => None,
+            Self::Blue => Some("#3584e4"),
+            Self::Teal => Some("#2190a4"),
+            Self::Green => Some("#3a944a"),
+            Self::Yellow => Some("#c88800"),
+            Self::Orange => Some("#ed5b00"),
+            Self::Red => Some("#e62d42"),
+            Self::Pink => Some("#d56199"),
+            Self::Purple => Some("#9141ac"),
+            Self::Slate => Some("#6f8396"),
+        }
+    }
     pub const ALL: [Self; 10] = [
         Self::System,
         Self::Blue,

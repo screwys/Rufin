@@ -18,7 +18,6 @@ use super::{
 };
 
 use crate::shell::Shell;
-use crate::{AccentPreference, ThemePreference};
 use adw::prelude::*;
 use localization::{tr, tr_with};
 use playback::StreamQuality;
@@ -720,7 +719,6 @@ pub(crate) fn appearance_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
     let page: adw::PreferencesPage =
         ui_shared::ui_resource::object(&builder, resource, "appearance_page");
     ui_shared::objects!(builder, resource, {
-        theme_group: adw::PreferencesGroup,
         waveform_row: adw::SwitchRow,
         layout_group: adw::PreferencesGroup,
         lyrics_panel_row: adw::SwitchRow,
@@ -734,7 +732,7 @@ pub(crate) fn appearance_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
         context_menus: adw::ExpanderRow,
     });
 
-    populate_theme_group(shell, &theme_group);
+    super::themes::bind(shell, &builder, resource);
     waveform_row.set_active(shell.settings.current.borrow().seekbar_waveform_enabled);
     let waveform_shell = Rc::clone(shell);
     waveform_row.connect_active_notify(move |row| {
@@ -769,96 +767,6 @@ pub(crate) fn appearance_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
     configure_context_menus_expander(shell, &builder, &context_menus);
 
     page
-}
-
-fn populate_theme_group(shell: &Rc<Shell>, group: &adw::PreferencesGroup) {
-    let options = [tr("System"), tr("Light"), tr("Dark")];
-    let selected = theme_preference_index(shell.settings.current.borrow().theme_preference);
-    let theme_shell = Rc::clone(shell);
-    let row = selection_row(&tr("Color scheme"), &options, selected, move |selected| {
-        let preference = theme_preference_from_index(selected);
-        if let Some(settings) =
-            theme_shell
-                .settings
-                .set_app_setting("theme setting", preference, |settings| {
-                    &mut settings.theme_preference
-                })
-        {
-            theme_shell.appearance.apply(&settings);
-            theme_shell.publish_controller_appearance();
-        }
-    });
-    group.add(&row);
-
-    let accent_titles = AccentPreference::ALL.map(accent_preference_title);
-    let accent_title_refs = accent_titles.each_ref().map(String::as_str);
-    let accent_row = adw::ComboRow::builder()
-        .title(tr("Accent color"))
-        .model(&gtk::StringList::new(&accent_title_refs))
-        .selected(accent_preference_index(
-            shell.settings.current.borrow().accent_preference,
-        ))
-        .build();
-    let accent_shell = Rc::clone(shell);
-    accent_row.connect_selected_notify(move |row| {
-        let preference = accent_preference_from_index(row.selected());
-        if let Some(settings) =
-            accent_shell
-                .settings
-                .set_app_setting("accent setting", preference, |settings| {
-                    &mut settings.accent_preference
-                })
-        {
-            accent_shell.appearance.apply(&settings);
-            accent_shell.publish_controller_appearance();
-        }
-    });
-    group.add(&accent_row);
-}
-
-pub(super) fn theme_preference_index(preference: ThemePreference) -> u32 {
-    match preference {
-        ThemePreference::System => 0,
-        ThemePreference::Light => 1,
-        ThemePreference::Dark => 2,
-    }
-}
-
-pub(super) fn theme_preference_from_index(index: u32) -> ThemePreference {
-    match index {
-        1 => ThemePreference::Light,
-        2 => ThemePreference::Dark,
-        _ => ThemePreference::System,
-    }
-}
-
-fn accent_preference_title(preference: AccentPreference) -> String {
-    match preference {
-        AccentPreference::System => tr("System"),
-        AccentPreference::Blue => tr("Blue"),
-        AccentPreference::Teal => tr("Teal"),
-        AccentPreference::Green => tr("Green"),
-        AccentPreference::Yellow => tr("Yellow"),
-        AccentPreference::Orange => tr("Orange"),
-        AccentPreference::Red => tr("Red"),
-        AccentPreference::Pink => tr("Pink"),
-        AccentPreference::Purple => tr("Purple"),
-        AccentPreference::Slate => tr("Slate"),
-    }
-}
-
-pub(super) fn accent_preference_index(preference: AccentPreference) -> u32 {
-    AccentPreference::ALL
-        .iter()
-        .position(|candidate| *candidate == preference)
-        .unwrap_or_default() as u32
-}
-
-pub(super) fn accent_preference_from_index(index: u32) -> AccentPreference {
-    AccentPreference::ALL
-        .get(index as usize)
-        .copied()
-        .unwrap_or_default()
 }
 
 pub(crate) fn loudness_normalization_index(mode: LoudnessNormalization) -> u32 {

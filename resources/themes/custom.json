@@ -1,0 +1,21 @@
+{
+  "name": "Custom",
+  "mode": "dark",
+  "colors": {
+    "window-bg-color": "#0f172a",
+    "window-fg-color": "#e2e8f0",
+    "view-bg-color": "#0f172a",
+    "view-fg-color": "#e2e8f0",
+    "sidebar-bg-color": "#1e293b",
+    "sidebar-fg-color": "#e2e8f0",
+    "headerbar-bg-color": "#1e293b",
+    "headerbar-fg-color": "#e2e8f0",
+    "card-bg-color": "#334155",
+    "card-fg-color": "#e2e8f0"
+  },
+  "accents": [
+    { "name": "Sky", "color": "#7dd3fc", "foreground": "#0f172a" },
+    { "name": "Rose", "color": "#fda4af", "foreground": "#0f172a" },
+    { "name": "Mint", "color": "#6ee7b7", "foreground": "#0f172a" }
+  ]
+}

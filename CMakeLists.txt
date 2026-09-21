@@ -29,10 +29,10 @@ if(NOT RUFIN_BUILD_IDENTITY STREQUAL "stable"
 endif()
 if(RUFIN_BUILD_IDENTITY STREQUAL "development")
   set(RUFIN_APP_ID io.github.screwys.Rufin.Devel)
-  set(RUFIN_DESKTOP_FILE data/io.github.screwys.Rufin.Devel.desktop)
+  set(RUFIN_DESKTOP_FILE resources/io.github.screwys.Rufin.Devel.desktop)
 else()
   set(RUFIN_APP_ID io.github.screwys.Rufin)
-  set(RUFIN_DESKTOP_FILE data/io.github.screwys.Rufin.desktop)
+  set(RUFIN_DESKTOP_FILE resources/io.github.screwys.Rufin.desktop)
 endif()
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -254,9 +254,9 @@ if(UNIX AND NOT APPLE)
     DESTINATION "${RUFIN_INSTALL_DATADIR}/applications"
     RENAME "${RUFIN_APP_ID}.desktop")
   install(FILES
-    data/io.github.screwys.Rufin.metainfo.xml
+    resources/io.github.screwys.Rufin.metainfo.xml
     DESTINATION "${RUFIN_INSTALL_DATADIR}/metainfo")
-  install(DIRECTORY data/icons/hicolor/
+  install(DIRECTORY resources/icons/hicolor/
     DESTINATION "${RUFIN_INSTALL_DATADIR}/icons/hicolor")
 endif()
 

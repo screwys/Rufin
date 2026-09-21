@@ -18,6 +18,7 @@ use ui_shared::{
     layout::{AllocationOwner, allocation_owner},
     localization::{bind_widget_accessible_label, bind_widget_tooltip},
     ratings::RatingControl,
+    scale::{horizontal_scale_value_at_x, install_hover_value_bubble, install_scale_fill_updates},
 };
 pub const BOTTOM_PLAYER_HEIGHT: i32 = 97;
 pub const BOTTOM_PLAYER_COVER_START_INSET: i32 = 10;
@@ -35,10 +36,10 @@ pub const BOTTOM_PLAYER_TRANSPORT_WIDTH: i32 = 300;
 pub const BOTTOM_PLAYER_PROGRESS_WIDTH: i32 = 320;
 pub const BOTTOM_PLAYER_PROGRESS_MIN_WIDTH: i32 = 140;
 pub const BOTTOM_PLAYER_BUTTON_ROW_HEIGHT: i32 = 58;
-pub const BOTTOM_PLAYER_SIDE_BUTTON_SIZE: i32 = 50;
-pub const BOTTOM_PLAYER_PLAY_BUTTON_SIZE: i32 = 45;
+pub const BOTTOM_PLAYER_SIDE_BUTTON_SIZE: i32 = 36;
+pub const BOTTOM_PLAYER_PLAY_BUTTON_SIZE: i32 = 44;
 pub const BOTTOM_PLAYER_BUTTON_OFFSET_Y: f64 = 3.0;
-pub const BOTTOM_PLAYER_BUTTON_STEP: f64 = 38.0;
+pub const BOTTOM_PLAYER_BUTTON_STEP: f64 = 44.0;
 pub const BOTTOM_PLAYER_WAVEFORM_HEIGHT: i32 = 32;
 pub const BOTTOM_PLAYER_ACTION_BUTTON_SIZE: i32 = 34;
 pub const BOTTOM_PLAYER_TITLE_MENU_BUTTON_SIZE: i32 = 18;
@@ -638,6 +639,8 @@ pub fn build_transport_controls(builder: &gtk::Builder, resource: &str) -> Trans
         progress_stack: gtk::Stack,
         progress: gtk::Scale,
         duration: gtk::Label,
+        seek_preview: gtk::Popover,
+        seek_preview_time: gtk::Label,
     });
     transport.set_width_request(BOTTOM_PLAYER_TRANSPORT_WIDTH);
     transport_buttons.set_size_request(
@@ -723,6 +726,38 @@ pub fn build_transport_controls(builder: &gtk::Builder, resource: &str) -> Trans
     progress_stack.add_named(&progress, Some("scale"));
     progress_stack.add_named(waveform.widget(), Some("waveform"));
     progress_stack.set_visible_child(&progress);
+    let weak_scale = progress.downgrade();
+    install_scale_fill_updates(&progress);
+    install_hover_value_bubble(
+        &progress_stack,
+        seek_preview,
+        seek_preview_time,
+        move |widget, x, y| {
+            let stack = widget.downcast_ref::<gtk::Stack>()?;
+            let scale = weak_scale.upgrade()?;
+            let child = stack.visible_child().filter(|child| child.is_sensitive())?;
+            let point =
+                stack.compute_point(&child, &gtk::graphene::Point::new(x as f32, y as f32))?;
+            let (seconds, track_center_y) = if child == scale {
+                let seconds = horizontal_scale_value_at_x(&scale, f64::from(point.x()));
+                scale.set_fill_level(seconds);
+                let range = scale.range_rect();
+                (seconds, range.y() as f32 + range.height() as f32 / 2.0)
+            } else {
+                let seconds = waveform_fraction_for_x(
+                    child.downcast_ref::<gtk::DrawingArea>()?,
+                    f64::from(point.x()),
+                ) * scale.adjustment().upper();
+                (seconds, child.height() as f32 / 2.0)
+            };
+            let center = child
+                .compute_point(stack, &gtk::graphene::Point::new(point.x(), track_center_y))?;
+            Some((
+                format_duration(seconds.round() as u32),
+                f64::from(center.y()),
+            ))
+        },
+    );
 
     TransportControls {
         root: transport,
@@ -757,6 +792,8 @@ pub fn build_player_action_controls(
         settings_button: gtk::MenuButton,
         volume_group: gtk::Box,
         volume: gtk::Scale,
+        volume_preview: gtk::Popover,
+        volume_preview_level: gtk::Label,
     });
     let root = actions;
     let buttons = action_buttons;
@@ -793,6 +830,24 @@ pub fn build_player_action_controls(
     volume_slot.add_css_class("volume-slider-slot");
     volume_slot.set_valign(gtk::Align::Fill);
     volume_group.append(&volume_slot);
+    install_scale_fill_updates(&volume);
+    install_hover_value_bubble(
+        &volume,
+        volume_preview,
+        volume_preview_level,
+        |widget, x, _| {
+            let scale = widget
+                .downcast_ref::<gtk::Scale>()
+                .filter(|scale| scale.is_sensitive())?;
+            let level = horizontal_scale_value_at_x(scale, x);
+            scale.set_fill_level(level);
+            let range = scale.range_rect();
+            Some((
+                format!("{:.0}", level * 100.0),
+                f64::from(range.y()) + f64::from(range.height()) / 2.0,
+            ))
+        },
+    );
     PlayerActionControls {
         root,
         buttons,

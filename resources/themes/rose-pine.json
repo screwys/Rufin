@@ -1,0 +1,47 @@
+{
+  "name": "Rosé Pine",
+  "mode": "dark",
+  "colors": {
+    "window-bg-color": "#191724",
+    "window-fg-color": "#e0def4",
+    "view-bg-color": "#191724",
+    "view-fg-color": "#e0def4",
+    "headerbar-bg-color": "#191724",
+    "headerbar-fg-color": "#e0def4",
+    "sidebar-bg-color": "#191724",
+    "sidebar-fg-color": "#e0def4",
+    "secondary-sidebar-bg-color": "#191724",
+    "secondary-sidebar-fg-color": "#e0def4",
+    "card-bg-color": "#1f1d2e",
+    "card-fg-color": "#e0def4",
+    "dialog-bg-color": "#1f1d2e",
+    "dialog-fg-color": "#e0def4",
+    "popover-bg-color": "#1f1d2e",
+    "popover-fg-color": "#e0def4",
+    "thumbnail-bg-color": "#1f1d2e",
+    "thumbnail-fg-color": "#e0def4",
+    "active-toggle-bg-color": "#1f1d2e",
+    "active-toggle-fg-color": "#e0def4",
+    "overview-bg-color": "#191724",
+    "overview-fg-color": "#e0def4",
+    "headerbar-backdrop-color": "#191724",
+    "sidebar-backdrop-color": "#191724",
+    "secondary-sidebar-backdrop-color": "#191724",
+    "error-bg-color": "#eb6f92",
+    "error-fg-color": "#191724",
+    "error-color": "oklab(from var(--error-bg-color) var(--standalone-color-oklab))",
+    "success-bg-color": "#31748f",
+    "success-fg-color": "#191724",
+    "success-color": "oklab(from var(--success-bg-color) var(--standalone-color-oklab))",
+    "warning-bg-color": "#f6c177",
+    "warning-fg-color": "#191724",
+    "warning-color": "oklab(from var(--warning-bg-color) var(--standalone-color-oklab))"
+  },
+  "accents": [
+    {
+      "name": "Rosé Pine",
+      "color": "#ebbcba",
+      "foreground": "#191724"
+    }
+  ]
+}

@@ -9,6 +9,10 @@ pub(crate) const RANDOM_PLAY_RESOURCE: &str = "/io/github/screwys/Rufin/ui/playe
 
 pub(crate) const APPEARANCE_PREFERENCES_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/appearance.ui";
+pub(crate) const THEME_TILE_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/preferences/theme_tile.ui";
+pub(crate) const THEME_ACCENT_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/preferences/theme_accent.ui";
 pub(crate) const PREFERENCES_DIALOG_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/dialog.ui";
 pub(crate) const GENERAL_PREFERENCES_RESOURCE: &str =
@@ -86,6 +90,8 @@ pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     SHOWCASE_CSS_RESOURCE,
     ABOUT_RESOURCE,
     APPEARANCE_PREFERENCES_RESOURCE,
+    THEME_TILE_RESOURCE,
+    THEME_ACCENT_RESOURCE,
     PREFERENCES_DIALOG_RESOURCE,
     GENERAL_PREFERENCES_RESOURCE,
     ACTIVITY_PREFERENCES_RESOURCE,

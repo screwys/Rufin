@@ -158,7 +158,7 @@ jobs:
           version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$source_dir/Cargo.toml" | head -n 1)"
           metainfo_version="$(
             sed -n 's/.*<release version="\([^"]*\)".*/\1/p' \
-              "$source_dir/data/io.github.screwys.Rufin.metainfo.xml" |
+              "$source_dir/resources/io.github.screwys.Rufin.metainfo.xml" |
               head -n 1
           )"
           test "$metainfo_version" = "$version"

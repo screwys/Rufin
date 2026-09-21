@@ -175,7 +175,7 @@ mod transport {
 use transport::IpcStream;
 
 pub const DEFAULT_CLIENT_ID: &str = "1505345384686419979";
-pub(crate) const APP_ICON_URL: &str = "https://raw.githubusercontent.com/screwys/Rufin/main/data/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg";
+pub(crate) const APP_ICON_URL: &str = "https://raw.githubusercontent.com/screwys/Rufin/main/resources/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg";
 pub(crate) const SUPPORTED: bool = cfg!(any(unix, windows));
 
 const MAX_TEXT_LENGTH: usize = 127;

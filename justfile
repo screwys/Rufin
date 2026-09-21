@@ -374,9 +374,9 @@ debug *args:
                 --dir="$data_home/applications" \
                 --set-key=Exec \
                 --set-value="$executable" \
-                data/io.github.screwys.Rufin.Devel.desktop; \
+                resources/io.github.screwys.Rufin.Devel.desktop; \
             install -Dm0644 \
-                data/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg \
+                resources/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg \
                 "$data_home/icons/hicolor/scalable/apps/io.github.screwys.Rufin.Devel.svg"; \
             if command -v update-desktop-database >/dev/null 2>&1; then \
                 update-desktop-database "$data_home/applications"; \

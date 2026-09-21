@@ -1,0 +1,47 @@
+{
+  "name": "Dracula",
+  "mode": "dark",
+  "colors": {
+    "window-bg-color": "rgb(40, 42, 54)",
+    "window-fg-color": "rgb(248, 248, 242)",
+    "view-bg-color": "rgb(40, 42, 54)",
+    "view-fg-color": "rgb(248, 248, 242)",
+    "headerbar-bg-color": "rgb(30, 31, 41)",
+    "headerbar-fg-color": "rgb(248, 248, 242)",
+    "sidebar-bg-color": "rgb(30, 31, 41)",
+    "sidebar-fg-color": "rgb(248, 248, 242)",
+    "secondary-sidebar-bg-color": "rgb(30, 31, 41)",
+    "secondary-sidebar-fg-color": "rgb(248, 248, 242)",
+    "card-bg-color": "rgb(68, 71, 90)",
+    "card-fg-color": "rgb(248, 248, 242)",
+    "dialog-bg-color": "rgb(68, 71, 90)",
+    "dialog-fg-color": "rgb(248, 248, 242)",
+    "popover-bg-color": "rgb(68, 71, 90)",
+    "popover-fg-color": "rgb(248, 248, 242)",
+    "thumbnail-bg-color": "rgb(68, 71, 90)",
+    "thumbnail-fg-color": "rgb(248, 248, 242)",
+    "active-toggle-bg-color": "rgb(68, 71, 90)",
+    "active-toggle-fg-color": "rgb(248, 248, 242)",
+    "overview-bg-color": "rgb(30, 31, 41)",
+    "overview-fg-color": "rgb(248, 248, 242)",
+    "headerbar-backdrop-color": "rgb(30, 31, 41)",
+    "sidebar-backdrop-color": "rgb(30, 31, 41)",
+    "secondary-sidebar-backdrop-color": "rgb(30, 31, 41)",
+    "error-bg-color": "rgb(255, 85, 85)",
+    "error-fg-color": "rgb(40, 42, 54)",
+    "error-color": "oklab(from var(--error-bg-color) var(--standalone-color-oklab))",
+    "success-bg-color": "rgb(80, 250, 123)",
+    "success-fg-color": "rgb(40, 42, 54)",
+    "success-color": "oklab(from var(--success-bg-color) var(--standalone-color-oklab))",
+    "warning-bg-color": "rgb(255, 184, 108)",
+    "warning-fg-color": "rgb(40, 42, 54)",
+    "warning-color": "oklab(from var(--warning-bg-color) var(--standalone-color-oklab))"
+  },
+  "accents": [
+    {
+      "name": "Dracula",
+      "color": "rgb(189, 147, 249)",
+      "foreground": "rgb(40, 42, 54)"
+    }
+  ]
+}

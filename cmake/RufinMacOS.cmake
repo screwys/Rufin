@@ -100,18 +100,18 @@ foreach(RUFIN_ICON_SIZE 16 32 128 256 512)
     COMMAND "${RUFIN_RSVG_CONVERT}"
       -w "${RUFIN_ICON_SIZE}" -h "${RUFIN_ICON_SIZE}"
       -o "${RUFIN_MACOS_ICONSET}/icon_${RUFIN_ICON_SIZE}x${RUFIN_ICON_SIZE}.png"
-      "${CMAKE_CURRENT_SOURCE_DIR}/data/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg"
+      "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg"
     COMMAND "${RUFIN_RSVG_CONVERT}"
       -w "${RUFIN_ICON_DOUBLE_SIZE}" -h "${RUFIN_ICON_DOUBLE_SIZE}"
       -o "${RUFIN_MACOS_ICONSET}/icon_${RUFIN_ICON_SIZE}x${RUFIN_ICON_SIZE}@2x.png"
-      "${CMAKE_CURRENT_SOURCE_DIR}/data/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg"
+      "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg"
   )
 endforeach()
 add_custom_command(
   OUTPUT "${RUFIN_MACOS_ICON}"
   ${RUFIN_MACOS_ICON_COMMANDS}
   COMMAND "${RUFIN_ICONUTIL}" -c icns "${RUFIN_MACOS_ICONSET}" -o "${RUFIN_MACOS_ICON}"
-  DEPENDS data/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg
+  DEPENDS resources/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg
   VERBATIM
 )
 add_custom_target(rufin-macos-icon DEPENDS "${RUFIN_MACOS_ICON}")

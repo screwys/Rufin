@@ -1,0 +1,47 @@
+{
+  "name": "One Dark",
+  "mode": "dark",
+  "colors": {
+    "window-bg-color": "rgb(40, 44, 52)",
+    "window-fg-color": "rgb(171, 178, 191)",
+    "view-bg-color": "rgb(40, 44, 52)",
+    "view-fg-color": "rgb(171, 178, 191)",
+    "headerbar-bg-color": "rgb(30, 33, 40)",
+    "headerbar-fg-color": "rgb(171, 178, 191)",
+    "sidebar-bg-color": "rgb(30, 33, 40)",
+    "sidebar-fg-color": "rgb(171, 178, 191)",
+    "secondary-sidebar-bg-color": "rgb(30, 33, 40)",
+    "secondary-sidebar-fg-color": "rgb(171, 178, 191)",
+    "card-bg-color": "rgb(55, 59, 70)",
+    "card-fg-color": "rgb(171, 178, 191)",
+    "dialog-bg-color": "rgb(55, 59, 70)",
+    "dialog-fg-color": "rgb(171, 178, 191)",
+    "popover-bg-color": "rgb(55, 59, 70)",
+    "popover-fg-color": "rgb(171, 178, 191)",
+    "thumbnail-bg-color": "rgb(55, 59, 70)",
+    "thumbnail-fg-color": "rgb(171, 178, 191)",
+    "active-toggle-bg-color": "rgb(55, 59, 70)",
+    "active-toggle-fg-color": "rgb(171, 178, 191)",
+    "overview-bg-color": "rgb(30, 33, 40)",
+    "overview-fg-color": "rgb(171, 178, 191)",
+    "headerbar-backdrop-color": "rgb(30, 33, 40)",
+    "sidebar-backdrop-color": "rgb(30, 33, 40)",
+    "secondary-sidebar-backdrop-color": "rgb(30, 33, 40)",
+    "error-bg-color": "rgb(224, 108, 117)",
+    "error-fg-color": "rgb(40, 44, 52)",
+    "error-color": "oklab(from var(--error-bg-color) var(--standalone-color-oklab))",
+    "success-bg-color": "rgb(152, 195, 121)",
+    "success-fg-color": "rgb(40, 44, 52)",
+    "success-color": "oklab(from var(--success-bg-color) var(--standalone-color-oklab))",
+    "warning-bg-color": "rgb(229, 192, 123)",
+    "warning-fg-color": "rgb(40, 44, 52)",
+    "warning-color": "oklab(from var(--warning-bg-color) var(--standalone-color-oklab))"
+  },
+  "accents": [
+    {
+      "name": "One Dark",
+      "color": "rgb(97, 175, 239)",
+      "foreground": "rgb(40, 44, 52)"
+    }
+  ]
+}

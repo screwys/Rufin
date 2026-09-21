@@ -8,9 +8,9 @@ pub fn build(include_icons: bool, output: &str) {
     verify_ui_resources();
     let mut roots = vec!["resources"];
     if include_icons {
-        println!("cargo:rerun-if-changed=../../data/icons");
-        verify_symbolic_icons(Path::new("../../data/icons"));
-        roots.push("../../data/icons");
+        println!("cargo:rerun-if-changed=../../resources/icons");
+        verify_symbolic_icons(Path::new("../../resources/icons"));
+        roots.push("../../resources/icons");
     }
     glib_build_tools::compile_resources(&roots, "resources/rufin.gresource.xml", output);
 }

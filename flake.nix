@@ -38,10 +38,11 @@
                 ./cmake
                 ./crates
                 ./vendor
-                ./data/icons/hicolor
-                ./data/io.github.screwys.Rufin.desktop
-                ./data/io.github.screwys.Rufin.metainfo.xml
-                ./data/showcase.css
+                ./resources/icons/hicolor
+                ./resources/io.github.screwys.Rufin.desktop
+                ./resources/io.github.screwys.Rufin.metainfo.xml
+                ./resources/showcase.css
+                ./resources/themes
                 ./locales
                 ./web
               ];

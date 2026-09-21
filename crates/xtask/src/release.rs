@@ -110,13 +110,7 @@ fn update_flathub_manifest_path(manifest: &Path, tag: &str) -> Result<()> {
         .trim()
         .to_owned();
     let cargo_toml = command_stdout("git", ["show", &format!("{tag}:Cargo.toml")])?;
-    let metainfo = command_stdout(
-        "git",
-        [
-            "show",
-            &format!("{tag}:data/io.github.screwys.Rufin.metainfo.xml"),
-        ],
-    )?;
+    let metainfo = metainfo_at_ref(&tag)?;
     let cargo_version = workspace_version_from_cargo_toml(&cargo_toml)?;
     let metainfo_version = first_metainfo_release_version(&metainfo)?;
 
@@ -241,7 +235,7 @@ fn create_tag(mut args: Vec<String>) -> Result<()> {
             "Cargo.lock",
             "Cargo.toml",
             "README.md",
-            "data/io.github.screwys.Rufin.metainfo.xml",
+            "resources/io.github.screwys.Rufin.metainfo.xml",
             ".github/ISSUE_TEMPLATE/bug_report.yml",
             "packaging/flatpak/cargo-sources.json",
             RPM_SPEC,
@@ -878,7 +872,7 @@ fn update_metainfo_release(
     notes: &str,
     preserve_existing: bool,
 ) -> Result<()> {
-    let path = PathBuf::from("data/io.github.screwys.Rufin.metainfo.xml");
+    let path = PathBuf::from("resources/io.github.screwys.Rufin.metainfo.xml");
     let input = read_to_string(&path)?;
     if preserve_existing {
         let existing_version = first_metainfo_release_version(&input)?;
@@ -900,7 +894,7 @@ fn update_metainfo_release(
     output.push_str(&without_existing[..insert_at]);
     output.push_str(&entry);
     output.push_str(&without_existing[insert_at..]);
-    output = replace_raw_data_refs(&output, version);
+    output = replace_raw_resource_refs(&output, version);
     write_string(&path, &output)
 }
 
@@ -1037,7 +1031,25 @@ fn xml_escape(input: &str) -> String {
         .replace('"', "&quot;")
 }
 
-fn replace_raw_data_refs(input: &str, version: &str) -> String {
+pub(crate) fn metainfo_at_ref(reference: &str) -> Result<String> {
+    let paths = command_stdout(
+        "git",
+        [
+            "ls-tree",
+            "--name-only",
+            reference,
+            "resources/io.github.screwys.Rufin.metainfo.xml",
+            "data/io.github.screwys.Rufin.metainfo.xml",
+        ],
+    )?;
+    let path = paths
+        .lines()
+        .last()
+        .ok_or("release ref has no MetaInfo file")?;
+    command_stdout("git", ["show", &format!("{reference}:{path}")])
+}
+
+fn replace_raw_resource_refs(input: &str, version: &str) -> String {
     let mut output = String::new();
     let needle = "https://raw.githubusercontent.com/screwys/Rufin/";
     let mut index = 0;
@@ -1046,9 +1058,17 @@ fn replace_raw_data_refs(input: &str, version: &str) -> String {
         let start = index + offset;
         output.push_str(&input[index..start + needle.len()]);
         let after_ref = start + needle.len();
-        if let Some(data_offset) = input[after_ref..].find("/data/") {
-            output.push_str(&format!("v{version}"));
-            index = after_ref + data_offset;
+        if let Some(offset) = input[after_ref..].find('/').filter(|offset| {
+            let path = &input[after_ref + offset..];
+            path.starts_with("/data/") || path.starts_with("/resources/")
+        }) {
+            let directory = if input[after_ref + offset..].starts_with("/data/") {
+                "/data/"
+            } else {
+                "/resources/"
+            };
+            output.push_str(&format!("v{version}/resources/"));
+            index = after_ref + offset + directory.len();
         } else {
             output.push_str(&input[after_ref..]);
             return output;

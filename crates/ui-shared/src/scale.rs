@@ -1,6 +1,68 @@
 use gtk::{glib, prelude::*};
 use std::rc::Rc;
 const SCALE_SURFACE_SCROLL_FACTOR: f64 = 2.5;
+
+pub fn install_scale_fill_updates(scale: &gtk::Scale) {
+    let trough = scale.first_child().expect("scale trough").downgrade();
+    scale.connect_fill_level_notify(move |_| {
+        // GTK queues the scale, but an unchanged trough allocation skips sizing its fill.
+        if let Some(trough) = trough.upgrade() {
+            trough.queue_allocate();
+        }
+    });
+}
+
+pub fn horizontal_scale_value_at_x(scale: &gtk::Scale, x: f64) -> f64 {
+    let range = scale.range_rect();
+    let fraction = ((x - f64::from(range.x())) / f64::from(range.width()).max(1.0)).clamp(0.0, 1.0);
+    let fraction = if scale.is_inverted()
+        ^ (scale.is_flippable() && scale.direction() == gtk::TextDirection::Rtl)
+    {
+        1.0 - fraction
+    } else {
+        fraction
+    };
+    let adjustment = scale.adjustment();
+    adjustment.lower()
+        + fraction * (adjustment.upper() - adjustment.page_size() - adjustment.lower())
+}
+
+pub fn install_hover_value_bubble(
+    widget: &impl IsA<gtk::Widget>,
+    bubble: gtk::Popover,
+    label: gtk::Label,
+    value_at: impl Fn(&gtk::Widget, f64, f64) -> Option<(String, f64)> + 'static,
+) {
+    bubble.set_parent(widget);
+    let motion = gtk::EventControllerMotion::new();
+    // Observe motion before the slider's gesture consumes it during a drag.
+    motion.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let weak_widget = widget.as_ref().downgrade();
+    let preview = bubble.clone();
+    motion.connect_motion(move |_, x, y| {
+        let Some(widget) = weak_widget.upgrade() else {
+            return;
+        };
+        let Some((value, track_center_y)) = value_at(&widget, x, y) else {
+            preview.popdown();
+            return;
+        };
+        label.set_text(&value);
+        // Leave 6px above the 12px thumb, independent of the host's padding and height.
+        preview.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
+            x.round() as i32,
+            (track_center_y - 12.0).round() as i32,
+            1,
+            1,
+        )));
+        preview.popup();
+    });
+    let preview = bubble.clone();
+    motion.connect_leave(move |_| preview.popdown());
+    widget.add_controller(motion);
+    widget.connect_destroy(move |_| bubble.unparent());
+}
+
 pub fn install_scale_scroll_forwarding(scale: &gtk::Scale) {
     let controller = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
     controller.set_propagation_phase(gtk::PropagationPhase::Capture);

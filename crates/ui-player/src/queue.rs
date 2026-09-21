@@ -383,6 +383,7 @@ fn install_queue_row_interactions(
         let queue_target = queue_row_drop_target(occurrence, y, root.height());
         enqueue_media_drop(&media_shell, value, queue_target)
     });
+    ui_shared::media_drag::style_media_drop_target(root);
     root.add_controller(media_drop);
 
     let context_shell = Rc::downgrade(shell);
@@ -982,6 +983,7 @@ fn queue_overlay_empty_label(
     empty_drop.connect_drop(move |_, value, _, _| {
         enqueue_media_drop(&empty_shell, value, QueueReorderTarget::End)
     });
+    empty.add_css_class("media-drop-target");
     empty.add_controller(empty_drop);
     overlay.add_overlay(&empty);
     Some(empty)

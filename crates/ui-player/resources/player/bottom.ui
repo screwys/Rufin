@@ -154,9 +154,26 @@
     </widgets>
   </object>
 
+  <object class="GtkPopover" id="seek_preview">
+    <property name="autohide">false</property>
+    <property name="focusable">false</property>
+    <property name="can-target">false</property>
+    <property name="has-arrow">false</property>
+    <property name="position">top</property>
+    <style><class name="slider-value-popover"/><class name="player-slider-preview"/></style>
+    <property name="child">
+      <object class="GtkLabel" id="seek_preview_time">
+        <style><class name="tabular-numeric"/></style>
+      </object>
+    </property>
+  </object>
+
   <object class="GtkScale" id="progress">
     <property name="orientation">horizontal</property>
     <property name="draw-value">false</property>
+    <property name="show-fill-level">true</property>
+    <property name="restrict-to-fill-level">false</property>
+    <property name="fill-level">0</property>
     <property name="adjustment">
       <object class="GtkAdjustment">
         <property name="lower">0</property>
@@ -184,7 +201,24 @@
     </property>
   </object>
 
+  <object class="GtkPopover" id="volume_preview">
+    <property name="autohide">false</property>
+    <property name="focusable">false</property>
+    <property name="can-target">false</property>
+    <property name="has-arrow">false</property>
+    <property name="position">top</property>
+    <style><class name="slider-value-popover"/><class name="player-slider-preview"/></style>
+    <property name="child">
+      <object class="GtkLabel" id="volume_preview_level">
+        <style><class name="tabular-numeric"/></style>
+      </object>
+    </property>
+  </object>
+
   <object class="GtkScale" id="volume">
+    <property name="show-fill-level">true</property>
+    <property name="restrict-to-fill-level">false</property>
+    <property name="fill-level">0</property>
     <property name="orientation">horizontal</property><property name="hexpand">true</property><property name="halign">fill</property><property name="valign">center</property>
     <property name="draw-value">false</property>
     <property name="adjustment"><object class="GtkAdjustment"><property name="lower">0</property><property name="upper">1</property><property name="value">1</property><property name="step-increment">0.01</property><property name="page-increment">0.1</property></object></property>
