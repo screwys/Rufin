@@ -295,6 +295,7 @@ pub async fn build(
         operation_feedback_action,
         root_stack,
         app_root_overlay,
+        app_content_overlay,
         app_content_stack,
         startup_loading_host,
         startup_loading_status,
@@ -461,6 +462,7 @@ pub async fn build(
                 &chrome.app_content_stack,
             )),
             preferences,
+            activity: RefCell::new(None),
             downloads,
             download_feedback: Default::default(),
             control_feedback,
@@ -483,6 +485,7 @@ pub async fn build(
     app.connect_shutdown(move |_| {
         if let Some(shell) = weak.upgrade() {
             shell.web_controller.stop();
+            shell.close_activity();
         }
     });
     let weak = Rc::downgrade(&shell);
@@ -590,6 +593,19 @@ pub async fn build(
     }
     if !shell.chrome.window.is_visible() {
         present_initial_window(&shell, force_initial_presentation);
+    }
+    if shell.chrome.window.is_mapped() {
+        shell.open_startup_activity();
+    } else {
+        let pending = Cell::new(true);
+        let weak = Rc::downgrade(&shell);
+        shell.chrome.window.connect_map(move |_| {
+            if pending.replace(false)
+                && let Some(shell) = weak.upgrade()
+            {
+                shell.open_startup_activity();
+            }
+        });
     }
     schedule_periodic_release_checks(&shell);
     if defer_initial_route && !shell.source.operation.borrow().blocks_library() {

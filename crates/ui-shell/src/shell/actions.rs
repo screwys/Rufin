@@ -28,6 +28,14 @@ pub(crate) fn connect_shell_actions(shell: &Rc<Shell>) {
 }
 
 pub(crate) fn install_window_actions(shell: &Rc<Shell>) {
+    #[cfg(target_os = "macos")]
+    let overview_accels = &["<Meta><Alt>o"][..];
+    #[cfg(not(target_os = "macos"))]
+    let overview_accels = &["<Control><Alt>o"][..];
+    add_window_action(shell, "listening-overview", overview_accels, {
+        let shell = Rc::clone(shell);
+        move || shell.open_activity(None)
+    });
     install_source_menu_actions(shell);
     add_window_action(shell, "import-playlist", &[], {
         let shell = Rc::clone(shell);
@@ -377,7 +385,10 @@ pub(crate) fn install_window_actions(shell: &Rc<Shell>) {
         fullscreen_player_accels,
         {
             let shell = Rc::clone(shell);
-            move || shell.player_ui.toggle_fullscreen_player()
+            move || {
+                shell.close_activity();
+                shell.player_ui.toggle_fullscreen_player();
+            }
         },
     );
     #[cfg(target_os = "macos")]

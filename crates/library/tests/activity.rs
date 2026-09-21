@@ -5,6 +5,130 @@ use library::{
 use super::support::{connection, fixture};
 
 #[tokio::test]
+async fn overview_uses_full_duration_qualified_plays_and_calendar_comparisons() {
+    let fixture = fixture().await;
+    let mut raw = connection(&fixture.path).await;
+    for (period, track, skipped, duration) in [
+        ("2025-12", 0, 0, 240_000),
+        ("2026-01", 0, 0, 300_000),
+        ("2026-01", 0, 0, 300_000),
+        ("2026-01", 1, 0, 180_000),
+        ("2026-01", 1, 1, 180_000),
+        ("2026-02", 1, 0, 180_000),
+    ] {
+        sqlx::query("INSERT INTO listens(media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped)
+            VALUES(?1,'Track','Artist','Album',100,?2,?3,1000,?4)")
+            .bind(&fixture.track_uris[track]).bind(period).bind(duration).bind(skipped)
+            .execute(&mut raw).await.unwrap();
+    }
+    drop(raw);
+    let cancel = ReadCancellation::new();
+    let month = fixture
+        .database
+        .activity_overview(
+            CalendarActivityPeriod::Month {
+                year: 2026,
+                month: 1,
+            },
+            5,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(month.totals.plays, 3);
+    assert_eq!(month.totals.duration_millis, 780_000);
+    assert_eq!(month.totals.tracks, 2);
+    assert_eq!(month.previous.plays, 1);
+    assert_eq!(month.previous.duration_millis, 240_000);
+    assert_eq!(
+        month
+            .tracks
+            .iter()
+            .map(|row| row.play_count)
+            .collect::<Vec<_>>(),
+        [2, 1]
+    );
+    assert_eq!(month.albums[0].play_count, 3);
+    assert_eq!(month.artists[0].play_count, 3);
+    assert_eq!(month.genres[0].1, 3);
+    let year = fixture
+        .database
+        .activity_overview(CalendarActivityPeriod::Year(2026), 5, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(year.totals.plays, 4);
+    assert_eq!(year.totals.duration_millis, 960_000);
+    assert_eq!(year.previous.plays, 1);
+    let empty = fixture
+        .database
+        .activity_overview(CalendarActivityPeriod::Year(2024), 5, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(empty.totals.plays, 0);
+    assert!(empty.tracks.is_empty());
+}
+
+#[tokio::test]
+async fn overview_keeps_monthly_baselines_and_bounds_history_results() {
+    let fixture = fixture().await;
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("INSERT INTO catalog.activity_baseline(source_key,period,item_kind,track_object_id,play_count,skip_count)
+        VALUES(?1,'2025-06','track','track-0',9,2)")
+        .bind(fixture.source).execute(&mut raw).await.unwrap();
+    for index in 0..7 {
+        sqlx::query("INSERT INTO listens(media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped)
+            VALUES(?1,?2,'Retained artist','Retained album',100,'2025-06',180000,1000,0)")
+            .bind(format!("file:///retained-{index}.flac")).bind(format!("Retained {index}"))
+            .execute(&mut raw).await.unwrap();
+    }
+    drop(raw);
+    let cancel = ReadCancellation::new();
+    let overview = fixture
+        .database
+        .activity_overview(
+            CalendarActivityPeriod::Month {
+                year: 2025,
+                month: 6,
+            },
+            5,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(overview.totals.plays, 16);
+    assert_eq!(overview.totals.tracks, 8);
+    assert_eq!(overview.tracks.len(), 5);
+    assert_eq!(overview.tracks[0].media_uri, fixture.track_uris[0]);
+    assert_eq!(overview.tracks[0].play_count, 9);
+    assert!(
+        overview.tracks[1..]
+            .iter()
+            .all(|row| row.title.starts_with("Retained"))
+    );
+    assert_eq!(overview.albums[0].play_count, 9);
+    for (limit, expected) in [(3, 3), (10, 8)] {
+        let report = fixture
+            .database
+            .activity_overview(
+                CalendarActivityPeriod::Month {
+                    year: 2025,
+                    month: 6,
+                },
+                limit,
+                &cancel,
+            )
+            .await
+            .unwrap();
+        assert_eq!(report.tracks.len(), expected);
+        assert_eq!(report.totals, overview.totals);
+    }
+    assert_eq!(
+        fixture.database.activity_months().await.unwrap(),
+        ["2025-06"]
+    );
+}
+
+#[tokio::test]
 async fn listens_accept_empty_optional_recording_ids() {
     let fixture = fixture().await;
     let listen = ListenWrite {

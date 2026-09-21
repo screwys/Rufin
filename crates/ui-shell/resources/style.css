@@ -1717,13 +1717,13 @@ link.inline-detail-link:active {
   text-decoration: none;
 }
 
-link.inline-detail-link:hover {
+label:hover link.inline-detail-link:hover {
   color: inherit;
   text-decoration-line: underline;
   text-decoration-color: color-mix(in srgb, currentColor 65%, var(--window-bg-color));
 }
 
-link.inline-detail-link:focus:focus-visible {
+label link.inline-detail-link:focus:focus-visible {
   outline: none;
   text-decoration-line: underline;
   text-decoration-color: var(--accent-color);
@@ -2597,3 +2597,18 @@ button.connect-relay-link, button.connect-relay-link:visited { color: inherit; }
 
 .connect-device-online .subtitle { color: var(--success-color); }
 .connect-device-offline .subtitle { color: var(--error-color); }
+/* The report shares the fullscreen player's artwork background and library cells. */
+.activity-overview, .activity-report { background-color: var(--window-bg-color); }
+.activity-title { font-size: 2.4em; font-weight: 800; }
+.activity-total { font-size: 2em; font-weight: 750; }
+.activity-stat {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background-color: alpha(currentColor, 0.045);
+  border: 1px solid alpha(currentColor, 0.08);
+}
+.activity-stat-icon { color: var(--accent-color); opacity: 0.85; }
+.activity-play-count { font-weight: 600; margin-top: 2px; }
+.activity-report columnview, .activity-report listview, .activity-report flowbox { background: transparent; }
+.activity-report progressbar trough { min-height: 8px; border-radius: 4px; }
+.activity-report progressbar progress { min-height: 8px; border-radius: 4px; }

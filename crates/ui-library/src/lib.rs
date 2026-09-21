@@ -1,3 +1,4 @@
+pub mod activity;
 mod catalog;
 mod home_layout;
 mod playlist_entry_model;

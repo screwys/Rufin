@@ -1,3 +1,4 @@
+mod activity;
 pub mod app;
 mod connect;
 pub mod context_menu;

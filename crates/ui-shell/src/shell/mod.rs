@@ -1,3 +1,4 @@
+mod activity;
 pub(crate) mod build;
 pub(crate) mod chrome;
 mod diagnostics;
@@ -42,6 +43,7 @@ impl Shell {
 }
 
 pub(crate) struct Shell {
+    activity: std::cell::RefCell<Option<Rc<activity::ActivityView>>>,
     pub(crate) quitting: Rc<Cell<bool>>,
     pub(crate) diagnostics: DiagnosticsHandle,
     pub(crate) appearance: crate::application::style::ApplicationAppearance,

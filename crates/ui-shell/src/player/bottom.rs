@@ -126,7 +126,11 @@ pub(crate) fn connect_player_controls(shell: &Rc<Shell>) {
             .area
             .upcast_ref(),
         move || {
-            fullscreen_shell.player_ui.toggle_fullscreen_player();
+            gtk::prelude::ActionGroupExt::activate_action(
+                &fullscreen_shell.chrome.window,
+                "toggle-fullscreen-player",
+                None,
+            );
         },
     );
 

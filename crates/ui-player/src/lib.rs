@@ -176,7 +176,7 @@ pub mod bottom;
 mod color_chooser;
 pub mod equalizer;
 pub mod fullscreen;
-mod fullscreen_background;
+pub mod fullscreen_background;
 mod icons;
 mod progress;
 pub mod visualizer;

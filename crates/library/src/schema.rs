@@ -144,6 +144,7 @@ CREATE INDEX IF NOT EXISTS listens_history_idx ON listens(source_id, started_at 
 CREATE INDEX IF NOT EXISTS listens_recent_idx ON listens(started_at DESC, listen_key DESC);
 
 CREATE INDEX IF NOT EXISTS listens_media_idx ON listens(media_uri, started_at DESC,listen_key DESC);
+CREATE INDEX IF NOT EXISTS listens_period_idx ON listens(local_period) WHERE skipped=0;
 
 CREATE TABLE IF NOT EXISTS listen_outbox (
     outbox_key INTEGER PRIMARY KEY,
