@@ -3522,6 +3522,9 @@ msgstr ""
 msgid "Toggle Fullscreen"
 msgstr "Lülita täisekraanivaade sisse/välja"
 
+msgid "Tools"
+msgstr ""
+
 #, fuzzy
 #| msgid "albums"
 msgid "Top albums"
