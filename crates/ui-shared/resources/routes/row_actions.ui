@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <template class="RufinRowActions" parent="GtkBox">
+    <property name="spacing">4</property>
+    <property name="halign">end</property>
+    <property name="valign">center</property>
+    <style><class name="row-actions"/></style>
+    <child><object class="GtkButton" id="menu">
+      <property name="icon-name">rufin-more-symbolic</property>
+      <property name="tooltip-text" translatable="yes">Options</property>
+      <property name="focus-on-click">false</property>
+      <property name="valign">center</property>
+      <style><class name="flat"/><class name="circular"/><class name="row-menu-button"/></style>
+    </object></child>
+    <child><object class="GtkBox" id="favorite_slot">
+      <property name="width-request">32</property>
+    </object></child>
+  </template>
+</interface>

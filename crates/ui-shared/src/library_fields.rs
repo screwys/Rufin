@@ -572,6 +572,7 @@ pub fn column_width(field: LibraryField) -> i32 {
         LibraryField::RowIndex => 48,
         LibraryField::Image => 56,
         LibraryField::Favorite => crate::favorites::FAVORITE_COLUMN_WIDTH,
+        LibraryField::Tools => crate::recycled_cells::ROW_ACTIONS_WIDTH,
         LibraryField::Title | LibraryField::TitleMerged => 220,
         LibraryField::Album
         | LibraryField::Artist

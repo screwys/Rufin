@@ -13,6 +13,7 @@
     </property>
     <child type="overlay">
       <object class="GtkButton" id="play">
+        <property name="focus-on-click">false</property>
         <property name="halign">center</property>
         <property name="valign">center</property>
         <property name="icon-name">rufin-media-playback-start-symbolic</property>

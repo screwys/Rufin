@@ -1,6 +1,6 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
-pub const LIBRARY_LIST_LAYOUT_VERSION: u8 = 9;
+pub const LIBRARY_LIST_LAYOUT_VERSION: u8 = 10;
 pub const DEFAULT_WINDOW_WIDTH: i32 = 1_500;
 pub const DEFAULT_WINDOW_HEIGHT: i32 = 900;
 pub const MIN_RESTORED_WINDOW_WIDTH: i32 = 450;
@@ -410,6 +410,7 @@ pub enum LibraryField {
     AlbumCount,
     Duration,
     Favorite,
+    Tools,
 }
 impl LibraryField {
     pub fn track_sort(self) -> library::TrackSort {
@@ -434,7 +435,8 @@ impl LibraryField {
             | Self::TitleMerged
             | Self::DiscNumber
             | Self::SongCount
-            | Self::AlbumCount => library::TrackSort::Title,
+            | Self::AlbumCount
+            | Self::Tools => library::TrackSort::Title,
         }
     }
 
@@ -745,6 +747,20 @@ impl LibraryListSettings {
                 self.grid_fields = default_grid_fields(key);
             }
         }
+        if self.layout_version < 10 {
+            for fields in [&mut self.row_fields, &mut self.detail_track_fields] {
+                for field in fields.iter_mut() {
+                    if *field == LibraryField::Favorite {
+                        *field = LibraryField::Tools;
+                    }
+                }
+                if key == LibraryListKey::Queue {
+                    fields.retain(|field| *field != LibraryField::Tools);
+                } else if !fields.contains(&LibraryField::Tools) {
+                    fields.push(LibraryField::Tools);
+                }
+            }
+        }
     }
 }
 pub fn default_library_list_settings() -> Vec<LibraryListSettingsEntry> {
@@ -766,7 +782,7 @@ pub fn available_row_fields(key: LibraryListKey) -> &'static [LibraryField] {
             LibraryField::Album,
             LibraryField::Year,
             LibraryField::Duration,
-            LibraryField::Favorite,
+            LibraryField::Tools,
         ],
         LibraryListKey::Albums | LibraryListKey::ArtistAlbums => &[
             LibraryField::RowIndex,
@@ -783,7 +799,7 @@ pub fn available_row_fields(key: LibraryListKey) -> &'static [LibraryField] {
             LibraryField::Genre,
             LibraryField::SongCount,
             LibraryField::Duration,
-            LibraryField::Favorite,
+            LibraryField::Tools,
         ],
         LibraryListKey::Artists | LibraryListKey::AlbumArtists => &[
             LibraryField::RowIndex,
@@ -794,19 +810,21 @@ pub fn available_row_fields(key: LibraryListKey) -> &'static [LibraryField] {
             LibraryField::LastPlayed,
             LibraryField::PlayCount,
             LibraryField::UserRating,
-            LibraryField::Favorite,
+            LibraryField::Tools,
         ],
         LibraryListKey::Genres => &[
             LibraryField::RowIndex,
             LibraryField::Title,
             LibraryField::AlbumCount,
             LibraryField::SongCount,
+            LibraryField::Tools,
         ],
         LibraryListKey::Moods => &[
             LibraryField::RowIndex,
             LibraryField::Title,
             LibraryField::SongCount,
             LibraryField::Duration,
+            LibraryField::Tools,
         ],
         LibraryListKey::Playlists | LibraryListKey::SmartPlaylists => &[
             LibraryField::RowIndex,
@@ -814,6 +832,7 @@ pub fn available_row_fields(key: LibraryListKey) -> &'static [LibraryField] {
             LibraryField::Title,
             LibraryField::SongCount,
             LibraryField::Duration,
+            LibraryField::Tools,
         ],
         LibraryListKey::Tracks
         | LibraryListKey::FavoriteTracks
@@ -842,7 +861,7 @@ pub fn available_row_fields(key: LibraryListKey) -> &'static [LibraryField] {
             LibraryField::DiscNumber,
             LibraryField::TrackNumber,
             LibraryField::Duration,
-            LibraryField::Favorite,
+            LibraryField::Tools,
         ],
     }
 }
@@ -983,41 +1002,45 @@ fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
             LibraryField::TitleMerged,
             LibraryField::PlayCount,
             LibraryField::Year,
-            LibraryField::Favorite,
+            LibraryField::Tools,
         ],
         LibraryListKey::Artists | LibraryListKey::AlbumArtists => vec![
             LibraryField::Image,
             LibraryField::Title,
             LibraryField::AlbumCount,
-            LibraryField::Favorite,
+            LibraryField::Tools,
         ],
         LibraryListKey::Genres => vec![
             LibraryField::Title,
             LibraryField::AlbumCount,
             LibraryField::SongCount,
+            LibraryField::Tools,
         ],
         LibraryListKey::Moods => vec![
             LibraryField::Title,
             LibraryField::SongCount,
             LibraryField::Duration,
+            LibraryField::Tools,
         ],
         LibraryListKey::Playlists => vec![
             LibraryField::Image,
             LibraryField::Title,
             LibraryField::SongCount,
+            LibraryField::Tools,
         ],
         LibraryListKey::SmartPlaylists => vec![
             LibraryField::Image,
             LibraryField::Title,
             LibraryField::SongCount,
             LibraryField::Duration,
+            LibraryField::Tools,
         ],
         LibraryListKey::Tracks => vec![
             LibraryField::RowIndex,
             LibraryField::TitleMerged,
             LibraryField::Album,
             LibraryField::Year,
-            LibraryField::Favorite,
+            LibraryField::Tools,
         ],
         LibraryListKey::FavoriteTracks => vec![
             LibraryField::RowIndex,
@@ -1025,13 +1048,14 @@ fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
             LibraryField::Album,
             LibraryField::Year,
             LibraryField::PlayCount,
+            LibraryField::Tools,
         ],
         LibraryListKey::History => vec![
             LibraryField::RowIndex,
             LibraryField::TitleMerged,
             LibraryField::Album,
             LibraryField::LastPlayed,
-            LibraryField::Favorite,
+            LibraryField::Tools,
         ],
         LibraryListKey::AlbumDetailTracks => default_detail_track_fields(),
         LibraryListKey::ArtistTracks => vec![
@@ -1040,7 +1064,7 @@ fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
             LibraryField::Album,
             LibraryField::Year,
             LibraryField::PlayCount,
-            LibraryField::Favorite,
+            LibraryField::Tools,
         ],
         LibraryListKey::GenreTracks
         | LibraryListKey::MoodTracks
@@ -1050,7 +1074,7 @@ fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
                 LibraryField::TitleMerged,
                 LibraryField::Album,
                 LibraryField::Duration,
-                LibraryField::Favorite,
+                LibraryField::Tools,
             ]
         }
         LibraryListKey::SmartPlaylistTracks => vec![
@@ -1058,7 +1082,7 @@ fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
             LibraryField::TitleMerged,
             LibraryField::Album,
             LibraryField::PlayCount,
-            LibraryField::Favorite,
+            LibraryField::Tools,
         ],
     }
 }
@@ -1100,7 +1124,7 @@ pub fn available_detail_track_fields() -> &'static [LibraryField] {
         LibraryField::TrackNumber,
         LibraryField::Title,
         LibraryField::Duration,
-        LibraryField::Favorite,
+        LibraryField::Tools,
     ]
 }
 fn default_detail_track_fields() -> Vec<LibraryField> {
@@ -1108,7 +1132,7 @@ fn default_detail_track_fields() -> Vec<LibraryField> {
         LibraryField::RowIndex,
         LibraryField::Title,
         LibraryField::Duration,
-        LibraryField::Favorite,
+        LibraryField::Tools,
     ]
 }
 fn default_sort_key(key: LibraryListKey) -> LibraryField {
@@ -1175,6 +1199,7 @@ fn row_field_is_usable(field: LibraryField) -> bool {
             | LibraryField::TrackNumber
             | LibraryField::DiscNumber
             | LibraryField::Favorite
+            | LibraryField::Tools
     )
 }
 

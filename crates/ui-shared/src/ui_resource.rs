@@ -91,6 +91,7 @@ pub const RECYCLED_TEXT_CELL_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/routes/recycled_text_cell.ui";
 
 pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
+    "/io/github/screwys/Rufin/ui/routes/row_actions.ui",
     TRACK_ROW_INDEX_RESOURCE,
     PLAY_MENU_RESOURCE,
     PLAYLIST_PICKER_RESOURCE,

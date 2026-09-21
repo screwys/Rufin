@@ -548,13 +548,28 @@ fn folder_table(
         columns.push(folder_name_column(shell, path.clone()));
         columns.push(folder_detail_column(shell, path.clone()));
     } else {
-        columns.push(folder_index_column(Rc::clone(&folders)));
+        columns.push(folder_index_column(shell, Rc::clone(&folders)));
         columns.push(folder_merged_column(shell, path.clone()));
         columns.push(folder_album_column(shell, path.clone()));
         columns.push(folder_year_column(shell, path.clone()));
     }
     let duration = folder_duration_column(shell, path.clone());
     columns.push(duration);
+    columns.push(super::columns::mapped_track_favorite_column::<
+        FolderTableRow,
+        _,
+        _,
+    >(
+        shell,
+        |row| match row {
+            FolderTableRow::Track(track) => Some(track.media_uri.clone()),
+            _ => None,
+        },
+        |row| match row {
+            FolderTableRow::Track(track) => Some((track.media_uri.clone(), track.favorite)),
+            _ => None,
+        },
+    ));
     for column in &columns {
         table.append_column(column);
     }
@@ -725,8 +740,19 @@ fn folder_label_column(
 }
 
 fn folder_index_column(
+    shell: &Rc<CatalogUi>,
     folders: Rc<ui_shared::sparse_model::SparseRouteModel<FolderLink, FolderTableRow>>,
 ) -> gtk::ColumnViewColumn {
+    let playing = super::columns::TrackRowPlayingIndicator::new();
+    let current_playing = playing.clone();
+    shell.register_current_route_track_selection(Rc::new(move |current| {
+        current_playing.set_current(
+            current.map(|current| current.media_uri.as_str()),
+            gtk::INVALID_LIST_POSITION,
+        );
+        current_playing.set_paused(current.is_some_and(|current| current.paused));
+        true
+    }));
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(|_, item| {
         if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
@@ -735,6 +761,7 @@ fn folder_index_column(
             )));
         }
     });
+    let bind_playing = playing.clone();
     connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
@@ -746,22 +773,28 @@ fn folder_index_column(
             return;
         };
         let text = match ui_shared::sparse_model::item_at_from_item::<FolderTableRow>(item) {
-            Some(FolderTableRow::Track(_)) => item
-                .position()
-                .saturating_sub(folders.len().min(u32::MAX as usize) as u32)
-                .saturating_add(1)
-                .to_string(),
-            _ => String::new(),
+            Some(FolderTableRow::Track(track)) => {
+                bind_playing.bind(cell.upcast_ref(), item.position(), &track.media_uri);
+                item.position()
+                    .saturating_sub(folders.len().min(u32::MAX as usize) as u32)
+                    .saturating_add(1)
+                    .to_string()
+            }
+            _ => {
+                bind_playing.unbind(cell.upcast_ref());
+                String::new()
+            }
         };
         super::columns::set_track_row_index_text(&cell, &text);
     });
-    factory.connect_unbind(|_, item| {
+    factory.connect_unbind(move |_, item| {
         if let Some(cell) = item
             .downcast_ref::<gtk::ListItem>()
             .and_then(gtk::ListItem::child)
             .and_then(|child| child.downcast::<gtk::Overlay>().ok())
         {
             super::columns::set_track_row_index_text(&cell, "");
+            playing.unbind(cell.upcast_ref());
         }
     });
     let column = gtk::ColumnViewColumn::new(Some("#"), Some(factory));

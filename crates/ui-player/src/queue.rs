@@ -13,10 +13,7 @@ use std::{
 };
 use ui_shared::{
     artwork::{ArtworkTileWeak, THUMB_COVER_SIZE},
-    favorites::{
-        FAVORITE_COLUMN_TITLE, column_favorite_icon_button, favorite_button_is_active,
-        set_favorite_button_active,
-    },
+    favorites::{favorite_button_is_active, row_favorite_icon_button, set_favorite_button_active},
     interactions::install_context_menu_openers,
     library_fields::TrackPresentation,
     media_drag::{
@@ -642,8 +639,9 @@ fn queue_favorite_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
         let Some(shell) = setup_shell.upgrade() else {
             return;
         };
-        let button = column_favorite_icon_button("Favorite track");
-        install_queue_row_interactions(button.upcast_ref(), &shell, item, None);
+        let button = row_favorite_icon_button("Favorite track");
+        let actions = ui_shared::recycled_cells::RowActions::with_favorite(&button);
+        install_queue_row_interactions(actions.upcast_ref(), &shell, item, None);
         let click_item = item.downgrade();
         let click_shell = Rc::clone(&shell);
         button.connect_clicked(move |button| {
@@ -654,13 +652,13 @@ fn queue_favorite_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
             (click_shell.set_track_favorite)(row.media_uri.clone(), favorite, button);
             set_favorite_button_active(button, favorite);
         });
-        item.set_child(Some(&button));
+        item.set_child(Some(&actions));
     });
     connect_sparse_bind(&factory, |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(button) = item.child().and_downcast::<gtk::Button>() else {
+        let Some(button) = ui_shared::recycled_cells::row_favorite_button(item) else {
             return;
         };
         let Some(object) = item
@@ -674,14 +672,12 @@ fn queue_favorite_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
     });
     factory.connect_unbind(|_, item| {
         if let Some(item) = item.downcast_ref::<gtk::ListItem>()
-            && let Some(button) = item.child().and_downcast::<gtk::Button>()
+            && let Some(button) = ui_shared::recycled_cells::row_favorite_button(item)
         {
             set_favorite_button_active(&button, false);
         }
     });
-    let column = gtk::ColumnViewColumn::new(Some(FAVORITE_COLUMN_TITLE), Some(factory));
-    column.set_fixed_width(ui_shared::favorites::FAVORITE_COLUMN_WIDTH);
-    column
+    ui_shared::recycled_cells::row_actions_column(&factory)
 }
 
 fn queue_year_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
@@ -757,20 +753,29 @@ fn build_queue_table(
         let index = queue_index_column(shell);
         let title = queue_title_column(shell);
         let duration = queue_duration_column(shell);
-        let favorite = queue_favorite_column(shell);
-        let columns = vec![
+        let mut columns = vec![
             (index.clone(), column_width(LibraryField::RowIndex)),
             (
                 title.clone(),
                 column_width(LibraryField::TitleMerged).saturating_add(72),
             ),
             (duration.clone(), column_width(LibraryField::Duration)),
-            (favorite.clone(), column_width(LibraryField::Favorite)),
         ];
         table.append_column(&index);
         table.append_column(&title);
         table.append_column(&duration);
-        table.append_column(&favorite);
+        if shell
+            .settings
+            .current
+            .borrow()
+            .library_list(LibraryListKey::Queue)
+            .row_fields
+            .contains(&LibraryField::Tools)
+        {
+            let tools = queue_favorite_column(shell);
+            table.append_column(&tools);
+            columns.push((tools, ui_shared::recycled_cells::ROW_ACTIONS_WIDTH));
+        }
         ui_shared::table_sizing::install_column_view_width_fit(&table, columns, 1)
     } else {
         ui_shared::table_sizing::install_column_view_width_fit(
@@ -834,11 +839,13 @@ fn configure_queue_columns(
                 LibraryField::TitleMerged => queue_title_column(shell),
                 LibraryField::RowIndex => queue_index_column(shell),
                 LibraryField::Duration => queue_duration_column(shell),
-                LibraryField::Favorite => queue_favorite_column(shell),
+                LibraryField::Tools => queue_favorite_column(shell),
                 LibraryField::Year => queue_year_column(shell),
                 _ => queue_text_column(shell, *field),
             };
-            let width = if *field == LibraryField::Year {
+            let width = if *field == LibraryField::Tools {
+                ui_shared::recycled_cells::ROW_ACTIONS_WIDTH
+            } else if *field == LibraryField::Year {
                 62
             } else {
                 ui_shared::library_fields::column_width(*field)

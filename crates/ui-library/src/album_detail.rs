@@ -14,8 +14,7 @@ use crate::CatalogUi;
 use crate::{LibraryField, LibraryLayout, LibraryListKey};
 use ui_shared::artwork::{ArtworkTile, THUMB_COVER_SIZE};
 use ui_shared::favorites::{
-    FAVORITE_ADD_ICON, FAVORITE_COLUMN_WIDTH, favorite_button_is_active, row_favorite_icon_button,
-    set_favorite_button_active,
+    favorite_button_is_active, row_favorite_icon_button, set_favorite_button_active,
 };
 use ui_shared::interactions::install_context_menu_openers;
 
@@ -1297,10 +1296,8 @@ fn album_track_header(field_widths: &[(LibraryField, i32)]) -> gtk::Widget {
             let image = gtk::Image::from_icon_name("rufin-preferences-system-time-symbolic");
             image.set_tooltip_text(Some(&localization::tr("Duration")));
             image.upcast()
-        } else if *field == LibraryField::Favorite {
-            let image = gtk::Image::from_icon_name(FAVORITE_ADD_ICON);
-            image.set_tooltip_text(Some(&localization::tr("Favorite")));
-            image.upcast()
+        } else if *field == LibraryField::Tools {
+            gtk::Box::new(gtk::Orientation::Horizontal, 0).upcast()
         } else {
             let label = album_track_label(
                 &localization::tr(ui_shared::settings::library_field_title(*field)),
@@ -1372,8 +1369,17 @@ fn album_track_cell(
     selection: &AlbumDetailTrackSelection,
 ) -> gtk::Widget {
     match field {
-        LibraryField::Favorite => {
+        LibraryField::Tools => {
             let button = row_favorite_icon_button("Favorite track");
+            let actions = ui_shared::recycled_cells::RowActions::with_favorite(&button);
+            let menu_shell = Rc::clone(shell);
+            let menu_uri = track.media_uri.clone();
+            install_context_menu_openers(
+                &actions,
+                Rc::new(move |target, position| {
+                    present_track_context_menu(target, &menu_shell, menu_uri.clone(), position);
+                }),
+            );
             set_favorite_button_active(&button, track.favorite);
             shell.register_favorite_button(
                 ui_shared::favorites::track_favorite_key(&track.media_uri),
@@ -1388,7 +1394,7 @@ fn album_track_cell(
                     Some(button),
                 );
             });
-            fixed_album_track_cell(width, ALBUM_TRACK_HEIGHT, button.upcast())
+            fixed_album_track_cell(width, ALBUM_TRACK_HEIGHT, actions.upcast())
         }
         LibraryField::Image => {
             let cover = ArtworkTile::new(32);
@@ -1418,7 +1424,6 @@ fn album_track_cell(
                 .downcast::<gtk::Box>()
                 .expect("album track cell");
             cell.set_spacing(5);
-            ui_shared::recycled_cells::install_playing_indicator(&label, &cell);
             selection.bind(label.upcast_ref(), &track.media_uri);
             cell.upcast()
         }
@@ -1524,7 +1529,8 @@ fn album_track_column_width(field: LibraryField) -> i32 {
         LibraryField::Year | LibraryField::Bpm => 52,
         LibraryField::PlayCount => 56,
         LibraryField::UserRating | LibraryField::SongCount | LibraryField::AlbumCount => 64,
-        LibraryField::Favorite => FAVORITE_COLUMN_WIDTH,
+        LibraryField::Tools => ui_shared::recycled_cells::ROW_ACTIONS_WIDTH,
+        LibraryField::Favorite => ui_shared::favorites::FAVORITE_COLUMN_WIDTH,
         LibraryField::Image => 56,
         LibraryField::Title | LibraryField::TitleMerged => 320,
         LibraryField::Album

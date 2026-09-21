@@ -750,6 +750,7 @@ fn named_collection_column<T: NamedCollectionRow>(
     field: LibraryField,
 ) -> gtk::ColumnViewColumn {
     match field {
+        LibraryField::Tools => named_actions_column::<T>(shell),
         LibraryField::RowIndex => mapped_row_index_column::<T>(collection_column_width(field)),
         LibraryField::Image => {
             let prefer_server_playlist_covers = shell
@@ -837,4 +838,30 @@ fn named_collection_column<T: NamedCollectionRow>(
             column
         }
     }
+}
+
+pub fn named_actions_column<T: NamedCollectionRow>(shell: &Rc<CatalogUi>) -> gtk::ColumnViewColumn {
+    let factory = gtk::SignalListItemFactory::new();
+    let shell = Rc::clone(shell);
+    factory.connect_setup(move |_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let actions = ui_shared::recycled_cells::RowActions::menu_only();
+        let weak = item.downgrade();
+        let shell = Rc::clone(&shell);
+        install_context_menu_openers(
+            &actions,
+            Rc::new(move |target, position| {
+                if let Some(row) = weak
+                    .upgrade()
+                    .and_then(|item| item_at_from_item::<T>(&item))
+                {
+                    row.present_context(target, &shell, position);
+                }
+            }),
+        );
+        item.set_child(Some(&actions));
+    });
+    ui_shared::recycled_cells::row_actions_column(&factory)
 }

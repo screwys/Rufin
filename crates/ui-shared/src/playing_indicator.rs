@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, time::Duration};
 
 use gtk::{glib, prelude::*, subclass::prelude::*};
 
@@ -7,7 +7,7 @@ mod imp {
 
     #[derive(Default)]
     pub struct PlayingIndicator {
-        pub tick: RefCell<Option<gtk::TickCallbackId>>,
+        pub timer: RefCell<Option<glib::SourceId>>,
         settings_handler: RefCell<Option<glib::SignalHandlerId>>,
     }
 
@@ -51,8 +51,8 @@ mod imp {
         }
 
         fn unmap(&self) {
-            if let Some(tick) = self.tick.take() {
-                tick.remove();
+            if let Some(timer) = self.timer.take() {
+                timer.remove();
             }
             if let Some(handler) = self.settings_handler.take() {
                 self.obj().settings().disconnect(handler);
@@ -115,16 +115,21 @@ impl PlayingIndicator {
 
     fn sync_animation(&self) {
         if self.settings().is_gtk_enable_animations() {
-            if self.imp().tick.borrow().is_none() {
-                self.imp()
-                    .tick
-                    .replace(Some(self.add_tick_callback(|widget, _| {
+            if self.imp().timer.borrow().is_none() {
+                let weak = self.downgrade();
+                self.imp().timer.replace(Some(glib::timeout_add_local(
+                    Duration::from_millis(33),
+                    move || {
+                        let Some(widget) = weak.upgrade() else {
+                            return glib::ControlFlow::Break;
+                        };
                         widget.queue_draw();
                         glib::ControlFlow::Continue
-                    })));
+                    },
+                )));
             }
-        } else if let Some(tick) = self.imp().tick.take() {
-            tick.remove();
+        } else if let Some(timer) = self.imp().timer.take() {
+            timer.remove();
         }
         self.queue_draw();
     }
