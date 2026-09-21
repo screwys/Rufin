@@ -58,6 +58,11 @@ msgstr ""
 "atslēgtas"
 
 msgid ""
+"If Discord is not installed as a flatpak, you need to give socket access to "
+"Rufin. If it is installed as a flatpak, this is not needed."
+msgstr ""
+
+msgid ""
 "List shared folders on this server using the entered credentials or guest "
 "access"
 msgstr ""
@@ -247,6 +252,9 @@ msgstr "5 jaunākie albumi"
 
 msgid "6 hours"
 msgstr "6 stundas"
+
+msgid "A new update is available, restart to apply"
+msgstr ""
 
 msgid "API key (Subsonic)"
 msgstr "API atslēga (Subsonic)"
@@ -1040,6 +1048,9 @@ msgstr "Atvienot"
 
 msgid "Discord Rich Presence"
 msgstr "Discord bagātīgā klātbūtne"
+
+msgid "Discord access in Flatpak"
+msgstr ""
 
 msgid "Discord"
 msgstr "Discord"
@@ -2705,6 +2716,9 @@ msgstr "Atiestatīt"
 msgid "Resource not found"
 msgstr "Resurss nav atrasts"
 
+msgid "Restart now"
+msgstr ""
+
 msgid "Restore User State"
 msgstr "Atjaunot lietotāja iestatījumus"
 
@@ -3236,6 +3250,11 @@ msgstr "Sinhronizēti teksti"
 msgid "System default"
 msgstr "Sistēmas noklusējums"
 
+#, fuzzy
+#| msgid "System default"
+msgid "System flatpak:"
+msgstr "Sistēmas noklusējums"
+
 msgid "System"
 msgstr "Sistēma"
 
@@ -3413,11 +3432,6 @@ msgstr "Atjaunināt"
 msgid "Updated Rufin to {version}"
 msgstr "Atjaunināts Rufin uz {version}"
 
-msgid "Updated Rufin to {version}. Restart to apply."
-msgstr ""
-"Atjaunināts Rufin līdz versijai {version}. Lai izmaiņas stātos spēkā, "
-"restartējiet programmu."
-
 msgid "Updating Rufin to {version}..."
 msgstr "Atjauninu Rufin uz versiju {version}..."
 
@@ -3486,6 +3500,11 @@ msgstr "Izmantot avota iestatījumu"
 msgid "Use the server's Instant Mix for Radio and Auto DJ."
 msgstr ""
 "Izmantot servera funkciju Instant Mix” radio un automātiskajam DJ režīmam."
+
+#, fuzzy
+#| msgid "User token"
+msgid "User flatpak:"
+msgstr "Lietotāja žetons"
 
 msgid "User token"
 msgstr "Lietotāja žetons"
@@ -3813,6 +3832,11 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "Updated Rufin to {version}. Restart to apply."
+#~ msgstr ""
+#~ "Atjaunināts Rufin līdz versijai {version}. Lai izmaiņas stātos spēkā, "
+#~ "restartējiet programmu."
 
 #~ msgid "Color scheme"
 #~ msgstr "Krāsu shēma"

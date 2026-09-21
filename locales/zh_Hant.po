@@ -52,6 +52,11 @@ msgid ""
 msgstr "從這個伺服器所下載的內容將被移除，且自動化規則會被關閉"
 
 msgid ""
+"If Discord is not installed as a flatpak, you need to give socket access to "
+"Rufin. If it is installed as a flatpak, this is not needed."
+msgstr ""
+
+msgid ""
 "List shared folders on this server using the entered credentials or guest "
 "access"
 msgstr ""
@@ -197,6 +202,9 @@ msgid "5 Latest Albums"
 msgstr "最新的 5 張專輯"
 
 msgid "6 hours"
+msgstr ""
+
+msgid "A new update is available, restart to apply"
 msgstr ""
 
 #, fuzzy
@@ -1070,6 +1078,9 @@ msgid "Disconnect"
 msgstr "重新連接"
 
 msgid "Discord Rich Presence"
+msgstr ""
+
+msgid "Discord access in Flatpak"
 msgstr ""
 
 msgid "Discord"
@@ -2869,6 +2880,9 @@ msgstr "重置"
 msgid "Resource not found"
 msgstr ""
 
+msgid "Restart now"
+msgstr ""
+
 msgid "Restore User State"
 msgstr ""
 
@@ -3444,6 +3458,11 @@ msgstr "已同步歌詞"
 msgid "System default"
 msgstr "系統預設值"
 
+#, fuzzy
+#| msgid "System default"
+msgid "System flatpak:"
+msgstr "系統預設值"
+
 msgid "System"
 msgstr "系統"
 
@@ -3623,9 +3642,6 @@ msgstr "更新"
 msgid "Updated Rufin to {version}"
 msgstr ""
 
-msgid "Updated Rufin to {version}. Restart to apply."
-msgstr ""
-
 msgid "Updating Rufin to {version}..."
 msgstr ""
 
@@ -3700,6 +3716,9 @@ msgid "Use source setting"
 msgstr "歌詞設定"
 
 msgid "Use the server's Instant Mix for Radio and Auto DJ."
+msgstr ""
+
+msgid "User flatpak:"
 msgstr ""
 
 msgid "User token"

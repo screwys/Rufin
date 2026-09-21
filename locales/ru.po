@@ -67,6 +67,11 @@ msgstr ""
 "отключены"
 
 msgid ""
+"If Discord is not installed as a flatpak, you need to give socket access to "
+"Rufin. If it is installed as a flatpak, this is not needed."
+msgstr ""
+
+msgid ""
 "List shared folders on this server using the entered credentials or guest "
 "access"
 msgstr ""
@@ -266,6 +271,9 @@ msgstr "5 последних альбомов"
 
 msgid "6 hours"
 msgstr "6 часов"
+
+msgid "A new update is available, restart to apply"
+msgstr ""
 
 msgid "API key (Subsonic)"
 msgstr "Ключ API (Subsonic)"
@@ -1016,6 +1024,9 @@ msgstr "Отключить"
 
 msgid "Discord Rich Presence"
 msgstr "Discord Rich Presence"
+
+msgid "Discord access in Flatpak"
+msgstr ""
 
 msgid "Discord"
 msgstr "Discord"
@@ -2639,6 +2650,9 @@ msgstr "Сбросить"
 msgid "Resource not found"
 msgstr "Ресурс не найден"
 
+msgid "Restart now"
+msgstr ""
+
 msgid "Restore User State"
 msgstr "Восстановить состояние пользователя"
 
@@ -3165,6 +3179,11 @@ msgstr "Синхронизированные тексты песен"
 msgid "System default"
 msgstr "Системные настройки"
 
+#, fuzzy
+#| msgid "System default"
+msgid "System flatpak:"
+msgstr "Системные настройки"
+
 msgid "System"
 msgstr "Система"
 
@@ -3342,9 +3361,6 @@ msgstr "Обновить"
 msgid "Updated Rufin to {version}"
 msgstr "Rufin обновлён на {version}"
 
-msgid "Updated Rufin to {version}. Restart to apply."
-msgstr "Rufin обновлён на {version}. Перезапустите, чтобы применить."
-
 msgid "Updating Rufin to {version}..."
 msgstr "Обновляю Rufin на {version}..."
 
@@ -3408,6 +3424,11 @@ msgstr "Использовать настройки источника"
 
 msgid "Use the server's Instant Mix for Radio and Auto DJ."
 msgstr "Использовать «Мгновенный микс» сервера для радио и «Авто-DJ»."
+
+#, fuzzy
+#| msgid "User token"
+msgid "User flatpak:"
+msgstr "Токен пользователя"
 
 msgid "User token"
 msgstr "Токен пользователя"
@@ -3728,6 +3749,9 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Updated Rufin to {version}. Restart to apply."
+#~ msgstr "Rufin обновлён на {version}. Перезапустите, чтобы применить."
 
 #~ msgid "Color scheme"
 #~ msgstr "Цветовая схема"

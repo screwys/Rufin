@@ -55,6 +55,11 @@ msgstr ""
 "disattivate"
 
 msgid ""
+"If Discord is not installed as a flatpak, you need to give socket access to "
+"Rufin. If it is installed as a flatpak, this is not needed."
+msgstr ""
+
+msgid ""
 "List shared folders on this server using the entered credentials or guest "
 "access"
 msgstr ""
@@ -238,6 +243,9 @@ msgstr "5 Ultimi Album"
 
 msgid "6 hours"
 msgstr "6 ore"
+
+msgid "A new update is available, restart to apply"
+msgstr ""
 
 msgid "API key (Subsonic)"
 msgstr "Chiave API (Subsonic)"
@@ -1021,6 +1029,9 @@ msgstr "Disconnetti"
 
 msgid "Discord Rich Presence"
 msgstr "Discord Rich Presence"
+
+msgid "Discord access in Flatpak"
+msgstr ""
 
 msgid "Discord"
 msgstr "Discord"
@@ -2641,6 +2652,9 @@ msgstr ""
 msgid "Resource not found"
 msgstr ""
 
+msgid "Restart now"
+msgstr ""
+
 msgid "Restore User State"
 msgstr ""
 
@@ -3161,6 +3175,9 @@ msgstr ""
 msgid "System default"
 msgstr ""
 
+msgid "System flatpak:"
+msgstr ""
+
 msgid "System"
 msgstr ""
 
@@ -3336,9 +3353,6 @@ msgstr ""
 msgid "Updated Rufin to {version}"
 msgstr ""
 
-msgid "Updated Rufin to {version}. Restart to apply."
-msgstr ""
-
 msgid "Updating Rufin to {version}..."
 msgstr ""
 
@@ -3403,6 +3417,9 @@ msgid "Use source setting"
 msgstr ""
 
 msgid "Use the server's Instant Mix for Radio and Auto DJ."
+msgstr ""
+
+msgid "User flatpak:"
 msgstr ""
 
 msgid "User token"
