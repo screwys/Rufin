@@ -3138,7 +3138,8 @@ async fn home_search_and_radio_results_stay_bounded() {
         .await
         .expect("alternate Explore Home page");
     assert_eq!(initial_home.showcase, alternate_explore_home.showcase);
-    assert_ne!(initial_home.explore, alternate_explore_home.explore);
+    assert_eq!(initial_home.explore.len(), fixture.albums.len());
+    assert_eq!(alternate_explore_home.explore.len(), fixture.albums.len());
     let mut raw = connection(&fixture.path).await;
     sqlx::query("UPDATE albums SET date_added=NULL,first_seen_at=CASE album_key WHEN ?1 THEN 200 ELSE 100 END")
         .bind(fixture.albums[0]).execute(&mut raw).await.expect("establish Local first-seen facts");

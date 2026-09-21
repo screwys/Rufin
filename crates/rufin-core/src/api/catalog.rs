@@ -134,7 +134,7 @@ pub(super) async fn home_data(
     for block in blocks {
         let (title, items) = match block {
             HomeBlockKind::Showcase => ("Showcase", page.showcase.iter().map(home_album).collect()),
-            HomeBlockKind::Explore => ("Explore", page.explore.iter().map(home_track).collect()),
+            HomeBlockKind::Explore => ("Explore", page.explore.iter().map(home_album).collect()),
             HomeBlockKind::MostPlayed => ("Most played", home_rows(&page.most_played)),
             HomeBlockKind::NewlyAdded => ("Newly added", home_rows(&page.newly_added)),
             HomeBlockKind::RecentlyPlayed => ("Recently played", home_rows(&page.recently_played)),
