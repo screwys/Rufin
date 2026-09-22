@@ -6,7 +6,12 @@
   <object class="GtkPopover" id="settings_popover">
     <property name="child">
       <object class="AdwPreferencesGroup">
-        <property name="title" translatable="yes">Customize display</property>
+        <property name="title" translatable="yes">Customize</property>
+        <child>
+          <object class="AdwSwitchRow" id="autoplay_first_track">
+            <property name="title" translatable="yes">Start playing automatically</property>
+          </object>
+        </child>
         <child>
           <object class="AdwSwitchRow" id="dynamic_background">
             <property name="title" translatable="yes">Dynamic background</property>
@@ -97,7 +102,7 @@
         <child>
           <object class="GtkMenuButton" id="customize">
             <property name="icon-name">rufin-sliders-2-symbolic</property>
-            <property name="tooltip-text" translatable="yes">Customize display</property>
+            <property name="tooltip-text" translatable="yes">Customize</property>
             <property name="popover">settings_popover</property>
             <style>
               <class name="flat"/>
