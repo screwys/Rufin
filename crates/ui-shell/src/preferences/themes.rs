@@ -191,17 +191,13 @@ fn populate(
             .add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_USER + 2);
         let weak = Rc::downgrade(shell);
         let definition = theme.cloned();
-        let preview = preview.downgrade();
         let update: Rc<dyn Fn()> = Rc::new(move || {
-            if let (Some(shell), Some(preview)) = (weak.upgrade(), preview.upgrade()) {
+            if let Some(shell) = weak.upgrade() {
                 provider.load_from_string(&format!(
                     "* {{ {} }}",
-                    shell.appearance.preview_css(
-                        definition.as_ref(),
-                        &shell.settings.current.borrow(),
-                        &preview,
-                        &provider
-                    )
+                    shell
+                        .appearance
+                        .preview_css(definition.as_ref(), &shell.settings.current.borrow())
                 ));
             }
         });
