@@ -416,9 +416,6 @@ msgstr ""
 msgid "Approve sign-in in your browser"
 msgstr "Approva l'accesso nel tuo browser"
 
-msgid "Artist / Album"
-msgstr "Artista / Album"
-
 msgid "Artist albums"
 msgstr "Album dell'artista"
 
@@ -1289,9 +1286,6 @@ msgid "Fixed position"
 msgstr ""
 
 msgid "Flat"
-msgstr ""
-
-msgid "Folder"
 msgstr ""
 
 msgid "Folders"
@@ -3722,6 +3716,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Artist / Album"
+#~ msgstr "Artista / Album"
 
 #~ msgid "Color scheme"
 #~ msgstr "Schema di colori"

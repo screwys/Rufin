@@ -444,9 +444,6 @@ msgstr "Wird angewendet …"
 msgid "Approve sign-in in your browser"
 msgstr "Bestätige die Anmeldung in deinem Browser"
 
-msgid "Artist / Album"
-msgstr "Künstler / Album"
-
 msgid "Artist albums"
 msgstr "Alben"
 
@@ -1284,9 +1281,6 @@ msgstr "Feste Position"
 
 msgid "Flat"
 msgstr "Neutral"
-
-msgid "Folder"
-msgstr "Ordner"
 
 msgid "Folders"
 msgstr "Ordner"
@@ -3706,6 +3700,12 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#~ msgid "Artist / Album"
+#~ msgstr "Künstler / Album"
+
+#~ msgid "Folder"
+#~ msgstr "Ordner"
 
 #~ msgid "This is not a valid Rufin visualizer preset."
 #~ msgstr "Dies ist keine gültige Rufin-Visualisierungsvoreinstellung."

@@ -393,9 +393,6 @@ msgstr "正在儲存..."
 msgid "Approve sign-in in your browser"
 msgstr ""
 
-msgid "Artist / Album"
-msgstr "藝人 / 專輯"
-
 msgid "Artist albums"
 msgstr "藝人專輯"
 
@@ -1376,9 +1373,6 @@ msgstr "固定位置"
 
 msgid "Flat"
 msgstr ""
-
-msgid "Folder"
-msgstr "資料夾"
 
 msgid "Folders"
 msgstr "資料夾"
@@ -4027,6 +4021,12 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Artist / Album"
+#~ msgstr "藝人 / 專輯"
+
+#~ msgid "Folder"
+#~ msgstr "資料夾"
 
 #~ msgid "Color scheme"
 #~ msgstr "色彩配置"

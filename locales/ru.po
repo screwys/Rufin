@@ -444,9 +444,6 @@ msgstr "Применяется..."
 msgid "Approve sign-in in your browser"
 msgstr "Подтвердите вход в системе в вашем браузере"
 
-msgid "Artist / Album"
-msgstr "Исполнитель / Альбом"
-
 msgid "Artist albums"
 msgstr "Альбомы исполнителя"
 
@@ -1285,9 +1282,6 @@ msgstr "Фиксированное расположение"
 
 msgid "Flat"
 msgstr "Плоский"
-
-msgid "Folder"
-msgstr "Папка"
 
 msgid "Folders"
 msgstr "Папки"
@@ -3757,6 +3751,12 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Artist / Album"
+#~ msgstr "Исполнитель / Альбом"
+
+#~ msgid "Folder"
+#~ msgstr "Папка"
 
 #~ msgid "This is not a valid Rufin visualizer preset."
 #~ msgstr "Это недействительный пресет визуализации для Rufin."
