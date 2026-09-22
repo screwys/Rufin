@@ -1324,6 +1324,12 @@ msgstr ""
 msgid "Found Servers"
 msgstr ""
 
+msgid "Frame rate limit"
+msgstr ""
+
+msgid "Frames per second"
+msgstr ""
+
 msgid "Friday"
 msgstr ""
 
@@ -2010,6 +2016,9 @@ msgid "Not connected"
 msgstr ""
 
 msgid "Not needed for most servers"
+msgstr ""
+
+msgid "Not valid"
 msgstr ""
 
 msgid "Nothing here yet"
@@ -3214,9 +3223,6 @@ msgid "This can be turned off after pairing if you want"
 msgstr ""
 
 msgid "This device"
-msgstr ""
-
-msgid "This is not a valid Rufin visualizer preset."
 msgstr ""
 
 msgid "This is owned by {source}. Regular playlists are synced to your remote."

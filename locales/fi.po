@@ -1357,6 +1357,14 @@ msgstr ""
 msgid "Found Servers"
 msgstr "Löydetyt palvelimet"
 
+msgid "Frame rate limit"
+msgstr ""
+
+#, fuzzy
+#| msgid "Multi-selection"
+msgid "Frames per second"
+msgstr "Monivalinta"
+
 msgid "Friday"
 msgstr "Perjantai"
 
@@ -2065,6 +2073,9 @@ msgstr "Ei yhdistetty"
 
 msgid "Not needed for most servers"
 msgstr "Ei tarvita useimpien palvelinten kanssa"
+
+msgid "Not valid"
+msgstr ""
 
 msgid "Nothing here yet"
 msgstr "Täällä ei ole mitään vielä"
@@ -3357,9 +3368,6 @@ msgstr ""
 
 msgid "This device"
 msgstr "Tämä laite"
-
-msgid "This is not a valid Rufin visualizer preset."
-msgstr ""
 
 msgid "This is owned by {source}. Regular playlists are synced to your remote."
 msgstr ""

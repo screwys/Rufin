@@ -1327,6 +1327,14 @@ msgstr "Avant"
 msgid "Found Servers"
 msgstr "Serveurs trouvés"
 
+msgid "Frame rate limit"
+msgstr ""
+
+#, fuzzy
+#| msgid "Multi-selection"
+msgid "Frames per second"
+msgstr "Multisélection"
+
 msgid "Friday"
 msgstr "Vendredi"
 
@@ -2029,6 +2037,9 @@ msgstr "Non connecté"
 
 msgid "Not needed for most servers"
 msgstr "Pas nécessaire pour la plupart des serveurs"
+
+msgid "Not valid"
+msgstr ""
 
 msgid "Nothing here yet"
 msgstr "Rien ici pour l'instant"
@@ -3260,9 +3271,6 @@ msgstr ""
 
 msgid "This device"
 msgstr "Cet appareil"
-
-msgid "This is not a valid Rufin visualizer preset."
-msgstr ""
 
 msgid "This is owned by {source}. Regular playlists are synced to your remote."
 msgstr ""
