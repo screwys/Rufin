@@ -9,7 +9,11 @@ use std::{
 };
 use ui_library::activity::ActivityCollections;
 use ui_player::fullscreen_background::FullscreenBackground;
-use ui_shared::{mounted_route::route_current_track, route::Route};
+use ui_shared::{
+    artwork::{ArtworkTile, cover_fetch_size_for_display},
+    mounted_route::route_current_track,
+    route::Route,
+};
 
 pub(super) struct ActivityView {
     root: gtk::Box,
@@ -39,7 +43,7 @@ pub(super) struct ActivityView {
     changing_period: Cell<bool>,
     data: RefCell<Option<ActivityOverview>>,
     task: RefCell<Option<tokio::task::AbortHandle>>,
-    cover_signal: RefCell<Option<(gtk::Picture, glib::SignalHandlerId)>>,
+    bg_tile: ArtworkTile,
     shell: Weak<Shell>,
 }
 
@@ -49,9 +53,7 @@ impl Drop for ActivityView {
         if let Some(task) = self.task.get_mut().take() {
             task.abort();
         }
-        if let Some((picture, signal)) = self.cover_signal.get_mut().take() {
-            picture.disconnect(signal);
-        }
+        self.bg_tile.cancel_artwork_request();
     }
 }
 
@@ -155,6 +157,7 @@ impl ActivityView {
             hours_change: gtk::Label, plays_change: gtk::Label, artists_change: gtk::Label, tracks_change: gtk::Label,
             tracks_section: gtk::Box, artists_section: gtk::Box, albums_section: gtk::Box, genres_section: gtk::Box,
             tracks_host: gtk::Box, artists_host: gtk::Box, albums_host: gtk::Box, genres_host: gtk::Box,
+            autoplay_first_track: adw::SwitchRow,
             dynamic_background: adw::SwitchRow, background_image: adw::SwitchRow,
             show_tracks: adw::SwitchRow, show_artists: adw::SwitchRow, show_albums: adw::SwitchRow,
             show_genres: adw::SwitchRow, show_comparison: adw::SwitchRow,
@@ -247,7 +250,7 @@ impl ActivityView {
             changing_period: Cell::new(false),
             data: RefCell::new(None),
             task: RefCell::new(None),
-            cover_signal: RefCell::new(None),
+            bg_tile: ArtworkTile::new(256),
             shell: Rc::downgrade(shell),
         });
         let weak = Rc::downgrade(shell);
@@ -269,7 +272,15 @@ impl ActivityView {
         });
         view.root.add_controller(key);
         let settings = shell.settings.current.borrow().activity_overview.clone();
+        background_image.set_sensitive(settings.dynamic_background);
+        let image_setting = background_image.downgrade();
+        dynamic_background.connect_active_notify(move |row| {
+            if let Some(image) = image_setting.upgrade() {
+                image.set_sensitive(row.is_active());
+            }
+        });
         let rows = [
+            autoplay_first_track,
             dynamic_background,
             background_image,
             show_tracks,
@@ -280,6 +291,7 @@ impl ActivityView {
             show_rufin_in_headline,
         ];
         let active = [
+            settings.autoplay_first_track,
             settings.dynamic_background,
             settings.background_image,
             settings.tracks,
@@ -289,13 +301,6 @@ impl ActivityView {
             settings.show_comparison,
             settings.show_rufin_in_headline,
         ];
-        rows[1].set_sensitive(settings.dynamic_background);
-        let image_setting = rows[1].downgrade();
-        rows[0].connect_active_notify(move |row| {
-            if let Some(image) = image_setting.upgrade() {
-                image.set_sensitive(row.is_active());
-            }
-        });
         for (index, (row, active)) in rows.into_iter().zip(active).enumerate() {
             row.set_active(active);
             let weak = Rc::downgrade(&view);
@@ -311,13 +316,14 @@ impl ActivityView {
                     .update_app_settings("listening overview", |settings| {
                         let settings = &mut settings.activity_overview;
                         let target = match index {
-                            0 => &mut settings.dynamic_background,
-                            1 => &mut settings.background_image,
-                            2 => &mut settings.tracks,
-                            3 => &mut settings.artists,
-                            4 => &mut settings.albums,
-                            5 => &mut settings.genres,
-                            6 => &mut settings.show_comparison,
+                            0 => &mut settings.autoplay_first_track,
+                            1 => &mut settings.dynamic_background,
+                            2 => &mut settings.background_image,
+                            3 => &mut settings.tracks,
+                            4 => &mut settings.artists,
+                            5 => &mut settings.albums,
+                            6 => &mut settings.genres,
+                            7 => &mut settings.show_comparison,
                             _ => &mut settings.show_rufin_in_headline,
                         };
                         let changed = *target != row.is_active();
@@ -385,19 +391,14 @@ impl ActivityView {
                 view.export_png();
             }
         });
-        let picture = shell
-            .player_ui
-            .views
-            .player_controls
-            .cover
-            .drag_paintable_source();
         let weak = Rc::downgrade(&view);
-        let signal = picture.connect_paintable_notify(move |_| {
-            if let Some(view) = weak.upgrade() {
-                view.refresh_background();
-            }
-        });
-        view.cover_signal.replace(Some((picture, signal)));
+        view.bg_tile
+            .drag_paintable_source()
+            .connect_paintable_notify(move |_| {
+                if let Some(view) = weak.upgrade() {
+                    view.refresh_background();
+                }
+            });
         view.refresh_background();
         minimize.grab_focus();
         view
@@ -564,15 +565,36 @@ impl ActivityView {
                         view.outgoing_content
                             .set_height_request(view.content.height());
                     }
+                    let first_artwork = data
+                        .tracks
+                        .first()
+                        .and_then(|row| row.artwork_binding.as_deref())
+                        .map(artwork::ArtworkBinding::opaque)
+                        .unwrap_or_default();
                     view.data.replace(Some(data));
+                    if let Some(shell) = view.shell.upgrade() {
+                        let fetch_size = cover_fetch_size_for_display(256);
+                        shell.artwork.bind_artwork_tile(
+                            &view.bg_tile,
+                            first_artwork,
+                            256,
+                            fetch_size,
+                        );
+                    }
                     view.apply_data();
                     if animate {
                         view.outgoing_content.set_visible(true);
                         view.transition.play();
                     }
                     if autoplay
-                        && let Some(uri) = top
                         && let Some(shell) = view.shell.upgrade()
+                        && shell
+                            .settings
+                            .current
+                            .borrow()
+                            .activity_overview
+                            .autoplay_first_track
+                        && let Some(uri) = top
                     {
                         (shell.media_menus.play_target)(
                             &rufin_core::playback::PlaybackTarget::Track(uri),
@@ -693,13 +715,7 @@ impl ActivityView {
         self.background.set_visible(settings.dynamic_background);
         if settings.dynamic_background {
             self.background.update(
-                shell
-                    .player_ui
-                    .views
-                    .player_controls
-                    .cover
-                    .drag_paintable_source()
-                    .paintable(),
+                self.bg_tile.drag_paintable_source().paintable(),
                 settings.background_image,
             );
         }

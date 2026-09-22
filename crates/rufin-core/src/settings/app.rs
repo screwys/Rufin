@@ -23,6 +23,7 @@ use super::{
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct ActivityOverviewSettings {
+    pub autoplay_first_track: bool,
     pub dynamic_background: bool,
     pub background_image: bool,
     pub tracks: bool,
@@ -45,6 +46,7 @@ pub struct ActivityOverviewSettings {
 impl Default for ActivityOverviewSettings {
     fn default() -> Self {
         Self {
+            autoplay_first_track: true,
             dynamic_background: true,
             background_image: true,
             tracks: true,
