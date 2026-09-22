@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-21 12:45+0000\n"
+"PO-Revision-Date: 2026-09-22 15:56+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
 "Language: ru\n"
@@ -70,6 +70,8 @@ msgid ""
 "If Discord is not installed as a flatpak, you need to give socket access to "
 "Rufin. If it is installed as a flatpak, this is not needed."
 msgstr ""
+"Если Discord не установлен как Flatpak, вам необходимо предоставить Rufin "
+"доступ к сокетам. Если он установлен как Flatpak, это не требуется."
 
 msgid ""
 "List shared folders on this server using the entered credentials or guest "
@@ -273,7 +275,7 @@ msgid "6 hours"
 msgstr "6 часов"
 
 msgid "A new update is available, restart to apply"
-msgstr ""
+msgstr "Доступно новое обновление, перезагрузите, чтобы применить"
 
 msgid "API key (Subsonic)"
 msgstr "Ключ API (Subsonic)"
@@ -841,10 +843,8 @@ msgstr "Скопировать текущий внешний вид в буфе�
 msgid "Copy"
 msgstr "Копировать"
 
-#, fuzzy
-#| msgid "Could not load this page"
 msgid "Could not load listening overview"
-msgstr "Не удалось загрузить эту страницу"
+msgstr "Не удалось загрузить обзор прослушивания"
 
 msgid "Could not load related tracks"
 msgstr "Не удалось загрузить похожие треки"
@@ -852,10 +852,8 @@ msgstr "Не удалось загрузить похожие треки"
 msgid "Could not load this page"
 msgstr "Не удалось загрузить эту страницу"
 
-#, fuzzy
-#| msgid "Could not open folder: {error}"
 msgid "Could not open file: {error}"
-msgstr "Не удалось открыть папку: {error}"
+msgstr "Не удалось открыть файл: {error}"
 
 msgid "Could not open folder: {error}"
 msgstr "Не удалось открыть папку: {error}"
@@ -1023,7 +1021,7 @@ msgid "Discord Rich Presence"
 msgstr "Discord Rich Presence"
 
 msgid "Discord access in Flatpak"
-msgstr ""
+msgstr "Доступ к Discord в Flatpak"
 
 msgid "Discord"
 msgstr "Discord"
@@ -1106,10 +1104,8 @@ msgstr "Редактировать текст песни"
 msgid "Edit metadata"
 msgstr "Редактировать метаданные"
 
-#, fuzzy
-#| msgid "Edit metadata"
 msgid "Edit theme"
-msgstr "Редактировать метаданные"
+msgstr "Редактировать тему"
 
 msgid "Edit"
 msgstr "Редактировать"
@@ -1316,12 +1312,10 @@ msgid "Found Servers"
 msgstr "Найденные серверы"
 
 msgid "Frame rate limit"
-msgstr ""
+msgstr "Предел частоты кадров"
 
-#, fuzzy
-#| msgid "Refresh section"
 msgid "Frames per second"
-msgstr "Обновить раздел"
+msgstr "Кадры в секунду"
 
 msgid "Friday"
 msgstr "Пятница"
@@ -1588,10 +1582,8 @@ msgstr "Отправка данных о прослушивании в ListenBra
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
 
-#, fuzzy
-#| msgid "Waiting for device"
 msgid "Listening overview"
-msgstr "Ожидание подключения устройства"
+msgstr "Обзор прослушивания"
 
 msgid "Load file contents"
 msgstr "Загрузить содержимое файла"
@@ -1726,7 +1718,7 @@ msgid "Metadata"
 msgstr "Метаданные"
 
 msgid "Minimize overview"
-msgstr ""
+msgstr "Свернуть вид"
 
 msgid "Minimum year"
 msgstr "Минимальный год"
@@ -1738,10 +1730,10 @@ msgid "Monday"
 msgstr "Понедельник"
 
 msgid "Month"
-msgstr ""
+msgstr "Месяц"
 
 msgid "Monthly"
-msgstr ""
+msgstr "Ежемесячно"
 
 msgid "Mood tracks"
 msgstr "Треки по настроениям"
@@ -1898,10 +1890,8 @@ msgstr "Следующее аудиоустройство"
 msgid "Next page"
 msgstr "Следующая страница"
 
-#, fuzzy
-#| msgid "Next page"
 msgid "Next period"
-msgstr "Следующая страница"
+msgstr "Следующий период"
 
 msgid "Next source"
 msgstr "Следующий источник"
@@ -1939,10 +1929,8 @@ msgstr "Без ограничений"
 msgid "No linked servers found"
 msgstr "Не найдено связанных серверов"
 
-#, fuzzy
-#| msgid "Use listening activity"
 msgid "No listening activity in this period"
-msgstr "Использовать данные о прослушиваниях"
+msgstr "Нет активности прослушивания в этот период"
 
 msgid "No local file mapping"
 msgstr "Нет сопоставлений для локального файла"
@@ -2011,7 +1999,7 @@ msgid "Not needed for most servers"
 msgstr "Не требуется для большинства серверов"
 
 msgid "Not valid"
-msgstr ""
+msgstr "Недействительно"
 
 msgid "Nothing here yet"
 msgstr "Здесь пока ничего нет"
@@ -2090,13 +2078,11 @@ msgstr "Открыть Rufin Connect"
 msgid "Open approval page"
 msgstr "Открыть страницу подтверждения"
 
-#, fuzzy
-#| msgid "Refresh automatically"
 msgid "Open automatically"
-msgstr "Автоматическое обновление"
+msgstr "Открыть автоматически"
 
 msgid "Open custom themes folder"
-msgstr ""
+msgstr "Открыть папку настраиваемых тем"
 
 msgid "Open fullscreen player"
 msgstr "Открыть полноэкранный плеер"
@@ -2390,10 +2376,8 @@ msgstr "Предыдущее аудиоустройство"
 msgid "Previous page"
 msgstr "Предыдущая страница"
 
-#, fuzzy
-#| msgid "Previous page"
 msgid "Previous period"
-msgstr "Предыдущая страница"
+msgstr "Предыдущий период"
 
 msgid "Previous"
 msgstr "Предыдущий"
@@ -2426,7 +2410,7 @@ msgid "Proxy casting through Rufin"
 msgstr "Прокси-трансляция через Rufin"
 
 msgid "Public"
-msgstr ""
+msgstr "Общедоступный"
 
 msgid "Purple"
 msgstr "Фиолетовый"
@@ -2536,10 +2520,8 @@ msgstr "Выпуск"
 msgid "Reload from file"
 msgstr "Перезагрузить из файла"
 
-#, fuzzy
-#| msgid "Reload"
 msgid "Reload themes"
-msgstr "Перезагрузить"
+msgstr "Перезагрузить темы"
 
 msgid "Reload to apply changes"
 msgstr "Перегрузка для применения изменений"
@@ -2656,7 +2638,7 @@ msgid "Resource not found"
 msgstr "Ресурс не найден"
 
 msgid "Restart now"
-msgstr ""
+msgstr "Перезапустить сейчас"
 
 msgid "Restore User State"
 msgstr "Восстановить состояние пользователя"
@@ -2670,10 +2652,8 @@ msgstr "Восстановить макет плеера"
 msgid "Restore"
 msgstr "Восстановить"
 
-#, fuzzy
-#| msgid "Refresh section"
 msgid "Results per section"
-msgstr "Обновить раздел"
+msgstr "Результаты по разделам"
 
 msgid "Resume"
 msgstr "Возобновить"
@@ -2958,10 +2938,8 @@ msgstr "Поделиться"
 msgid "Shared secret"
 msgstr "Общий секретный ключ"
 
-#, fuzzy
-#| msgid "Show Rufin"
 msgid "Show Rufin in headline"
-msgstr "Показать Rufin"
+msgstr "Показать Rufin в заголовке"
 
 msgid "Show Rufin"
 msgstr "Показать Rufin"
@@ -2969,10 +2947,8 @@ msgstr "Показать Rufin"
 msgid "Show artwork"
 msgstr "Показать обложку"
 
-#, fuzzy
-#| msgid "Show tray icon"
 msgid "Show comparison"
-msgstr "Показывать значок в системном трее"
+msgstr "Показать сравнение"
 
 msgid "Show downloaded badge"
 msgstr "Показывать значок \"Загружено\""
@@ -3184,10 +3160,8 @@ msgstr "Синхронизированные тексты песен"
 msgid "System default"
 msgstr "Системные настройки"
 
-#, fuzzy
-#| msgid "System default"
 msgid "System flatpak:"
-msgstr "Системные настройки"
+msgstr "Система Flatpak:"
 
 msgid "System"
 msgstr "Система"
@@ -3257,27 +3231,19 @@ msgid "Toggle Fullscreen"
 msgstr "Полноэкранный режим"
 
 msgid "Tools"
-msgstr ""
+msgstr "Инструменты"
 
-#, fuzzy
-#| msgid "albums"
 msgid "Top albums"
-msgstr "альбомы"
+msgstr "Лучшие альбомы"
 
-#, fuzzy
-#| msgid "Album artists"
 msgid "Top artists"
-msgstr "Авторы альбома"
+msgstr "Лучшие исполнители"
 
-#, fuzzy
-#| msgid "Any genre"
 msgid "Top genres"
-msgstr "Любой жанр"
+msgstr "Лучшие жанры"
 
-#, fuzzy
-#| msgid "Mood tracks"
 msgid "Top tracks"
-msgstr "Треки по настроениям"
+msgstr "Лучшие треки"
 
 msgid "Track number"
 msgstr "Номер трека"
@@ -3427,10 +3393,8 @@ msgstr "Использовать настройки источника"
 msgid "Use the server's Instant Mix for Radio and Auto DJ."
 msgstr "Использовать «Мгновенный микс» сервера для радио и «Авто-DJ»."
 
-#, fuzzy
-#| msgid "User token"
 msgid "User flatpak:"
-msgstr "Токен пользователя"
+msgstr "Пользователь flatpak:"
 
 msgid "User token"
 msgstr "Токен пользователя"
@@ -3528,10 +3492,8 @@ msgstr "Записывать теги EBU R128 в файлы"
 msgid "Year"
 msgstr "Год"
 
-#, fuzzy
-#| msgid "Year"
 msgid "Yearly"
-msgstr "Год"
+msgstr "Ежегодно"
 
 msgid "Yellow"
 msgstr "Жёлтый"
@@ -3546,10 +3508,10 @@ msgid "Your queue is empty."
 msgstr "Ваша очередь воспроизведения пуста."
 
 msgid "Your {period} in Rufin"
-msgstr ""
+msgstr "Ваш {period} в Rufin"
 
 msgid "Your {period}"
-msgstr ""
+msgstr "Ваш {period}"
 
 msgid "above"
 msgstr "выше"
@@ -3632,14 +3594,11 @@ msgstr[0] "{count} месяц назад"
 msgstr[1] "{count} месяца назад"
 msgstr[2] "{count} месяцев назад"
 
-#, fuzzy
-#| msgid "{count} day ago"
-#| msgid_plural "{count} days ago"
 msgid "{count} play"
 msgid_plural "{count} plays"
-msgstr[0] "{count} день назад"
-msgstr[1] "{count} дня назад"
-msgstr[2] "{count} дней назад"
+msgstr[0] "{count} воспроизведение"
+msgstr[1] "{count} воспроизведения"
+msgstr[2] "{count} воспроизведений"
 
 msgid "{count} result"
 msgid_plural "{count} results"
