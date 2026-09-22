@@ -844,11 +844,10 @@ async fn migrate_released_download_records(
             && released.source_id == *source_id
         {
             let Some(media_uri) = database
-                .track_rows_for_source(source_key, &[released.track_id], &cancellation)
+                .track_uris_for_source(source_key, &[released.track_id], &cancellation)
                 .await
                 .map_err(|error| error.to_string())?
                 .pop()
-                .map(|media| media.media_uri)
             else {
                 continue;
             };
@@ -913,11 +912,10 @@ async fn migrate_released_download_records(
             .map_err(|error| format!("could not inspect {}: {error}", audio.display()))?
             .len();
         let Some(media_uri) = database
-            .track_rows_for_source(source_key, &[track_id], &cancellation)
+            .track_uris_for_source(source_key, &[track_id], &cancellation)
             .await
             .map_err(|error| error.to_string())?
             .pop()
-            .map(|media| media.media_uri)
         else {
             continue;
         };

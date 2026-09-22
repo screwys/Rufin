@@ -131,7 +131,6 @@ impl Database {
         .await?
         .map(TryInto::try_into)
         .transpose()?;
-        Database::clear_progress(&mut connection).await?;
         Ok((track, album))
     }
 
@@ -154,7 +153,6 @@ impl Database {
             .bind(limit as i64)
             .fetch_all(&mut *connection)
             .await;
-        Database::clear_progress(&mut connection).await?;
         result.map_err(Into::into)
     }
 
@@ -167,7 +165,6 @@ impl Database {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let result = sqlx::query_as::<_, MeasurementScalar>("SELECT track.loudness_analysis_key analysis_key,loudness.integrated_lufs,loudness.true_peak,replay.gain_db replay_gain_db,replay.peak replay_gain_peak FROM tracks track LEFT JOIN loudness_measurements loudness ON loudness.source_key=track.source_key AND loudness.entity_kind='track' AND loudness.entity_key=track.track_key AND loudness.analysis_key=track.loudness_analysis_key LEFT JOIN replay_gain_measurements replay ON replay.source_key=track.source_key AND replay.entity_kind='track' AND replay.entity_key=track.track_key AND replay.analysis_key=track.loudness_analysis_key WHERE track.source_key=?1 AND track.track_key=?2 AND (loudness.entity_key IS NOT NULL OR replay.entity_key IS NOT NULL)")
             .bind(source).bind(track).fetch_optional(&mut *connection).await;
-        Database::clear_progress(&mut connection).await?;
         result?.map(TryInto::try_into).transpose()
     }
 
@@ -180,7 +177,6 @@ impl Database {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let result = sqlx::query_as::<_, MeasurementScalar>("SELECT album.loudness_analysis_key analysis_key,loudness.integrated_lufs,loudness.true_peak,replay.gain_db replay_gain_db,replay.peak replay_gain_peak FROM albums album LEFT JOIN loudness_measurements loudness ON loudness.source_key=album.source_key AND loudness.entity_kind='album' AND loudness.entity_key=album.album_key AND loudness.analysis_key=album.loudness_analysis_key LEFT JOIN replay_gain_measurements replay ON replay.source_key=album.source_key AND replay.entity_kind='album' AND replay.entity_key=album.album_key AND replay.analysis_key=album.loudness_analysis_key WHERE album.source_key=?1 AND album.album_key=?2 AND (loudness.entity_key IS NOT NULL OR replay.entity_key IS NOT NULL)")
             .bind(source).bind(album).fetch_optional(&mut *connection).await;
-        Database::clear_progress(&mut connection).await?;
         result?.map(TryInto::try_into).transpose()
     }
 
@@ -193,7 +189,6 @@ impl Database {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let result = sqlx::query_as::<_, TrackWorkScalar>("SELECT track.track_key,track.loudness_analysis_key expected_analysis_key,COALESCE((SELECT access.access_uri FROM local_access_files access WHERE access.source_key=track.source_key AND access.media_uri=track.media_uri ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),track.media_uri) media_uri FROM tracks track LEFT JOIN loudness_measurements measurement ON measurement.source_key=track.source_key AND measurement.entity_kind='track' AND measurement.entity_key=track.track_key WHERE track.source_key=?1 AND track.track_key>?2 AND (measurement.entity_key IS NULL OR measurement.analysis_key<>track.loudness_analysis_key) ORDER BY track.track_key LIMIT 1")
             .bind(source).bind(after.map_or(0, TrackKey::raw)).fetch_optional(&mut *connection).await;
-        Database::clear_progress(&mut connection).await?;
         result?.map(TryInto::try_into).transpose()
     }
 
@@ -226,7 +221,6 @@ impl Database {
             None
         };
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(result)
     }
 

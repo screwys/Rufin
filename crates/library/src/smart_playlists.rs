@@ -631,7 +631,7 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<i64> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let count = if folder.is_none() {
+        Ok(if folder.is_none() {
             sqlx::query_scalar(
                 "SELECT count(*) FROM smart_playlists WHERE instr(normalized_name,lower(?1))>0",
             )
@@ -643,9 +643,7 @@ impl Database {
             sqlx::query_scalar(AssertSqlSafe(format!("{policy} SELECT count(*) FROM definitions WHERE instr(normalized_name,lower(?5))>0 AND (current_scope=0 OR ?3 IS NULL OR EXISTS(SELECT 1 FROM selected WHERE selected.definition_key=definitions.definition_key))")))
                 .bind(source).bind(now).bind(folder).bind(Option::<SmartPlaylistKey>::None)
                 .bind(filter.trim()).fetch_one(&mut *connection).await?
-        };
-        Database::clear_progress(&mut connection).await?;
-        Ok(count)
+        })
     }
 
     pub async fn smart_playlist_track_count(
@@ -660,7 +658,7 @@ impl Database {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let filter = filter.trim().to_lowercase();
         let input = smart_display_input(&mut connection, now, key).await?;
-        let count = if filter.is_empty() {
+        Ok(if filter.is_empty() {
             sqlx::query_scalar(AssertSqlSafe(format!("SELECT count(*) FROM ({input})")))
                 .bind(source)
                 .bind(now)
@@ -684,9 +682,7 @@ impl Database {
                 count += i64::from(matches_smart_text(&row, &filter));
             }
             count
-        };
-        Database::clear_progress(&mut connection).await?;
-        Ok(count)
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -758,7 +754,6 @@ impl Database {
             rows
         };
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(rows)
     }
 
@@ -788,7 +783,6 @@ impl Database {
         .await?;
         let rows = load_smart_track_rows(&mut transaction, &uris).await?;
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(rows)
     }
 
@@ -849,7 +843,6 @@ impl Database {
         .fetch_all(&mut *transaction)
         .await?;
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(SmartPlaylistValueSuggestions { genres, moods })
     }
 
@@ -859,13 +852,12 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<SmartPlaylistKey>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result =
+        Ok(
             sqlx::query_scalar("SELECT smart_playlist_key FROM smart_playlists WHERE object_id=?1")
                 .bind(object_id)
                 .fetch_optional(&mut *connection)
-                .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+                .await?,
+        )
     }
 
     pub async fn smart_playlist_route_page(
@@ -911,7 +903,6 @@ impl Database {
         let mut transaction = connection.begin().await?;
         let result = load_smart_playlist_rows(&mut transaction, source, keys, folder, now).await?;
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(result)
     }
 
@@ -1088,16 +1079,14 @@ impl Database {
             )
             .await?
         );
-        let media_uris = sqlx::query_scalar::<_, String>(AssertSqlSafe(sql.as_str()))
+        Ok(sqlx::query_scalar::<_, String>(AssertSqlSafe(sql.as_str()))
             .persistent(false)
             .bind(source)
             .bind(now)
             .bind(folder)
             .bind(serde_json::to_string(&[key.raw()])?)
             .fetch_all(&mut *connection)
-            .await?;
-        Database::clear_progress(&mut connection).await?;
-        Ok(media_uris)
+            .await?)
     }
 
     pub async fn smart_playlist_track_rows(
@@ -1148,7 +1137,6 @@ impl Database {
         .await?;
         let rows = load_smart_track_rows(&mut transaction, &uris).await?;
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(rows)
     }
 }

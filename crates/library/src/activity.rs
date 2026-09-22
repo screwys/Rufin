@@ -407,7 +407,6 @@ impl Database {
             .bind(HISTORY_LIMIT)
             .fetch_all(&mut *connection)
             .await;
-        Database::clear_progress(&mut connection).await?;
         history_rows(result?)
     }
 
@@ -511,7 +510,6 @@ impl Database {
         .bind(source).bind(&month).bind(&year).bind(lifetime).bind(limit)
         .fetch_all(&mut *transaction).await?;
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(CalendarActivitySummary {
             tracks,
             albums,
@@ -528,7 +526,7 @@ impl Database {
     ) -> LibraryResult<Vec<PendingListenDelivery>> {
         let limit = limit.clamp(1, DELIVERY_LIMIT) as i64;
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_as::<_, PendingListenDelivery>(
+        Ok(sqlx::query_as::<_, PendingListenDelivery>(
             "SELECT outbox.outbox_key,outbox.listen_key,outbox.service,outbox.account_id,
                     outbox.attempts,outbox.next_attempt_at,outbox.last_error,
                     listen.external_id,listen.track_title,listen.artist_name,listen.album_title,
@@ -540,9 +538,7 @@ impl Database {
         .bind(now)
         .bind(limit)
         .fetch_all(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        .await?)
     }
 
     pub async fn complete_listen_delivery(&self, outbox: ListenOutboxKey) -> LibraryResult<bool> {
@@ -747,10 +743,6 @@ pub(crate) async fn write_imported_listen(
     .fetch_optional(&mut *connection)
     .await?;
     let key = if let Some(key) = inserted {
-        sqlx::query("UPDATE tracks SET local_play_count=local_play_count+1 WHERE media_uri=?1")
-            .bind(&listen.media_uri)
-            .execute(&mut *connection)
-            .await?;
         key
     } else {
         sqlx::query_scalar("SELECT listen_key FROM listens WHERE external_id=?1 OR (external_id IS NULL AND listen_key=?2)")

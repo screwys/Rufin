@@ -398,7 +398,6 @@ impl Database {
         }
 
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         drop(connection);
         drop(_permit);
         enrich_home_page(

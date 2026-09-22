@@ -358,19 +358,6 @@ async fn load_direct_queue(root: &Path) -> Result<Vec<DownloadJob>, String> {
     Ok(queue.jobs)
 }
 
-async fn media_uris_for_keys(
-    database: &Database,
-    source: SourceKey,
-    keys: &[TrackKey],
-    cancellation: &library::ReadCancellation,
-) -> Result<Vec<String>, String> {
-    database
-        .track_rows_for_source(source, keys, cancellation)
-        .await
-        .map(|media| media.into_iter().map(|item| item.media_uri).collect())
-        .map_err(|error| error.to_string())
-}
-
 async fn released_queue_media_uri(
     database: &Database,
     source: SourceKey,
@@ -391,8 +378,10 @@ async fn released_queue_media_uri(
     } else {
         return Err("the saved download queue has an invalid media identity".to_string());
     };
-    Ok(media_uris_for_keys(database, source, &[key], cancellation)
-        .await?
+    Ok(database
+        .track_uris_for_source(source, &[key], cancellation)
+        .await
+        .map_err(|error| error.to_string())?
         .pop()
         .map(|uri| (uri, staging_identity)))
 }

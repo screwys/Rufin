@@ -72,7 +72,6 @@ impl Database {
         .bind(authority)
         .fetch_optional(&mut *connection)
         .await;
-        Database::clear_progress(&mut connection).await?;
         result?.map(TryInto::try_into).transpose()
     }
 

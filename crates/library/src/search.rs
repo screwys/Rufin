@@ -93,7 +93,6 @@ impl Database {
         )
         .await?;
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(SearchResults {
             tracks,
             albums,
@@ -187,7 +186,6 @@ impl Database {
         )
         .await?;
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(SearchResults {
             tracks,
             albums,

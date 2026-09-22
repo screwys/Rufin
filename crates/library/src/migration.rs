@@ -318,8 +318,7 @@ pub(crate) async fn import_released(
             SELECT current.playlist_key FROM catalog.released_playlists old JOIN temp.playlists current ON current.object_id=old.object_id
             WHERE old.playlist_key=home_entries.entity_key AND (current.source_key=home_entries.source_key OR current.source_key IS NULL) LIMIT 1)
             WHERE entity_kind='playlist';
-            DROP TABLE catalog.released_playlists;
-            UPDATE catalog.tracks SET local_play_count=(SELECT count(*) FROM main.listens WHERE listens.media_uri=tracks.media_uri);")
+            DROP TABLE catalog.released_playlists;")
             .execute(target).await?;
     }
     source.close().await?;

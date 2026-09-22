@@ -316,7 +316,6 @@ impl Database {
             .fetch_one(&mut *connection)
             .await
         };
-        Database::clear_progress(&mut connection).await?;
         Ok(usize::try_from(count?).unwrap_or_default())
     }
 
@@ -380,7 +379,6 @@ impl Database {
     ) -> LibraryResult<(usize, usize)> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let(album,track)=sqlx::query_as::<_,(i64,i64)>("SELECT (SELECT count(*) FROM albums WHERE source_key=?1),(SELECT count(*) FROM tracks WHERE source_key=?1)").bind(source).fetch_one(&mut *connection).await?;
-        Database::clear_progress(&mut connection).await?;
         Ok((
             usize::try_from(album).unwrap_or_default(),
             usize::try_from(track).unwrap_or_default(),
@@ -430,7 +428,6 @@ impl Database {
         .bind(root)
         .fetch_one(&mut *connection)
         .await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(usize::try_from(count).unwrap_or_default())
     }
 
@@ -458,15 +455,13 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<MappingTrackRow>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let rows = sqlx::query_as::<_, MappingTrackRow>(
+        Ok(sqlx::query_as::<_, MappingTrackRow>(
             "SELECT track_key,object_id,media_uri,source_path,title,display_album album,display_artist artist,disc_number,track_number,duration_millis
              FROM tracks WHERE source_key=?1 AND source_path IS NOT NULL
                AND ((?3 IS NULL AND track_key>?2) OR source_path=?3)
              ORDER BY track_key LIMIT ?4",
         ).bind(source).bind(after.map_or(0, TrackKey::raw)).bind(source_path).bind(limit.clamp(1,128) as i64)
-        .fetch_all(&mut *connection).await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(rows?)
+        .fetch_all(&mut *connection).await?)
     }
 
     pub async fn mapping_track_source_path(
@@ -476,16 +471,14 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<String>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let path = sqlx::query_scalar(
+        Ok(sqlx::query_scalar(
             "SELECT source_path FROM tracks
              WHERE source_key=?1 AND track_key=?2 AND source_path IS NOT NULL",
         )
         .bind(source)
         .bind(track)
         .fetch_optional(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(path?)
+        .await?)
     }
 
     pub async fn local_file_page(
@@ -503,7 +496,6 @@ impl Database {
             .fetch_all(&mut *transaction).await?;
         let rows = load_local_file_rows(&mut transaction, source, scalars).await?;
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(rows)
     }
 
@@ -546,7 +538,6 @@ impl Database {
             .await?;
         let rows = load_local_file_rows(&mut transaction, source, scalars).await?;
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(rows)
     }
 
@@ -687,13 +678,11 @@ impl Database {
                          AND candidate.origin='download'
                      ) ORDER BY requested.ordinal",
         );
-        let result = query
+        Ok(query
             .build_query_as::<LocalAccessRow>()
             .persistent(false)
             .fetch_all(&mut *connection)
-            .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+            .await?)
     }
 
     pub async fn remove_local_access(&self, key: LocalAccessFileKey) -> LibraryResult<bool> {

@@ -180,7 +180,6 @@ impl Scan {
         .bind(database.distinct_track_covers())
         .fetch_optional(&mut *connection)
         .await;
-        Database::clear_progress(&mut connection).await?;
         result?
             .map(|(source_key, revision, artwork)| publication(source_key, revision, &artwork))
             .transpose()
@@ -2481,15 +2480,13 @@ impl Database {
     ) -> LibraryResult<Option<CachedSource>> {
         validate_id("source", object_id)?;
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_as::<_, CachedSource>(
+        Ok(sqlx::query_as::<_, CachedSource>(
             "SELECT source_key source,object_id,display_name,catalog_revision,artwork_digest
              FROM sources WHERE object_id=?1 AND catalog_revision>0",
         )
         .bind(object_id)
         .fetch_optional(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        .await?)
     }
 }
 
@@ -2928,12 +2925,12 @@ async fn publish_entities(
              normalized_name=excluded.normalized_name,
              sort_text=excluded.sort_text
          WHERE (folders.name,folders.normalized_name,folders.sort_text) IS NOT (excluded.name,excluded.normalized_name,excluded.sort_text)",
-        "INSERT INTO tracks(source_key, object_id, album_key, title, normalized_search, display_album, display_artist, sort_text, duration_millis, disc_number, track_number, year, release_date, date_added, media_uri, source_path, source_format, comment, bpm, musicbrainz_recording_id, musicbrainz_release_track_id, cue_path, cue_start_millis, cue_end_millis, first_seen_at, source_loudness_analysis_key, loudness_analysis_key, local_play_count) SELECT ?1, item.object_id, album.album_key, item.title, item.normalized_search, item.display_album, item.display_artist, item.sort_text, item.duration_millis, item.disc_number, item.track_number, item.year, item.release_date, item.date_added, item.media_uri, item.source_path, item.source_format, item.comment, item.bpm, item.musicbrainz_recording_id, item.musicbrainz_release_track_id, item.cue_path, item.cue_start_millis, item.cue_end_millis, item.first_seen_at, item.source_loudness_analysis_key, COALESCE((SELECT access.loudness_analysis_key
+        "INSERT INTO tracks(source_key, object_id, album_key, title, normalized_search, display_album, display_artist, sort_text, duration_millis, disc_number, track_number, year, release_date, date_added, media_uri, source_path, source_format, comment, bpm, musicbrainz_recording_id, musicbrainz_release_track_id, cue_path, cue_start_millis, cue_end_millis, first_seen_at, source_loudness_analysis_key, loudness_analysis_key) SELECT ?1, item.object_id, album.album_key, item.title, item.normalized_search, item.display_album, item.display_artist, item.sort_text, item.duration_millis, item.disc_number, item.track_number, item.year, item.release_date, item.date_added, item.media_uri, item.source_path, item.source_format, item.comment, item.bpm, item.musicbrainz_recording_id, item.musicbrainz_release_track_id, item.cue_path, item.cue_start_millis, item.cue_end_millis, item.first_seen_at, item.source_loudness_analysis_key, COALESCE((SELECT access.loudness_analysis_key
                             FROM local_access_files AS access
                             WHERE access.media_uri=item.media_uri
                             ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,
                                      access.local_access_file_key LIMIT 1),
-                           item.source_loudness_analysis_key), (SELECT count(*) FROM listens WHERE media_uri=item.media_uri)
+                           item.source_loudness_analysis_key)
            FROM temp.scan_tracks AS item
            LEFT JOIN albums AS album
              ON album.source_key = ?1 AND album.object_id = item.album_object_id
@@ -2963,9 +2960,8 @@ async fn publish_entities(
              cue_end_millis=excluded.cue_end_millis,
              first_seen_at=COALESCE(tracks.first_seen_at, excluded.first_seen_at),
              source_loudness_analysis_key=excluded.source_loudness_analysis_key,
-             loudness_analysis_key=excluded.loudness_analysis_key,
-             local_play_count=excluded.local_play_count
-         WHERE (tracks.album_key,tracks.title,tracks.normalized_search,tracks.display_album,tracks.display_artist,tracks.sort_text,tracks.duration_millis,tracks.disc_number,tracks.track_number,tracks.year,tracks.release_date,tracks.date_added,tracks.media_uri,tracks.source_path,tracks.source_format,tracks.comment,tracks.bpm,tracks.musicbrainz_recording_id,tracks.musicbrainz_release_track_id,tracks.cue_path,tracks.cue_start_millis,tracks.cue_end_millis,tracks.first_seen_at,tracks.source_loudness_analysis_key,tracks.loudness_analysis_key,tracks.local_play_count) IS NOT (excluded.album_key,excluded.title,excluded.normalized_search,excluded.display_album,excluded.display_artist,excluded.sort_text,excluded.duration_millis,excluded.disc_number,excluded.track_number,excluded.year,excluded.release_date,excluded.date_added,excluded.media_uri,excluded.source_path,excluded.source_format,excluded.comment,excluded.bpm,excluded.musicbrainz_recording_id,excluded.musicbrainz_release_track_id,excluded.cue_path,excluded.cue_start_millis,excluded.cue_end_millis,COALESCE(tracks.first_seen_at, excluded.first_seen_at),excluded.source_loudness_analysis_key,excluded.loudness_analysis_key,excluded.local_play_count)",
+             loudness_analysis_key=excluded.loudness_analysis_key
+         WHERE (tracks.album_key,tracks.title,tracks.normalized_search,tracks.display_album,tracks.display_artist,tracks.sort_text,tracks.duration_millis,tracks.disc_number,tracks.track_number,tracks.year,tracks.release_date,tracks.date_added,tracks.media_uri,tracks.source_path,tracks.source_format,tracks.comment,tracks.bpm,tracks.musicbrainz_recording_id,tracks.musicbrainz_release_track_id,tracks.cue_path,tracks.cue_start_millis,tracks.cue_end_millis,tracks.first_seen_at,tracks.source_loudness_analysis_key,tracks.loudness_analysis_key) IS NOT (excluded.album_key,excluded.title,excluded.normalized_search,excluded.display_album,excluded.display_artist,excluded.sort_text,excluded.duration_millis,excluded.disc_number,excluded.track_number,excluded.year,excluded.release_date,excluded.date_added,excluded.media_uri,excluded.source_path,excluded.source_format,excluded.comment,excluded.bpm,excluded.musicbrainz_recording_id,excluded.musicbrainz_release_track_id,excluded.cue_path,excluded.cue_start_millis,excluded.cue_end_millis,COALESCE(tracks.first_seen_at, excluded.first_seen_at),excluded.source_loudness_analysis_key,excluded.loudness_analysis_key)",
     ] {
         changed |= sqlx::query(sql).bind(source_key).execute(&mut **transaction).await?.rows_affected() > 0;
     }

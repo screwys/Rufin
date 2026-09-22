@@ -91,7 +91,6 @@ impl Database {
             .persistent(false)
             .fetch_optional(&mut *connection)
             .await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(result.map(|(key, id, object_id)| (key, crate::SourceId::new(id), object_id)))
     }
 
@@ -131,13 +130,11 @@ impl Database {
             _ => {}
         }
         query.push(" GROUP BY track.media_uri ORDER BY min(requested.position)");
-        let result = query
+        Ok(query
             .build_query_scalar()
             .persistent(false)
             .fetch_all(&mut *connection)
-            .await?;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result)
+            .await?)
     }
 
     pub async fn radio_candidates(
@@ -289,7 +286,6 @@ impl Database {
                 break;
             }
         }
-        Database::clear_progress(&mut connection).await?;
         Ok(result)
     }
 
@@ -416,7 +412,6 @@ impl Database {
                 break;
             }
         }
-        Database::clear_progress(&mut connection).await?;
         Ok(result)
     }
 }

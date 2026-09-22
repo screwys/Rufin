@@ -140,9 +140,7 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<PlaylistEntryKey>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = selected_playlist_entries_on(&mut connection, input).await;
-        Database::clear_progress(&mut connection).await?;
-        result
+        selected_playlist_entries_on(&mut connection, input).await
     }
     pub async fn playlist_count(
         &self,
@@ -152,13 +150,12 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<i64> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let count =
+        Ok(
             playlist_order_query(source, folder, PlaylistSort::Position, false, filter, true)
                 .build_query_scalar::<i64>()
                 .fetch_one(&mut *connection)
-                .await?;
-        Database::clear_progress(&mut connection).await?;
-        Ok(count)
+                .await?,
+        )
     }
 
     pub async fn playlist_entries_count(
@@ -169,11 +166,11 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<i64> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let count = playlist_query(playlist, folder, PlaylistEntrySort::Position, false, filter)
-            .count(&mut connection)
-            .await?;
-        Database::clear_progress(&mut connection).await?;
-        Ok(count)
+        Ok(
+            playlist_query(playlist, folder, PlaylistEntrySort::Position, false, filter)
+                .count(&mut connection)
+                .await?,
+        )
     }
 
     pub async fn playlist_owner(
@@ -182,16 +179,14 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<(Option<SourceKey>, Option<String>)>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_as::<_, (Option<SourceKey>, Option<String>)>(
+        Ok(sqlx::query_as::<_, (Option<SourceKey>, Option<String>)>(
             "SELECT playlist.source_key,source.object_id
              FROM playlists playlist LEFT JOIN sources source USING(source_key)
              WHERE playlist.playlist_key=?1",
         )
         .bind(playlist)
         .fetch_optional(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        .await?)
     }
 
     pub async fn playlist_route_page(
@@ -232,15 +227,13 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<PlaylistKey>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar(
+        Ok(sqlx::query_scalar(
             "SELECT playlist_key FROM playlists WHERE source_key=?1 AND object_id=?2",
         )
         .bind(source)
         .bind(object_id)
         .fetch_optional(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        .await?)
     }
 
     pub async fn playlist_key_by_identity(
@@ -250,7 +243,7 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<PlaylistKey>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar(
+        Ok(sqlx::query_scalar(
             "SELECT playlist_key FROM main.playlists
              WHERE source_key IS (SELECT source_key FROM main.source_ids WHERE object_id=?1)
                AND (?1 IS NULL OR source_key IS NOT NULL) AND object_id=?2 AND name IS NOT NULL
@@ -262,9 +255,7 @@ impl Database {
         .bind(source_id.map(crate::SourceId::as_str))
         .bind(object_id)
         .fetch_optional(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        .await?)
     }
 
     pub async fn all_playlist_track_order(
@@ -274,7 +265,7 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<String>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar::<_, String>(
+        Ok(sqlx::query_scalar::<_, String>(
             "SELECT track.media_uri FROM tracks track
              WHERE track.source_key=?1
                AND EXISTS (SELECT 1 FROM playlist_entries entry WHERE entry.media_uri=track.media_uri)
@@ -284,9 +275,7 @@ impl Database {
         .bind(source)
         .bind(folder)
         .fetch_all(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        .await?)
     }
 
     pub async fn playlist_order(
@@ -299,7 +288,7 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<PlaylistKey>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = Self::load_playlist_order(
+        Self::load_playlist_order(
             &mut connection,
             Some(source),
             folder,
@@ -307,9 +296,7 @@ impl Database {
             descending,
             filter,
         )
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        result
+        .await
     }
 
     async fn load_playlist_order(
@@ -354,7 +341,6 @@ impl Database {
             .await?;
         let rows = Self::load_playlist_rows(&mut transaction, &keys).await?;
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(rows)
     }
 
@@ -382,7 +368,6 @@ impl Database {
             .await?;
         let rows = load_playlist_entry_rows(&mut transaction, &keys).await?;
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(rows)
     }
 
@@ -408,7 +393,6 @@ impl Database {
         }
         rows.retain(|row| row.writable);
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(rows)
     }
 
@@ -422,17 +406,8 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<PlaylistEntryKey>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = Self::load_playlist_entry_order(
-            &mut connection,
-            playlist,
-            folder,
-            sort,
-            descending,
-            filter,
-        )
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        result
+        Self::load_playlist_entry_order(&mut connection, playlist, folder, sort, descending, filter)
+            .await
     }
 
     pub async fn playlist_detail_page(
@@ -472,7 +447,6 @@ impl Database {
             None
         };
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(page)
     }
 
@@ -501,7 +475,7 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<String>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar::<_, String>(
+        Ok(sqlx::query_scalar::<_, String>(
             "SELECT entry.media_uri FROM playlist_entries entry
              JOIN playlists playlist USING(playlist_key)
              LEFT JOIN tracks track USING(media_uri)
@@ -515,9 +489,7 @@ impl Database {
         .bind(playlist)
         .bind(folder)
         .fetch_all(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        .await?)
     }
 
     pub async fn playlist_rows(
@@ -526,9 +498,7 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<PlaylistRow>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = Self::load_playlist_rows(&mut connection, keys).await;
-        Database::clear_progress(&mut connection).await?;
-        result
+        Self::load_playlist_rows(&mut connection, keys).await
     }
 
     async fn load_playlist_rows(
@@ -652,13 +622,11 @@ impl Database {
             .push(") SELECT entry.media_uri FROM requested JOIN playlist_entries entry USING(playlist_entry_key) WHERE entry.playlist_key=")
             .push_bind(playlist)
             .push(" ORDER BY requested.ordinal");
-        let result = query
+        Ok(query
             .build_query_scalar::<String>()
             .persistent(false)
             .fetch_all(&mut *connection)
-            .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+            .await?)
     }
 
     pub async fn source_playlist_object_ids(
@@ -667,14 +635,12 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<String>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar(
+        Ok(sqlx::query_scalar(
             "SELECT object_id FROM playlists WHERE source_key=?1 ORDER BY sort_text,playlist_key",
         )
         .bind(source)
         .fetch_all(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        .await?)
     }
 
     pub async fn source_playlist_object_id(
@@ -684,16 +650,14 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<String>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar(
+        Ok(sqlx::query_scalar(
             "SELECT object_id FROM playlists
              WHERE source_key=?1 AND playlist_key=?2",
         )
         .bind(source)
         .bind(playlist)
         .fetch_optional(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        .await?)
     }
 
     pub async fn source_playlist_media_object_ids(
@@ -733,7 +697,6 @@ impl Database {
             .await?
         {
             let Some(object_id) = object_id else {
-                Database::clear_progress(&mut connection).await?;
                 return Err(LibraryError::InvalidRequest(
                     "Playlist Track is no longer current".to_string(),
                 ));
@@ -744,7 +707,6 @@ impl Database {
                         .bind(source)
                         .fetch_one(&mut *connection)
                         .await?;
-                Database::clear_progress(&mut connection).await?;
                 return Err(LibraryError::PlaylistSourceMismatch(crate::SourceId::new(
                     source_id,
                 )));
@@ -753,7 +715,6 @@ impl Database {
                 result.push(object_id);
             }
         }
-        Database::clear_progress(&mut connection).await?;
         Ok(result)
     }
 
@@ -780,13 +741,11 @@ impl Database {
             .push(" AND playlist.playlist_key=")
             .push_bind(playlist)
             .push(" ORDER BY requested.ordinal");
-        let result = query
+        Ok(query
             .build_query_scalar::<String>()
             .persistent(false)
             .fetch_all(&mut *connection)
-            .await?;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result)
+            .await?)
     }
 
     pub async fn create_playlist(

@@ -173,7 +173,7 @@ impl Database {
             crate::queue::import_queue_jsonl_on(&mut transaction, open("queue.jsonl")?).await?;
         }
         if contents.activity {
-            sqlx::raw_sql("DELETE FROM listens;DELETE FROM legacy_activity;UPDATE tracks SET local_play_count=0 WHERE local_play_count<>0;")
+            sqlx::raw_sql("DELETE FROM listens;DELETE FROM legacy_activity;")
                 .execute(&mut *transaction)
                 .await?;
             let activity = crate::activity::import_activity_jsonl_on(
