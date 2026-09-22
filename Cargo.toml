@@ -1,6 +1,5 @@
 [workspace]
 members = ["crates/*"]
-exclude = ["vendor/smb"]
 resolver = "3"
 
 [workspace.package]
@@ -98,9 +97,9 @@ percent-encoding = "2.3.2"
 proc-macro2 = "1.0.107"
 quick-xml = { version = "0.42", features = ["async-tokio"] }
 pulldown-cmark = { version = "0.13.0", default-features = false }
-smb = { version = "=0.11.2", default-features = false, features = ["multi_threaded", "sign", "encrypt"] }
-smb-fscc = "=0.11.2"
-smb-msg = "=0.11.2"
+smb = { version = "=0.12.1", default-features = false, features = ["multi_threaded", "sign", "encrypt"] }
+smb-fscc = "=0.12.1"
+smb-msg = "=0.12.1"
 tokio-util = { version = "0.7", features = ["io"] }
 reqwest = { version = "0.13.3", default-features = false, features = ["http2", "rustls", "system-proxy"] }
 roxmltree = "0.21.0"
@@ -166,6 +165,3 @@ opt-level = 3
 
 [profile.test.package.libsqlite3-sys]
 opt-level = 3
-
-[patch.crates-io]
-smb = { path = "vendor/smb" }
