@@ -8,6 +8,16 @@
     <child>
       <object class="AdwPreferencesGroup">
         <property name="title" translatable="yes">Presets</property>
+        <property name="header-suffix">
+          <object class="GtkLabel" id="saved_message">
+            <property name="label" translatable="yes">Preset saved</property>
+            <property name="visible">false</property>
+            <property name="wrap">true</property>
+            <style>
+              <class name="success" />
+            </style>
+          </object>
+        </property>
         <child>
           <object class="AdwComboRow" id="presets">
             <property name="title" translatable="yes">Saved preset</property>
@@ -198,9 +208,10 @@
                     </child>
                     <child>
                       <object class="GtkScale" id="spacing">
+                        <style>
+                          <class name="playback-setting-scale" />
+                        </style>
                         <property name="hexpand">true</property>
-                        <property name="draw-value">true</property>
-                        <property name="value-pos">right</property>
                         <property name="digits">1</property>
                         <property name="adjustment">
                           <object class="GtkAdjustment">
@@ -233,9 +244,10 @@
                     </child>
                     <child>
                       <object class="GtkScale" id="opacity">
+                        <style>
+                          <class name="playback-setting-scale" />
+                        </style>
                         <property name="hexpand">true</property>
-                        <property name="draw-value">true</property>
-                        <property name="value-pos">right</property>
                         <property name="digits">0</property>
                         <property name="adjustment">
                           <object class="GtkAdjustment">
@@ -258,6 +270,53 @@
                 <style>
                   <class name="visualizer-setting-pair" />
                 </style>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwPreferencesRow">
+            <property name="activatable">false</property>
+            <property name="selectable">false</property>
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <property name="spacing">2</property>
+                <child>
+                  <object class="GtkLabel" id="fps_limit_label">
+                    <property name="label" translatable="yes">Frame rate limit</property>
+                    <property name="xalign">0</property>
+                    <property name="wrap">true</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkScale" id="fps_limit">
+                    <style><class name="playback-setting-scale" /></style>
+                    <marks>
+                      <mark value="30" position="bottom">30</mark>
+                      <mark value="60" position="bottom">60</mark>
+                      <mark value="90" position="bottom">90</mark>
+                      <mark value="120" position="bottom">120</mark>
+                      <mark value="144" position="bottom">144</mark>
+                      <mark value="165" position="bottom">165</mark>
+                      <mark value="180" position="bottom">180</mark>
+                    </marks>
+                    <property name="hexpand">true</property>
+                    <property name="digits">0</property>
+                    <property name="tooltip-text" translatable="yes">Frames per second</property>
+                    <property name="adjustment">
+                      <object class="GtkAdjustment">
+                        <property name="lower">1</property>
+                        <property name="upper">180</property>
+                        <property name="step-increment">1</property>
+                        <property name="page-increment">10</property>
+                        <property name="value">30</property>
+                      </object>
+                    </property>
+                    <accessibility><relation name="labelled-by">fps_limit_label</relation></accessibility>
+                  </object>
+                </child>
+                <style><class name="visualizer-setting-cell" /></style>
               </object>
             </child>
           </object>
@@ -288,9 +347,10 @@
                     </child>
                     <child>
                       <object class="GtkScale" id="sidebar_opacity">
+                        <style>
+                          <class name="playback-setting-scale" />
+                        </style>
                         <property name="hexpand">true</property>
-                        <property name="draw-value">true</property>
-                        <property name="value-pos">right</property>
                         <property name="digits">0</property>
                         <property name="adjustment">
                           <object class="GtkAdjustment">
@@ -323,9 +383,10 @@
                     </child>
                     <child>
                       <object class="GtkScale" id="fullscreen_opacity">
+                        <style>
+                          <class name="playback-setting-scale" />
+                        </style>
                         <property name="hexpand">true</property>
-                        <property name="draw-value">true</property>
-                        <property name="value-pos">right</property>
                         <property name="digits">0</property>
                         <property name="adjustment">
                           <object class="GtkAdjustment">
@@ -378,9 +439,10 @@
                     </child>
                     <child>
                       <object class="GtkScale" id="rise">
+                        <style>
+                          <class name="playback-setting-scale" />
+                        </style>
                         <property name="hexpand">true</property>
-                        <property name="draw-value">true</property>
-                        <property name="value-pos">right</property>
                         <property name="digits">0</property>
                         <property name="adjustment">
                           <object class="GtkAdjustment">
@@ -413,9 +475,10 @@
                     </child>
                     <child>
                       <object class="GtkScale" id="fall">
+                        <style>
+                          <class name="playback-setting-scale" />
+                        </style>
                         <property name="hexpand">true</property>
-                        <property name="draw-value">true</property>
-                        <property name="value-pos">right</property>
                         <property name="digits">0</property>
                         <property name="adjustment">
                           <object class="GtkAdjustment">
@@ -467,9 +530,10 @@
                         </child>
                         <child>
                           <object class="GtkScale" id="peak_hold">
+                            <style>
+                              <class name="playback-setting-scale" />
+                            </style>
                             <property name="hexpand">true</property>
-                            <property name="draw-value">true</property>
-                            <property name="value-pos">right</property>
                             <property name="digits">1</property>
                             <property name="adjustment">
                               <object class="GtkAdjustment">
@@ -502,9 +566,10 @@
                         </child>
                         <child>
                           <object class="GtkScale" id="peak_fall">
+                            <style>
+                              <class name="playback-setting-scale" />
+                            </style>
                             <property name="hexpand">true</property>
-                            <property name="draw-value">true</property>
-                            <property name="value-pos">right</property>
                             <property name="digits">0</property>
                             <property name="adjustment">
                               <object class="GtkAdjustment">
@@ -551,9 +616,6 @@
         </child>
       </object>
     </child>
-  </object>
-  <object class="GtkLabel" id="saved_message">
-    <property name="label" translatable="yes">Preset saved</property>
   </object>
   <object class="GtkSizeGroup">
     <property name="mode">vertical</property>

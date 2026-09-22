@@ -53,7 +53,6 @@
                     <property name="vexpand">true</property>
                     <property name="child">
                       <object class="GtkStack" id="app_content_stack">
-                        <property name="margin-top">4</property>
                         <property name="hhomogeneous">false</property>
                         <property name="vhomogeneous">false</property>
                         <property name="interpolate-size">false</property>
@@ -66,6 +65,8 @@
                             <property name="child">
                               <object class="GtkBox" id="upper">
                                 <property name="orientation">horizontal</property>
+                                <property name="margin-start">8</property>
+                                <property name="margin-end">8</property>
                                 <property name="hexpand">true</property>
                                 <property name="vexpand">true</property>
                                 <child>

@@ -25,11 +25,9 @@
                 <property name="orientation">horizontal</property>
                 <property name="spacing">2</property>
                 <property name="valign">center</property>
-                <property name="margin-top">10</property>
                 <property name="margin-start">10</property>
                 <property name="margin-end">8</property>
                 <style>
-                  <class name="sidebar-header" />
                   <class name="queue-toolbar" />
                 </style>
                 <child>
@@ -161,9 +159,11 @@
   <object class="GtkBox" id="visualizer_controls">
     <property name="halign">end</property>
     <property name="valign">start</property>
+    <property name="margin-top">8</property>
     <property name="margin-end">8</property>
     <style>
       <class name="lyrics-controls" />
+      <class name="lyrics-top-controls" />
     </style>
     <child>
       <object class="GtkButton" id="visualizer_settings">

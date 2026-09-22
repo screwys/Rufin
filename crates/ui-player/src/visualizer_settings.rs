@@ -9,6 +9,7 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
     let builder = ui_shared::ui_resource::builder(resource);
     ui_shared::objects!(builder, resource, {
         page: adw::PreferencesPage,
+        fps_limit: gtk::Scale,
         style: adw::ComboRow,
         accent: adw::SwitchRow,
         start_color: gtk::Button,
@@ -32,6 +33,40 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
         copy: gtk::Button,
         paste: gtk::Button,
         saved_message: gtk::Label,
+    });
+
+    for scale in [
+        &fps_limit,
+        &spacing,
+        &opacity,
+        &sidebar_opacity,
+        &fullscreen_opacity,
+        &rise,
+        &fall,
+        &peak_hold,
+        &peak_fall,
+    ] {
+        let digits = scale.digits() as usize;
+        ui_shared::scale::install_sliding_value_bubble(scale, move |value| {
+            format!("{value:.digits$}")
+        });
+    }
+
+    let limit = shell.settings.current.borrow().visualizer.fps_limit;
+    fps_limit.set_value(limit as f64);
+    ui_shared::scale::install_scale_scroll_forwarding(&fps_limit);
+    let weak_shell = Rc::downgrade(shell);
+    fps_limit.connect_value_changed(move |row| {
+        if let Some(shell) = weak_shell.upgrade() {
+            shell
+                .settings
+                .update_app_settings("visualizer frame rate", |settings| {
+                    let limit = row.value() as u32;
+                    let changed = settings.visualizer.fps_limit != limit;
+                    settings.visualizer.fps_limit = limit;
+                    changed
+                });
+        }
     });
 
     presets.set_selected(shell.settings.current.borrow().visualizer.selected_preset() as u32);
@@ -242,6 +277,8 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
 
     let weak_shell = Rc::downgrade(shell);
     let preset_row = presets.downgrade();
+    let feedback =
+        ui_shared::feedback::ControlFeedbackState::new(&saved_message, Rc::clone(&shell.settings));
     let saved_message = saved_message.text();
     save.connect_clicked(move |_| {
         let (Some(shell), Some(row)) = (weak_shell.upgrade(), preset_row.upgrade()) else {
@@ -256,9 +293,7 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
             })
             .is_some()
         {
-            shell
-                .control_feedback
-                .show_feedback_toast(saved_message.to_string());
+            feedback.show_feedback_toast(saved_message.to_string());
         }
     });
     let weak_shell = Rc::downgrade(shell);

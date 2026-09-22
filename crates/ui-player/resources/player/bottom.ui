@@ -20,11 +20,11 @@
 
   <object class="GtkBox" id="identity">
     <property name="orientation">vertical</property>
-    <property name="spacing">1</property>
+    <property name="spacing">4</property>
     <property name="hexpand">true</property>
     <property name="width-request">1</property>
     <property name="halign">fill</property>
-    <property name="valign">center</property>
+    <property name="valign">fill</property>
     <style><class name="player-identity"/></style>
     <child>
       <object class="GtkBox" id="title_row">
@@ -104,7 +104,7 @@
   </object>
   <object class="GtkBox" id="transport">
     <property name="orientation">vertical</property>
-    <property name="spacing">5</property>
+    <property name="spacing">3</property>
     <property name="valign">center</property>
     <style><class name="player-transport"/></style>
     <child>

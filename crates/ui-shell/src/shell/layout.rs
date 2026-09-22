@@ -7,11 +7,10 @@ use crate::{
 use adw::prelude::*;
 use gtk::glib;
 use tracing::debug;
-use ui_player::bottom::NOW_PLAYING_RAIL_WIDTH;
 
 use super::Shell;
 
-pub(super) const COMPACT_RAIL_WIDTH: i32 = NOW_PLAYING_RAIL_WIDTH;
+pub(super) const COMPACT_RAIL_WIDTH: i32 = 72;
 pub(super) const LEFT_PANE_SEPARATOR_WIDTH: i32 = 8;
 pub(super) const RIGHT_PANE_SEPARATOR_WIDTH: i32 = 8;
 pub(super) const NORMAL_SIDEBAR_WIDTH: i32 = crate::DEFAULT_LEFT_SIDEBAR_WIDTH;

@@ -378,10 +378,12 @@ impl PartialEq for LyricsPaneContent {
 
 impl LyricsPane {
     pub fn new() -> Self {
+        super::edge_fade::LyricsEdgeFade::static_type();
         let resource = crate::ui_resource::LYRICS_PANE_RESOURCE;
         let builder = ui_shared::ui_resource::builder(resource);
         ui_shared::objects!(builder, resource, {
             root: gtk::Overlay,
+            edge_fade: super::edge_fade::LyricsEdgeFade,
             scroller: gtk::ScrolledWindow,
             body: gtk::Box,
             controls: gtk::Box,
@@ -400,7 +402,7 @@ impl LyricsPane {
         edit_button.update_property(&[gtk::accessible::Property::Label(&edit_label)]);
         root.set_measure_overlay(&controls, false);
         root.set_child(gtk::Widget::NONE);
-        let layout = ui_shared::layout::allocation_owner(&scroller, |_, _| {});
+        let layout = ui_shared::layout::allocation_owner(&edge_fade, |_, _| {});
         root.set_child(Some(&layout));
 
         let pane = Self {
@@ -447,17 +449,18 @@ impl LyricsPane {
             let (Some(scroller), Some(body)) = (scroller.upgrade(), body.upgrade()) else {
                 return;
             };
-            // Half a viewport at either end makes every lyric's text center reachable,
-            // including wrapped rows with pronunciation above or below the main text.
-            let padding = if matches!(*content.borrow(), Some(LyricsPaneContent::Document { .. })) {
-                height / 2
-            } else {
-                0
-            };
+            // Start near the top, with enough space below to center the final lines.
+            let (top_padding, bottom_padding) =
+                if matches!(*content.borrow(), Some(LyricsPaneContent::Document { .. })) {
+                    (height / 10, height / 2)
+                } else {
+                    (0, 0)
+                };
             let resized = previous_size.replace((width, height)) != (width, height);
-            let padding_changed = body.margin_top() != padding;
-            body.set_margin_top(padding);
-            body.set_margin_bottom(padding);
+            let padding_changed =
+                body.margin_top() != top_padding || body.margin_bottom() != bottom_padding;
+            body.set_margin_top(top_padding);
+            body.set_margin_bottom(bottom_padding);
             if !resized && !padding_changed {
                 return;
             }
