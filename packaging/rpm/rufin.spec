@@ -1,3 +1,4 @@
+%global debug_package %{nil}
 Name:           rufin
 Version:        0.16.0
 Release:        1%{?dist}
