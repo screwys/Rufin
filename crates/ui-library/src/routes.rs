@@ -744,7 +744,8 @@ impl CatalogUi {
             {
                 let row_load = Arc::clone(&row_load);
                 Rc::new(move |_, range, cancellation| {
-                    row_load(load_request.borrow().clone(), range, cancellation)
+                    let request = load_request.borrow().clone();
+                    row_load(request, range, cancellation)
                 })
             },
         );

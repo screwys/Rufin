@@ -125,7 +125,8 @@ impl<T: TrackPresentation> TrackCollectionModel<T> {
             TRACK_OVERSCAN,
             runtime,
             Rc::new(move |keys, range, cancellation| {
-                load(keys, range, load_request.borrow().clone(), cancellation)
+                let request = load_request.borrow().clone();
+                load(keys, range, request, cancellation)
             }),
         );
         sparse.seed_matching_at(first_row_position, first_rows, |row| {

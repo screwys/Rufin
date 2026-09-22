@@ -212,7 +212,8 @@ impl AlbumCollectionModels {
                 let load = Arc::clone(&load);
                 let request = Rc::clone(&request);
                 Rc::new(move |_, range, cancellation| {
-                    load(request.borrow().clone(), range, cancellation)
+                    let request = request.borrow().clone();
+                    load(request, range, cancellation)
                 })
             },
         );

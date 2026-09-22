@@ -215,7 +215,8 @@ impl CatalogUi {
             32,
             self.runtime.clone(),
             Rc::new(move |_, range, cancellation| {
-                row_load(load_request.borrow().clone(), range, cancellation)
+                let request = load_request.borrow().clone();
+                row_load(request, range, cancellation)
             }),
         );
         let row_key = Rc::new(row_key);
