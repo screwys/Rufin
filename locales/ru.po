@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-22 15:56+0000\n"
+"PO-Revision-Date: 2026-09-22 18:37+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
 "Language: ru\n"
@@ -906,10 +906,8 @@ msgstr "Настраиваемый"
 msgid "Customize display"
 msgstr "Настроить отображение"
 
-#, fuzzy
-#| msgid "Custom"
 msgid "Customize"
-msgstr "Настраиваемый"
+msgstr "Настроить"
 
 msgid "Cut"
 msgstr "Вырезать"
@@ -3121,10 +3119,8 @@ msgstr "Спонсор"
 msgid "Start minimized"
 msgstr "Запускать в свернутом виде"
 
-#, fuzzy
-#| msgid "Save playlist changes automatically"
 msgid "Start playing automatically"
-msgstr "Автоматически сохранять изменения в плейлисте"
+msgstr "Начинать воспроизведение автоматически"
 
 msgid "Starting..."
 msgstr "Запуск..."
