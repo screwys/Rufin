@@ -904,6 +904,11 @@ msgstr "Benutzerdefiniert"
 msgid "Customize display"
 msgstr "Ansicht anpassen"
 
+#, fuzzy
+#| msgid "Custom"
+msgid "Customize"
+msgstr "Benutzerdefiniert"
+
 msgid "Cut"
 msgstr "Ausschneiden"
 
@@ -3112,6 +3117,11 @@ msgstr "Sponsor"
 
 msgid "Start minimized"
 msgstr "Minimiert starten"
+
+#, fuzzy
+#| msgid "Save playlist changes automatically"
+msgid "Start playing automatically"
+msgstr "Playlist-Änderungen automatisch speichern"
 
 msgid "Starting..."
 msgstr "Wird gestartet …"

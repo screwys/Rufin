@@ -906,6 +906,11 @@ msgstr "Настраиваемый"
 msgid "Customize display"
 msgstr "Настроить отображение"
 
+#, fuzzy
+#| msgid "Custom"
+msgid "Customize"
+msgstr "Настраиваемый"
+
 msgid "Cut"
 msgstr "Вырезать"
 
@@ -3115,6 +3120,11 @@ msgstr "Спонсор"
 
 msgid "Start minimized"
 msgstr "Запускать в свернутом виде"
+
+#, fuzzy
+#| msgid "Save playlist changes automatically"
+msgid "Start playing automatically"
+msgstr "Автоматически сохранять изменения в плейлисте"
 
 msgid "Starting..."
 msgstr "Запуск..."

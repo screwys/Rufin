@@ -894,6 +894,11 @@ msgstr "Personnalisé"
 msgid "Customize display"
 msgstr "Affichage personnalisé"
 
+#, fuzzy
+#| msgid "Custom"
+msgid "Customize"
+msgstr "Personnalisé"
+
 msgid "Cut"
 msgstr "Couper"
 
@@ -3180,6 +3185,11 @@ msgstr "Sponsor"
 
 msgid "Start minimized"
 msgstr "Démarrer minimisé"
+
+#, fuzzy
+#| msgid "Refresh automatically"
+msgid "Start playing automatically"
+msgstr "Rafraîchir automatiquement"
 
 msgid "Starting..."
 msgstr "Démarrage..."

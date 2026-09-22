@@ -885,6 +885,9 @@ msgstr ""
 msgid "Customize display"
 msgstr ""
 
+msgid "Customize"
+msgstr ""
+
 msgid "Cut"
 msgstr ""
 
@@ -3118,6 +3121,9 @@ msgid "Sponsor"
 msgstr ""
 
 msgid "Start minimized"
+msgstr ""
+
+msgid "Start playing automatically"
 msgstr ""
 
 msgid "Starting..."
