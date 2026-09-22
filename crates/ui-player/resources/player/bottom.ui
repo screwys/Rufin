@@ -188,7 +188,8 @@
     <property name="halign">end</property><property name="valign">fill</property><property name="vexpand">true</property>
     <property name="child">
       <object class="GtkBox" id="action_buttons">
-        <property name="orientation">horizontal</property><property name="spacing">0</property>
+        <style><class name="player-action-buttons"/></style>
+        <property name="orientation">horizontal</property><property name="spacing">2</property>
         <property name="halign">end</property><property name="valign">center</property>
         <child>
           <object class="GtkMenuButton" id="settings_button">
@@ -196,7 +197,7 @@
             <style><class name="icon-button"/><class name="flat"/><class name="circular"/><class name="player-settings-button"/></style>
           </object>
         </child>
-        <child><object class="GtkBox" id="volume_group"><property name="orientation">horizontal</property><property name="spacing">0</property><property name="valign">center</property></object></child>
+        <child><object class="GtkBox" id="volume_group"><property name="orientation">horizontal</property><property name="spacing">2</property><property name="valign">center</property></object></child>
       </object>
     </property>
   </object>

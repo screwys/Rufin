@@ -1098,11 +1098,11 @@ mod tests {
 
         let expanded =
             right_sidebar_width_after_drag_update(&settings, 968, None, 300.0, 0.0, -200.0);
-        assert_eq!(expanded, 426.0);
+        assert_eq!(expanded, 430.0);
 
         let reversed =
             right_sidebar_width_after_drag_update(&settings, 968, None, expanded, -200.0, -199.0);
-        assert_eq!(reversed, 425.0);
+        assert_eq!(reversed, 429.0);
     }
 
     #[test]
@@ -1161,7 +1161,7 @@ mod tests {
 
         assert_eq!(
             right_sidebar_width_after_drag_update(&settings, 968, None, 500.0, 0.0, 1.0),
-            425.0
+            429.0
         );
     }
 
@@ -1316,7 +1316,7 @@ mod tests {
 
         assert_eq!(resolved.left_sidebar, ResolvedLeftSidebarMode::Compact);
         assert_eq!(resolved.left_sidebar_width, COMPACT_RAIL_WIDTH);
-        assert_eq!(resolved.right_sidebar_width, 482);
+        assert_eq!(resolved.right_sidebar_width, 486);
         assert_eq!(resolved.main_width, MIN_USEFUL_MAIN_WIDTH);
     }
 

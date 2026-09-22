@@ -67,7 +67,7 @@
                     <accessibility><property name="label" translatable="yes">Search queue</property></accessibility>
                     <property name="hexpand">true</property>
                     <property name="width-chars">1</property><property name="max-width-chars">1</property>
-                    <property name="height-request">30</property>
+                    <property name="height-request">32</property>
                     <style><class name="queue-search"/></style>
                   </object>
                 </child>

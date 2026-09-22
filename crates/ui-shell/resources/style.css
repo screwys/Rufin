@@ -475,9 +475,6 @@ scrolledwindow.sidebar-scroller overshoot,
 }
 
 .track-toolbar button.library-toolbar-icon-button {
-  min-width: 34px;
-  min-height: 34px;
-  padding: 0;
   border-radius: 999px;
 }
 
@@ -566,6 +563,8 @@ headerbar.shared-topbar > windowhandle > box > widget > box.start,
 headerbar.shared-topbar > windowhandle > box > widget > box.end,
 headerbar.shared-topbar windowcontrols {
   border-spacing: 2px;
+  margin: 0;
+  padding: 0;
 }
 
 headerbar.shared-topbar:backdrop > windowhandle {
@@ -573,12 +572,33 @@ headerbar.shared-topbar:backdrop > windowhandle {
 }
 
 headerbar.shared-topbar button.topbar-button,
+headerbar.shared-topbar menubutton.topbar-button,
 headerbar.shared-topbar menubutton.topbar-button > button,
-headerbar.shared-topbar windowcontrols > button {
-  min-width: 28px;
-  min-height: 28px;
-  padding: 2px;
+headerbar.shared-topbar windowcontrols > button,
+.track-toolbar button.library-toolbar-icon-button,
+.queue-toolbar button.icon-button,
+.player-action-buttons button,
+.player-action-buttons menubutton,
+.player-action-buttons menubutton > button {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
   margin: 0;
+  -gtk-icon-size: 16px;
+}
+
+headerbar.shared-topbar button.topbar-button image,
+headerbar.shared-topbar menubutton.topbar-button image,
+headerbar.shared-topbar windowcontrols > button image,
+.track-toolbar button.library-toolbar-icon-button image,
+.queue-toolbar button.icon-button image,
+.player-action-buttons button image,
+.player-action-buttons menubutton image {
+  -gtk-icon-size: 16px;
+}
+
+.player-action-buttons .favorite-toggle {
+  font-size: 16px;
 }
 
 entry.search {
@@ -914,7 +934,7 @@ gridview.album-grid {
 }
 
 .queue-toolbar {
-  min-height: 30px;
+  min-height: 32px;
 }
 
 .queue-toolbar button image {
@@ -927,7 +947,7 @@ gridview.album-grid {
 }
 
 .queue-search {
-  min-height: 30px;
+  min-height: 32px;
   padding-top: 0;
   padding-bottom: 0;
 }
