@@ -38,39 +38,39 @@
   <screenshots>
     <screenshot type="default">
       <caption>Browse your music library</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/Rufin.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.0/resources/screenshots/Rufin.png</image>
     </screenshot>
     <screenshot>
       <caption>View artist details</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/artist_detail.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.0/resources/screenshots/artist_detail.png</image>
     </screenshot>
     <screenshot>
       <caption>Browse genres</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/genres.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.0/resources/screenshots/genres.png</image>
     </screenshot>
     <screenshot>
       <caption>Create smart playlists</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/smart_playlists.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.0/resources/screenshots/smart_playlists.png</image>
     </screenshot>
     <screenshot>
       <caption>Configure playback</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/playback_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.0/resources/screenshots/playback_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Use the fullscreen player</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/fullscreen_player.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.0/resources/screenshots/fullscreen_player.png</image>
     </screenshot>
     <screenshot>
       <caption>Configure the visualizer</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/visualizer_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.0/resources/screenshots/visualizer_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Configure integrations</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/integrations.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.0/resources/screenshots/integrations.png</image>
     </screenshot>
     <screenshot>
       <caption>Edit a playlist</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/playlist_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.0/resources/screenshots/playlist_settings.png</image>
     </screenshot>
   </screenshots>
   <launchable type="desktop-id">io.github.screwys.Rufin.desktop</launchable>
@@ -81,6 +81,53 @@
     <control>touch</control>
   </supports>
   <releases>
+    <release version="0.16.0" date="2026-09-22">
+      <description>
+        <p>This release brings significant UI changes with the new topbar and new fullscreen player, and it also introduces a preview version of &quot;Rufin Connect&quot;, which is a cross-device sync engine that will be used for... our upcoming Android version! The Android version will become a native player just like the desktop version is; it will be a standalone app. Rufin Connect will let you sync logins and local folders and continue the music. I intend to keep the feature parity close by reusing existing Rust code (with UniFFI Kotling bindings) and make this ready by the next major release. There is also a Matrix chat for Rufin now, you can drop in to say hi!</p>
+        <ul>
+          <li>Rufin Connect works by reading and writing to a profile folder. The communication is end-to-end encrypted, and you confirm that both devices encrypt and decrypt by confirming the emojis shown on both devices match during pairing. You have multiple options to configure sync between these devices. By default, Rufin can discover a device on the local network and connect to it; these folders become stored locally. If you want persistent synchronization, you can configure WebDAV/Samba directly from inside the app (or reuse existing configuration if you have it as a source); you can point something like SyncThing to this folder, or you can use an Iroh relay/self-host a personal one. I could only test this myself so much; so I would appreciate any issues with this getting reported. In the future, I intend to use p2panda so that any kind of p2p relay works (i2p, onion network, etc.).</li>
+        </ul>
+        <ul>
+          <li>This also becomes the official release of Controller with more fixes and an updated web UI interface, including removing the JS requirement; so the site becomes usable with JS disabled as well.</li>
+        </ul>
+        <ul>
+          <li>The new topbar handles various problems for us. It now provides visual parity cross-platform since Windows/MacOS needed a separate tray, which is now gone. It also makes room for growing controls, some of which I have moved here. We also now have a proper persistent search bar, which can show recent searches and results in place without needing to go to the search route.</li>
+        </ul>
+        <ul>
+          <li>We now have a lot of themes, including Catppuccin flavors and accent colors. You can also create a custom theme.</li>
+        </ul>
+        <ul>
+          <li>The fullscreen player gets a brand new look and multiple layout options. It can show a dynamic background or a blurred version of the album artwork. It also gets a new tab for related tracks.</li>
+        </ul>
+        <ul>
+          <li>An item that waited in the backlog for quite a bit of time: activity overview. You can see your monthly/yearly (preparing for the future) activity in Rufin and export it as a PNG!</li>
+        </ul>
+        <ul>
+          <li>The visualizer now gets presets and styles and exposes multiple settings as configurable. By default, it now uses the resolved accent color of your theme.</li>
+        </ul>
+        <ul>
+          <li>Right sidebar is separated into modules: you can set the visualizer in the sidebar separately from the lyrics, hide the playback queue, and move each of these 3 up and down.</li>
+        </ul>
+        <ul>
+          <li>Local playback mapping that is used for metadata editing is hardened to handle some failure paths. The path is now also editable directly.</li>
+        </ul>
+        <ul>
+          <li>Playlist interoperability is increased. You can now keep imported playlist files in sync, so the same playlist file can be used between different players. You can also configure multiple options such as using relative or absolute paths or the format of playlist files, as we also support PLS/XSPF now.</li>
+        </ul>
+        <ul>
+          <li>Remote playlists can now be set private or public.</li>
+        </ul>
+        <ul>
+          <li>The context menu gets a submenu for Play so that you can now shuffle collections directly from the context menu without needing to enable shuffle mode.</li>
+        </ul>
+        <ul>
+          <li>Added French translation by Arnaud Constantin</li>
+        </ul>
+        <ul>
+          <li>Added Italian translation by Patrick Canal</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.15.4" date="2026-09-13">
       <description>
         <p>Rufin can now expose its API for headless controls and can also be controlled from a web UI. You can enable Controller through Preferences -&gt; Integrations. The access token is generated automatically; open/copy actions write the token to the link so you don't need to enter the API key each time.</p>
