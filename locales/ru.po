@@ -1321,6 +1321,14 @@ msgstr "Вперед"
 msgid "Found Servers"
 msgstr "Найденные серверы"
 
+msgid "Frame rate limit"
+msgstr ""
+
+#, fuzzy
+#| msgid "Refresh section"
+msgid "Frames per second"
+msgstr "Обновить раздел"
+
 msgid "Friday"
 msgstr "Пятница"
 
@@ -2007,6 +2015,9 @@ msgstr "Не подключено"
 
 msgid "Not needed for most servers"
 msgstr "Не требуется для большинства серверов"
+
+msgid "Not valid"
+msgstr ""
 
 msgid "Nothing here yet"
 msgstr "Здесь пока ничего нет"
@@ -3220,9 +3231,6 @@ msgstr "Это можно отключить после сопряжения, е
 msgid "This device"
 msgstr "Это устройство"
 
-msgid "This is not a valid Rufin visualizer preset."
-msgstr "Это недействительный пресет визуализации для Rufin."
-
 msgid "This is owned by {source}. Regular playlists are synced to your remote."
 msgstr ""
 "Это принадлежит {source}. Обычные плейлисты синхронизируются с вашим "
@@ -3749,6 +3757,9 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "This is not a valid Rufin visualizer preset."
+#~ msgstr "Это недействительный пресет визуализации для Rufin."
 
 #~ msgid "Updated Rufin to {version}. Restart to apply."
 #~ msgstr "Rufin обновлён на {version}. Перезапустите, чтобы применить."

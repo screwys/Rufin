@@ -1412,6 +1412,14 @@ msgstr "前進"
 msgid "Found Servers"
 msgstr ""
 
+msgid "Frame rate limit"
+msgstr ""
+
+#, fuzzy
+#| msgid "Refresh section"
+msgid "Frames per second"
+msgstr "重新整理區塊"
+
 msgid "Friday"
 msgstr ""
 
@@ -2148,6 +2156,9 @@ msgid "Not connected"
 msgstr "未連接"
 
 msgid "Not needed for most servers"
+msgstr ""
+
+msgid "Not valid"
 msgstr ""
 
 msgid "Nothing here yet"
@@ -3500,9 +3511,6 @@ msgstr ""
 
 msgid "This device"
 msgstr "此裝置"
-
-msgid "This is not a valid Rufin visualizer preset."
-msgstr ""
 
 msgid "This is owned by {source}. Regular playlists are synced to your remote."
 msgstr ""

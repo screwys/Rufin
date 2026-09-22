@@ -1320,6 +1320,14 @@ msgstr "Vorwärts"
 msgid "Found Servers"
 msgstr "Entdeckte Server"
 
+msgid "Frame rate limit"
+msgstr ""
+
+#, fuzzy
+#| msgid "Results per section"
+msgid "Frames per second"
+msgstr "Ergebnisse pro Bereich"
+
 msgid "Friday"
 msgstr "Freitag"
 
@@ -1996,6 +2004,9 @@ msgstr "Nicht verbunden"
 
 msgid "Not needed for most servers"
 msgstr "Für die meisten Server nicht erforderlich"
+
+msgid "Not valid"
+msgstr ""
 
 msgid "Nothing here yet"
 msgstr "Hier ist noch nichts"
@@ -3191,9 +3202,6 @@ msgstr "Dies kann nach dem Koppeln bei Bedarf deaktiviert werden"
 msgid "This device"
 msgstr "Dieses Gerät"
 
-msgid "This is not a valid Rufin visualizer preset."
-msgstr "Dies ist keine gültige Rufin-Visualisierungsvoreinstellung."
-
 msgid "This is owned by {source}. Regular playlists are synced to your remote."
 msgstr ""
 "Dies wird von {source} verwaltet. Normale Wiedergabelisten werden mit deinem "
@@ -3698,6 +3706,9 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#~ msgid "This is not a valid Rufin visualizer preset."
+#~ msgstr "Dies ist keine gültige Rufin-Visualisierungsvoreinstellung."
 
 #~ msgid "Updated Rufin to {version}. Restart to apply."
 #~ msgstr ""

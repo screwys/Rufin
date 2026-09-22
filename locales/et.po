@@ -1430,6 +1430,14 @@ msgstr "Edasi"
 msgid "Found Servers"
 msgstr "Leitud serverid"
 
+msgid "Frame rate limit"
+msgstr ""
+
+#, fuzzy
+#| msgid "Refresh section"
+msgid "Frames per second"
+msgstr "Uuenda ploki andmeid"
+
 msgid "Friday"
 msgstr ""
 
@@ -2167,6 +2175,9 @@ msgid "Not connected"
 msgstr "Pole ühendatud"
 
 msgid "Not needed for most servers"
+msgstr ""
+
+msgid "Not valid"
 msgstr ""
 
 msgid "Nothing here yet"
@@ -3525,9 +3536,6 @@ msgstr ""
 
 msgid "This device"
 msgstr "See seade"
-
-msgid "This is not a valid Rufin visualizer preset."
-msgstr ""
 
 msgid "This is owned by {source}. Regular playlists are synced to your remote."
 msgstr ""

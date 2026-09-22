@@ -1451,6 +1451,14 @@ msgstr "Vpřed"
 msgid "Found Servers"
 msgstr "Nalezené servery"
 
+msgid "Frame rate limit"
+msgstr ""
+
+#, fuzzy
+#| msgid "Refresh section"
+msgid "Frames per second"
+msgstr "Obnovit sekci"
+
 msgid "Friday"
 msgstr ""
 
@@ -2206,6 +2214,9 @@ msgid "Not connected"
 msgstr "Není připojeno"
 
 msgid "Not needed for most servers"
+msgstr ""
+
+msgid "Not valid"
 msgstr ""
 
 msgid "Nothing here yet"
@@ -3586,9 +3597,6 @@ msgstr ""
 
 msgid "This device"
 msgstr "Toto zařízení"
-
-msgid "This is not a valid Rufin visualizer preset."
-msgstr ""
 
 msgid "This is owned by {source}. Regular playlists are synced to your remote."
 msgstr ""
