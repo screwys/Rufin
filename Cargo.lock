@@ -201,7 +201,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app-identity"
-version = "0.15.4"
+version = "0.16.0"
 
 [[package]]
 name = "append-only-bytes"
@@ -267,7 +267,7 @@ checksum = "2ccd462b64c3c72f1be8305905a85d85403d768e8690c9b8bd3b9009a5761679"
 
 [[package]]
 name = "artwork"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "async-trait",
  "fast_image_resize",
@@ -597,7 +597,7 @@ checksum = "21e4227379beff4205943696e6c3e0cd809bacdf3f0edd6e3dd153e2269571a4"
 
 [[package]]
 name = "audio-processing"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "base64 0.23.1",
  "ebur128",
@@ -706,7 +706,7 @@ dependencies = [
 
 [[package]]
 name = "backup"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "age",
  "blake3",
@@ -1786,7 +1786,7 @@ dependencies = [
 
 [[package]]
 name = "desktop-integration"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "app-identity",
  "apple-cf",
@@ -1949,7 +1949,7 @@ checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "downloads"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "async-channel",
  "blake3",
@@ -4581,7 +4581,7 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "library"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "blake3",
  "chrono",
@@ -4698,7 +4698,7 @@ dependencies = [
 
 [[package]]
 name = "localization"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "gettext-rs",
 ]
@@ -4980,7 +4980,7 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "lyrics"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "lindera",
  "reqwest 0.13.5",
@@ -5157,7 +5157,7 @@ dependencies = [
 
 [[package]]
 name = "metadata-lookup"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "reqwest 0.13.5",
  "serde_json",
@@ -6580,7 +6580,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "playback"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "library",
  "serde",
@@ -6592,7 +6592,7 @@ dependencies = [
 
 [[package]]
 name = "playback-cast"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "audio-processing",
  "fcast-sender-sdk",
@@ -6616,7 +6616,7 @@ dependencies = [
 
 [[package]]
 name = "playback-gstreamer"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "audio-processing",
  "gstreamer",
@@ -7594,7 +7594,7 @@ dependencies = [
 
 [[package]]
 name = "rufin"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "app-identity",
  "desktop-integration",
@@ -7611,7 +7611,7 @@ dependencies = [
 
 [[package]]
 name = "rufin-connect"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "anyhow",
  "blake3",
@@ -7633,7 +7633,7 @@ dependencies = [
 
 [[package]]
 name = "rufin-controller"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "app-identity",
  "localization",
@@ -7646,7 +7646,7 @@ dependencies = [
 
 [[package]]
 name = "rufin-core"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "age",
  "app-identity",
@@ -7959,7 +7959,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scrobbling"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "library",
  "md5 0.8.1",
@@ -8020,7 +8020,7 @@ dependencies = [
 
 [[package]]
 name = "secrets"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "app-identity",
  "apple-native-keyring-store",
@@ -8540,7 +8540,7 @@ checksum = "ea06cc588e43c632923a55450401b8f25e628131571d4e1baea1bdfdb2b5ed06"
 
 [[package]]
 name = "sources"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "async-channel",
  "base64 0.23.1",
@@ -9534,7 +9534,7 @@ dependencies = [
 
 [[package]]
 name = "ui-library"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "artwork",
  "downloads",
@@ -9553,7 +9553,7 @@ dependencies = [
 
 [[package]]
 name = "ui-player"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "app-identity",
  "artwork",
@@ -9574,7 +9574,7 @@ dependencies = [
 
 [[package]]
 name = "ui-shared"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "app-identity",
  "artwork",
@@ -9598,7 +9598,7 @@ dependencies = [
 
 [[package]]
 name = "ui-shell"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "app-identity",
  "artwork",
@@ -10252,7 +10252,7 @@ dependencies = [
 
 [[package]]
 name = "windows-updater"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "app-identity",
  "directories",
@@ -10549,7 +10549,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.15.4"
+version = "0.16.0"
 dependencies = [
  "directories",
  "proc-macro2",
