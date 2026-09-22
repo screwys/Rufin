@@ -747,6 +747,7 @@ impl LyricsService {
         let prefer_translations = resolution.plan.prefers_translations();
         let preferred_translation_language =
             resolution.plan.preferred_translation_language().to_string();
+        let has_existing_lyrics = fallback.is_some();
         let lookup_cancelled = Arc::clone(cancelled);
         let document = run_external_lookup(Arc::clone(&self.search_lane), move || {
             external_best_lyrics(
@@ -755,6 +756,7 @@ impl LyricsService {
                 require_word_timing,
                 prefer_translations,
                 &preferred_translation_language,
+                has_existing_lyrics,
                 &lookup_cancelled,
             )
         })
@@ -769,23 +771,8 @@ impl LyricsService {
         let Some(document) = document else {
             return false;
         };
-        if acquisition_complete(&document, &resolution.plan) {
-            if self.current_request_active(request, key, cancelled) {
-                self.cache_and_accept(
-                    request,
-                    key,
-                    &resolution.context.input_digest,
-                    &resolution.plan,
-                    document,
-                )
-                .await;
-            }
-            return true;
-        }
-        if prefer_fallback(fallback, document, &resolution.plan) {
-            self.show_fallback(request, key, fallback.as_ref().expect("fallback"));
-        }
-        false
+        self.resolve_candidate(request, key, resolution, cancelled, fallback, document)
+            .await
     }
 
     async fn resolve_candidate(
@@ -797,6 +784,9 @@ impl LyricsService {
         fallback: &mut Option<LyricsBundle>,
         document: LyricsBundle,
     ) -> bool {
+        if document.is_instrumental() && fallback.is_some() {
+            return false;
+        }
         if acquisition_complete(&document, &resolution.plan) {
             if self.current_request_active(request, key, cancelled) {
                 self.cache_and_accept(
