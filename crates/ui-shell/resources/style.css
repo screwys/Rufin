@@ -308,6 +308,7 @@ button.release-note-update:hover {
   margin: 0;
 }
 
+button.preference-selection-button,
 .preference-selection-button {
   min-height: 26px;
   padding: 2px 10px;
@@ -577,9 +578,12 @@ headerbar.shared-topbar menubutton.topbar-button > button,
 headerbar.shared-topbar windowcontrols > button,
 .track-toolbar button.library-toolbar-icon-button,
 .queue-toolbar button.icon-button,
-.player-action-buttons button,
-.player-action-buttons menubutton,
-.player-action-buttons menubutton > button {
+.player-action-buttons > button,
+.player-action-buttons > menubutton,
+.player-action-buttons > menubutton > button,
+.player-action-buttons > box > button,
+.player-action-buttons > box > menubutton,
+.player-action-buttons > box > menubutton > button {
   min-width: 32px;
   min-height: 32px;
   padding: 0;
@@ -592,8 +596,10 @@ headerbar.shared-topbar menubutton.topbar-button image,
 headerbar.shared-topbar windowcontrols > button image,
 .track-toolbar button.library-toolbar-icon-button image,
 .queue-toolbar button.icon-button image,
-.player-action-buttons button image,
-.player-action-buttons menubutton image {
+.player-action-buttons > button image,
+.player-action-buttons > menubutton image,
+.player-action-buttons > box > button image,
+.player-action-buttons > box > menubutton image {
   -gtk-icon-size: 16px;
 }
 

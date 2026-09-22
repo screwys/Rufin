@@ -375,9 +375,6 @@ msgstr ""
 msgid "Approve sign-in in your browser"
 msgstr ""
 
-msgid "Artist / Album"
-msgstr ""
-
 msgid "Artist albums"
 msgstr ""
 
@@ -1213,9 +1210,6 @@ msgid "Fixed position"
 msgstr ""
 
 msgid "Flat"
-msgstr ""
-
-msgid "Folder"
 msgstr ""
 
 msgid "Folders"

@@ -68,7 +68,6 @@ impl CatalogUi {
             crate::available_sort_fields(LibraryListKey::Tracks),
         );
         toolbar.set_layout_control_visible(false);
-        toolbar.set_configure_control_visible(false);
         wrapper.imp().toolbar_host.append(&toolbar.widget());
         wrapper
             .imp()
@@ -141,7 +140,7 @@ pub async fn prepare_folder_route(
                         )
                         .await
                         .map_err(|error| error.to_string())?;
-                    let folders: Vec<FolderLink> = page
+                    let mut folders: Vec<FolderLink> = page
                         .folders
                         .into_iter()
                         .map(|folder| FolderLink {
@@ -149,6 +148,10 @@ pub async fn prepare_folder_route(
                             name: folder.name,
                         })
                         .collect();
+                    folders.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                    if settings.descending {
+                        folders.reverse();
+                    }
                     let first_tracks = database
                         .track_rows_by_uri(
                             &order[..order.len().min(64_usize.saturating_sub(folders.len()))],
@@ -189,7 +192,7 @@ pub async fn prepare_folder_route(
         .folder_child_order(source, exact_folder, cancellation)
         .await
         .map_err(|error| error.to_string())?;
-    let folders: Vec<FolderLink> = database
+    let mut folders: Vec<FolderLink> = database
         .folder_rows(source, &folder_order, cancellation)
         .await
         .map_err(|error| error.to_string())?
@@ -199,6 +202,9 @@ pub async fn prepare_folder_route(
             name: folder.name,
         })
         .collect();
+    if settings.descending {
+        folders.reverse();
+    }
     let page = database
         .query_track_route_page(
             &library::TrackQuery {
@@ -456,12 +462,15 @@ fn folder_page(
     };
     let database = Arc::clone(&selected.database);
     let source_key = selected.source_key;
+    let mut canonical_folders = folders.to_vec();
+    canonical_folders.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    let canonical_folders: Arc<[FolderLink]> = canonical_folders.into();
     let load = Arc::new(
         move |request: crate::track_model::TrackProjectionRequest,
               cancellation: ReadCancellation| {
             let database = Arc::clone(&database);
             let source = source.clone();
-            let folders = Arc::clone(&folders);
+            let folders = Arc::clone(&canonical_folders);
             Box::pin(async move {
                 let (tracks, first_rows) = match source {
                     FolderTrackSource::Live(candidates) => (
@@ -498,13 +507,16 @@ fn folder_page(
                     }
                 };
                 let normalized = request.query.to_lowercase();
-                let folders = folders
+                let mut folders: Vec<FolderLink> = folders
                     .iter()
                     .filter(|folder| {
                         normalized.is_empty() || folder.name.to_lowercase().contains(&normalized)
                     })
                     .cloned()
                     .collect();
+                if request.settings.descending {
+                    folders.reverse();
+                }
                 Ok((folders, tracks, first_rows))
             }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
         },
@@ -581,33 +593,24 @@ fn folder_table(
     table.set_hexpand(true);
     table.set_halign(gtk::Align::Fill);
     table.set_vexpand(true);
-    let mut columns = Vec::new();
-    if path.is_empty() {
-        columns.push(folder_name_column(shell, path.clone()));
-        columns.push(folder_detail_column(shell, path.clone()));
-    } else {
-        columns.push(folder_index_column(shell, Rc::clone(&folders)));
-        columns.push(folder_merged_column(shell, path.clone()));
-        columns.push(folder_album_column(shell, path.clone()));
-        columns.push(folder_year_column(shell, path.clone()));
-    }
-    let duration = folder_duration_column(shell, path.clone());
-    columns.push(duration);
-    columns.push(super::columns::mapped_track_favorite_column::<
-        FolderTableRow,
-        _,
-        _,
-    >(
-        shell,
-        |row| match row {
-            FolderTableRow::Track(track) => Some(track.media_uri.clone()),
-            _ => None,
-        },
-        |row| match row {
-            FolderTableRow::Track(track) => Some((track.media_uri.clone(), track.favorite)),
-            _ => None,
-        },
-    ));
+    let columns = vec![
+        folder_index_column(shell, Rc::clone(&folders)),
+        folder_merged_column(shell, path.clone()),
+        folder_album_column(shell, path.clone()),
+        folder_year_column(shell, path.clone()),
+        folder_duration_column(shell, path.clone()),
+        super::columns::mapped_track_favorite_column::<FolderTableRow, _, _>(
+            shell,
+            |row| match row {
+                FolderTableRow::Track(track) => Some(track.media_uri.clone()),
+                _ => None,
+            },
+            |row| match row {
+                FolderTableRow::Track(track) => Some((track.media_uri.clone(), track.favorite)),
+                _ => None,
+            },
+        ),
+    ];
     for column in &columns {
         table.append_column(column);
     }
@@ -688,95 +691,6 @@ fn folder_table(
     (table, width_fit)
 }
 
-fn folder_name_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk::ColumnViewColumn {
-    folder_label_column(shell, path, "Name", 220)
-}
-
-fn folder_label_column(
-    shell: &Rc<CatalogUi>,
-    path: Vec<FolderPathItem>,
-    title: &str,
-    width: i32,
-) -> gtk::ColumnViewColumn {
-    let factory = gtk::SignalListItemFactory::new();
-    let setup_shell = Rc::clone(shell);
-    factory.connect_setup(move |_, item| {
-        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
-            return;
-        };
-        let cell = ui_shared::recycled_cells::RecycledFolderCell::new();
-        let weak = item.downgrade();
-        let shell = Rc::downgrade(&setup_shell);
-        install_context_menu_openers(
-            &cell,
-            Rc::new(move |target, position| {
-                let (Some(item), Some(shell)) = (weak.upgrade(), shell.upgrade()) else {
-                    return;
-                };
-                let Some(FolderTableRow::Track(track)) =
-                    ui_shared::sparse_model::item_at_from_item::<FolderTableRow>(&item)
-                else {
-                    return;
-                };
-                super::collection_context::present_track_context_menu(
-                    target,
-                    &shell,
-                    track.media_uri,
-                    position,
-                );
-            }),
-        );
-        install_folder_cell_activation(&cell, item, &setup_shell, path.clone());
-        item.set_child(Some(&cell));
-    });
-    let bind_shell = Rc::clone(shell);
-    connect_sparse_bind(&factory, move |item| {
-        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
-            return;
-        };
-        let Some(row) = ui_shared::sparse_model::item_at_from_item::<FolderTableRow>(item) else {
-            return;
-        };
-        let Some(cell) = ui_shared::recycled_cells::list_cell::<
-            ui_shared::recycled_cells::RecycledFolderCell,
-        >(item) else {
-            return;
-        };
-        let cover = cell.cover();
-        match row {
-            FolderTableRow::Folder(folder) => {
-                bind_shell.artwork.clear_artwork_tile(&cover);
-                cell.set_cover_visible(false);
-                cell.icon().set_visible(true);
-                cell.label().set_text(&folder.name);
-            }
-            FolderTableRow::Track(track) => {
-                cell.icon().set_visible(false);
-                cell.set_cover_visible(true);
-                bind_shell.artwork.bind_artwork_tile(
-                    &cover,
-                    ui_shared::library_fields::opaque_artwork(track.artwork_binding.as_deref()),
-                    48,
-                    ui_shared::artwork::THUMB_COVER_SIZE,
-                );
-                cell.label().set_text(&track.title);
-            }
-        }
-    });
-    let clear_shell = Rc::clone(shell);
-    factory.connect_unbind(move |_, item| {
-        if let Some(cell) = item.downcast_ref::<gtk::ListItem>().and_then(
-            ui_shared::recycled_cells::list_cell::<ui_shared::recycled_cells::RecycledFolderCell>,
-        ) {
-            clear_shell.artwork.clear_artwork_tile(&cell.cover());
-            cell.label().set_text("");
-        }
-    });
-    let column = gtk::ColumnViewColumn::new(Some(&tr(title)), Some(factory));
-    configure_folder_column(&column, width);
-    column
-}
-
 fn folder_index_column(
     shell: &Rc<CatalogUi>,
     folders: Rc<ui_shared::sparse_model::SparseRouteModel<FolderLink, FolderTableRow>>,
@@ -835,7 +749,8 @@ fn folder_index_column(
             playing.unbind(cell.upcast_ref());
         }
     });
-    let column = gtk::ColumnViewColumn::new(Some("#"), Some(factory));
+    let column =
+        gtk::ColumnViewColumn::new(Some(super::columns::ROW_INDEX_COLUMN_TITLE), Some(factory));
     configure_folder_column(
         &column,
         super::columns::track_column_width(LibraryListKey::Tracks, LibraryField::RowIndex),
@@ -970,30 +885,6 @@ fn folder_merged_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk
     column
 }
 
-fn folder_detail_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk::ColumnViewColumn {
-    let column = folder_text_column(
-        shell,
-        path,
-        msgid("Artist / Album"),
-        18,
-        false,
-        |row| match row {
-            FolderTableRow::Folder(_) => tr("Folder"),
-            FolderTableRow::Track(track) => {
-                format!("{} / {}", track.artist, track.album)
-            }
-        },
-        |row| match row {
-            FolderTableRow::Folder(_) => None,
-            FolderTableRow::Track(track) => {
-                Some(ui_shared::detail_links::track_artist_album_links(track))
-            }
-        },
-    );
-    configure_folder_column(&column, 200);
-    column
-}
-
 fn folder_album_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk::ColumnViewColumn {
     let column = folder_text_column(
         shell,
@@ -1046,7 +937,6 @@ fn folder_duration_column(
     shell: &Rc<CatalogUi>,
     path: Vec<FolderPathItem>,
 ) -> gtk::ColumnViewColumn {
-    let nested = !path.is_empty();
     let column = folder_text_column(
         shell,
         path,
@@ -1063,11 +953,7 @@ fn folder_duration_column(
     );
     configure_folder_column(
         &column,
-        if nested {
-            super::columns::track_column_width(LibraryListKey::Tracks, LibraryField::Duration)
-        } else {
-            80
-        },
+        super::columns::track_column_width(LibraryListKey::Tracks, LibraryField::Duration),
     );
     column
 }

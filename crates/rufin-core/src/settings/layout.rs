@@ -1,6 +1,6 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
-pub const LIBRARY_LIST_LAYOUT_VERSION: u8 = 13;
+pub const LIBRARY_LIST_LAYOUT_VERSION: u8 = 14;
 pub const DEFAULT_WINDOW_WIDTH: i32 = 1_500;
 pub const DEFAULT_WINDOW_HEIGHT: i32 = 900;
 pub const MIN_RESTORED_WINDOW_WIDTH: i32 = 450;
@@ -821,6 +821,34 @@ impl LibraryListSettings {
         {
             self.row_fields = default_row_fields(key);
         }
+        if self.layout_version < 14
+            && key == LibraryListKey::FavoriteTracks
+            && self.row_fields
+                == [
+                    LibraryField::RowIndex,
+                    LibraryField::TitleMerged,
+                    LibraryField::Album,
+                    LibraryField::Year,
+                    LibraryField::PlayCount,
+                    LibraryField::Tools,
+                ]
+        {
+            self.row_fields = default_row_fields(key);
+        }
+        if self.layout_version < 14
+            && key == LibraryListKey::SmartPlaylists
+            && self.row_fields
+                == [
+                    LibraryField::RowIndex,
+                    LibraryField::Image,
+                    LibraryField::Title,
+                    LibraryField::SongCount,
+                    LibraryField::Duration,
+                    LibraryField::Tools,
+                ]
+        {
+            self.row_fields = default_row_fields(key);
+        }
     }
 }
 pub fn default_library_list_settings() -> Vec<LibraryListSettingsEntry> {
@@ -1086,34 +1114,18 @@ fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
             LibraryField::Duration,
             LibraryField::Tools,
         ],
-        LibraryListKey::Playlists => vec![
+        LibraryListKey::Playlists | LibraryListKey::SmartPlaylists => vec![
             LibraryField::RowIndex,
             LibraryField::Image,
             LibraryField::Title,
             LibraryField::SongCount,
             LibraryField::Tools,
         ],
-        LibraryListKey::SmartPlaylists => vec![
-            LibraryField::RowIndex,
-            LibraryField::Image,
-            LibraryField::Title,
-            LibraryField::SongCount,
-            LibraryField::Duration,
-            LibraryField::Tools,
-        ],
-        LibraryListKey::Tracks => vec![
+        LibraryListKey::Tracks | LibraryListKey::FavoriteTracks => vec![
             LibraryField::RowIndex,
             LibraryField::TitleMerged,
             LibraryField::Album,
             LibraryField::Year,
-            LibraryField::Tools,
-        ],
-        LibraryListKey::FavoriteTracks => vec![
-            LibraryField::RowIndex,
-            LibraryField::TitleMerged,
-            LibraryField::Album,
-            LibraryField::Year,
-            LibraryField::PlayCount,
             LibraryField::Tools,
         ],
         LibraryListKey::History => vec![
@@ -1317,5 +1329,46 @@ mod disc_tests {
                 LibraryField::Tools,
             ]
         );
+    }
+
+    #[test]
+    fn favorite_tracks_row_fields_match_tracks_route_defaults() {
+        assert_eq!(
+            default_row_fields(LibraryListKey::FavoriteTracks),
+            default_row_fields(LibraryListKey::Tracks)
+        );
+    }
+
+    #[test]
+    fn favorite_tracks_migrates_play_count_column_out_of_defaults() {
+        let mut settings = LibraryListSettings::for_key(LibraryListKey::FavoriteTracks);
+        settings.row_fields = vec![
+            LibraryField::RowIndex,
+            LibraryField::TitleMerged,
+            LibraryField::Album,
+            LibraryField::Year,
+            LibraryField::PlayCount,
+            LibraryField::Tools,
+        ];
+        settings.layout_version = 13;
+        settings.sanitize(LibraryListKey::FavoriteTracks);
+        assert_eq!(
+            settings.row_fields,
+            default_row_fields(LibraryListKey::Tracks)
+        );
+    }
+
+    #[test]
+    fn default_row_fields_do_not_exceed_five_columns() {
+        for key in LibraryListKey::all() {
+            let defaults = default_row_fields(key);
+            assert!(
+                defaults.len() <= 5,
+                "key {:?} has {} default row columns: {:?}",
+                key,
+                defaults.len(),
+                defaults
+            );
+        }
     }
 }
