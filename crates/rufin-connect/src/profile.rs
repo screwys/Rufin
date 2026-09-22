@@ -1,10 +1,12 @@
 //! Loro persistence for the shared Rufin profile. Each catalog row is a separate
 //! document; a playlist's occurrences share a movable list. Playback is not stored here.
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::fs::File;
+use std::io::{BufRead, BufReader, BufWriter, Seek, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
+use flate2::{Compression, bufread::MultiGzDecoder, write::GzEncoder};
 use library::{CONNECT_PAGE_SIZE, ConnectRecord, Database};
 use loro::{ExportMode, LoroDoc, ToJson, VersionVector};
 use serde::{Deserialize, Serialize};
@@ -408,23 +410,25 @@ impl ProfileStore {
 
     /// Stream current state and the history still needed by enrolled devices.
     pub async fn export_snapshot(&self, path: &Path) -> Result<()> {
-        self.export_documents(path, false, None).await
+        self.export_documents(File::create(path)?, false, None)
+            .await
     }
 
     /// The caller appends membership after exporting, before publishing the file.
-    pub async fn export_device_snapshot(&self, path: &Path, peer: &str) -> Result<()> {
-        self.export_documents(path, false, Some(peer)).await
+    pub async fn export_device_snapshot(&self, output: File, peer: &str) -> Result<()> {
+        self.export_documents(output, false, Some(peer)).await
     }
 
-    pub async fn export_setup_snapshot(&self, path: &Path) -> Result<()> {
-        self.export_documents(path, true, None).await
+    pub async fn export_setup_snapshot(&self, output: File) -> Result<()> {
+        self.export_documents(output, true, None).await
     }
 
-    async fn export_documents(&self, path: &Path, setup: bool, peer: Option<&str>) -> Result<()> {
-        let path = path.to_owned();
+    async fn export_documents(&self, file: File, setup: bool, peer: Option<&str>) -> Result<()> {
         let mut output = tokio::task::spawn_blocking(move || -> Result<_> {
-            let mut output = BufWriter::new(std::fs::File::create(path)?);
-            writeln!(output, "{FORMAT}")?;
+            let mut output = BufWriter::new(file);
+            let mut header = GzEncoder::new(&mut output, Compression::default());
+            writeln!(header, "{FORMAT}")?;
+            header.finish()?;
             Ok(output)
         })
         .await??;
@@ -437,9 +441,9 @@ impl ProfileStore {
         let mut cursor = String::new();
         loop {
             let statement = if setup {
-                "SELECT name,snapshot FROM documents WHERE substr(name,1,instr(name,':')-1) IN ('source','integration','root','preference','scrobbling','device','connect_key','connect_network','connect_storage') AND name>?1 ORDER BY name LIMIT ?2"
+                "SELECT name,CASE WHEN compressed IS NULL THEN snapshot END,compressed FROM documents WHERE substr(name,1,instr(name,':')-1) IN ('source','integration','root','preference','scrobbling','device','connect_key','connect_network','connect_storage') AND name>?1 ORDER BY name LIMIT ?2"
             } else {
-                "SELECT name,snapshot FROM documents WHERE name>?1 ORDER BY name LIMIT ?2"
+                "SELECT name,CASE WHEN compressed IS NULL THEN snapshot END,compressed FROM documents WHERE name>?1 ORDER BY name LIMIT ?2"
             };
             let rows = sqlx::query(statement)
                 .bind(&cursor)
@@ -450,28 +454,62 @@ impl ProfileStore {
                 break;
             }
             cursor = rows.last().unwrap().get(0);
-            // Serializing the full profile and writing its file must not occupy
-            // the async workers serving playback and interactive library reads.
+            // Reuse unchanged gzip members. Concatenating them preserves the
+            // portable snapshot stream without serializing the catalog again.
             let mut author = author.take();
-            output = tokio::task::spawn_blocking(move || -> Result<_> {
+            let (writer, encoded) = tokio::task::spawn_blocking(move || -> Result<_> {
+                let mut encoded = Vec::new();
                 for row in rows {
-                    serde_json::to_writer(
-                        &mut output,
-                        &Update {
+                    let cached: Option<Vec<u8>> = row.get(2);
+                    if author.is_none()
+                        && let Some(cached) = cached
+                    {
+                        output.write_all(&cached)?;
+                        continue;
+                    }
+                    let mut update = match cached {
+                        Some(cached) => serde_json::from_reader(MultiGzDecoder::new(&cached[..]))?,
+                        None => Update {
                             version: FORMAT,
                             document: row.get(0),
                             bytes: row.get(1),
-                            author: author.take(),
+                            author: None,
                         },
-                    )?;
-                    output.write_all(b"\n")?;
+                    };
+                    update.author = author.take();
+                    let mut compressed = GzEncoder::new(Vec::new(), Compression::default());
+                    serde_json::to_writer(&mut compressed, &update)?;
+                    compressed.write_all(b"\n")?;
+                    let compressed = compressed.finish()?;
+                    output.write_all(&compressed)?;
+                    if update.author.is_none() {
+                        encoded.push((update.document, update.bytes, compressed));
+                    }
                 }
-                Ok(output)
+                Ok((output, encoded))
             })
             .await??;
+            output = writer;
+            if !encoded.is_empty() {
+                let mut connection = self.connection.lock().await;
+                let mut transaction = connection.begin().await?;
+                for (name, snapshot, compressed) in encoded {
+                    // An edit or pruning may have changed this document while
+                    // the export's read transaction kept its previous snapshot.
+                    sqlx::query("UPDATE documents SET compressed=?3 WHERE name=?1 AND snapshot=?2")
+                        .bind(name)
+                        .bind(snapshot)
+                        .bind(compressed)
+                        .execute(&mut *transaction)
+                        .await?;
+                }
+                transaction.commit().await?;
+            }
         }
         tokio::task::spawn_blocking(move || -> Result<()> {
-            writeln!(output, "END")?;
+            let mut end = GzEncoder::new(&mut output, Compression::default());
+            writeln!(end, "END")?;
+            end.finish()?;
             output.flush()?;
             output.get_ref().sync_all()?;
             Ok(())
@@ -483,16 +521,15 @@ impl ProfileStore {
 
     /// Every document is validated inside one SQLite transaction before any pending
     /// projection becomes visible. A corrupt/truncated snapshot preserves usable state.
-    pub async fn import_snapshot(&self, path: &Path) -> Result<bool> {
-        self.read_snapshot(path, false).await
+    pub async fn import_snapshot(&self, input: File) -> Result<bool> {
+        self.read_snapshot(input, false).await
     }
 
     /// Check an imported snapshot for local edits it does not contain. Exports
     /// order documents by name, so both histories can be compared a page at a time.
-    pub async fn snapshot_contains_current(&self, path: &Path) -> Result<bool> {
-        let path = path.to_owned();
+    pub async fn snapshot_contains_current(&self, file: File) -> Result<bool> {
         let (mut input, mut line) = tokio::task::spawn_blocking(move || -> Result<_> {
-            let mut input = BufReader::new(std::fs::File::open(path)?);
+            let mut input = snapshot_reader(file)?;
             let mut line = String::new();
             input.read_line(&mut line)?;
             Ok((input, line))
@@ -555,14 +592,13 @@ impl ProfileStore {
         }
     }
 
-    pub async fn replace_snapshot(&self, path: &Path) -> Result<bool> {
-        self.read_snapshot(path, true).await
+    pub async fn replace_snapshot(&self, input: File) -> Result<bool> {
+        self.read_snapshot(input, true).await
     }
 
-    async fn read_snapshot(&self, path: &Path, replace: bool) -> Result<bool> {
-        let path = path.to_owned();
+    async fn read_snapshot(&self, file: File, replace: bool) -> Result<bool> {
         let mut input = tokio::task::spawn_blocking(move || -> Result<_> {
-            let mut input = BufReader::new(std::fs::File::open(path)?);
+            let mut input = snapshot_reader(file)?;
             let mut line = String::new();
             input.read_line(&mut line)?;
             validate_version(
@@ -622,13 +658,21 @@ impl ProfileStore {
                 break;
             }
         }
-        if let Some(peer) = &peer {
-            let mut members: Vec<String> = tokio::task::spawn_blocking(move || -> Result<_> {
+        let has_author = peer.is_some();
+        let mut members: Vec<String> = tokio::task::spawn_blocking(move || -> Result<_> {
+            let members = if has_author {
                 let mut line = String::new();
                 input.read_line(&mut line)?;
-                serde_json::from_str(&line).context("missing Connect snapshot membership")
-            })
-            .await??;
+                serde_json::from_str(&line).context("missing Connect snapshot membership")?
+            } else {
+                Vec::new()
+            };
+            // Finish gzip validation before committing any imported documents.
+            std::io::copy(&mut input, &mut std::io::sink())?;
+            Ok(members)
+        })
+        .await??;
+        if let Some(peer) = &peer {
             members.push(peer.to_owned());
             history::register_on(&mut transaction, &members).await?;
         }
@@ -670,6 +714,16 @@ impl ProfileStore {
         let mut connection = self.connection.lock().await;
         sqlx::raw_sql("BEGIN; DELETE FROM documents; DELETE FROM projection; DELETE FROM local_values; DELETE FROM sync_cursors; DELETE FROM history_peers; DELETE FROM history_acknowledgements; DELETE FROM history_pending; COMMIT;").execute(&mut *connection).await?;
         Ok(())
+    }
+}
+
+fn snapshot_reader(mut file: File) -> Result<Box<dyn BufRead + Send>> {
+    file.rewind()?;
+    let mut input = BufReader::new(file);
+    if input.fill_buf()?.starts_with(&[0x1f, 0x8b]) {
+        Ok(Box::new(BufReader::new(MultiGzDecoder::new(input))))
+    } else {
+        Ok(Box::new(input))
     }
 }
 
@@ -786,11 +840,17 @@ async fn index_documents(connection: &mut SqliteConnection) -> Result<()> {
             .execute(&mut *transaction)
             .await?;
     }
+    if !columns.iter().any(|name| name == "compressed") {
+        sqlx::query("ALTER TABLE documents ADD COLUMN compressed BLOB")
+            .execute(&mut *transaction)
+            .await?;
+    }
     sqlx::raw_sql(
         "DROP TRIGGER IF EXISTS file_revision_insert;
         DROP TRIGGER IF EXISTS file_revision_update;
         DROP TABLE IF EXISTS outgoing;
         DROP INDEX IF EXISTS documents_sync_priority;
+        CREATE TRIGGER IF NOT EXISTS documents_compressed_changed AFTER UPDATE OF snapshot ON documents BEGIN UPDATE documents SET compressed=NULL WHERE name=NEW.name; END;
         CREATE INDEX IF NOT EXISTS documents_revision ON documents(revision,name);",
     )
     .execute(&mut *transaction)
@@ -1067,6 +1127,7 @@ async fn import_on(
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use serde_json::json;
 
     fn entry(id: &str, position: usize) -> ConnectRecord {
@@ -1549,7 +1610,9 @@ mod tests {
         );
         let snapshot = directory.path().join("incompatible.jsonl");
         sender.export_snapshot(&snapshot).await.unwrap();
-        let snapshot_contents = std::fs::read_to_string(&snapshot).unwrap();
+        let snapshot_contents =
+            std::io::read_to_string(snapshot_reader(File::open(&snapshot).unwrap()).unwrap())
+                .unwrap();
         std::fs::write(
             &snapshot,
             snapshot_contents.replacen("\"version\":1", "\"version\":2", 1),
@@ -1557,7 +1620,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             receiver
-                .replace_snapshot(&snapshot)
+                .replace_snapshot(std::fs::File::open(&snapshot).unwrap())
                 .await
                 .unwrap_err()
                 .to_string(),
@@ -1813,8 +1876,12 @@ mod tests {
         .await
         .unwrap();
         let setup = directory.path().join("setup.jsonl");
-        a.export_setup_snapshot(&setup).await.unwrap();
-        b.replace_snapshot(&setup).await.unwrap();
+        a.export_setup_snapshot(std::fs::File::create(&setup).unwrap())
+            .await
+            .unwrap();
+        b.replace_snapshot(std::fs::File::open(&setup).unwrap())
+            .await
+            .unwrap();
         let mut connection = b.connection.lock().await;
         let names: Vec<String> = sqlx::query_scalar("SELECT name FROM documents ORDER BY name")
             .fetch_all(&mut *connection)
@@ -1948,23 +2015,60 @@ mod tests {
         let file = directory.path().join("profile");
         let peer_file = directory.path().join("peer-profile");
         original.export_snapshot(&peer_file).await.unwrap();
-        joining.replace_snapshot(&peer_file).await.unwrap();
-        assert!(joining.snapshot_contains_current(&peer_file).await.unwrap());
+        joining
+            .replace_snapshot(std::fs::File::open(&peer_file).unwrap())
+            .await
+            .unwrap();
+        assert!(
+            joining
+                .snapshot_contains_current(std::fs::File::open(&peer_file).unwrap())
+                .await
+                .unwrap()
+        );
         assert!(missing_updates(&joining, &original).await.is_empty());
         original.export_snapshot(&file).await.unwrap();
-        offline.replace_snapshot(&file).await.unwrap();
+        offline
+            .replace_snapshot(std::fs::File::open(&file).unwrap())
+            .await
+            .unwrap();
         offline.write_records(&[record(false)]).await.unwrap();
         offline.export_snapshot(&file).await.unwrap();
-        joining.replace_snapshot(&file).await.unwrap();
-        assert!(!joining.snapshot_contains_current(&peer_file).await.unwrap());
-        assert!(joining.snapshot_contains_current(&file).await.unwrap());
+        joining
+            .replace_snapshot(std::fs::File::open(&file).unwrap())
+            .await
+            .unwrap();
+        assert!(
+            !joining
+                .snapshot_contains_current(std::fs::File::open(&peer_file).unwrap())
+                .await
+                .unwrap()
+        );
+        assert!(
+            joining
+                .snapshot_contains_current(std::fs::File::open(&file).unwrap())
+                .await
+                .unwrap()
+        );
         assert!(!missing_updates(&joining, &original).await.is_empty());
-        joining.import_snapshot(&peer_file).await.unwrap();
+        joining
+            .import_snapshot(std::fs::File::open(&peer_file).unwrap())
+            .await
+            .unwrap();
         assert_eq!(missing_updates(&joining, &original).await.len(), 1);
         deliver(&joining, &original).await;
-        assert!(original.snapshot_contains_current(&file).await.unwrap());
+        assert!(
+            original
+                .snapshot_contains_current(std::fs::File::open(&file).unwrap())
+                .await
+                .unwrap()
+        );
         assert!(missing_updates(&joining, &original).await.is_empty());
-        assert!(!joining.import_snapshot(&file).await.unwrap());
+        assert!(
+            !joining
+                .import_snapshot(std::fs::File::open(&file).unwrap())
+                .await
+                .unwrap()
+        );
         assert!(missing_updates(&joining, &original).await.is_empty());
         let db = Database::open(directory.path().join("library.sqlite"))
             .await
@@ -1978,7 +2082,12 @@ mod tests {
             }])
             .await
             .unwrap();
-        assert!(!joining.snapshot_contains_current(&file).await.unwrap());
+        assert!(
+            !joining
+                .snapshot_contains_current(std::fs::File::open(&file).unwrap())
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]
@@ -2003,21 +2112,38 @@ mod tests {
         let profile = ProfileStore::open(&path, 1).await.unwrap();
         assert_eq!(profile.sync_cursor("peer", true).await.unwrap(), 12);
         assert_eq!(profile.sync_cursor("peer", false).await.unwrap(), 24);
-        profile.import_snapshot(&snapshot).await.unwrap();
-        profile.import_snapshot(&snapshot).await.unwrap();
+        profile
+            .import_snapshot(std::fs::File::open(&snapshot).unwrap())
+            .await
+            .unwrap();
+        profile
+            .import_snapshot(std::fs::File::open(&snapshot).unwrap())
+            .await
+            .unwrap();
         assert_eq!(profile.sync_cursor("peer", true).await.unwrap(), 12);
         assert_eq!(profile.sync_cursor("peer", false).await.unwrap(), 24);
         let bytes = std::fs::read(&snapshot).unwrap();
         std::fs::write(&snapshot, &bytes[..bytes.len() - 4]).unwrap();
-        assert!(profile.replace_snapshot(&snapshot).await.is_err());
+        assert!(
+            profile
+                .replace_snapshot(std::fs::File::open(&snapshot).unwrap())
+                .await
+                .is_err()
+        );
         assert_eq!(profile.sync_cursor("peer", true).await.unwrap(), 12);
         assert_eq!(profile.sync_cursor("peer", false).await.unwrap(), 24);
         std::fs::write(&snapshot, bytes).unwrap();
-        profile.replace_snapshot(&snapshot).await.unwrap();
+        profile
+            .replace_snapshot(std::fs::File::open(&snapshot).unwrap())
+            .await
+            .unwrap();
         assert_eq!(profile.sync_cursor("peer", true).await.unwrap(), 0);
         assert_eq!(profile.sync_cursor("peer", false).await.unwrap(), 0);
         profile.acknowledge_sync("peer", false, 30).await.unwrap();
-        profile.replace_snapshot(&snapshot).await.unwrap();
+        profile
+            .replace_snapshot(std::fs::File::open(&snapshot).unwrap())
+            .await
+            .unwrap();
         assert_eq!(profile.sync_cursor("peer", false).await.unwrap(), 0);
     }
 
@@ -2051,7 +2177,11 @@ mod tests {
         a.export_snapshot(&snapshot).await.unwrap();
         let complete = std::fs::read(&snapshot).unwrap();
         std::fs::write(&snapshot, &complete[..complete.len() - 4]).unwrap();
-        assert!(b.import_snapshot(&snapshot).await.is_err());
+        assert!(
+            b.import_snapshot(std::fs::File::open(&snapshot).unwrap())
+                .await
+                .is_err()
+        );
         let mut connection = b.connection.lock().await;
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT count(*) FROM documents")
@@ -2062,9 +2192,15 @@ mod tests {
         );
         drop(connection);
         std::fs::write(&snapshot, &complete).unwrap();
-        b.import_snapshot(&snapshot).await.unwrap();
+        b.import_snapshot(std::fs::File::open(&snapshot).unwrap())
+            .await
+            .unwrap();
         b.write_records(&[record("light")]).await.unwrap();
-        assert!(!b.import_snapshot(&snapshot).await.unwrap());
+        assert!(
+            !b.import_snapshot(std::fs::File::open(&snapshot).unwrap())
+                .await
+                .unwrap()
+        );
         let mut connection = b.connection.lock().await;
         let current = records(
             &load_document(&mut connection, "preference:theme", 2)

@@ -1,6 +1,128 @@
 use super::*;
 use library::{AlbumSort, FolderKey, ReadCancellation, SourceKey};
 
+pub(super) async fn page_total(
+    products: &ProductHandles,
+    parameters: &HashMap<String, String>,
+    kind: &str,
+) -> Result<Option<i64>, Error> {
+    if !boolean(parameters, "total")? {
+        return Ok(None);
+    }
+    let filter = parameters.get("q").map(String::as_str).unwrap_or("");
+    let favorites = boolean(parameters, "favorites")?;
+    if matches!(kind, "tracks" | "albums")
+        && !parameters.contains_key("folder")
+        && filter.trim().is_empty()
+        && !favorites
+        && let Some(source) = parameters.get("source")
+        && let Some((albums, tracks)) = products
+            .source
+            .shared
+            .cached_source_counts(&sources::SourceId::new(source))
+    {
+        return Ok(Some(if kind == "tracks" { tracks } else { albums } as i64));
+    }
+    let (source, folder) = if parameters.contains_key("source") {
+        let (source, folder) = scope(products, parameters).await?;
+        (Some(source), folder)
+    } else {
+        (None, None)
+    };
+    let cancel = ReadCancellation::new();
+    let database = &products.library;
+    let required_source = || source.ok_or_else(|| bad_request("Source not found"));
+    let count = match kind {
+        "tracks" => {
+            database
+                .track_count(required_source()?, folder, favorites, filter, &cancel)
+                .await
+        }
+        "albums" => {
+            database
+                .album_count(
+                    required_source()?,
+                    folder,
+                    favorites,
+                    filter,
+                    match parameters.get("sort").map(String::as_str) {
+                        Some("track_count") => AlbumSort::TrackCount,
+                        Some("duration") => AlbumSort::Duration,
+                        _ => AlbumSort::Title,
+                    },
+                    &cancel,
+                )
+                .await
+        }
+        "artists" => {
+            database
+                .artist_count(
+                    required_source()?,
+                    folder,
+                    boolean(parameters, "album_artists")?,
+                    favorites,
+                    filter,
+                    &cancel,
+                )
+                .await
+        }
+        "genres" => {
+            database
+                .genre_count(required_source()?, folder, filter, &cancel)
+                .await
+        }
+        "playlists" => {
+            database
+                .playlist_count(source, folder, filter, &cancel)
+                .await
+        }
+        "entries" => {
+            database
+                .playlist_entries_count(key(parameters, "id")?, folder, filter, &cancel)
+                .await
+        }
+        "smart-playlists" => {
+            database
+                .smart_playlist_count(source, folder, filter, now(), &cancel)
+                .await
+        }
+        "smart-tracks" => {
+            database
+                .smart_playlist_track_count(
+                    source,
+                    key(parameters, "id")?,
+                    folder,
+                    filter,
+                    now(),
+                    &cancel,
+                )
+                .await
+        }
+        "album-tracks" | "artist-tracks" | "genre-tracks" => {
+            let collection = match kind {
+                "album-tracks" => library::QueueCollection::AlbumKey(key(parameters, "id")?),
+                "artist-tracks" => library::QueueCollection::ArtistKey {
+                    key: key(parameters, "id")?,
+                    album_artist: boolean(parameters, "album_artists")?,
+                },
+                _ => library::QueueCollection::Genre(key(parameters, "id")?),
+            };
+            database
+                .collection_tracks_count(
+                    &collection,
+                    folder,
+                    filter,
+                    kind != "genre-tracks" && favorites,
+                    &cancel,
+                )
+                .await
+        }
+        _ => unreachable!("Unknown catalog count"),
+    }
+    .map_err(internal)?;
+    Ok(Some(count))
+}
+
 pub(super) async fn scope(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
@@ -208,7 +330,8 @@ pub(super) async fn genre_tracks_data(
         )
         .await
         .map_err(internal)?;
-    Ok(json!({"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}))
+    let total = page_total(products, parameters, "genre-tracks").await?;
+    Ok(json!({"total":total,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}))
 }
 
 async fn artists(
@@ -260,8 +383,9 @@ pub(super) async fn artists_data(
         )
         .await
         .map_err(internal)?;
+    let total = page_total(products, parameters, "artists").await?;
     Ok(
-        json!({"offset":offset,"limit":limit,"artists":rows.iter().map(|row|json!({"id":row.artist_key,"object_id":row.object_id,"album_artists":boolean(parameters,"album_artists").unwrap_or(false),"uri":row.media_uri,"name":row.name,"favorite":row.favorite,"album_count":row.album_count,"track_count":row.track_count})).collect::<Vec<_>>()}),
+        json!({"total":total,"offset":offset,"limit":limit,"artists":rows.iter().map(|row|json!({"id":row.artist_key,"object_id":row.object_id,"album_artists":boolean(parameters,"album_artists").unwrap_or(false),"uri":row.media_uri,"name":row.name,"favorite":row.favorite,"album_count":row.album_count,"track_count":row.track_count})).collect::<Vec<_>>()}),
     )
 }
 
@@ -312,8 +436,9 @@ pub(super) async fn artist_tracks_data(
         )
         .await
         .map_err(internal)?;
+    let total = page_total(products, parameters, "artist-tracks").await?;
     Ok(
-        json!({"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
+        json!({"total":total,"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
     )
 }
 
@@ -373,8 +498,9 @@ pub(super) async fn smart_playlists_data(
         )
         .await
         .map_err(internal)?;
+    let total = page_total(products, parameters, "smart-playlists").await?;
     Ok(
-        json!({"offset":offset,"limit":limit,"smart_playlists":rows.iter().map(|row|json!({"id":row.smart_playlist_key,"object_id":row.object_id,"name":crate::playlists::smart_playlist_display_name(row),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_bindings.len()})).collect::<Vec<_>>()}),
+        json!({"total":total,"offset":offset,"limit":limit,"smart_playlists":rows.iter().map(|row|json!({"id":row.smart_playlist_key,"object_id":row.object_id,"name":crate::playlists::smart_playlist_display_name(row),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_bindings.len()})).collect::<Vec<_>>()}),
     )
 }
 
@@ -416,8 +542,9 @@ pub(super) async fn smart_tracks_data(
         )
         .await
         .map_err(internal)?;
+    let total = page_total(products, parameters, "smart-tracks").await?;
     Ok(
-        json!({"offset":offset,"limit":limit,"tracks":rows.iter().map(|row|json!({"uri":row.media_uri,"title":row.title,"artist":row.artist,"album":row.album,"favorite":row.favorite,"duration_ms":row.duration_millis})).collect::<Vec<_>>()}),
+        json!({"total":total,"offset":offset,"limit":limit,"tracks":rows.iter().map(|row|json!({"uri":row.media_uri,"title":row.title,"artist":row.artist,"album":row.album,"favorite":row.favorite,"duration_ms":row.duration_millis})).collect::<Vec<_>>()}),
     )
 }
 
@@ -477,8 +604,9 @@ pub(super) async fn albums_data(
         )
         .await
         .map_err(internal)?;
+    let total = page_total(products, parameters, "albums").await?;
     Ok(
-        json!({"offset":offset,"limit":limit,"albums":rows.iter().map(|row| json!({
+        json!({"total":total,"offset":offset,"limit":limit,"albums":rows.iter().map(|row| json!({
                 "id":row.album_key,"object_id":row.object_id,"uri":row.media_uri,"title":row.title,"artist":row.display_artist,
                 "year":row.year,"track_count":row.track_count,"duration_ms":row.duration_millis,"favorite":row.favorite,"rating":row.rating
             })).collect::<Vec<_>>()}),
@@ -534,8 +662,9 @@ pub(super) async fn album_tracks_data(
         )
         .await
         .map_err(bad_request)?;
+    let total = page_total(products, parameters, "album-tracks").await?;
     Ok(
-        json!({"album_tracks":true,"disc_sections":disc_sections,"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
+        json!({"total":total,"album_tracks":true,"disc_sections":disc_sections,"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
     )
 }
 

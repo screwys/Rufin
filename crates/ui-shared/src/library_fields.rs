@@ -467,7 +467,8 @@ pub fn set_field_enabled(
     let fields = active_fields_for_set_mut(settings, field_set);
     if enabled {
         if !fields.contains(&field) {
-            fields.push(field);
+            let position = fields.len() - usize::from(fields.last() == Some(&LibraryField::Tools));
+            fields.insert(position, field);
         }
     } else {
         fields.retain(|candidate| *candidate != field);

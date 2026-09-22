@@ -3,7 +3,7 @@ use age::secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
-    io::{Read, Write},
+    io::{Read, Seek, Write},
     path::{Path, PathBuf},
 };
 
@@ -43,7 +43,7 @@ pub fn new_key() -> String {
         .to_owned()
 }
 
-pub fn encrypt(snapshot: &Path, output: &Path, profile: &str, key: &str) -> Result<(), String> {
+pub fn encrypt(mut snapshot: File, output: &Path, profile: &str, key: &str) -> Result<(), String> {
     let identity: age::x25519::Identity = key.parse().map_err(error)?;
     let recipient = identity.to_public();
     let encryptor =
@@ -55,14 +55,13 @@ pub fn encrypt(snapshot: &Path, output: &Path, profile: &str, key: &str) -> Resu
     let length: u16 = profile.len().try_into().map_err(error)?;
     stream.write_all(&length.to_le_bytes()).map_err(error)?;
     stream.write_all(profile.as_bytes()).map_err(error)?;
-    let mut compressed = flate2::write::GzEncoder::new(stream, flate2::Compression::default());
-    std::io::copy(&mut File::open(snapshot).map_err(error)?, &mut compressed).map_err(error)?;
-    let stream = compressed.finish().map_err(error)?;
+    snapshot.rewind().map_err(error)?;
+    std::io::copy(&mut snapshot, &mut stream).map_err(error)?;
     stream.finish().map_err(error)?.sync_all().map_err(error)
 }
 
 /// Authenticate the complete input before returning a snapshot for application.
-pub fn decrypt(input: &Path, keys: &[String]) -> Result<(String, tempfile::NamedTempFile), String> {
+pub fn decrypt(input: &Path, keys: &[String], directory: &Path) -> Result<(String, File), String> {
     let identities = keys
         .iter()
         .map(|key| key.parse::<age::x25519::Identity>().map_err(error))
@@ -85,14 +84,10 @@ pub fn decrypt(input: &Path, keys: &[String]) -> Result<(String, tempfile::Named
     let mut profile = vec![0; usize::from(u16::from_le_bytes(length))];
     stream.read_exact(&mut profile).map_err(error)?;
     let profile = String::from_utf8(profile).map_err(error)?;
-    let mut staged = tempfile::NamedTempFile::new().map_err(error)?;
-    if &magic == MAGIC {
-        std::io::copy(&mut flate2::read::MultiGzDecoder::new(stream), &mut staged)
-            .map_err(error)?;
-    } else {
-        std::io::copy(&mut stream, &mut staged).map_err(error)?;
-    }
-    staged.as_file().sync_all().map_err(error)?;
+    let mut staged = tempfile::tempfile_in(directory).map_err(error)?;
+    std::io::copy(&mut stream, &mut staged).map_err(error)?;
+    staged.sync_all().map_err(error)?;
+    staged.rewind().map_err(error)?;
     Ok((profile, staged))
 }
 
@@ -127,21 +122,28 @@ mod tests {
         let snapshot = dir.path().join("snapshot");
         let encrypted = dir.path().join("profile.rufin-connect");
         let contents = b"shared state including credentials\n".repeat(10_000);
-        std::fs::write(&snapshot, &contents).unwrap();
+        let mut compressed = flate2::write::GzEncoder::new(
+            File::create(&snapshot).unwrap(),
+            flate2::Compression::default(),
+        );
+        compressed.write_all(&contents).unwrap();
+        compressed.finish().unwrap();
         let key = new_key();
-        encrypt(&snapshot, &encrypted, "profile", &key).unwrap();
+        encrypt(File::open(&snapshot).unwrap(), &encrypted, "profile", &key).unwrap();
         let ciphertext = std::fs::read(&encrypted).unwrap();
         assert!(ciphertext.len() < contents.len() / 10);
         assert!(!ciphertext.windows(11).any(|bytes| bytes == b"credentials"));
-        let (profile, staged) = decrypt(&encrypted, std::slice::from_ref(&key)).unwrap();
+        let (profile, staged) =
+            decrypt(&encrypted, std::slice::from_ref(&key), dir.path()).unwrap();
         assert_eq!(profile, "profile");
-        assert_eq!(
-            std::fs::read(staged.path()).unwrap(),
-            std::fs::read(&snapshot).unwrap()
-        );
-        assert!(decrypt(&encrypted, &[new_key()]).is_err());
+        let mut restored = Vec::new();
+        flate2::read::MultiGzDecoder::new(staged)
+            .read_to_end(&mut restored)
+            .unwrap();
+        assert_eq!(restored, contents);
+        assert!(decrypt(&encrypted, &[new_key()], dir.path()).is_err());
         std::fs::write(&encrypted, &ciphertext[..ciphertext.len() - 1]).unwrap();
-        assert!(decrypt(&encrypted, std::slice::from_ref(&key)).is_err());
+        assert!(decrypt(&encrypted, std::slice::from_ref(&key), dir.path()).is_err());
     }
 
     #[test]
@@ -161,24 +163,37 @@ mod tests {
         stream.write_all(&7u16.to_le_bytes()).unwrap();
         stream.write_all(b"profile1\nEND\n").unwrap();
         stream.finish().unwrap();
-        let (profile, staged) = decrypt(&encrypted, &[key]).unwrap();
+        let (profile, mut staged) = decrypt(&encrypted, &[key], dir.path()).unwrap();
         assert_eq!(profile, "profile");
-        assert_eq!(std::fs::read(staged.path()).unwrap(), b"1\nEND\n");
+        let mut restored = String::new();
+        staged.read_to_string(&mut restored).unwrap();
+        assert_eq!(restored, "1\nEND\n");
     }
     #[test]
     fn rotated_keys_read_existing_exports_and_rewrite_for_current_members() {
         let dir = tempfile::tempdir().unwrap();
         let snapshot = dir.path().join("state");
         let destination = dir.path().join("profile");
-        std::fs::write(&snapshot, b"1\nEND\n").unwrap();
+        let mut compressed = flate2::write::GzEncoder::new(
+            File::create(&snapshot).unwrap(),
+            flate2::Compression::default(),
+        );
+        compressed.write_all(b"1\nEND\n").unwrap();
+        compressed.finish().unwrap();
         let old = new_key();
         let intermediate = new_key();
         let current = new_key();
-        encrypt(&snapshot, &destination, "profile", &old).unwrap();
+        encrypt(
+            File::open(&snapshot).unwrap(),
+            &destination,
+            "profile",
+            &old,
+        )
+        .unwrap();
         let keys = vec![current.clone(), old.clone(), intermediate];
-        let (profile, staged) = decrypt(&destination, &keys).unwrap();
-        encrypt(staged.path(), &destination, &profile, &current).unwrap();
-        assert!(decrypt(&destination, &[old]).is_err());
-        assert!(decrypt(&destination, &[current]).is_ok());
+        let (profile, staged) = decrypt(&destination, &keys, dir.path()).unwrap();
+        encrypt(staged, &destination, &profile, &current).unwrap();
+        assert!(decrypt(&destination, &[old], dir.path()).is_err());
+        assert!(decrypt(&destination, &[current], dir.path()).is_ok());
     }
 }

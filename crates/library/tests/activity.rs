@@ -561,10 +561,13 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
     ] {
         let tracks = fixture
             .database
-            .track_route_page(
-                fixture.source,
-                None,
-                false,
+            .query_track_route_page(
+                &library::TrackQuery {
+                    source: fixture.source,
+                    collection: None,
+                    folder: None,
+                    favorites_only: false,
+                },
                 "",
                 sort,
                 true,
@@ -573,13 +576,22 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
             )
             .await
             .unwrap();
-        assert_eq!(&tracks.order[..2], expected.map(String::as_str));
+        assert_eq!(
+            tracks.first_rows[..2]
+                .iter()
+                .map(|row| row.media_uri.as_str())
+                .collect::<Vec<_>>(),
+            expected.map(String::as_str)
+        );
         let album = fixture
             .database
-            .album_track_route_page(
-                fixture.source,
-                fixture.albums[0],
-                None,
+            .query_track_route_page(
+                &library::TrackQuery {
+                    source: fixture.source,
+                    collection: Some(library::QueueCollection::AlbumKey(fixture.albums[0])),
+                    folder: None,
+                    favorites_only: false,
+                },
                 "",
                 sort,
                 true,
@@ -588,7 +600,14 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
             )
             .await
             .unwrap();
-        assert_eq!(album.order, expected.map(String::as_str));
+        assert_eq!(
+            album
+                .first_rows
+                .iter()
+                .map(|row| row.media_uri.as_str())
+                .collect::<Vec<_>>(),
+            expected.map(String::as_str)
+        );
     }
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM listens WHERE source_id IS NULL")

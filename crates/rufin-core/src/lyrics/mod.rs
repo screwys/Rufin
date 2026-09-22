@@ -9,7 +9,7 @@ use async_channel::Sender;
 use library::{Database, ReadCancellation};
 use playback::{CurrentMedia, CurrentMediaId};
 use serde::{Deserialize, Serialize};
-use sources::{Source, SourceId};
+use sources::Source;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tracing::{debug, warn};
@@ -40,13 +40,11 @@ impl LyricsService {
         let source_id = match library::source_entity_parts(&context.media.media_uri) {
             Some((source, kind, _)) if kind == "track" => source,
             Some(_) => return None,
-            None => SourceId::new(
-                self.database
-                    .track_row_by_uri(&context.media.media_uri, &ReadCancellation::new())
-                    .await
-                    .ok()??
-                    .source_id,
-            ),
+            None => self
+                .database
+                .track_source_by_uri(&context.media.media_uri, &ReadCancellation::new())
+                .await
+                .ok()??,
         };
         let source = Arc::clone(&self.source_owner);
         tokio::task::spawn_blocking(move || source.client(&source_id).ok())
@@ -1740,6 +1738,7 @@ fn unix_seconds() -> i64 {
 mod tests {
     use super::*;
     use ::lyrics::{LyricsCue, LyricsCueLine, LyricsLine};
+    use sources::SourceId;
 
     #[tokio::test]
     async fn current_lyrics_reads_local_cue_mapped_and_downloaded_files_by_logical_identity() {

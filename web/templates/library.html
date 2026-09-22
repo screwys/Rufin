@@ -1,5 +1,5 @@
 {% import "macros.html" as m %}
-<div data-page data-count="{{ rows.len() }}">
+<div data-page data-count="{{ rows.len() }}" data-total="{{ total }}">
 {% if kind == "track" %}
   <table class="track-list" role="presentation">
     <thead role="rowgroup"><tr role="row"><th role="columnheader">#</th><th role="columnheader">{{ localization::tr("Title") }}</th><th role="columnheader">{{ localization::tr("Album") }}</th><th role="columnheader" class="duration" aria-label="{{ localization::tr("Duration") }}" title="{{ localization::tr("Duration") }}">{% call m::icon("duration") %}{% endcall %}</th><th role="columnheader" class="favorite" aria-label="{{ localization::tr("Favorite") }}" title="{{ localization::tr("Favorite") }}">{% call m::icon("favorite") %}{% endcall %}</th><th role="columnheader" class="actions" aria-label="{{ localization::tr("Actions") }}"></th></tr></thead>

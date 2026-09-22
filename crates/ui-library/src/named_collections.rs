@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -43,7 +44,7 @@ use ui_shared::interactions::install_context_menu_openers;
 use ui_shared::library_fields::{playlist_artwork, playlist_field, smart_playlist_field};
 use ui_shared::recycled_cells::{RecycledBadgedTextCell, list_cell};
 use ui_shared::route::Route;
-use ui_shared::sparse_model::{SparseRouteModel, connect_sparse_bind};
+use ui_shared::sparse_model::{SparseRouteModel, SparseSource, connect_sparse_bind};
 
 #[derive(Clone)]
 pub struct NamedReadRequest {
@@ -51,19 +52,21 @@ pub struct NamedReadRequest {
     pub settings: LibraryListSettings,
 }
 
-pub type NamedOrderLoad<K, R> = Arc<
+pub type NamedPageLoad<R> = Arc<
     dyn Fn(
             NamedReadRequest,
             library::ReadCancellation,
-        ) -> Pin<Box<dyn Future<Output = Result<(Vec<K>, usize, Vec<R>), String>> + Send>>
+        ) -> Pin<Box<dyn Future<Output = Result<(usize, usize, Vec<R>), String>> + Send>>
         + Send
         + Sync,
 >;
 
+pub type NamedRowsLoad<R> = ui_shared::media_drag::CollectionRowsLoad<NamedReadRequest, R>;
+
 impl CatalogUi {
     pub fn library_genres_route(
         self: &Rc<Self>,
-        order: Vec<GenreKey>,
+        count: usize,
         first_row_position: usize,
         first_rows: Vec<GenreRow>,
         selected: rufin_core::runtime::SelectedLibrary,
@@ -72,39 +75,49 @@ impl CatalogUi {
         let folder = selected.music_folder_key;
         let rows_database = Arc::clone(&selected.database);
         let row_load = Arc::new(
-            move |keys: Vec<GenreKey>, cancellation: library::ReadCancellation| {
+            move |request: NamedReadRequest,
+                  range: std::ops::Range<usize>,
+                  cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&rows_database);
                 Box::pin(async move {
                     database
-                        .genre_rows(source, &keys, folder, &cancellation)
+                        .genre_page(
+                            source,
+                            folder,
+                            &request.query,
+                            request.settings.sort_key.genre_sort(),
+                            request.settings.descending,
+                            range.start,
+                            range.len(),
+                            &cancellation,
+                        )
                         .await
                         .map_err(|error| error.to_string())
                 }) as Pin<Box<dyn Future<Output = _> + Send>>
             },
         );
         let order_database = Arc::clone(&selected.database);
-        let order_load: NamedOrderLoad<GenreKey, GenreRow> =
-            Arc::new(move |request, cancellation| {
-                let database = Arc::clone(&order_database);
-                Box::pin(async move {
-                    database
-                        .genre_route_page(
-                            source,
-                            folder,
-                            &request.query,
-                            request.settings.sort_key.genre_sort(),
-                            request.settings.descending,
-                            library::RouteSeedWindow::top(),
-                            &cancellation,
-                        )
-                        .await
-                        .map_err(|error| error.to_string())
-                })
-            });
+        let order_load: NamedPageLoad<GenreRow> = Arc::new(move |request, cancellation| {
+            let database = Arc::clone(&order_database);
+            Box::pin(async move {
+                database
+                    .genre_route_page(
+                        source,
+                        folder,
+                        &request.query,
+                        request.settings.sort_key.genre_sort(),
+                        request.settings.descending,
+                        library::RouteSeedWindow::top(),
+                        &cancellation,
+                    )
+                    .await
+                    .map_err(|error| error.to_string())
+            })
+        });
         self.named_collection_route(
             LibraryListKey::Genres,
             msgid("Nothing here yet"),
-            order,
+            count,
             first_row_position,
             first_rows,
             |row: &GenreRow| row.genre_key,
@@ -115,7 +128,7 @@ impl CatalogUi {
 
     pub fn library_moods_route(
         self: &Rc<Self>,
-        order: Vec<MoodKey>,
+        count: usize,
         first_row_position: usize,
         first_rows: Vec<MoodRow>,
         selected: rufin_core::runtime::SelectedLibrary,
@@ -124,39 +137,49 @@ impl CatalogUi {
         let folder = selected.music_folder_key;
         let rows_database = Arc::clone(&selected.database);
         let row_load = Arc::new(
-            move |keys: Vec<MoodKey>, cancellation: library::ReadCancellation| {
+            move |request: NamedReadRequest,
+                  range: std::ops::Range<usize>,
+                  cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&rows_database);
                 Box::pin(async move {
                     database
-                        .mood_rows(source, &keys, folder, &cancellation)
+                        .mood_page(
+                            source,
+                            folder,
+                            &request.query,
+                            request.settings.sort_key.mood_sort(),
+                            request.settings.descending,
+                            range.start,
+                            range.len(),
+                            &cancellation,
+                        )
                         .await
                         .map_err(|error| error.to_string())
                 }) as Pin<Box<dyn Future<Output = _> + Send>>
             },
         );
         let order_database = Arc::clone(&selected.database);
-        let order_load: NamedOrderLoad<MoodKey, MoodRow> =
-            Arc::new(move |request, cancellation| {
-                let database = Arc::clone(&order_database);
-                Box::pin(async move {
-                    database
-                        .mood_route_page(
-                            source,
-                            folder,
-                            &request.query,
-                            request.settings.sort_key.mood_sort(),
-                            request.settings.descending,
-                            library::RouteSeedWindow::top(),
-                            &cancellation,
-                        )
-                        .await
-                        .map_err(|error| error.to_string())
-                })
-            });
+        let order_load: NamedPageLoad<MoodRow> = Arc::new(move |request, cancellation| {
+            let database = Arc::clone(&order_database);
+            Box::pin(async move {
+                database
+                    .mood_route_page(
+                        source,
+                        folder,
+                        &request.query,
+                        request.settings.sort_key.mood_sort(),
+                        request.settings.descending,
+                        library::RouteSeedWindow::top(),
+                        &cancellation,
+                    )
+                    .await
+                    .map_err(|error| error.to_string())
+            })
+        });
         self.named_collection_route(
             LibraryListKey::Moods,
             msgid("Nothing here yet"),
-            order,
+            count,
             first_row_position,
             first_rows,
             |row: &MoodRow| row.mood_key,
@@ -170,19 +193,39 @@ impl CatalogUi {
         self: &Rc<Self>,
         key: LibraryListKey,
         empty_body: &'static str,
-        order: Vec<K>,
+        count: usize,
         first_row_position: usize,
         first_rows: Vec<R>,
         row_key: impl Fn(&R) -> K + 'static,
-        row_load: ui_shared::sparse_model::SparseLoad<K, R>,
-        order_load: NamedOrderLoad<K, R>,
+        row_load: NamedRowsLoad<R>,
+        order_load: NamedPageLoad<R>,
     ) -> MountedRoute
     where
         K: Clone + Eq + Send + Sync + 'static,
         R: NamedCollectionRow<Key = K> + Send + Sync + 'static,
     {
-        let sparse = SparseRouteModel::new(order, 32, self.runtime.clone(), row_load);
+        let applied = Rc::new(RefCell::new(NamedReadRequest {
+            query: String::new(),
+            settings: self.settings.current.borrow().library_list(key),
+        }));
+        let load_request = Rc::clone(&applied);
+        let selection_load = Arc::clone(&row_load);
+        let sparse = SparseRouteModel::new(
+            SparseSource::Query { count },
+            32,
+            self.runtime.clone(),
+            Rc::new(move |_, range, cancellation| {
+                let request = load_request.borrow().clone();
+                row_load(request, range, cancellation)
+            }),
+        );
         let row_key = Rc::new(row_key);
+        ui_shared::media_drag::install_collection_selection(
+            &sparse,
+            Rc::clone(&applied),
+            selection_load,
+            R::playback,
+        );
         sparse.seed_matching_at(first_row_position, first_rows, {
             let row_key = Rc::clone(&row_key);
             move |row| row_key(row)
@@ -209,8 +252,7 @@ impl CatalogUi {
             let content = content.clone();
             let row_key = Rc::clone(&row_key);
             Rc::new(
-                move |request: NamedReadRequest,
-                      result: Result<(Vec<K>, usize, Vec<R>), String>| {
+                move |request: NamedReadRequest, result: Result<(usize, usize, Vec<R>), String>| {
                     let Some(shell) = shell.upgrade() else {
                         return;
                     };
@@ -218,10 +260,11 @@ impl CatalogUi {
                         return;
                     }
                     match result {
-                        Ok((order, first_row_position, first_rows)) => {
+                        Ok((count, first_row_position, first_rows)) => {
+                            applied.replace(request.clone());
                             let row_key = Rc::clone(&row_key);
                             if !sparse.replace_prepared_at(
-                                order,
+                                SparseSource::Query { count },
                                 first_row_position,
                                 first_rows,
                                 Vec::new(),
@@ -752,7 +795,9 @@ fn named_collection_column<T: NamedCollectionRow>(
 ) -> gtk::ColumnViewColumn {
     match field {
         LibraryField::Tools => named_actions_column::<T>(shell),
-        LibraryField::RowIndex => mapped_row_index_column::<T>(collection_column_width(field)),
+        LibraryField::RowIndex => {
+            mapped_row_index_column::<T>(shell, collection_column_width(field), T::playback)
+        }
         LibraryField::Image => {
             let prefer_server_playlist_covers = shell
                 .settings
@@ -774,6 +819,7 @@ fn named_collection_column<T: NamedCollectionRow>(
         }
         LibraryField::Title | LibraryField::TitleMerged => {
             let factory = gtk::SignalListItemFactory::new();
+            super::columns::bind_collection_title::<T>(&factory, shell, T::playback);
             let setup_shell = Rc::clone(shell);
             factory.connect_setup(move |_, item| {
                 let Some(item) = item.downcast_ref::<gtk::ListItem>() else {

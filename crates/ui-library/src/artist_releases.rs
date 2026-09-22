@@ -2,7 +2,6 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
-use ui_shared::sparse_model::item_at;
 
 use adw::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -10,11 +9,12 @@ use gtk::{gio, glib};
 
 use crate::CatalogUi;
 use crate::{LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings};
-use ui_shared::layout::{configure_fill_width_clip, width_allocation_owner};
+use ui_shared::layout::width_allocation_owner;
 use ui_shared::mounted_route::MountedRouteSearchTarget;
 
 use super::cards;
-use super::collections::{CollectionTableProjection, album_table, library_route_inset};
+use super::collections::library_route_inset;
+use super::columns::AlbumTableCell;
 use super::grid_cells::{AlbumGridCell, ReusableCollectionGridCell, collection_grid_column_count};
 use super::route_shell::LibraryToolbarProjection;
 use crate::route_layout::{
@@ -50,20 +50,16 @@ pub struct ArtistReleaseProjections {
 
 struct ArtistAlbumProjection {
     sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumRow>>,
-    model: gtk::SliceListModel,
     start: Cell<usize>,
     count: Cell<usize>,
     source_present: Cell<bool>,
     search: gtk::SearchEntry,
     header: gtk::Widget,
     toolbar: LibraryToolbarProjection,
-    rows: gio::ListStore,
-    row: RefCell<Option<(CollectionTableProjection, gtk::Widget)>>,
-    body_layout: Cell<Option<LibraryLayout>>,
+    rows: ArtistRowsModel,
     layout: Rc<Cell<LibraryLayout>>,
     columns: Rc<Cell<usize>>,
     applied_settings: RefCell<LibraryListSettings>,
-    shell: Weak<CatalogUi>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -76,6 +72,14 @@ enum ArtistRouteTarget {
 enum ArtistRouteRow {
     Static {
         widget: gtk::Widget,
+    },
+    TableHeader {
+        section: Weak<ArtistAlbumProjection>,
+    },
+    AlbumTable {
+        section: Weak<ArtistAlbumProjection>,
+        position: usize,
+        last: bool,
     },
     AlbumGrid {
         section: Weak<ArtistAlbumProjection>,
@@ -91,8 +95,105 @@ struct ArtistGridSlot {
     widget: gtk::Widget,
 }
 
+mod artist_rows_model_imp {
+    use super::*;
+    use gio::subclass::prelude::*;
+    #[derive(Default)]
+    pub(super) struct ArtistRowsModel {
+        pub(super) owner: RefCell<Weak<ArtistAlbumProjection>>,
+        pub(super) count: Cell<u32>,
+        pub(super) items: RefCell<HashMap<u32, glib::WeakRef<SparseObjectItem>>>,
+    }
+    #[glib::object_subclass]
+    impl ObjectSubclass for ArtistRowsModel {
+        const NAME: &'static str = "RufinArtistRowsModel";
+        type Type = super::ArtistRowsModel;
+        type Interfaces = (gio::ListModel,);
+    }
+    impl ObjectImpl for ArtistRowsModel {}
+    impl ListModelImpl for ArtistRowsModel {
+        fn item_type(&self) -> glib::Type {
+            SparseObjectItem::static_type()
+        }
+        fn n_items(&self) -> u32 {
+            self.count.get()
+        }
+        #[expect(
+            clippy::arc_with_non_send_sync,
+            reason = "GTK presentation rows stay on the main thread"
+        )]
+        fn item(&self, position: u32) -> Option<glib::Object> {
+            if position >= self.count.get() {
+                return None;
+            }
+            let mut items = self.items.borrow_mut();
+            items.retain(|_, item| item.upgrade().is_some());
+            if let Some(item) = items.get(&position).and_then(glib::WeakRef::upgrade) {
+                return Some(item.upcast());
+            }
+            let item = SparseObjectItem::new(
+                Arc::new(self.owner.borrow().upgrade()?.row_at(position)),
+                true,
+            );
+            items.insert(position, item.downgrade());
+            Some(item.upcast())
+        }
+    }
+}
+
+glib::wrapper! {
+    struct ArtistRowsModel(ObjectSubclass<artist_rows_model_imp::ArtistRowsModel>) @implements gio::ListModel;
+}
+
+impl ArtistRowsModel {
+    fn refresh(&self, count: u32) {
+        let old = self.imp().count.replace(count);
+        if old != count {
+            self.imp()
+                .items
+                .borrow_mut()
+                .retain(|position, _| *position == 0);
+            let start = u32::from(old != 0 && count != 0);
+            self.items_changed(start, old - start, count - start);
+        } else {
+            self.refresh_items(|_| true);
+        }
+    }
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "GTK presentation rows stay on the main thread"
+    )]
+    fn refresh_items(&self, changed: impl Fn(&ArtistRouteRow) -> bool) {
+        let Some(owner) = self.imp().owner.borrow().upgrade() else {
+            return;
+        };
+        let items = self
+            .imp()
+            .items
+            .borrow()
+            .iter()
+            .filter_map(|(position, item)| Some((*position, item.upgrade()?)))
+            .collect::<Vec<_>>();
+        for (position, item) in items {
+            let row = owner.row_at(position);
+            if changed(&row) {
+                item.replace(Arc::new(row), true);
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+enum ArtistCellKind {
+    #[default]
+    Static,
+    Grid,
+    Table,
+    Header,
+}
+
 mod artist_route_list_cell_imp {
-    use super::ArtistGridSlot;
+    use super::{ArtistCellKind, ArtistGridSlot, LibraryField};
     use std::cell::{Cell, RefCell};
 
     use gtk::glib;
@@ -102,7 +203,10 @@ mod artist_route_list_cell_imp {
     pub(super) struct ArtistRouteListCell {
         pub(super) grid_cells: RefCell<Vec<ArtistGridSlot>>,
         pub(super) grid_columns: Cell<usize>,
-        pub(super) grid_mode: Cell<bool>,
+        pub(super) kind: Cell<ArtistCellKind>,
+        pub(super) table_fields: RefCell<Vec<LibraryField>>,
+        pub(super) table_cells: RefCell<Vec<gtk::Widget>>,
+        pub(super) bound_items: RefCell<Vec<ui_shared::sparse_model::SparseObjectItem>>,
     }
 
     #[glib::object_subclass]
@@ -123,6 +227,84 @@ glib::wrapper! {
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Orientable;
 }
 
+mod artist_table_layout_imp {
+    use super::*;
+    use gtk::subclass::prelude::*;
+
+    #[derive(Default)]
+    pub(super) struct ArtistTableLayout;
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for ArtistTableLayout {
+        const NAME: &'static str = "RufinArtistTableLayout";
+        type Type = super::ArtistTableLayout;
+        type ParentType = gtk::LayoutManager;
+    }
+
+    impl ObjectImpl for ArtistTableLayout {}
+
+    impl LayoutManagerImpl for ArtistTableLayout {
+        fn request_mode(&self, _: &gtk::Widget) -> gtk::SizeRequestMode {
+            gtk::SizeRequestMode::HeightForWidth
+        }
+
+        fn measure(
+            &self,
+            widget: &gtk::Widget,
+            orientation: gtk::Orientation,
+            for_size: i32,
+        ) -> (i32, i32, i32, i32) {
+            let row = widget.downcast_ref::<ArtistRouteListCell>().unwrap();
+            if orientation == gtk::Orientation::Horizontal {
+                let minimum = row
+                    .imp()
+                    .table_cells
+                    .borrow()
+                    .iter()
+                    .map(|cell| cell.measure(orientation, -1).0)
+                    .sum();
+                let natural = row.column_widths(-1).iter().sum::<i32>().max(minimum);
+                return (minimum, natural, -1, -1);
+            }
+            let widths = row.column_widths(for_size);
+            let mut minimum = 0;
+            let mut natural = 0;
+            for (cell, width) in row.imp().table_cells.borrow().iter().zip(widths) {
+                let width = width.max(cell.measure(gtk::Orientation::Horizontal, -1).0);
+                let (min, nat, _, _) = cell.measure(orientation, width);
+                minimum = minimum.max(min);
+                natural = natural.max(nat);
+            }
+            (minimum, natural, -1, -1)
+        }
+
+        fn allocate(&self, widget: &gtk::Widget, width: i32, height: i32, baseline: i32) {
+            let row = widget.downcast_ref::<ArtistRouteListCell>().unwrap();
+            let widths = row.column_widths(width);
+            let rtl = widget.direction() == gtk::TextDirection::Rtl;
+            let mut x = 0;
+            for (cell, cell_width) in row.imp().table_cells.borrow().iter().zip(widths) {
+                let position = if rtl { width - x - cell_width } else { x };
+                cell.allocate(
+                    cell_width,
+                    height,
+                    baseline,
+                    Some(
+                        gtk::gsk::Transform::new()
+                            .translate(&gtk::graphene::Point::new(position as f32, 0.0)),
+                    ),
+                );
+                x += cell_width;
+            }
+        }
+    }
+}
+
+glib::wrapper! {
+    struct ArtistTableLayout(ObjectSubclass<artist_table_layout_imp::ArtistTableLayout>)
+        @extends gtk::LayoutManager;
+}
+
 impl ArtistRouteListCell {
     fn new() -> Self {
         glib::Object::builder()
@@ -134,25 +316,119 @@ impl ArtistRouteListCell {
             .build()
     }
 
-    fn clear_grid_state(&self, remove: bool) {
+    fn clear_content(&self, remove: bool) {
         let imp = self.imp();
         for slot in imp.grid_cells.borrow().iter() {
             slot.cell.clear();
             slot.widget.set_visible(false);
         }
+        imp.bound_items.borrow_mut().clear();
+        for widget in imp.table_cells.borrow().iter() {
+            if let Some(cell) = widget.downcast_ref::<AlbumTableCell>() {
+                cell.bind(0, None);
+            }
+        }
         if remove {
+            if matches!(
+                imp.kind.get(),
+                ArtistCellKind::Table | ArtistCellKind::Header
+            ) {
+                self.set_layout_manager(Some(gtk::BoxLayout::new(gtk::Orientation::Horizontal)));
+            }
             remove_box_children(self);
+            imp.table_cells.borrow_mut().clear();
+            imp.table_fields.borrow_mut().clear();
             imp.grid_cells.borrow_mut().clear();
             imp.grid_columns.set(0);
-            imp.grid_mode.set(false);
+            imp.kind.set(ArtistCellKind::Static);
             self.remove_css_class("album-grid");
+            self.remove_css_class("artist-album-table-row");
+            self.remove_css_class("artist-album-table-header");
         }
+    }
+
+    fn table(&self, shell: &Rc<CatalogUi>, fields: &[LibraryField], header: bool) {
+        let kind = if header {
+            ArtistCellKind::Header
+        } else {
+            ArtistCellKind::Table
+        };
+        let imp = self.imp();
+        if imp.kind.get() == kind && imp.table_fields.borrow().as_slice() == fields {
+            return;
+        }
+        self.clear_content(true);
+        self.set_orientation(gtk::Orientation::Horizontal);
+        self.set_homogeneous(false);
+        self.add_css_class(if header {
+            "artist-album-table-header"
+        } else {
+            "artist-album-table-row"
+        });
+        for field in fields {
+            let widget = if header {
+                let label = album_table_title(*field).map_or_else(
+                    || gtk::Label::new(None),
+                    ui_shared::localization::localized_label,
+                );
+                label.add_css_class("table-header");
+                label.set_xalign(0.0);
+                label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                label.upcast::<gtk::Widget>()
+            } else {
+                AlbumTableCell::new(shell, *field, None).upcast()
+            };
+            self.append(&widget);
+            imp.table_cells.borrow_mut().push(widget);
+        }
+        imp.table_fields.replace(fields.to_vec());
+        imp.kind.set(kind);
+        self.set_layout_manager(Some(glib::Object::new::<ArtistTableLayout>()));
+    }
+
+    fn column_widths(&self, width: i32) -> Vec<i32> {
+        let imp = self.imp();
+        let fields = imp.table_fields.borrow();
+        let preferred = fields
+            .iter()
+            .map(|field| {
+                super::columns::column_fit_width(
+                    *field,
+                    ui_shared::library_fields::column_width(*field),
+                )
+            })
+            .collect::<Vec<_>>();
+        if width < 0 {
+            return preferred;
+        }
+        let minimum = fields
+            .iter()
+            .zip(&preferred)
+            .map(|(field, preferred)| {
+                let title = album_table_title(*field).map(localization::tr);
+                ui_shared::table_sizing::column_header_minimum_width(title.as_deref(), *preferred)
+            })
+            .collect::<Vec<_>>();
+        ui_shared::table_sizing::fitted_column_widths_with_minimums(
+            &preferred,
+            &minimum,
+            width - ui_shared::table_sizing::FITTED_TABLE_WIDTH_PADDING,
+        )
     }
 
     fn apply_fields(&self, fields: &[LibraryField]) {
         for slot in self.imp().grid_cells.borrow().iter() {
             slot.cell.apply_fields(fields);
         }
+    }
+}
+
+fn album_table_title(field: LibraryField) -> Option<&'static str> {
+    match field {
+        LibraryField::Tools => None,
+        LibraryField::RowIndex => Some(super::columns::ROW_INDEX_COLUMN_TITLE),
+        LibraryField::TitleMerged => Some("Title"),
+        _ => Some(ui_shared::settings::library_field_title(field)),
     }
 }
 
@@ -181,7 +457,7 @@ impl ArtistAlbumProjection {
         header.append(&heading);
         header.append(&toolbar.widget());
         let header: gtk::Widget = header.upcast();
-        let rows = static_artist_route_model(header.clone());
+        let rows: ArtistRowsModel = glib::Object::new();
 
         let settings = shell
             .settings
@@ -189,14 +465,8 @@ impl ArtistAlbumProjection {
             .borrow()
             .library_list(LibraryListKey::ArtistAlbums);
         let source_present = count != 0;
-        let model = gtk::SliceListModel::new(
-            Some(sparse.list_model()),
-            start.min(u32::MAX as usize) as u32,
-            count.min(u32::MAX as usize) as u32,
-        );
         let projection = Rc::new(Self {
             sparse,
-            model,
             start: Cell::new(start),
             count: Cell::new(count),
             source_present: Cell::new(source_present),
@@ -204,21 +474,15 @@ impl ArtistAlbumProjection {
             header,
             toolbar,
             rows,
-            row: RefCell::new(None),
-            body_layout: Cell::new(None),
             layout,
             columns,
             applied_settings: RefCell::new(settings),
-            shell: Rc::downgrade(shell),
         });
-        let weak = Rc::downgrade(&projection);
         projection
-            .sparse
-            .connect_ready_changed(move |position, count| {
-                if let Some(projection) = weak.upgrade() {
-                    projection.refresh_grid_range(position, count);
-                }
-            });
+            .rows
+            .imp()
+            .owner
+            .replace(Rc::downgrade(&projection));
         projection.refresh_body();
         projection
     }
@@ -231,8 +495,8 @@ impl ArtistAlbumProjection {
         self.search.clone()
     }
 
-    fn rows(&self) -> gio::ListStore {
-        self.rows.clone()
+    fn rows(&self) -> gio::ListModel {
+        self.rows.clone().upcast()
     }
 
     fn set_range(self: &Rc<Self>, start: usize, count: usize, authoritative: bool) {
@@ -241,147 +505,79 @@ impl ArtistAlbumProjection {
         }
         self.start.set(start);
         self.count.set(count);
-        self.model.set_offset(start.min(u32::MAX as usize) as u32);
-        self.model.set_size(count.min(u32::MAX as usize) as u32);
         self.refresh_body();
     }
 
-    fn row_widget(&self, settings: &LibraryListSettings) -> gtk::Widget {
-        if let Some((table, surface)) = self.row.borrow().as_ref() {
-            table.apply_fields(&settings.row_fields);
-            return surface.clone();
-        }
-        let Some(shell) = self.shell.upgrade() else {
-            return gtk::Box::new(gtk::Orientation::Vertical, 0).upcast();
-        };
-        let table = album_table(
-            &shell,
-            self.model.clone(),
-            LibraryListKey::ArtistAlbums,
-            None,
-        );
-        table.apply_fields(&settings.row_fields);
-        let clip = non_propagating_width_scroller();
-        clip.set_child(Some(&table.widget()));
-        let resize_table = table.clone();
-        let resize_clip = clip.clone();
-        let surface = width_allocation_owner(&clip, move |width| {
-            resize_table.fit_scroller_allocation(&resize_clip, width);
-        })
-        .upcast::<gtk::Widget>();
-        self.row.replace(Some((table, surface.clone())));
-        surface
-    }
-
     fn refresh_body(self: &Rc<Self>) {
-        if self.source_is_empty() {
-            self.header.set_visible(false);
-            self.header.set_margin_bottom(0);
-            replace_artist_release_body(&self.rows, Vec::new());
-            self.row.borrow_mut().take();
-            self.body_layout.set(None);
-            return;
-        }
-        self.header.set_visible(true);
-        if self.layout.get() == LibraryLayout::Row
-            && self.body_layout.get() == Some(LibraryLayout::Row)
-        {
-            self.header.set_margin_bottom(ARTIST_RELEASE_HEADER_GAP);
-            let settings = self.applied_settings.borrow().clone();
-            let row = self.row_widget(&settings);
-            row.set_margin_bottom(ARTIST_RELEASE_SECTION_GAP);
-            return;
-        }
-        match self.layout.get() {
-            LibraryLayout::Row => {
-                self.header.set_margin_bottom(ARTIST_RELEASE_HEADER_GAP);
-                let settings = self.applied_settings.borrow().clone();
-                let row = self.row_widget(&settings);
-                row.set_margin_bottom(ARTIST_RELEASE_SECTION_GAP);
-                replace_artist_release_body(
-                    &self.rows,
-                    vec![ArtistRouteRow::Static { widget: row }],
-                );
-            }
-            LibraryLayout::Grid | LibraryLayout::Detail => {
-                self.header.set_margin_bottom(if self.count.get() == 0 {
-                    ARTIST_RELEASE_SECTION_GAP
-                } else {
-                    ARTIST_RELEASE_HEADER_GAP
-                });
-                replace_artist_release_body(&self.rows, self.grid_rows(0, self.grid_row_count()));
-                self.row.borrow_mut().take();
-            }
-        }
-        self.body_layout.set(Some(self.layout.get()));
+        self.header.set_visible(!self.source_is_empty());
+        self.header.set_margin_bottom(if self.source_is_empty() {
+            0
+        } else if self.count.get() == 0 {
+            ARTIST_RELEASE_SECTION_GAP
+        } else {
+            ARTIST_RELEASE_HEADER_GAP
+        });
+        let count = if self.source_is_empty() {
+            1
+        } else if self.layout.get() == LibraryLayout::Row {
+            2 + self.count.get()
+        } else {
+            1 + self.count.get().div_ceil(self.columns.get().max(1))
+        };
+        self.rows.refresh(count as u32);
     }
 
-    fn grid_row_count(&self) -> usize {
-        self.count.get().div_ceil(self.columns.get().max(1))
-    }
-
-    fn grid_rows(self: &Rc<Self>, start_row: usize, end_row: usize) -> Vec<ArtistRouteRow> {
-        let columns = self.columns.get().max(1);
-        let count = self.count.get();
-        let row_count = self.grid_row_count();
-        (start_row..end_row.min(row_count))
-            .map(|row| {
-                let local_start = row * columns;
-                ArtistRouteRow::AlbumGrid {
+    fn row_at(self: &Rc<Self>, position: u32) -> ArtistRouteRow {
+        if position == 0 {
+            return ArtistRouteRow::Static {
+                widget: self.header.clone(),
+            };
+        }
+        let local = position as usize - 1;
+        if self.layout.get() == LibraryLayout::Row {
+            if local == 0 {
+                return ArtistRouteRow::TableHeader {
                     section: Rc::downgrade(self),
-                    start: self.start.get() + local_start,
-                    len: (count - local_start).min(columns),
-                    columns,
-                    margin_bottom: if row + 1 == row_count {
-                        ARTIST_RELEASE_SECTION_GAP
-                    } else {
-                        0
-                    },
-                }
-            })
-            .collect()
-    }
-
-    #[expect(
-        clippy::arc_with_non_send_sync,
-        reason = "GTK-only presentation rows reuse the existing SparseItem notification owner"
-    )]
-    fn refresh_grid_range(self: &Rc<Self>, position: u32, count: u32) {
-        if self.layout.get() != LibraryLayout::Grid || self.source_is_empty() {
-            return;
-        }
-        let section_start = self.start.get();
-        let section_end = section_start.saturating_add(self.count.get());
-        let change_start = position as usize;
-        let change_end = change_start.saturating_add(count as usize);
-        if change_end <= section_start || change_start >= section_end {
-            return;
+                };
+            }
+            return ArtistRouteRow::AlbumTable {
+                section: Rc::downgrade(self),
+                position: self.start.get() + local - 1,
+                last: local == self.count.get(),
+            };
         }
         let columns = self.columns.get().max(1);
-        let row_count = self.grid_row_count();
-        if row_count == 0 {
-            return;
+        let start = local * columns;
+        ArtistRouteRow::AlbumGrid {
+            section: Rc::downgrade(self),
+            start: self.start.get() + start,
+            len: (self.count.get() - start).min(columns),
+            columns,
+            margin_bottom: if start + columns >= self.count.get() {
+                ARTIST_RELEASE_SECTION_GAP
+            } else {
+                0
+            },
         }
-        let local_start = change_start.saturating_sub(section_start);
-        let local_end = change_end.min(section_end).saturating_sub(section_start);
-        let first = (local_start / columns).min(row_count - 1);
-        let end = local_end
-            .max(local_start.saturating_add(1))
-            .div_ceil(columns)
-            .min(row_count)
-            .max(first + 1);
-        for (offset, row) in self.grid_rows(first, end).into_iter().enumerate() {
-            if let Some(item) = self
-                .rows
-                .item((first + offset + 1) as u32)
-                .and_downcast::<SparseObjectItem>()
-            {
-                item.replace(Arc::new(row), true);
+    }
+
+    fn refresh_grid_range(self: &Rc<Self>, position: u32, count: u32) {
+        let end = position.saturating_add(count);
+        self.rows.refresh_items(|row| match row {
+            ArtistRouteRow::AlbumGrid { start, len, .. } => {
+                *start < end as usize && start + len > position as usize
             }
-        }
+            ArtistRouteRow::AlbumTable { position: at, .. } => {
+                (*at as u32) >= position && (*at as u32) < end
+            }
+            _ => false,
+        });
     }
 
     fn apply_settings(self: &Rc<Self>, settings: &LibraryListSettings) {
+        if *self.applied_settings.borrow() == *settings {
+            return;
+        }
         self.toolbar.apply(LibraryListKey::ArtistAlbums, settings);
         self.applied_settings.replace(settings.clone());
         self.refresh_body();
@@ -408,8 +604,10 @@ impl ArtistReleaseProjections {
         let flat_order = orders.iter().flatten().copied().collect::<Vec<_>>();
         let database = Arc::clone(&shell.library);
         let folder = None;
-        let load = Arc::new(
-            move |keys: Vec<library::AlbumKey>, cancellation: library::ReadCancellation| {
+        let load = Rc::new(
+            move |keys: Vec<library::AlbumKey>,
+                  _: std::ops::Range<usize>,
+                  cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&database);
                 Box::pin(async move {
                     database
@@ -443,6 +641,14 @@ impl ArtistReleaseProjections {
                 })
                 .collect::<Vec<_>>(),
         );
+        let ready_sections = Rc::downgrade(&sections);
+        sparse.connect_ready_changed(move |position, count| {
+            if let Some(sections) = ready_sections.upgrade() {
+                for section in sections.iter() {
+                    section.refresh_grid_range(position, count);
+                }
+            }
+        });
         let ArtistReleaseRoutePreamble {
             header,
             favorite,
@@ -467,18 +673,26 @@ impl ArtistReleaseProjections {
         );
         let empty_rows = static_artist_route_model(empty.clone());
         let mut section_models = Vec::with_capacity(sections.len() + 3);
-        section_models.push(header_rows);
-        section_models.push(favorite_rows);
+        section_models.push(header_rows.upcast::<gio::ListModel>());
+        section_models.push(favorite_rows.upcast::<gio::ListModel>());
         section_models.extend(sections.iter().map(|section| section.rows()));
-        section_models.push(empty_rows);
+        section_models.push(empty_rows.upcast::<gio::ListModel>());
         let section_models = Rc::new(section_models);
-        let model_sections = gio::ListStore::new::<gio::ListStore>();
+        let model_sections = gio::ListStore::new::<gio::ListModel>();
         for model in section_models.iter() {
             model_sections.append(model);
         }
         let rows = gtk::FlattenListModel::new(Some(model_sections));
         let grid_fields = Rc::new(RefCell::new(settings.grid_fields.clone()));
         let (list, apply_grid_fields) = artist_route_list(shell, rows, Rc::clone(&grid_fields));
+        let selection = list.model().expect("Artist selection").downgrade();
+        sparse
+            .list_model()
+            .connect_items_changed(move |_, _, _, _| {
+                if let Some(selection) = selection.upgrade() {
+                    selection.unselect_all();
+                }
+            });
         list.set_margin_top(ROUTE_TOP_MARGIN);
         let resize_columns = Rc::clone(&columns);
         let resize_layout = Rc::clone(&layout);
@@ -629,7 +843,11 @@ impl ArtistReleaseProjections {
             .layout_cycle()
     }
 
-    pub fn apply_library_list_settings(&self, settings: &LibraryListSettings) {
+    pub fn apply_library_list_settings(&self, settings: &LibraryListSettings) -> bool {
+        let query_changed = self.sections.first().is_some_and(|section| {
+            let previous = section.applied_settings.borrow();
+            previous.sort_key != settings.sort_key || previous.descending != settings.descending
+        });
         let next_layout = normalized_artist_layout(settings.layout);
         let previous_fields = self.grid_fields.borrow().clone();
         self.layout.set(next_layout);
@@ -640,6 +858,7 @@ impl ArtistReleaseProjections {
             self.grid_fields.replace(settings.grid_fields.clone());
             (self.apply_grid_fields)(&settings.grid_fields);
         }
+        query_changed
     }
 }
 
@@ -663,28 +882,58 @@ fn static_artist_route_model(widget: gtk::Widget) -> gio::ListStore {
     model
 }
 
-#[expect(
-    clippy::arc_with_non_send_sync,
-    reason = "GTK-only presentation rows reuse the existing SparseItem notification owner"
-)]
-fn replace_artist_release_body(model: &gio::ListStore, rows: Vec<ArtistRouteRow>) {
-    let additions = rows
-        .into_iter()
-        .map(|row| SparseObjectItem::new(Arc::new(row), true))
-        .collect::<Vec<_>>();
-    replace_artist_release_objects(model, &additions);
-}
-
-fn replace_artist_release_objects(model: &gio::ListStore, additions: &[SparseObjectItem]) {
-    model.splice(1, model.n_items().saturating_sub(1), additions);
-}
-
 fn artist_route_list(
     shell: &Rc<CatalogUi>,
     model: gtk::FlattenListModel,
     fields: Rc<RefCell<Vec<LibraryField>>>,
 ) -> (gtk::ListView, Rc<dyn Fn(&[LibraryField])>) {
-    let selection = gtk::NoSelection::new(Some(model));
+    let activate_model = model.clone();
+    let selection_models = model.model().expect("Artist section models");
+    let selection = ui_shared::selection::PositionSelectionModel::new(model);
+    selection.set_collection_selection(Box::new(move |target, positions| {
+        let rufin_core::playback::PlaybackTarget::Album(uri) = target else {
+            return None;
+        };
+        let selected = gtk::Bitset::new_empty();
+        let mut sparse = None;
+        let mut offset = 0;
+        for index in 0..selection_models.n_items() {
+            let model = selection_models
+                .item(index)?
+                .downcast::<gio::ListModel>()
+                .ok()?;
+            if let Some(rows) = model.downcast_ref::<ArtistRowsModel>()
+                && let Some(section) = rows.imp().owner.borrow().upgrade()
+                && section.layout.get() == LibraryLayout::Row
+                && !section.source_is_empty()
+            {
+                let section_positions = positions.copy();
+                section_positions.intersect(&gtk::Bitset::new_range(
+                    offset + 2,
+                    section.count.get() as u32,
+                ));
+                section_positions.shift_left(offset + 2);
+                section_positions.shift_right(section.start.get() as u32);
+                selected.union(&section_positions);
+                sparse = Some(Rc::clone(&section.sparse));
+            }
+            offset += model.n_items();
+        }
+        let sparse = sparse?;
+        let dragged = sparse.ready_position(|row| row.media_uri == *uri)?;
+        if selected.size() < 2 || !selected.contains(dragged) {
+            return None;
+        }
+        Some(ui_shared::media_drag::CollectionTargets::Ready(
+            ui_shared::selection::selected_values(
+                sparse.order().keys().expect("artist release keys"),
+                &selected,
+            )
+            .into_iter()
+            .map(rufin_core::playback::PlaybackTarget::AlbumKey)
+            .collect(),
+        ))
+    }));
     let factory = gtk::SignalListItemFactory::new();
     let cells = Rc::new(RefCell::new(
         Vec::<glib::WeakRef<ArtistRouteListCell>>::new(),
@@ -712,9 +961,53 @@ fn artist_route_list(
         let Some(state) = item.child().and_downcast::<ArtistRouteListCell>() else {
             return;
         };
+        state.imp().bound_items.borrow_mut().clear();
+        let table = matches!(row, ArtistRouteRow::AlbumTable { .. });
+        item.set_selectable(table);
+        item.set_activatable(table);
         match row {
+            ArtistRouteRow::TableHeader { section } => {
+                let Some(section) = section.upgrade() else {
+                    return;
+                };
+                state.table(
+                    &bind_shell,
+                    &section.applied_settings.borrow().row_fields,
+                    true,
+                );
+                state.set_margin_bottom(0);
+            }
+            ArtistRouteRow::AlbumTable {
+                section,
+                position,
+                last,
+            } => {
+                let Some(section) = section.upgrade() else {
+                    return;
+                };
+                state.table(
+                    &bind_shell,
+                    &section.applied_settings.borrow().row_fields,
+                    false,
+                );
+                state.set_margin_bottom(if last { ARTIST_RELEASE_SECTION_GAP } else { 0 });
+                let value = section
+                    .sparse
+                    .list_model()
+                    .item(position as u32)
+                    .and_downcast::<SparseObjectItem>();
+                let row = value
+                    .as_ref()
+                    .and_then(|item| item.value::<Arc<library::AlbumRow>>());
+                for cell in state.imp().table_cells.borrow().iter() {
+                    cell.downcast_ref::<AlbumTableCell>()
+                        .unwrap()
+                        .bind((position - section.start.get()) as u32, row.clone());
+                }
+                state.imp().bound_items.borrow_mut().extend(value);
+            }
             ArtistRouteRow::Static { widget } => {
-                state.clear_grid_state(true);
+                state.clear_content(true);
                 state.set_orientation(gtk::Orientation::Vertical);
                 state.set_homogeneous(false);
                 state.set_margin_bottom(0);
@@ -736,8 +1029,8 @@ fn artist_route_list(
                     return;
                 };
                 let imp = state.imp();
-                if !imp.grid_mode.get() || imp.grid_columns.get() != columns {
-                    state.clear_grid_state(true);
+                if imp.kind.get() != ArtistCellKind::Grid || imp.grid_columns.get() != columns {
+                    state.clear_content(true);
                     state.set_orientation(gtk::Orientation::Horizontal);
                     state.set_homogeneous(true);
                     state.add_css_class("album-grid");
@@ -755,7 +1048,7 @@ fn artist_route_list(
                             .push(ArtistGridSlot { cell, widget });
                     }
                     imp.grid_columns.set(columns);
-                    imp.grid_mode.set(true);
+                    imp.kind.set(ArtistCellKind::Grid);
                 }
                 state.set_margin_bottom(margin_bottom);
                 let model = section.sparse.list_model();
@@ -767,11 +1060,18 @@ fn artist_route_list(
                     }
                     slot.widget.set_visible(true);
                     let position = start + offset;
-                    if let Some(album) = item_at::<library::AlbumRow>(&model, position as u32) {
-                        slot.cell.bind(position as u32, album);
+                    let value = model
+                        .item(position as u32)
+                        .and_downcast::<SparseObjectItem>();
+                    if let Some(album) = value
+                        .as_ref()
+                        .and_then(|item| item.value::<Arc<library::AlbumRow>>())
+                    {
+                        slot.cell.bind(position as u32, (*album).clone());
                     } else {
                         slot.cell.clear();
                     }
+                    imp.bound_items.borrow_mut().extend(value);
                 }
             }
         }
@@ -781,11 +1081,7 @@ fn artist_route_list(
             return;
         };
         if let Some(state) = item.child().and_downcast::<ArtistRouteListCell>() {
-            if state.imp().grid_mode.get() {
-                state.clear_grid_state(false);
-            } else {
-                remove_box_children(&state);
-            }
+            state.clear_content(state.imp().kind.get() == ArtistCellKind::Static);
         }
     });
     factory.connect_teardown(move |_, item| {
@@ -793,13 +1089,31 @@ fn artist_route_list(
             return;
         };
         if let Some(state) = item.child().and_downcast::<ArtistRouteListCell>() {
-            state.clear_grid_state(true);
+            state.clear_content(true);
         }
         item.set_child(None::<&gtk::Widget>);
     });
     let list = gtk::ListView::new(Some(selection), Some(factory));
     list.add_css_class("artist-release-list");
     list.set_single_click_activate(false);
+    let activate_shell = Rc::downgrade(shell);
+    list.connect_activate(move |_, position| {
+        let Some(shell) = activate_shell.upgrade() else {
+            return;
+        };
+        let Some(ArtistRouteRow::AlbumTable {
+            section, position, ..
+        }) = ui_shared::sparse_model::item_at::<ArtistRouteRow>(&activate_model, position)
+        else {
+            return;
+        };
+        if let Some(row) = section
+            .upgrade()
+            .and_then(|section| section.sparse.peek_ready(position))
+        {
+            shell.navigate(ui_shared::route::Route::AlbumDetail(row.media_uri.clone()));
+        }
+    });
     list.set_hexpand(true);
     list.set_halign(gtk::Align::Fill);
     list.set_vexpand(true);
@@ -822,20 +1136,9 @@ fn remove_box_children(root: &impl IsA<gtk::Box>) {
     }
 }
 
-fn non_propagating_width_scroller() -> gtk::ScrolledWindow {
-    let clip = gtk::ScrolledWindow::new();
-    clip.add_css_class("non-propagating-width-clip");
-    configure_fill_width_clip(&clip, gtk::PolicyType::Never);
-    clip.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Never);
-    clip.set_propagate_natural_height(true);
-    clip.set_hexpand(true);
-    clip.set_halign(gtk::Align::Fill);
-    clip
-}
-
 fn virtual_search_target(
     list: &gtk::ListView,
-    models: Rc<Vec<gio::ListStore>>,
+    models: Rc<Vec<gio::ListModel>>,
     model_index: usize,
     search: gtk::SearchEntry,
 ) -> MountedRouteSearchTarget {
@@ -892,13 +1195,15 @@ mod tests {
 
     #[test]
     fn section_body_updates_leave_header_item_in_place() {
-        let rows = gio::ListStore::new::<SparseObjectItem>();
-        rows.append(&SparseObjectItem::new(0_u8, true));
+        let rows: ArtistRowsModel = glib::Object::new();
+        let header = SparseObjectItem::new(0_u8, true);
+        rows.imp().count.set(1);
+        rows.imp().items.borrow_mut().insert(0, header.downgrade());
         let identity = rows.item(0).unwrap();
-        replace_artist_release_objects(&rows, &[SparseObjectItem::new(1_u8, true)]);
+        rows.refresh(2);
         assert_eq!(rows.item(0).unwrap(), identity);
         assert_eq!(rows.n_items(), 2);
-        replace_artist_release_objects(&rows, &[]);
+        rows.refresh(1);
         assert_eq!(rows.item(0).unwrap(), identity);
         assert_eq!(rows.n_items(), 1);
     }

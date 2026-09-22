@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use ::library::{AlbumDetail, AlbumRow, FavoriteTarget};
+use ::library::{AlbumRow, FavoriteTarget};
 use adw::prelude::*;
 
 use crate::CatalogUi;
@@ -37,20 +37,16 @@ use ui_shared::route::Route;
 impl CatalogUi {
     pub fn album_detail_view(
         self: &Rc<Self>,
-        detail: Option<AlbumDetail>,
-        first_row_position: usize,
-        first_rows: Vec<library::TrackRow>,
+        detail: Option<(AlbumRow, library::TrackRoutePage)>,
     ) -> MountedRoute {
-        let Some(detail) = detail else {
+        let Some((album, page)) = detail else {
             return MountedRoute::static_widget(crate::route_layout::placeholder_view(
                 "Album",
                 msgid("This isn't available"),
             ));
         };
-        let album = detail.album.clone();
         let album_id = album.album_key;
-        let tracks = detail.track_order;
-        let current_album = Rc::new(RefCell::new(detail.album.clone()));
+        let current_album = Rc::new(RefCell::new(album.clone()));
         let context_id = format!("album:{album_id}");
         let applied_external_link_settings = Rc::new(RefCell::new(
             self.settings.current.borrow().external_site_links.clone(),
@@ -66,15 +62,12 @@ impl CatalogUi {
         let model = TrackCollectionModel::new(
             Arc::clone(&self.library),
             self.runtime.clone(),
-            tracks,
-            first_row_position,
-            first_rows,
+            page,
             self.settings
                 .current
                 .borrow()
                 .library_list(LibraryListKey::AlbumDetailTracks),
         );
-        model.list_model().set_sections(detail.disc_sections);
         let (tracks_widget, track_projection, track_toolbar) = self.scrolling_track_projection(
             model,
             LibraryListKey::AlbumDetailTracks,
@@ -85,7 +78,7 @@ impl CatalogUi {
         let cover_size = detail_showcase_cover_size(inner_content_width);
         let cover = media_cover_projection(
             self,
-            ui_shared::library_fields::opaque_artwork(detail.album.artwork_binding.as_deref()),
+            ui_shared::library_fields::opaque_artwork(album.artwork_binding.as_deref()),
             cover_size,
             "album-detail-cover",
         );
@@ -97,8 +90,8 @@ impl CatalogUi {
             &album.title,
         );
         showcase_view.add_external_links_class("album-detail-link-stack");
-        showcase_view.replace_summary(&album_summary_items(&detail.album));
-        let track_count = Rc::new(Cell::new(detail.album.track_count.max(0) as u32));
+        showcase_view.replace_summary(&album_summary_items(&album));
+        let track_count = Rc::new(Cell::new(album.track_count.max(0) as u32));
         let localized_track_count = Rc::clone(&track_count);
         showcase_view.bind_summary_text_with(1, move || {
             track_count_text(u64::from(localized_track_count.get()))
@@ -219,10 +212,13 @@ impl CatalogUi {
             let database = Arc::clone(&database);
             async move {
                 let page = database
-                    .album_track_route_page(
-                        source,
-                        album_id,
-                        folder,
+                    .query_track_route_page(
+                        &library::TrackQuery {
+                            source: source,
+                            collection: Some(library::QueueCollection::AlbumKey(album_id)),
+                            folder: folder,
+                            favorites_only: false,
+                        },
                         &request.query,
                         request.settings.sort_key.track_sort(),
                         request.settings.descending,
@@ -231,13 +227,7 @@ impl CatalogUi {
                     )
                     .await
                     .map_err(|error| error.to_string())?;
-                Ok::<_, String>(PreparedTrackProjection {
-                    disc_sections: page.disc_sections,
-                    order: page.order,
-                    first_row_position: page.first_row_position,
-                    first_rows: page.first_rows,
-                    request,
-                })
+                Ok::<_, String>(PreparedTrackProjection::from_page(page, request))
             }
         };
         let refresh =
@@ -339,22 +329,27 @@ pub async fn load_album_detail(
     settings: &rufin_core::settings::LibraryListSettings,
     window: library::RouteSeedWindow,
     cancellation: &library::ReadCancellation,
-) -> library::LibraryResult<(Option<library::AlbumDetail>, usize, Vec<library::TrackRow>)> {
-    let detail = database
-        .album_detail(
-            album_uri,
+) -> library::LibraryResult<Option<(AlbumRow, library::TrackRoutePage)>> {
+    let Some(album) = database
+        .album_row_by_media_uri(album_uri, cancellation)
+        .await?
+    else {
+        return Ok(None);
+    };
+    let page = database
+        .query_track_route_page(
+            &library::TrackQuery {
+                source: album.source_key,
+                collection: Some(library::QueueCollection::AlbumKey(album.album_key)),
+                folder: None,
+                favorites_only: false,
+            },
+            "",
             settings.sort_key.track_sort(),
             settings.descending,
+            window,
             cancellation,
         )
         .await?;
-    let Some(detail) = detail else {
-        return Ok::<_, library::LibraryError>((None, 0, Vec::new()));
-    };
-    let seed = window.range(detail.track_order.len());
-    let first_row_position = seed.start;
-    let first_rows = database
-        .track_rows_by_uri(&detail.track_order[seed], cancellation)
-        .await?;
-    Ok((Some(detail), first_row_position, first_rows))
+    Ok(Some((album, page)))
 }

@@ -10,6 +10,7 @@ publish = false
 anyhow = "1"
 blake3.workspace = true
 futures-util.workspace = true
+flate2.workspace = true
 iroh = { version = "1.0.3", default-features = false, features = ["tls-ring"] }
 iroh-blobs = "0.103.0"
 iroh-mdns-address-lookup = "0.5.0"

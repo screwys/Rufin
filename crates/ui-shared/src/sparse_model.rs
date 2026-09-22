@@ -1,4 +1,4 @@
-//! Retains one complete key order and only the ready rows around the visible route window.
+//! Retains ready rows around the visible route window, loading query-backed lists by position.
 //! Route policy, GTK factories, artwork requests, and skeleton geometry stay with the caller.
 
 use std::any::Any;
@@ -14,11 +14,45 @@ use gtk::prelude::*;
 use gtk::{gio, glib};
 use library::ReadCancellation;
 
-pub type SparseLoad<K, R> = Arc<
-    dyn Fn(Vec<K>, ReadCancellation) -> Pin<Box<dyn Future<Output = Result<Vec<R>, String>> + Send>>
-        + Send
-        + Sync,
+pub type SparseLoad<K, R> = Rc<
+    dyn Fn(
+        Vec<K>,
+        Range<usize>,
+        ReadCancellation,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<R>, String>> + Send>>,
 >;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SparseSource<K> {
+    Keys(Arc<[K]>),
+    Query { count: usize },
+}
+
+impl<K> From<Vec<K>> for SparseSource<K> {
+    fn from(keys: Vec<K>) -> Self {
+        Self::Keys(keys.into())
+    }
+}
+
+impl<K> SparseSource<K> {
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Keys(keys) => keys.len(),
+            Self::Query { count } => *count,
+        }
+    }
+
+    pub fn keys(&self) -> Option<&Arc<[K]>> {
+        match self {
+            Self::Keys(keys) => Some(keys),
+            Self::Query { .. } => None,
+        }
+    }
+}
 
 const SPARSE_WINDOW_SIZE: usize = 64;
 const SPARSE_PENDING_WINDOW_CAP: usize = 8;
@@ -42,13 +76,13 @@ pub struct ReadyChange {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SparseItem<K, R> {
-    Placeholder(K),
+    Placeholder(Option<K>),
     Ready(Arc<R>),
 }
 
 pub struct SparseModel<K, R> {
     order_id: String,
-    order: Arc<[K]>,
+    order: SparseSource<K>,
     ready: BTreeMap<usize, Arc<R>>,
     ready_windows: VecDeque<usize>,
     generation: u64,
@@ -206,7 +240,7 @@ impl SparseObjectItem {
         if self.is_ready() {
             self.value::<Arc<R>>().map(SparseItem::Ready)
         } else {
-            self.value::<K>().map(SparseItem::Placeholder)
+            self.value::<Option<K>>().map(SparseItem::Placeholder)
         }
     }
 
@@ -395,6 +429,7 @@ mod imp {
         pub(super) demand: RefCell<Option<Rc<dyn Fn(u32)>>>,
         pub(super) ready_handler: RefCell<Option<Rc<dyn Fn(u32, u32)>>>,
         pub(super) sections: RefCell<Vec<(u32, i64)>>,
+        pub(super) collection_selection: RefCell<Option<crate::selection::CollectionSelection>>,
     }
 
     #[glib::object_subclass]
@@ -454,6 +489,20 @@ glib::wrapper! {
 }
 
 impl SparseObjectModel {
+    pub(crate) fn set_collection_selection(&self, capture: crate::selection::CollectionSelection) {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+        self.imp().collection_selection.replace(Some(capture));
+    }
+
+    pub(crate) fn collection_selection(
+        &self,
+        target: &rufin_core::playback::PlaybackTarget,
+        positions: &gtk::Bitset,
+    ) -> Option<crate::media_drag::CollectionTargets> {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+        self.imp().collection_selection.borrow().as_ref()?(target, positions)
+    }
+
     pub fn section(&self, position: u32) -> (u32, u32) {
         use glib::subclass::prelude::ObjectSubclassIsExt;
         if position >= self.n_items() {
@@ -505,7 +554,7 @@ impl SparseObjectModel {
             .map(|index| sections[index].1)
     }
 
-    pub fn new<K, R>(order: Vec<K>, overscan: usize) -> Self
+    pub fn new<K, R>(order: impl Into<SparseSource<K>>, overscan: usize) -> Self
     where
         K: Clone + 'static,
         R: 'static,
@@ -529,7 +578,7 @@ impl SparseObjectModel {
         self.with_typed_mut::<K, R, _>(|state| state.sparse.order_id.clone())
     }
 
-    pub fn order<K, R>(&self) -> Arc<[K]>
+    pub fn order<K, R>(&self) -> SparseSource<K>
     where
         K: Clone + 'static,
         R: 'static,
@@ -639,7 +688,7 @@ impl SparseObjectModel {
         true
     }
 
-    pub fn replace_order<K, R>(&self, order: Vec<K>)
+    pub fn replace_order<K, R>(&self, order: impl Into<SparseSource<K>>)
     where
         K: Clone + 'static,
         R: 'static,
@@ -656,7 +705,7 @@ impl SparseObjectModel {
 
     fn replace_prepared<K, R>(
         &self,
-        order: Vec<K>,
+        order: SparseSource<K>,
         first: usize,
         rows: Vec<R>,
         sections: Vec<(u32, i64)>,
@@ -670,7 +719,8 @@ impl SparseObjectModel {
         let sections_changed = *self.imp().sections.borrow() != sections;
         self.imp().sections.replace(sections);
         let (same_order, updates) = self.with_typed_mut::<K, R, _>(|state| {
-            let same_order = state.sparse.order.as_ref() == order.as_slice();
+            let same_order = matches!((&state.sparse.order, &order),
+                (SparseSource::Keys(previous), SparseSource::Keys(next)) if previous == next);
             state.sparse.replace_order(order);
             state.sparse.seed_at(first, rows);
             if !same_order {
@@ -710,13 +760,13 @@ impl SparseObjectModel {
         }
     }
 
-    pub fn update_ready<K, R>(&self, key: &K, update: impl FnOnce(&mut R)) -> bool
+    pub fn update_ready<K, R>(&self, position: usize, update: impl FnOnce(&mut R)) -> bool
     where
         K: Clone + Eq + 'static,
         R: Clone + 'static,
     {
         let updated = self.with_typed_mut::<K, R, _>(|state| {
-            let position = state.sparse.update_ready(key, update)?;
+            let position = state.sparse.update_ready(position, update)?;
             let item = state
                 .objects
                 .get(&position)
@@ -813,7 +863,7 @@ where
     R: Clone + Send + Sync + 'static,
 {
     pub fn new(
-        order: Vec<K>,
+        order: impl Into<SparseSource<K>>,
         _overscan: usize,
         runtime: tokio::runtime::Handle,
         load: SparseLoad<K, R>,
@@ -852,7 +902,7 @@ where
         self.model.order_id::<K, R>()
     }
 
-    pub fn order(&self) -> Arc<[K]> {
+    pub fn order(&self) -> SparseSource<K> {
         self.model.order::<K, R>()
     }
 
@@ -866,11 +916,12 @@ where
 
     pub fn seed_matching_at(&self, first: usize, rows: Vec<R>, key: impl Fn(&R) -> K) -> bool {
         let order = self.order();
-        if !rows
-            .iter()
-            .enumerate()
-            .all(|(position, row)| order.get(first.saturating_add(position)) == Some(&key(row)))
-        {
+        if order.keys().is_some_and(|keys| {
+            !rows
+                .iter()
+                .enumerate()
+                .all(|(position, row)| keys.get(first.saturating_add(position)) == Some(&key(row)))
+        }) {
             return false;
         }
         self.model.seed_at::<K, R>(first, rows);
@@ -895,12 +946,17 @@ where
         self.start();
     }
 
-    pub fn replace_order(&self, order: Vec<K>) {
+    pub fn replace_order(&self, order: impl Into<SparseSource<K>>) {
         self.cancel();
         self.model.replace_order::<K, R>(order);
     }
 
-    pub fn replace_prepared(&self, order: Vec<K>, rows: Vec<R>, key: impl Fn(&R) -> K) -> bool
+    pub fn replace_prepared(
+        &self,
+        order: impl Into<SparseSource<K>>,
+        rows: Vec<R>,
+        key: impl Fn(&R) -> K,
+    ) -> bool
     where
         R: PartialEq,
     {
@@ -909,7 +965,7 @@ where
 
     pub fn replace_prepared_at(
         &self,
-        order: Vec<K>,
+        order: impl Into<SparseSource<K>>,
         first: usize,
         rows: Vec<R>,
         sections: Vec<(u32, i64)>,
@@ -918,11 +974,13 @@ where
     where
         R: PartialEq,
     {
-        if !rows
-            .iter()
-            .enumerate()
-            .all(|(position, row)| order.get(first.saturating_add(position)) == Some(&key(row)))
-        {
+        let order = order.into();
+        if order.keys().is_some_and(|keys| {
+            !rows
+                .iter()
+                .enumerate()
+                .all(|(position, row)| keys.get(first.saturating_add(position)) == Some(&key(row)))
+        }) {
             return false;
         }
         self.cancel();
@@ -959,8 +1017,8 @@ where
             .and_then(|position| u32::try_from(position).ok())
     }
 
-    pub fn update_ready(&self, key: &K, update: impl FnOnce(&mut R)) -> bool {
-        self.model.update_ready::<K, R>(key, update)
+    pub fn update_ready(&self, position: usize, update: impl FnOnce(&mut R)) -> bool {
+        self.model.update_ready::<K, R>(position, update)
     }
 
     pub fn update_matching(&self, matches: impl Fn(&R) -> bool, update: impl Fn(&mut R)) {
@@ -1031,9 +1089,11 @@ where
         let cancellation = ReadCancellation::new();
         self.cancellation
             .replace(Some((token, cancellation.clone())));
-        let task = self
-            .runtime
-            .spawn((self.load)(page.keys.clone(), cancellation));
+        let task = self.runtime.spawn((self.load)(
+            page.keys.clone(),
+            page.range.clone(),
+            cancellation,
+        ));
         let route = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let rows = task.await.ok().and_then(Result::ok);
@@ -1095,14 +1155,14 @@ where
     pub fn new(_: usize) -> Self {
         Self {
             order_id: String::new(),
-            order: Arc::new([]),
+            order: SparseSource::Keys(Arc::new([])),
             ready: BTreeMap::new(),
             ready_windows: VecDeque::new(),
             generation: 1,
         }
     }
 
-    pub fn replace_order(&mut self, order: Vec<K>) {
+    pub fn replace_order(&mut self, order: impl Into<SparseSource<K>>) {
         static NEXT_ORDER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         static SESSION: std::sync::LazyLock<u128> = std::sync::LazyLock::new(|| {
             std::time::SystemTime::now()
@@ -1125,8 +1185,8 @@ where
         self.order.len()
     }
 
-    pub fn order(&self) -> Arc<[K]> {
-        Arc::clone(&self.order)
+    pub fn order(&self) -> SparseSource<K> {
+        self.order.clone()
     }
 
     fn seed_at(&mut self, first: usize, rows: Vec<R>) {
@@ -1146,19 +1206,14 @@ where
 
     #[cfg(test)]
     pub fn key(&self, position: usize) -> Option<&K> {
-        self.order.get(position)
+        self.order.keys()?.get(position)
     }
 
-    pub fn update_ready(&mut self, key: &K, update: impl FnOnce(&mut R)) -> Option<usize>
+    pub fn update_ready(&mut self, position: usize, update: impl FnOnce(&mut R)) -> Option<usize>
     where
         K: Eq,
         R: Clone,
     {
-        let position = self
-            .ready
-            .keys()
-            .copied()
-            .find(|position| self.order.get(*position) == Some(key))?;
         let row = self.ready.get_mut(&position)?;
         update(Arc::make_mut(row));
         Some(position)
@@ -1170,10 +1225,14 @@ where
             self.touch_ready_window(window_first(position));
             return Some(SparseItem::Ready(row));
         }
-        self.order
-            .get(position)
-            .cloned()
-            .map(SparseItem::Placeholder)
+        (position < self.order.len()).then(|| {
+            SparseItem::Placeholder(
+                self.order
+                    .keys()
+                    .and_then(|keys| keys.get(position))
+                    .cloned(),
+            )
+        })
     }
 
     pub fn hydrate(&mut self, visible: Range<usize>) -> Option<HydrationPage<K>> {
@@ -1191,7 +1250,10 @@ where
         Some(HydrationPage {
             generation: self.generation,
             range: start..end,
-            keys: self.order[start..end].to_vec(),
+            keys: self
+                .order
+                .keys()
+                .map_or_else(Vec::new, |keys| keys[start..end].to_vec()),
         })
     }
 
@@ -1214,7 +1276,7 @@ where
     #[cfg(test)]
     pub fn teardown(&mut self) {
         self.ready.clear();
-        self.order = Arc::new([]);
+        self.order = SparseSource::Keys(Arc::new([]));
         self.ready_windows.clear();
         self.generation = self.generation.wrapping_add(1).max(1);
     }
@@ -1254,10 +1316,10 @@ mod tests {
                 let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
                 let loaded = Arc::clone(&requests);
                 let route = SparseRouteModel::new(
-                    (0..1_000_u64).collect(),
+                    (0..1_000_u64).collect::<Vec<_>>(),
                     64,
                     runtime.handle().clone(),
-                    Arc::new(move |keys: Vec<u64>, _| {
+                    Rc::new(move |keys: Vec<u64>, _, _| {
                         loaded.lock().unwrap().push(keys.clone());
                         Box::pin(
                             async move { Ok(keys.iter().map(u64::to_string).collect::<Vec<_>>()) },
@@ -1316,18 +1378,22 @@ mod tests {
         for _ in 0..16 {
             let owner = Arc::new(());
             let owner_weak = Arc::downgrade(&owner);
-            let load: SparseLoad<u64, String> = Arc::new(move |_, _| {
+            let load: SparseLoad<u64, String> = Rc::new(move |_, _, _| {
                 let owner = owner.clone();
                 Box::pin(async move {
                     drop(owner);
                     Ok(Vec::new())
                 })
             });
-            let route =
-                SparseRouteModel::new((0..1_000_000).collect(), 64, runtime.handle().clone(), load);
+            let route = SparseRouteModel::new(
+                (0..1_000_000).collect::<Vec<_>>(),
+                64,
+                runtime.handle().clone(),
+                load,
+            );
             route.seed(vec!["retained title".into()]);
             let route_weak = Rc::downgrade(&route);
-            let order = Arc::downgrade(&route.order());
+            let order = Arc::downgrade(route.order().keys().unwrap());
             let row = Arc::downgrade(&route.ready(0).expect("seeded row"));
             let list = route.list_model();
             let list_weak = list.downgrade();
@@ -1353,13 +1419,13 @@ mod tests {
     #[test]
     fn deep_windows_keep_route_extent_and_three_exact_ready_pages() {
         let mut model = SparseModel::<u64, String>::new(8);
-        model.replace_order((0..10_000).collect());
+        model.replace_order((0..10_000).collect::<Vec<_>>());
         assert_eq!(model.len(), 10_000);
         let first = model.hydrate(5_000..5_020).expect("hydration page");
         assert_eq!(first.range, 4_992..5_056);
         assert!(matches!(
             model.item(5_000),
-            Some(SparseItem::Placeholder(5_000))
+            Some(SparseItem::Placeholder(Some(5_000)))
         ));
         model
             .accept(&first, first.keys.iter().map(u64::to_string).collect())
@@ -1386,7 +1452,7 @@ mod tests {
         );
         assert!(matches!(
             model.item(5_000),
-            Some(SparseItem::Placeholder(5_000))
+            Some(SparseItem::Placeholder(Some(5_000)))
         ));
         assert_eq!(model.key(9_999), Some(&9_999));
     }
@@ -1395,7 +1461,11 @@ mod tests {
     fn complete_history_result_keeps_selected_snapshots_across_both_windows() {
         let order = (0..100_u64).collect::<Vec<_>>();
         let model = SparseObjectModel::new::<u64, String>(order.clone(), SPARSE_WINDOW_SIZE);
-        model.seed::<u64, String>((0..100).map(|value| format!("matched {value}")).collect());
+        model.seed::<u64, String>(
+            (0..100)
+                .map(|value| format!("matched {value}"))
+                .collect::<Vec<_>>(),
+        );
         for position in [0, 63, 64, 99] {
             assert!(
                 matches!(model.item(position).unwrap().downcast::<SparseObjectItem>().unwrap()
@@ -1404,9 +1474,11 @@ mod tests {
         }
         assert!(model.hydrate::<u64, String>(64..100).is_none());
         model.replace_prepared::<u64, String>(
-            order,
+            order.into(),
             0,
-            (0..100).map(|value| format!("filtered {value}")).collect(),
+            (0..100)
+                .map(|value| format!("filtered {value}"))
+                .collect::<Vec<_>>(),
             Vec::new(),
         );
         assert!(model.hydrate::<u64, String>(64..100).is_none());
@@ -1419,29 +1491,43 @@ mod tests {
     #[test]
     fn prepared_seed_respects_the_existing_ready_window_capacity() {
         let mut model = SparseModel::<u64, u64>::new(SPARSE_WINDOW_SIZE);
-        model.replace_order((0..1000).collect());
-        model.seed_at(31, (31..1000).collect());
+        model.replace_order((0..1000).collect::<Vec<_>>());
+        model.seed_at(31, (31..1000).collect::<Vec<_>>());
         assert_eq!(
             model.ready_len(),
             SPARSE_WINDOW_SIZE * SPARSE_READY_WINDOW_CAP - 31
         );
         for position in [256, 384, 512] {
-            model.seed_at(position, (position as u64..position as u64 + 64).collect());
+            model.seed_at(
+                position,
+                (position as u64..position as u64 + 64).collect::<Vec<_>>(),
+            );
         }
         assert_eq!(
             model.ready_len(),
             SPARSE_WINDOW_SIZE * SPARSE_READY_WINDOW_CAP
         );
-        assert!(matches!(model.item(31), Some(SparseItem::Placeholder(31))));
+        assert!(matches!(
+            model.item(31),
+            Some(SparseItem::Placeholder(Some(31)))
+        ));
     }
 
     #[test]
     fn restored_seed_populates_only_its_aligned_window() {
         let mut model = SparseModel::new(SPARSE_WINDOW_SIZE);
-        model.replace_order((0..256_u64).collect());
-        model.seed_at(128, (128..192).map(|value| value.to_string()).collect());
+        model.replace_order((0..256_u64).collect::<Vec<_>>());
+        model.seed_at(
+            128,
+            (128..192)
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>(),
+        );
 
-        assert!(matches!(model.item(0), Some(SparseItem::Placeholder(0))));
+        assert!(matches!(
+            model.item(0),
+            Some(SparseItem::Placeholder(Some(0)))
+        ));
         assert!(matches!(
             model.item(128),
             Some(SparseItem::Ready(value)) if value.as_str() == "128"
@@ -1452,9 +1538,9 @@ mod tests {
     #[test]
     fn replaced_or_torn_down_routes_reject_delayed_rows() {
         let mut model = SparseModel::<u64, u64>::new(2);
-        model.replace_order((0..20).collect());
+        model.replace_order((0..20).collect::<Vec<_>>());
         let delayed = model.hydrate(5..10).expect("hydration page");
-        model.replace_order((100..120).collect());
+        model.replace_order((100..120).collect::<Vec<_>>());
         assert!(model.accept(&delayed, delayed.keys.clone()).is_none());
         model.teardown();
         assert_eq!(model.len(), 0);
@@ -1484,7 +1570,7 @@ mod tests {
 
     #[test]
     fn gtk_model_publishes_ready_rows_through_the_existing_item_identity() {
-        let model = SparseObjectModel::new::<u64, String>((0..100).collect(), 2);
+        let model = SparseObjectModel::new::<u64, String>((0..100).collect::<Vec<_>>(), 2);
         assert_eq!(model.n_items(), 100);
         let placeholder = model
             .item(50)
@@ -1492,7 +1578,7 @@ mod tests {
             .expect("placeholder item");
         assert!(matches!(
             placeholder.typed_value::<u64, String>(),
-            Some(SparseItem::Placeholder(50))
+            Some(SparseItem::Placeholder(Some(50)))
         ));
         let notifications = Rc::new(Cell::new(0));
         let notification_count = Rc::clone(&notifications);
@@ -1540,7 +1626,8 @@ mod tests {
 
     #[test]
     fn readiness_subscription_is_replaced_and_disconnected_by_bind_owner() {
-        let item = SparseObjectItem::from_sparse(SparseItem::<u64, String>::Placeholder(0), false);
+        let item =
+            SparseObjectItem::from_sparse(SparseItem::<u64, String>::Placeholder(Some(0)), false);
         let first_calls = Rc::new(Cell::new(0));
         let second_calls = Rc::new(Cell::new(0));
 
@@ -1603,7 +1690,7 @@ mod tests {
         let _old_item = model.item(0).expect("old item");
 
         model.replace_prepared::<u64, String>(
-            vec![10, 11],
+            vec![10, 11].into(),
             0,
             vec!["ten".to_string(), "eleven".to_string()],
             Vec::new(),
@@ -1618,7 +1705,8 @@ mod tests {
 
     #[test]
     fn disc_sections_change_atomically_with_tracks() {
-        let model = SparseObjectModel::new::<u64, String>((0..24).collect(), SPARSE_WINDOW_SIZE);
+        let model =
+            SparseObjectModel::new::<u64, String>((0..24).collect::<Vec<_>>(), SPARSE_WINDOW_SIZE);
         model.set_sections(vec![(0, 1), (12, 2)]);
         assert_eq!(model.section(15), (12, 24));
         let notifications = Rc::new(Cell::new(0));
@@ -1629,13 +1717,23 @@ mod tests {
             assert_eq!(model.section(0), (0, 3));
             assert_eq!(model.section(3), (3, u32::MAX));
         });
-        model.replace_prepared::<u64, String>(vec![0, 1, 2], 0, Vec::new(), Vec::new());
+        model.replace_prepared::<u64, String>(vec![0, 1, 2].into(), 0, Vec::new(), Vec::new());
         assert_eq!(notifications.get(), 0);
         assert_eq!(model.section_value(0), None);
-        model.replace_prepared::<u64, String>(vec![0, 1, 2], 0, Vec::new(), vec![(0, 1), (2, 2)]);
+        model.replace_prepared::<u64, String>(
+            vec![0, 1, 2].into(),
+            0,
+            Vec::new(),
+            vec![(0, 1), (2, 2)],
+        );
         assert_eq!(notifications.get(), 1);
         assert_eq!(model.section(2), (2, 3));
-        model.replace_prepared::<u64, String>(vec![0, 1, 2], 0, Vec::new(), vec![(0, 1), (2, 2)]);
+        model.replace_prepared::<u64, String>(
+            vec![0, 1, 2].into(),
+            0,
+            Vec::new(),
+            vec![(0, 1), (2, 2)],
+        );
         assert_eq!(notifications.get(), 1);
     }
 
@@ -1655,7 +1753,7 @@ mod tests {
         model.connect_items_changed(move |_, _, _, _| splice_count.set(splice_count.get() + 1));
 
         model.replace_prepared::<u64, String>(
-            vec![1, 2],
+            vec![1, 2].into(),
             0,
             vec!["one".to_string(), "two".to_string()],
             Vec::new(),
@@ -1690,7 +1788,7 @@ mod tests {
         second.connect_ready(2, Rc::new(move || second_count.set(second_count.get() + 1)));
 
         model.replace_prepared::<u64, String>(
-            vec![1, 2],
+            vec![1, 2].into(),
             0,
             vec!["one".to_string(), "changed".to_string()],
             Vec::new(),
@@ -1725,15 +1823,15 @@ mod tests {
         });
 
         model.replace_prepared::<u64, String>(
-            order,
+            order.into(),
             0,
-            (0..64).map(|value| value.to_string()).collect(),
+            (0..64).map(|value| value.to_string()).collect::<Vec<_>>(),
             Vec::new(),
         );
 
         assert!(matches!(
             deep.typed_value::<u64, String>(),
-            Some(SparseItem::Placeholder(64))
+            Some(SparseItem::Placeholder(Some(64)))
         ));
         assert_eq!(demanded.get(), Some(64));
     }

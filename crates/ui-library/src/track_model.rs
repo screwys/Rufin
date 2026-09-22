@@ -8,7 +8,7 @@ use playback::{PlayRequest, QueuePlacement};
 use rufin_core::settings::LibraryListSettings;
 
 use ui_shared::library_fields::TrackPresentation;
-use ui_shared::sparse_model::{SparseObjectModel, SparseRouteModel};
+use ui_shared::sparse_model::{SparseObjectModel, SparseRouteModel, SparseSource};
 
 const TRACK_OVERSCAN: usize = 64;
 
@@ -28,17 +28,30 @@ impl TrackProjectionRequest {
 
 #[derive(Clone)]
 pub struct PreparedTrackProjection<T = TrackRow> {
-    pub order: Vec<String>,
+    pub order: SparseSource<String>,
     pub disc_sections: Vec<(u32, i64)>,
     pub first_row_position: usize,
     pub first_rows: Vec<T>,
     pub request: TrackProjectionRequest,
 }
 
+impl PreparedTrackProjection {
+    pub fn from_page(page: library::TrackRoutePage, request: TrackProjectionRequest) -> Self {
+        Self {
+            order: SparseSource::Query { count: page.count },
+            disc_sections: page.disc_sections,
+            first_row_position: page.first_row_position,
+            first_rows: page.first_rows,
+            request,
+        }
+    }
+}
+
 struct TrackModelState<T: TrackPresentation> {
     sparse: Rc<SparseRouteModel<String, T>>,
     request: RefCell<TrackProjectionRequest>,
-    applied: RefCell<TrackProjectionRequest>,
+    applied: Rc<RefCell<TrackProjectionRequest>>,
+    source: Option<(library::QueueQuery, Option<library::FolderKey>)>,
 }
 
 #[derive(Clone)]
@@ -48,53 +61,81 @@ impl TrackCollectionModel {
     pub fn new(
         database: Arc<Database>,
         runtime: tokio::runtime::Handle,
-        order: Vec<String>,
-        first_row_position: usize,
-        first_rows: Vec<TrackRow>,
+        page: library::TrackRoutePage,
         settings: LibraryListSettings,
     ) -> Self {
-        let rows_database = Arc::clone(&database);
-        let load = Arc::new(
-            move |keys: Vec<String>, cancellation: library::ReadCancellation| {
-                let database = Arc::clone(&rows_database);
+        let query = page.query.clone();
+        let model = Self::with_load(
+            runtime,
+            SparseSource::Query { count: page.count },
+            Some((page.query.queue_query(), page.query.folder)),
+            page.first_row_position,
+            page.first_rows,
+            settings,
+            Rc::new(move |_, range, request, cancellation| {
+                let database = database.clone();
+                let query = query.clone();
                 Box::pin(async move {
                     database
-                        .track_rows_by_uri(&keys, &cancellation)
+                        .query_tracks_page(
+                            &query,
+                            &request.query,
+                            request.settings.sort_key.track_sort(),
+                            request.settings.descending,
+                            range.start,
+                            range.len(),
+                            &cancellation,
+                        )
                         .await
                         .map_err(|error| error.to_string())
-                }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
-            },
+                })
+            }),
         );
-        Self::with_load(
-            runtime,
-            order,
-            first_row_position,
-            first_rows,
-            settings,
-            load,
-        )
+        model.list_model().set_sections(page.disc_sections);
+        model
     }
 }
 
 impl<T: TrackPresentation> TrackCollectionModel<T> {
     pub fn with_load(
         runtime: tokio::runtime::Handle,
-        order: Vec<String>,
+        order: SparseSource<String>,
+        source: Option<(library::QueueQuery, Option<library::FolderKey>)>,
         first_row_position: usize,
         first_rows: Vec<T>,
         settings: LibraryListSettings,
-        load: ui_shared::sparse_model::SparseLoad<String, T>,
+        load: Rc<
+            dyn Fn(
+                Vec<String>,
+                std::ops::Range<usize>,
+                TrackProjectionRequest,
+                library::ReadCancellation,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<Vec<T>, String>> + Send>,
+            >,
+        >,
     ) -> Self {
-        let sparse = SparseRouteModel::new(order, TRACK_OVERSCAN, runtime.clone(), load.clone());
+        let applied = Rc::new(RefCell::new(TrackProjectionRequest {
+            query: String::new(),
+            settings: settings.clone(),
+        }));
+        let load_request = applied.clone();
+        let sparse = SparseRouteModel::new(
+            order,
+            TRACK_OVERSCAN,
+            runtime,
+            Rc::new(move |keys, range, cancellation| {
+                let request = load_request.borrow().clone();
+                load(keys, range, request, cancellation)
+            }),
+        );
         sparse.seed_matching_at(first_row_position, first_rows, |row| {
             row.media_uri().to_string()
         });
         Self(Rc::new(TrackModelState {
             sparse,
-            applied: RefCell::new(TrackProjectionRequest {
-                query: String::new(),
-                settings: settings.clone(),
-            }),
+            applied,
+            source,
             request: RefCell::new(TrackProjectionRequest {
                 query: String::new(),
                 settings,
@@ -110,8 +151,33 @@ impl<T: TrackPresentation> TrackCollectionModel<T> {
         Rc::clone(&self.0.sparse)
     }
 
-    pub fn order(&self) -> Arc<[String]> {
-        self.0.sparse.order()
+    pub fn ready_position(&self, media_uri: &str) -> Option<u32> {
+        self.0
+            .sparse
+            .ready_position(|row| row.media_uri() == media_uri)
+    }
+
+    pub fn selection_input(&self, positions: &gtk::Bitset) -> library::QueueInput {
+        if let Some((query, folder)) = &self.0.source {
+            let request = self.0.applied.borrow();
+            library::QueueInput::TrackSelection {
+                query: query.clone(),
+                folder: *folder,
+                filter: request.query.clone(),
+                sort: request.settings.sort_key.track_sort(),
+                descending: request.settings.descending,
+                ranges: ui_shared::selection::selected_ranges(positions),
+            }
+        } else {
+            library::QueueInput::MediaUris {
+                order: ui_shared::selection::selected_values(
+                    self.0.sparse.order().keys().expect("supplied track keys"),
+                    positions,
+                )
+                .into(),
+                provenance: library::QueueProvenance::Manual,
+            }
+        }
     }
 
     pub fn source_is_empty(&self) -> bool {
@@ -175,12 +241,9 @@ impl<T: TrackPresentation> TrackCollectionModel<T> {
         else {
             return false;
         };
-        let Some(track) = self.0.sparse.order().get(position as usize).cloned() else {
-            return false;
-        };
         self.0
             .sparse
-            .update_ready(&track, |row| row.set_favorite(favorite))
+            .update_ready(position as usize, |row| row.set_favorite(favorite))
     }
 
     pub fn update_downloaded(&self, media_uri: &str, downloaded: bool) {
@@ -203,10 +266,27 @@ impl<T: TrackPresentation> TrackCollectionModel<T> {
         if anchor_index >= order.len() {
             return;
         }
-        let input = library::QueueInput::Uris {
-            order,
-            context_id: self.visible_context_id(context_base).into(),
-            source_start: 0,
+        let context_id = self.visible_context_id(context_base).into();
+        let input = if let Some((query, folder)) = &self.0.source {
+            let applied = self.0.applied.borrow();
+            library::QueueInput::Query {
+                query: query.clone(),
+                folder: *folder,
+                filter: applied.query.clone(),
+                sort: applied.settings.sort_key.track_sort(),
+                descending: applied.settings.descending,
+                context_id,
+                anchor_uri: (!collection_start)
+                    .then(|| self.0.sparse.ready(anchor_index as u32))
+                    .flatten()
+                    .map(|row| row.media_uri().to_string()),
+            }
+        } else {
+            library::QueueInput::Uris {
+                order: order.keys().expect("supplied track keys").clone(),
+                context_id,
+                source_start: 0,
+            }
         };
         let request = if collection_start {
             PlayRequest::ordered
@@ -302,11 +382,12 @@ mod tests {
         };
         let model = TrackCollectionModel::with_load(
             runtime.handle().clone(),
-            vec![row.media_uri.clone()],
+            vec![row.media_uri.clone()].into(),
+            None,
             0,
             vec![row.clone()],
             LibraryListSettings::for_key(rufin_core::settings::LibraryListKey::History),
-            Arc::new(|_, _| panic!("seeded rows must not request hydration")),
+            Rc::new(|_, _, _, _| panic!("seeded rows must not request hydration")),
         );
         let pending = model.projection_request();
         assert_eq!(
@@ -329,7 +410,7 @@ mod tests {
         updated.title = "After".into();
         let prepared = PreparedTrackProjection {
             disc_sections: Vec::new(),
-            order: vec![updated.media_uri.clone()],
+            order: vec![updated.media_uri.clone()].into(),
             first_row_position: 0,
             first_rows: vec![updated.clone()],
             request: pending,

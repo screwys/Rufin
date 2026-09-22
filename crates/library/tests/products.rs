@@ -26,7 +26,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
             for descending in [false, true] {
                 for folder in [None, Some(fixture.folder)] {
                     for filter in ["", "artist"] {
-                        let (order, _, _) = db
+                        let (count, _, rows) = db
                             .artist_route_page(
                                 fixture.source,
                                 folder,
@@ -40,6 +40,8 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                             )
                             .await
                             .unwrap();
+                        let order = rows.iter().map(|row| row.artist_key).collect::<Vec<_>>();
+                        assert_eq!(count, order.len());
                         let mut actual = Vec::new();
                         for offset in 0..=order.len() {
                             actual.extend(
@@ -73,7 +75,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
         GenreSort::TrackCount,
     ] {
         for folder in [None, Some(fixture.folder)] {
-            let (order, _, _) = db
+            let (count, _, rows) = db
                 .genre_route_page(
                     fixture.source,
                     folder,
@@ -85,6 +87,8 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                 )
                 .await
                 .unwrap();
+            let order = rows.iter().map(|row| row.genre_key).collect::<Vec<_>>();
+            assert_eq!(count, order.len());
             let mut actual = Vec::new();
             for offset in 0..=order.len() {
                 actual.extend(
@@ -134,7 +138,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                 SmartPlaylistListSort::Duration,
             ] {
                 for descending in [false, true] {
-                    let (order, _, _) = db
+                    let (count, _, rows) = db
                         .smart_playlist_route_page(
                             source,
                             folder,
@@ -146,6 +150,11 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                         )
                         .await
                         .unwrap();
+                    let order = rows
+                        .iter()
+                        .map(|row| row.smart_playlist_key)
+                        .collect::<Vec<_>>();
+                    assert_eq!(count, order.len());
                     let mut actual = Vec::new();
                     for offset in 0..=order.len() {
                         actual.extend(
@@ -280,7 +289,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
         for descending in [false, true] {
             for folder in [None, Some(fixture.folder)] {
                 for filter in ["", "album"] {
-                    let (order, _, _) = database
+                    let (count, _, rows) = database
                         .album_route_page(
                             fixture.source,
                             folder,
@@ -293,6 +302,8 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                         )
                         .await
                         .unwrap();
+                    let order = rows.iter().map(|row| row.album_key).collect::<Vec<_>>();
+                    assert_eq!(count, order.len());
                     let mut paged = Vec::new();
                     for offset in 0..=order.len() {
                         let page = database
@@ -320,10 +331,13 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
     for album in &fixture.albums {
         for folder in [None, Some(fixture.folder)] {
             let page = database
-                .album_track_route_page(
-                    fixture.source,
-                    *album,
-                    folder,
+                .query_track_route_page(
+                    &library::TrackQuery {
+                        source: fixture.source,
+                        collection: Some(library::QueueCollection::AlbumKey(*album)),
+                        folder: folder,
+                        favorites_only: false,
+                    },
                     "",
                     library::TrackSort::TrackNumber,
                     false,
@@ -333,7 +347,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                 .await
                 .unwrap();
             let mut paged = Vec::new();
-            for offset in 0..=page.order.len() {
+            for offset in 0..=page.count {
                 paged.extend(
                     database
                         .collection_tracks_page(
@@ -354,7 +368,14 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                         .map(|row| row.media_uri),
                 );
             }
-            assert_eq!(paged, page.order);
+            assert_eq!(paged.len(), page.count);
+            assert_eq!(
+                paged,
+                page.first_rows
+                    .into_iter()
+                    .map(|row| row.media_uri)
+                    .collect::<Vec<_>>()
+            );
         }
     }
     let uris = [
@@ -381,7 +402,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
         ] {
             for descending in [false, true] {
                 for filter in ["", "global"] {
-                    let (order, _, _) = database
+                    let (count, _, rows) = database
                         .playlist_route_page(
                             source,
                             None,
@@ -393,6 +414,8 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                         )
                         .await
                         .unwrap();
+                    let order = rows.iter().map(|row| row.playlist_key).collect::<Vec<_>>();
+                    assert_eq!(count, order.len());
                     let mut paged = Vec::new();
                     for offset in 0..=order.len() {
                         paged.extend(
@@ -829,10 +852,9 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         .create_smart_playlist("Toolbar", &definition)
         .await
         .unwrap();
-    let (_, members) = database
-        .smart_playlist_membership(None, key, None, 500, &cancel)
+    let members = database
+        .smart_playlist_media_uri_order(None, key, None, 500, &cancel)
         .await
-        .unwrap()
         .unwrap();
     assert_eq!(members, uris.iter().rev().cloned().collect::<Vec<_>>());
     for sort in [
@@ -853,13 +875,19 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         TrackSort::Favorite,
     ] {
         let ascending = database
-            .smart_playlist_track_order(&members, "", sort, false, &cancel)
+            .smart_playlist_sorted_track_page(None, key, None, "", sort, false, 500, 0, 64, &cancel)
             .await
-            .unwrap();
+            .unwrap()
+            .into_iter()
+            .map(|row| row.media_uri)
+            .collect::<Vec<_>>();
         let descending = database
-            .smart_playlist_track_order(&members, "", sort, true, &cancel)
+            .smart_playlist_sorted_track_page(None, key, None, "", sort, true, 500, 0, 64, &cancel)
             .await
-            .unwrap();
+            .unwrap()
+            .into_iter()
+            .map(|row| row.media_uri)
+            .collect::<Vec<_>>();
         assert_eq!(ascending.len(), 11, "{sort:?}");
         assert_eq!(
             ascending.iter().rev().collect::<Vec<_>>(),
@@ -890,9 +918,23 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         ("", uris.clone()),
     ] {
         let order = database
-            .smart_playlist_track_order(&members, query, TrackSort::Title, false, &cancel)
+            .smart_playlist_sorted_track_page(
+                None,
+                key,
+                None,
+                query,
+                TrackSort::Title,
+                false,
+                500,
+                0,
+                64,
+                &cancel,
+            )
             .await
-            .unwrap();
+            .unwrap()
+            .into_iter()
+            .map(|row| row.media_uri)
+            .collect::<Vec<_>>();
         assert_eq!(order, expected, "{query}");
     }
     let rows = database
@@ -908,25 +950,35 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         .update_smart_playlist(key, "Toolbar", &definition)
         .await
         .unwrap();
-    let (_, limited) = database
-        .smart_playlist_membership(None, key, None, 500, &cancel)
+    let limited = database
+        .smart_playlist_media_uri_order(None, key, None, 500, &cancel)
         .await
-        .unwrap()
         .unwrap();
     assert_eq!(limited, members[..3]);
     let order = database
-        .smart_playlist_track_order(&limited, "", TrackSort::TrackNumber, false, &cancel)
+        .smart_playlist_sorted_track_page(
+            None,
+            key,
+            None,
+            "",
+            TrackSort::TrackNumber,
+            false,
+            500,
+            0,
+            64,
+            &cancel,
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.media_uri)
+        .collect::<Vec<_>>();
+    assert_eq!(order, uris[8..]);
+    definition.limit = None;
+    database
+        .update_smart_playlist(key, "Toolbar", &definition)
         .await
         .unwrap();
-    assert_eq!(order, uris[8..]);
-    // A view change uses its captured set; the next catalog refresh renews that set.
-    assert_eq!(
-        database
-            .smart_playlist_track_order(&members, "", TrackSort::Title, false, &cancel)
-            .await
-            .unwrap(),
-        uris
-    );
     sqlx::query("DELETE FROM listens WHERE media_uri=?1")
         .bind(&uris[0])
         .execute(&mut raw)
@@ -934,9 +986,23 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         .unwrap();
     for descending in [false, true] {
         let order = database
-            .smart_playlist_track_order(&members, "", TrackSort::LastPlayed, descending, &cancel)
+            .smart_playlist_sorted_track_page(
+                None,
+                key,
+                None,
+                "",
+                TrackSort::LastPlayed,
+                descending,
+                500,
+                0,
+                64,
+                &cancel,
+            )
             .await
-            .unwrap();
+            .unwrap()
+            .into_iter()
+            .map(|row| row.media_uri)
+            .collect::<Vec<_>>();
         assert_eq!(order.last(), Some(&uris[0]));
     }
     assert_eq!(
@@ -1109,7 +1175,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                 library::PlaylistSort::TrackCount,
                 library::PlaylistSort::Duration,
             ] {
-                let (order, _, rows) = database
+                let (count, _, rows) = database
                     .playlist_route_page(
                         source,
                         folder,
@@ -1121,6 +1187,8 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                     )
                     .await
                     .unwrap();
+                let order = rows.iter().map(|row| row.playlist_key).collect::<Vec<_>>();
+                assert_eq!(count, order.len());
                 assert!(order.contains(&global));
                 let row = rows.iter().find(|row| row.playlist_key == global).unwrap();
                 assert_eq!(row.track_count, 2);
@@ -1141,24 +1209,36 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                 .await
                 .unwrap()
                 .unwrap();
-            assert_eq!(detail.order.len(), 2);
+            assert_eq!(detail.count, 2);
             assert_eq!(detail.first_rows.len(), 2);
             for row in detail.first_rows {
                 assert_eq!(&row.media_uri, uri);
                 assert_eq!(row.artwork_binding, binding);
             }
-            let result = database
-                .smart_playlist_membership(source, smart, folder, 500, &cancel)
+            let summary = database
+                .smart_playlist_rows(source, &[smart], folder, 500, &cancel)
                 .await
                 .unwrap()
+                .pop()
                 .unwrap();
             let rows = database
-                .smart_playlist_track_rows(&result.1, &cancel)
+                .smart_playlist_sorted_track_page(
+                    source,
+                    smart,
+                    folder,
+                    "",
+                    library::TrackSort::Title,
+                    false,
+                    500,
+                    0,
+                    64,
+                    &cancel,
+                )
                 .await
                 .unwrap();
             let row = rows.iter().find(|row| &row.media_uri == uri).unwrap();
             assert_eq!(row.artwork_binding, binding);
-            assert_eq!(result.0.artwork_bindings, expected_sample);
+            assert_eq!(summary.artwork_bindings, expected_sample);
         }
         let current_rows = database.playlist_rows(&[current], &cancel).await.unwrap();
         assert_eq!(current_rows[0].representative_artwork, expected_sample);
@@ -1462,7 +1542,7 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(detail.genre.source_id, row.source_id);
+    assert_eq!(detail.source_id, row.source_id);
     let original = fixture
         .database
         .genre_rows(fixture.source, &[fixture.genre], None, &cancel)
@@ -1642,7 +1722,7 @@ async fn genre_routes_reject_an_artwork_only_identity_without_track_membership()
     drop(raw);
 
     for sort in [GenreSort::Title, GenreSort::TrackCount] {
-        let (order, _, _) = fixture
+        let (count, _, rows) = fixture
             .database
             .genre_route_page(
                 fixture.source,
@@ -1655,6 +1735,8 @@ async fn genre_routes_reject_an_artwork_only_identity_without_track_membership()
             )
             .await
             .expect("Genre route");
+        let order = rows.iter().map(|row| row.genre_key).collect::<Vec<_>>();
+        assert_eq!(count, order.len());
         assert!(!order.contains(&orphan));
     }
 }
@@ -1682,38 +1764,52 @@ async fn artist_play_order_stays_complete_beside_the_favorite_section() {
         .unwrap();
     let complete = fixture
         .database
-        .artist_track_route_page(
-            fixture.source,
-            fixture.artists[0],
-            false,
-            None,
+        .query_track_route_page(
+            &library::TrackQuery {
+                source: fixture.source,
+                collection: Some(library::QueueCollection::ArtistKey {
+                    key: fixture.artists[0],
+                    album_artist: false,
+                }),
+                folder: None,
+                favorites_only: false,
+            },
             "",
             library::TrackSort::Title,
-            false,
             false,
             RouteSeedWindow::top(),
             &cancel,
         )
         .await
         .unwrap()
-        .order;
+        .first_rows
+        .into_iter()
+        .map(|row| row.media_uri)
+        .collect::<Vec<_>>();
     let favorites = fixture
         .database
-        .artist_track_route_page(
-            fixture.source,
-            fixture.artists[0],
-            false,
-            None,
+        .query_track_route_page(
+            &library::TrackQuery {
+                source: fixture.source,
+                collection: Some(library::QueueCollection::ArtistKey {
+                    key: fixture.artists[0],
+                    album_artist: false,
+                }),
+                folder: None,
+                favorites_only: true,
+            },
             "",
             library::TrackSort::Title,
             false,
-            true,
             RouteSeedWindow::top(),
             &cancel,
         )
         .await
         .unwrap()
-        .order;
+        .first_rows
+        .into_iter()
+        .map(|row| row.media_uri)
+        .collect::<Vec<_>>();
     assert_eq!(favorites, [fixture.track_uris[0].clone()]);
     assert!(complete.len() > favorites.len());
 }
@@ -1779,78 +1875,106 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
 
     let track_artist_tracks = fixture
         .database
-        .artist_track_route_page(
-            fixture.source,
-            track_artist.artist_key,
-            false,
-            None,
+        .query_track_route_page(
+            &library::TrackQuery {
+                source: fixture.source,
+                collection: Some(library::QueueCollection::ArtistKey {
+                    key: track_artist.artist_key,
+                    album_artist: false,
+                }),
+                folder: None,
+                favorites_only: false,
+            },
             "",
             library::TrackSort::Title,
-            false,
             false,
             RouteSeedWindow::top(),
             &cancel,
         )
         .await
         .unwrap()
-        .order;
+        .first_rows
+        .into_iter()
+        .map(|row| row.media_uri)
+        .collect::<Vec<_>>();
     let album_artist_tracks = fixture
         .database
-        .artist_track_route_page(
-            fixture.source,
-            album_artist.artist_key,
-            true,
-            None,
+        .query_track_route_page(
+            &library::TrackQuery {
+                source: fixture.source,
+                collection: Some(library::QueueCollection::ArtistKey {
+                    key: album_artist.artist_key,
+                    album_artist: true,
+                }),
+                folder: None,
+                favorites_only: false,
+            },
             "",
             library::TrackSort::Title,
-            false,
             false,
             RouteSeedWindow::top(),
             &cancel,
         )
         .await
         .unwrap()
-        .order;
+        .first_rows
+        .into_iter()
+        .map(|row| row.media_uri)
+        .collect::<Vec<_>>();
     assert_eq!(track_artist_tracks, album_artist_tracks);
     assert_eq!(track_artist_tracks.len(), 2);
     assert!(
         fixture
             .database
-            .artist_track_route_page(
-                fixture.source,
-                track_artist.artist_key,
-                true,
-                None,
+            .query_track_route_page(
+                &library::TrackQuery {
+                    source: fixture.source,
+                    collection: Some(library::QueueCollection::ArtistKey {
+                        key: track_artist.artist_key,
+                        album_artist: true
+                    }),
+                    folder: None,
+                    favorites_only: false
+                },
                 "",
                 library::TrackSort::Title,
                 false,
-                false,
                 RouteSeedWindow::top(),
-                &cancel,
+                &cancel
             )
             .await
             .unwrap()
-            .order
+            .first_rows
+            .into_iter()
+            .map(|row| row.media_uri)
+            .collect::<Vec<_>>()
             .is_empty()
     );
     assert!(
         fixture
             .database
-            .artist_track_route_page(
-                fixture.source,
-                album_artist.artist_key,
-                false,
-                None,
+            .query_track_route_page(
+                &library::TrackQuery {
+                    source: fixture.source,
+                    collection: Some(library::QueueCollection::ArtistKey {
+                        key: album_artist.artist_key,
+                        album_artist: false
+                    }),
+                    folder: None,
+                    favorites_only: false
+                },
                 "",
                 library::TrackSort::Title,
                 false,
-                false,
                 RouteSeedWindow::top(),
-                &cancel,
+                &cancel
             )
             .await
             .unwrap()
-            .order
+            .first_rows
+            .into_iter()
+            .map(|row| row.media_uri)
+            .collect::<Vec<_>>()
             .is_empty()
     );
 
@@ -1985,7 +2109,10 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
                         )
                         .await
                         .expect("Track Artist order")
-                        .0;
+                        .2
+                        .into_iter()
+                        .map(|row| row.artist_key)
+                        .collect::<Vec<_>>();
                     assert!(track_artists.contains(&track_only), "{sort:?}");
                     assert!(track_artists.contains(&both), "{sort:?}");
                     assert!(!track_artists.contains(&album_only), "{sort:?}");
@@ -2005,7 +2132,10 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
                         )
                         .await
                         .expect("Album Artist order")
-                        .0;
+                        .2
+                        .into_iter()
+                        .map(|row| row.artist_key)
+                        .collect::<Vec<_>>();
                     assert!(album_artists.contains(&album_only), "{sort:?}");
                     assert!(album_artists.contains(&both), "{sort:?}");
                     assert!(!album_artists.contains(&track_only), "{sort:?}");
@@ -2047,32 +2177,39 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
         assert_eq!(row.track_count, 0);
         let detail = fixture
             .database
-            .artist_detail(fixture.source, artist, album_artist, None, &cancel)
+            .artist_rows(fixture.source, &[artist], album_artist, None, &cancel)
             .await
-            .expect("known artist detail")
+            .expect("known &[artist] detail")
+            .pop()
             .unwrap();
-        assert_eq!(detail.artist.artist_key, artist);
-        assert_eq!(detail.artist.track_count, 0);
-        assert!(detail.representative_albums.is_empty());
+        assert_eq!(detail.artist_key, artist);
+        assert_eq!(detail.track_count, 0);
     }
     assert_eq!(
         fixture
             .database
-            .artist_track_route_page(
-                fixture.source,
-                track_only,
-                false,
-                None,
+            .query_track_route_page(
+                &library::TrackQuery {
+                    source: fixture.source,
+                    collection: Some(library::QueueCollection::ArtistKey {
+                        key: track_only,
+                        album_artist: false
+                    }),
+                    folder: None,
+                    favorites_only: false
+                },
                 "",
                 library::TrackSort::Title,
                 false,
-                false,
                 RouteSeedWindow::top(),
-                &cancel,
+                &cancel
             )
             .await
             .expect("Track Artist Tracks")
-            .order,
+            .first_rows
+            .into_iter()
+            .map(|row| row.media_uri)
+            .collect::<Vec<_>>(),
         [fixture.track_uris[0].clone()]
     );
     assert_eq!(
@@ -2112,7 +2249,7 @@ async fn selected_source_defaults_have_the_three_activity_smart_playlists() {
             .expect("default Smart Playlists are idempotent")
     );
     let cancellation = ReadCancellation::new();
-    let (order, _, rows) = fixture
+    let (count, _, rows) = fixture
         .database
         .smart_playlist_route_page(
             Some(fixture.source),
@@ -2125,6 +2262,11 @@ async fn selected_source_defaults_have_the_three_activity_smart_playlists() {
         )
         .await
         .expect("read default Smart Playlists");
+    let order = rows
+        .iter()
+        .map(|row| row.smart_playlist_key)
+        .collect::<Vec<_>>();
+    assert_eq!(count, order.len());
     assert_eq!(order.len(), 3);
     assert_eq!(
         rows.iter()
@@ -2330,12 +2472,12 @@ async fn smart_visible_window_keeps_uri_order_and_latest_snapshot_without_rechec
     assert!(order.contains(&direct));
     let detail = fixture
         .database
-        .smart_playlist_membership(None, key, None, 500, &cancel)
+        .smart_playlist_rows(None, &[key], None, 500, &cancel)
         .await
         .unwrap()
+        .pop()
         .unwrap();
-    assert_eq!(detail.1, order);
-    assert_eq!(detail.0.track_count as usize, detail.1.len());
+    assert_eq!(detail.track_count as usize, order.len());
     definition.match_all.push(SmartPlaylistRule {
         field: SmartPlaylistRuleField::Title,
         operator: SmartPlaylistRuleOperator::Equals,
@@ -2538,7 +2680,7 @@ async fn smart_overview_keeps_the_full_order_and_only_the_requested_summary_wind
     ] {
         for descending in [false, true] {
             let window = RouteSeedWindow::relative(1.0);
-            let (order, start, rows) = fixture
+            let (count, start, rows) = fixture
                 .database
                 .smart_playlist_route_page(
                     Some(fixture.source),
@@ -2551,18 +2693,16 @@ async fn smart_overview_keeps_the_full_order_and_only_the_requested_summary_wind
                 )
                 .await
                 .unwrap();
-            assert_eq!(order.len(), 70);
+            let order = rows
+                .iter()
+                .map(|row| row.smart_playlist_key)
+                .collect::<Vec<_>>();
+            assert_eq!(count, 70);
             assert_eq!(start, 64);
             assert_eq!(rows.len(), 6);
             let expected = fixture
                 .database
-                .smart_playlist_rows(
-                    Some(fixture.source),
-                    &order[window.range(order.len())],
-                    folder,
-                    0,
-                    &cancel,
-                )
+                .smart_playlist_rows(Some(fixture.source), &order, folder, 0, &cancel)
                 .await
                 .unwrap();
             assert_eq!(rows, expected);
@@ -2618,7 +2758,10 @@ async fn smart_playlist_reordering_preserves_unique_positions() {
             )
             .await
             .expect("read reordered Smart Playlists")
-            .0,
+            .2
+            .into_iter()
+            .map(|row| row.smart_playlist_key)
+            .collect::<Vec<_>>(),
         [first, second, third]
     );
 }
@@ -2845,7 +2988,10 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
             )
             .await
             .expect("sorted Smart Playlist order")
-            .0,
+            .2
+            .into_iter()
+            .map(|row| row.smart_playlist_key)
+            .collect::<Vec<_>>(),
         [smart, second, policy]
     );
     assert_eq!(
@@ -2862,7 +3008,10 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
             )
             .await
             .expect("duration-sorted Smart Playlist order")
-            .0,
+            .2
+            .into_iter()
+            .map(|row| row.smart_playlist_key)
+            .collect::<Vec<_>>(),
         [smart, second, policy]
     );
     let smart_plan = sqlx::query_as::<_, (i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT smart_playlist_key FROM smart_playlists ORDER BY position,smart_playlist_key")
@@ -3059,20 +3208,22 @@ async fn home_search_and_radio_results_stay_bounded() {
     assert!(
         fixture
             .database
-            .track_route_page(
-                fixture.source,
-                None,
-                false,
+            .query_track_route_page(
+                &library::TrackQuery {
+                    source: fixture.source,
+                    collection: None,
+                    folder: None,
+                    favorites_only: false
+                },
                 "artist a",
                 library::TrackSort::Title,
                 false,
                 RouteSeedWindow::top(),
-                &cancel,
+                &cancel
             )
             .await
             .expect("complete Track filter")
-            .order
-            .len()
+            .count
             >= 2
     );
     let initial_home = fixture

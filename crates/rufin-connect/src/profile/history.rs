@@ -35,16 +35,17 @@ impl ProfileStore {
 
     /// Include membership observed after the snapshot, so a newly enrolled device
     /// cannot disappear from the acknowledgement used by another device to prune.
-    pub async fn finish_device_snapshot(&self, path: &Path, members: &[String]) -> Result<()> {
+    pub async fn finish_device_snapshot(&self, mut file: File, members: &[String]) -> Result<()> {
         let mut connection = self.connection.lock().await;
         register_on(&mut connection, members).await?;
         let members = participants(&mut connection).await?;
         drop(connection);
-        let path = path.to_owned();
         tokio::task::spawn_blocking(move || -> Result<()> {
-            let mut file = std::fs::OpenOptions::new().append(true).open(path)?;
-            serde_json::to_writer(&mut file, &members)?;
-            file.write_all(b"\n")?;
+            file.seek(std::io::SeekFrom::End(0))?;
+            let mut output = GzEncoder::new(&mut file, Compression::default());
+            serde_json::to_writer(&mut output, &members)?;
+            output.write_all(b"\n")?;
+            output.finish()?;
             file.sync_all()?;
             Ok(())
         })

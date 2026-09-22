@@ -4,6 +4,7 @@ import { api, state } from "./connection.js";
 import { $, button, icon, notice, openPopup, run } from "./ui.js";
 
 let genreOffset = 0;
+let genreTotal = 0;
 
 let genreTimer;
 
@@ -25,9 +26,10 @@ async function loadRandom(reset = false) {
     request = ++genreRequest,
     offset = genreOffset;
   const result = await api(
-    `/random?${new URLSearchParams({ source: state.source, ...(state.selectedLibrary ? { folder: state.selectedLibrary } : {}), q: $("genre-search").value, offset })}`,
+    `/random?${new URLSearchParams({ source: state.source, ...(state.selectedLibrary ? { folder: state.selectedLibrary } : {}), q: $("genre-search").value, offset, total: offset === 0 })}`,
   );
   if (request !== genreRequest || state.source !== requestedSource) return;
+  if (result.total !== null) genreTotal = result.total;
   if (reset || state.randomSource !== state.source) {
     const settings = result.settings;
     $("random-count").value = settings.limit;
@@ -49,8 +51,7 @@ async function loadRandom(reset = false) {
   const focused = document.activeElement?.dataset.genreId;
   window.replaceChildren();
   window.style.paddingTop = `${offset * genreRowHeight}px`;
-  window.style.paddingBottom =
-    result.genres.length === 64 ? `${32 * genreRowHeight}px` : "0px";
+  window.style.paddingBottom = `${Math.max(0, genreTotal - offset - result.genres.length) * genreRowHeight}px`;
   for (const row of result.genres) {
     const option = button(
       row.name,
@@ -152,10 +153,10 @@ function init() {
     }, 150);
   });
   $("genre-options").addEventListener("scroll", () => {
-    const offset = Math.max(
+    const offset = Math.min(Math.max(0, genreTotal - 64), Math.max(
       0,
       Math.floor($("genre-options").scrollTop / genreRowHeight / 32) * 32,
-    );
+    ));
     if (offset === genreOffset) return;
     genreOffset = offset;
     clearTimeout(genreTimer);

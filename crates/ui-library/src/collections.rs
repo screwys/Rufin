@@ -876,8 +876,16 @@ where
     T: Clone + 'static,
     M: IsA<gio::ListModel> + Clone + 'static,
 {
-    let selection =
-        selection.unwrap_or_else(|| gtk::MultiSelection::new(Some(model.clone())).upcast());
+    let selection = selection.unwrap_or_else(|| {
+        if model
+            .as_ref()
+            .is::<ui_shared::sparse_model::SparseObjectModel>()
+        {
+            ui_shared::selection::PositionSelectionModel::new(model.clone()).upcast()
+        } else {
+            gtk::MultiSelection::new(Some(model.clone())).upcast()
+        }
+    });
     let table = gtk::ColumnView::new(Some(selection.clone()));
     table.add_css_class("track-table");
     table.set_single_click_activate(false);
@@ -935,14 +943,27 @@ impl CatalogUi {
     pub fn related_tracks_view(self: &Rc<Self>, rows: Vec<TrackRow>) -> gtk::Widget {
         let key = LibraryListKey::Tracks;
         let settings = self.settings.current.borrow().library_list(key);
-        let order = rows.iter().map(|row| row.media_uri.clone()).collect();
-        let model = TrackCollectionModel::new(
-            self.library.clone(),
+        let order = rows
+            .iter()
+            .map(|row| row.media_uri.clone())
+            .collect::<Vec<_>>();
+        let database = self.library.clone();
+        let model = TrackCollectionModel::with_load(
             self.runtime.clone(),
-            order,
+            order.into(),
+            None,
             0,
             rows,
             settings,
+            Rc::new(move |keys, _, _, cancellation| {
+                let database = database.clone();
+                Box::pin(async move {
+                    database
+                        .track_rows_by_uri(&keys, &cancellation)
+                        .await
+                        .map_err(|error| error.to_string())
+                })
+            }),
         );
         let selection = TrackSelection::new(model.clone());
         self.register_current_route_track_selection_owner(selection.clone());
@@ -1258,7 +1279,10 @@ fn install_playlist_order_drop(
         };
         let target = match &source {
             MediaDragSource::Target { target, .. } => target,
-            MediaDragSource::Targets { targets, .. } if targets.len() == 1 => &targets[0],
+            MediaDragSource::Targets {
+                targets: ui_shared::media_drag::CollectionTargets::Ready(targets),
+                ..
+            } if targets.len() == 1 => &targets[0],
             _ => return drop_media(source),
         };
         let target = match target {
