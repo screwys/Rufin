@@ -665,6 +665,7 @@ pub fn external_best_lyrics(
     require_word_timing: bool,
     prefer_translations: bool,
     preferred_translation_language: &str,
+    has_existing_lyrics: bool,
     cancelled: &AtomicBool,
 ) -> Result<Option<Lyrics>, String> {
     if cancelled.load(Ordering::Acquire) {
@@ -724,12 +725,18 @@ pub fn external_best_lyrics(
         preferred_translation_language: preferred_translation_language.to_string(),
         ..crate::Settings::default()
     };
-    Ok(select_external_lyrics(results, &selection, cancelled))
+    Ok(select_external_lyrics(
+        results,
+        &selection,
+        has_existing_lyrics,
+        cancelled,
+    ))
 }
 
 fn select_external_lyrics(
     results: Vec<LyricsSearchResult>,
     selection: &crate::Settings,
+    has_existing_lyrics: bool,
     cancelled: &AtomicBool,
 ) -> Option<Lyrics> {
     let mut fallback = None;
@@ -748,7 +755,7 @@ fn select_external_lyrics(
         }
         match lyrics_from_search_result(&result) {
             Ok(Some(lyrics)) if lyrics.is_instrumental() => {
-                if fallback.is_none() {
+                if !has_existing_lyrics && fallback.is_none() {
                     return Some(lyrics);
                 }
             }
@@ -1981,7 +1988,7 @@ mod tests {
                         &[ExternalLyricsProvider::Lrclib],
                     );
                     let lyrics =
-                        select_external_lyrics(results, &selection, &AtomicBool::new(false))
+                        select_external_lyrics(results, &selection, false, &AtomicBool::new(false))
                             .unwrap();
                     assert_eq!(lyrics.is_instrumental(), instrumental);
                     if !instrumental {
@@ -2007,7 +2014,7 @@ mod tests {
             ..crate::Settings::default()
         };
         let lyrics =
-            select_external_lyrics(candidates, &selection, &AtomicBool::new(false)).unwrap();
+            select_external_lyrics(candidates, &selection, false, &AtomicBool::new(false)).unwrap();
         assert!(lyrics.documents()[0].has_word_timing());
     }
 
