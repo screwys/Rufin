@@ -397,9 +397,6 @@ msgstr "Tallennetaan..."
 msgid "Approve sign-in in your browser"
 msgstr "Viimeistele kirjautuminen selaimessa"
 
-msgid "Artist / Album"
-msgstr "Esittäjä / Albumi"
-
 msgid "Artist albums"
 msgstr ""
 
@@ -1323,9 +1320,6 @@ msgstr ""
 
 msgid "Flat"
 msgstr ""
-
-msgid "Folder"
-msgstr "Kansio"
 
 msgid "Folders"
 msgstr "Kansiot"
@@ -3909,6 +3903,12 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#~ msgid "Artist / Album"
+#~ msgstr "Esittäjä / Albumi"
+
+#~ msgid "Folder"
+#~ msgstr "Kansio"
 
 #~ msgid "Updated Rufin to {version}. Restart to apply."
 #~ msgstr ""

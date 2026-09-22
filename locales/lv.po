@@ -430,9 +430,6 @@ msgstr "Pielietot"
 msgid "Approve sign-in in your browser"
 msgstr "Apstipriniet pieteikšanos savā pārlūkprogrammā"
 
-msgid "Artist / Album"
-msgstr "Izpildītājs / Albums"
-
 msgid "Artist albums"
 msgstr "Izpildītāja albumi"
 
@@ -1319,9 +1316,6 @@ msgstr "Fiksēta pozīcija"
 
 msgid "Flat"
 msgstr "Plakans"
-
-msgid "Folder"
-msgstr "Mape"
 
 msgid "Folders"
 msgstr "Mapes"
@@ -3840,6 +3834,12 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "Artist / Album"
+#~ msgstr "Izpildītājs / Albums"
+
+#~ msgid "Folder"
+#~ msgstr "Mape"
 
 #~ msgid "This is not a valid Rufin visualizer preset."
 #~ msgstr "Šis nav derīgs Rufin vizualizācijas iepriekš iestatītais veids."

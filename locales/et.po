@@ -416,9 +416,6 @@ msgstr "Salvestan…"
 msgid "Approve sign-in in your browser"
 msgstr ""
 
-msgid "Artist / Album"
-msgstr "Esitaja / Album"
-
 msgid "Artist albums"
 msgstr "Esitajate albumid"
 
@@ -1394,9 +1391,6 @@ msgstr "Fikseeritud asukoht"
 
 msgid "Flat"
 msgstr "Ühetasane"
-
-msgid "Folder"
-msgstr "Kaust"
 
 msgid "Folders"
 msgstr "Kaustad"
@@ -4075,6 +4069,12 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Artist / Album"
+#~ msgstr "Esitaja / Album"
+
+#~ msgid "Folder"
+#~ msgstr "Kaust"
 
 #~ msgid "Color scheme"
 #~ msgstr "Kasutatavad värvid"

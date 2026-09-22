@@ -414,9 +414,6 @@ msgstr "Ukládání..."
 msgid "Approve sign-in in your browser"
 msgstr ""
 
-msgid "Artist / Album"
-msgstr "Interpret / Album"
-
 msgid "Artist albums"
 msgstr "Alba interpretů"
 
@@ -1415,9 +1412,6 @@ msgstr "Pevná pozice"
 
 msgid "Flat"
 msgstr "Plochý"
-
-msgid "Folder"
-msgstr "Složka"
 
 msgid "Folders"
 msgstr "Složky"
@@ -4145,6 +4139,12 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Artist / Album"
+#~ msgstr "Interpret / Album"
+
+#~ msgid "Folder"
+#~ msgstr "Složka"
 
 #~ msgid "Color scheme"
 #~ msgstr "Schéma barev"
