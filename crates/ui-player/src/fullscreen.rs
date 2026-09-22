@@ -1,9 +1,9 @@
 use super::equalizer::EqualizerSurface;
 use adw::prelude::*;
 use localization::tr;
-use playback::{EqualizerSettings, PlaybackView};
+use playback::PlaybackView;
 use std::{
-    cell::{Cell, RefCell},
+    cell::{Cell, OnceCell, RefCell},
     rc::Rc,
 };
 use ui_shared::artwork::ArtworkTile;
@@ -84,7 +84,8 @@ pub struct FullscreenPlayerParts {
     pub lyrics_host: gtk::Box,
     pub queue_panel: gtk::Box,
     pub queue_loading: adw::Spinner,
-    pub equalizer: EqualizerSurface,
+    pub equalizer: OnceCell<EqualizerSurface>,
+    equalizer_panel: gtk::ScrolledWindow,
     related_list: gtk::Box,
     related_status: gtk::Label,
     related_retry: gtk::Button,
@@ -233,10 +234,6 @@ pub fn build_fullscreen_player(visualizer_area: &gtk::DrawingArea) -> Fullscreen
     hero.append(&hero_content);
     stack.add_titled(&queue_panel, Some("queue"), &tr("Queue"));
     stack.add_titled(&related_panel, Some("related"), &tr("Related"));
-    let equalizer = EqualizerSurface::new(&EqualizerSettings::default());
-    equalizer.root.set_valign(gtk::Align::Center);
-    equalizer.set_band_height_request(500);
-    equalizer_panel.set_child(Some(&equalizer.root));
     stack.add_titled(&equalizer_panel, Some("equalizer"), &tr("Equalizer"));
     stack.set_visible_child_name("queue");
     visualizer_panel.append(visualizer_area);
@@ -293,7 +290,8 @@ pub fn build_fullscreen_player(visualizer_area: &gtk::DrawingArea) -> Fullscreen
         lyrics_host,
         queue_panel,
         queue_loading,
-        equalizer,
+        equalizer: OnceCell::new(),
+        equalizer_panel,
         related_list,
         related_status,
         related_retry,
@@ -557,13 +555,26 @@ pub fn connect_fullscreen_player_controls(shell: &Rc<crate::PlayerUi>) {
     shell
         .views
         .fullscreen_player
-        .equalizer
-        .connect_changed(move |equalizer| {
-            let Some(equalizer_shell) = equalizer_shell.upgrade() else {
+        .equalizer_panel
+        .connect_map(move |panel| {
+            let Some(shell) = equalizer_shell.upgrade() else {
                 return;
             };
-            equalizer_shell.update_playback_settings(|settings| {
-                settings.equalizer = equalizer.clone();
+            shell.views.fullscreen_player.equalizer.get_or_init(|| {
+                let equalizer =
+                    EqualizerSurface::new(&shell.settings.current.borrow().playback.equalizer);
+                equalizer.root.set_valign(gtk::Align::Center);
+                equalizer.set_band_height_request(500);
+                let changed_shell = Rc::downgrade(&shell);
+                equalizer.connect_changed(move |equalizer| {
+                    if let Some(shell) = changed_shell.upgrade() {
+                        shell.update_playback_settings(|settings| {
+                            settings.equalizer = equalizer.clone()
+                        });
+                    }
+                });
+                panel.set_child(Some(&equalizer.root));
+                equalizer
             });
         });
 }

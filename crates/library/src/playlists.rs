@@ -106,12 +106,76 @@ pub struct PlaylistEntryRow {
 #[derive(Clone)]
 pub struct PlaylistDetailPage {
     pub summary: PlaylistRow,
-    pub order: Vec<PlaylistEntryKey>,
+    pub count: usize,
     pub first_row_position: usize,
     pub first_rows: Vec<PlaylistEntryRow>,
 }
 
+pub(crate) async fn selected_playlist_entries_on(
+    connection: &mut SqliteConnection,
+    input: &crate::QueueInput,
+) -> LibraryResult<Vec<PlaylistEntryKey>> {
+    match input {
+        crate::QueueInput::PlaylistEntries { order, .. } => Ok(order.to_vec()),
+        crate::QueueInput::PlaylistSelection {
+            key,
+            filter,
+            sort,
+            descending,
+            ranges,
+            ..
+        } => {
+            let query = playlist_query(*key, None, *sort, *descending, filter);
+            crate::source_window::selected_values_on(connection, &query, &query.entry_key, ranges)
+                .await
+        }
+        _ => unreachable!("playlist entry selection"),
+    }
+}
+
 impl Database {
+    pub async fn selected_playlist_entries(
+        &self,
+        input: &crate::QueueInput,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<PlaylistEntryKey>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let result = selected_playlist_entries_on(&mut connection, input).await;
+        Database::clear_progress(&mut connection).await?;
+        result
+    }
+    pub async fn playlist_count(
+        &self,
+        source: Option<SourceKey>,
+        folder: Option<FolderKey>,
+        filter: &str,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<i64> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let count =
+            playlist_order_query(source, folder, PlaylistSort::Position, false, filter, true)
+                .build_query_scalar::<i64>()
+                .fetch_one(&mut *connection)
+                .await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(count)
+    }
+
+    pub async fn playlist_entries_count(
+        &self,
+        playlist: PlaylistKey,
+        folder: Option<FolderKey>,
+        filter: &str,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<i64> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let count = playlist_query(playlist, folder, PlaylistEntrySort::Position, false, filter)
+            .count(&mut connection)
+            .await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(count)
+    }
+
     pub async fn playlist_owner(
         &self,
         playlist: PlaylistKey,
@@ -139,19 +203,26 @@ impl Database {
         filter: &str,
         window: RouteSeedWindow,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<(Vec<PlaylistKey>, usize, Vec<PlaylistRow>)> {
+    ) -> LibraryResult<(usize, usize, Vec<PlaylistRow>)> {
         let source = source.into();
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let order =
-            Self::load_playlist_order(&mut transaction, source, folder, sort, descending, filter)
-                .await?;
-        let seed = window.range(order.len());
-        let first_row_position = seed.start;
-        let first_rows = Self::load_playlist_rows(&mut transaction, &order[seed]).await?;
-        transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
-        Ok((order, first_row_position, first_rows))
+        let count = self
+            .playlist_count(source, folder, filter, cancellation)
+            .await?
+            .max(0) as usize;
+        let range = window.range(count);
+        let rows = self
+            .playlist_page(
+                source,
+                folder,
+                sort,
+                descending,
+                filter,
+                range.start,
+                range.len(),
+                cancellation,
+            )
+            .await?;
+        Ok((count, range.start, rows))
     }
 
     pub async fn playlist_key_by_object(
@@ -250,7 +321,7 @@ impl Database {
         filter: &str,
     ) -> LibraryResult<Vec<PlaylistKey>> {
         Ok(
-            playlist_order_query(source, folder, sort, descending, filter)
+            playlist_order_query(source, folder, sort, descending, filter, false)
                 .build_query_scalar()
                 .persistent(false)
                 .fetch_all(connection)
@@ -272,7 +343,7 @@ impl Database {
     ) -> LibraryResult<Vec<PlaylistRow>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let keys = playlist_order_query(source, folder, sort, descending, filter)
+        let keys = playlist_order_query(source, folder, sort, descending, filter, false)
             .push(" LIMIT ")
             .push_bind(limit.min(PLAYLIST_ROW_LIMIT) as i64)
             .push(" OFFSET ")
@@ -379,21 +450,21 @@ impl Database {
             .await?
             .pop();
         let page = if let Some(summary) = summary {
-            let order = Self::load_playlist_entry_order(
+            let query = playlist_query(playlist, folder, sort, descending, "");
+            let count = query.count(&mut transaction).await?.max(0) as usize;
+            let range = window.range(count);
+            let first_row_position = range.start;
+            let keys = crate::source_window::selected_values_on(
                 &mut transaction,
-                playlist,
-                folder,
-                sort,
-                descending,
-                "",
+                &query,
+                &query.entry_key,
+                &[range],
             )
             .await?;
-            let range = window.range(order.len());
-            let first_row_position = range.start;
-            let first_rows = load_playlist_entry_rows(&mut transaction, &order[range]).await?;
+            let first_rows = load_playlist_entry_rows(&mut transaction, &keys).await?;
             Some(PlaylistDetailPage {
                 summary,
-                order,
+                count,
                 first_row_position,
                 first_rows,
             })
@@ -1571,11 +1642,15 @@ fn playlist_order_query(
     sort: PlaylistSort,
     descending: bool,
     filter: &str,
+    count: bool,
 ) -> QueryBuilder<Sqlite> {
     let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
     let aggregate = matches!(sort, PlaylistSort::TrackCount | PlaylistSort::Duration);
-    let mut query =
-        QueryBuilder::<Sqlite>::new("SELECT playlist.playlist_key FROM playlists playlist");
+    let mut query = QueryBuilder::<Sqlite>::new(if count {
+        "SELECT count(*) FROM playlists playlist"
+    } else {
+        "SELECT playlist.playlist_key FROM playlists playlist"
+    });
     if aggregate {
         query.push(" LEFT JOIN playlist_entries entry USING(playlist_key) LEFT JOIN tracks track USING(media_uri)");
     }
@@ -1587,6 +1662,9 @@ fn playlist_order_query(
             .push(" AND instr(playlist.normalized_name,")
             .push_bind(filter)
             .push(")>0");
+    }
+    if count {
+        return query;
     }
     if aggregate {
         query.push(" AND (playlist.source_key IS NULL OR ").push_bind(folder)

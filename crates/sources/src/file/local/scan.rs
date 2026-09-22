@@ -726,9 +726,12 @@ pub(crate) async fn stage_artwork(
                                     .trim_end_matches(['/', '\\'])
                                     .to_string();
                                 prefix.push(std::path::MAIN_SEPARATOR);
-                                let image = if scan
-                                    .local_artwork_directory_is_single_album(&prefix)
-                                    .await?
+                                // A sibling cover belongs to the directory, including CUE
+                                // and standalone copies with separate album identities.
+                                let image = if priority == 0
+                                    || scan
+                                        .local_artwork_directory_is_single_album(&prefix)
+                                        .await?
                                 {
                                     super::artwork::directory_image(directory).and_then(|path| {
                                         artwork_revision(&path).map(|revision| {

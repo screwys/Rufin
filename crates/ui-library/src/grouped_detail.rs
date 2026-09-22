@@ -30,9 +30,7 @@ pub struct GroupedDetailData {
     pub seed: u32,
     pub summary_items: Vec<(&'static str, String)>,
     pub context_menu: Option<Rc<dyn Fn(&gtk::Widget, Option<(f64, f64)>, CollectionPlay)>>,
-    pub tracks: Vec<String>,
-    pub first_row_position: usize,
-    pub first_rows: Vec<library::TrackRow>,
+    pub tracks: library::TrackRoutePage,
     pub table_context: &'static str,
     pub playback_context: String,
     pub play_label: &'static str,
@@ -80,8 +78,6 @@ impl CatalogUi {
             summary_items,
             context_menu,
             tracks,
-            first_row_position,
-            first_rows,
             table_context,
             playback_context,
             play_label,
@@ -112,8 +108,6 @@ impl CatalogUi {
         showcase_view.replace_summary(&summary_items);
         let track_projection = self.searchable_track_collection(
             tracks,
-            first_row_position,
-            first_rows,
             key,
             SearchableTrackOptions {
                 context_id: playback_context.clone(),

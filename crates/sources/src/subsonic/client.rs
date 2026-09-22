@@ -1717,16 +1717,13 @@ mod tests {
         assert_eq!(row.artwork_binding, results.albums[0].artwork_binding);
         assert!(row.artwork_binding.is_some());
         let album = database
-            .album_detail(
-                &results.albums[0].media_uri,
-                library::TrackSort::TrackNumber,
-                false,
+            .collection_media_uri_order(
+                &library::QueueCollection::AlbumKey(results.albums[0].album_key),
                 &library::ReadCancellation::new(),
             )
             .await
-            .unwrap()
             .unwrap();
-        assert_eq!(album.track_order, vec![row.media_uri.clone()]);
+        assert_eq!(album, vec![row.media_uri.clone()]);
         let songs = (0..125).map(|index| serde_json::json!({
             "id": format!("collection-{index}"), "title":format!("Track {index}"),
             "albumId":"album-one", "album":"Album", "artistId":"artist-one", "artist":"Artist"
@@ -1748,17 +1745,14 @@ mod tests {
             .unwrap();
         scan.finish().await.unwrap();
         let album = database
-            .album_detail(
-                &results.albums[0].media_uri,
-                library::TrackSort::TrackNumber,
-                false,
+            .collection_media_uri_order(
+                &library::QueueCollection::AlbumKey(results.albums[0].album_key),
                 &library::ReadCancellation::new(),
             )
             .await
-            .unwrap()
             .unwrap();
         assert_eq!(
-            album.track_order.len(),
+            album.len(),
             126,
             "explicit collection acquisition retains more than one presentation window and never removes unseen rows"
         );

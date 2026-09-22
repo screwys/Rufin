@@ -48,11 +48,24 @@ async fn converged_playlist_history_prunes_without_changing_sync_or_projection()
     let name = "playlist:[null,\"mix\"]";
     let old_file = directory.path().join("old");
     a.export_snapshot(&old_file).await.unwrap();
-    b.import_snapshot(&old_file).await.unwrap();
+    b.import_snapshot(std::fs::File::open(&old_file).unwrap())
+        .await
+        .unwrap();
     let file = directory.path().join("b-profile");
-    b.export_device_snapshot(&file, "b").await.unwrap();
-    b.finish_device_snapshot(&file, &members).await.unwrap();
-    assert!(!a.import_snapshot(&file).await.unwrap());
+    b.export_device_snapshot(std::fs::File::create(&file).unwrap(), "b")
+        .await
+        .unwrap();
+    b.finish_device_snapshot(
+        std::fs::OpenOptions::new().write(true).open(&file).unwrap(),
+        &members,
+    )
+    .await
+    .unwrap();
+    assert!(
+        !a.import_snapshot(std::fs::File::open(&file).unwrap())
+            .await
+            .unwrap()
+    );
     let before = snapshot(&a, name).await;
     let versions = a.changes(0, 10).await.unwrap();
     let file_revision = a.revision().await.unwrap();
@@ -68,13 +81,21 @@ async fn converged_playlist_history_prunes_without_changing_sync_or_projection()
     assert_eq!(a.changes(0, 10).await.unwrap(), versions);
     assert!(a.revision().await.unwrap() > file_revision);
     assert!(!a.projection_pending().await.unwrap());
-    assert!(!a.import_snapshot(&old_file).await.unwrap());
+    assert!(
+        !a.import_snapshot(std::fs::File::open(&old_file).unwrap())
+            .await
+            .unwrap()
+    );
     assert_eq!(snapshot(&a, name).await, compact);
 
     // An unpruned peer's full file includes old operations and new descendants.
     b.write_records(&[entry("three", 2)]).await.unwrap();
     b.export_snapshot(&file).await.unwrap();
-    assert!(a.import_snapshot(&file).await.unwrap());
+    assert!(
+        a.import_snapshot(std::fs::File::open(&file).unwrap())
+            .await
+            .unwrap()
+    );
     let updated = snapshot(&a, name).await;
     let updated_doc = LoroDoc::new();
     updated_doc.import(&updated).unwrap();
@@ -87,7 +108,11 @@ async fn converged_playlist_history_prunes_without_changing_sync_or_projection()
         .await
         .unwrap();
     a.export_snapshot(&file).await.unwrap();
-    assert!(c.import_snapshot(&file).await.unwrap());
+    assert!(
+        c.import_snapshot(std::fs::File::open(&file).unwrap())
+            .await
+            .unwrap()
+    );
     let bootstrapped = LoroDoc::new();
     bootstrapped.import(&snapshot(&c, name).await).unwrap();
     assert_eq!(bootstrapped.get_deep_value(), updated_doc.get_deep_value());
@@ -138,11 +163,15 @@ async fn acknowledging_an_unseen_concurrent_branch_does_not_prune_it_away() {
     a.write_records(&[preference(0)]).await.unwrap();
     let file = directory.path().join("profile");
     a.export_snapshot(&file).await.unwrap();
-    b.import_snapshot(&file).await.unwrap();
+    b.import_snapshot(std::fs::File::open(&file).unwrap())
+        .await
+        .unwrap();
     b.write_records(&[preference(100)]).await.unwrap();
     edit_history(&a).await;
     a.export_snapshot(&file).await.unwrap();
-    b.import_snapshot(&file).await.unwrap();
+    b.import_snapshot(std::fs::File::open(&file).unwrap())
+        .await
+        .unwrap();
     let before = snapshot(&a, "preference:theme").await;
     a.acknowledge_versions("b", &b.changes(0, 10).await.unwrap(), &members)
         .await
@@ -150,7 +179,9 @@ async fn acknowledging_an_unseen_concurrent_branch_does_not_prune_it_away() {
     a.prune_history("a", &members, 10).await.unwrap();
     assert_eq!(snapshot(&a, "preference:theme").await, before);
     b.export_snapshot(&file).await.unwrap();
-    a.import_snapshot(&file).await.unwrap();
+    a.import_snapshot(std::fs::File::open(&file).unwrap())
+        .await
+        .unwrap();
     a.prune_history("a", &members, 10).await.unwrap();
     let left = LoroDoc::new();
     left.import(&snapshot(&a, "preference:theme").await)

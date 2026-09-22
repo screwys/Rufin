@@ -523,29 +523,25 @@ pub fn remove_playlist_entry_selection(
     menus: &Rc<MediaMenus>,
     selection: PlaylistEntrySelectionSnapshot,
 ) -> bool {
-    if !selection.writable || selection.entries.is_empty() {
+    if !selection.writable || selection.count == 0 {
         return false;
     }
-    let item_count = selection.entries.len();
+    let item_count = selection.count;
     let task_selection = selection.clone();
     let database = menus.library.clone();
     let task = menus
         .runtime
-        .spawn(async move { task_selection.media_uris(&database).await });
+        .spawn(async move { task_selection.resolve(&database).await });
     let menus = Rc::downgrade(menus);
     gtk::glib::spawn_future_local(async move {
-        let Ok(Ok(media_uris)) = task.await else {
+        let Ok(Ok((entries, media_uris))) = task.await else {
             return;
         };
         let Some(menus) = menus.upgrade() else { return };
         if media_uris.len() != item_count {
             return;
         }
-        rufin_core::playlists::remove_playlist_entries(
-            &menus.source,
-            selection.playlist,
-            selection.entries.to_vec(),
-        );
+        rufin_core::playlists::remove_playlist_entries(&menus.source, selection.playlist, entries);
         let feedback = OperationFeedback {
             subject: DownloadSubject::for_media_uris("playlist", Some("Playlist"), &media_uris),
             preview_uris: media_uris.iter().take(4).cloned().collect(),
@@ -580,7 +576,7 @@ fn append_playlist_entry_selection_actions(
     menus: &Rc<MediaMenus>,
     selection: PlaylistEntrySelectionSnapshot,
 ) {
-    if selection.entries.is_empty() {
+    if selection.count == 0 {
         return;
     }
     surface.append_play_actions(&menus.settings.current.borrow().context_menu);
@@ -626,7 +622,7 @@ fn append_track_selection_actions(
     menus: &Rc<MediaMenus>,
     selection: TrackSelectionSnapshot,
 ) {
-    if selection.media_uris.is_empty() {
+    if selection.count == 0 {
         return;
     }
     surface.append_play_actions(&menus.settings.current.borrow().context_menu);
@@ -666,15 +662,31 @@ pub fn install_track_selection_download_actions(
     let remove_menus = Rc::clone(menus);
     surface.add_action("remove-downloads", move || {
         let downloads = remove_menus.downloads.clone();
-        downloads.remove(selection.media_uris.to_vec(), true);
+        let database = remove_menus.library.clone();
+        let selection = selection.clone();
+        let task = remove_menus
+            .runtime
+            .spawn(async move { selection.media_uris(&database).await });
+        glib::spawn_future_local(async move {
+            if let Ok(Ok(uris)) = task.await {
+                downloads.remove(uris, true);
+            }
+        });
     });
 }
 
 pub fn download_track_selection(menus: &Rc<MediaMenus>, selection: TrackSelectionSnapshot) -> bool {
     let source = menus.source.clone();
-    let subject = selection.download_subject();
-    let media_uris = selection.media_uris.to_vec();
-    source.download_media(subject, media_uris);
+    let database = menus.library.clone();
+    let task = menus
+        .runtime
+        .spawn(async move { selection.media_uris(&database).await });
+    glib::spawn_future_local(async move {
+        if let Ok(Ok(uris)) = task.await {
+            let subject = DownloadSubject::for_media_uris("track-selection", None, &uris);
+            source.download_media(subject, uris);
+        }
+    });
     true
 }
 

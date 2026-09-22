@@ -357,8 +357,9 @@ pub(super) async fn list_data(
         )
         .await
         .map_err(internal)?;
+    let total = catalog::page_total(products, parameters, "playlists").await?;
     Ok(
-        json!({"offset":offset,"limit":limit,"playlists":rows.iter().map(|row| json!({"id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":crate::playlists::playlist_artwork_bindings(row, prefer_server_covers).len()})).collect::<Vec<_>>()}),
+        json!({"total":total,"offset":offset,"limit":limit,"playlists":rows.iter().map(|row| json!({"id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":crate::playlists::playlist_artwork_bindings(row, prefer_server_covers).len()})).collect::<Vec<_>>()}),
     )
 }
 
@@ -407,8 +408,9 @@ pub(super) async fn entries_data(
         )
         .await
         .map_err(internal)?;
+    let total = catalog::page_total(products, parameters, "entries").await?;
     Ok(
-        json!({"offset":offset,"limit":limit,"entries":rows.iter().map(|row| json!({"id":row.playlist_entry_key,"position":row.position,"uri":row.media_uri,"title":row.title,"artist":row.artist,"album":row.album,"favorite":row.favorite,"duration_ms":row.duration_millis})).collect::<Vec<_>>()}),
+        json!({"total":total,"offset":offset,"limit":limit,"entries":rows.iter().map(|row| json!({"id":row.playlist_entry_key,"position":row.position,"uri":row.media_uri,"title":row.title,"artist":row.artist,"album":row.album,"favorite":row.favorite,"duration_ms":row.duration_millis})).collect::<Vec<_>>()}),
     )
 }
 

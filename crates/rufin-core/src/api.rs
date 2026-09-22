@@ -172,7 +172,8 @@ async fn tracks_data(
         .map_err(internal)?
         .map_err(bad_request)?;
     let rows = rows.iter().map(track_row_json).collect::<Vec<_>>();
-    Ok(json!({"offset":offset,"limit":limit,"tracks":rows}))
+    let total = catalog::page_total(products, parameters, "tracks").await?;
+    Ok(json!({"offset":offset,"limit":limit,"total":total,"tracks":rows}))
 }
 
 async fn queue_state(

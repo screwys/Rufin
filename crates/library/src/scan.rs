@@ -1206,11 +1206,11 @@ impl Scan {
         query.push_values(&prefixes, |mut row, (prefix, directory)| {
             row.push_bind(*prefix).push_bind(*directory);
         });
-        query.push("), eligible AS (SELECT prefix FROM requested WHERE directory OR 1=(SELECT count(DISTINCT track.album_key) FROM tracks track WHERE track.source_key=")
+        query.push("), eligible AS (SELECT prefix,directory OR 1=(SELECT count(DISTINCT track.album_key) FROM tracks track WHERE track.source_key=")
             .push_bind(source)
-            .push(" AND track.album_key IS NOT NULL AND track.source_path>=requested.prefix AND track.source_path<requested.prefix||char(1114111))) INSERT OR IGNORE INTO temp.scan_local_component_paths(path) SELECT file.path FROM eligible JOIN local_files file ON file.source_key=")
+            .push(" AND track.album_key IS NOT NULL AND track.source_path>=requested.prefix AND track.source_path<requested.prefix||char(1114111)) AS descendants FROM requested) INSERT OR IGNORE INTO temp.scan_local_component_paths(path) SELECT file.path FROM eligible JOIN local_files file ON file.source_key=")
             .push_bind(source)
-            .push(" AND file.path>=eligible.prefix AND file.path<eligible.prefix||char(1114111)");
+            .push(" AND file.path>=eligible.prefix AND file.path<eligible.prefix||char(1114111) AND (eligible.descendants OR (file.kind<>'directory' AND instr(substr(file.path,length(eligible.prefix)+1),substr(eligible.prefix,-1))=0))");
         self.stage(query.build()).await
     }
 

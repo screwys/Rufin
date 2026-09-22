@@ -7615,6 +7615,7 @@ version = "0.15.4"
 dependencies = [
  "anyhow",
  "blake3",
+ "flate2",
  "futures-util",
  "iroh",
  "iroh-blobs",

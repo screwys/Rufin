@@ -43,12 +43,6 @@ use ui_shared::recycled_cells::{
 };
 use ui_shared::sparse_model::connect_sparse_bind;
 
-fn begin_order_request(generation: &std::cell::Cell<u64>) -> u64 {
-    let next = generation.get().wrapping_add(1);
-    generation.set(next);
-    next
-}
-
 #[derive(Clone)]
 pub struct PlaylistEntriesView {
     widget: gtk::Widget,
@@ -58,7 +52,6 @@ pub struct PlaylistEntriesView {
     search: gtk::SearchEntry,
     stack: gtk::Stack,
     toolbar_widget: gtk::Widget,
-    order_generation: Rc<std::cell::Cell<u64>>,
 }
 
 impl PlaylistEntriesView {
@@ -97,34 +90,26 @@ impl PlaylistEntriesView {
 
     pub fn connect_search_request(
         &self,
-        callback: impl Fn(u64, PlaylistEntryProjectionRequest) + 'static,
+        callback: impl Fn(PlaylistEntryProjectionRequest) + 'static,
     ) {
         let model = self.model.clone();
-        let generation = Rc::clone(&self.order_generation);
         self.search.connect_search_changed(move |search| {
             if model.set_query(&search.text()) {
-                callback(begin_order_request(&generation), model.projection_request());
+                callback(model.projection_request());
             }
         });
     }
 
-    pub fn begin_order_request(&self) -> (u64, PlaylistEntryProjectionRequest) {
-        (
-            begin_order_request(&self.order_generation),
-            self.model.projection_request(),
-        )
+    pub fn projection_request(&self) -> PlaylistEntryProjectionRequest {
+        self.model.projection_request()
     }
 
-    pub fn replace_order(&self, generation: u64, order: Vec<library::PlaylistEntryKey>) -> bool {
-        if self.order_generation.get() != generation {
-            return false;
-        }
-        let empty = order.is_empty();
-        self.model.replace_order(order);
+    pub fn replace_count(&self, request: PlaylistEntryProjectionRequest, count: usize) {
+        let empty = count == 0;
+        self.model.replace_count(count, request);
         self.toolbar_widget.set_visible(!empty);
         self.stack
             .set_visible_child_name(if empty { "empty" } else { "content" });
-        true
     }
 
     pub fn apply_library_list_settings(
@@ -150,7 +135,7 @@ impl CatalogUi {
         playlist: PlaylistKey,
         playlist_name: String,
         writable: bool,
-        order: Vec<library::PlaylistEntryKey>,
+        count: usize,
         first_row_position: usize,
         first_rows: Vec<PlaylistEntryRow>,
     ) -> PlaylistEntriesView {
@@ -163,7 +148,7 @@ impl CatalogUi {
             self.library.clone(),
             self.runtime.clone(),
             playlist,
-            order,
+            count,
             first_row_position,
             first_rows,
             settings,
@@ -211,7 +196,6 @@ impl CatalogUi {
             search,
             stack,
             toolbar_widget,
-            order_generation: Rc::new(std::cell::Cell::default()),
         }
     }
 }
@@ -724,7 +708,7 @@ fn install_playlist_entry_drag(
                     .map(|selection| selection.single_entry(entry.playlist_entry_key))
             })?;
         let mut providers = Vec::new();
-        if selection.writable && selection.entries.len() == 1 {
+        if selection.writable && selection.count == 1 {
             providers.push(gtk::gdk::ContentProvider::for_value(
                 &entry.playlist_entry_key.raw().to_value(),
             ));
@@ -970,15 +954,6 @@ fn playlist_entry_column_width(field: LibraryField) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn prepared_playlist_update_rejects_a_stale_request() {
-        let lane = std::cell::Cell::default();
-        let stale = begin_order_request(&lane);
-        let current = begin_order_request(&lane);
-        assert_ne!(lane.get(), stale);
-        assert_eq!(lane.get(), current);
-    }
 
     #[test]
     fn playlist_placeholder_keeps_number_and_actions_inert_until_ready() {

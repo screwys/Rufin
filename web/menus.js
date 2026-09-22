@@ -202,6 +202,7 @@ function renderPlaylistSubmenu(menu, target, signal) {
   );
   menu.lastChild.append(document.createTextNode(tr("New Playlist")));
   let offset = 0,
+    total = 0,
     request = 0,
     timer;
   const load = async () => {
@@ -210,17 +211,18 @@ function renderPlaylistSubmenu(menu, target, signal) {
     const params = new URLSearchParams({
       offset: start,
       limit: 64,
+      total: start === 0,
       sort: "title",
       q: search.value,
     });
     if (state.source) params.set("source", state.source);
     const result = await api(`/playlists?${params}`, "GET", undefined, signal);
     if (signal.aborted || turn !== request) return;
+    if (result.total !== null) total = result.total;
     const focused = document.activeElement?.dataset.playlistId;
     window.replaceChildren();
     window.style.paddingTop = `${start * 32}px`;
-    window.style.paddingBottom =
-      result.playlists.length === 64 ? "1024px" : "0px";
+    window.style.paddingBottom = `${Math.max(0, total - start - result.playlists.length) * 32}px`;
     for (const row of result.playlists) {
       const item = button(
         row.name,
@@ -253,7 +255,7 @@ function renderPlaylistSubmenu(menu, target, signal) {
     }, 150);
   });
   scroll.addEventListener("scroll", () => {
-    const next = Math.max(0, Math.floor(scroll.scrollTop / 32 / 32) * 32);
+    const next = Math.min(Math.max(0, total - 64), Math.max(0, Math.floor(scroll.scrollTop / 32 / 32) * 32));
     if (next !== offset) {
       offset = next;
       clearTimeout(timer);

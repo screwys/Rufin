@@ -345,10 +345,13 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
     let cancel = ReadCancellation::new();
     let album = fixture
         .database
-        .album_track_route_page(
-            fixture.source,
-            fixture.albums[0],
-            None,
+        .query_track_route_page(
+            &library::TrackQuery {
+                source: fixture.source,
+                collection: Some(library::QueueCollection::AlbumKey(fixture.albums[0])),
+                folder: None,
+                favorites_only: false,
+            },
             "",
             TrackSort::TrackNumber,
             false,
@@ -357,7 +360,10 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
         )
         .await
         .expect("Album Track order")
-        .order;
+        .first_rows
+        .into_iter()
+        .map(|row| row.media_uri)
+        .collect::<Vec<_>>();
     let playlist_key = fixture
         .database
         .create_playlist(Some(fixture.source), "Collection", &fixture.track_uris[..3])
@@ -453,10 +459,13 @@ async fn source_membership_matches_track_view_sort_filter_and_null_order() {
             for filter in ["", "a"] {
                 let view = fixture
                     .database
-                    .track_route_page(
-                        fixture.source,
-                        None,
-                        false,
+                    .query_track_route_page(
+                        &library::TrackQuery {
+                            source: fixture.source,
+                            collection: None,
+                            folder: None,
+                            favorites_only: false,
+                        },
                         filter,
                         sort,
                         descending,
@@ -481,7 +490,10 @@ async fn source_membership_matches_track_view_sort_filter_and_null_order() {
                 let items = source_items(&fixture.database, input, None).await;
                 assert_eq!(
                     items.iter().map(|row| &row.media_uri).collect::<Vec<_>>(),
-                    view.order.iter().collect::<Vec<_>>(),
+                    view.first_rows
+                        .iter()
+                        .map(|row| &row.media_uri)
+                        .collect::<Vec<_>>(),
                     "{sort:?}, descending={descending}, filter={filter}"
                 );
             }

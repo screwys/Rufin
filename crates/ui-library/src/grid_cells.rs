@@ -408,8 +408,16 @@ where
     Demand: Fn(u32) + 'static,
     M: IsA<gio::ListModel> + Clone + 'static,
 {
-    let selection =
-        selection.unwrap_or_else(|| gtk::MultiSelection::new(Some(model.clone())).upcast());
+    let selection = selection.unwrap_or_else(|| {
+        if model
+            .as_ref()
+            .is::<ui_shared::sparse_model::SparseObjectModel>()
+        {
+            ui_shared::selection::PositionSelectionModel::new(model.clone()).upcast()
+        } else {
+            gtk::MultiSelection::new(Some(model.clone())).upcast()
+        }
+    });
     let factory = gtk::SignalListItemFactory::new();
     let cells = Rc::new(RefCell::new(Vec::<
         glib::WeakRef<cards::CollectionGridCardInset>,
@@ -1064,24 +1072,43 @@ impl ReusableCollectionGridCell<AlbumRow> for AlbumGridCell {
     }
 }
 
-enum GridPlayingTarget {
+enum MediaPlayingTarget {
     Track(String),
     Collection(String),
 }
 
-pub struct GridPlayingBinding {
-    title: glib::WeakRef<gtk::Label>,
-    target: RefCell<Option<GridPlayingTarget>>,
+pub struct MediaPlayingBinding {
+    widget: glib::WeakRef<gtk::Widget>,
+    target: RefCell<Option<MediaPlayingTarget>>,
 }
 
-impl GridPlayingBinding {
+impl MediaPlayingBinding {
+    pub fn new(shell: &CatalogUi, widget: &impl IsA<gtk::Widget>) -> Rc<Self> {
+        let binding = Rc::new(Self {
+            widget: widget.as_ref().downgrade(),
+            target: RefCell::new(None),
+        });
+        let mut cells = shell.media_playing_cells.borrow_mut();
+        cells.retain(|cell| cell.strong_count() != 0);
+        cells.push(Rc::downgrade(&binding));
+        binding
+    }
+
+    pub fn bind(&self, shell: &CatalogUi, target: Option<PlaybackTarget>) {
+        self.target.replace(target.map(|target| match target {
+            PlaybackTarget::Track(uri) => MediaPlayingTarget::Track(uri),
+            target => MediaPlayingTarget::Collection(target.context_id()),
+        }));
+        self.refresh(shell.current.borrow().as_ref());
+    }
+
     pub fn refresh(&self, current: Option<&ui_shared::mounted_route::RouteCurrentTrack>) {
-        let Some(title) = self.title.upgrade() else {
+        let Some(widget) = self.widget.upgrade() else {
             return;
         };
         let playing = current.is_some_and(|current| match self.target.borrow().as_ref() {
-            Some(GridPlayingTarget::Track(uri)) => uri == &current.media_uri,
-            Some(GridPlayingTarget::Collection(expected)) => {
+            Some(MediaPlayingTarget::Track(uri)) => uri == &current.media_uri,
+            Some(MediaPlayingTarget::Collection(expected)) => {
                 current.context.as_ref().is_some_and(|context| {
                     context.context_id == *expected
                         || context
@@ -1093,7 +1120,7 @@ impl GridPlayingBinding {
             None => false,
         });
         ui_shared::recycled_cells::set_track_playing(
-            title.upcast_ref(),
+            &widget,
             playing,
             current.is_some_and(|current| current.paused),
         );
@@ -1107,7 +1134,7 @@ pub struct CollectionGridCardCell {
     downloaded: RefCell<Option<gtk::Image>>,
     fields: RefCell<Vec<CollectionGridFieldCell>>,
     ready: Cell<bool>,
-    playing_target: RefCell<Option<Rc<GridPlayingBinding>>>,
+    playing_target: RefCell<Option<Rc<MediaPlayingBinding>>>,
 }
 
 impl CollectionGridCardCell {
@@ -1162,21 +1189,8 @@ impl CollectionGridCardCell {
 
     pub fn bind_playing_target(&self, shell: &CatalogUi, target: PlaybackTarget) {
         let mut binding = self.playing_target.borrow_mut();
-        let binding = binding.get_or_insert_with(|| {
-            let binding = Rc::new(GridPlayingBinding {
-                title: self.title.downgrade(),
-                target: RefCell::new(None),
-            });
-            let mut cells = shell.grid_playing_cells.borrow_mut();
-            cells.retain(|cell| cell.strong_count() != 0);
-            cells.push(Rc::downgrade(&binding));
-            binding
-        });
-        binding.target.replace(Some(match target {
-            PlaybackTarget::Track(uri) => GridPlayingTarget::Track(uri),
-            target => GridPlayingTarget::Collection(target.context_id()),
-        }));
-        binding.refresh(shell.current.borrow().as_ref());
+        let binding = binding.get_or_insert_with(|| MediaPlayingBinding::new(shell, &self.title));
+        binding.bind(shell, Some(target));
     }
 
     pub fn set_download_target(&self, shell: &Rc<CatalogUi>, downloaded: bool) {

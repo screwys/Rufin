@@ -187,7 +187,7 @@ async fn random_settings(
     }
     Ok(json_response(
         StatusCode::OK,
-        json!({"settings":settings,"selected_genre":selected_genre,"genres":rows.iter().map(|row|json!({"id":row.genre_key,"object_id":row.object_id,"name":row.name})).collect::<Vec<_>>()}),
+        json!({"total":catalog::page_total(&products, &parameters, "genres").await?,"settings":settings,"selected_genre":selected_genre,"genres":rows.iter().map(|row|json!({"id":row.genre_key,"object_id":row.object_id,"name":row.name})).collect::<Vec<_>>()}),
     ))
 }
 

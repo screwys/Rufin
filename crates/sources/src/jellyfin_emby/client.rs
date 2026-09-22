@@ -1223,7 +1223,11 @@ mod tests {
                 .source_playlist_entry_object_ids(
                     publication.source,
                     key,
-                    &page.order,
+                    &page
+                        .first_rows
+                        .iter()
+                        .map(|row| row.playlist_entry_key)
+                        .collect::<Vec<_>>(),
                     &cancellation
                 )
                 .await
@@ -1781,19 +1785,25 @@ mod tests {
             .expect("apply exact removal");
         assert!(
             database
-                .track_route_page(
-                    source_key,
-                    None,
-                    false,
+                .query_track_route_page(
+                    &library::TrackQuery {
+                        source: source_key,
+                        collection: None,
+                        folder: None,
+                        favorites_only: false
+                    },
                     "",
                     library::TrackSort::Title,
                     false,
                     library::RouteSeedWindow::top(),
-                    &cancellation,
+                    &cancellation
                 )
                 .await
                 .expect("Track page")
-                .order
+                .first_rows
+                .into_iter()
+                .map(|row| row.media_uri)
+                .collect::<Vec<_>>()
                 .is_empty()
         );
         assert_eq!(

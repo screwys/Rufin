@@ -846,10 +846,13 @@ impl Shell {
             "Track route",
             move |window, cancellation| async move {
                 database
-                    .track_route_page(
-                        source_key,
-                        folder,
-                        favorites_only,
+                    .query_track_route_page(
+                        &library::TrackQuery {
+                            source: source_key,
+                            collection: None,
+                            folder,
+                            favorites_only,
+                        },
                         "",
                         settings.sort_key.track_sort(),
                         settings.descending,
@@ -858,22 +861,10 @@ impl Shell {
                     )
                     .await
             },
-            move |shell, page, selected| {
-                let library::TrackRoutePage {
-                    disc_sections: _,
-                    order,
-                    first_row_position,
-                    first_rows,
-                } = page;
-                match build_route {
-                    Route::Tracks => {
-                        shell.library_tracks_route(order, first_row_position, first_rows, selected)
-                    }
-                    Route::Favorites => {
-                        shell.favorites_route(order, first_row_position, first_rows, selected)
-                    }
-                    _ => unreachable!("root Track route owner"),
-                }
+            move |shell, page, selected| match build_route {
+                Route::Tracks => shell.library_tracks_route(page, selected),
+                Route::Favorites => shell.favorites_route(page, selected),
+                _ => unreachable!("root Track route owner"),
             },
         );
     }
@@ -900,9 +891,7 @@ impl Shell {
                 )
                 .await
             },
-            move |shell, (detail, first_row_position, first_rows)| {
-                shell.album_detail_view(detail, first_row_position, first_rows)
-            },
+            move |shell, detail| shell.album_detail_view(detail),
         );
     }
 
@@ -1104,8 +1093,8 @@ impl Shell {
                         )),
                     );
                 };
-                let source = detail.summary.source_key;
                 let artist = detail.summary.artist_key;
+                let source = detail.summary.source_key;
                 shell.artist_detail_view(artist, album_artist, Some(detail), source)
             },
         );
@@ -1208,12 +1197,11 @@ impl Shell {
                         )),
                     );
                 };
-                let source = detail.summary.source_key;
                 let artist = detail.summary.artist_key;
                 if favorites_only {
-                    shell.artist_favorite_tracks_view(artist, album_artist, Some(detail), source)
+                    shell.artist_favorite_tracks_view(artist, album_artist, Some(detail))
                 } else {
-                    shell.artist_tracks_view(artist, album_artist, Some(detail), source)
+                    shell.artist_tracks_view(artist, album_artist, Some(detail))
                 }
             },
         );
@@ -1234,15 +1222,7 @@ impl Shell {
             move |window, cancellation| async move {
                 load_named_detail(&database, id, &settings, window, &cancellation).await
             },
-            move |shell, (summary, page)| {
-                let library::TrackRoutePage {
-                    disc_sections: _,
-                    order,
-                    first_row_position,
-                    first_rows,
-                } = page;
-                shell.named_detail_view(id, summary, order, first_row_position, first_rows)
-            },
+            move |shell, detail| shell.named_detail_view(id, detail),
         );
     }
 

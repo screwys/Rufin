@@ -1331,7 +1331,10 @@ mod tests {
             );
             let file = directory.path().join("snapshot");
             documents.export_snapshot(&file).await.unwrap();
-            receiving_documents.import_snapshot(&file).await.unwrap();
+            receiving_documents
+                .import_snapshot(std::fs::File::open(&file).unwrap())
+                .await
+                .unwrap();
             // A profile already caught up before acknowledgement tracking must
             // exchange versions again, without importing its catalog again.
             receiving_documents

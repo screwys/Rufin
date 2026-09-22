@@ -352,6 +352,14 @@ pub(crate) struct Shared {
 }
 
 impl Shared {
+    pub(crate) fn cached_source_counts(&self, source: &SourceId) -> Option<(usize, usize)> {
+        self.catalog_counts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(source)
+            .copied()
+    }
+
     async fn refresh_source_counts(
         &self,
         source_id: &SourceId,
@@ -2924,15 +2932,13 @@ impl SourceOwner {
         let source_id = match library::source_entity_parts(target.media_uri()) {
             Some((source_id, kind, _)) if kind == target.kind() => source_id,
             _ => match target {
-                FavoriteTarget::Track(media_uri) => SourceId::new(
-                    self.shared
-                        .database
-                        .track_row_by_uri(media_uri, &ReadCancellation::new())
-                        .await
-                        .ok()
-                        .flatten()?
-                        .source_id,
-                ),
+                FavoriteTarget::Track(media_uri) => self
+                    .shared
+                    .database
+                    .track_source_by_uri(media_uri, &ReadCancellation::new())
+                    .await
+                    .ok()
+                    .flatten()?,
                 FavoriteTarget::Album(_) | FavoriteTarget::Artist(_) => return None,
             },
         };
@@ -3038,10 +3044,9 @@ impl SourceOwner {
             None => self
                 .shared
                 .database
-                .track_row_by_uri(media_uri, &ReadCancellation::new())
+                .track_source_by_uri(media_uri, &ReadCancellation::new())
                 .await
-                .map_err(string_error)?
-                .map(|row| SourceId::new(row.source_id)),
+                .map_err(string_error)?,
         }
         .ok_or_else(source_access_unavailable)?;
         self.client(&source_id)

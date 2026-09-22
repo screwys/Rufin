@@ -49,6 +49,33 @@ columnview > header {
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
 }
 
+.artist-album-table-header {
+  padding: 6px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+}
+
+.artist-album-table-header > .table-header {
+  padding: 0 6px;
+  border-bottom: 0;
+}
+
+.artist-album-table-row > * {
+  padding: 8px 6px;
+}
+
+.artist-album-table-header > *:not(:first-child),
+.artist-album-table-row > *:not(:first-child) {
+  border-left: 1px solid transparent;
+}
+
+listview.artist-release-list row:hover .artist-album-table-row {
+  background: color-mix(in srgb, var(--window-fg-color) 7%, transparent);
+}
+
+listview.artist-release-list row:selected .artist-album-table-row {
+  background: color-mix(in srgb, var(--accent-bg-color) 25%, transparent);
+}
+
 .playlist-drag-preview {
   background: var(--card-bg-color);
   color: var(--window-fg-color);
@@ -754,16 +781,20 @@ label.track-row-playing:not(.track-row-paused) {
   opacity: 0;
 }
 
-row:hover .track-row-index-number,
-row:focus-within .track-row-index-number,
+columnview > listview > row:hover .track-row-index-number,
+columnview > listview > row:focus-within .track-row-index-number,
+.artist-album-table-row:hover .track-row-index-number,
+.artist-album-table-row:focus-within .track-row-index-number,
 .track-row-index-cell.track-row-playing:not(.track-row-paused) .track-row-index-number,
 .album-detail-track-row:hover .track-row-index-number,
 .album-detail-track-row:focus-within .track-row-index-number {
   opacity: 0;
 }
 
-row:hover .track-row-play,
-row:focus-within .track-row-play,
+columnview > listview > row:hover .track-row-play,
+columnview > listview > row:focus-within .track-row-play,
+.artist-album-table-row:hover .track-row-play,
+.artist-album-table-row:focus-within .track-row-play,
 .album-detail-track-row:hover .track-row-play,
 .album-detail-track-row:focus-within .track-row-play {
   opacity: 1;
@@ -791,7 +822,9 @@ playing-indicator {
 
 .row-menu-button { opacity: 0; }
 
-row:hover .row-menu-button,
+columnview > listview > row:hover .row-menu-button,
+row.search-result:hover .row-menu-button,
+.artist-album-table-row:hover .row-menu-button,
 .album-detail-track-row:hover .row-menu-button,
 .row-menu-button:focus-visible { opacity: 1; }
 
@@ -2223,7 +2256,8 @@ button.download-queue-pause image {
   opacity: 0;
 }
 
-columnview row:hover .row-favorite-button:not(.active-toggle),
+columnview > listview > row:hover .row-favorite-button:not(.active-toggle),
+.artist-album-table-row:hover .row-favorite-button:not(.active-toggle),
 listview.queue-list row:hover .row-favorite-button:not(.active-toggle),
 .album-detail-track-row:hover .row-favorite-button:not(.active-toggle),
 .row-favorite-button:not(.active-toggle):focus {

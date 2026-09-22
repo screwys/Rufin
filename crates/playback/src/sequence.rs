@@ -1,7 +1,7 @@
 //! Complete lightweight playback membership, order, and nearby resolved metadata.
 use crate::{OccurrenceId, Provenance, QueueItem, QueueOccurrence, RepeatMode};
 pub use library::{QueuePlacement as Placement, QueueReorderTarget};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -113,7 +113,7 @@ pub struct Sequence {
     repeat_mode: RepeatMode,
     shuffle_enabled: bool,
     revision: u64,
-    content_id: String,
+    content_id: OnceLock<String>,
     progress_millis: u64,
     dirty: Option<QueuePersistenceKind>,
     // Position ticks do not change the metadata window.
@@ -130,7 +130,7 @@ impl Sequence {
             repeat_mode: RepeatMode::Off,
             shuffle_enabled: false,
             revision: 0,
-            content_id: library::queue_content_id(&[], &[]),
+            content_id: OnceLock::new(),
             progress_millis: 0,
             dirty: None,
             window_dirty: true,
@@ -140,7 +140,6 @@ impl Sequence {
         window: library::QueueRestore,
         revision: u64,
     ) -> Result<Self, SequenceError> {
-        let content_id = library::queue_content_id(&window.entries, &window.order);
         let sequence = Self {
             members: window.entries,
             order: window.order,
@@ -149,7 +148,7 @@ impl Sequence {
             repeat_mode: window.repeat_mode,
             shuffle_enabled: window.shuffled,
             revision,
-            content_id,
+            content_id: OnceLock::new(),
             progress_millis: window.progress_millis.max(0) as u64,
             dirty: None,
             window_dirty: true,
@@ -177,7 +176,7 @@ impl Sequence {
     fn changed(&mut self, kind: QueuePersistenceKind) {
         self.revision += 1;
         if kind != QueuePersistenceKind::State {
-            self.content_id = library::queue_content_id(&self.members, &self.order);
+            self.content_id.take();
         }
         self.window_dirty |= kind != QueuePersistenceKind::State;
         self.dirty = Some(self.dirty.map_or(kind, |old| old.max(kind)));
@@ -244,7 +243,8 @@ impl Sequence {
         self.revision
     }
     pub fn content_id(&self) -> &str {
-        &self.content_id
+        self.content_id
+            .get_or_init(|| library::queue_content_id(&self.members, &self.order))
     }
     pub fn progress_millis(&self) -> u64 {
         self.progress_millis
@@ -386,7 +386,7 @@ impl Sequence {
         }
         self.selected_index = (!self.order.is_empty()).then_some(0);
         self.trim_rows();
-        self.content_id = library::queue_content_id(&self.members, &self.order);
+        self.content_id.take();
     }
     pub(crate) fn add_page(
         &mut self,

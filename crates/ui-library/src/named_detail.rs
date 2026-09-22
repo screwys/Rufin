@@ -18,7 +18,7 @@ use ui_shared::mounted_route::MountedRoute;
 
 use super::detail_showcase::detail_radio_button;
 use super::grouped_detail::GroupedDetailData;
-use crate::track_model::{PreparedTrackProjection, TrackProjectionRequest};
+use crate::track_model::PreparedTrackProjection;
 use ui_shared::media_menus::CollectionPlay;
 use ui_shared::media_menus::{present_genre_context_menu, present_mood_context_menu};
 
@@ -170,21 +170,15 @@ impl CatalogUi {
     pub fn named_detail_view(
         self: &Rc<Self>,
         id: NamedDetailId,
-        summary: Option<NamedDetailSummary>,
-        order: Vec<String>,
-        first_row_position: usize,
-        first_rows: Vec<library::TrackRow>,
+        detail: Option<(NamedDetailSummary, library::TrackRoutePage)>,
     ) -> MountedRoute {
-        let Some(summary) = summary else {
+        let Some((summary, page)) = detail else {
             return MountedRoute::static_widget(crate::route_layout::placeholder_view(
                 id.kind(),
                 id.missing_body(),
             ));
         };
-        let source = match &summary {
-            NamedDetailSummary::Genre(row) => row.source_key,
-            NamedDetailSummary::Mood(row) => row.source_key,
-        };
+        let query = page.query.clone();
         let current = Rc::new(RefCell::new(summary));
         let borrowed = current.borrow();
         let title = borrowed.name().to_string();
@@ -207,48 +201,36 @@ impl CatalogUi {
             seed,
             summary_items,
             context_menu,
-            tracks: order,
-            first_row_position,
-            first_rows,
+            tracks: page,
             table_context: id.table_context(),
             playback_context: id.context_id(),
             play_label: id.play_label(),
         });
         let tracks = Rc::new(grouped.tracks().clone());
-        let lane = Rc::new(NamedOrderLane::new());
-        {
-            let shell = Rc::downgrade(self);
-            let projection = Rc::downgrade(&tracks);
-            let lane = Rc::clone(&lane);
-            grouped.tracks().connect_search_request(move |request| {
-                request_named_order(
-                    shell.clone(),
-                    projection.clone(),
-                    source,
-                    id,
-                    request,
-                    Rc::clone(&lane),
-                );
-            });
-        }
-        let refresh = {
-            let shell = Rc::downgrade(self);
-            let projection = Rc::clone(&tracks);
-            let lane = Rc::clone(&lane);
-            Rc::new(move || {
-                let Some(shell) = shell.upgrade() else {
-                    return;
-                };
-                request_named_order(
-                    Rc::downgrade(&shell),
-                    Rc::downgrade(&projection),
-                    source,
-                    id,
-                    projection.projection_request(),
-                    Rc::clone(&lane),
-                );
-            })
-        };
+        let database = Arc::clone(&self.library);
+        let refresh = tracks.connect_read(
+            self,
+            |request| request,
+            move |request, cancellation| {
+                let database = Arc::clone(&database);
+                let query = query.clone();
+                async move {
+                    let page = database
+                        .query_track_route_page(
+                            &query,
+                            &request.query,
+                            request.settings.sort_key.track_sort(),
+                            request.settings.descending,
+                            library::RouteSeedWindow::top(),
+                            &cancellation,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    Ok(PreparedTrackProjection::from_page(page, request))
+                }
+            },
+            "mounted named detail",
+        );
         let resume = {
             let shell = Rc::downgrade(self);
             let projection = Rc::clone(&tracks);
@@ -291,83 +273,13 @@ impl CatalogUi {
     }
 }
 
-fn request_named_order(
-    shell: std::rc::Weak<CatalogUi>,
-    projection: std::rc::Weak<super::routes::TrackListProjection>,
-    source: library::SourceKey,
-    id: NamedDetailId,
-    request: TrackProjectionRequest,
-    lane: Rc<NamedOrderLane>,
-) {
-    let (generation, cancellation) = lane.begin();
-    let Some(owner) = shell.upgrade() else { return };
-    let database = Arc::clone(&owner.library);
-    let query = request.query.clone();
-    let sort = request.settings.sort_key.track_sort();
-    let descending = request.settings.descending;
-    let task = owner.runtime.spawn(async move {
-        match id {
-            NamedDetailId::Genre(key) => {
-                database
-                    .genre_track_route_page(
-                        source,
-                        key,
-                        None,
-                        &query,
-                        sort,
-                        descending,
-                        library::RouteSeedWindow::top(),
-                        &cancellation,
-                    )
-                    .await
-            }
-            NamedDetailId::Mood(key) => {
-                database
-                    .mood_track_route_page(
-                        source,
-                        key,
-                        None,
-                        &query,
-                        sort,
-                        descending,
-                        library::RouteSeedWindow::top(),
-                        &cancellation,
-                    )
-                    .await
-            }
-        }
-    });
-    let lane = Rc::downgrade(&lane);
-    gtk::glib::spawn_future_local(async move {
-        let page = task.await.ok().and_then(Result::ok);
-        let Some(shell) = shell.upgrade() else {
-            return;
-        };
-        let (Some(lane), Some(projection)) = (lane.upgrade(), projection.upgrade()) else {
-            return;
-        };
-        if !lane.finish(generation) || !(shell.is_current)() {
-            return;
-        }
-        if let Some(page) = page {
-            projection.replace_prepared(PreparedTrackProjection {
-                disc_sections: Vec::new(),
-                order: page.order,
-                first_row_position: page.first_row_position,
-                first_rows: page.first_rows,
-                request,
-            });
-        }
-    });
-}
-
 pub async fn load_named_detail(
     database: &Database,
     id: NamedDetailId,
     settings: &LibraryListSettings,
     window: library::RouteSeedWindow,
     cancellation: &ReadCancellation,
-) -> Result<(Option<NamedDetailSummary>, library::TrackRoutePage), String> {
+) -> Result<Option<(NamedDetailSummary, library::TrackRoutePage)>, String> {
     let collection = match id {
         NamedDetailId::Genre(key) => library::QueueCollection::Genre(key),
         NamedDetailId::Mood(key) => library::QueueCollection::Mood(key),
@@ -377,15 +289,7 @@ pub async fn load_named_detail(
         .await
         .map_err(|error| error.to_string())?
     else {
-        return Ok((
-            None,
-            library::TrackRoutePage {
-                disc_sections: Vec::new(),
-                order: Vec::new(),
-                first_row_position: 0,
-                first_rows: Vec::new(),
-            },
-        ));
+        return Ok(None);
     };
     let sort = settings.sort_key.track_sort();
     let descending = settings.descending;
@@ -395,24 +299,15 @@ pub async fn load_named_detail(
                 .genre_detail(source, key, None, cancellation)
                 .await
                 .map_err(|error| error.to_string())?;
-            let detail = if let Some(detail) = detail {
-                let mut row = detail.genre;
-                row.representative_artwork = database
-                    .album_rows(source, &detail.representative_albums, None, cancellation)
-                    .await
-                    .map_err(|error| error.to_string())?
-                    .into_iter()
-                    .filter_map(|album| album.artwork_binding)
-                    .collect();
-                Some(NamedDetailSummary::Genre(row))
-            } else {
-                None
-            };
+            let detail = detail.map(NamedDetailSummary::Genre);
             let page = database
-                .genre_track_route_page(
-                    source,
-                    key,
-                    None,
+                .query_track_route_page(
+                    &library::TrackQuery {
+                        source: source,
+                        collection: Some(library::QueueCollection::Genre(key)),
+                        folder: None,
+                        favorites_only: false,
+                    },
                     "",
                     sort,
                     descending,
@@ -421,31 +316,22 @@ pub async fn load_named_detail(
                 )
                 .await
                 .map_err(|error| error.to_string())?;
-            Ok((detail, page))
+            Ok(detail.map(|detail| (detail, page)))
         }
         NamedDetailId::Mood(key) => {
             let detail = database
                 .mood_detail(source, key, None, cancellation)
                 .await
                 .map_err(|error| error.to_string())?;
-            let detail = if let Some(detail) = detail {
-                let mut row = detail.mood;
-                row.representative_artwork = database
-                    .album_rows(source, &detail.representative_albums, None, cancellation)
-                    .await
-                    .map_err(|error| error.to_string())?
-                    .into_iter()
-                    .filter_map(|album| album.artwork_binding)
-                    .collect();
-                Some(NamedDetailSummary::Mood(row))
-            } else {
-                None
-            };
+            let detail = detail.map(NamedDetailSummary::Mood);
             let page = database
-                .mood_track_route_page(
-                    source,
-                    key,
-                    None,
+                .query_track_route_page(
+                    &library::TrackQuery {
+                        source: source,
+                        collection: Some(library::QueueCollection::Mood(key)),
+                        folder: None,
+                        favorites_only: false,
+                    },
                     "",
                     sort,
                     descending,
@@ -454,7 +340,7 @@ pub async fn load_named_detail(
                 )
                 .await
                 .map_err(|error| error.to_string())?;
-            Ok((detail, page))
+            Ok(detail.map(|detail| (detail, page)))
         }
     }
 }
