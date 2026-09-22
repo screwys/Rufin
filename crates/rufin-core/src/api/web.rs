@@ -475,26 +475,14 @@ async fn source_icon(
             )
         };
     }
-    macro_rules! svg {
-        ($name:literal) => {
-            asset(
-                "image/svg+xml",
-                include_bytes!(concat!(
-                    "../../../../resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.",
-                    $name,
-                    ".svg"
-                )),
-            )
-        };
-    }
     Ok(match kind.as_str() {
         "jellyfin" => png!("jellyfin"),
         "navidrome" => png!("navidrome"),
         "subsonic" => png!("opensubsonic"),
         "webdav" => png!("webdav"),
         "smb" => png!("smb"),
-        "plex" => svg!("plex"),
-        "emby" => svg!("emby"),
+        "plex" => png!("plex"),
+        "emby" => png!("emby"),
         _ => return Err(error(StatusCode::NOT_FOUND, "Source icon not found")),
     })
 }
