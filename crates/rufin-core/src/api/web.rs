@@ -160,6 +160,7 @@ struct Library<'a> {
     rows: Vec<Row<'a>>,
     kind: &'a str,
     offset: usize,
+    total: String,
     album_tracks: bool,
     disc_headers: HashMap<usize, String>,
 }
@@ -287,6 +288,10 @@ pub(super) fn render(
                 .collect(),
             kind,
             offset,
+            total: value["total"]
+                .as_i64()
+                .map(|count| count.to_string())
+                .unwrap_or_default(),
             album_tracks: value["album_tracks"].as_bool().unwrap_or(false),
             disc_headers: value["disc_sections"]
                 .as_array()
@@ -949,6 +954,7 @@ async fn catalog_page(
     products: ProductHandles,
     mut parameters: HashMap<String, String>,
 ) -> Result<Value, Error> {
+    parameters.insert("total".into(), "true".into());
     let view = parameters
         .get("view")
         .cloned()

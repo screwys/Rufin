@@ -255,10 +255,54 @@ impl<'row> FromRow<'row, SqliteRow> for TrackRow {
 
 #[derive(Clone, Debug)]
 pub struct TrackRoutePage {
-    pub order: Vec<String>,
+    pub query: TrackQuery,
+    pub count: usize,
     pub disc_sections: Vec<(u32, i64)>,
     pub first_row_position: usize,
     pub first_rows: Vec<TrackRow>,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TrackQuery {
+    pub source: SourceKey,
+    pub collection: Option<crate::QueueCollection>,
+    pub folder: Option<FolderKey>,
+    pub favorites_only: bool,
+}
+
+impl TrackQuery {
+    pub(crate) fn sql(
+        &self,
+        filter: &str,
+        sort: TrackSort,
+        descending: bool,
+    ) -> crate::source_window::SourceQuery {
+        let mut query = match &self.collection {
+            Some(collection) => crate::collections::collection_track_query(
+                self.source,
+                sort,
+                descending,
+                collection,
+            ),
+            None => track_query(self.source, sort, descending, false, None, ""),
+        };
+        track_filter(&mut query, self.folder, filter, self.favorites_only);
+        query
+    }
+
+    pub fn queue_query(&self) -> crate::QueueQuery {
+        match &self.collection {
+            Some(collection) => crate::QueueQuery::Collection {
+                collection: collection.clone(),
+                favorites_only: self.favorites_only,
+            },
+            None => crate::QueueQuery::Tracks {
+                source: self.source,
+                favorites_only: self.favorites_only,
+                recursive: true,
+            },
+        }
+    }
 }
 
 #[derive(FromRow)]
@@ -308,6 +352,68 @@ pub struct TrackMetadataWrite {
 }
 
 impl Database {
+    pub async fn selected_track_uris(
+        &self,
+        input: &crate::QueueInput,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<String>> {
+        match input {
+            crate::QueueInput::MediaUris { order, .. } => Ok(order.to_vec()),
+            crate::QueueInput::TrackSelection {
+                query,
+                folder,
+                filter,
+                sort,
+                descending,
+                ranges,
+            } => {
+                let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+                let mut transaction = connection.begin().await?;
+                let rows = query_selected_track_uris_on(
+                    &mut transaction,
+                    query,
+                    *folder,
+                    filter,
+                    *sort,
+                    *descending,
+                    ranges,
+                )
+                .await?;
+                transaction.commit().await?;
+                Database::clear_progress(&mut connection).await?;
+                Ok(rows)
+            }
+            _ => unreachable!("track selection input"),
+        }
+    }
+    pub async fn track_count(
+        &self,
+        source: SourceKey,
+        folder: Option<FolderKey>,
+        favorites_only: bool,
+        filter: &str,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<i64> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let query = track_query(source, TrackSort::Title, false, false, folder, filter);
+        let count = if favorites_only {
+            // Use the existing source-favorite index, then add locally favorited
+            // tracks which are not source favorites. The sets do not overlap.
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT (SELECT count(*) FROM tracks track WHERE {} AND track.source_favorite=1
+                    AND COALESCE((SELECT favorite FROM user_media_state state WHERE state.media_uri=track.media_uri),1)=1)
+                 + (SELECT count(*) FROM user_media_state state CROSS JOIN tracks track ON track.media_uri=state.media_uri
+                    WHERE state.favorite=1 AND track.source_favorite=0 AND {})",
+                query.predicate, query.predicate
+            )))
+            .fetch_one(&mut *connection).await?
+        } else {
+            query.count(&mut connection).await?
+        };
+        Database::clear_progress(&mut connection).await?;
+        Ok(count)
+    }
+
     /// Reads one page without materializing the source's full track order.
     #[allow(clippy::too_many_arguments)]
     pub async fn track_page(
@@ -322,17 +428,36 @@ impl Database {
         limit: usize,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<TrackRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let query = track_query(
-            source,
+        self.query_tracks_page(
+            &TrackQuery {
+                source,
+                collection: None,
+                folder,
+                favorites_only,
+            },
+            filter,
             sort,
             descending,
-            favorites_only,
-            folder,
-            filter,
-            false,
-        );
+            offset,
+            limit,
+            cancellation,
+        )
+        .await
+    }
+
+    pub async fn query_tracks_page(
+        &self,
+        query: &TrackQuery,
+        filter: &str,
+        sort: TrackSort,
+        descending: bool,
+        offset: usize,
+        limit: usize,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<TrackRow>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let query = query.sql(filter, sort, descending);
         let sql = format!("{} LIMIT ?1 OFFSET ?2", query.select("track.track_key"));
         let keys = sqlx::query_scalar::<_, TrackKey>(sqlx::AssertSqlSafe(sql))
             .bind(limit.min(TRACK_ROW_LIMIT) as i64)
@@ -374,6 +499,25 @@ impl Database {
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
         result
+    }
+
+    pub async fn track_source_by_uri(
+        &self,
+        media_uri: &str,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Option<crate::SourceId>> {
+        let mut connection = tokio::select! {
+            result = self.acquire_reader() => result?,
+            () = cancellation.cancelled() => return Err(LibraryError::ReadCancelled),
+        };
+        let source = sqlx::query_scalar::<_, String>(
+            "SELECT source.object_id FROM tracks track JOIN sources source USING(source_key)
+             WHERE track.media_uri=?1",
+        )
+        .bind(media_uri)
+        .fetch_optional(&mut *connection)
+        .await?;
+        Ok(source.map(crate::SourceId::new))
     }
 
     pub async fn track_row_by_uri(
@@ -486,26 +630,24 @@ impl Database {
         descending: bool,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<String>> {
-        let order = self
-            .track_order_where(
-                source,
-                sort,
-                descending,
-                favorites_only,
-                folder,
-                "",
-                None,
-                cancellation,
-            )
-            .await?;
-        Ok(order.into_iter().map(|(_, media_uri)| media_uri).collect())
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let order = load_track_order(
+            &mut connection,
+            source,
+            sort,
+            descending,
+            favorites_only,
+            folder,
+            "",
+        )
+        .await;
+        Database::clear_progress(&mut connection).await?;
+        Ok(order?.into_iter().map(|(_, media_uri)| media_uri).collect())
     }
 
-    pub async fn track_route_page(
+    pub async fn query_track_route_page(
         &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        favorites_only: bool,
+        query: &TrackQuery,
         filter: &str,
         sort: TrackSort,
         descending: bool,
@@ -514,28 +656,35 @@ impl Database {
     ) -> LibraryResult<TrackRoutePage> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let order = load_track_order(
-            &mut transaction,
-            source,
-            sort,
-            descending,
-            favorites_only,
-            folder,
-            filter,
-            false,
-        )
+        let sql = query.sql(filter, sort, descending);
+        let count = sql.count(&mut transaction).await?.max(0) as usize;
+        let range = window.range(count);
+        let disc_sections = if matches!(
+            query.collection,
+            Some(crate::QueueCollection::Album(_) | crate::QueueCollection::AlbumKey(_))
+        ) {
+            crate::collections::album_disc_sections(&sql, sort, descending, &mut transaction)
+                .await?
+        } else {
+            Vec::new()
+        };
+        let keys = sqlx::query_scalar::<_, TrackKey>(sqlx::AssertSqlSafe(format!(
+            "{} LIMIT ?1 OFFSET ?2",
+            sql.select("track.track_key")
+        )))
+        .bind(range.len() as i64)
+        .bind(range.start as i64)
+        .persistent(false)
+        .fetch_all(&mut *transaction)
         .await?;
-        let seed = window.range(order.len());
-        let first_row_position = seed.start;
-        let first_keys = order[seed].iter().map(|(key, _)| *key).collect::<Vec<_>>();
-        let first_rows = load_track_rows(&mut transaction, &first_keys).await?;
-        let order = order.into_iter().map(|(_, media_uri)| media_uri).collect();
+        let first_rows = load_track_rows(&mut transaction, &keys).await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
         Ok(TrackRoutePage {
-            disc_sections: Vec::new(),
-            order,
-            first_row_position,
+            query: query.clone(),
+            count,
+            disc_sections,
+            first_row_position: range.start,
             first_rows,
         })
     }
@@ -549,62 +698,19 @@ impl Database {
         descending: bool,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<String>> {
-        let order = self
-            .track_order_where(
-                source,
-                sort,
-                descending,
-                false,
-                None,
-                filter,
-                Some(candidates),
-                cancellation,
-            )
-            .await?;
-        Ok(order.into_iter().map(|(_, media_uri)| media_uri).collect())
-    }
-
-    async fn track_order_where(
-        &self,
-        source: SourceKey,
-        sort: TrackSort,
-        descending: bool,
-        favorites_only: bool,
-        folder: Option<FolderKey>,
-        filter: &str,
-        candidates: Option<&[String]>,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<(TrackKey, String)>> {
-        if let Some(candidates) = candidates {
-            let mut writer = self.writer().await?;
-            let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-            stage_folder_route_tracks(connection, candidates).await?;
-            return load_track_order(
-                connection,
-                source,
-                sort,
-                descending,
-                favorites_only,
-                folder,
-                filter,
-                true,
-            )
-            .await;
-        }
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = load_track_order(
-            &mut connection,
-            source,
-            sort,
-            descending,
-            favorites_only,
-            folder,
-            filter,
-            false,
-        )
-        .await;
+        let mut query = track_query(source, sort, descending, false, None, filter);
+        query
+            .predicate
+            .push_str(" AND track.media_uri IN (SELECT value FROM json_each(?1))");
+        let order =
+            sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(query.select("track.media_uri")))
+                .bind(serde_json::to_string(candidates)?)
+                .persistent(false)
+                .fetch_all(&mut *connection)
+                .await;
         Database::clear_progress(&mut connection).await?;
-        result
+        Ok(order?)
     }
 
     pub async fn track_rows(
@@ -709,33 +815,55 @@ impl Database {
     }
 }
 
-async fn stage_folder_route_tracks(
+pub(crate) async fn query_selected_track_uris_on(
     connection: &mut SqliteConnection,
-    candidates: &[String],
-) -> LibraryResult<()> {
-    sqlx::query(
-        "CREATE TEMP TABLE IF NOT EXISTS folder_route_tracks(
-            media_uri TEXT PRIMARY KEY
-         ) WITHOUT ROWID",
-    )
-    .execute(&mut *connection)
-    .await?;
-    sqlx::query("DELETE FROM temp.folder_route_tracks")
-        .execute(&mut *connection)
-        .await?;
-    for page in candidates.chunks(TRACK_ROW_LIMIT) {
-        let mut insert = QueryBuilder::<Sqlite>::new(
-            "INSERT OR IGNORE INTO temp.folder_route_tracks(media_uri) ",
-        );
-        insert.push_values(page, |mut row, key| {
-            row.push_bind(key);
-        });
-        insert.build().execute(&mut *connection).await?;
-    }
-    Ok(())
+    query: &crate::QueueQuery,
+    folder: Option<FolderKey>,
+    filter: &str,
+    sort: TrackSort,
+    descending: bool,
+    ranges: &[std::ops::Range<usize>],
+) -> LibraryResult<Vec<String>> {
+    let query = match query {
+        crate::QueueQuery::Tracks {
+            source,
+            favorites_only,
+            ..
+        } => track_query(*source, sort, descending, *favorites_only, folder, filter),
+        crate::QueueQuery::Collection {
+            collection,
+            favorites_only,
+        } => {
+            crate::collections::playback_query(
+                connection,
+                collection,
+                folder,
+                filter,
+                sort,
+                descending,
+                *favorites_only,
+            )
+            .await?
+        }
+        crate::QueueQuery::SmartDisplay { key, source } => {
+            return crate::smart_playlists::smart_sorted_uris_on(
+                connection,
+                *source,
+                *key,
+                folder,
+                filter,
+                sort,
+                descending,
+                crate::smart_playlists::now(),
+                Some(ranges),
+            )
+            .await;
+        }
+        crate::QueueQuery::Smart { .. } => unreachable!("selection uses display order"),
+    };
+    crate::source_window::selected_values_on(connection, &query, &query.uri, ranges).await
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn load_track_order(
     connection: &mut SqliteConnection,
     source: SourceKey,
@@ -744,17 +872,8 @@ async fn load_track_order(
     favorites_only: bool,
     folder: Option<FolderKey>,
     filter: &str,
-    folder_subset: bool,
 ) -> LibraryResult<Vec<(TrackKey, String)>> {
-    let query = track_query(
-        source,
-        sort,
-        descending,
-        favorites_only,
-        folder,
-        filter,
-        folder_subset,
-    );
+    let query = track_query(source, sort, descending, favorites_only, folder, filter);
     Ok(sqlx::query_as::<_, (TrackKey, String)>(sqlx::AssertSqlSafe(
         query.select("track.track_key,track.media_uri"),
     ))
@@ -770,7 +889,6 @@ pub(crate) fn track_query(
     favorites_only: bool,
     folder: Option<FolderKey>,
     filter: &str,
-    folder_subset: bool,
 ) -> crate::source_window::SourceQuery {
     let mut query = crate::source_window::SourceQuery {
         from: "tracks track".into(),
@@ -779,9 +897,6 @@ pub(crate) fn track_query(
         uri: "track.media_uri".into(),
         entry_key: "NULL".into(),
     };
-    if folder_subset {
-        query.predicate.push_str(" AND EXISTS(SELECT 1 FROM temp.folder_route_tracks candidate WHERE candidate.media_uri=track.media_uri)");
-    }
     track_filter(&mut query, folder, filter, favorites_only);
     if sort.uses_activity() {
         for field in &mut query.order {

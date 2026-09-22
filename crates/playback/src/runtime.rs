@@ -555,9 +555,8 @@ fn run_playback(
                 if !apply_runtime_command(&mut runtime, command, &outputs, &clock) {
                     break;
                 }
-                let sample = clock();
                 if runtime
-                    .poll(&sample)
+                    .poll(&clock)
                     .and_then(|update| publish_update(&outputs, update))
                     .is_err()
                 {
@@ -565,9 +564,8 @@ fn run_playback(
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
-                let sample = clock();
                 if runtime
-                    .poll(&sample)
+                    .poll(&clock)
                     .and_then(|update| publish_update(&outputs, update))
                     .is_err()
                 {
@@ -1370,14 +1368,18 @@ impl PlaybackRuntime {
         Ok(update)
     }
 
-    fn poll(&mut self, sample: &ClockSample) -> PlaybackResult<PlaybackUpdate> {
+    fn poll(&mut self, clock: &Clock) -> PlaybackResult<PlaybackUpdate> {
         let events = self.backend.drain_events();
         let mut output = PlaybackUpdate::default();
-        for event in events {
-            let update = self.session.handle_backend(event, sample);
-            output.merge(self.finish(update, sample)?);
+        if events.is_empty() && self.session.external_queue_extent().is_none() {
+            return Ok(output);
         }
-        let update = self.session.advance_external_clock(sample);
+        let sample = clock();
+        for event in events {
+            let update = self.session.handle_backend(event, &sample);
+            output.merge(self.finish(update, &sample)?);
+        }
+        let update = self.session.advance_external_clock(&sample);
         if update.view_changed {
             output.merge(self.commit(update));
         }

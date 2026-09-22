@@ -38,11 +38,10 @@ pub use activity::{
 pub use artwork::RepresentativeArtworkScope;
 pub use backup::{BackupRestoreReport, StateGroups};
 pub use collections::{
-    AlbumArtistLink, AlbumDetail, AlbumGenreLink, AlbumMetadataWrite, AlbumReleaseCandidate,
-    AlbumReleaseClass, AlbumReleaseClassification, AlbumReleaseResult, AlbumRow, AlbumSort,
-    ArtistDetail, ArtistMetadataWrite, ArtistRow, ArtistSort, CollectionIdentity,
-    CollectionSourceReference, FolderRow, GenreDetail, GenreRow, GenreSort, MoodDetail, MoodRow,
-    MoodSort,
+    AlbumArtistLink, AlbumGenreLink, AlbumMetadataWrite, AlbumReleaseCandidate, AlbumReleaseClass,
+    AlbumReleaseClassification, AlbumReleaseResult, AlbumRow, AlbumSort, ArtistMetadataWrite,
+    ArtistRow, ArtistSort, CollectionIdentity, CollectionSourceReference, FolderRow, GenreChoice,
+    GenreRow, GenreSort, MoodRow, MoodSort,
 };
 pub use connect::{CONNECT_PAGE_SIZE, ConnectChange, ConnectRecord, ConnectRoot};
 pub use db::{Database, ReadCancellation};
@@ -91,7 +90,8 @@ pub use smart_playlists::{
     SmartPlaylistValueSuggestions, SmartPlaylistWrite, SmartSourceReference,
 };
 pub use tracks::{
-    TrackArtistLink, TrackGenreLink, TrackMetadataWrite, TrackRoutePage, TrackRow, TrackSort,
+    TrackArtistLink, TrackGenreLink, TrackMetadataWrite, TrackQuery, TrackRoutePage, TrackRow,
+    TrackSort,
 };
 
 use thiserror::Error;

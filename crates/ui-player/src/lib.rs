@@ -218,10 +218,9 @@ impl PlayerUi {
         }
     }
     pub fn sync_fullscreen_equalizer_controls(&self, equalizer: &EqualizerSettings) {
-        self.views
-            .fullscreen_player
-            .equalizer
-            .set_settings(equalizer);
+        if let Some(surface) = self.views.fullscreen_player.equalizer.get() {
+            surface.set_settings(equalizer);
+        }
     }
 }
 

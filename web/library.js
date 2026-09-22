@@ -59,158 +59,200 @@ function mediaRow(node) {
 
 const pageSize = 48;
 
-let loadMore = async () => {};
+let revealEntry = async () => {};
+let libraryTotal = null;
 let readRange = async () => [];
 let selectionRequest;
 let selectionPending = Promise.resolve();
 
-async function loadLibrary(path, parameters, signal, initialPage = null) {
-  const content = $("content"),
-    scroller = $("main"),
-    pages = [];
-  let busy = false,
-    end = false;
+async function loadLibrary(path, parameters, signal, initialPage = null, knownTotal = null) {
+  signal.throwIfAborted();
+  const content = $("content"), scroller = $("main"), pages = new Map();
+  const before = el("div"), after = el("div");
+  before.setAttribute("aria-hidden", "true");
+  after.setAttribute("aria-hidden", "true");
+  content.prepend(before);
+  content.append(after);
+  let total = knownTotal, pageHeight = 1, lastHeight = null, pending = null;
+  libraryTotal = total;
+  let header = null, timer, resize;
+  signal.addEventListener("abort", () => {
+    clearTimeout(timer);
+    resize?.disconnect();
+    pages.clear();
+    content.style.minHeight = "";
+  }, { once: true });
+  const pageCount = () => Math.ceil(total / pageSize);
+  const fullHeight = () => Math.max(0, pageCount() - 1) * pageHeight +
+    (lastHeight ?? pageHeight * Math.min(1, (total % pageSize || pageSize) / pageSize));
+  // Browsers cap element height. Map long scrollbars to logical positions while
+  // keeping the actual rows at their normal size.
+  const extent = () => Math.min(fullHeight(), 8_000_000);
+  const origin = () => before.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+  const scrollPosition = () => Math.max(0, scroller.scrollTop - origin());
+  const ratio = () => Math.max(1, (fullHeight() - scroller.clientHeight) /
+    Math.max(1, extent() - scroller.clientHeight));
+  const logicalPosition = () => scrollPosition() * ratio();
+  const targetPage = () => Math.min(Math.max(0, pageCount() - 1), Math.floor(logicalPosition() / pageHeight));
+  const syncRows = () => {
+    state.visibleItems = [...content.querySelectorAll("[data-row]")].map(mediaRow);
+    content.style.setProperty("--index-width", `${Math.max(3, String(total).length)}ch`);
+  };
+  const layout = () => {
+    content.style.minHeight = `${extent() + (header?.getBoundingClientRect().height || 0)}px`;
+    const ordered = [...pages.values()].sort((a, b) => a.start - b.start);
+    let previous = before;
+    for (const page of ordered) {
+      if (previous.nextElementSibling !== page.node) previous.after(page.node);
+      previous = page.node;
+    }
+    const height = ordered.reduce((sum, page) => sum + page.node.getBoundingClientRect().height, 0);
+    const shift = logicalPosition() - scrollPosition();
+    const top = Math.max(0, (ordered[0]?.start || 0) / pageSize * pageHeight - shift);
+    before.style.height = `${top}px`;
+    after.style.height = `${Math.max(0, extent() - top - height)}px`;
+    syncRows();
+  };
+  const loadPage = async (start, existing = null) => {
+    const lifetime = new AbortController();
+    const abort = () => lifetime.abort();
+    signal.addEventListener("abort", abort, { once: true });
+    const node = existing || el("section", "library-page");
+    node.classList.add("library-page");
+    node.setAttribute("hx-sync", "this:replace");
+    node.hidden = true;
+    after.before(node);
+    const remove = () => {
+      lifetime.abort();
+      signal.removeEventListener("abort", abort);
+      if (node.contains(document.activeElement)) content.focus({ preventScroll: true });
+      node.remove();
+      releaseCovers();
+    };
+    try {
+      const query = new URLSearchParams(parameters);
+      query.set("offset", start);
+      query.set("total", String(total === null));
+      if (!existing) await fragment(`/api${path}?${query}`, node, lifetime.signal);
+      signal.throwIfAborted();
+      const data = node.matches("[data-page]") ? node : node.querySelector("[data-page]");
+      if (data.dataset.total !== "") {
+        total = Number(data.dataset.total);
+        libraryTotal = total;
+      }
+      const count = Number(data.dataset.count);
+      const table = node.querySelector(".track-list");
+      if (table && !header) {
+        content.setAttribute("role", "grid");
+        content.setAttribute("aria-label", tr("Tracks"));
+        content.setAttribute("aria-multiselectable", "true");
+        content.setAttribute("aria-rowcount", total + 1);
+        header = table.cloneNode(false);
+        header.classList.add("library-header");
+        header.append(table.querySelector("thead").cloneNode(true));
+        content.prepend(header);
+      }
+      node.hidden = false;
+      const page = { start, node, remove, count };
+      pages.set(start, page);
+      if (table) bindTracks(node, start, lifetime.signal);
+      else {
+        bindCards(node);
+        loadCardCovers(node, lifetime.signal);
+      }
+      return page;
+    } catch (error) {
+      remove();
+      throw error;
+    }
+  };
+  const measure = () => {
+    const page = [...pages.values()].find((page) => page.count === pageSize) || pages.values().next().value;
+    if (!page) return;
+    pageHeight = Math.max(1, page.node.getBoundingClientRect().height);
+    if (page.count < pageSize && total > pageSize) {
+      const grid = page.node.querySelector(".album-grid");
+      const columns = grid ? getComputedStyle(grid).gridTemplateColumns.split(" ").length : 1;
+      pageHeight *= Math.ceil(pageSize / columns) / Math.max(1, Math.ceil(page.count / columns));
+    }
+    const last = pages.get((pageCount() - 1) * pageSize);
+    lastHeight = last ? last.node.getBoundingClientRect().height : null;
+  };
+  const fill = () => {
+    if (pending) return pending;
+    if (signal.aborted || !total) return Promise.resolve();
+    pending = (async () => {
+      let target;
+      do {
+        target = targetPage();
+        const first = Math.max(0, target - 1);
+        const last = Math.min(pageCount() - 1, target + Math.ceil(scroller.clientHeight / pageHeight));
+        for (const [start, page] of pages) {
+          if (start / pageSize < first || start / pageSize > last) {
+            page.remove();
+            pages.delete(start);
+          }
+        }
+        layout();
+        for (let index = first; index <= last; index++) {
+          if (!pages.has(index * pageSize)) await loadPage(index * pageSize);
+          if (signal.aborted) return;
+          const end = pages.get((pageCount() - 1) * pageSize);
+          if (end) lastHeight = end.node.getBoundingClientRect().height;
+          layout();
+          if (target !== targetPage()) break;
+        }
+      } while (target !== targetPage());
+    })().finally(() => { pending = null; });
+    return pending;
+  };
   readRange = async (start, end, selectionSignal) => {
     const result = [];
     for (let offset = start; offset <= end; offset += pageSize) {
       const query = new URLSearchParams(parameters);
       query.set("offset", offset);
       query.set("limit", Math.min(pageSize, end - offset + 1));
-      const page = await api(
-        `${path}?${query}`,
-        "GET",
-        undefined,
-        selectionSignal,
-      );
+      query.delete("total");
+      const page = await api(`${path}?${query}`, "GET", undefined, selectionSignal);
       result.push(...(page.tracks || page.entries));
     }
     return result;
   };
-  const fill = () => {
-    if (signal.aborted || busy) return;
-    if (
-      scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <
-        scroller.clientHeight / 2 &&
-      !end
-    )
-      run(() => loadMore());
-    else if (
-      pages[0]?.start > 0 &&
-      pages[0].node.getBoundingClientRect().top >
-        scroller.getBoundingClientRect().top - scroller.clientHeight / 2
-    )
-      run(() => loadMore(-1));
+  const start = Math.floor(offset / pageSize) * pageSize;
+  if (offset !== start) { initialPage?.remove(); initialPage = null; }
+  await loadPage(start, initialPage);
+  measure();
+  layout();
+  scroller.scrollTop = start ? origin() + start / pageSize * pageHeight / ratio() : 0;
+  await fill();
+  signal.throwIfAborted();
+  revealEntry = async (index) => {
+    if (index < 0 || index >= total) return;
+    const start = Math.floor(index / pageSize) * pageSize;
+    scroller.scrollTop = start ? origin() + start / pageSize * pageHeight / ratio() : 0;
+    await fill();
+    signal.throwIfAborted();
+    return content.querySelector(`tr[data-index="${index}"]`);
   };
-  const syncRows = () => {
-    state.visibleItems = [...content.querySelectorAll("[data-row]")].map(
-      mediaRow,
-    );
-    const rows = content.querySelectorAll("tr[data-index]");
-    if (rows.length)
-      content.style.setProperty(
-        "--index-width",
-        `${Math.max(3, String(Number(rows[rows.length - 1].dataset.index) + 1).length)}ch`,
-      );
-  };
-  loadMore = async (direction = 1) => {
-    if (busy || signal.aborted || (direction > 0 && end)) return;
-    const start =
-      direction < 0
-        ? pages[0].start - pageSize
-        : (pages.at(-1)?.start ?? offset - pageSize) + pageSize;
-    if (start < 0) return;
-    busy = true;
-    const existing = initialPage;
-    initialPage = null;
-    const node = existing || el("section", "library-page");
-    node.setAttribute("hx-sync", "this:replace");
-    node.setAttribute("aria-busy", "true");
-    const lifetime = new AbortController();
-    const abort = () => lifetime.abort();
-    signal.addEventListener("abort", abort, { once: true });
-    const remove = () => {
-      lifetime.abort();
-      signal.removeEventListener("abort", abort);
-      node.remove();
-      releaseCovers();
-    };
-    if (!existing) {
-      if (direction < 0) pages[0].node.before(node);
-      else content.append(node);
-    }
-    try {
-      const query = new URLSearchParams(parameters);
-      query.set("offset", start);
-      if (!existing) await fragment(`/api${path}?${query}`, node, lifetime.signal);
-      const count = Number(node.dataset.count ?? node.querySelector("[data-count]").dataset.count);
-      const table = node.querySelector(".track-list");
-      if (table) {
-        content.setAttribute("role", "grid");
-        content.setAttribute("aria-label", tr("Tracks"));
-        content.setAttribute("aria-multiselectable", "true");
-        if (!content.querySelector(".library-header")) {
-          const header = table.cloneNode(false);
-          header.classList.add("library-header");
-
-          header.append(table.querySelector("thead").cloneNode(true));
-          content.prepend(header);
-        }
-      }
-      node.classList.add("library-page");
-      if (direction > 0) end = count < pageSize;
-      if (!count && pages.length) {
-        remove();
-        return;
-      }
-      const page = { node, start, remove };
-      if (direction < 0) {
-        pages.unshift(page);
-        scroller.scrollTop += node.getBoundingClientRect().height;
-      } else pages.push(page);
-      syncRows();
-      if (node.querySelector(".track-list"))
-        bindTracks(node, start, lifetime.signal);
-      else {
-        bindCards(node);
-        loadCardCovers(node, lifetime.signal);
-      }
-      while (pages.length > 3) {
-        const candidate = direction > 0 ? pages[0] : pages.at(-1);
-        const rect = candidate.node.getBoundingClientRect(),
-          viewport = scroller.getBoundingClientRect();
-        if (
-          direction > 0
-            ? rect.bottom > viewport.top
-            : rect.top < viewport.bottom
-        )
-          break;
-        if (candidate.node.contains(document.activeElement))
-          content.focus({ preventScroll: true });
-        candidate.remove();
-        if (direction > 0) {
-          pages.shift();
-          scroller.scrollTop -= rect.height;
-        } else {
-          pages.pop();
-          end = false;
-        }
-      }
-      syncRows();
-      node.setAttribute("aria-busy", "false");
-      requestAnimationFrame(fill);
-    } catch (error) {
-      remove();
-      throw error;
-    } finally {
-      busy = false;
-    }
-  };
-  await loadMore();
-  scroller.addEventListener("scroll", fill, { signal, passive: true });
-  const resize = new ResizeObserver(fill);
+  scroller.addEventListener("scroll", () => {
+    // Reposition the window immediately when the logical scroll range is compressed.
+    if (ratio() > 1) layout();
+    clearTimeout(timer);
+    timer = setTimeout(() => run(fill), 40);
+  }, { signal, passive: true });
+  let width = scroller.clientWidth, height = scroller.clientHeight;
+  resize = new ResizeObserver(() => {
+    if (width === scroller.clientWidth && height === scroller.clientHeight) return;
+    const atTop = scroller.scrollTop === 0;
+    const position = logicalPosition() / pageHeight;
+    width = scroller.clientWidth;
+    height = scroller.clientHeight;
+    measure();
+    layout();
+    scroller.scrollTop = atTop ? 0 : origin() + position * pageHeight / ratio();
+    run(fill);
+  });
   resize.observe(scroller);
-  signal.addEventListener("abort", () => resize.disconnect(), { once: true });
-  fill();
 }
 
 function restoreView() {
@@ -255,7 +297,7 @@ function navigate(next, selected = null) {
   });
   $("navigation").classList.remove("open");
   setSort();
-  run(loadView);
+  run(() => loadView(false, state.selectedLibrary ? null : selected?.track_count ?? null));
 }
 
 function setSort() {
@@ -348,13 +390,18 @@ function empty(title, description, action) {
   $("content").replaceChildren(node);
 }
 
-async function loadView(initial = false) {
+async function loadView(initial = false, knownTotal = null) {
   run(refreshPins);
-  for (const name of ["role", "aria-label", "aria-multiselectable"])
+  for (const name of ["role", "aria-label", "aria-multiselectable", "aria-rowcount"])
     $("content").removeAttribute(name);
   selectionRequest?.abort();
   selectionPending = Promise.resolve();
-  loadMore = async () => {};
+  revealEntry = async () => {};
+  readRange = async () => [];
+  libraryTotal = null;
+  selectedTracks.clear();
+  selectionAnchor = 0;
+  state.visibleItems = [];
   disposeHome();
   closeMenus();
   viewRequest?.abort();
@@ -408,12 +455,10 @@ async function loadView(initial = false) {
       $("content").replaceChildren();
       $("main").scrollTop = 0;
     }
-    selectedTracks.clear();
-    selectionAnchor = 0;
     if (route === "home") {
       if (!initial) await fragment(`/api${path}?${params}`, $("content"), signal);
       bindHome(signal);
-    } else await loadLibrary(path, params, signal, initial ? $("content").querySelector("[data-page]") : null);
+    } else await loadLibrary(path, params, signal, initial ? $("content").querySelector("[data-page]") : null, knownTotal);
   } catch (error) {
     if (!signal.aborted) empty(tr("Could not load this page"), error.message);
     throw error;
@@ -572,6 +617,7 @@ function bindTracks(host, start, signal) {
     const index = start + position,
       row = mediaRow(tr);
     tr.dataset.index = index;
+    tr.setAttribute("aria-rowindex", index + 2);
     bindDrag(
       tr,
       async () => {
@@ -629,22 +675,18 @@ function bindTracks(host, start, signal) {
           event.preventDefault();
           if (event.key === "Enter") run(() => playSelection(row));
           else selectTrack(index, event);
-        } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
           event.preventDefault();
           run(async () => {
-            const direction = event.key === "ArrowDown" ? 1 : -1;
+            const destination = event.key === "Home" ? 0 : event.key === "End" ? libraryTotal - 1 : index + (event.key === "ArrowDown" ? 1 : -1);
             let next = $("content").querySelector(
-              `tr[data-index="${index + direction}"]`,
+              `tr[data-index="${destination}"]`,
             );
             if (!next) {
-              await loadMore(direction);
-              if (signal.aborted) return;
-              next = $("content").querySelector(
-                `tr[data-index="${index + direction}"]`,
-              );
+              next = await revealEntry(destination);
             }
             if (next) {
-              selectTrack(index + direction, event);
+              selectTrack(destination, event);
               next.focus();
             }
           });
@@ -737,7 +779,7 @@ function init() {
   });
   $("sort").addEventListener("change", () => {
     offset = 0;
-    run(loadView);
+    run(() => loadView(false, libraryTotal));
   });
   $("descending").addEventListener("click", () => {
     $("descending").setAttribute(
@@ -749,7 +791,7 @@ function init() {
         ? "sort-descending"
         : "sort-ascending";
     offset = 0;
-    run(loadView);
+    run(() => loadView(false, libraryTotal));
   });
   $("refresh").addEventListener("click", () =>
     run(async () => {

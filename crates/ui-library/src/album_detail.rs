@@ -20,7 +20,7 @@ use ui_shared::interactions::install_context_menu_openers;
 
 use super::collection_context::present_track_context_menu;
 use ui_shared::library_fields::{opaque_artwork, track_field};
-use ui_shared::sparse_model::{SparseObjectModel, SparseRouteModel};
+use ui_shared::sparse_model::{SparseObjectModel, SparseRouteModel, SparseSource};
 
 const ALBUM_TRACK_HEIGHT: i32 = 36;
 const ALBUM_DETAIL_INLINE_TRACK_ROWS: usize = 8;
@@ -43,7 +43,7 @@ struct AlbumDetailRowMetrics {
 }
 
 pub enum AlbumCollectionOrder {
-    Rows(Vec<AlbumKey>),
+    Rows(usize),
     Detail {
         media_uris: Vec<String>,
         albums: Vec<String>,
@@ -128,6 +128,8 @@ impl AlbumCollectionModels {
         first_rows: Vec<AlbumRow>,
         first_detail_rows: Vec<AlbumDetailRouteRow>,
         layout: LibraryLayout,
+        favorites_only: bool,
+        request: Rc<RefCell<crate::routes::CollectionReadRequest>>,
     ) -> Self {
         let source = selected.source_key;
         let folder = selected.music_folder_key;
@@ -141,8 +143,10 @@ impl AlbumCollectionModels {
                 unreachable!("Album detail layout requires its flattened identity order")
             };
             let database = Arc::clone(&selected.database);
-            let load = Arc::new(
-                move |items: Vec<String>, cancellation: library::ReadCancellation| {
+            let load = Rc::new(
+                move |items: Vec<String>,
+                      _: std::ops::Range<usize>,
+                      cancellation: library::ReadCancellation| {
                     let database = Arc::clone(&database);
                     Box::pin(async move {
                         let (albums, tracks) = database
@@ -170,22 +174,52 @@ impl AlbumCollectionModels {
                 },
             };
         }
-        let AlbumCollectionOrder::Rows(order) = order else {
+        let AlbumCollectionOrder::Rows(count) = order else {
             unreachable!("Album row/grid layout requires its Album key order")
         };
         let database = Arc::clone(&selected.database);
-        let load = Arc::new(
-            move |keys: Vec<AlbumKey>, cancellation: library::ReadCancellation| {
+        let load: ui_shared::media_drag::CollectionRowsLoad<
+            crate::routes::CollectionReadRequest,
+            AlbumRow,
+        > = Arc::new(
+            move |request: crate::routes::CollectionReadRequest,
+                  range: std::ops::Range<usize>,
+                  cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&database);
                 Box::pin(async move {
                     database
-                        .album_rows(source, &keys, folder, &cancellation)
+                        .album_page(
+                            source,
+                            folder,
+                            favorites_only,
+                            &request.query,
+                            request.settings.sort_key.album_sort(),
+                            request.settings.descending,
+                            range.start,
+                            range.len(),
+                            &cancellation,
+                        )
                         .await
                         .map_err(|error| error.to_string())
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
             },
         );
-        let sparse = SparseRouteModel::new(order, 32, selected.runtime.clone(), load);
+        let sparse = SparseRouteModel::new(
+            SparseSource::Query { count },
+            32,
+            selected.runtime.clone(),
+            {
+                let load = Arc::clone(&load);
+                let request = Rc::clone(&request);
+                Rc::new(move |_, range, cancellation| {
+                    let request = request.borrow().clone();
+                    load(request, range, cancellation)
+                })
+            },
+        );
+        ui_shared::media_drag::install_collection_selection(&sparse, request, load, |row| {
+            rufin_core::playback::PlaybackTarget::Album(row.media_uri.clone())
+        });
         sparse.seed_matching_at(first_row_position, first_rows, |row| row.album_key);
         Self {
             rows: Some(sparse),
@@ -225,8 +259,8 @@ impl AlbumCollectionModels {
 
     pub fn replace_order(&self, order: AlbumCollectionOrder) {
         if let Some(rows) = &self.rows {
-            if let AlbumCollectionOrder::Rows(order) = order {
-                rows.replace_order(order);
+            if let AlbumCollectionOrder::Rows(count) = order {
+                rows.replace_order(SparseSource::Query { count });
             }
         } else if let Some(detail) = &self.detail.sparse
             && let AlbumCollectionOrder::Detail {
@@ -250,11 +284,11 @@ impl AlbumCollectionModels {
         first_rows: Vec<AlbumRow>,
     ) -> bool {
         if let Some(rows) = &self.rows {
-            let AlbumCollectionOrder::Rows(order) = order else {
+            let AlbumCollectionOrder::Rows(count) = order else {
                 return false;
             };
             return rows.replace_prepared_at(
-                order,
+                SparseSource::Query { count },
                 first_row_position,
                 first_rows,
                 Vec::new(),
@@ -273,10 +307,7 @@ impl AlbumCollectionModels {
             let Some(position) = rows.ready_position(|row| row.media_uri == media_uri) else {
                 return false;
             };
-            let Some(album) = rows.order().get(position as usize).copied() else {
-                return false;
-            };
-            rows.update_ready(&album, |row| row.favorite = favorite)
+            rows.update_ready(position as usize, |row| row.favorite = favorite)
         } else if let Some(detail) = &self.detail.sparse {
             let Some(position) = detail.ready_position(|row| {
                 matches!(row, AlbumDetailRouteRow::Album(album) if album.media_uri == media_uri)
@@ -284,10 +315,7 @@ impl AlbumCollectionModels {
             else {
                 return false;
             };
-            let Some(key) = detail.order().get(position as usize).cloned() else {
-                return false;
-            };
-            detail.update_ready(&key, |row| {
+            detail.update_ready(position as usize, |row| {
                 if let AlbumDetailRouteRow::Album(album) = row {
                     album.favorite = favorite;
                 }
@@ -411,7 +439,7 @@ impl AlbumDetailLayout {
         let order = model
             .sparse
             .as_ref()
-            .map(|sparse| sparse.order())
+            .and_then(|sparse| sparse.order().keys().cloned())
             .unwrap_or_else(|| Arc::new([]));
         Self::from_order(
             &order,
@@ -644,8 +672,10 @@ impl AlbumDetailTrackSelection {
         });
     }
 
-    fn clear_visible(&self) {
-        self.visible.borrow_mut().clear();
+    fn prune_visible(&self) {
+        self.visible
+            .borrow_mut()
+            .retain(|binding| binding.row.upgrade().is_some());
     }
 }
 
@@ -920,19 +950,23 @@ impl AlbumDetailVirtualListInner {
         if !album_detail_window_changed(self.rendered.borrow().as_ref(), &visible) {
             return;
         }
-        self.rendered.replace(Some(visible.clone()));
-        if self
-            .widget
-            .root()
-            .and_then(|root| root.focus())
-            .is_some_and(|focus| focus.is_ancestor(&self.rows_widget))
-        {
-            // Keep focus on the surviving list instead of letting GTK focus a
-            // replacement row and scroll back toward it on every render.
-            self.widget.grab_focus();
-        }
-        while let Some(child) = self.rows_widget.first_child() {
-            self.rows_widget.remove(&child);
+        let previous = self.rendered.replace(Some(visible.clone()));
+        let focus = self.widget.root().and_then(|root| root.focus());
+        let mut position = previous.as_ref().map_or(0, |range| range.start);
+        let mut child = self.rows_widget.first_child();
+        while let Some(row) = child {
+            child = row.next_sibling();
+            if previous.is_none() || !visible.contains(&position) {
+                if focus
+                    .as_ref()
+                    .is_some_and(|focus| *focus == row || focus.is_ancestor(&row))
+                {
+                    // Preserve the list's scroll position when its focused row leaves.
+                    self.widget.grab_focus();
+                }
+                self.rows_widget.remove(&row);
+            }
+            position += 1;
         }
         let top_height = layout.row(visible.start).map_or(0, |row| row.top);
         let bottom_start = visible
@@ -956,8 +990,18 @@ impl AlbumDetailVirtualListInner {
             return;
         };
         sparse.demand_positions(demand);
-        self.selection.clear_visible();
-        for (_, row) in rows {
+        self.selection.prune_visible();
+        let mut retained = self.rows_widget.first_child();
+        let mut preceding: Option<gtk::Widget> = None;
+        for (position, row) in rows {
+            if previous
+                .as_ref()
+                .is_some_and(|range| range.contains(&position))
+            {
+                preceding = retained;
+                retained = preceding.as_ref().and_then(gtk::Widget::next_sibling);
+                continue;
+            }
             let child = match &row.item {
                 AlbumDetailVisualItem::Lead {
                     album_position,
@@ -1014,7 +1058,9 @@ impl AlbumDetailVirtualListInner {
             host.set_height_request(row.height);
             host.set_hexpand(true);
             host.append(&child);
-            self.rows_widget.append(&host);
+            self.rows_widget
+                .insert_child_after(&host, preceding.as_ref());
+            preceding = Some(host.upcast());
         }
     }
 

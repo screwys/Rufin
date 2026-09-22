@@ -1379,19 +1379,13 @@ impl Source {
             .await
             .map_err(metadata_database_error)?
             .ok_or(crate::SourceMetadataError::Unavailable)?;
-        let source = album.source_key;
         match &self.implementation {
             Implementation::Files(files) => files.read_album_metadata(database, album).await,
             Implementation::JellyfinEmby(jellyfin) => jellyfin.read_album_metadata(album).await,
             Implementation::Plex(plex) => plex.read_album_metadata(album).await,
-            Implementation::Local(_) => {
-                self.read_local_album_metadata(database, source, album)
-                    .await
-            }
+            Implementation::Local(_) => self.read_local_album_metadata(database, album).await,
             Implementation::OpenSubsonic(_) => {
-                let metadata = self
-                    .read_local_album_metadata(database, source, album)
-                    .await?;
+                let metadata = self.read_local_album_metadata(database, album).await?;
                 if !self.mapped_metadata_ready().await {
                     return Err(crate::SourceMetadataError::Unavailable);
                 }
@@ -1411,19 +1405,13 @@ impl Source {
             .await
             .map_err(metadata_database_error)?
             .ok_or(crate::SourceMetadataError::Unavailable)?;
-        let source = artist.source_key;
         match &self.implementation {
             Implementation::Files(files) => files.read_artist_metadata(database, artist).await,
             Implementation::JellyfinEmby(jellyfin) => jellyfin.read_artist_metadata(artist).await,
             Implementation::Plex(plex) => plex.read_artist_metadata(artist).await,
-            Implementation::Local(_) => {
-                self.read_local_artist_metadata(database, source, artist)
-                    .await
-            }
+            Implementation::Local(_) => self.read_local_artist_metadata(database, artist).await,
             Implementation::OpenSubsonic(_) => {
-                let metadata = self
-                    .read_local_artist_metadata(database, source, artist)
-                    .await?;
+                let metadata = self.read_local_artist_metadata(database, artist).await?;
                 if !self.mapped_metadata_ready().await {
                     return Err(crate::SourceMetadataError::Unavailable);
                 }
@@ -1772,11 +1760,10 @@ impl Source {
     async fn read_local_album_metadata(
         &self,
         database: &Database,
-        source: library::SourceKey,
         album: library::AlbumRow,
     ) -> Result<crate::AlbumMetadata, crate::SourceMetadataError> {
         let targets = self
-            .album_metadata_targets(database, source, album.album_key)
+            .album_metadata_targets(database, album.album_key)
             .await?;
         album_metadata_from_targets(album, &targets)
     }
@@ -1784,11 +1771,10 @@ impl Source {
     async fn read_local_artist_metadata(
         &self,
         database: &Database,
-        source: library::SourceKey,
         artist: library::ArtistRow,
     ) -> Result<crate::ArtistMetadata, crate::SourceMetadataError> {
         let targets = self
-            .artist_metadata_targets(database, source, artist.artist_key)
+            .artist_metadata_targets(database, artist.artist_key)
             .await?;
         artist_metadata_from_targets(artist, &targets)
     }
@@ -1846,7 +1832,7 @@ impl Source {
         edit: &crate::AlbumMetadataEdit,
     ) -> Result<ScanOutcome, crate::SourceMetadataError> {
         let targets = self
-            .album_metadata_targets(database, source, album.album_key)
+            .album_metadata_targets(database, album.album_key)
             .await?;
         let paths = targets
             .iter()
@@ -1922,7 +1908,7 @@ impl Source {
         edit: &crate::ArtistMetadataEdit,
     ) -> Result<ScanOutcome, crate::SourceMetadataError> {
         let targets = self
-            .artist_metadata_targets(database, source, artist.artist_key)
+            .artist_metadata_targets(database, artist.artist_key)
             .await?;
         let paths = targets
             .iter()
@@ -1984,50 +1970,33 @@ impl Source {
     async fn album_metadata_targets(
         &self,
         database: &Database,
-        source: library::SourceKey,
         album: library::AlbumKey,
     ) -> Result<Vec<MetadataFileTarget>, crate::SourceMetadataError> {
-        let cancel = library::ReadCancellation::new();
         let keys = database
-            .album_track_route_page(
-                source,
-                album,
-                None,
-                "",
-                library::TrackSort::TrackNumber,
-                false,
-                library::RouteSeedWindow::top(),
-                &cancel,
+            .collection_media_uri_order(
+                &library::QueueCollection::AlbumKey(album),
+                &library::ReadCancellation::new(),
             )
             .await
-            .map_err(metadata_database_error)?
-            .order;
+            .map_err(metadata_database_error)?;
         self.metadata_targets(database, &keys).await
     }
 
     async fn artist_metadata_targets(
         &self,
         database: &Database,
-        source: library::SourceKey,
         artist: library::ArtistKey,
     ) -> Result<Vec<MetadataFileTarget>, crate::SourceMetadataError> {
-        let cancel = library::ReadCancellation::new();
         let keys = database
-            .artist_track_route_page(
-                source,
-                artist,
-                false,
-                None,
-                "",
-                library::TrackSort::Title,
-                false,
-                false,
-                library::RouteSeedWindow::top(),
-                &cancel,
+            .collection_media_uri_order(
+                &library::QueueCollection::ArtistKey {
+                    key: artist,
+                    album_artist: false,
+                },
+                &library::ReadCancellation::new(),
             )
             .await
-            .map_err(metadata_database_error)?
-            .order;
+            .map_err(metadata_database_error)?;
         self.metadata_targets(database, &keys).await
     }
 

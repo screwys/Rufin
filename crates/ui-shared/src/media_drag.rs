@@ -8,6 +8,86 @@ use downloads::DownloadSubject;
 use gtk::glib;
 use rufin_core::playback::PlaybackTarget;
 use std::{cell::RefCell, rc::Rc};
+use std::{future::Future, ops::Range, pin::Pin, sync::Arc};
+
+pub type CollectionPageLoad = Arc<
+    dyn Fn(
+            Range<usize>,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<PlaybackTarget>, String>> + Send>>
+        + Send
+        + Sync,
+>;
+
+pub type CollectionRowsLoad<Q, R> = Arc<
+    dyn Fn(
+            Q,
+            Range<usize>,
+            library::ReadCancellation,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<R>, String>> + Send>>
+        + Send
+        + Sync,
+>;
+
+#[derive(Clone)]
+pub enum CollectionTargets {
+    Ready(Vec<PlaybackTarget>),
+    Query {
+        ranges: Vec<Range<usize>>,
+        load: CollectionPageLoad,
+    },
+}
+
+impl CollectionTargets {
+    async fn resolve(&self) -> Result<Vec<PlaybackTarget>, String> {
+        match self {
+            Self::Ready(targets) => Ok(targets.clone()),
+            Self::Query { ranges, load } => {
+                let mut targets = Vec::new();
+                for range in ranges {
+                    for start in (range.start..range.end).step_by(64) {
+                        targets.extend(load(start..range.end.min(start + 64)).await?);
+                    }
+                }
+                Ok(targets)
+            }
+        }
+    }
+}
+
+pub fn install_collection_selection<K, R, Q>(
+    sparse: &Rc<crate::sparse_model::SparseRouteModel<K, R>>,
+    request: Rc<RefCell<Q>>,
+    load: CollectionRowsLoad<Q, R>,
+    target: impl Fn(&R) -> PlaybackTarget + Send + Sync + 'static,
+) where
+    K: Clone + Eq + Send + Sync + 'static,
+    R: Clone + Send + Sync + 'static,
+    Q: Clone + Send + Sync + 'static,
+{
+    let weak = Rc::downgrade(sparse);
+    let target = Arc::new(target);
+    sparse
+        .list_model()
+        .set_collection_selection(Box::new(move |dragged, positions| {
+            let sparse = weak.upgrade()?;
+            let position = sparse.ready_position(|row| target(row) == *dragged)?;
+            positions.contains(position).then(|| {
+                let request = request.borrow().clone();
+                let load = Arc::clone(&load);
+                let target = Arc::clone(&target);
+                CollectionTargets::Query {
+                    ranges: crate::selection::selected_ranges(positions),
+                    load: Arc::new(move |range| {
+                        let rows = load(request.clone(), range, library::ReadCancellation::new());
+                        let target = Arc::clone(&target);
+                        Box::pin(
+                            async move { Ok(rows.await?.iter().map(|row| target(row)).collect()) },
+                        )
+                    }),
+                }
+            })
+        }));
+}
 const PLAYLIST_DRAG_ICON_WIDTH: i32 = 180;
 const PLAYLIST_DRAG_ICON_COVER_SIZE: i32 = 36;
 
@@ -145,7 +225,7 @@ pub enum MediaDragSource {
     Targets {
         source_key: Option<library::SourceKey>,
         folder: Option<library::FolderKey>,
-        targets: Vec<PlaybackTarget>,
+        targets: CollectionTargets,
     },
     Selection(TrackSelectionSnapshot),
     PlaylistEntries(PlaylistEntrySelectionSnapshot),
@@ -278,6 +358,12 @@ fn capture_collection_selection(
                 .ancestor(gtk::ColumnView::static_type())
                 .and_downcast::<gtk::ColumnView>()
                 .and_then(|table| table.model())
+        })
+        .or_else(|| {
+            widget
+                .ancestor(gtk::ListView::static_type())
+                .and_downcast::<gtk::ListView>()
+                .and_then(|list| list.model())
         });
     let Some(selection) = selection else {
         return source;
@@ -286,103 +372,21 @@ fn capture_collection_selection(
     if positions.size() < 2 {
         return source;
     }
-    let Some((iter, first)) = gtk::BitsetIter::init_first(&positions) else {
-        return source;
-    };
     let target = match target {
         PlaybackTarget::Contextual { target, .. } => target.as_ref(),
         target => target,
     };
-    let mut contains_dragged = false;
-    let targets = std::iter::once(first)
-        .chain(iter)
-        .map(|position| {
-            let object = selection.item(position)?;
-            let (target, dragged) = selected_collection_target(&object, target)?;
-            contains_dragged |= dragged;
-            Some(target)
-        })
-        .collect::<Option<Vec<_>>>();
-    match targets {
-        Some(targets) if contains_dragged => MediaDragSource::Targets {
+    if let Some(targets) = selection
+        .downcast_ref::<crate::selection::PositionSelectionModel>()
+        .and_then(|selection| selection.collection_selection(target, &positions))
+    {
+        return MediaDragSource::Targets {
             source_key: *source_key,
             folder: *folder,
             targets,
-        },
-        _ => source,
+        };
     }
-}
-
-fn selected_collection_target(
-    object: &glib::Object,
-    dragged: &PlaybackTarget,
-) -> Option<(PlaybackTarget, bool)> {
-    use crate::sparse_model::SparseObjectItem;
-    // Sparse placeholders already carry collection keys. A large selection needs no row hydration.
-    macro_rules! selected {
-        ($row:ty, $key:ty, $field:ident, $target:expr, $matches:expr) => {{
-            if let Some(row) =
-                crate::sparse_model::object_item::<$row, _>(object.clone(), Clone::clone)
-            {
-                Some(($target(row.$field), $matches(&row)))
-            } else {
-                let item = object.downcast_ref::<SparseObjectItem>()?;
-                if item.is_ready() {
-                    None
-                } else {
-                    item.value::<$key>().map(|key| ($target(key), false))
-                }
-            }
-        }};
-    }
-    match dragged {
-        PlaybackTarget::Album(uri) => selected!(
-            library::AlbumRow,
-            library::AlbumKey,
-            album_key,
-            PlaybackTarget::AlbumKey,
-            |row: &library::AlbumRow| &row.media_uri == uri
-        ),
-        PlaybackTarget::Artist(uri) | PlaybackTarget::AlbumArtist(uri) => {
-            let album_artist = matches!(dragged, PlaybackTarget::AlbumArtist(_));
-            selected!(
-                library::ArtistRow,
-                library::ArtistKey,
-                artist_key,
-                |key| PlaybackTarget::ArtistKey(key, album_artist),
-                |row: &library::ArtistRow| &row.media_uri == uri
-            )
-        }
-        PlaybackTarget::Genre(key) => selected!(
-            library::GenreRow,
-            library::GenreKey,
-            genre_key,
-            PlaybackTarget::Genre,
-            |row: &library::GenreRow| row.genre_key == *key
-        ),
-        PlaybackTarget::Mood(key) => selected!(
-            library::MoodRow,
-            library::MoodKey,
-            mood_key,
-            PlaybackTarget::Mood,
-            |row: &library::MoodRow| row.mood_key == *key
-        ),
-        PlaybackTarget::Playlist(key) => selected!(
-            library::PlaylistRow,
-            library::PlaylistKey,
-            playlist_key,
-            PlaybackTarget::Playlist,
-            |row: &library::PlaylistRow| row.playlist_key == *key
-        ),
-        PlaybackTarget::SmartPlaylist(key) => selected!(
-            library::SmartPlaylistRow,
-            library::SmartPlaylistKey,
-            smart_playlist_key,
-            PlaybackTarget::SmartPlaylist,
-            |row: &library::SmartPlaylistRow| row.smart_playlist_key == *key
-        ),
-        _ => None,
-    }
+    source
 }
 
 fn compact_playlist_drag_icon(cover: Option<gtk::Widget>, title: &str) -> gtk::Widget {
@@ -457,18 +461,14 @@ impl MediaDragSource {
                 targets,
             } => library::QueueInput::Groups(
                 targets
+                    .resolve()
+                    .await?
                     .iter()
                     .map(|target| target.queue_input(*source_key, *folder))
                     .collect(),
             ),
-            Self::Selection(selection) => library::QueueInput::MediaUris {
-                order: selection.media_uris.clone(),
-                provenance: library::QueueProvenance::Manual,
-            },
-            Self::PlaylistEntries(selection) => library::QueueInput::PlaylistEntries {
-                order: selection.entries.clone(),
-                context_id: format!("playlist-selection:{}", selection.playlist).into(),
-            },
+            Self::Selection(selection) => selection.input.clone(),
+            Self::PlaylistEntries(selection) => selection.input.clone(),
             Self::MediaUris(order)
             | Self::Queue {
                 media_uris: order, ..
@@ -505,7 +505,9 @@ impl MediaDragSource {
                 Ok((media_uris, subject))
             }
             Self::Selection(selection) => {
-                Ok((selection.media_uris.to_vec(), selection.download_subject()))
+                let media_uris = selection.media_uris(database).await?;
+                let subject = DownloadSubject::for_media_uris("track-selection", None, &media_uris);
+                Ok((media_uris, subject))
             }
             Self::Targets {
                 source_key,
@@ -513,7 +515,7 @@ impl MediaDragSource {
                 targets,
             } => {
                 let mut media_uris = Vec::new();
-                for target in targets {
+                for target in targets.resolve().await? {
                     media_uris.extend(
                         target
                             .resolve_media_uris(database, *source_key, *folder)
@@ -578,51 +580,6 @@ pub fn download_subject(target: &PlaybackTarget) -> DownloadSubject {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn collection_drag_retains_unhydrated_selected_keys() {
-        use crate::sparse_model::SparseObjectModel;
-        macro_rules! check {
-            ($key:ty, $row:ty, $dragged:expr, $expected:expr) => {{
-                let key = <$key>::from_raw(1001);
-                let model = SparseObjectModel::new::<$key, $row>(vec![key], 64);
-                let object = model.item(0).expect("selected placeholder");
-                assert_eq!(
-                    selected_collection_target(&object, &$dragged),
-                    Some(($expected(key), false))
-                );
-            }};
-        }
-        check!(
-            library::AlbumKey,
-            library::AlbumRow,
-            PlaybackTarget::Album("album:dragged".into()),
-            PlaybackTarget::AlbumKey
-        );
-        check!(
-            library::ArtistKey,
-            library::ArtistRow,
-            PlaybackTarget::Artist("artist:dragged".into()),
-            |key| PlaybackTarget::ArtistKey(key, false)
-        );
-        check!(
-            library::GenreKey,
-            library::GenreRow,
-            PlaybackTarget::Genre(library::GenreKey::from_raw(2)),
-            PlaybackTarget::Genre
-        );
-        check!(
-            library::MoodKey,
-            library::MoodRow,
-            PlaybackTarget::Mood(library::MoodKey::from_raw(2)),
-            PlaybackTarget::Mood
-        );
-        check!(
-            library::PlaylistKey,
-            library::PlaylistRow,
-            PlaybackTarget::Playlist(library::PlaylistKey::from_raw(2)),
-            PlaybackTarget::Playlist
-        );
-    }
     #[test]
     fn playlist_drag_value_roundtrips_the_media_uris() {
         let expected = std::sync::Arc::<[String]>::from([

@@ -12,20 +12,14 @@ pub const FAVORITE_COLUMN_WIDTH: i32 = 32;
 
 pub type FavoriteControlKey = FavoriteTarget;
 
-#[derive(Default)]
-struct FavoriteControls {
-    static_controls: RefCell<HashMap<FavoriteControlKey, Vec<glib::WeakRef<gtk::Button>>>>,
-    dynamic_controls: RefCell<Vec<DynamicFavoriteControl>>,
-}
-
-struct DynamicFavoriteControl {
+struct FavoriteControl {
     key: Rc<dyn Fn() -> Option<FavoriteControlKey>>,
     button: glib::WeakRef<gtk::Button>,
 }
 
 #[derive(Default)]
 pub struct FavoriteSessionState {
-    controls: FavoriteControls,
+    controls: RefCell<Vec<FavoriteControl>>,
     pending_intents: RefCell<HashMap<FavoriteTarget, bool>>,
 }
 
@@ -39,55 +33,6 @@ pub fn track_favorite_key(media_uri: &str) -> FavoriteControlKey {
 
 pub fn artist_favorite_key(media_uri: &str) -> FavoriteControlKey {
     FavoriteTarget::Artist(media_uri.to_string())
-}
-
-fn register_favorite_control(
-    controls: &FavoriteControls,
-    key: FavoriteControlKey,
-    button: &gtk::Button,
-) {
-    let weak = glib::WeakRef::new();
-    weak.set(Some(button));
-    controls
-        .static_controls
-        .borrow_mut()
-        .entry(key)
-        .or_default()
-        .push(weak);
-}
-
-fn register_dynamic_favorite_control(
-    controls: &FavoriteControls,
-    key: Rc<dyn Fn() -> Option<FavoriteControlKey>>,
-    button: &gtk::Button,
-) {
-    let weak = glib::WeakRef::new();
-    weak.set(Some(button));
-    controls
-        .dynamic_controls
-        .borrow_mut()
-        .push(DynamicFavoriteControl { key, button: weak });
-}
-
-fn update_favorite_controls(controls: &FavoriteControls, key: &FavoriteControlKey, favorite: bool) {
-    if let Some(buttons) = controls.static_controls.borrow_mut().get_mut(key) {
-        buttons.retain(|button| {
-            let Some(button) = button.upgrade() else {
-                return false;
-            };
-            set_favorite_button_active(&button, favorite);
-            true
-        });
-    }
-    controls.dynamic_controls.borrow_mut().retain(|control| {
-        let Some(button) = control.button.upgrade() else {
-            return false;
-        };
-        if (control.key)().as_ref() == Some(key) {
-            set_favorite_button_active(&button, favorite);
-        }
-        true
-    });
 }
 
 pub fn favorite_icon_button(label: &str) -> gtk::Button {
@@ -143,18 +88,22 @@ fn icon_image_from_widget(widget: gtk::Widget) -> Option<gtk::Image> {
 
 impl FavoriteSessionState {
     pub fn register_favorite_button(&self, key: FavoriteControlKey, button: &gtk::Button) {
-        register_favorite_control(&self.controls, key, button);
+        self.register_dynamic_favorite_button(Rc::new(move || Some(key.clone())), button);
     }
     pub fn register_dynamic_favorite_button(
         &self,
         key: Rc<dyn Fn() -> Option<FavoriteControlKey>>,
         button: &gtk::Button,
     ) {
-        register_dynamic_favorite_control(&self.controls, key, button);
+        let mut controls = self.controls.borrow_mut();
+        controls.retain(|control| control.button.upgrade().is_some());
+        controls.push(FavoriteControl {
+            key,
+            button: button.downgrade(),
+        });
     }
     pub fn clear_favorite_controls(&self) {
-        self.controls.static_controls.borrow_mut().clear();
-        self.controls.dynamic_controls.borrow_mut().clear();
+        self.controls.borrow_mut().clear();
     }
     pub fn projected_item_favorite(&self, item: &FavoriteTarget, fallback: bool) -> bool {
         self.pending_intents
@@ -167,7 +116,15 @@ impl FavoriteSessionState {
         self.pending_intents.borrow_mut().insert(item, favorite);
     }
     pub fn update_visible_favorite_buttons(&self, item: &FavoriteTarget, favorite: bool) {
-        update_favorite_controls(&self.controls, item, favorite);
+        self.controls.borrow_mut().retain(|control| {
+            let Some(button) = control.button.upgrade() else {
+                return false;
+            };
+            if (control.key)().as_ref() == Some(item) {
+                set_favorite_button_active(&button, favorite);
+            }
+            true
+        });
     }
     pub fn response_matches_pending(&self, item: &FavoriteTarget, requested: bool) -> bool {
         let mut pending = self.pending_intents.borrow_mut();

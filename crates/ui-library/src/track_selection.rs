@@ -1,9 +1,7 @@
 //! Position-only multi-selection for sparse Track and playlist-entry routes.
 //!
-//! GTK's general multi-selection retains every selected model item. Rufin instead owns one
-//! complete key order and clears selection when that order changes, so retaining a roaring bitset
-//! of positions preserves native list selection without turning selected off-screen rows into
-//! sparse hydration demand.
+//! Selected positions are resolved when an action needs them. Selecting off-screen rows does not
+//! hydrate their widgets or prepare a complete collection order.
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -16,7 +14,8 @@ use super::track_model::TrackCollectionModel;
 
 #[derive(Clone)]
 pub struct TrackSelection {
-    order: Rc<dyn Fn() -> Arc<[String]>>,
+    input: Rc<dyn Fn(&gtk::Bitset) -> library::QueueInput>,
+    position: Rc<dyn Fn(&str) -> Option<u32>>,
     selection: PositionSelectionModel,
 }
 
@@ -25,8 +24,10 @@ impl TrackSelection {
         model: TrackCollectionModel<T>,
     ) -> Self {
         let selection = PositionSelectionModel::new(model.list_model());
+        let locate = model.clone();
         Self {
-            order: Rc::new(move || model.order()),
+            input: Rc::new(move |positions| model.selection_input(positions)),
+            position: Rc::new(move |uri| locate.ready_position(uri)),
             selection,
         }
     }
@@ -49,22 +50,30 @@ impl TrackSelection {
     }
 
     pub fn selected_tracks_for(&self, clicked: &str) -> Option<TrackSelectionSnapshot> {
-        self.selected_tracks().filter(|selection| {
-            selection.media_uris.len() > 1 && selection.media_uris.iter().any(|uri| uri == clicked)
+        let position = (self.position)(clicked)?;
+        let positions = self.selection.selection();
+        (positions.size() > 1 && positions.contains(position)).then(|| TrackSelectionSnapshot {
+            input: (self.input)(&positions),
+            count: positions.size() as usize,
         })
     }
 
     pub fn selected_tracks(&self) -> Option<TrackSelectionSnapshot> {
-        let media_uris = selected_values(&(self.order)(), &self.selection.selection());
-        (!media_uris.is_empty()).then(|| TrackSelectionSnapshot {
-            media_uris: media_uris.into(),
+        let positions = self.selection.selection();
+        (positions.size() > 0).then(|| TrackSelectionSnapshot {
+            input: (self.input)(&positions),
+            count: positions.size() as usize,
         })
     }
 
     pub fn dragged_tracks_for(&self, clicked: &str) -> TrackSelectionSnapshot {
         self.selected_tracks_for(clicked)
             .unwrap_or_else(|| TrackSelectionSnapshot {
-                media_uris: Arc::from([clicked.to_string()]),
+                input: library::QueueInput::MediaUris {
+                    order: Arc::from([clicked.to_string()]),
+                    provenance: library::QueueProvenance::Manual,
+                },
+                count: 1,
             })
     }
 }
@@ -97,14 +106,13 @@ impl PlaylistEntrySelection {
         clicked: PlaylistEntryKey,
     ) -> Option<PlaylistEntrySelectionSnapshot> {
         let positions = self.selection.selection();
-        let entries = selected_values(&self.model.order(), &positions);
-        (entries.len() > 1 && entries.contains(&clicked)).then(|| self.snapshot(entries))
+        let position = self.model.ready_position(clicked)?;
+        (positions.size() > 1 && positions.contains(position)).then(|| self.snapshot(&positions))
     }
 
     pub fn selected_entries(&self) -> Option<PlaylistEntrySelectionSnapshot> {
         let positions = self.selection.selection();
-        let entries = selected_values(&self.model.order(), &positions);
-        (!entries.is_empty()).then(|| self.snapshot(entries))
+        (positions.size() > 0).then(|| self.snapshot(&positions))
     }
 
     pub fn single_entry(&self, entry: PlaylistEntryKey) -> PlaylistEntrySelectionSnapshot {
@@ -112,22 +120,27 @@ impl PlaylistEntrySelection {
             writable: self.writable,
             playlist: self.model.playlist_key(),
             playlist_name: Arc::clone(&self.playlist_name),
-            entries: Arc::from([entry]),
+            count: 1,
+            input: library::QueueInput::PlaylistEntries {
+                order: Arc::from([entry]),
+                context_id: format!("playlist-selection:{}", self.model.playlist_key()).into(),
+            },
         }
     }
 
-    fn snapshot(&self, entries: Vec<PlaylistEntryKey>) -> PlaylistEntrySelectionSnapshot {
+    fn snapshot(&self, positions: &gtk::Bitset) -> PlaylistEntrySelectionSnapshot {
         PlaylistEntrySelectionSnapshot {
             writable: self.writable,
             playlist: self.model.playlist_key(),
             playlist_name: Arc::clone(&self.playlist_name),
-            entries: entries.into(),
+            input: self.model.selection_input(positions),
+            count: positions.size() as usize,
         }
     }
 }
 
 use ui_shared::selection::{
-    PlaylistEntrySelectionSnapshot, PositionSelectionModel, TrackSelectionSnapshot, selected_values,
+    PlaylistEntrySelectionSnapshot, PositionSelectionModel, TrackSelectionSnapshot,
 };
 
 use artwork::ArtworkBinding;

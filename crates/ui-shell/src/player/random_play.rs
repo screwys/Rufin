@@ -2,7 +2,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use ::library::{GenreRow, GenreSort, PlayedFilter, RandomCriteria, ReadCancellation};
+use ::library::{GenreChoice, PlayedFilter, RandomCriteria, ReadCancellation};
 use adw::prelude::*;
 use gtk::glib;
 use playback::{QueuePlacement, RandomPlayRequest};
@@ -40,29 +40,8 @@ pub(super) fn present_random_play_dialog(shell: &Rc<Shell>) {
     let folder = selected.music_folder_key;
     let cancellation = ReadCancellation::new();
     let runtime = selected.runtime.clone();
-    let task = runtime.spawn(async move {
-        let order = database
-            .genre_route_page(
-                source,
-                folder,
-                "",
-                GenreSort::Title,
-                false,
-                library::RouteSeedWindow::top(),
-                &cancellation,
-            )
-            .await?
-            .0;
-        let mut genres = Vec::with_capacity(order.len());
-        for keys in order.chunks(128) {
-            genres.extend(
-                database
-                    .genre_rows(source, keys, folder, &cancellation)
-                    .await?,
-            );
-        }
-        Ok::<_, library::LibraryError>(genres)
-    });
+    let task =
+        runtime.spawn(async move { database.genre_choices(source, folder, &cancellation).await });
     let shell = Rc::downgrade(shell);
     glib::spawn_future_local(async move {
         let Some(shell) = shell.upgrade() else {
@@ -78,7 +57,7 @@ pub(super) fn present_random_play_dialog(shell: &Rc<Shell>) {
 fn present_random_play_dialog_loaded(
     shell: &Rc<Shell>,
     selected: rufin_core::runtime::SelectedLibrary,
-    genres: Vec<GenreRow>,
+    genres: Vec<GenreChoice>,
 ) {
     let played_filters = [
         PlayedFilter::All,
@@ -184,7 +163,11 @@ fn connect_year_toggle(check: &gtk::CheckButton, spinner: &gtk::SpinButton) {
     });
 }
 
-fn configure_genre_dropdown(dropdown: &gtk::DropDown, genres: &[GenreRow], selected: Option<&str>) {
+fn configure_genre_dropdown(
+    dropdown: &gtk::DropDown,
+    genres: &[GenreChoice],
+    selected: Option<&str>,
+) {
     let mut labels = Vec::with_capacity(genres.len() + 1);
     labels.push(tr("Any genre"));
     labels.extend(genres.iter().map(|genre| genre.name.clone()));
@@ -228,7 +211,7 @@ fn connect_action(
     shell: &Rc<Shell>,
     dialog: &adw::Dialog,
     controls: &RandomPlayControls,
-    genres: &[GenreRow],
+    genres: &[GenreChoice],
     selected: &rufin_core::runtime::SelectedLibrary,
     placement: QueuePlacement,
 ) {
@@ -271,7 +254,7 @@ fn connect_action(
 
 fn settings_from_controls(
     controls: &RandomPlayControls,
-    genres: &[GenreRow],
+    genres: &[GenreChoice],
     source_id: sources::SourceId,
     music_folder_id: Option<String>,
 ) -> Option<RandomPlaySettings> {
@@ -304,7 +287,7 @@ fn settings_from_controls(
 
 fn request_from_settings(
     settings: &RandomPlaySettings,
-    genres: &[GenreRow],
+    genres: &[GenreChoice],
     source_id: &sources::SourceId,
     music_folder_id: Option<&str>,
     placement: QueuePlacement,
@@ -368,7 +351,7 @@ pub(crate) fn play_saved_random(shell: &Rc<Shell>, placement: QueuePlacement) {
     report_random_result(shell, task);
 }
 
-fn selected_genre(genres: &[GenreRow], selected: u32) -> Option<String> {
+fn selected_genre(genres: &[GenreChoice], selected: u32) -> Option<String> {
     if selected == gtk::INVALID_LIST_POSITION || selected == 0 {
         return None;
     }

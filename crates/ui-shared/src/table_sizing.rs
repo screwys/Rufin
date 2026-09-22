@@ -25,7 +25,7 @@ pub fn fitted_column_widths(base_widths: &[i32], available_width: i32) -> Vec<i3
     fitted_column_widths_with_minimums(base_widths, &minimum_widths, available_width)
 }
 
-fn fitted_column_widths_with_minimums(
+pub fn fitted_column_widths_with_minimums(
     base_widths: &[i32],
     minimum_widths: &[i32],
     available_width: i32,
@@ -279,7 +279,9 @@ fn fit_preferred_column_widths(state: &ColumnViewWidthState) {
     let preferred_widths = columns.iter().map(|(_, width)| *width).collect::<Vec<_>>();
     let minimum_widths = columns
         .iter()
-        .map(|(column, preferred)| column_header_minimum_width(column, *preferred))
+        .map(|(column, preferred)| {
+            column_header_minimum_width(column.title().as_deref(), *preferred)
+        })
         .collect::<Vec<_>>();
     drop(columns);
     let widths = fitted_column_widths_with_minimums(
@@ -290,14 +292,13 @@ fn fit_preferred_column_widths(state: &ColumnViewWidthState) {
     apply_column_widths(state, &widths);
 }
 
-fn column_header_minimum_width(column: &gtk::ColumnViewColumn, preferred: i32) -> i32 {
+pub fn column_header_minimum_width(title: Option<&str>, preferred: i32) -> i32 {
     // Headerless action columns need room for their buttons even in narrow tables.
-    if column.title().is_none() {
+    if title.is_none() {
         return preferred;
     }
     let fallback = preferred.clamp(MIN_TABLE_COLUMN_WIDTH, TABLE_TARGET_WIDTH);
-    let header = column
-        .title()
+    let header = title
         .map(|title| compact_header_text_width(&title, MIN_TABLE_COLUMN_WIDTH))
         .unwrap_or(MIN_TABLE_COLUMN_WIDTH)
         .min(preferred.max(1));

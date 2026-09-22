@@ -18,26 +18,69 @@ async fn unavailable_local_root_preserves_catalog_and_can_retry() {
     fs::create_dir(&root).unwrap();
     let track = root.join("track.wav");
     write_silent_wav(&track, 1).unwrap();
-    let database = Database::open(directory.path().join("library.sqlite")).await.unwrap();
+    let database = Database::open(directory.path().join("library.sqlite"))
+        .await
+        .unwrap();
     let (configuration, source, _) = Source::connect(
         SourceId::new("test-source"),
-        SourceSetupInput::Local(LocalFolderHostInput { roots: vec![root.clone()] }),
-    ).await.unwrap().into_parts();
+        SourceSetupInput::Local(LocalFolderHostInput {
+            roots: vec![root.clone()],
+        }),
+    )
+    .await
+    .unwrap()
+    .into_parts();
     let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
     fs::rename(&root, &offline).unwrap();
-    assert!(matches!(source.manual_refresh(&database, &configuration.name, &|_| {}, cancelled.clone()).await,
-        Err(sources::SourceError::IncompleteScan { outcome: ScanOutcome::Failed, .. })));
+    assert!(matches!(
+        source
+            .manual_refresh(&database, &configuration.name, &|_| {}, cancelled.clone())
+            .await,
+        Err(sources::SourceError::IncompleteScan {
+            outcome: ScanOutcome::Failed,
+            ..
+        })
+    ));
     fs::rename(&offline, &root).unwrap();
-    let initial = publication(source.manual_refresh(&database, &configuration.name, &|_| {}, cancelled.clone()).await.unwrap());
+    let initial = publication(
+        source
+            .manual_refresh(&database, &configuration.name, &|_| {}, cancelled.clone())
+            .await
+            .unwrap(),
+    );
     assert_eq!(initial.catalog_revision, 1);
     fs::rename(&root, &offline).unwrap();
-    assert!(source.manual_refresh(&database, &configuration.name, &|_| {}, cancelled.clone()).await.is_err());
-    assert!(source.catch_up_local(&database, initial.source, &|_| {}, cancelled.clone()).await.is_err());
-    assert!(source.apply_local_change(&database, initial.source,
-        LocalLiveChange::Paths { paths: vec![track], rename: None }).await.is_err());
+    assert!(
+        source
+            .manual_refresh(&database, &configuration.name, &|_| {}, cancelled.clone())
+            .await
+            .is_err()
+    );
+    assert!(
+        source
+            .catch_up_local(&database, initial.source, &|_| {}, cancelled.clone())
+            .await
+            .is_err()
+    );
+    assert!(
+        source
+            .apply_local_change(
+                &database,
+                initial.source,
+                LocalLiveChange::Paths {
+                    paths: vec![track],
+                    rename: None
+                }
+            )
+            .await
+            .is_err()
+    );
     assert_eq!(track_count(&database, initial).await, 1);
     fs::rename(&offline, &root).unwrap();
-    source.manual_refresh(&database, &configuration.name, &|_| {}, cancelled).await.unwrap();
+    source
+        .manual_refresh(&database, &configuration.name, &|_| {}, cancelled)
+        .await
+        .unwrap();
     assert_eq!(track_count(&database, initial).await, 1);
 }
 
@@ -160,7 +203,8 @@ async fn local_image_change_publishes_artwork_without_catalog_revision() {
         )
         .await
         .expect("Album order")
-        .0[0];
+        .2[0]
+        .album_key;
     let before = database
         .album_rows(initial.source, &[album], None, &ReadCancellation::new())
         .await
@@ -400,7 +444,7 @@ async fn cue_catch_up_advances_a_shared_backing_media_observation() {
         )
         .await
         .expect("Album order")
-        .0;
+        .2;
     assert_eq!(albums.len(), 2);
     write_silent_wav(&media, 3).expect("edit CUE backing media");
     let changed = publication(
@@ -986,7 +1030,10 @@ async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
         )
         .await
         .expect("Album order")
-        .0;
+        .2
+        .into_iter()
+        .map(|row| row.album_key)
+        .collect::<Vec<_>>();
     assert_eq!(albums.len(), 1);
     assert_eq!(
         album_genres(&database, initial, albums[0]).await,

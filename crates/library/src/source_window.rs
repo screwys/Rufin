@@ -17,6 +17,15 @@ pub(crate) struct SourceQuery {
 }
 
 impl SourceQuery {
+    pub async fn count(&self, connection: &mut SqliteConnection) -> LibraryResult<i64> {
+        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT count(*) FROM {} WHERE {}",
+            self.from, self.predicate
+        )))
+        .fetch_one(connection)
+        .await?)
+    }
+
     pub fn select(&self, columns: &str) -> String {
         format!(
             "SELECT {columns} FROM {} WHERE {} ORDER BY {}",
@@ -25,6 +34,47 @@ impl SourceQuery {
             self.order.join(",")
         )
     }
+}
+
+pub(crate) async fn selected_values_on<T>(
+    connection: &mut SqliteConnection,
+    query: &crate::source_window::SourceQuery,
+    column: &str,
+    ranges: &[std::ops::Range<usize>],
+) -> LibraryResult<Vec<T>>
+where
+    T: for<'r> sqlx::Decode<'r, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite> + Send + Unpin,
+{
+    let Some(first) = ranges.first() else {
+        return Ok(Vec::new());
+    };
+    if ranges.len() == 1 {
+        let sql = format!("{} LIMIT ?1 OFFSET ?2", query.select(column));
+        return Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+            .bind(first.len() as i64)
+            .bind(first.start as i64)
+            .persistent(false)
+            .fetch_all(connection)
+            .await?);
+    }
+    let columns = format!(
+        "{column} value, row_number() OVER (ORDER BY {})-1 position",
+        query.order.join(",")
+    );
+    let sql = format!(
+        "WITH ordered AS ({} LIMIT ?1)
+         SELECT value FROM ordered WHERE EXISTS (
+           SELECT 1 FROM json_each(?2) selected
+           WHERE position>=json_extract(selected.value,'$.start')
+             AND position<json_extract(selected.value,'$.end')) ORDER BY position",
+        query.select(&columns),
+    );
+    Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+        .bind(ranges.iter().map(|range| range.end).max().unwrap_or(0) as i64)
+        .bind(serde_json::to_string(ranges)?)
+        .persistent(false)
+        .fetch_all(connection)
+        .await?)
 }
 
 pub(crate) async fn source_members(
@@ -54,12 +104,18 @@ async fn source_members_on(
     legacy_seed: Option<u64>,
 ) -> LibraryResult<Vec<(String, Option<String>, bool)>> {
     let mut query = match &source.scope {
-        QueueScope::Smart { reference, now } => {
+        QueueScope::Smart {
+            reference,
+            now,
+            display_sort,
+        } => {
             let mut uris = crate::smart_playlists::smart_members_ref(
                 connection,
                 reference,
                 *now,
                 &source.filter,
+                *display_sort,
+                source.descending,
             )
             .await?;
             if let Some(seed) = legacy_seed {
@@ -130,7 +186,6 @@ async fn source_members_on(
                 *favorites_only,
                 folder,
                 &source.filter,
-                false,
             )
         }
         QueueScope::Collection {
@@ -282,14 +337,25 @@ pub(crate) async fn canonical_query(
                 favorites_only,
             }
         }
-        QueueQuery::Smart { key, source, now } => {
+        query @ (QueueQuery::Smart { .. } | QueueQuery::SmartDisplay { .. }) => {
+            let (key, source, now, display_sort) = match query {
+                QueueQuery::Smart { key, source, now } => (key, source, now, None),
+                QueueQuery::SmartDisplay { key, source } => {
+                    (key, source, crate::smart_playlists::now(), Some(sort))
+                }
+                _ => unreachable!(),
+            };
             let Some(reference) =
                 crate::smart_playlists::smart_source_reference(connection, key, source, folder)
                     .await?
             else {
                 return Ok(None);
             };
-            QueueScope::Smart { reference, now }
+            QueueScope::Smart {
+                reference,
+                now,
+                display_sort,
+            }
         }
     };
     Ok(Some(QueueSource {

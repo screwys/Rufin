@@ -50,9 +50,10 @@ impl RemoteSource {
                                         "{}/",
                                         self.location(directory)?.trim_end_matches('/')
                                     );
-                                    let image = if scan
-                                        .local_artwork_directory_is_single_album(&prefix)
-                                        .await?
+                                    let image = if slot == 0
+                                        || scan
+                                            .local_artwork_directory_is_single_album(&prefix)
+                                            .await?
                                     {
                                         self.directory_image(scan, &prefix).await?
                                     } else {

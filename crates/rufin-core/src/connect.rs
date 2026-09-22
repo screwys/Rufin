@@ -1401,7 +1401,9 @@ impl ConnectOwner {
             } => {
                 if let Some(source_id) = source_id {
                     let source = self.source.client(&source_id)?;
-                    let incoming = tempfile::NamedTempFile::new().map_err(error)?;
+                    std::fs::create_dir_all(&self.directory).map_err(error)?;
+                    let incoming =
+                        tempfile::NamedTempFile::new_in(&self.directory).map_err(error)?;
                     if source
                         .read_profile_file(&path.to_string_lossy(), incoming.path())
                         .await
@@ -1691,7 +1693,7 @@ impl ConnectOwner {
             .await
             .map_err(error)?;
         network.check_membership(&peer).await.map_err(error)?;
-        let staged = Self::fetch_snapshot(network, &peer, true).await?;
+        let staged = self.fetch_snapshot(network, &peer, true).await?;
         let _action = self.actions.lock().await;
         if !self.joining.load(std::sync::atomic::Ordering::Acquire)
             || !self
@@ -1741,6 +1743,7 @@ impl ConnectOwner {
     }
 
     async fn fetch_snapshot(
+        &self,
         network: &ConnectNetwork,
         peer: &str,
         setup: bool,
@@ -1757,7 +1760,7 @@ impl ConnectOwner {
             .as_str()
             .ok_or("The peer did not provide its profile")?;
         // Blob installation replaces this path; close its handle before fetching on Windows.
-        let staged = tempfile::NamedTempFile::new()
+        let staged = tempfile::NamedTempFile::new_in(&self.directory)
             .map_err(error)?
             .into_temp_path();
         network
@@ -2296,7 +2299,7 @@ impl ConnectOwner {
             .secret(file_key(&self.identity_reference()?, &session.profile))
             .await?
             .ok_or("The Connect file key is unavailable")?;
-        let snapshot = tempfile::NamedTempFile::new().map_err(error)?;
+        let snapshot = tempfile::tempfile_in(&self.directory).map_err(error)?;
         if setup {
             // Folder identities and labels are setup data; track rows can follow
             // after this device chooses which existing folders to reuse.
@@ -2320,13 +2323,13 @@ impl ConnectOwner {
             }
             session
                 .documents
-                .export_setup_snapshot(snapshot.path())
+                .export_setup_snapshot(snapshot.try_clone().map_err(error)?)
                 .await
                 .map_err(error)?;
         } else {
             session
                 .documents
-                .export_device_snapshot(snapshot.path(), &session.identity)
+                .export_device_snapshot(snapshot.try_clone().map_err(error)?, &session.identity)
                 .await
                 .map_err(error)?;
             let members = match self.network.lock().await.as_ref() {
@@ -2335,14 +2338,15 @@ impl ConnectOwner {
             };
             session
                 .documents
-                .finish_device_snapshot(snapshot.path(), &members)
+                .finish_device_snapshot(snapshot.try_clone().map_err(error)?, &members)
                 .await
                 .map_err(error)?;
         }
         let profile = session.profile.clone();
+        let directory = self.directory.clone();
         tokio::task::spawn_blocking(move || {
-            let output = tempfile::NamedTempFile::new().map_err(error)?;
-            portable::encrypt(snapshot.path(), output.path(), &profile, &key)?;
+            let output = tempfile::NamedTempFile::new_in(directory).map_err(error)?;
+            portable::encrypt(snapshot, output.path(), &profile, &key)?;
             Ok(output)
         })
         .await
@@ -2401,10 +2405,13 @@ impl ConnectOwner {
                 keys
             }
         };
-        let (profile, staged) =
-            tokio::task::spawn_blocking(move || portable::decrypt(&path, &keys))
-                .await
-                .map_err(error)??;
+        let directory = self.directory.clone();
+        let (profile, staged) = tokio::task::spawn_blocking(move || {
+            std::fs::create_dir_all(&directory).map_err(error)?;
+            portable::decrypt(&path, &keys, &directory)
+        })
+        .await
+        .map_err(error)??;
         let key = match explicit_key {
             Some(key) => key,
             None => self
@@ -2438,7 +2445,7 @@ impl ConnectOwner {
             // Validate the complete snapshot transaction before touching working
             // settings, queues or collection. A failed import keeps them intact.
             documents
-                .replace_snapshot(staged.path())
+                .replace_snapshot(staged.try_clone().map_err(error)?)
                 .await
                 .map_err(error)?;
             self.joining
@@ -2489,7 +2496,7 @@ impl ConnectOwner {
             drop(_sync);
             session
                 .documents
-                .import_snapshot(staged.path())
+                .import_snapshot(staged.try_clone().map_err(error)?)
                 .await
                 .map_err(error)?;
             let _sync = self.sync.lock().await;
@@ -2551,7 +2558,7 @@ impl ConnectOwner {
         &self,
         session: &Arc<Session>,
         path: PathBuf,
-    ) -> Result<tempfile::NamedTempFile, String> {
+    ) -> Result<std::fs::File, String> {
         let identity = self.identity_reference()?;
         let mut keys = vec![
             self.secret(file_key(&identity, &session.profile))
@@ -2564,8 +2571,9 @@ impl ConnectOwner {
         {
             keys.extend(serde_json::from_str::<Vec<String>>(&previous).map_err(error)?);
         }
+        let directory = self.directory.clone();
         let (profile, staged) =
-            tokio::task::spawn_blocking(move || portable::decrypt(&path, &keys))
+            tokio::task::spawn_blocking(move || portable::decrypt(&path, &keys, &directory))
                 .await
                 .map_err(error)??;
         if profile != session.profile {
@@ -2575,7 +2583,7 @@ impl ConnectOwner {
         // a file must not hold the lock needed by Join or Disconnect.
         session
             .documents
-            .import_snapshot(staged.path())
+            .import_snapshot(staged.try_clone().map_err(error)?)
             .await
             .map_err(error)?;
         Ok(staged)
@@ -2668,7 +2676,7 @@ impl ConnectOwner {
             if version.is_some() && cached.files.get(&path) == Some(&version) {
                 continue;
             }
-            let incoming = tempfile::NamedTempFile::new().map_err(error)?;
+            let incoming = tempfile::NamedTempFile::new_in(&self.directory).map_err(error)?;
             let input = match &destination {
                 portable::Destination::Local { path: folder } => folder.join(&path),
                 portable::Destination::Remote { .. } => {
@@ -2690,7 +2698,7 @@ impl ConnectOwner {
             if path == own_path
                 && session
                     .documents
-                    .snapshot_contains_current(imported.path())
+                    .snapshot_contains_current(imported)
                     .await
                     .map_err(error)?
             {
@@ -2703,22 +2711,38 @@ impl ConnectOwner {
             return Ok(());
         }
         let output = self.export_session(session, false).await?;
-        match &destination {
+        let version = match &destination {
             portable::Destination::Local { path } => {
-                portable::install(output, path.join(&own_path)).await?
+                let path = path.join(&own_path);
+                portable::install(output, path.clone()).await?;
+                let metadata = tokio::fs::metadata(path).await.map_err(error)?;
+                Some(format!(
+                    "{:?}:{}",
+                    metadata.modified().map_err(error)?,
+                    metadata.len()
+                ))
             }
-            portable::Destination::Remote { .. } => {
+            portable::Destination::Remote { path, .. } => {
                 source
                     .as_ref()
                     .unwrap()
                     .write_profile_file(&own_path, output, Some(None))
                     .await
                     .map_err(error)?;
+                source
+                    .as_ref()
+                    .unwrap()
+                    .profile_files(path)
+                    .await
+                    .map_err(error)?
+                    .into_iter()
+                    .find_map(|(path, version)| (path == own_path).then_some(version))
+                    .flatten()
             }
-        }
+        };
         cached.revision = Some(revision);
         // This device only writes its own file; other writers' snapshots remain intact.
-        cached.files.remove(&own_path);
+        cached.files.insert(own_path, version);
         Ok(())
     }
 }

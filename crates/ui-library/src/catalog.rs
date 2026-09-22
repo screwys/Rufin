@@ -48,7 +48,7 @@ pub struct CatalogUi {
 
     pub current: RefCell<Option<RouteCurrentTrack>>,
     pub current_track_selections: RefCell<Vec<RouteCurrentTrackSelection>>,
-    pub grid_playing_cells: RefCell<Vec<std::rc::Weak<crate::grid_cells::GridPlayingBinding>>>,
+    pub media_playing_cells: RefCell<Vec<std::rc::Weak<crate::grid_cells::MediaPlayingBinding>>>,
     pub track_selections: RefCell<Vec<TrackSelection>>,
     pub playlist_entry_selection: RefCell<Option<PlaylistEntrySelection>>,
 }
@@ -202,7 +202,7 @@ impl CatalogUi {
     }
     pub fn reapply_current_track(&self) {
         let current = self.current.borrow();
-        self.grid_playing_cells.borrow_mut().retain(|cell| {
+        self.media_playing_cells.borrow_mut().retain(|cell| {
             let Some(cell) = cell.upgrade() else {
                 return false;
             };

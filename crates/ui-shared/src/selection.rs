@@ -2,6 +2,12 @@ use gtk::{gio, glib, prelude::*, subclass::prelude::*};
 use library::{PlaylistEntryKey, PlaylistKey};
 use playback::QueuePlacement;
 use std::{cell::RefCell, sync::Arc};
+pub(crate) type CollectionSelection = Box<
+    dyn Fn(
+        &rufin_core::playback::PlaybackTarget,
+        &gtk::Bitset,
+    ) -> Option<crate::media_drag::CollectionTargets>,
+>;
 mod position_selection_imp {
     use super::*;
 
@@ -11,6 +17,7 @@ mod position_selection_imp {
         pub(super) model_handler: RefCell<Option<glib::SignalHandlerId>>,
         pub(super) section_handler: RefCell<Option<glib::SignalHandlerId>>,
         pub(super) selected: RefCell<Option<gtk::Bitset>>,
+        pub(super) collection_selection: RefCell<Option<CollectionSelection>>,
     }
 
     #[glib::object_subclass]
@@ -36,6 +43,7 @@ mod position_selection_imp {
             }
             self.model.borrow_mut().take();
             self.selected.borrow_mut().take();
+            self.collection_selection.borrow_mut().take();
         }
     }
 
@@ -219,33 +227,45 @@ impl PositionSelectionModel {
 
         self.imp().selected.replace(Some(gtk::Bitset::new_empty()));
     }
+    pub fn set_collection_selection(&self, capture: CollectionSelection) {
+        self.imp().collection_selection.replace(Some(capture));
+    }
+
+    pub(crate) fn collection_selection(
+        &self,
+        target: &rufin_core::playback::PlaybackTarget,
+        positions: &gtk::Bitset,
+    ) -> Option<crate::media_drag::CollectionTargets> {
+        if let Some(capture) = self.imp().collection_selection.borrow().as_ref() {
+            return capture(target, positions);
+        }
+        self.imp()
+            .model
+            .borrow()
+            .as_ref()?
+            .downcast_ref::<crate::sparse_model::SparseObjectModel>()?
+            .collection_selection(target, positions)
+    }
 }
 
 #[derive(Clone)]
 pub struct TrackSelectionSnapshot {
-    pub media_uris: Arc<[String]>,
+    pub input: library::QueueInput,
+    pub count: usize,
 }
 impl TrackSelectionSnapshot {
     pub fn play(&self, queue: &playback::QueueHandle, placement: QueuePlacement, shuffled: bool) {
-        if self.media_uris.is_empty() {
-            return;
-        }
         queue.play(
-            playback::PlayRequest::ordered(
-                library::QueueInput::MediaUris {
-                    order: self.media_uris.clone(),
-                    provenance: library::QueueProvenance::Manual,
-                },
-                0,
-                placement,
-                false,
-            )
-            .shuffled(shuffled),
+            playback::PlayRequest::ordered(self.input.clone(), 0, placement, false)
+                .shuffled(shuffled),
         );
     }
 
-    pub fn download_subject(&self) -> downloads::DownloadSubject {
-        downloads::DownloadSubject::for_media_uris("track-selection", None, &self.media_uris)
+    pub async fn media_uris(&self, database: &library::Database) -> Result<Vec<String>, String> {
+        database
+            .selected_track_uris(&self.input, &library::ReadCancellation::new())
+            .await
+            .map_err(|error| error.to_string())
     }
 }
 #[derive(Clone)]
@@ -253,13 +273,25 @@ pub struct PlaylistEntrySelectionSnapshot {
     pub writable: bool,
     pub playlist: PlaylistKey,
     pub playlist_name: Arc<str>,
-    pub entries: Arc<[PlaylistEntryKey]>,
+    pub input: library::QueueInput,
+    pub count: usize,
 }
 impl PlaylistEntrySelectionSnapshot {
     pub async fn media_uris(&self, database: &library::Database) -> Result<Vec<String>, String> {
+        self.resolve(database).await.map(|(_, uris)| uris)
+    }
+
+    pub async fn resolve(
+        &self,
+        database: &library::Database,
+    ) -> Result<(Vec<PlaylistEntryKey>, Vec<String>), String> {
         let cancellation = library::ReadCancellation::new();
-        let mut media_uris = Vec::with_capacity(self.entries.len());
-        for entries in self.entries.chunks(256) {
+        let keys = database
+            .selected_playlist_entries(&self.input, &cancellation)
+            .await
+            .map_err(|error| error.to_string())?;
+        let mut media_uris = Vec::with_capacity(keys.len());
+        for entries in keys.chunks(256) {
             media_uris.extend(
                 database
                     .playlist_entry_media_uris(self.playlist, entries, &cancellation)
@@ -267,26 +299,40 @@ impl PlaylistEntrySelectionSnapshot {
                     .map_err(|error| error.to_string())?,
             );
         }
-        Ok(media_uris)
+        Ok((keys, media_uris))
     }
 
     pub fn play(&self, queue: &playback::QueueHandle, placement: QueuePlacement, shuffled: bool) {
         queue.play(
-            playback::PlayRequest::ordered(
-                library::QueueInput::PlaylistEntries {
-                    order: self.entries.clone(),
-                    context_id: format!("playlist-selection:{}", self.playlist).into(),
-                },
-                0,
-                placement,
-                false,
-            )
-            .shuffled(shuffled),
+            playback::PlayRequest::ordered(self.input.clone(), 0, placement, false)
+                .shuffled(shuffled),
         );
     }
 }
 pub fn selected_values<T: Clone>(order: &[T], positions: &gtk::Bitset) -> Vec<T> {
     keys_at_positions(order, selected_positions(positions))
+}
+
+pub fn selected_ranges(positions: &gtk::Bitset) -> Vec<std::ops::Range<usize>> {
+    if positions.size() == 0 {
+        return Vec::new();
+    }
+    let start = positions.minimum() as usize;
+    let end = positions.maximum() as usize + 1;
+    if end - start == positions.size() as usize {
+        return std::iter::once(start..end).collect();
+    }
+    let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
+    for position in selected_positions(positions).map(|position| position as usize) {
+        if let Some(last) = ranges.last_mut()
+            && last.end == position
+        {
+            last.end += 1;
+        } else {
+            ranges.push(position..position + 1);
+        }
+    }
+    ranges
 }
 
 fn selected_positions(positions: &gtk::Bitset) -> impl Iterator<Item = u32> + '_ {

@@ -1154,7 +1154,7 @@ impl crate::PlayerUi {
         };
         let pending = &queue.reveal_current[usize::from(fullscreen)];
         let loading = self.queue_loading_icon(fullscreen).is_visible();
-        if !pending.get() && !loading {
+        if !pending.get() {
             return;
         }
         let Some(occurrence) = queue.current.borrow().clone() else {
@@ -1221,15 +1221,20 @@ fn render_panel(
             }
         });
         let weak = scroller.downgrade();
+        let weak_shell = Rc::downgrade(shell);
         owner.set_after_allocate_callback(move || {
-            if let Some(value) = resize_offset.take()
-                && let Some(scroller) = weak.upgrade()
-            {
+            let Some(scroller) = weak.upgrade() else {
+                return;
+            };
+            if let Some(value) = resize_offset.take() {
                 // GtkColumnView otherwise keeps a row at a fractional viewport
                 // position, which slides the tracks when a divider changes height.
                 let adjustment = scroller.vadjustment();
                 let maximum = (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
                 adjustment.set_value(value.clamp(adjustment.lower(), maximum));
+            }
+            if let Some(shell) = weak_shell.upgrade() {
+                shell.reveal_queue_current(&scroller, fullscreen);
             }
         });
         panel.append(&owner);
@@ -1250,9 +1255,12 @@ fn render_panel(
     if shell
         .selected_queue()
         .is_some_and(|queue| queue.reveal_current[usize::from(fullscreen)].get())
-        || shell.queue_loading_icon(fullscreen).is_visible()
     {
-        reveal_queue_after_layout(shell, &scroller, fullscreen);
+        scroller
+            .parent()
+            .and_then(|overlay| overlay.parent())
+            .expect("queue allocation owner")
+            .queue_allocate();
     }
 }
 
@@ -1279,30 +1287,6 @@ fn queue_scroller_in(widget: &gtk::Widget) -> Option<gtk::ScrolledWindow> {
         child = widget.next_sibling();
     }
     None
-}
-
-fn reveal_queue_after_layout(
-    shell: &Rc<crate::PlayerUi>,
-    scroller: &gtk::ScrolledWindow,
-    fullscreen: bool,
-) {
-    let shell = Rc::downgrade(shell);
-    scroller.add_tick_callback(move |scroller, clock| {
-        let scroller = scroller.downgrade();
-        let shell = shell.clone();
-        let handler = Rc::new(RefCell::new(None));
-        let disconnect = handler.clone();
-        *handler.borrow_mut() = Some(clock.connect_local("layout", true, move |values| {
-            let clock = values[0].get::<gtk::gdk::FrameClock>().unwrap();
-            clock.disconnect(disconnect.take().unwrap());
-            if let (Some(shell), Some(scroller)) = (shell.upgrade(), scroller.upgrade()) {
-                shell.reveal_queue_current(&scroller, fullscreen);
-            }
-            None
-        }));
-        clock.request_phase(gtk::gdk::FrameClockPhase::LAYOUT);
-        glib::ControlFlow::Break
-    });
 }
 
 fn reveal_queue_current_row(scroller: &gtk::ScrolledWindow, position: usize) -> bool {

@@ -214,6 +214,14 @@ pub enum QueueCollection {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum QueueInput {
     Choices(Arc<[Option<QueueChoice>]>),
+    TrackSelection {
+        query: QueueQuery,
+        folder: Option<crate::FolderKey>,
+        filter: String,
+        sort: crate::TrackSort,
+        descending: bool,
+        ranges: Vec<std::ops::Range<usize>>,
+    },
     Query {
         query: QueueQuery,
         folder: Option<crate::FolderKey>,
@@ -232,6 +240,14 @@ pub enum QueueInput {
         context_id: Arc<str>,
         anchor_entry: Option<crate::PlaylistEntryKey>,
         anchor_uri: Option<String>,
+    },
+    PlaylistSelection {
+        key: crate::PlaylistKey,
+        filter: String,
+        sort: crate::PlaylistEntrySort,
+        descending: bool,
+        ranges: Vec<std::ops::Range<usize>>,
+        context_id: Arc<str>,
     },
     Source {
         reference: QueueSource,
@@ -291,6 +307,10 @@ pub enum QueueQuery {
         source: Option<SourceKey>,
         now: i64,
     },
+    SmartDisplay {
+        key: crate::SmartPlaylistKey,
+        source: Option<SourceKey>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -313,6 +333,8 @@ pub enum QueueScope {
     Smart {
         reference: crate::SmartSourceReference,
         now: i64,
+        #[serde(default)]
+        display_sort: Option<crate::TrackSort>,
     },
 }
 
@@ -1201,6 +1223,7 @@ impl Database {
             .ok_or(LibraryError::WriterUnavailable)?
             .begin()
             .await?;
+        restore_table_queue(&mut transaction).await?;
         let json =
             sqlx::query_scalar::<_, String>("SELECT state FROM queue_saved WHERE singleton=1")
                 .fetch_optional(&mut *transaction)
@@ -1350,6 +1373,34 @@ async fn capture_input(
     anchor: &mut Option<usize>,
 ) -> LibraryResult<()> {
     let input = match input {
+        selection @ QueueInput::PlaylistSelection { .. } => {
+            let order =
+                crate::playlists::selected_playlist_entries_on(connection, &selection).await?;
+            let QueueInput::PlaylistSelection { context_id, .. } = selection else {
+                unreachable!()
+            };
+            QueueInput::PlaylistEntries {
+                order: order.into(),
+                context_id,
+            }
+        }
+        QueueInput::TrackSelection {
+            query,
+            folder,
+            filter,
+            sort,
+            descending,
+            ranges,
+        } => {
+            for uri in crate::tracks::query_selected_track_uris_on(
+                connection, &query, folder, &filter, sort, descending, &ranges,
+            )
+            .await?
+            {
+                push_entry(entries, namespace, uri, None, QueueProvenance::Manual);
+            }
+            return Ok(());
+        }
         QueueInput::Groups(inputs) => {
             for input in inputs {
                 Box::pin(capture_input(
@@ -1687,6 +1738,68 @@ async fn save_queue_on(
     )
     .await
 }
+// Development builds stored complete membership in tables and removed queue_saved.
+// Convert that persisted queue before retiring the unpublished storage format.
+async fn restore_table_queue(connection: &mut sqlx::SqliteConnection) -> LibraryResult<()> {
+    let present: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='queue_membership' AND type='table')",
+    )
+    .fetch_one(&mut *connection)
+    .await?;
+    if !present {
+        return Ok(());
+    }
+    let id: Option<String> =
+        sqlx::query_scalar("SELECT membership_id FROM queue_state WHERE singleton=1")
+            .fetch_optional(&mut *connection)
+            .await?
+            .flatten();
+    if let Some(id) = id {
+        use futures_util::TryStreamExt;
+        let mut entries = Vec::new();
+        {
+            let mut records = sqlx::query_as::<_, (String, String, Option<String>, String)>(
+                "SELECT occurrence_id,media_uri,playlist_entry_id,provenance FROM queue_membership WHERE queue_id=?1 ORDER BY position",
+            ).bind(&id).fetch(&mut *connection);
+            while let Some((occurrence, media_uri, playlist_entry_id, provenance)) =
+                records.try_next().await?
+            {
+                entries.push(QueueEntry {
+                    occurrence: occurrence.into(),
+                    media_uri: media_uri.into(),
+                    playlist_entry_id: playlist_entry_id.map(Into::into),
+                    provenance: serde_json::from_str(&provenance)?,
+                });
+            }
+        }
+        let order = sqlx::query_scalar::<_, i64>(
+            "SELECT position FROM queue_membership WHERE queue_id=?1 AND playback_position IS NOT NULL ORDER BY playback_position",
+        ).bind(&id).fetch_all(&mut *connection).await?.into_iter().map(|position| position as u32).collect();
+        let next_id: String =
+            sqlx::query_scalar("SELECT next_id FROM queue_sets WHERE queue_id=?1")
+                .bind(&id)
+                .fetch_one(&mut *connection)
+                .await?;
+        let mut state = QueueRestore {
+            entries: entries.into(),
+            order,
+            next_id: serde_json::from_str(&next_id)?,
+            ..Default::default()
+        };
+        read_saved_settings(connection, &mut state).await?;
+        save_queue_on(connection, &state).await?;
+    }
+    sqlx::raw_sql(
+        "UPDATE queue_state SET membership_id=NULL;
+         DROP TABLE queue_membership;
+         DROP TABLE queue_sets;
+         DROP TABLE collection_members;",
+    )
+    .execute(connection)
+    .await?;
+    Ok(())
+}
+
 async fn read_saved_settings(
     connection: &mut sqlx::SqliteConnection,
     state: &mut QueueRestore,

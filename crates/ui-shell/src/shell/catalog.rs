@@ -67,7 +67,7 @@ impl Shell {
             search_session: Rc::clone(&self.chrome.topbar.search_session),
             current: RefCell::new(None),
             current_track_selections: RefCell::new(Vec::new()),
-            grid_playing_cells: RefCell::new(Vec::new()),
+            media_playing_cells: RefCell::new(Vec::new()),
             track_selections: RefCell::new(Vec::new()),
             playlist_entry_selection: RefCell::new(None),
             has_current_track: ui_player::state::current_playback_track(
