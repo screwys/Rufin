@@ -1583,7 +1583,8 @@ fn album_track_column_width(field: LibraryField) -> i32 {
         | LibraryField::Artist
         | LibraryField::AlbumArtist
         | LibraryField::Genre => 160,
-        LibraryField::ReleaseDate | LibraryField::DateAdded | LibraryField::LastPlayed => 96,
+        LibraryField::ReleaseDate | LibraryField::DateAdded => 96,
+        LibraryField::LastPlayed => 148,
     }
 }
 

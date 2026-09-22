@@ -1,6 +1,6 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
-pub const LIBRARY_LIST_LAYOUT_VERSION: u8 = 12;
+pub const LIBRARY_LIST_LAYOUT_VERSION: u8 = 13;
 pub const DEFAULT_WINDOW_WIDTH: i32 = 1_500;
 pub const DEFAULT_WINDOW_HEIGHT: i32 = 900;
 pub const MIN_RESTORED_WINDOW_WIDTH: i32 = 450;
@@ -808,6 +808,19 @@ impl LibraryListSettings {
                 self.row_fields = defaults;
             }
         }
+        if self.layout_version < 13
+            && key == LibraryListKey::History
+            && self.row_fields
+                == [
+                    LibraryField::RowIndex,
+                    LibraryField::TitleMerged,
+                    LibraryField::Album,
+                    LibraryField::LastPlayed,
+                    LibraryField::Tools,
+                ]
+        {
+            self.row_fields = default_row_fields(key);
+        }
     }
 }
 pub fn default_library_list_settings() -> Vec<LibraryListSettingsEntry> {
@@ -1106,7 +1119,6 @@ fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
         LibraryListKey::History => vec![
             LibraryField::RowIndex,
             LibraryField::TitleMerged,
-            LibraryField::Album,
             LibraryField::LastPlayed,
             LibraryField::Tools,
         ],
@@ -1268,5 +1280,42 @@ mod disc_tests {
         assert!(!LibraryListKey::AlbumDetailTracks.supports_layout(LibraryLayout::Grid));
         assert!(LibraryListKey::Tracks.supports_layout(LibraryLayout::Grid));
         assert!(LibraryListKey::Albums.supports_layout(LibraryLayout::Grid));
+    }
+
+    #[test]
+    fn history_row_fields_default_to_index_title_last_played_and_tools() {
+        let defaults = default_row_fields(LibraryListKey::History);
+        assert_eq!(
+            defaults,
+            [
+                LibraryField::RowIndex,
+                LibraryField::TitleMerged,
+                LibraryField::LastPlayed,
+                LibraryField::Tools,
+            ]
+        );
+    }
+
+    #[test]
+    fn history_migrates_album_column_out_of_defaults() {
+        let mut settings = LibraryListSettings::for_key(LibraryListKey::History);
+        settings.row_fields = vec![
+            LibraryField::RowIndex,
+            LibraryField::TitleMerged,
+            LibraryField::Album,
+            LibraryField::LastPlayed,
+            LibraryField::Tools,
+        ];
+        settings.layout_version = 12;
+        settings.sanitize(LibraryListKey::History);
+        assert_eq!(
+            settings.row_fields,
+            [
+                LibraryField::RowIndex,
+                LibraryField::TitleMerged,
+                LibraryField::LastPlayed,
+                LibraryField::Tools,
+            ]
+        );
     }
 }

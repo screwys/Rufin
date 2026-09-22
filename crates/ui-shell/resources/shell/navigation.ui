@@ -70,6 +70,7 @@
     </style>
     <child>
       <object class="GtkScrolledWindow" id="compact_nav_scroller">
+        <property name="overlay-scrolling">true</property>
         <property name="hscrollbar-policy">never</property>
         <property name="vscrollbar-policy">automatic</property>
         <property name="propagate-natural-width">false</property>

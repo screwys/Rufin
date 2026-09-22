@@ -31,11 +31,7 @@ use ui_shared::interactions::{
 use ui_shared::library_fields::{playlist_artwork, smart_playlist_display_name};
 use ui_shared::route::{CollectionCategory, Route};
 
-use super::{
-    Shell,
-    layout::{COMPACT_RAIL_WIDTH, ResolvedLeftSidebarMode},
-    route::RouteStack,
-};
+use super::{Shell, layout::ResolvedLeftSidebarMode, route::RouteStack};
 use localization::tr;
 use ui_shared::controls::{PLAY_ICON, PLAY_LATER_ICON, PLAY_NEXT_ICON, icon_button};
 use ui_shared::mounted_route::route_current_track;
@@ -43,7 +39,7 @@ use ui_shared::mounted_route::route_current_track;
 const COMPACT_NAV_ICON_SIZE: i32 = 24;
 const MOUSE_BACK_BUTTON: u32 = 8;
 const MOUSE_FORWARD_BUTTON: u32 = 9;
-const COMPACT_RAIL_LABEL_WIDTH: i32 = COMPACT_RAIL_WIDTH - 16;
+const COMPACT_RAIL_LABEL_WIDTH: i32 = super::layout::COMPACT_RAIL_WIDTH - 16;
 const COMPACT_RAIL_LABEL_WIDTH_CHARS: i32 = 8;
 const NAV_SELECTED_CLASS: &str = "selected";
 const SIDEBAR_PINS_HEADING_CLASS: &str = "sidebar-pins-heading";

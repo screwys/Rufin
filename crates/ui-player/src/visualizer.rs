@@ -505,11 +505,33 @@ impl crate::PlayerUi {
         let seen_generation = Cell::new(generation.get());
         let last_data_time = Cell::new(None);
         let last_frame_time = Cell::new(None);
+        let next_frame_time = Cell::new(None::<f64>);
+        let last_limit = Cell::new(0);
         let Some(window) = self.window.upgrade() else {
             return;
         };
         let tick = window.add_tick_callback(move |_, clock| {
             let now = clock.frame_time();
+            let Some(owner) = shell.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            let limit = owner
+                .settings
+                .current
+                .borrow()
+                .visualizer
+                .fps_limit
+                .clamp(1, 180);
+            if last_limit.replace(limit) != limit {
+                next_frame_time.set(None);
+            }
+            let deadline = next_frame_time.get().unwrap_or(now as f64);
+            if (now as f64) < deadline {
+                return glib::ControlFlow::Continue;
+            }
+            // Carry fractional frame time so caps need not divide the display refresh rate.
+            let interval = 1_000_000.0 / f64::from(limit);
+            next_frame_time.set(Some((deadline + interval).max(now as f64)));
             let elapsed_frames = last_frame_time.replace(Some(now)).map_or(1.0, |last| {
                 (now - last) as f64 / VISUALIZER_REFERENCE_FRAME_MICROS
             });

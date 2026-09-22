@@ -579,7 +579,8 @@ pub fn column_width(field: LibraryField) -> i32 {
         | LibraryField::Artist
         | LibraryField::AlbumArtist
         | LibraryField::Genre => 220,
-        LibraryField::ReleaseDate | LibraryField::DateAdded | LibraryField::LastPlayed => 118,
+        LibraryField::ReleaseDate | LibraryField::DateAdded => 118,
+        LibraryField::LastPlayed => 148,
         LibraryField::PlayCount => play_count_column_width(),
         LibraryField::UserRating | LibraryField::SongCount | LibraryField::AlbumCount => 96,
         LibraryField::Year
@@ -614,7 +615,7 @@ pub fn optional_year(year: Option<i64>) -> String {
 pub fn display_unix_date(value: Option<i64>) -> String {
     value
         .and_then(|value| glib::DateTime::from_unix_local(value).ok())
-        .and_then(|value| value.format("%Y-%m-%d").ok())
+        .and_then(|value| value.format("%Y-%m-%d %H:%M").ok())
         .map(|value| value.to_string())
         .unwrap_or_default()
 }
@@ -622,3 +623,16 @@ pub fn favorite_text(favorite: bool) -> String {
     if favorite { "♥" } else { "" }.to_string()
 }
 use crate::detail_links::joined_credits;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_unix_date_shows_date_and_time() {
+        let dt = glib::DateTime::from_local(2026, 9, 22, 14, 30, 0.0).unwrap();
+        let timestamp = dt.to_unix();
+        assert_eq!(display_unix_date(Some(timestamp)), "2026-09-22 14:30");
+        assert_eq!(display_unix_date(None), "");
+    }
+}

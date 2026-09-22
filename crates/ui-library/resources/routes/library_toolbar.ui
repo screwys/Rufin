@@ -20,9 +20,10 @@
       <object class="GtkBox" id="end_area">
         <child>
           <object class="GtkBox" id="controls">
-            <property name="spacing">12</property>
+            <property name="spacing">2</property>
             <child>
               <object class="GtkButton" id="command_button">
+                <style><class name="library-toolbar-icon-button"/></style>
                 <property name="visible">false</property>
                 <property name="icon-name">rufin-list-add-symbolic</property>
                 <property name="tooltip-text" translatable="yes">New Playlist</property>
@@ -30,6 +31,7 @@
             </child>
             <child>
               <object class="GtkButton" id="import_button">
+                <style><class name="library-toolbar-icon-button"/></style>
                 <property name="visible">false</property>
                 <property name="icon-name">rufin-document-open-symbolic</property>
                 <property name="tooltip-text" translatable="yes">Import Playlist</property>

@@ -103,6 +103,7 @@ impl VisualizerPreset {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VisualizerSettings {
+    pub fps_limit: u32,
     pub appearance: VisualizerAppearance,
     pub presets: Vec<VisualizerPreset>,
     pub selected_preset: Option<usize>,
@@ -111,6 +112,7 @@ pub struct VisualizerSettings {
 impl Default for VisualizerSettings {
     fn default() -> Self {
         Self {
+            fps_limit: 30,
             appearance: VisualizerAppearance::default(),
             selected_preset: None,
             presets: (0..5)
@@ -125,13 +127,13 @@ impl Default for VisualizerSettings {
 fn default_preset(slot: usize) -> VisualizerAppearance {
     match slot {
         1 => VisualizerAppearance {
-            style: VisualizerStyle::Segmented,
+            style: VisualizerStyle::Circular,
             spacing: 2.0,
-            rise: 0.9,
-            fall: 0.24,
+            rise: 0.55,
+            fall: 0.12,
             peaks: true,
-            peak_hold: 0.7,
-            peak_fall: 0.45,
+            peak_hold: 0.3,
+            peak_fall: 0.8,
             ..Default::default()
         },
         2 => VisualizerAppearance {
@@ -151,13 +153,13 @@ fn default_preset(slot: usize) -> VisualizerAppearance {
             ..Default::default()
         },
         4 => VisualizerAppearance {
-            style: VisualizerStyle::Circular,
+            style: VisualizerStyle::Segmented,
             spacing: 2.0,
-            rise: 0.55,
-            fall: 0.12,
+            rise: 0.9,
+            fall: 0.24,
             peaks: true,
-            peak_hold: 0.3,
-            peak_fall: 0.8,
+            peak_hold: 0.7,
+            peak_fall: 0.45,
             ..Default::default()
         },
         _ => VisualizerAppearance::default(),

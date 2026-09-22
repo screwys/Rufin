@@ -910,9 +910,6 @@ pub fn track_column_width(key: LibraryListKey, field: LibraryField) -> i32 {
             _ => {}
         }
     }
-    if key == LibraryListKey::History && field == LibraryField::LastPlayed {
-        return 148;
-    }
 
     match key {
         LibraryListKey::ArtistTracks
@@ -931,7 +928,8 @@ pub fn track_column_width(key: LibraryListKey, field: LibraryField) -> i32 {
         | LibraryField::Genre => 180,
         LibraryField::PlayCount => play_count_column_width(),
         LibraryField::UserRating | LibraryField::SongCount | LibraryField::AlbumCount => 82,
-        LibraryField::ReleaseDate | LibraryField::DateAdded | LibraryField::LastPlayed => 108,
+        LibraryField::ReleaseDate | LibraryField::DateAdded => 108,
+        LibraryField::LastPlayed => 148,
         LibraryField::Year
         | LibraryField::DiscNumber
         | LibraryField::TrackNumber

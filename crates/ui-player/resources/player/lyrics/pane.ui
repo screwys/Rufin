@@ -7,6 +7,8 @@
     <property name="margin-end">0</property>
     <style><class name="lyrics-panel"/></style>
     <property name="child">
+      <object class="RufinLyricsEdgeFade" id="edge_fade">
+        <child>
       <object class="GtkScrolledWindow" id="scroller">
         <property name="hscrollbar-policy">never</property>
         <property name="vscrollbar-policy">automatic</property>
@@ -25,6 +27,8 @@
             <style><class name="lyrics-lines"/></style>
           </object>
         </property>
+      </object>
+        </child>
       </object>
     </property>
     <child type="overlay">
