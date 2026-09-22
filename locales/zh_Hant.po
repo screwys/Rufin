@@ -945,6 +945,9 @@ msgstr ""
 msgid "Customize display"
 msgstr ""
 
+msgid "Customize"
+msgstr ""
+
 msgid "Cut"
 msgstr "剪下"
 
@@ -3415,6 +3418,9 @@ msgid "Sponsor"
 msgstr ""
 
 msgid "Start minimized"
+msgstr ""
+
+msgid "Start playing automatically"
 msgstr ""
 
 #, fuzzy

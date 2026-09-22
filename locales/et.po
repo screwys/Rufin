@@ -967,6 +967,11 @@ msgstr "Kohandatud"
 msgid "Customize display"
 msgstr "Kohanda ekraanivaadet"
 
+#, fuzzy
+#| msgid "Custom"
+msgid "Customize"
+msgstr "Kohandatud"
+
 msgid "Cut"
 msgstr "Lõika"
 
@@ -3440,6 +3445,11 @@ msgstr ""
 
 msgid "Start minimized"
 msgstr "Käivita minimeerituna"
+
+#, fuzzy
+#| msgid "Save lyrics automatically"
+msgid "Start playing automatically"
+msgstr "Salvesta laulusõnad automaatselt"
 
 #, fuzzy
 #| msgid "Saving..."

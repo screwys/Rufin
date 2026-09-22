@@ -978,6 +978,11 @@ msgstr "Přizpůsobené"
 msgid "Customize display"
 msgstr "Přizpůsobit zobrazení"
 
+#, fuzzy
+#| msgid "Custom"
+msgid "Customize"
+msgstr "Přizpůsobené"
+
 msgid "Cut"
 msgstr "Vyjmout"
 
@@ -3500,6 +3505,11 @@ msgstr ""
 
 msgid "Start minimized"
 msgstr "Spustit v minimalizovaném režimu"
+
+#, fuzzy
+#| msgid "Searching will start automatically"
+msgid "Start playing automatically"
+msgstr "Vyhledávání se spustí automaticky"
 
 #, fuzzy
 #| msgid "Saving..."

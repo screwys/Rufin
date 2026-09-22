@@ -924,6 +924,11 @@ msgstr "Pielāgots"
 msgid "Customize display"
 msgstr "Pielāgot displeju"
 
+#, fuzzy
+#| msgid "Custom"
+msgid "Customize"
+msgstr "Pielāgots"
+
 msgid "Cut"
 msgstr "Izgriezt"
 
@@ -3210,6 +3215,11 @@ msgstr "Sponsoris"
 
 msgid "Start minimized"
 msgstr "Sākt minimizētu"
+
+#, fuzzy
+#| msgid "Save playlist changes automatically"
+msgid "Start playing automatically"
+msgstr "Automātiski saglabāt atskaņošanas saraksta izmaiņas"
 
 msgid "Starting..."
 msgstr "Sākas..."

@@ -916,6 +916,11 @@ msgstr "Mukautettu"
 msgid "Customize display"
 msgstr "Mukauta näkymää"
 
+#, fuzzy
+#| msgid "Custom"
+msgid "Customize"
+msgstr "Mukautettu"
+
 msgid "Cut"
 msgstr "Leikkaa"
 
@@ -3273,6 +3278,11 @@ msgstr ""
 
 msgid "Start minimized"
 msgstr "Käynnistä pienennettynä"
+
+#, fuzzy
+#| msgid "Save lyrics automatically"
+msgid "Start playing automatically"
+msgstr "Tallenna sanoitukset automaattisesti"
 
 #, fuzzy
 #| msgid "Saving..."
