@@ -1937,6 +1937,8 @@ where
         let button = row_favorite_icon_button("Favorite track");
         let actions = ui_shared::recycled_cells::RowActions::with_favorite(&button);
         set_placeholder_favorite(&button, None);
+        actions.menu().set_visible(false);
+        actions.menu().set_sensitive(false);
         install_track_list_item_context_menu(
             &actions,
             &setup_shell,
@@ -1993,23 +1995,33 @@ where
         else {
             set_placeholder_favorite(&button, None);
             if let Some(actions) = actions {
+                actions.menu().set_visible(false);
                 actions.menu().set_sensitive(false);
             }
             return;
         };
         let favorite =
             favorite.map(|(track, favorite)| bind_shell.projected_track_favorite(&track, favorite));
+        let ready = favorite.is_some();
         set_placeholder_favorite(&button, favorite);
         if let Some(actions) = actions {
-            actions.menu().set_sensitive(favorite.is_some());
+            actions.menu().set_visible(ready);
+            actions.menu().set_sensitive(ready);
         }
     });
 
     factory.connect_unbind(move |_, item| {
-        if let Some(item) = item.downcast_ref::<gtk::ListItem>()
-            && let Some(button) = favorite_cell_button(item)
-        {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        if let Some(button) = favorite_cell_button(item) {
             set_placeholder_favorite(&button, None);
+        }
+        if let Some(actions) =
+            ui_shared::recycled_cells::list_cell::<ui_shared::recycled_cells::RowActions>(item)
+        {
+            actions.menu().set_visible(false);
+            actions.menu().set_sensitive(false);
         }
     });
 

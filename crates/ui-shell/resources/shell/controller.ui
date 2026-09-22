@@ -30,8 +30,6 @@
             </object></child>
           </object></child>
         </object></child>
-      </object></child>
-      <child><object class="AdwPreferencesGroup">
         <child><object class="AdwSwitchRow" id="web_enabled">
           <accessibility><property name="label" translatable="yes">Controller</property></accessibility>
           <child type="prefix"><object class="GtkBox">
