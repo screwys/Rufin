@@ -1,6 +1,5 @@
 use crate::{AccentPreference, Settings, ThemePreference};
 
-use gtk::prelude::*;
 use rufin_core::themes::{Mode, Theme};
 use std::{cell::RefCell, path::PathBuf};
 
@@ -96,61 +95,24 @@ impl ApplicationAppearance {
             .load_from_string(&appearance_override_css(settings, &themes));
     }
 
-    pub(crate) fn preview_css(
-        &self,
-        theme: Option<&Theme>,
-        settings: &Settings,
-        preview: &gtk::Box,
-        provider: &gtk::CssProvider,
-    ) -> String {
+    pub(crate) fn preview_css(&self, theme: Option<&Theme>, settings: &Settings) -> String {
         let themes = self.themes.borrow();
-        if let Some(theme) = theme.filter(|theme| !theme.accents.is_empty()) {
-            return palette_css(
-                &themes,
-                theme,
-                settings.theme_accents.get(&theme.id).map(String::as_str),
-                settings.accent_preference,
+        let theme = theme.unwrap_or_else(|| &themes[usize::from(self.system_style.is_dark())]);
+        let mut css = String::new();
+        if theme.accents.is_empty() && settings.accent_preference == AccentPreference::System {
+            append_accent(
+                &mut css,
+                &self.system_style.accent_color_rgba().to_string(),
+                "#ffffff",
             );
         }
-        // Sample inherited system colors as well as explicit colors. Restore the app style
-        // before a frame or a StyleManager notification can expose the preview scheme.
-        let manager = adw::StyleManager::default();
-        let _notifications = manager.freeze_notify();
-        let scheme = manager.color_scheme();
-        let overrides = self.override_provider.to_string();
-        let mut preview_css = theme
-            .map(|theme| palette_css(&themes, theme, None, settings.accent_preference))
-            .unwrap_or_default();
-        if theme.is_none()
-            && let Some(color) = settings.accent_preference.color()
-        {
-            append_accent(&mut preview_css, color, "#ffffff");
-        }
-        self.override_provider
-            .load_from_string(&format!(":root {{ {preview_css} }}"));
-        manager.set_color_scheme(match theme.map(|theme| theme.mode) {
-            None => adw::ColorScheme::PreferLight,
-            Some(Mode::Light) => adw::ColorScheme::ForceLight,
-            Some(Mode::Dark) => adw::ColorScheme::ForceDark,
-        });
-        let base = &themes[usize::from(manager.is_dark())];
-        let mut colors = base.colors.clone();
-        for key in base
-            .colors
-            .keys()
-            .map(String::as_str)
-            .filter(|key| key.ends_with("-color"))
-            .chain(["accent-bg-color", "accent-fg-color", "accent-color"])
-        {
-            provider.load_from_string(&format!("* {{ color: var(--{key}); }}"));
-            colors.insert(key.into(), preview.color().to_string());
-        }
-        manager.set_color_scheme(scheme);
-        self.override_provider.load_from_string(&overrides);
-        colors
-            .into_iter()
-            .map(|(key, value)| format!("--{key}: {value};\n"))
-            .collect()
+        css.push_str(&palette_css(
+            &themes,
+            theme,
+            settings.theme_accents.get(&theme.id).map(String::as_str),
+            settings.accent_preference,
+        ));
+        css
     }
 }
 
