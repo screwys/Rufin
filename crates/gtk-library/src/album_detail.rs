@@ -329,9 +329,15 @@ impl AlbumCollectionModels {
 pub fn album_detail_list(
     shell: &Rc<CatalogUi>,
     model: AlbumDetailModel,
-    _: LibraryListKey,
+    key: LibraryListKey,
 ) -> AlbumDetailVirtualList {
-    AlbumDetailVirtualList::new(shell, model)
+    let fields = shell
+        .settings
+        .current
+        .borrow()
+        .library_list(key)
+        .detail_track_fields;
+    AlbumDetailVirtualList::new(shell, model, fields)
 }
 
 #[derive(Clone)]
@@ -342,6 +348,7 @@ pub struct AlbumDetailVirtualList {
 struct AlbumDetailVirtualListInner {
     shell: Weak<CatalogUi>,
     model: AlbumDetailModel,
+    fields: Vec<LibraryField>,
     widget: gtk::Box,
     top_spacer: gtk::Box,
     rows_widget: gtk::Box,
@@ -684,7 +691,7 @@ fn apply_album_detail_track_selection(row: &gtk::Widget, selected: bool, paused:
 }
 
 impl AlbumDetailVirtualList {
-    fn new(shell: &Rc<CatalogUi>, model: AlbumDetailModel) -> Self {
+    fn new(shell: &Rc<CatalogUi>, model: AlbumDetailModel, fields: Vec<LibraryField>) -> Self {
         let widget = gtk::Box::new(gtk::Orientation::Vertical, 0);
         widget.add_css_class("track-table");
         widget.add_css_class("album-detail-list");
@@ -706,6 +713,7 @@ impl AlbumDetailVirtualList {
         let inner = Rc::new(AlbumDetailVirtualListInner {
             shell: Rc::downgrade(shell),
             model: model.clone(),
+            fields,
             widget,
             top_spacer,
             rows_widget,
@@ -1034,6 +1042,7 @@ impl AlbumDetailVirtualListInner {
                             *last_in_album,
                             self.width.get(),
                             &self.selection,
+                            &self.fields,
                         ),
                         _ => album_detail_placeholder(row.height),
                     }
@@ -1050,6 +1059,7 @@ impl AlbumDetailVirtualListInner {
                         *last_in_album,
                         self.width.get(),
                         &self.selection,
+                        &self.fields,
                     ),
                     _ => album_detail_placeholder(row.height),
                 },
@@ -1144,16 +1154,11 @@ fn album_lead_row(
     last_in_album: bool,
     width: i32,
     selection: &AlbumDetailTrackSelection,
+    fields: &[LibraryField],
 ) -> gtk::Widget {
     let metrics = album_detail_row_metrics_for_width(width);
-    let fields = shell
-        .settings
-        .current
-        .borrow()
-        .library_list(LibraryListKey::AlbumDetailTracks)
-        .detail_track_fields;
     let track_width = album_track_area_width(width, metrics);
-    let field_widths = album_track_field_widths(&fields, track_width);
+    let field_widths = album_track_field_widths(fields, track_width);
     let content_height =
         album_detail_ready_height(width, !album.genres.is_empty(), inline_tracks.len());
     let row = gtk::Box::new(gtk::Orientation::Horizontal, metrics.spacing);
@@ -1225,15 +1230,10 @@ fn album_continuation_row(
     last_in_album: bool,
     width: i32,
     selection: &AlbumDetailTrackSelection,
+    fields: &[LibraryField],
 ) -> gtk::Widget {
     let metrics = album_detail_row_metrics_for_width(width);
-    let fields = shell
-        .settings
-        .current
-        .borrow()
-        .library_list(LibraryListKey::AlbumDetailTracks)
-        .detail_track_fields;
-    let field_widths = album_track_field_widths(&fields, album_track_area_width(width, metrics));
+    let field_widths = album_track_field_widths(fields, album_track_area_width(width, metrics));
     let row = gtk::Box::new(gtk::Orientation::Horizontal, metrics.spacing);
     row.add_css_class("album-detail-row");
     row.set_hexpand(true);
