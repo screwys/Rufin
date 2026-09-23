@@ -1,12 +1,15 @@
-# The marked Linux dependency blocks are generated. Edit `NIX_PACKAGES` in
-# `crates/xtask/src/linux_packaging.rs`, then run `just deps` to update them.
 {
   description = "Native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and Emby servers;  local folders,  WebDAV including a direct Nextcloud browser login path, Samba and NAS shares.";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.crane.url = "github:ipetkov/crane";
 
   outputs =
-    { self, nixpkgs }:
+    {
+      self,
+      nixpkgs,
+      crane,
+    }:
     let
       systems = [
         "x86_64-linux"
@@ -20,16 +23,16 @@
         let
           pkgs = import nixpkgs { inherit system; };
           inherit (pkgs) lib;
+          craneLib = crane.mkLib pkgs;
           workspaceManifest = builtins.fromTOML (builtins.readFile ./Cargo.toml);
-        in
-        rec {
-          rufin = pkgs.stdenv.mkDerivation {
+          commonArgs = {
             pname = "rufin";
             version = workspaceManifest.workspace.package.version;
 
             src = lib.fileset.toSource {
               root = ./.;
               fileset = lib.fileset.unions [
+                ./.cargo
                 ./Cargo.lock
                 ./Cargo.toml
                 ./CMakeLists.txt
@@ -48,24 +51,16 @@
               ];
             };
 
-            cargoDeps = pkgs.rustPlatform.importCargoLock {
-              lockFile = ./Cargo.lock;
-            };
-
             strictDeps = true;
 
             nativeBuildInputs = with pkgs; [
-              cargo
               cmake
               gettext
               ninja
               pkg-config
-              rustPlatform.cargoSetupHook
-              rustc
               wrapGAppsHook4
             ];
 
-            # Generated Linux package dependencies start.
             buildInputs =
               with pkgs;
               [
@@ -82,37 +77,61 @@
                 gst-plugins-ugly
                 gst-libav
               ]);
-            # Generated Linux package dependencies end.
 
             doCheck = false;
+            CMAKE_GENERATOR = "Ninja";
 
             SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
-
-            cmakeFlags = [
-              (lib.cmakeFeature "RUFIN_BUILD_IDENTITY" "stable")
-              (lib.cmakeBool "RUFIN_CARGO_FROZEN" true)
-            ];
-
-            postInstall = ''
-              substituteInPlace "$out/share/applications/io.github.screwys.Rufin.desktop" \
-                --replace-fail "Exec=rufin" "Exec=$out/bin/rufin"
-            '';
-
-            preFixup = ''
-              gappsWrapperArgs+=(
-                --set-default RUFIN_LOCALEDIR "$out/share/locale"
-                --set-default SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
-              )
-            '';
-
-            meta = {
-              description = "Native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and Emby servers;  local folders,  WebDAV including a direct Nextcloud browser login path, Samba and NAS shares.";
-              homepage = "https://github.com/screwys/Rufin";
-              license = lib.licenses.gpl3Plus;
-              mainProgram = "rufin";
-              platforms = lib.platforms.linux;
-            };
           };
+
+          cargoArtifacts = craneLib.buildDepsOnly (
+            commonArgs
+            // {
+              buildPhaseCargoCommand = "cargo build --release --locked --package rufin";
+            }
+          );
+        in
+        rec {
+          rufin = craneLib.mkCargoDerivation (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              doInstallCargoArtifacts = false;
+              nativeBuildInputs = commonArgs.nativeBuildInputs ++ [
+                craneLib.removeReferencesToRustToolchainHook
+                craneLib.removeReferencesToVendoredSourcesHook
+              ];
+
+              configurePhase = "cmakeConfigurePhase";
+              buildPhaseCargoCommand = "cmake --build . --parallel $NIX_BUILD_CORES";
+              installPhaseCommand = "cmake --install .";
+
+              cmakeFlags = [
+                (lib.cmakeFeature "RUFIN_BUILD_IDENTITY" "stable")
+                (lib.cmakeBool "RUFIN_CARGO_FROZEN" true)
+              ];
+
+              postInstall = ''
+                substituteInPlace "$out/share/applications/io.github.screwys.Rufin.desktop" \
+                  --replace-fail "Exec=rufin" "Exec=$out/bin/rufin"
+              '';
+
+              preFixup = ''
+                gappsWrapperArgs+=(
+                  --set-default RUFIN_LOCALEDIR "$out/share/locale"
+                  --set-default SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+                )
+              '';
+
+              meta = {
+                description = "Native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and Emby servers;  local folders,  WebDAV including a direct Nextcloud browser login path, Samba and NAS shares.";
+                homepage = "https://github.com/screwys/Rufin";
+                license = lib.licenses.gpl3Plus;
+                mainProgram = "rufin";
+                platforms = lib.platforms.linux;
+              };
+            }
+          );
 
           default = rufin;
         }
@@ -161,7 +180,6 @@
                 wavpack
                 zstd
               ]
-              # Generated Linux development dependencies start.
               ++ (with pkgs; [
                 glib
                 gtk4
@@ -176,13 +194,21 @@
                 gst-plugins-ugly
                 gst-libav
               ]);
-            # Generated Linux development dependencies end.
 
             GIO_EXTRA_MODULES = "${pkgs.glib-networking}/lib/gio/modules";
           };
         in
         {
           default = defaultShell;
+          checks = pkgs.mkShell {
+            packages = with pkgs; [
+              cargo
+              rustc
+              rustfmt
+              ast-grep
+              just
+            ];
+          };
           packaging = pkgs.mkShell {
             inputsFrom = [ defaultShell ];
             packages = with pkgs; [

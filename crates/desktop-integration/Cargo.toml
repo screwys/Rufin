@@ -15,12 +15,13 @@ app-identity.workspace = true
 metadata-lookup.workspace = true
 artwork.workspace = true
 gio.workspace = true
-glib.workspace = true
+glib = { workspace = true, features = ["v2_66"] }
 localization.workspace = true
 playback.workspace = true
 presence.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+url.workspace = true
 
 [target.'cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))'.dependencies]
 ksni = { workspace = true, features = ["blocking"] }

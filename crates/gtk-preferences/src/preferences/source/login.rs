@@ -1492,7 +1492,7 @@ fn default_music_folder() -> Option<PathBuf> {
 }
 
 fn path_subtitle(path: &Path) -> String {
-    gtk_widgets::path_display::display_path(path)
+    desktop_integration::display_path(path)
 }
 
 fn local_folders_subtitle(folders: &[PathBuf]) -> String {

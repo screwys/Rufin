@@ -841,21 +841,17 @@ label.track-row-playing:not(.track-row-paused) {
 }
 
 columnview > listview > row:hover .track-row-index-number,
-columnview > listview > row:focus-within .track-row-index-number,
 .artist-album-table-row:hover .track-row-index-number,
-.artist-album-table-row:focus-within .track-row-index-number,
+.track-row-index-cell:focus-within .track-row-index-number,
 .track-row-index-cell.track-row-playing:not(.track-row-paused) .track-row-index-number,
-.album-detail-track-row:hover .track-row-index-number,
-.album-detail-track-row:focus-within .track-row-index-number {
+.album-detail-track-row:hover .track-row-index-number {
   opacity: 0;
 }
 
 columnview > listview > row:hover .track-row-play,
-columnview > listview > row:focus-within .track-row-play,
 .artist-album-table-row:hover .track-row-play,
-.artist-album-table-row:focus-within .track-row-play,
-.album-detail-track-row:hover .track-row-play,
-.album-detail-track-row:focus-within .track-row-play {
+.track-row-index-cell:focus-within .track-row-play,
+.album-detail-track-row:hover .track-row-play {
   opacity: 1;
 }
 

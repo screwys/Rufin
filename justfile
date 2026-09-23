@@ -247,25 +247,13 @@ _build-rpm requested_arch="":
 clean:
     @scripts/container clean
 
-# Run all checks, or only Linux dependency checks with `just check deps`.
-check target="":
-    @if [[ -z "{{ target }}" ]]; then \
-        scripts/container run default none just _check-all; \
-    elif [[ "{{ target }}" == "deps" ]]; then \
-        scripts/container run default none just _check-deps; \
-    else \
-        echo "usage: just check [deps]" >&2; \
-        exit 2; \
-    fi
-
-_check-deps:
-    @cargo run --locked -p xtask -- generate linux-packaging --check
+check:
+    @scripts/container run default none just _check-all
 
 _check-all:
     @just _check-cmake
     @cargo run --locked -p xtask -- generate flatpak-sources --check
     @cargo run --locked -p xtask -- generate i18n-template --check
-    @cargo run --locked -p xtask -- generate linux-packaging --check
     @cargo fmt --all -- --check
     @if command -v ast-grep >/dev/null 2>&1; then \
         just _ast-grep; \
@@ -431,13 +419,6 @@ _lint:
         export GETTEXT_DIR="$(brew --prefix gettext)"; \
     fi; \
     cargo clippy --workspace --all-targets --locked --features app-identity/development
-
-# Regenerate Linux package dependency metadata.
-deps:
-    @scripts/container run default none just _deps
-
-_deps:
-    @cargo run --locked -p xtask -- generate linux-packaging
 
 _build-native-package identity="development":
     @build_identity="{{ identity }}"; \

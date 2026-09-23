@@ -1803,6 +1803,7 @@ dependencies = [
  "tempfile",
  "tracing",
  "tray-icon",
+ "url",
  "windows",
  "winsafe",
 ]
@@ -3295,6 +3296,7 @@ name = "gtk-preferences"
 version = "0.16.0"
 dependencies = [
  "backup",
+ "desktop-integration",
  "directories",
  "downloads",
  "glib-build-tools",
@@ -3356,6 +3358,7 @@ dependencies = [
  "app-identity",
  "artwork",
  "async-channel",
+ "desktop-integration",
  "downloads",
  "glib-build-tools",
  "gtk4",
@@ -3370,7 +3373,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
- "url",
 ]
 
 [[package]]
