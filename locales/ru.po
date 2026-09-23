@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-22 18:37+0000\n"
+"PO-Revision-Date: 2026-09-24 06:59+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
 "Language: ru\n"
@@ -447,7 +447,7 @@ msgid "Approve sign-in in your browser"
 msgstr "Подтвердите вход в системе в вашем браузере"
 
 msgid "April {year}"
-msgstr ""
+msgstr "Апрель {year}"
 
 msgid "Artist albums"
 msgstr "Альбомы исполнителя"
@@ -486,7 +486,7 @@ msgid "Audio"
 msgstr "Аудио"
 
 msgid "August {year}"
-msgstr ""
+msgstr "Август {year}"
 
 msgid "Authentication"
 msgstr "Аутентификация"
@@ -946,7 +946,7 @@ msgid "Debug logging"
 msgstr "Отладочное журналирование"
 
 msgid "December {year}"
-msgstr ""
+msgstr "Декабрь {year}"
 
 msgid "Decrease"
 msgstr "Уменьшить"
@@ -1257,7 +1257,7 @@ msgid "Featured genres"
 msgstr "Рекомендованные жанры"
 
 msgid "February {year}"
-msgstr ""
+msgstr "Февраль {year}"
 
 msgid "File connection"
 msgstr "Подключение к файлу"
@@ -1491,7 +1491,7 @@ msgid "Invite"
 msgstr "Пригласить"
 
 msgid "January {year}"
-msgstr ""
+msgstr "Январь {year}"
 
 msgid "Jellyfin"
 msgstr "Jellyfin"
@@ -1506,10 +1506,10 @@ msgid "Join"
 msgstr "Присоединиться"
 
 msgid "July {year}"
-msgstr ""
+msgstr "Июль {year}"
 
 msgid "June {year}"
-msgstr ""
+msgstr "Июнь {year}"
 
 msgid "Karaoke Playback"
 msgstr "Воспроизведение караоке"
@@ -1718,15 +1718,13 @@ msgid "Mapped Local Path"
 msgstr "Сопоставленный локальный путь"
 
 msgid "March {year}"
-msgstr ""
+msgstr "Март {year}"
 
 msgid "Maximum year"
 msgstr "Максимальный год"
 
-#, fuzzy
-#| msgid "Maximum year"
 msgid "May {year}"
-msgstr "Максимальный год"
+msgstr "Май {year}"
 
 msgid "Media available"
 msgstr "Доступные медиафайлы"
@@ -2052,7 +2050,7 @@ msgid "Notifications"
 msgstr "Уведомления"
 
 msgid "November {year}"
-msgstr ""
+msgstr "Ноябрь {year}"
 
 msgid "Now playing notifications"
 msgstr "Уведомления о текущем воспроизведении"
@@ -2067,7 +2065,7 @@ msgid "Number of songs"
 msgstr "Количество песен"
 
 msgid "October {year}"
-msgstr ""
+msgstr "Октябрь {year}"
 
 msgid "Off only for a server you control"
 msgstr "Отключайте только для сервера, которым вы управляете"
@@ -2920,7 +2918,7 @@ msgid "Separate .lrc file"
 msgstr "Отдельный файл .lrc"
 
 msgid "September {year}"
-msgstr ""
+msgstr "Сентябрь {year}"
 
 msgid "Server Actions"
 msgstr "Действия на сервере"
