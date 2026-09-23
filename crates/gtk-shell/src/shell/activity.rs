@@ -9,7 +9,7 @@ use gtk_widgets::{
     route::Route,
 };
 use library::{ActivityOverview, CalendarActivityPeriod};
-use localization::{tr, tr_with};
+use localization::{msgid, tr, tr_with};
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},
@@ -798,10 +798,22 @@ fn period_key(period: CalendarActivityPeriod) -> String {
 fn period_label(period: CalendarActivityPeriod) -> String {
     match period {
         CalendarActivityPeriod::Month { year, month } => {
-            glib::DateTime::from_local(year, i32::from(month), 1, 12, 0, 0.0)
-                .and_then(|date| date.format("%B %Y"))
-                .map(|text| text.to_string())
-                .unwrap_or_else(|_| period_key(period))
+            let message = match month {
+                1 => msgid("January {year}"),
+                2 => msgid("February {year}"),
+                3 => msgid("March {year}"),
+                4 => msgid("April {year}"),
+                5 => msgid("May {year}"),
+                6 => msgid("June {year}"),
+                7 => msgid("July {year}"),
+                8 => msgid("August {year}"),
+                9 => msgid("September {year}"),
+                10 => msgid("October {year}"),
+                11 => msgid("November {year}"),
+                12 => msgid("December {year}"),
+                _ => return period_key(period),
+            };
+            tr_with(message, &[("year", &year.to_string())])
         }
         _ => period_key(period),
     }

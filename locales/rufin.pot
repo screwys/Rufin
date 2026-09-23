@@ -375,6 +375,10 @@ msgstr ""
 msgid "Approve sign-in in your browser"
 msgstr ""
 
+#, rust-format
+msgid "April {year}"
+msgstr ""
+
 msgid "Artist albums"
 msgstr ""
 
@@ -409,6 +413,10 @@ msgid "Audio processing is unavailable while casting"
 msgstr ""
 
 msgid "Audio"
+msgstr ""
+
+#, rust-format
+msgid "August {year}"
 msgstr ""
 
 msgid "Authentication"
@@ -874,6 +882,10 @@ msgstr ""
 msgid "Debug logging"
 msgstr ""
 
+#, rust-format
+msgid "December {year}"
+msgstr ""
+
 msgid "Decrease"
 msgstr ""
 
@@ -1182,6 +1194,10 @@ msgstr ""
 msgid "Featured genres"
 msgstr ""
 
+#, rust-format
+msgid "February {year}"
+msgstr ""
+
 msgid "File connection"
 msgstr ""
 
@@ -1409,6 +1425,10 @@ msgstr ""
 msgid "Invite"
 msgstr ""
 
+#, rust-format
+msgid "January {year}"
+msgstr ""
+
 msgid "Jellyfin"
 msgstr ""
 
@@ -1419,6 +1439,14 @@ msgid "Join using"
 msgstr ""
 
 msgid "Join"
+msgstr ""
+
+#, rust-format
+msgid "July {year}"
+msgstr ""
+
+#, rust-format
+msgid "June {year}"
 msgstr ""
 
 msgid "Karaoke Playback"
@@ -1619,7 +1647,15 @@ msgstr ""
 msgid "Mapped Local Path"
 msgstr ""
 
+#, rust-format
+msgid "March {year}"
+msgstr ""
+
 msgid "Maximum year"
+msgstr ""
+
+#, rust-format
+msgid "May {year}"
 msgstr ""
 
 msgid "Media available"
@@ -1945,6 +1981,10 @@ msgstr ""
 msgid "Notifications"
 msgstr ""
 
+#, rust-format
+msgid "November {year}"
+msgstr ""
+
 msgid "Now playing notifications"
 msgstr ""
 
@@ -1955,6 +1995,10 @@ msgid "Number of backups"
 msgstr ""
 
 msgid "Number of songs"
+msgstr ""
+
+#, rust-format
+msgid "October {year}"
 msgstr ""
 
 msgid "Off only for a server you control"
@@ -2800,6 +2844,10 @@ msgid "Self-host an Iroh Relay"
 msgstr ""
 
 msgid "Separate .lrc file"
+msgstr ""
+
+#, rust-format
+msgid "September {year}"
 msgstr ""
 
 msgid "Server Actions"
