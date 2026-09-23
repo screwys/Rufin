@@ -11,6 +11,7 @@ readme.workspace = true
 publish.workspace = true
 
 [dependencies]
+desktop-integration.workspace = true
 web.workspace = true
 presence.workspace = true
 pulldown-cmark.workspace = true

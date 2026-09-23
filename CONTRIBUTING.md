@@ -133,10 +133,9 @@ This selects the same gettext runtime as GTK and loads the GME, OpenMPT, and
 WavPack plugins built by CMake. Installed macOS app bundles include and load
 these plugins automatically.
 
-Run `just deps` after changing Linux package dependencies or AUR metadata; `just check deps`
-validates the generated metadata. Direct `makepkg --printsrcinfo` also works on
-Arch-based systems, while `just deps` handles a Nix-provided `makepkg` without
-`/etc/makepkg.conf`.
+Edit native dependencies in the package definition for each platform. After changing
+`packaging/aur/rufin-git/PKGBUILD`, run `makepkg --printsrcinfo > .SRCINFO` from that
+directory in an Arch build environment.
 
 Broader native checks additionally need rustfmt, clippy, cargo-deny, and `msgfmt`
 from gettext.
@@ -144,8 +143,8 @@ from gettext.
 
 To enable the debug logging, refer to [README.md#troubleshooting](README.md#troubleshooting).
 
-Most commands work the same for local and container development. Linux builds plus dependency,
-formatting, test, and check commands use the host by default or the development container after it
+Most commands work the same for local and container development. Linux builds, formatting,
+test, and check commands use the host by default or the development container after it
 is set up; macOS and Windows package builds always run on their matching host. Flatpak uses a
 privileged container for nested sandboxing only during that command. RPM mounts the selected host
 engine socket only during its command; that socket can control the engine. Disposable package work
