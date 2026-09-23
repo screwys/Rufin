@@ -302,6 +302,7 @@ pub struct ConnectOwner {
     joining: std::sync::atomic::AtomicBool,
     download_cancel: Mutex<Option<tokio_util::sync::CancellationToken>>,
     media_jobs: Mutex<BTreeMap<String, tokio_util::sync::CancellationToken>>,
+    media_files: tokio::sync::Mutex<()>,
 }
 
 impl ConnectOwner {
@@ -364,6 +365,7 @@ impl ConnectOwner {
             download_cancel: Mutex::new(None),
             joining: std::sync::atomic::AtomicBool::new(false),
             media_jobs: Mutex::new(BTreeMap::new()),
+            media_files: tokio::sync::Mutex::new(()),
         });
         owner.playback.install_connect(&owner);
         owner.source.install_connect(&owner);

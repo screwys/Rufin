@@ -332,6 +332,7 @@ pub enum LibraryListKey {
     Artists,
     AlbumArtists,
     Tracks,
+    Folders,
     FavoriteTracks,
     History,
     Genres,
@@ -348,12 +349,13 @@ pub enum LibraryListKey {
     Queue,
 }
 impl LibraryListKey {
-    pub fn all() -> [Self; 18] {
+    pub fn all() -> [Self; 19] {
         [
             Self::Albums,
             Self::Artists,
             Self::AlbumArtists,
             Self::Tracks,
+            Self::Folders,
             Self::FavoriteTracks,
             Self::History,
             Self::Genres,
@@ -374,7 +376,9 @@ impl LibraryListKey {
     pub fn supports_layout(self, layout: LibraryLayout) -> bool {
         match layout {
             LibraryLayout::Detail => matches!(self, Self::Albums),
-            LibraryLayout::Grid => !matches!(self, Self::AlbumDetailTracks | Self::Queue),
+            LibraryLayout::Grid => {
+                !matches!(self, Self::AlbumDetailTracks | Self::Queue | Self::Folders)
+            }
             LibraryLayout::Row => true,
         }
     }
@@ -384,6 +388,7 @@ impl LibraryListKey {
             Self::Albums => LibraryLayout::Grid,
             Self::Queue
             | Self::Tracks
+            | Self::Folders
             | Self::FavoriteTracks
             | Self::History
             | Self::AlbumDetailTracks
@@ -654,6 +659,7 @@ impl LibraryListSettings {
                 | LibraryListKey::Artists
                 | LibraryListKey::AlbumArtists
                 | LibraryListKey::Tracks
+                | LibraryListKey::Folders
                 | LibraryListKey::FavoriteTracks
                 | LibraryListKey::History
                 | LibraryListKey::Genres
@@ -696,6 +702,7 @@ impl LibraryListSettings {
                 | LibraryListKey::Artists
                 | LibraryListKey::AlbumArtists
                 | LibraryListKey::Tracks
+                | LibraryListKey::Folders
                 | LibraryListKey::History
                 | LibraryListKey::Genres
                 | LibraryListKey::Moods
@@ -923,6 +930,7 @@ pub fn available_row_fields(key: LibraryListKey) -> &'static [LibraryField] {
             LibraryField::Tools,
         ],
         LibraryListKey::Tracks
+        | LibraryListKey::Folders
         | LibraryListKey::FavoriteTracks
         | LibraryListKey::History
         | LibraryListKey::AlbumDetailTracks
@@ -955,7 +963,7 @@ pub fn available_row_fields(key: LibraryListKey) -> &'static [LibraryField] {
 }
 pub fn available_grid_fields(key: LibraryListKey) -> &'static [LibraryField] {
     match key {
-        LibraryListKey::Queue => &[],
+        LibraryListKey::Queue | LibraryListKey::Folders => &[],
         LibraryListKey::Albums | LibraryListKey::ArtistAlbums => &[
             LibraryField::AlbumArtist,
             LibraryField::Year,
@@ -1059,6 +1067,7 @@ pub fn available_sort_fields(key: LibraryListKey) -> &'static [LibraryField] {
         ],
         LibraryListKey::History => &[LibraryField::LastPlayed],
         LibraryListKey::Tracks
+        | LibraryListKey::Folders
         | LibraryListKey::FavoriteTracks
         | LibraryListKey::AlbumDetailTracks
         | LibraryListKey::ArtistTracks
@@ -1121,7 +1130,7 @@ fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
             LibraryField::SongCount,
             LibraryField::Tools,
         ],
-        LibraryListKey::Tracks | LibraryListKey::FavoriteTracks => vec![
+        LibraryListKey::Tracks | LibraryListKey::Folders | LibraryListKey::FavoriteTracks => vec![
             LibraryField::RowIndex,
             LibraryField::TitleMerged,
             LibraryField::Album,
@@ -1163,7 +1172,7 @@ fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
 }
 fn default_grid_fields(key: LibraryListKey) -> Vec<LibraryField> {
     match key {
-        LibraryListKey::Queue => Vec::new(),
+        LibraryListKey::Queue | LibraryListKey::Folders => Vec::new(),
         LibraryListKey::Albums | LibraryListKey::ArtistAlbums => {
             vec![LibraryField::AlbumArtist, LibraryField::Year]
         }
@@ -1219,6 +1228,7 @@ fn default_sort_key(key: LibraryListKey) -> LibraryField {
         | LibraryListKey::Moods
         | LibraryListKey::ArtistAlbums
         | LibraryListKey::Tracks
+        | LibraryListKey::Folders
         | LibraryListKey::FavoriteTracks => LibraryField::Title,
         LibraryListKey::History => LibraryField::LastPlayed,
         LibraryListKey::Queue

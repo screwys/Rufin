@@ -187,8 +187,14 @@ CREATE TABLE IF NOT EXISTS connect_media_files (
     path TEXT NOT NULL,
     managed INTEGER NOT NULL,
     hash TEXT,
+    backing_uri TEXT,
     PRIMARY KEY (media_uri, encoding)
 ) STRICT;
+
+CREATE INDEX IF NOT EXISTS connect_media_files_path_idx ON connect_media_files(path,encoding,revision);
+CREATE INDEX IF NOT EXISTS connect_media_files_hash_idx ON connect_media_files(hash) WHERE hash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS connect_media_files_backing_idx ON connect_media_files(backing_uri,encoding,revision);
+CREATE INDEX IF NOT EXISTS connect_media_files_missing_backing_idx ON connect_media_files(media_uri) WHERE backing_uri IS NULL;
 
 CREATE TABLE IF NOT EXISTS queue_occurrences (
     queue_occurrence_key INTEGER PRIMARY KEY,
@@ -675,7 +681,28 @@ CREATE INDEX IF NOT EXISTS local_access_match_uri_idx ON local_access_metadata(n
 "#;
 
 pub(crate) async fn initialize_durable(connection: &mut SqliteConnection) -> LibraryResult<()> {
-    initialize(connection, STORE_SCHEMA).await
+    initialize(connection, STORE_SCHEMA).await?;
+    loop {
+        let files: Vec<(String, String)> = sqlx::query_as(
+            "SELECT media_uri,encoding FROM connect_media_files WHERE backing_uri IS NULL LIMIT 128",
+        ).fetch_all(&mut *connection).await?;
+        if files.is_empty() {
+            return Ok(());
+        }
+        let mut transaction = connection.begin().await?;
+        for (uri, encoding) in files {
+            let backing = crate::cue_media_parts(&uri).map(|(_, backing, _, _)| backing);
+            sqlx::query(
+                "UPDATE connect_media_files SET backing_uri=?1 WHERE media_uri=?2 AND encoding=?3",
+            )
+            .bind(backing.as_deref().unwrap_or(&uri))
+            .bind(&uri)
+            .bind(encoding)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
+    }
 }
 
 pub(crate) async fn initialize_catalog(connection: &mut SqliteConnection) -> LibraryResult<()> {

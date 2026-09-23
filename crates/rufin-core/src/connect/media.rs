@@ -51,7 +51,7 @@ fn corresponding_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
 }
 
 fn versioned_path(path: &Path, uri: &str, revision: &str, encoding: Encoding) -> PathBuf {
-    let key = media_key(uri, revision, encoding);
+    let key = file_key(uri, revision, encoding);
     let extension = path.extension().unwrap_or_default().to_string_lossy();
     path.with_extension(format!("{key:.12}.{extension}"))
 }
@@ -60,6 +60,12 @@ fn media_key(uri: &str, revision: &str, encoding: Encoding) -> String {
     blake3::hash(format!("{uri}\0{revision}\0{}", encoding.name()).as_bytes())
         .to_hex()
         .to_string()
+}
+
+fn file_key(uri: &str, revision: &str, encoding: Encoding) -> String {
+    // CUE tracks keep their own identity, but transfer the same complete audio file.
+    let backing = library::cue_media_parts(uri).map(|(_, backing, _, _)| backing);
+    media_key(backing.as_deref().unwrap_or(uri), revision, encoding)
 }
 
 fn serving_key(peer: &str, id: &str) -> String {
@@ -82,6 +88,27 @@ fn mapped_root<'a>(
 }
 
 impl ConnectOwner {
+    fn media_path(
+        &self,
+        uri: &str,
+        revision: &str,
+        encoding: Encoding,
+        source_format: Option<&str>,
+    ) -> PathBuf {
+        let mut path = self
+            .directory
+            .join("media")
+            .join(file_key(uri, revision, encoding));
+        let extension = match encoding {
+            Encoding::Mp3 => "mp3",
+            Encoding::Original => source_format.unwrap_or("audio"),
+        };
+        if !extension.is_empty() && extension.chars().all(|c| c.is_ascii_alphanumeric()) {
+            path.set_extension(extension);
+        }
+        path
+    }
+
     fn selected_media_path(
         &self,
         uri: &str,
@@ -96,24 +123,21 @@ impl ConnectOwner {
             return Ok(None);
         };
         let mut path = corresponding_path(root, relative)?;
-        if encoding != Encoding::Original || library::cue_media_parts(uri).is_some() {
-            let key = media_key(uri, &revision(reference), encoding);
-            let extension = if encoding == Encoding::Mp3 {
-                "mp3"
-            } else {
-                reference["source_format"].as_str().unwrap_or("audio")
-            };
-            path.set_extension(format!("{key:.12}.{extension}"));
+        if encoding == Encoding::Mp3 {
+            let key = file_key(uri, &revision(reference), encoding);
+            path.set_extension(format!("{key:.12}.mp3"));
         }
         Ok(Some(path))
     }
 
+    // Callers hold media_files while changing files and their receipts.
     async fn store_media(
         &self,
         mut file: library::ConnectMediaFile,
         destination: &Path,
     ) -> Result<PathBuf, String> {
         let source = file_path(&file).ok_or("The completed media file is missing")?;
+        let source_file = file.clone();
         let source_managed = file.managed;
         let encoding = if file.encoding == "mp3" {
             Encoding::Mp3
@@ -130,34 +154,57 @@ impl ConnectOwner {
             .map(|reference| self.selected_media_path(&file.media_uri, encoding, reference))
             .transpose()?
             .flatten();
-        let mut target = selected
-            .clone()
+        let backing = self
+            .database
+            .connect_backing_media_file(&file.media_uri, &file.encoding, &file.revision)
+            .await
+            .map_err(error)?;
+        let mut target = backing
+            .as_ref()
+            .and_then(file_path)
+            .filter(|path| {
+                selected.as_ref().is_none_or(|selected| {
+                    path == selected
+                        || *path
+                            == versioned_path(selected, &file.media_uri, &file.revision, encoding)
+                })
+            })
+            .or_else(|| selected.clone())
             .unwrap_or_else(|| destination.to_path_buf());
         let previous = self
             .database
             .connect_media_file(&file.media_uri, &file.encoding)
             .await
             .map_err(error)?;
-        let versioned = versioned_path(&target, &file.media_uri, &file.revision, encoding);
-        if previous.as_ref().is_some_and(|old| {
-            (!old.managed
-                && old.revision != file.revision
-                && file_path(old).as_ref() == Some(&target))
-                || (old.managed && file_path(old).as_ref() == Some(&versioned))
-        }) {
-            target = versioned;
+        let mut shared = self
+            .database
+            .connect_media_file_at_path(&file_uri(&target)?, &file.encoding, &file.revision)
+            .await
+            .map_err(error)?;
+        if shared
+            .as_ref()
+            .is_some_and(|old| old.revision != file.revision)
+        {
+            target = versioned_path(&target, &file.media_uri, &file.revision, encoding);
+            shared = self
+                .database
+                .connect_media_file_at_path(&file_uri(&target)?, &file.encoding, &file.revision)
+                .await
+                .map_err(error)?;
         }
+        let shared = shared.filter(|file| file.revision == source_file.revision);
         let owned_target = previous
             .as_ref()
             .is_some_and(|old| old.managed && file_path(old).as_ref() == Some(&target));
-        let reused = encoding == Encoding::Original
-            && selected.is_some()
-            && target != source
+        let reused = target != source
             && target.is_file()
-            && !owned_target;
+            && (shared.is_some()
+                || encoding == Encoding::Original
+                    && selected.as_ref() == Some(&target)
+                    && !owned_target);
         if reused {
-            file.managed = false;
-            file.hash = None;
+            file.managed = shared.as_ref().is_some_and(|file| file.managed);
+            file.hash = shared.and_then(|file| file.hash);
         } else if target != source {
             // A revised original must not overwrite a file the user supplied.
             if target.exists() && !owned_target {
@@ -187,15 +234,31 @@ impl ConnectOwner {
             .connect_save_media_file(&file)
             .await
             .map_err(error)?;
-        self.database
-            .connect_set_local_file(&file.media_uri, &target, file.managed)
-            .await
-            .map_err(error)?;
-        if remove_source {
+        if reference.is_some() {
+            self.database
+                .connect_set_local_file(&file.media_uri, &target, file.managed)
+                .await
+                .map_err(error)?;
+        }
+        if remove_source
+            && !self
+                .database
+                .connect_media_file_users(&source_file)
+                .await
+                .map_err(error)?
+                .0
+        {
             tokio::fs::remove_file(&source).await.map_err(error)?;
         }
         if let Some(previous) = previous.filter(|old| old.managed && old.path != file.path) {
-            if let Some(path) = file_path(&previous) {
+            if !self
+                .database
+                .connect_media_file_users(&previous)
+                .await
+                .map_err(error)?
+                .0
+                && let Some(path) = file_path(&previous)
+            {
                 tokio::fs::remove_file(path).await.map_err(error)?;
             }
             self.database
@@ -221,8 +284,16 @@ impl ConnectOwner {
         file: &library::ConnectMediaFile,
         remove_path: bool,
     ) -> Result<usize, String> {
+        let (path_used, blob_used) = self
+            .database
+            .connect_media_file_users(file)
+            .await
+            .map_err(error)?;
         let mut removed = 0;
-        if remove_path && let Some(path) = file_path(file) {
+        if remove_path
+            && !path_used
+            && let Some(path) = file_path(file)
+        {
             tokio::fs::remove_file(path).await.map_err(error)?;
             removed = 1;
         }
@@ -234,7 +305,11 @@ impl ConnectOwner {
             };
             network
                 .media()
-                .forget(hash, &media_key(&file.media_uri, &file.revision, encoding))
+                .forget(
+                    hash,
+                    &media_key(&file.media_uri, &file.revision, encoding),
+                    blob_used,
+                )
                 .await
                 .map_err(error)?;
         }
@@ -425,6 +500,7 @@ impl ConnectOwner {
             if cancel.is_cancelled() {
                 return Err("Transfer cancelled".into());
             }
+            let _files = self.media_files.lock().await;
             let hash = match self.network.lock().await.clone() {
                 Some(network) => Some(
                     network
@@ -478,11 +554,27 @@ impl ConnectOwner {
         {
             return Ok(Some(path));
         }
+        let _files = self.media_files.lock().await;
         let receipt = self
             .database
             .connect_media_file(uri, encoding.name())
             .await
             .map_err(error)?;
+        if receipt
+            .as_ref()
+            .is_none_or(|file| file.revision != revision || file_path(file).is_none())
+        {
+            if let Some((mut shared, path)) = self
+                .database
+                .connect_backing_media_file(uri, encoding.name(), &revision)
+                .await
+                .map_err(error)?
+                .and_then(|file| file_path(&file).map(|path| (file, path)))
+            {
+                shared.media_uri = uri.into();
+                return self.store_media(shared, &path).await.map(Some);
+            }
+        }
         if let Some(receipt) = receipt
             .as_ref()
             .filter(|receipt| receipt.revision == revision)
@@ -515,7 +607,7 @@ impl ConnectOwner {
         }
         // Explicit source revisions supersede a previous receipt. Preserve a
         // user's reused original and put its updated copy in managed storage.
-        if receipt.is_some() {
+        if receipt.is_some_and(|receipt| receipt.revision != revision) {
             return Ok(None);
         }
         let config = self.status().settings;
@@ -614,15 +706,12 @@ impl ConnectOwner {
         let offer = self
             .request_media(peer, uri, encoding, &cancel, None)
             .await?;
-        let key = media_key(uri, &offer.revision, encoding);
-        let mut destination = self.directory.join("media").join(&key);
-        let extension = match encoding {
-            Encoding::Mp3 => "mp3",
-            Encoding::Original => reference["source_format"].as_str().unwrap_or("audio"),
-        };
-        if !extension.is_empty() && extension.chars().all(|c| c.is_ascii_alphanumeric()) {
-            destination.set_extension(extension);
-        }
+        let mut destination = self.media_path(
+            uri,
+            &offer.revision,
+            encoding,
+            reference["source_format"].as_str(),
+        );
         if let Some(selected) = self.selected_media_path(uri, encoding, &reference)? {
             destination = selected;
         }
@@ -634,6 +723,7 @@ impl ConnectOwner {
         let receipt = self
             .receive_media(peer, uri, &staged, offer, cancel)
             .await?;
+        let _files = self.media_files.lock().await;
         self.store_media(receipt, &destination).await
     }
 
@@ -649,28 +739,22 @@ impl ConnectOwner {
         let offer = self
             .request_media(peer, &item.media_uri, encoding, &cancel, Some(occurrence))
             .await?;
-        let mut destination = self.directory.join("media").join(media_key(
+        let destination = self.media_path(
             &item.media_uri,
             &offer.revision,
             encoding,
-        ));
-        let extension = if encoding == Encoding::Mp3 {
-            Some("mp3")
-        } else {
-            item.source_format.as_deref()
-        };
-        if let Some(extension) = extension.filter(|extension| {
-            !extension.is_empty() && extension.chars().all(|c| c.is_ascii_alphanumeric())
-        }) {
-            destination.set_extension(extension);
-        }
+            item.source_format.as_deref(),
+        );
+        let parent = destination.parent().ok_or("Media path has no parent")?;
+        tokio::fs::create_dir_all(parent).await.map_err(error)?;
+        let staged = tempfile::NamedTempFile::new_in(parent)
+            .map_err(error)?
+            .into_temp_path();
         let receipt = self
-            .receive_media(peer, &item.media_uri, &destination, offer, cancel)
+            .receive_media(peer, &item.media_uri, &staged, offer, cancel)
             .await?;
-        self.database
-            .connect_save_media_file(&receipt)
-            .await
-            .map_err(error)?;
+        let _files = self.media_files.lock().await;
+        let destination = self.store_media(receipt, &destination).await?;
         self.database
             .connect_set_queue_file(item, &destination)
             .await
@@ -973,7 +1057,10 @@ impl downloads::ConnectDownload for ConnectOwner {
         file: library::ConnectMediaFile,
         destination: &'a Path,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
-        Box::pin(async move { self.store_media(file, destination).await.map(|_| ()) })
+        Box::pin(async move {
+            let _files = self.media_files.lock().await;
+            self.store_media(file, destination).await.map(|_| ())
+        })
     }
 
     fn remove<'a>(
@@ -982,6 +1069,7 @@ impl downloads::ConnectDownload for ConnectOwner {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<usize, String>> + Send + 'a>>
     {
         Box::pin(async move {
+            let _files = self.media_files.lock().await;
             let files = self
                 .database
                 .connect_media_files(uri)

@@ -136,6 +136,8 @@ impl RemoteSource {
                                     SourceError::Other("Could not read CUE backing audio".into())
                                 }));
                                 backing_file.state = LocalFileState::Unreadable;
+                                scan.retain_local_media_paths(std::slice::from_ref(path))
+                                    .await?;
                                 scan.write_local_files(&[(backing_file, vec![])]).await?;
                                 continue;
                             }
@@ -185,8 +187,8 @@ impl RemoteSource {
                     Err(SourceError::Cancelled) => return Err(SourceError::Cancelled),
                     Err(error) => {
                         tracing::warn!(%error, "could not read remote CUE album");
-                        scan.incomplete();
-                        if let Some(old) = old {
+                        scan.clear_freshness();
+                        if let Some(old) = old.or_else(|| renamed.first()) {
                             scan.retain_local_cue_path(&old.path).await?;
                             for page in old.dependencies.chunks(128) {
                                 scan.write_local_dependency_paths(page).await?;

@@ -39,6 +39,10 @@ pub(super) struct Client {
 
 impl Client {
     pub(super) fn start(timeout_seconds: u64) -> io::Result<Self> {
+        // Keep using the running build if an update replaced its executable on disk.
+        #[cfg(target_os = "linux")]
+        let mut command = Command::new("/proc/self/exe");
+        #[cfg(not(target_os = "linux"))]
         let mut command = Command::new(std::env::current_exe()?);
         #[cfg(not(test))]
         command

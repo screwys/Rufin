@@ -714,7 +714,7 @@ impl Shell {
                     .settings
                     .current
                     .borrow()
-                    .library_list(LibraryListKey::Tracks);
+                    .library_list(LibraryListKey::Folders);
                 let load_selected = selected.clone();
                 let load_path = path.clone();
                 self.queue_prepared_route(

@@ -59,9 +59,9 @@ pub struct CollectionTableProjection {
     table: gtk::ColumnView,
     navigation: MountedRouteItemNavigation,
     fixed_columns: Rc<Vec<(gtk::ColumnViewColumn, i32)>>,
-    column_for_field: Rc<dyn Fn(LibraryField) -> (gtk::ColumnViewColumn, i32)>,
+    column_for_field: Rc<dyn Fn(LibraryField) -> gtk::ColumnViewColumn>,
     width_for_field: Rc<dyn Fn(LibraryField) -> i32>,
-    fields: Rc<RefCell<Vec<LibraryField>>>,
+    field_columns: Rc<RefCell<Vec<(LibraryField, gtk::ColumnViewColumn)>>>,
     width_fit: ColumnViewWidthFit,
 }
 
@@ -71,7 +71,8 @@ impl CollectionTableProjection {
     }
 
     pub fn apply_fields(&self, fields: &[LibraryField]) {
-        if self.fields.borrow().as_slice() == fields {
+        let previous = self.field_columns.borrow().clone();
+        if previous.iter().map(|(field, _)| field).eq(fields) {
             self.width_fit
                 .set_preferred_widths(&self.preferred_widths(fields));
             return;
@@ -79,24 +80,35 @@ impl CollectionTableProjection {
         // GTK adds new column cells to section headers as well as track rows.
         let header_factory = self.table.header_factory();
         self.table.set_header_factory(None::<&gtk::ListItemFactory>);
-        while let Some(column) = self
-            .table
-            .columns()
-            .item(0)
-            .and_then(|item| item.downcast::<gtk::ColumnViewColumn>().ok())
-        {
-            self.table.remove_column(&column);
+        for (field, column) in &previous {
+            if !fields.contains(field) {
+                self.table.remove_column(column);
+            }
         }
         let mut active = self.fixed_columns.as_ref().clone();
-        for (column, _) in self.fixed_columns.iter() {
-            self.table.append_column(column);
-        }
+        let mut field_columns = Vec::with_capacity(fields.len());
         for field in fields {
-            let (column, width) = (self.column_for_field)(*field);
-            self.table.append_column(&column);
-            active.push((column, width));
+            let column = previous
+                .iter()
+                .find(|(previous_field, _)| previous_field == field)
+                .map(|(_, column)| column.clone())
+                .unwrap_or_else(|| (self.column_for_field)(*field));
+            active.push((column.clone(), (self.width_for_field)(*field)));
+            field_columns.push((*field, column));
         }
-        *self.fields.borrow_mut() = fields.to_vec();
+        let columns = self.table.columns();
+        for (position, (column, _)) in active.iter().enumerate() {
+            let position = position as u32;
+            if columns
+                .item(position)
+                .and_downcast::<gtk::ColumnViewColumn>()
+                .as_ref()
+                != Some(column)
+            {
+                self.table.insert_column(position, column);
+            }
+        }
+        self.field_columns.replace(field_columns);
         self.width_fit.replace(active);
         self.table.set_header_factory(header_factory.as_ref());
     }
@@ -840,24 +852,27 @@ where
     M: IsA<gio::ListModel> + Clone + 'static,
 {
     let width_for_field = Rc::new(width_for_field) as Rc<dyn Fn(LibraryField) -> i32>;
-    let column_width_for_field = Rc::clone(&width_for_field);
-    let column_for_field = Rc::new(move |field| {
-        let column = column_for_field(field);
-        let width = column_width_for_field(field);
-        (column, width)
-    }) as Rc<dyn Fn(LibraryField) -> (gtk::ColumnViewColumn, i32)>;
+    let column_for_field =
+        Rc::new(column_for_field) as Rc<dyn Fn(LibraryField) -> gtk::ColumnViewColumn>;
+    let field_columns = fields
+        .iter()
+        .map(|field| (*field, column_for_field(*field)))
+        .collect::<Vec<_>>();
     let mut active = fixed_columns.clone();
-    active.extend(fields.iter().map(|field| column_for_field(*field)));
+    active.extend(
+        field_columns
+            .iter()
+            .map(|(field, column)| (column.clone(), width_for_field(*field))),
+    );
     let (table, width_fit, navigation) =
         collection_table_with_width(model, active, initial_width, false, activate, selection);
-    let fields = Rc::new(RefCell::new(fields.to_vec()));
     CollectionTableProjection {
         table,
         navigation,
         fixed_columns: Rc::new(fixed_columns),
         column_for_field,
         width_for_field,
-        fields,
+        field_columns: Rc::new(RefCell::new(field_columns)),
         width_fit,
     }
 }

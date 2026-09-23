@@ -23,8 +23,10 @@ pub struct MediaStore {
 }
 
 impl MediaStore {
-    pub async fn forget(&self, hash: &str, representation: &str) -> Result<()> {
-        self.store.tags().delete(format!("download/{hash}")).await?;
+    pub async fn forget(&self, hash: &str, representation: &str, keep_blob: bool) -> Result<()> {
+        if !keep_blob {
+            self.store.tags().delete(format!("download/{hash}")).await?;
+        }
         self.store
             .tags()
             .delete(format!("media/{representation}"))
@@ -48,6 +50,11 @@ impl MediaStore {
             .blobs()
             .add_path(absolute)
             .with_named_tag(tag)
+            .await?;
+        // Several CUE tracks can keep receipts for the same blob.
+        self.store
+            .tags()
+            .set(format!("download/{}", entry.hash), entry.hash)
             .await?;
         Ok(entry.hash.to_string())
     }
@@ -109,6 +116,36 @@ impl MediaStore {
 pub(crate) struct MemberBlobs {
     pub network: Weak<ConnectNetwork>,
     pub store: Store,
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn cue_shared_blob_remains_until_the_last_receipt() {
+    let root = tempfile::tempdir().unwrap();
+    let endpoint = Endpoint::builder(iroh::endpoint::presets::Minimal)
+        .bind()
+        .await
+        .unwrap();
+    let media = MediaStore::open(root.path(), endpoint.clone())
+        .await
+        .unwrap();
+    let file = root.path().join("audio.flac");
+    tokio::fs::write(&file, b"whole album audio").await.unwrap();
+    let hash = media.publish(&file, "media/first-cue").await.unwrap();
+    media.forget(&hash, "first-cue", true).await.unwrap();
+    let mut tags = media
+        .store
+        .tags()
+        .list_prefix(format!("download/{hash}"))
+        .await
+        .unwrap();
+    assert!(tags.next().await.unwrap().is_ok());
+    drop(tags);
+    media.forget(&hash, "last-cue", false).await.unwrap();
+    let mut tags = media.store.tags().list().await.unwrap();
+    assert!(tags.next().await.is_none());
+    drop(tags);
+    endpoint.close().await;
 }
 
 impl ProtocolHandler for MemberBlobs {

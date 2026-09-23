@@ -70,7 +70,13 @@ pub(crate) fn parse_cue_sheet(text: &str) -> Option<CueSheet> {
                 }
             }
             "FILE" => {
-                valid &= push_track(&mut current_file, current_track.take());
+                // A pregap can be in the previous file while INDEX 01 is in this file.
+                if current_track
+                    .as_ref()
+                    .is_some_and(|track| track.index_start_ms.is_some())
+                {
+                    valid &= push_track(&mut current_file, current_track.take());
+                }
                 push_file(&mut sheet, current_file.take());
                 let Some(path) = fields.next_value() else {
                     continue;
