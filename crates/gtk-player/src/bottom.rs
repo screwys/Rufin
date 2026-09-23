@@ -38,7 +38,6 @@ pub const BOTTOM_PLAYER_BUTTON_STEP: f64 = 44.0;
 pub const BOTTOM_PLAYER_WAVEFORM_HEIGHT: i32 = 24;
 pub const BOTTOM_PLAYER_ACTION_BUTTON_SIZE: i32 = 32;
 pub const BOTTOM_PLAYER_TITLE_MENU_BUTTON_SIZE: i32 = 18;
-pub const BOTTOM_PLAYER_IDENTITY_HEIGHT: i32 = 64;
 pub const BOTTOM_PLAYER_TITLE_ROW_HEIGHT: i32 = 20;
 pub const BOTTOM_PLAYER_META_ROW_HEIGHT: i32 = 18;
 pub const BOTTOM_PLAYER_ACTION_SPACING: i32 = 2;
@@ -588,8 +587,7 @@ pub fn build_now_playing_controls(builder: &gtk::Builder, resource: &str) -> Now
     title.set_height_request(BOTTOM_PLAYER_TITLE_ROW_HEIGHT);
     artist.set_height_request(BOTTOM_PLAYER_META_ROW_HEIGHT);
     album.set_height_request(BOTTOM_PLAYER_META_ROW_HEIGHT);
-    let identity_slot = bottom_player_identity_slot(&identity);
-    now_playing.append(&identity_slot);
+    now_playing.append(&identity);
 
     NowPlayingControls {
         root: now_playing,
@@ -599,14 +597,6 @@ pub fn build_now_playing_controls(builder: &gtk::Builder, resource: &str) -> Now
         artist,
         album,
     }
-}
-
-pub fn bottom_player_identity_slot(identity: &gtk::Box) -> gtk::Overlay {
-    let slot = bottom_player_allocated_slot(identity, 1, BOTTOM_PLAYER_IDENTITY_HEIGHT);
-    slot.set_hexpand(true);
-    slot.set_halign(gtk::Align::Fill);
-    slot.set_valign(gtk::Align::Center);
-    slot
 }
 
 pub fn bottom_player_allocated_slot(

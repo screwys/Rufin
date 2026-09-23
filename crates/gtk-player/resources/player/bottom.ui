@@ -24,7 +24,7 @@
     <property name="hexpand">true</property>
     <property name="width-request">1</property>
     <property name="halign">fill</property>
-    <property name="valign">fill</property>
+    <property name="valign">center</property>
     <style><class name="player-identity"/></style>
     <child>
       <object class="GtkBox" id="title_row">
