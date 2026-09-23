@@ -124,7 +124,7 @@ regex = "1.13.1"
 tempfile = "3.23.0"
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2"] }
 thiserror = "2.0.18"
-tray-icon = { version = "0.24.2", default-features = false }
+tray-icon = { version = "0.25.0", default-features = false }
 tokio = "1.52.3"
 tokio-rustls = { version = "0.26.4", default-features = false }
 tokio-tungstenite = { version = "0.30.0", default-features = false }
