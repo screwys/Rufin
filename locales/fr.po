@@ -409,6 +409,9 @@ msgstr ""
 msgid "Approve sign-in in your browser"
 msgstr "Approuver la connexion dans votre navigateur"
 
+msgid "April {year}"
+msgstr ""
+
 msgid "Artist albums"
 msgstr "Artiste albums"
 
@@ -444,6 +447,9 @@ msgstr ""
 
 msgid "Audio"
 msgstr "Audio"
+
+msgid "August {year}"
+msgstr ""
 
 msgid "Authentication"
 msgstr "Authentification"
@@ -915,6 +921,9 @@ msgstr ""
 msgid "Debug logging"
 msgstr "Journal de débogage"
 
+msgid "December {year}"
+msgstr ""
+
 msgid "Decrease"
 msgstr "Diminuer"
 
@@ -1227,6 +1236,9 @@ msgstr "Favoris"
 msgid "Featured genres"
 msgstr ""
 
+msgid "February {year}"
+msgstr ""
+
 #, fuzzy
 #| msgid "Connection"
 msgid "File connection"
@@ -1461,6 +1473,9 @@ msgstr "Intégrations"
 msgid "Invite"
 msgstr ""
 
+msgid "January {year}"
+msgstr ""
+
 msgid "Jellyfin"
 msgstr "Jellyfin"
 
@@ -1473,6 +1488,12 @@ msgid "Join using"
 msgstr ""
 
 msgid "Join"
+msgstr ""
+
+msgid "July {year}"
+msgstr ""
+
+msgid "June {year}"
 msgstr ""
 
 msgid "Karaoke Playback"
@@ -1687,7 +1708,15 @@ msgstr "Gérer"
 msgid "Mapped Local Path"
 msgstr ""
 
+msgid "March {year}"
+msgstr ""
+
 msgid "Maximum year"
+msgstr "Année maximale"
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "May {year}"
 msgstr "Année maximale"
 
 #, fuzzy
@@ -2023,6 +2052,9 @@ msgstr "Rien en file d'attente"
 msgid "Notifications"
 msgstr "Notifications"
 
+msgid "November {year}"
+msgstr ""
+
 msgid "Now playing notifications"
 msgstr ""
 
@@ -2034,6 +2066,9 @@ msgstr "Nombre de sauvegardes"
 
 msgid "Number of songs"
 msgstr "Nombre de chansons"
+
+msgid "October {year}"
+msgstr ""
 
 msgid "Off only for a server you control"
 msgstr ""
@@ -2907,6 +2942,9 @@ msgstr ""
 msgid "Separate .lrc file"
 msgstr ""
 
+msgid "September {year}"
+msgstr ""
+
 msgid "Server Actions"
 msgstr ""
 
@@ -3745,7 +3783,8 @@ msgstr "Supprimer le cache de {app_name}"
 #. Windows installer: InstallWriteFailed.
 msgctxt "Windows installer"
 msgid "Setup could not complete the installation. Please try again."
-msgstr "L'installateur n'a pas pu compléter l'installation. Veuillez réessayer."
+msgstr ""
+"L'installateur n'a pas pu compléter l'installation. Veuillez réessayer."
 
 #. Windows installer: InvalidUpdate. {app_name} is the application display name.
 msgctxt "Windows installer"

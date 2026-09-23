@@ -430,6 +430,9 @@ msgstr "Pielietot"
 msgid "Approve sign-in in your browser"
 msgstr "Apstipriniet pieteikšanos savā pārlūkprogrammā"
 
+msgid "April {year}"
+msgstr ""
+
 msgid "Artist albums"
 msgstr "Izpildītāja albumi"
 
@@ -465,6 +468,9 @@ msgstr "Skaņas apstrāde nav pieejama straumējot"
 
 msgid "Audio"
 msgstr "Skaņa"
+
+msgid "August {year}"
+msgstr ""
 
 msgid "Authentication"
 msgstr "Autentifikācija"
@@ -959,6 +965,9 @@ msgstr ""
 msgid "Debug logging"
 msgstr "Atkļūdošanas žurnāls"
 
+msgid "December {year}"
+msgstr ""
+
 msgid "Decrease"
 msgstr "Samazināt"
 
@@ -1283,6 +1292,9 @@ msgstr "Izlase"
 msgid "Featured genres"
 msgstr "Ieteicamie žanri"
 
+msgid "February {year}"
+msgstr ""
+
 #, fuzzy
 #| msgid "Connection"
 msgid "File connection"
@@ -1521,6 +1533,9 @@ msgstr "Integrācijas"
 msgid "Invite"
 msgstr ""
 
+msgid "January {year}"
+msgstr ""
+
 msgid "Jellyfin"
 msgstr "Jellyfin"
 
@@ -1533,6 +1548,12 @@ msgid "Join using"
 msgstr ""
 
 msgid "Join"
+msgstr ""
+
+msgid "July {year}"
+msgstr ""
+
+msgid "June {year}"
 msgstr ""
 
 msgid "Karaoke Playback"
@@ -1748,7 +1769,15 @@ msgstr "Pārvaldīt"
 msgid "Mapped Local Path"
 msgstr "Nokartētais lokālais ceļš"
 
+msgid "March {year}"
+msgstr ""
+
 msgid "Maximum year"
+msgstr "Maksimālais gads"
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "May {year}"
 msgstr "Maksimālais gads"
 
 #, fuzzy
@@ -2086,6 +2115,9 @@ msgstr "Rindā nav neviena elementa"
 msgid "Notifications"
 msgstr "Paziņojumi"
 
+msgid "November {year}"
+msgstr ""
+
 msgid "Now playing notifications"
 msgstr "Paziņojumi par pašreiz atskaņoto"
 
@@ -2097,6 +2129,9 @@ msgstr "Dublējumu skaits"
 
 msgid "Number of songs"
 msgstr "Dziesmu skaits"
+
+msgid "October {year}"
+msgstr ""
 
 msgid "Off only for a server you control"
 msgstr "Izslēdziet tikai serverim, ko pārvaldāt"
@@ -2973,6 +3008,9 @@ msgstr ""
 
 msgid "Separate .lrc file"
 msgstr "Atsevišķs .lrc fails"
+
+msgid "September {year}"
+msgstr ""
 
 msgid "Server Actions"
 msgstr "Servera darbības"
