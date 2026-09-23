@@ -1,7 +1,5 @@
 //! Owns complete Track orders, bounded final rows, details, and Track metadata writes.
-//! Row assembly batches relation reads within the supplied window.
-
-use std::collections::BTreeMap;
+//! Each bounded row query includes its ordered artist and genre links.
 
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Connection, FromRow, QueryBuilder, Row, Sqlite, SqliteConnection};
@@ -152,7 +150,7 @@ pub(crate) const TRACK_LINK_COLUMNS: &str = "
        FROM album_artists credit JOIN artists artist USING(artist_key)
        WHERE credit.album_key=track.album_key) album_artists,";
 
-#[derive(Clone, Debug, FromRow, PartialEq)]
+#[derive(Clone, Debug, FromRow, PartialEq, serde::Deserialize)]
 pub struct TrackGenreLink {
     pub genre_key: GenreKey,
     pub name: String,
@@ -246,9 +244,12 @@ impl<'row> FromRow<'row, SqliteRow> for TrackRow {
             musicbrainz_album_id: row.try_get("musicbrainz_album_id")?,
             musicbrainz_release_group_id: row.try_get("musicbrainz_release_group_id")?,
             primary_artist_musicbrainz_id: row.try_get("primary_artist_musicbrainz_id")?,
-            artists: Vec::new(),
-            album_artists: Vec::new(),
-            genres: Vec::new(),
+            artists: serde_json::from_str(row.try_get("artists")?)
+                .map_err(|error| sqlx::Error::Decode(error.into()))?,
+            album_artists: serde_json::from_str(row.try_get("album_artists")?)
+                .map_err(|error| sqlx::Error::Decode(error.into()))?,
+            genres: serde_json::from_str(row.try_get("genres")?)
+                .map_err(|error| sqlx::Error::Decode(error.into()))?,
         })
     }
 }
@@ -305,29 +306,6 @@ impl TrackQuery {
     }
 }
 
-#[derive(FromRow)]
-struct TrackArtistRelation {
-    track_key: TrackKey,
-    artist_key: ArtistKey,
-    media_uri: String,
-    name: String,
-}
-
-#[derive(FromRow)]
-struct AlbumArtistRelation {
-    track_key: TrackKey,
-    artist_key: ArtistKey,
-    media_uri: String,
-    name: String,
-}
-
-#[derive(FromRow)]
-struct TrackGenreRelation {
-    track_key: TrackKey,
-    genre_key: GenreKey,
-    name: String,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct TrackMetadataWrite {
     pub title: String,
@@ -380,7 +358,6 @@ impl Database {
                 )
                 .await?;
                 transaction.commit().await?;
-                Database::clear_progress(&mut connection).await?;
                 Ok(rows)
             }
             _ => unreachable!("track selection input"),
@@ -396,7 +373,7 @@ impl Database {
     ) -> LibraryResult<i64> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let query = track_query(source, TrackSort::Title, false, false, folder, filter);
-        let count = if favorites_only {
+        Ok(if favorites_only {
             // Use the existing source-favorite index, then add locally favorited
             // tracks which are not source favorites. The sets do not overlap.
             sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
@@ -409,9 +386,7 @@ impl Database {
             .fetch_one(&mut *connection).await?
         } else {
             query.count(&mut connection).await?
-        };
-        Database::clear_progress(&mut connection).await?;
-        Ok(count)
+        })
     }
 
     /// Reads one page without materializing the source's full track order.
@@ -467,38 +442,32 @@ impl Database {
             .await?;
         let rows = load_track_rows(&mut transaction, &keys).await?;
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(rows)
     }
 
-    pub async fn track_rows_for_source(
+    pub async fn track_uris_for_source(
         &self,
         source: SourceKey,
         tracks: &[TrackKey],
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<TrackRow>> {
+    ) -> LibraryResult<Vec<String>> {
         if tracks.is_empty() {
             return Ok(Vec::new());
         }
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
         let mut query = QueryBuilder::<Sqlite>::new("WITH requested(track_key,ordinal) AS (");
         query.push_values(tracks.iter().enumerate(), |mut row, (ordinal, track)| {
             row.push_bind(*track).push_bind(ordinal as i64);
         });
         query
-            .push(") SELECT track.track_key FROM requested JOIN tracks track USING(track_key) WHERE track.source_key=")
+            .push(") SELECT track.media_uri FROM requested JOIN tracks track USING(track_key) WHERE track.source_key=")
             .push_bind(source)
             .push(" ORDER BY requested.ordinal");
-        let keys = query
-            .build_query_scalar::<TrackKey>()
+        Ok(query
+            .build_query_scalar::<String>()
             .persistent(false)
-            .fetch_all(&mut *transaction)
-            .await?;
-        let result = load_track_rows(&mut transaction, &keys).await;
-        transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
-        result
+            .fetch_all(&mut *connection)
+            .await?)
     }
 
     pub async fn track_source_by_uri(
@@ -566,7 +535,6 @@ impl Database {
             .await?;
         let result = load_track_rows(&mut transaction, &keys).await?;
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(result)
     }
 
@@ -577,14 +545,13 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<TrackKey>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result =
+        Ok(
             sqlx::query_scalar("SELECT track_key FROM tracks WHERE source_key=?1 AND object_id=?2")
                 .bind(source)
                 .bind(object_id)
                 .fetch_optional(&mut *connection)
-                .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+                .await?,
+        )
     }
 
     pub async fn track_media_uris_by_objects(
@@ -617,7 +584,6 @@ impl Database {
                     .await?,
             );
         }
-        Database::clear_progress(&mut connection).await?;
         Ok(result)
     }
 
@@ -641,7 +607,6 @@ impl Database {
             "",
         )
         .await;
-        Database::clear_progress(&mut connection).await?;
         Ok(order?.into_iter().map(|(_, media_uri)| media_uri).collect())
     }
 
@@ -679,7 +644,6 @@ impl Database {
         .await?;
         let first_rows = load_track_rows(&mut transaction, &keys).await?;
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(TrackRoutePage {
             query: query.clone(),
             count,
@@ -703,14 +667,13 @@ impl Database {
         query
             .predicate
             .push_str(" AND track.media_uri IN (SELECT value FROM json_each(?1))");
-        let order =
+        Ok(
             sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(query.select("track.media_uri")))
                 .bind(serde_json::to_string(candidates)?)
                 .persistent(false)
                 .fetch_all(&mut *connection)
-                .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(order?)
+                .await?,
+        )
     }
 
     pub async fn track_rows(
@@ -730,7 +693,6 @@ impl Database {
         let mut transaction = connection.begin().await?;
         let result = load_track_rows(&mut transaction, keys).await;
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         result
     }
 
@@ -939,8 +901,9 @@ pub(crate) async fn load_track_rows(
     query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
         row.push_bind(*key).push_bind(position as i64);
     });
-    query.push(") SELECT track.track_key,track.source_key,source.object_id source_id,
-                        track.object_id,track.album_key,album.media_uri album_media_uri,track.title,
+    query.push(") SELECT ").push(TRACK_LINK_COLUMNS);
+    query.push("track.track_key,track.source_key,source.object_id source_id,
+                        track.object_id,track.album_key,track.title,
                         track.display_album album,track.display_artist artist,
                         album.display_artist album_display_artist,
                         track.duration_millis,track.disc_number,track.track_number,
@@ -956,7 +919,7 @@ pub(crate) async fn load_track_rows(
                            WHERE baseline.source_key=track.source_key
                              AND baseline.track_object_id=track.object_id
                              AND baseline.period='lifetime' AND baseline.item_kind='track'
-                           UNION ALL SELECT listen.started_at FROM listens listen
+                           UNION ALL SELECT max(listen.started_at) FROM listens listen
                            WHERE listen.media_uri=track.media_uri
                         )) last_played,
                         COALESCE((SELECT baseline.play_count FROM activity_baseline baseline
@@ -980,87 +943,19 @@ pub(crate) async fn load_track_rows(
                           (SELECT artist.musicbrainz_artist_id FROM album_artists credit
                            JOIN artists artist USING(artist_key)
                            WHERE credit.album_key=track.album_key ORDER BY credit.position LIMIT 1)
-                        ) primary_artist_musicbrainz_id
+                        ) primary_artist_musicbrainz_id,
+                        (SELECT json_group_array(json_object('genre_key',genre.genre_key,'name',genre.name) ORDER BY relation.position)
+                         FROM track_genres relation JOIN genres genre USING(genre_key)
+                         WHERE relation.track_key=track.track_key) genres
                  FROM requested JOIN tracks track USING(track_key)
                  JOIN sources source ON source.source_key=track.source_key
                  LEFT JOIN albums album USING(album_key)
                  ORDER BY requested.position");
-    let scalars = query
+    Ok(query
         .build_query_as::<TrackRow>()
         .persistent(false)
-        .fetch_all(&mut *connection)
-        .await?;
-    let mut artists = BTreeMap::<TrackKey, Vec<TrackArtistLink>>::new();
-    let mut query = QueryBuilder::<Sqlite>::new("WITH requested(track_key, position) AS (");
-    query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
-        row.push_bind(*key).push_bind(position as i64);
-    });
-    query.push("),unique_requested AS (SELECT track_key,min(position) position FROM requested GROUP BY track_key) SELECT relation.track_key,artist.artist_key,artist.media_uri,artist.name FROM unique_requested requested JOIN track_artists relation USING(track_key) JOIN artists artist USING(artist_key) ORDER BY requested.position,relation.position");
-    for relation in query
-        .build_query_as::<TrackArtistRelation>()
-        .persistent(false)
-        .fetch_all(&mut *connection)
-        .await?
-    {
-        artists
-            .entry(relation.track_key)
-            .or_default()
-            .push(TrackArtistLink {
-                artist_key: relation.artist_key,
-                media_uri: relation.media_uri,
-                name: relation.name,
-            });
-    }
-    let mut album_artists = BTreeMap::<TrackKey, Vec<TrackArtistLink>>::new();
-    let mut query = QueryBuilder::<Sqlite>::new("WITH requested(track_key, position) AS (");
-    query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
-        row.push_bind(*key).push_bind(position as i64);
-    });
-    query.push("),unique_requested AS (SELECT track_key,min(position) position FROM requested GROUP BY track_key) SELECT track.track_key,artist.artist_key,artist.media_uri,artist.name FROM unique_requested requested JOIN tracks track USING(track_key) JOIN album_artists relation USING(album_key) JOIN artists artist USING(artist_key) ORDER BY requested.position,relation.position");
-    for relation in query
-        .build_query_as::<AlbumArtistRelation>()
-        .persistent(false)
-        .fetch_all(&mut *connection)
-        .await?
-    {
-        album_artists
-            .entry(relation.track_key)
-            .or_default()
-            .push(TrackArtistLink {
-                artist_key: relation.artist_key,
-                media_uri: relation.media_uri,
-                name: relation.name,
-            });
-    }
-    let mut genres = BTreeMap::<TrackKey, Vec<TrackGenreLink>>::new();
-    let mut query = QueryBuilder::<Sqlite>::new("WITH requested(track_key, position) AS (");
-    query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
-        row.push_bind(*key).push_bind(position as i64);
-    });
-    query.push("),unique_requested AS (SELECT track_key,min(position) position FROM requested GROUP BY track_key) SELECT relation.track_key,genre.genre_key,genre.name FROM unique_requested requested JOIN track_genres relation USING(track_key) JOIN genres genre USING(genre_key) ORDER BY requested.position,relation.position");
-    for relation in query
-        .build_query_as::<TrackGenreRelation>()
-        .persistent(false)
-        .fetch_all(&mut *connection)
-        .await?
-    {
-        genres
-            .entry(relation.track_key)
-            .or_default()
-            .push(TrackGenreLink {
-                genre_key: relation.genre_key,
-                name: relation.name,
-            });
-    }
-    let mut rows = Vec::with_capacity(scalars.len());
-    for mut track in scalars {
-        let key = track.track_key;
-        track.artists = artists.remove(&key).unwrap_or_default();
-        track.album_artists = album_artists.remove(&key).unwrap_or_default();
-        track.genres = genres.remove(&key).unwrap_or_default();
-        rows.push(track);
-    }
-    Ok(rows)
+        .fetch_all(connection)
+        .await?)
 }
 
 #[cfg(test)]

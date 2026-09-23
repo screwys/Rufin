@@ -139,7 +139,6 @@ impl Database {
             .bind(limit as i64)
             .fetch_all(&mut *connection)
             .await?;
-        Database::clear_progress(&mut connection).await?;
         drop(connection);
         drop(_permit);
         let uris = tracks

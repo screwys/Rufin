@@ -69,13 +69,11 @@ impl Database {
             }
         };
         query.push(" AND (").push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders folder_scope WHERE folder_scope.track_key=track.track_key AND folder_scope.folder_key=").push_bind(folder).push(")) AND track.artwork_binding IS NOT NULL GROUP BY binding ORDER BY min(track.sort_text),min(track.track_key) LIMIT ").push_bind(limit);
-        let bindings = query
+        Ok(query
             .build_query_scalar::<Vec<u8>>()
             .persistent(false)
             .fetch_all(&mut *connection)
-            .await?;
-        Database::clear_progress(&mut connection).await?;
-        Ok(bindings)
+            .await?)
     }
 
     pub async fn artwork_preparation_page(
@@ -119,7 +117,6 @@ impl Database {
             .fetch_all(&mut *transaction)
             .await?;
         transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
         Ok(bindings)
     }
 }

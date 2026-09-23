@@ -47,7 +47,6 @@ impl Database {
         .bind(media_uri)
         .fetch_optional(&mut *connection)
         .await;
-        Database::clear_progress(&mut connection).await?;
         result?
             .map(|(favorite, rating)| {
                 Ok((

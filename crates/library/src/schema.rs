@@ -273,7 +273,7 @@ CREATE INDEX IF NOT EXISTS local_locators_precedence_idx ON local_locators(media
 "#;
 pub(crate) const CATALOG_SCHEMA: &str = r#"PRAGMA application_id = 1381320270;
 
-PRAGMA user_version = 46;
+PRAGMA user_version = 47;
 
 CREATE TABLE IF NOT EXISTS sources (
     source_key INTEGER PRIMARY KEY,
@@ -679,6 +679,12 @@ pub(crate) async fn initialize_durable(connection: &mut SqliteConnection) -> Lib
 }
 
 pub(crate) async fn initialize_catalog(connection: &mut SqliteConnection) -> LibraryResult<()> {
+    if pragma(connection, "user_version").await? < 47 {
+        // Drop the backfill marker before advancing the version so interrupted upgrades retry.
+        sqlx::query("DROP INDEX IF EXISTS tracks_local_play_count_idx")
+            .execute(&mut *connection)
+            .await?;
+    }
     initialize(connection, CATALOG_SCHEMA).await?;
     if sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('sources') WHERE name='catalog_digest')",
@@ -787,7 +793,7 @@ pub(crate) async fn attach_catalog(
     Ok(())
 }
 
-/// Backfill once after attaching the durable listens to an existing catalog.
+/// Own the indexed local play count and its maintenance on the fixed writer.
 pub(crate) async fn initialize_local_activity(
     connection: &mut SqliteConnection,
 ) -> LibraryResult<()> {
@@ -798,7 +804,7 @@ pub(crate) async fn initialize_local_activity(
     if !indexed {
         sqlx::raw_sql("UPDATE catalog.tracks SET local_play_count=(SELECT count(*) FROM main.listens WHERE listens.media_uri=tracks.media_uri);
         CREATE INDEX catalog.tracks_local_play_count_idx ON tracks(source_key,local_play_count,sort_text,media_uri);
-        CREATE INDEX catalog.tracks_global_local_play_count_idx ON tracks(local_play_count,sort_text,media_uri);")
+        CREATE INDEX IF NOT EXISTS catalog.tracks_global_local_play_count_idx ON tracks(local_play_count,sort_text,media_uri);")
         .execute(&mut *transaction).await?;
     }
     sqlx::raw_sql("CREATE INDEX IF NOT EXISTS catalog.tracks_local_shuffle_idx ON tracks(source_key,local_play_count,((track_key*1103515245)%2147483647),media_uri);
@@ -807,6 +813,27 @@ pub(crate) async fn initialize_local_activity(
         CREATE INDEX IF NOT EXISTS catalog.tracks_global_shuffle_idx ON tracks(((track_key*1103515245)%2147483647),media_uri);")
         .execute(&mut *transaction).await?;
     transaction.commit().await?;
+    // The catalog count is an indexed copy of durable history. All writers use these triggers.
+    sqlx::raw_sql(
+        "CREATE TEMP TRIGGER local_play_count_listen_insert AFTER INSERT ON main.listens BEGIN
+             UPDATE tracks SET local_play_count=local_play_count+1 WHERE media_uri=NEW.media_uri;
+         END;
+         CREATE TEMP TRIGGER local_play_count_listen_delete AFTER DELETE ON main.listens BEGIN
+             UPDATE tracks SET local_play_count=local_play_count-1 WHERE media_uri=OLD.media_uri;
+         END;
+         CREATE TEMP TRIGGER local_play_count_track_insert AFTER INSERT ON catalog.tracks
+         WHEN NEW.local_play_count<>0 OR EXISTS(SELECT 1 FROM main.listens WHERE media_uri=NEW.media_uri) BEGIN
+             UPDATE tracks SET local_play_count=(SELECT count(*) FROM main.listens WHERE media_uri=NEW.media_uri)
+             WHERE track_key=NEW.track_key;
+         END;
+         CREATE TEMP TRIGGER local_play_count_track_uri AFTER UPDATE OF media_uri ON catalog.tracks
+         WHEN OLD.media_uri IS NOT NEW.media_uri BEGIN
+             UPDATE tracks SET local_play_count=(SELECT count(*) FROM main.listens WHERE media_uri=NEW.media_uri)
+             WHERE track_key=NEW.track_key;
+         END;",
+    )
+    .execute(connection)
+    .await?;
     Ok(())
 }
 

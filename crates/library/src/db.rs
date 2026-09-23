@@ -375,13 +375,6 @@ impl Database {
         Ok((permit, self.inner.export_readers.acquire().await?))
     }
 
-    pub(crate) async fn clear_progress(
-        connection: &mut PoolConnection<Sqlite>,
-    ) -> LibraryResult<()> {
-        connection.lock_handle().await?.remove_progress_handler();
-        Ok(())
-    }
-
     pub(crate) fn begin_scan(&self) -> LibraryResult<u64> {
         let token = self.inner.next_scan.fetch_add(1, Ordering::Relaxed);
         self.inner
@@ -685,9 +678,6 @@ mod tests {
                 .is_err(),
             "pooled reader accepted a write"
         );
-        Database::clear_progress(&mut reader)
-            .await
-            .expect("clear reader progress handler");
 
         let mut writer = database.writer().await.expect("acquire fixed writer");
         let writer = writer.as_mut().expect("writer remains available");
@@ -721,7 +711,7 @@ mod tests {
     async fn playback_bypass_uses_second_slot_but_third_general_read_waits_fairly() {
         let (_directory, database) = database().await;
         let cancellation = ReadCancellation::new();
-        let (permit, mut general) = database
+        let (permit, general) = database
             .acquire_general(&cancellation)
             .await
             .expect("acquire suspended general read");
@@ -757,19 +747,13 @@ mod tests {
             "a free pool slot bypassed the permit"
         );
 
-        Database::clear_progress(&mut general)
-            .await
-            .expect("clear suspended read handler");
         drop(general);
         drop(permit);
-        let (_permit, mut admitted) = timeout(Duration::from_secs(1), waiting)
+        let (_permit, _admitted) = timeout(Duration::from_secs(1), waiting)
             .await
             .expect("third general read admitted after permit release")
             .expect("general read task joined")
             .expect("general read acquired");
-        Database::clear_progress(&mut admitted)
-            .await
-            .expect("clear admitted handler");
     }
 
     #[tokio::test]
@@ -781,15 +765,14 @@ mod tests {
         let read = tokio::spawn(async move {
             let (_permit, mut connection) =
                 task_database.acquire_general(&task_cancellation).await?;
-            let result = sqlx::query_scalar::<_, i64>(
+            sqlx::query_scalar::<_, i64>(
                 "WITH RECURSIVE count(value) AS (
                      VALUES(0) UNION ALL SELECT value + 1 FROM count
                  ) SELECT sum(value) FROM count",
             )
             .fetch_one(&mut *connection)
-            .await;
-            Database::clear_progress(&mut connection).await?;
-            result.map_err(LibraryError::from)
+            .await
+            .map_err(LibraryError::from)
         });
         sleep(Duration::from_millis(20)).await;
         cancellation.cancel();
@@ -811,16 +794,13 @@ mod tests {
                 .expect("reader remains usable"),
             7
         );
-        Database::clear_progress(&mut connection)
-            .await
-            .expect("clear replacement read handler");
     }
 
     #[tokio::test]
     async fn dynamic_reader_skips_journal_mode_and_is_idle_reapable() {
         let (directory, database) = database().await;
         let cancellation = ReadCancellation::new();
-        let (_permit, mut general) = database
+        let (_permit, general) = database
             .acquire_general(&cancellation)
             .await
             .expect("hold steady reader");
@@ -846,9 +826,6 @@ mod tests {
             .expect("release writer transaction");
         drop(writer);
         drop(optional);
-        Database::clear_progress(&mut general)
-            .await
-            .expect("clear steady reader handler");
         drop(general);
         assert_eq!(
             database.reader_pool().options().get_idle_timeout(),
