@@ -416,6 +416,9 @@ msgstr ""
 msgid "Approve sign-in in your browser"
 msgstr "Approva l'accesso nel tuo browser"
 
+msgid "April {year}"
+msgstr ""
+
 msgid "Artist albums"
 msgstr "Album dell'artista"
 
@@ -451,6 +454,9 @@ msgstr "L'elaborazione audio non è disponibile durante il casting"
 
 msgid "Audio"
 msgstr "Audio"
+
+msgid "August {year}"
+msgstr ""
 
 msgid "Authentication"
 msgstr "Autenticazione"
@@ -940,6 +946,9 @@ msgstr ""
 msgid "Debug logging"
 msgstr "Scrivendo il log di debug"
 
+msgid "December {year}"
+msgstr ""
+
 msgid "Decrease"
 msgstr "Decrementa"
 
@@ -1256,6 +1265,9 @@ msgstr ""
 msgid "Featured genres"
 msgstr ""
 
+msgid "February {year}"
+msgstr ""
+
 #, fuzzy
 #| msgid "Connection"
 msgid "File connection"
@@ -1487,6 +1499,9 @@ msgstr ""
 msgid "Invite"
 msgstr ""
 
+msgid "January {year}"
+msgstr ""
+
 msgid "Jellyfin"
 msgstr ""
 
@@ -1499,6 +1514,12 @@ msgid "Join using"
 msgstr ""
 
 msgid "Join"
+msgstr ""
+
+msgid "July {year}"
+msgstr ""
+
+msgid "June {year}"
 msgstr ""
 
 msgid "Karaoke Playback"
@@ -1710,7 +1731,13 @@ msgstr ""
 msgid "Mapped Local Path"
 msgstr ""
 
+msgid "March {year}"
+msgstr ""
+
 msgid "Maximum year"
+msgstr ""
+
+msgid "May {year}"
 msgstr ""
 
 #, fuzzy
@@ -2038,6 +2065,9 @@ msgstr ""
 msgid "Notifications"
 msgstr ""
 
+msgid "November {year}"
+msgstr ""
+
 msgid "Now playing notifications"
 msgstr ""
 
@@ -2048,6 +2078,9 @@ msgid "Number of backups"
 msgstr ""
 
 msgid "Number of songs"
+msgstr ""
+
+msgid "October {year}"
 msgstr ""
 
 msgid "Off only for a server you control"
@@ -2901,6 +2934,9 @@ msgid "Self-host an Iroh Relay"
 msgstr ""
 
 msgid "Separate .lrc file"
+msgstr ""
+
+msgid "September {year}"
 msgstr ""
 
 msgid "Server Actions"

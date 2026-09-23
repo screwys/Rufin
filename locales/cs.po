@@ -414,6 +414,9 @@ msgstr "Ukládání..."
 msgid "Approve sign-in in your browser"
 msgstr ""
 
+msgid "April {year}"
+msgstr ""
+
 msgid "Artist albums"
 msgstr "Alba interpretů"
 
@@ -451,6 +454,9 @@ msgstr "Zpracování zvuku není během odesílání k dispozici"
 
 msgid "Audio"
 msgstr "Zvuk"
+
+msgid "August {year}"
+msgstr ""
 
 msgid "Authentication"
 msgstr ""
@@ -1013,6 +1019,9 @@ msgstr ""
 msgid "Debug logging"
 msgstr "Protokol ladění"
 
+msgid "December {year}"
+msgstr ""
+
 msgid "Decrease"
 msgstr "Snížit"
 
@@ -1375,6 +1384,9 @@ msgstr "Oblíbené"
 msgid "Featured genres"
 msgstr "Vybrané žánry"
 
+msgid "February {year}"
+msgstr ""
+
 #, fuzzy
 #| msgid "Connection"
 msgid "File connection"
@@ -1624,6 +1636,9 @@ msgstr "Integrace"
 msgid "Invite"
 msgstr ""
 
+msgid "January {year}"
+msgstr ""
+
 msgid "Jellyfin"
 msgstr "Jellyfin"
 
@@ -1636,6 +1651,12 @@ msgid "Join using"
 msgstr ""
 
 msgid "Join"
+msgstr ""
+
+msgid "July {year}"
+msgstr ""
+
+msgid "June {year}"
 msgstr ""
 
 #, fuzzy
@@ -1866,7 +1887,15 @@ msgstr "Spravovat"
 msgid "Mapped Local Path"
 msgstr "Mapovaná lokální cesta"
 
+msgid "March {year}"
+msgstr ""
+
 msgid "Maximum year"
+msgstr "Maximální rok"
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "May {year}"
 msgstr "Maximální rok"
 
 #, fuzzy
@@ -2236,6 +2265,9 @@ msgstr "Nic ve frontě"
 msgid "Notifications"
 msgstr "Notifikace"
 
+msgid "November {year}"
+msgstr ""
+
 msgid "Now playing notifications"
 msgstr "Oznámení o tom, co se aktuálně přehrává"
 
@@ -2249,6 +2281,9 @@ msgstr "Počet skladeb"
 
 msgid "Number of songs"
 msgstr "Počet skladeb"
+
+msgid "October {year}"
+msgstr ""
 
 msgid "Off only for a server you control"
 msgstr "Platí pouze pro server, který spravujete"
@@ -3244,6 +3279,9 @@ msgid "Self-host an Iroh Relay"
 msgstr ""
 
 msgid "Separate .lrc file"
+msgstr ""
+
+msgid "September {year}"
 msgstr ""
 
 msgid "Server Actions"

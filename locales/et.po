@@ -404,6 +404,9 @@ msgstr "Rakendan…"
 msgid "Approve sign-in in your browser"
 msgstr "Kinnita sisselogimine oma veebibrauseris"
 
+msgid "April {year}"
+msgstr ""
+
 msgid "Artist albums"
 msgstr "Esitajate albumid"
 
@@ -439,6 +442,9 @@ msgstr "Heli töötlemine pole meediumilevi kasutamisel saadaval"
 
 msgid "Audio"
 msgstr "Heli"
+
+msgid "August {year}"
+msgstr ""
 
 msgid "Authentication"
 msgstr "Autentimine"
@@ -894,6 +900,9 @@ msgstr "Päevi enne aasta lõppu"
 msgid "Debug logging"
 msgstr "Silumislogi"
 
+msgid "December {year}"
+msgstr ""
+
 msgid "Decrease"
 msgstr "Vähenda"
 
@@ -1200,6 +1209,9 @@ msgstr "Lemmikud"
 msgid "Featured genres"
 msgstr "Esiletõstetud žanrid"
 
+msgid "February {year}"
+msgstr ""
+
 msgid "File connection"
 msgstr "Failiühendus"
 
@@ -1429,6 +1441,9 @@ msgstr "Lõimingud"
 msgid "Invite"
 msgstr "Kutsu"
 
+msgid "January {year}"
+msgstr ""
+
 msgid "Jellyfin"
 msgstr "Jellyfin"
 
@@ -1440,6 +1455,12 @@ msgstr "Liitu kasutades teenust"
 
 msgid "Join"
 msgstr "Liitu"
+
+msgid "July {year}"
+msgstr ""
+
+msgid "June {year}"
+msgstr ""
 
 msgid "Karaoke Playback"
 msgstr "Taasesitus karaoke-stiilis"
@@ -1643,7 +1664,15 @@ msgstr "Halda"
 msgid "Mapped Local Path"
 msgstr "Vastendatud kohalik kaust"
 
+msgid "March {year}"
+msgstr ""
+
 msgid "Maximum year"
+msgstr "Maksimaalne aasta"
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "May {year}"
 msgstr "Maksimaalne aasta"
 
 msgid "Media available"
@@ -1969,6 +1998,9 @@ msgstr "Mitte midagi pole lisatud järjekorda"
 msgid "Notifications"
 msgstr "Teavitused"
 
+msgid "November {year}"
+msgstr ""
+
 msgid "Now playing notifications"
 msgstr "Tevitused hetkel esitamisel lugude kohta"
 
@@ -1980,6 +2012,9 @@ msgstr "Varukoopiate arv"
 
 msgid "Number of songs"
 msgstr "Lugude arv"
+
+msgid "October {year}"
+msgstr ""
 
 msgid "Off only for a server you control"
 msgstr "Lülita välja vaid enda kontrollitava serveri jaoks"
@@ -2839,6 +2874,9 @@ msgstr ""
 
 msgid "Separate .lrc file"
 msgstr "Eraldi .lrc fail"
+
+msgid "September {year}"
+msgstr ""
 
 msgid "Server Actions"
 msgstr "Serveri tegevused"

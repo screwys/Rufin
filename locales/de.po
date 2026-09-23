@@ -444,6 +444,9 @@ msgstr "Wird angewendet …"
 msgid "Approve sign-in in your browser"
 msgstr "Bestätige die Anmeldung in deinem Browser"
 
+msgid "April {year}"
+msgstr ""
+
 msgid "Artist albums"
 msgstr "Alben"
 
@@ -479,6 +482,9 @@ msgstr "Audioverarbeitung ist beim Übertragen nicht verfügbar"
 
 msgid "Audio"
 msgstr "Audio"
+
+msgid "August {year}"
+msgstr ""
 
 msgid "Authentication"
 msgstr "Authentifizierung"
@@ -939,6 +945,9 @@ msgstr "Tage vor Jahresende"
 msgid "Debug logging"
 msgstr "Debug-Protokollierung"
 
+msgid "December {year}"
+msgstr ""
+
 msgid "Decrease"
 msgstr "Verringern"
 
@@ -1252,6 +1261,9 @@ msgstr "Favoriten"
 msgid "Featured genres"
 msgstr "Beliebte Genres"
 
+msgid "February {year}"
+msgstr ""
+
 msgid "File connection"
 msgstr "Dateiverbindung"
 
@@ -1484,6 +1496,9 @@ msgstr "Integrationen"
 msgid "Invite"
 msgstr "Einladen"
 
+msgid "January {year}"
+msgstr ""
+
 msgid "Jellyfin"
 msgstr "Jellyfin"
 
@@ -1495,6 +1510,12 @@ msgstr "Beitreten über"
 
 msgid "Join"
 msgstr "Beitreten"
+
+msgid "July {year}"
+msgstr ""
+
+msgid "June {year}"
+msgstr ""
 
 msgid "Karaoke Playback"
 msgstr "Karaoke-Wiedergabe"
@@ -1697,7 +1718,15 @@ msgstr "Verwalten"
 msgid "Mapped Local Path"
 msgstr "Verknüpfter lokaler Pfad"
 
+msgid "March {year}"
+msgstr ""
+
 msgid "Maximum year"
+msgstr "Maximaljahr"
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "May {year}"
 msgstr "Maximaljahr"
 
 msgid "Media available"
@@ -2025,6 +2054,9 @@ msgstr "Nichts in der Warteschlange"
 msgid "Notifications"
 msgstr "Benachrichtigungen"
 
+msgid "November {year}"
+msgstr ""
+
 msgid "Now playing notifications"
 msgstr "Wiedergabe-Benachrichtigungen"
 
@@ -2036,6 +2068,9 @@ msgstr "Anzahl der Sicherungen"
 
 msgid "Number of songs"
 msgstr "Titelanzahl"
+
+msgid "October {year}"
+msgstr ""
 
 msgid "Off only for a server you control"
 msgstr "Nur bei einem selbst kontrollierten Server deaktivieren"
@@ -2883,6 +2918,9 @@ msgstr "Iroh-Relay selbst hosten"
 
 msgid "Separate .lrc file"
 msgstr "Separate .lrc-Datei"
+
+msgid "September {year}"
+msgstr ""
 
 msgid "Server Actions"
 msgstr "Server-Aktionen"

@@ -393,6 +393,9 @@ msgstr "正在儲存..."
 msgid "Approve sign-in in your browser"
 msgstr ""
 
+msgid "April {year}"
+msgstr ""
+
 msgid "Artist albums"
 msgstr "藝人專輯"
 
@@ -430,6 +433,9 @@ msgstr "投放時無法進行音訊處理"
 
 msgid "Audio"
 msgstr "音訊"
+
+msgid "August {year}"
+msgstr ""
 
 msgid "Authentication"
 msgstr ""
@@ -978,6 +984,9 @@ msgstr ""
 msgid "Debug logging"
 msgstr "除錯記錄"
 
+msgid "December {year}"
+msgstr ""
+
 msgid "Decrease"
 msgstr "減少"
 
@@ -1336,6 +1345,9 @@ msgstr "最愛"
 msgid "Featured genres"
 msgstr ""
 
+msgid "February {year}"
+msgstr ""
+
 #, fuzzy
 #| msgid "Connection"
 msgid "File connection"
@@ -1579,6 +1591,9 @@ msgstr ""
 msgid "Invite"
 msgstr ""
 
+msgid "January {year}"
+msgstr ""
+
 msgid "Jellyfin"
 msgstr "Jellyfin"
 
@@ -1591,6 +1606,12 @@ msgid "Join using"
 msgstr ""
 
 msgid "Join"
+msgstr ""
+
+msgid "July {year}"
+msgstr ""
+
+msgid "June {year}"
 msgstr ""
 
 #, fuzzy
@@ -1811,7 +1832,15 @@ msgstr "管理"
 msgid "Mapped Local Path"
 msgstr ""
 
+msgid "March {year}"
+msgstr ""
+
 msgid "Maximum year"
+msgstr "最大年份"
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "May {year}"
 msgstr "最大年份"
 
 #, fuzzy
@@ -2176,6 +2205,9 @@ msgstr "未佇列任何內容"
 msgid "Notifications"
 msgstr "通知"
 
+msgid "November {year}"
+msgstr ""
+
 msgid "Now playing notifications"
 msgstr "正在播放通知"
 
@@ -2189,6 +2221,9 @@ msgstr "歌曲數量"
 
 msgid "Number of songs"
 msgstr "歌曲數量"
+
+msgid "October {year}"
+msgstr ""
 
 msgid "Off only for a server you control"
 msgstr ""
@@ -3158,6 +3193,9 @@ msgid "Self-host an Iroh Relay"
 msgstr ""
 
 msgid "Separate .lrc file"
+msgstr ""
+
+msgid "September {year}"
 msgstr ""
 
 msgid "Server Actions"

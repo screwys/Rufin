@@ -446,6 +446,9 @@ msgstr "Применяется..."
 msgid "Approve sign-in in your browser"
 msgstr "Подтвердите вход в системе в вашем браузере"
 
+msgid "April {year}"
+msgstr ""
+
 msgid "Artist albums"
 msgstr "Альбомы исполнителя"
 
@@ -481,6 +484,9 @@ msgstr "Обработка звука недоступна во время тр�
 
 msgid "Audio"
 msgstr "Аудио"
+
+msgid "August {year}"
+msgstr ""
 
 msgid "Authentication"
 msgstr "Аутентификация"
@@ -939,6 +945,9 @@ msgstr "Дни до конца года"
 msgid "Debug logging"
 msgstr "Отладочное журналирование"
 
+msgid "December {year}"
+msgstr ""
+
 msgid "Decrease"
 msgstr "Уменьшить"
 
@@ -1247,6 +1256,9 @@ msgstr "Избранные"
 msgid "Featured genres"
 msgstr "Рекомендованные жанры"
 
+msgid "February {year}"
+msgstr ""
+
 msgid "File connection"
 msgstr "Подключение к файлу"
 
@@ -1478,6 +1490,9 @@ msgstr "Интеграции"
 msgid "Invite"
 msgstr "Пригласить"
 
+msgid "January {year}"
+msgstr ""
+
 msgid "Jellyfin"
 msgstr "Jellyfin"
 
@@ -1489,6 +1504,12 @@ msgstr "Подключиться, используя"
 
 msgid "Join"
 msgstr "Присоединиться"
+
+msgid "July {year}"
+msgstr ""
+
+msgid "June {year}"
+msgstr ""
 
 msgid "Karaoke Playback"
 msgstr "Воспроизведение караоке"
@@ -1696,7 +1717,15 @@ msgstr "Управление"
 msgid "Mapped Local Path"
 msgstr "Сопоставленный локальный путь"
 
+msgid "March {year}"
+msgstr ""
+
 msgid "Maximum year"
+msgstr "Максимальный год"
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "May {year}"
 msgstr "Максимальный год"
 
 msgid "Media available"
@@ -2022,6 +2051,9 @@ msgstr "В очереди ничего нет"
 msgid "Notifications"
 msgstr "Уведомления"
 
+msgid "November {year}"
+msgstr ""
+
 msgid "Now playing notifications"
 msgstr "Уведомления о текущем воспроизведении"
 
@@ -2033,6 +2065,9 @@ msgstr "Количество резервных копий"
 
 msgid "Number of songs"
 msgstr "Количество песен"
+
+msgid "October {year}"
+msgstr ""
 
 msgid "Off only for a server you control"
 msgstr "Отключайте только для сервера, которым вы управляете"
@@ -2883,6 +2918,9 @@ msgstr "Разместите Iroh Relay на собственном сервер
 
 msgid "Separate .lrc file"
 msgstr "Отдельный файл .lrc"
+
+msgid "September {year}"
+msgstr ""
 
 msgid "Server Actions"
 msgstr "Действия на сервере"
