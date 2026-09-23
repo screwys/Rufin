@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<interface domain="rufin">
-  <object class="AdwToast" id="toast">
-    <property name="title" translatable="yes">A new update is available, restart to apply</property>
-    <property name="button-label" translatable="yes">Restart now</property>
-    <property name="timeout">0</property>
-  </object>
-</interface>
