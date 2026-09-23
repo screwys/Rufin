@@ -153,9 +153,6 @@ jobs:
               esac
 
               case "$path" in
-                .github/workflows/checks.yml)
-                  add_jobs "${workspace_jobs[@]}" cargo-deny
-                  ;;
                 .github/workflows/aur-build.yml)
                   add_jobs aur_bin aur_git
                   ;;
