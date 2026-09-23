@@ -1,3 +1,5 @@
+//! Native path text for desktop labels.
+
 use std::path::{Component, Path, Prefix};
 
 /// Format a native path for a label, without changing the path used for I/O.

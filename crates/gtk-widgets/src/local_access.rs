@@ -435,17 +435,17 @@ pub fn preview_local_path_text(
     if !server_prefix.is_empty() {
         return projected
             .as_deref()
-            .map(crate::path_display::display_path)
+            .map(desktop_integration::display_path)
             .unwrap_or_else(|| tr("Server prefix doesn't match"));
     }
 
     let sample_path = Path::new(sample);
     if !sources::reported_path_is_absolute(sample) {
         let path = projected.unwrap_or_else(|| folder.join(sample_path));
-        return crate::path_display::display_path(&path);
+        return desktop_integration::display_path(&path);
     }
     if sample_path.starts_with(folder) {
-        return crate::path_display::display_path(sample_path);
+        return desktop_integration::display_path(sample_path);
     }
     tr("Add a matching server prefix")
 }
@@ -492,11 +492,11 @@ mod tests {
                 "",
                 Some(&root)
             ),
-            crate::path_display::display_path(&projected),
+            desktop_integration::display_path(&projected),
         );
         assert_eq!(
             preview_local_path_text(Some("Artist/Track.flac"), "", "", Some(&root)),
-            crate::path_display::display_path(&projected),
+            desktop_integration::display_path(&projected),
         );
         assert!(!root.exists());
     }
