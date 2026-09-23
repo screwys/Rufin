@@ -18,6 +18,9 @@ on:
       - scripts/rust-cache-command
       - sgconfig.yml
       - '!**/*.md'
+      - '!**/*.css'
+      - '!**/*.ui'
+      - '!**/resources/**'
   workflow_dispatch:
 
 permissions:
@@ -119,10 +122,7 @@ jobs:
               fi
 
               case "$path" in
-                resources/themes/*|crates/gtk-*/resources/*)
-                  add_jobs "${workspace_jobs[@]}"
-                  ;;
-                LICENSE|resources|resources/*|web|web/*|locales/*|*.md|*.ui|*.xml|.github/FUNDING.yml|.github/ISSUE_TEMPLATE/*)
+                LICENSE|resources|resources/*|*/resources/*|web|web/*|locales/*|*.md|*.css|*.ui|*.xml|.github/FUNDING.yml|.github/ISSUE_TEMPLATE/*)
                   continue
                   ;;
               esac
@@ -153,9 +153,6 @@ jobs:
               esac
 
               case "$path" in
-                .github/workflows/checks.yml)
-                  add_jobs "${workspace_jobs[@]}" cargo-deny
-                  ;;
                 .github/workflows/aur-build.yml)
                   add_jobs aur_bin aur_git
                   ;;
