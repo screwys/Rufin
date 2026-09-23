@@ -1801,7 +1801,7 @@ dependencies = [
  "metadata-lookup",
  "mpris-server",
  "playback",
- "serde",
+ "presence",
  "serde_json",
  "tempfile",
  "tracing",
@@ -3227,6 +3227,162 @@ dependencies = [
  "gstreamer-sys",
  "libc",
  "system-deps 7.0.8",
+]
+
+[[package]]
+name = "gtk-editors"
+version = "0.16.0"
+dependencies = [
+ "async-channel",
+ "glib-build-tools",
+ "gtk-widgets",
+ "gtk4",
+ "libadwaita",
+ "library",
+ "localization",
+ "rufin-core",
+ "sources",
+]
+
+[[package]]
+name = "gtk-library"
+version = "0.16.0"
+dependencies = [
+ "artwork",
+ "downloads",
+ "glib-build-tools",
+ "gtk-media-menus",
+ "gtk-widgets",
+ "gtk4",
+ "libadwaita",
+ "library",
+ "localization",
+ "playback",
+ "rufin-core",
+ "sources",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "gtk-media-menus"
+version = "0.16.0"
+dependencies = [
+ "downloads",
+ "glib-build-tools",
+ "gtk-widgets",
+ "gtk4",
+ "libadwaita",
+ "library",
+ "localization",
+ "playback",
+ "rufin-core",
+ "sources",
+ "tokio",
+]
+
+[[package]]
+name = "gtk-player"
+version = "0.16.0"
+dependencies = [
+ "app-identity",
+ "artwork",
+ "glib-build-tools",
+ "gtk-widgets",
+ "gtk4",
+ "libadwaita",
+ "library",
+ "localization",
+ "lyrics",
+ "pangocairo",
+ "playback",
+ "regex",
+ "rufin-core",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "gtk-preferences"
+version = "0.16.0"
+dependencies = [
+ "backup",
+ "directories",
+ "downloads",
+ "glib-build-tools",
+ "gtk-player",
+ "gtk-widgets",
+ "gtk4",
+ "libadwaita",
+ "library",
+ "localization",
+ "playback",
+ "presence",
+ "pulldown-cmark",
+ "rufin-core",
+ "secrets",
+ "sources",
+ "tempfile",
+ "tracing",
+ "web",
+]
+
+[[package]]
+name = "gtk-shell"
+version = "0.16.0"
+dependencies = [
+ "app-identity",
+ "artwork",
+ "ashpd",
+ "async-channel",
+ "desktop-integration",
+ "downloads",
+ "glib-build-tools",
+ "gtk-editors",
+ "gtk-library",
+ "gtk-media-menus",
+ "gtk-player",
+ "gtk-preferences",
+ "gtk-widgets",
+ "gtk4",
+ "libadwaita",
+ "library",
+ "localization",
+ "lyrics",
+ "playback",
+ "proptest",
+ "rufin-core",
+ "secrets",
+ "serde_json",
+ "sources",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "web",
+]
+
+[[package]]
+name = "gtk-widgets"
+version = "0.16.0"
+dependencies = [
+ "app-identity",
+ "artwork",
+ "async-channel",
+ "downloads",
+ "glib-build-tools",
+ "gtk4",
+ "libadwaita",
+ "library",
+ "localization",
+ "playback",
+ "proptest",
+ "rufin-core",
+ "serde",
+ "sources",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "url",
 ]
 
 [[package]]
@@ -4701,6 +4857,7 @@ name = "localization"
 version = "0.16.0"
 dependencies = [
  "gettext-rs",
+ "spiritless_po",
 ]
 
 [[package]]
@@ -6771,6 +6928,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "presence"
+version = "0.16.0"
+dependencies = [
+ "playback",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "pretty_assertions"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7598,6 +7764,7 @@ version = "0.16.0"
 dependencies = [
  "app-identity",
  "desktop-integration",
+ "gtk-shell",
  "localization",
  "playback",
  "playback-gstreamer",
@@ -7605,7 +7772,6 @@ dependencies = [
  "rufin-core",
  "sources",
  "tracing",
- "ui-shell",
  "windows-updater",
 ]
 
@@ -7642,6 +7808,7 @@ dependencies = [
  "rufin-core",
  "sources",
  "tokio",
+ "web",
 ]
 
 [[package]]
@@ -7651,14 +7818,11 @@ dependencies = [
  "age",
  "app-identity",
  "artwork",
- "askama",
  "async-channel",
  "audio-processing",
  "axum",
  "backup",
  "blake3",
- "bytes",
- "desktop-integration",
  "directories",
  "downloads",
  "flate2",
@@ -7666,9 +7830,6 @@ dependencies = [
  "getrandom 0.4.3",
  "gio",
  "glib",
- "http-body-util",
- "hyper",
- "hyper-util",
  "image",
  "library",
  "localization",
@@ -7677,6 +7838,7 @@ dependencies = [
  "metadata-lookup",
  "playback",
  "playback-cast",
+ "presence",
  "reqwest 0.13.5",
  "rufin-connect",
  "scrobbling",
@@ -8612,6 +8774,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "023a211cb3138dbc438680b32560ad89f699977624c9f8dbb95a47d5b4c07dd3"
 
 [[package]]
+name = "spiritless_po"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be26bb1dc09d661d3e4cbd60d975ec6f9fe8bb56b0b3ac27666cd931334898cc"
+
+[[package]]
 name = "spki"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9533,104 +9701,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ui-library"
-version = "0.16.0"
-dependencies = [
- "artwork",
- "downloads",
- "glib-build-tools",
- "gtk4",
- "libadwaita",
- "library",
- "localization",
- "playback",
- "rufin-core",
- "sources",
- "tokio",
- "tracing",
- "ui-shared",
-]
-
-[[package]]
-name = "ui-player"
-version = "0.16.0"
-dependencies = [
- "app-identity",
- "artwork",
- "glib-build-tools",
- "gtk4",
- "libadwaita",
- "library",
- "localization",
- "lyrics",
- "pangocairo",
- "playback",
- "regex",
- "rufin-core",
- "tokio",
- "tracing",
- "ui-shared",
-]
-
-[[package]]
-name = "ui-shared"
-version = "0.16.0"
-dependencies = [
- "app-identity",
- "artwork",
- "async-channel",
- "downloads",
- "glib-build-tools",
- "gtk4",
- "libadwaita",
- "library",
- "localization",
- "playback",
- "proptest",
- "rufin-core",
- "serde",
- "sources",
- "tempfile",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "ui-shell"
-version = "0.16.0"
-dependencies = [
- "app-identity",
- "artwork",
- "ashpd",
- "async-channel",
- "backup",
- "desktop-integration",
- "directories",
- "downloads",
- "glib-build-tools",
- "gtk4",
- "libadwaita",
- "library",
- "localization",
- "lyrics",
- "playback",
- "proptest",
- "pulldown-cmark",
- "rufin-core",
- "secrets",
- "serde",
- "serde_json",
- "sources",
- "tempfile",
- "tokio",
- "tracing",
- "ui-library",
- "ui-player",
- "ui-shared",
-]
-
-[[package]]
 name = "unarray"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9915,6 +9985,39 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "web"
+version = "0.16.0"
+dependencies = [
+ "artwork",
+ "askama",
+ "async-channel",
+ "axum",
+ "blake3",
+ "bytes",
+ "futures-util",
+ "getrandom 0.4.3",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "image",
+ "library",
+ "localization",
+ "lyrics",
+ "playback",
+ "playback-cast",
+ "reqwest 0.13.5",
+ "rufin-core",
+ "secrets",
+ "serde",
+ "serde_json",
+ "sources",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "url",
 ]
 
 [[package]]

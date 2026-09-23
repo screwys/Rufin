@@ -742,3 +742,21 @@ pub fn smart_playlist_display_name(playlist: &library::SmartPlaylistRow) -> Stri
         _ => playlist.name.clone(),
     }
 }
+
+#[derive(Clone)]
+pub enum SmartPlaylistChange {
+    Create {
+        name: String,
+        definition: library::SmartPlaylistDefinition,
+    },
+    Update {
+        key: library::SmartPlaylistKey,
+        name: String,
+        definition: library::SmartPlaylistDefinition,
+    },
+    Delete(library::SmartPlaylistKey),
+    Move {
+        dragged: library::SmartPlaylistKey,
+        target: library::SmartPlaylistKey,
+    },
+}

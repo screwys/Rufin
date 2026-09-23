@@ -732,14 +732,18 @@ mod tests {
         incoming.scrobbling.listenbrainz.enabled = false;
         let applied = Arc::new(Mutex::new(Vec::new()));
         let observed = Arc::clone(&applied);
-        let settings_apply = (*SettingsOwner::new(file.clone(), move |_, current, credentials| {
-            observed.lock().unwrap().push((
-                current.ui.private_mode,
-                current.scrobbling.listenbrainz.enabled,
-                credentials,
-            ));
-        }))
-        .clone();
+        let secrets = Arc::new(secrets::SwitchableSecretStore::new(Arc::new(
+            ConfigSecretStore::new(directory.path().join("secrets.json")),
+        )));
+        let settings_apply =
+            (*SettingsOwner::new(file.clone(), secrets, move |_, current, credentials| {
+                observed.lock().unwrap().push((
+                    current.ui.private_mode,
+                    current.scrobbling.listenbrainz.enabled,
+                    credentials,
+                ));
+            }))
+            .clone();
         let (writing, written) = mpsc::sync_channel(1);
         let (resume, resumed) = mpsc::sync_channel(1);
         let store = HeldStore {

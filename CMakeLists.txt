@@ -242,6 +242,31 @@ else()
 endif()
 
 file(GLOB RUFIN_PO_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/locales/*.po")
+file(GLOB RUFIN_PREVIOUS_LOCALES LIST_DIRECTORIES true "${CMAKE_CURRENT_BINARY_DIR}/locale/*")
+foreach(RUFIN_PREVIOUS_LOCALE IN LISTS RUFIN_PREVIOUS_LOCALES)
+  get_filename_component(RUFIN_LANGUAGE "${RUFIN_PREVIOUS_LOCALE}" NAME)
+  if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/locales/${RUFIN_LANGUAGE}.po")
+    file(REMOVE_RECURSE "${RUFIN_PREVIOUS_LOCALE}")
+  endif()
+endforeach()
+find_program(RUFIN_MSGFMT msgfmt HINTS "${RUFIN_GETTEXT_PREFIX}/bin")
+set(RUFIN_TRANSLATION_OUTPUTS)
+foreach(RUFIN_PO_FILE IN LISTS RUFIN_PO_FILES)
+  get_filename_component(RUFIN_LANGUAGE "${RUFIN_PO_FILE}" NAME_WE)
+  set(RUFIN_CATALOG_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/locale/${RUFIN_LANGUAGE}/LC_MESSAGES")
+  set(RUFIN_CATALOG "${RUFIN_CATALOG_DIRECTORY}/rufin.mo")
+  if(RUFIN_MSGFMT)
+    add_custom_command(OUTPUT "${RUFIN_CATALOG}"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "${RUFIN_CATALOG_DIRECTORY}"
+      COMMAND "${RUFIN_MSGFMT}" --check "${RUFIN_PO_FILE}" -o "${RUFIN_CATALOG}"
+      DEPENDS "${RUFIN_PO_FILE}"
+      VERBATIM)
+    list(APPEND RUFIN_TRANSLATION_OUTPUTS "${RUFIN_CATALOG}")
+  endif()
+endforeach()
+add_custom_target(rufin-translations DEPENDS ${RUFIN_TRANSLATION_OUTPUTS})
+add_dependencies(rufin rufin-translations)
+add_dependencies(rufin-controller rufin-translations)
 install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/locale/"
   DESTINATION "${RUFIN_INSTALL_LOCALEDIR}")
 

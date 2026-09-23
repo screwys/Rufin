@@ -8,6 +8,8 @@ mod secret_storage;
 pub use secret_storage::KeyringSecretStore;
 pub mod sidebar;
 pub mod visualizer;
+mod web_controller;
+pub use web_controller::ControllerSettings;
 
 pub use app::{
     ExternalSiteLinkSettings, HomeBlockKind, HomeSectionKind, RandomPlayGenreSelection,
@@ -276,7 +278,7 @@ fn default_home_sections() -> Vec<HomeSectionKind> {
 pub struct SettingsFile {
     revision: Arc<std::sync::atomic::AtomicU64>,
     sidebar: tokio::sync::watch::Sender<SidebarSettings>,
-    web_controller: tokio::sync::watch::Sender<crate::api::ControllerSettings>,
+    web_controller: tokio::sync::watch::Sender<crate::settings::ControllerSettings>,
     path: Option<PathBuf>,
     config_dir: PathBuf,
     value: Arc<Mutex<StoredSettings>>,
@@ -427,6 +429,7 @@ impl SettingsFile {
 #[derive(Clone)]
 pub struct SettingsOwner {
     file: SettingsFile,
+    secrets: Arc<SwitchableSecretStore>,
     on_change: Arc<dyn Fn(&StoredSettings, &StoredSettings, bool) + Send + Sync>,
 }
 
@@ -439,10 +442,12 @@ impl SettingsOwner {
 
     pub(crate) fn new(
         file: SettingsFile,
+        secrets: Arc<SwitchableSecretStore>,
         on_change: impl Fn(&StoredSettings, &StoredSettings, bool) + Send + Sync + 'static,
     ) -> Arc<Self> {
         Arc::new(Self {
             file,
+            secrets,
             on_change: Arc::new(on_change),
         })
     }
@@ -498,7 +503,7 @@ impl SettingsFile {
 
     pub(crate) fn web_controller_changes(
         &self,
-    ) -> tokio::sync::watch::Receiver<crate::api::ControllerSettings> {
+    ) -> tokio::sync::watch::Receiver<crate::settings::ControllerSettings> {
         self.web_controller.subscribe()
     }
 
@@ -515,6 +520,41 @@ impl SettingsOwner {
 
     pub fn sidebar_changes(&self) -> tokio::sync::watch::Receiver<SidebarSettings> {
         self.file.sidebar_changes()
+    }
+
+    pub fn set_pinned(&self, pin: SidebarPin, pinned: bool) -> Result<bool, String> {
+        self.file
+            .update(|stored| Ok(stored.ui.sidebar.set_pinned(pin, pinned)))
+    }
+
+    pub fn reorder_pin(&self, moved: &SidebarPin, target: &SidebarPin) -> Result<bool, String> {
+        self.file.update(|stored| {
+            let Some(after) = stored.ui.sidebar.pin_drop_after(moved, target) else {
+                return Ok(false);
+            };
+            Ok(stored.ui.sidebar.reorder_pin(moved, target, after))
+        })
+    }
+
+    pub fn remember_created_playlist(
+        &self,
+        source_id: Option<SourceId>,
+        playlist_id: String,
+        current: Option<bool>,
+    ) -> Result<(), String> {
+        self.file.update(|stored| {
+            stored.ui.sidebar.set_pinned(
+                SidebarPin::Playlist {
+                    source_id,
+                    playlist_id,
+                },
+                true,
+            );
+            if let Some(current) = current {
+                stored.ui.new_playlist_current = current;
+            }
+            Ok(())
+        })
     }
 
     pub fn save(&self, settings: &UiSettings) -> Result<UiSettings, String> {

@@ -86,13 +86,13 @@ fn main() -> ExitCode {
     };
     match app::with_runtime(|_| {
         if updated_restart {
-            ui_shell::run_application_after_update(initial_settings, bootstrap, || {})
+            gtk_shell::run_application_after_update(initial_settings, bootstrap, || {})
         } else {
-            ui_shell::run_application(initial_settings, bootstrap)
+            gtk_shell::run_application(initial_settings, bootstrap)
         }
     }) {
         Ok(exit) => exit,
-        Err(error) => ui_shell::run_startup_error_application(error.to_string()),
+        Err(error) => gtk_shell::run_startup_error_application(error.to_string()),
     }
 }
 

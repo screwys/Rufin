@@ -18,7 +18,7 @@ use tracing::warn;
 ))]
 pub(crate) use app_identity::APP_ID;
 
-pub use discord::{DEFAULT_CLIENT_ID, Discord, DisplayType, LinkType, Settings};
+pub use discord::Discord;
 pub use media_controls::MediaControls;
 pub use notification::{
     Notifications, now_playing_notification_can_send, now_playing_notification_should_withdraw,

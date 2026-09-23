@@ -216,6 +216,7 @@ where
     let settings_library = Arc::clone(&library);
     let settings_handle = SettingsOwner::new(
         settings.clone(),
+        Arc::clone(&secrets),
         move |previous, current, credentials_changed| {
             if previous.ui.prefer_distinct_track_covers != current.ui.prefer_distinct_track_covers {
                 settings_library.set_distinct_track_covers(current.ui.prefer_distinct_track_covers);
@@ -298,6 +299,7 @@ where
         secret_storage_fallbacks,
         diagnostics,
         products: ProductHandles {
+            settings: Arc::clone(&settings_handle),
             appearance: tokio::sync::watch::channel(crate::themes::controller_colors(
                 &stored.ui,
                 &paths.config_dir().join("themes"),

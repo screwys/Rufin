@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use desktop_integration::Settings as RichPresenceSettings;
 use downloads::{DownloadRules, SourceDownloadSettings};
 use library::PlayedFilter;
 use localization::{default_language_preference, sanitize_language_preference};
@@ -10,6 +9,7 @@ use playback::{
     DEFAULT_AUTO_DJ_REFILL_THRESHOLD, MAX_AUTO_DJ_REFILL_THRESHOLD, MIN_AUTO_DJ_REFILL_THRESHOLD,
     PlaybackSettings, RepeatMode, StreamQuality,
 };
+use presence::Settings as RichPresenceSettings;
 use secrets::SecretStorageMode;
 use serde::{Deserialize, Serialize};
 use sources::SourceId;
@@ -176,7 +176,7 @@ pub struct Settings {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_search_results: Vec<RecentSearchResult>,
     #[serde(default)]
-    pub web_controller: crate::api::ControllerSettings,
+    pub web_controller: crate::settings::ControllerSettings,
     #[serde(default)]
     pub backup: crate::runtime::BackupSettings,
     #[serde(default)]
@@ -290,7 +290,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             recent_search_results: Vec::new(),
-            web_controller: crate::api::ControllerSettings::default(),
+            web_controller: crate::settings::ControllerSettings::default(),
             layout: LayoutSettings::default(),
             sidebar: SidebarSettings::default(),
             context_menu: ContextMenuSettings::default(),

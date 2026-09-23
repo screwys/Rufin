@@ -1877,8 +1877,33 @@ impl SourceOwner {
         self.shared.operation.subscribe()
     }
 
-    pub(crate) fn catalog_changes(&self) -> tokio::sync::watch::Receiver<()> {
+    pub fn catalog_changes(&self) -> tokio::sync::watch::Receiver<()> {
         self.shared.catalog_changed.subscribe()
+    }
+
+    pub fn cached_source_counts(&self, source: &SourceId) -> Option<(usize, usize)> {
+        self.shared.cached_source_counts(source)
+    }
+
+    /// Browse a configured source without changing the selected library.
+    pub fn browse_folder(
+        &self,
+        source_id: SourceId,
+        folder_object_id: Option<String>,
+        music_folder_object_id: Option<String>,
+    ) -> Receiver<Result<LiveFolderPage, String>> {
+        self.reply(move |owner, _| async move {
+            let source = tokio::task::spawn_blocking(move || owner.client(&source_id))
+                .await
+                .map_err(string_error)??;
+            source
+                .browse_folder(
+                    folder_object_id.as_deref(),
+                    music_folder_object_id.as_deref(),
+                )
+                .await
+                .map_err(string_error)
+        })
     }
 
     pub fn selected_library(&self) -> Option<SelectedLibrary> {

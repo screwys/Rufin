@@ -35,6 +35,7 @@ pub use waveform::WaveformProjection;
 
 #[derive(Clone)]
 pub struct ProductHandles {
+    pub settings: crate::SettingsHandle,
     pub appearance: tokio::sync::watch::Sender<std::collections::BTreeMap<String, String>>,
     pub backup: BackupHandle,
     pub connect: Arc<crate::connect::ConnectOwner>,
