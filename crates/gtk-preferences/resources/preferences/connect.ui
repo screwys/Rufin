@@ -61,7 +61,8 @@
                                     <property name="show-apply-button">true</property>
                                     <child type="suffix">
                                       <object class="GtkButton" id="create">
-                                        <property name="label" translatable="yes">Enable Rufin Connect</property>
+                                        <property name="icon-name">rufin-network-hotspot-symbolic</property>
+                                        <property name="tooltip-text" translatable="yes">Enable Rufin Connect</property>
                                         <style>
                                           <class name="suggested-action" />
                                         </style>
