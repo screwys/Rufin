@@ -525,7 +525,7 @@ mod tests {
                 Ok(())
             })
             .unwrap();
-        let sender = SettingsOwner::new(sender, |_, _, _| {});
+        let sender = SettingsOwner::new(sender, Arc::clone(&secrets), |_, _, _| {});
         let records = sender.connect_records(&secrets).unwrap();
         assert!(
             records
@@ -534,10 +534,14 @@ mod tests {
         );
         assert!(!records.iter().any(|r| r.kind == "source"));
         let receiver_file = SettingsFile::memory();
-        let receiver = SettingsOwner::new(receiver_file.clone(), |_, _, _| {});
         let receiver_secrets = Arc::new(SwitchableSecretStore::new(Arc::new(
             secrets::MemorySecretStore::new(),
         )));
+        let receiver = SettingsOwner::new(
+            receiver_file.clone(),
+            Arc::clone(&receiver_secrets),
+            |_, _, _| {},
+        );
         assert!(
             !receiver
                 .apply_connect_records(&records, &receiver_secrets)
@@ -587,11 +591,11 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        let owner = SettingsOwner::new(file.clone(), |_, _, _| {});
         let secrets = Arc::new(SwitchableSecretStore::new(Arc::new(ConcurrentEditStore {
             file: file.clone(),
             edited: std::sync::atomic::AtomicBool::new(false),
         })));
+        let owner = SettingsOwner::new(file.clone(), Arc::clone(&secrets), |_, _, _| {});
         owner
             .apply_connect_records(
                 &[ConnectRecord {
@@ -662,13 +666,14 @@ mod tests {
         let device_identity = receiver.load().jellyfin_device_id;
         let observed = Arc::new(AtomicUsize::new(0));
         let callback = observed.clone();
-        let sender = SettingsOwner::new(sender, |_, _, _| {});
-        let receiver_owner = SettingsOwner::new(receiver.clone(), move |_, _, _| {
-            callback.fetch_add(1, Ordering::Relaxed);
-        });
         let secrets = Arc::new(SwitchableSecretStore::new(Arc::new(
             secrets::MemorySecretStore::new(),
         )));
+        let sender = SettingsOwner::new(sender, Arc::clone(&secrets), |_, _, _| {});
+        let receiver_owner =
+            SettingsOwner::new(receiver.clone(), Arc::clone(&secrets), move |_, _, _| {
+                callback.fetch_add(1, Ordering::Relaxed);
+            });
         let records = sender.connect_records(&secrets).unwrap();
         let source = records
             .iter()

@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+  <object class="AdwAlertDialog" id="controller_regenerate">
+    <property name="heading" translatable="yes">Regenerate access token?</property>
+    <property name="body" translatable="yes">You will need to reconnect through the clients you use with the new API key.</property>
+    <property name="default-response">cancel</property>
+    <property name="close-response">cancel</property>
+    <responses>
+      <response id="cancel" translatable="yes">Cancel</response>
+      <response id="regenerate" appearance="destructive" translatable="yes">Regenerate access token</response>
+    </responses>
+  </object>
+
+  <object class="AdwPreferencesPage" id="integrations_page">
+    <property name="title" translatable="yes">Integrations</property>
+    <property name="icon-name">rufin-network-workgroup-symbolic</property>
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Controller</property>
+        <child>
+          <object class="AdwSwitchRow" id="web_enabled">
+            <property name="title" translatable="yes">Enable Controller</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSwitchRow" id="web_allow_remote">
+            <property name="title" translatable="yes">Allow remote connections</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSpinRow" id="web_port">
+            <property name="title" translatable="yes">Port</property>
+            <property name="adjustment"><object class="GtkAdjustment">
+              <property name="lower">1</property>
+              <property name="upper">65535</property>
+              <property name="step-increment">1</property>
+              <property name="page-increment">10</property>
+            </object></property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="web_token">
+            <property name="title" translatable="yes">Access token</property>
+            <child type="suffix"><object class="GtkButton" id="web_regenerate">
+              <property name="icon-name">rufin-view-refresh-symbolic</property>
+              <property name="tooltip-text" translatable="yes">Regenerate access token</property>
+              <property name="valign">center</property>
+              <style><class name="flat"/></style>
+            </object></child>
+            <child type="suffix"><object class="GtkButton" id="web_copy_token">
+              <property name="child"><object class="GtkImage" id="web_copy_token_icon">
+                <property name="icon-name">rufin-edit-copy-symbolic</property>
+              </object></property>
+              <property name="tooltip-text" translatable="yes">Copy access token</property>
+              <property name="valign">center</property>
+              <style><class name="flat"/></style>
+            </object></child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="web_status">
+            <property name="title" translatable="yes">Controller status</property>
+            <property name="use-markup">false</property>
+            <child type="suffix"><object class="GtkButton" id="web_open">
+              <property name="icon-name">rufin-external-link-symbolic</property>
+              <property name="tooltip-text" translatable="yes">Open Controller</property>
+              <property name="valign">center</property>
+              <style><class name="flat"/></style>
+            </object></child>
+            <child type="suffix"><object class="GtkButton" id="web_copy_link">
+              <property name="child"><object class="GtkImage" id="web_copy_link_icon">
+                <property name="icon-name">rufin-edit-copy-symbolic</property>
+              </object></property>
+              <property name="tooltip-text" translatable="yes">Copy link</property>
+              <property name="valign">center</property>
+              <style><class name="flat"/></style>
+            </object></child>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup" id="file_connections">
+        <property name="title" translatable="yes">File connections</property>
+        <property name="header-suffix"><object class="GtkBox">
+          <property name="spacing">6</property>
+          <child><object class="GtkButton" id="add_webdav"><property name="label" translatable="yes">WebDAV / Nextcloud</property></object></child>
+          <child><object class="GtkButton" id="add_smb"><property name="label" translatable="yes">SMB / Samba</property></object></child>
+        </object></property>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup" id="lastfm_group">
+        <property name="title" translatable="yes">Last.fm</property>
+        <child>
+          <object class="AdwSwitchRow" id="lastfm_enabled"><property name="title" translatable="yes">Last.fm scrobbling</property></object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="lastfm_api_help">
+            <property name="title" translatable="yes">API keys</property>
+            <property name="use-markup">true</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwPasswordEntryRow" id="lastfm_api_key">
+            <property name="title" translatable="yes">API key</property>
+            <property name="show-apply-button">true</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwPasswordEntryRow" id="lastfm_api_secret">
+            <property name="title" translatable="yes">Shared secret</property>
+            <property name="show-apply-button">true</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="lastfm_connection">
+            <property name="title" translatable="yes">Connection</property>
+            <child type="suffix">
+              <object class="GtkButton" id="lastfm_connect">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSwitchRow" id="lastfm_now_playing"><property name="title" translatable="yes">Now playing updates</property></object>
+        </child>
+      </object>
+    </child>
+
+    <child>
+      <object class="AdwPreferencesGroup" id="librefm_group">
+        <property name="title" translatable="yes">Libre.fm</property>
+        <property name="description" translatable="yes">If the page doesn't load, then Libre.fm blocks your IP range/VPN</property>
+        <child>
+          <object class="AdwSwitchRow" id="librefm_enabled"><property name="title" translatable="yes">Libre.fm scrobbling</property></object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="librefm_connection">
+            <property name="title" translatable="yes">Connection</property>
+            <child type="suffix">
+              <object class="GtkButton" id="librefm_connect">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSwitchRow" id="librefm_now_playing"><property name="title" translatable="yes">Now playing updates</property></object>
+        </child>
+      </object>
+    </child>
+
+    <child>
+      <object class="AdwPreferencesGroup" id="listenbrainz_group">
+        <property name="title" translatable="yes">ListenBrainz</property>
+        <child>
+          <object class="AdwSwitchRow" id="listenbrainz_enabled"><property name="title" translatable="yes">ListenBrainz scrobbling</property></object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="listenbrainz_token_help">
+            <property name="title" translatable="yes">Get token</property>
+            <property name="use-markup">true</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwPasswordEntryRow" id="listenbrainz_token">
+            <property name="title" translatable="yes">User token</property>
+            <property name="show-apply-button">true</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSwitchRow" id="listenbrainz_now_playing"><property name="title" translatable="yes">Now playing updates</property></object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>

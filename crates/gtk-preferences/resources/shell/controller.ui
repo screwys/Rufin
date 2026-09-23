@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+  <object class="GtkPopover" id="popover">
+    <property name="autohide">true</property>
+    <property name="position">bottom</property>
+    <property name="child"><object class="GtkBox">
+      <property name="orientation">vertical</property>
+      <property name="width-request">340</property>
+      <property name="margin-start">8</property><property name="margin-end">8</property>
+      <property name="margin-top">8</property><property name="margin-bottom">8</property>
+      <child><object class="AdwPreferencesGroup">
+        <child><object class="AdwSwitchRow" id="connect_enabled">
+          <accessibility><property name="label" translatable="yes">Rufin Connect</property></accessibility>
+          <child type="prefix"><object class="GtkBox">
+            <property name="spacing">6</property>
+            <child><object class="GtkLabel"><property name="label" translatable="yes">Rufin Connect</property></object></child>
+            <child><object class="GtkButton" id="open_connect">
+              <property name="icon-name">rufin-external-link-symbolic</property>
+              <property name="tooltip-text" translatable="yes">Open Rufin Connect</property>
+              <property name="valign">center</property>
+              <style><class name="flat"/></style>
+            </object></child>
+            <child><object class="GtkButton" id="continue_connect">
+              <property name="icon-name">rufin-media-playback-start-symbolic</property>
+              <property name="visible">false</property>
+              <property name="valign">center</property>
+              <style><class name="flat"/></style>
+            </object></child>
+          </object></child>
+        </object></child>
+        <child><object class="AdwSwitchRow" id="web_enabled">
+          <accessibility><property name="label" translatable="yes">Controller</property></accessibility>
+          <child type="prefix"><object class="GtkBox">
+            <property name="spacing">6</property>
+            <child><object class="GtkLabel">
+              <property name="label" translatable="yes">Controller</property>
+            </object></child>
+            <child><object class="GtkButton" id="open_settings">
+              <property name="icon-name">rufin-external-link-symbolic</property>
+              <property name="tooltip-text" translatable="yes">Open settings</property>
+              <property name="valign">center</property>
+              <accessibility><property name="label" translatable="yes">Open settings</property></accessibility>
+              <style><class name="flat"/></style>
+            </object></child>
+          </object></child>
+        </object></child>
+        <child><object class="AdwActionRow" id="web_status">
+          <property name="title" translatable="yes">Controller status</property>
+          <property name="use-markup">false</property>
+          <child type="suffix"><object class="GtkButton" id="web_copy_link">
+            <property name="tooltip-text" translatable="yes">Copy link</property>
+            <property name="valign">center</property>
+            <property name="child"><object class="GtkImage" id="web_copy_link_icon">
+              <property name="icon-name">rufin-edit-copy-symbolic</property>
+            </object></property>
+            <style><class name="flat"/></style>
+          </object></child>
+          <child type="suffix"><object class="GtkButton" id="web_open">
+            <property name="icon-name">rufin-external-link-symbolic</property>
+            <property name="tooltip-text" translatable="yes">Open Controller</property>
+            <property name="valign">center</property>
+            <style><class name="flat"/></style>
+          </object></child>
+        </object></child>
+      </object></child>
+    </object></property>
+  </object>
+  <object class="GtkPopover" id="addresses_popover">
+    <property name="autohide">true</property>
+    <property name="position">bottom</property>
+    <property name="child"><object class="GtkBox">
+      <property name="orientation">vertical</property>
+      <property name="spacing">8</property>
+      <property name="margin-start">8</property><property name="margin-end">8</property>
+      <property name="margin-top">8</property><property name="margin-bottom">8</property>
+      <child><object class="GtkLabel">
+        <property name="label" translatable="yes">Choose an address</property>
+        <property name="xalign">0</property>
+        <style><class name="heading"/></style>
+      </object></child>
+      <child><object class="GtkBox" id="addresses">
+        <property name="orientation">vertical</property>
+      </object></child>
+    </object></property>
+  </object>
+</interface>

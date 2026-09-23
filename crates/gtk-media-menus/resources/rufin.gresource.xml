@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/io/github/screwys/Rufin/ui">
+    <file compressed="true">routes/playlist_picker.ui</file>
+    <file compressed="true">routes/playlist_picker_context.ui</file>
+    <file compressed="true">routes/playlist_picker_row.ui</file>
+  </gresource>
+</gresources>

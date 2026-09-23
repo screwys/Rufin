@@ -1,0 +1,370 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20" />
+  <requires lib="libadwaita" version="1.9" />
+  <object class="AdwPreferencesGroup" id="backup_group">
+    <property name="title" translatable="yes">Backups</property>
+    <child>
+      <object class="AdwActionRow" id="automatic_row">
+        <property name="title" translatable="yes">Automatic Backups</property>
+        <property name="subtitle" translatable="yes">Rufin data folder</property>
+        <property name="activatable">true</property>
+        <child type="suffix"><object class="GtkImage"><property name="icon-name">rufin-go-next-symbolic</property></object></child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesRow">
+        <property name="activatable">false</property>
+        <property name="child">
+          <object class="AdwWrapBox">
+            <property name="child-spacing">6</property>
+            <property name="margin-top">8</property>
+            <property name="margin-bottom">8</property>
+            <property name="margin-start">12</property>
+            <property name="margin-end">12</property>
+            <child>
+              <object class="GtkButton" id="restore_button">
+                <property name="label" translatable="yes">Import Backup</property>
+                <property name="hexpand">true</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="export_button">
+                <property name="label" translatable="yes">Export Backup</property>
+                <property name="hexpand">true</property>
+              </object>
+            </child>
+            <property name="line-spacing">6</property>
+            <property name="justify">fill</property>
+            <property name="justify-last-line">true</property>
+          </object>
+        </property>
+      </object>
+    </child>
+    <child>
+      <object class="AdwActionRow" id="schedule_error">
+        <property name="title" translatable="yes">Scheduled Backup Failed</property>
+        <property name="visible">false</property>
+      </object>
+    </child>
+  </object>
+  <object class="AdwNavigationPage" id="settings_page">
+    <property name="title" translatable="yes">Backup Settings</property>
+    <property name="child">
+      <object class="AdwPreferencesPage" id="settings_content">
+        <style><class name="backup-settings"/></style>
+        <child>
+          <object class="AdwPreferencesGroup" id="automatic">
+            <property name="title" translatable="yes">Automatic Backups</property>
+            <child><object class="AdwSwitchRow" id="enabled"><property name="title" translatable="yes">Enable automatic backups</property></object></child>
+            <child>
+              <object class="AdwActionRow" id="folder_row">
+                <property name="title" translatable="yes">Backup Folder</property>
+                <property name="subtitle" translatable="yes">Rufin data folder</property>
+                
+    <child type="suffix">
+                  <object class="GtkButton" id="reset_folder">
+                    <property name="icon-name">rufin-view-refresh-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Use Rufin data folder</property>
+                    <property name="valign">center</property>
+                    <style>
+                      <class name="flat" />
+                    </style>
+                  </object>
+                </child>
+                <child type="suffix"><object class="GtkButton" id="open_folder">
+      <property name="icon-name">rufin-document-open-symbolic</property>
+      <property name="tooltip-text" translatable="yes">Open Folder</property>
+      <property name="valign">center</property><style><class name="flat"/></style>
+    </object></child>
+<child type="suffix">
+                  <object class="GtkButton" id="choose_folder">
+                    <property name="label" translatable="yes">Choose</property>
+                    <property name="valign">center</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwPreferencesRow">
+                <property name="activatable">false</property>
+                <property name="child">
+                  <object class="AdwWrapBox">
+                    <property name="child-spacing">12</property>
+                    <property name="line-spacing">12</property>
+                    <property name="margin-top">8</property>
+                    <property name="margin-bottom">8</property>
+                    <property name="margin-start">12</property>
+                    <property name="margin-end">12</property>
+                    <child><object class="GtkBox">
+                      <property name="orientation">vertical</property><property name="spacing">6</property><property name="hexpand">true</property>
+                      <child><object class="GtkLabel"><property name="label" translatable="yes">Number of backups</property><property name="xalign">0</property></object></child>
+                      <child><object class="GtkSpinButton" id="retention_count"><property name="numeric">true</property><property name="adjustment"><object class="GtkAdjustment"><property name="lower">1</property><property name="upper">4294967295</property><property name="step-increment">1</property><property name="page-increment">1</property><property name="value">2</property></object></property><accessibility><property name="label" translatable="yes">Number of backups</property></accessibility></object></child>
+                    </object></child>
+                    <child>
+                      <object class="GtkBox" id="schedule_field">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">6</property>
+                        <property name="hexpand">true</property>
+                        <child>
+                          <object class="GtkLabel">
+                            <property name="label" translatable="yes">Schedule</property>
+                            <property name="xalign">0</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkDropDown" id="schedule">
+                            <property name="model">
+                              <object class="GtkStringList">
+                                <items>
+                                  <item translatable="yes">Daily</item>
+                                  <item translatable="yes">Weekly</item>
+                                </items>
+                              </object>
+                            </property>
+                            <accessibility>
+                              <property name="label" translatable="yes">Schedule</property>
+                            </accessibility>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkBox" id="weekday_field">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">6</property>
+                        <property name="hexpand">true</property>
+                        <child>
+                          <object class="GtkLabel">
+                            <property name="label" translatable="yes">Weekday</property>
+                            <property name="xalign">0</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkDropDown" id="weekday">
+                            <property name="model">
+                              <object class="GtkStringList">
+                                <items>
+                                  <item translatable="yes">Monday</item>
+                                  <item translatable="yes">Tuesday</item>
+                                  <item translatable="yes">Wednesday</item>
+                                  <item translatable="yes">Thursday</item>
+                                  <item translatable="yes">Friday</item>
+                                  <item translatable="yes">Saturday</item>
+                                  <item translatable="yes">Sunday</item>
+                                </items>
+                              </object>
+                            </property>
+                            <accessibility>
+                              <property name="label" translatable="yes">Weekday</property>
+                            </accessibility>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkBox" id="hour_field">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">6</property>
+                        <property name="hexpand">true</property>
+                        <child>
+                          <object class="GtkLabel">
+                            <property name="label" translatable="yes">Hour</property>
+                            <property name="xalign">0</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkDropDown" id="hour">
+                            <property name="model">
+                              <object class="GtkStringList">
+                                <items>
+                                  <item>00:00</item>
+                                  <item>01:00</item>
+                                  <item>02:00</item>
+                                  <item>03:00</item>
+                                  <item>04:00</item>
+                                  <item>05:00</item>
+                                  <item>06:00</item>
+                                  <item>07:00</item>
+                                  <item>08:00</item>
+                                  <item>09:00</item>
+                                  <item>10:00</item>
+                                  <item>11:00</item>
+                                  <item>12:00</item>
+                                  <item>13:00</item>
+                                  <item>14:00</item>
+                                  <item>15:00</item>
+                                  <item>16:00</item>
+                                  <item>17:00</item>
+                                  <item>18:00</item>
+                                  <item>19:00</item>
+                                  <item>20:00</item>
+                                  <item>21:00</item>
+                                  <item>22:00</item>
+                                  <item>23:00</item>
+                                </items>
+                              </object>
+                            </property>
+                            <accessibility>
+                              <property name="label" translatable="yes">Hour</property>
+                            </accessibility>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </property>
+              </object>
+            </child>
+            <child>
+              <object class="AdwSwitchRow" id="encrypt">
+                <property name="title" translatable="yes">Encrypt backups</property>
+              </object>
+            </child>
+            <child>
+              <object class="AdwPasswordEntryRow" id="scheduled_password">
+                <property name="title" translatable="yes">Scheduled Backup Password</property>
+                <property name="show-apply-button">true</property>
+              </object>
+            </child>
+
+          </object>
+        </child>
+        <child><object class="AdwPreferencesGroup" id="contents_slot"><property name="title" translatable="yes">Contents</property></object></child>
+      </object>
+    </property>
+  </object>
+  <object class="AdwPreferencesGroup" id="activity_group">
+    <property name="title" translatable="yes">Activity</property>
+    <child>
+      <object class="AdwPreferencesRow">
+        <property name="activatable">false</property>
+        <property name="child">
+          <object class="AdwWrapBox">
+            <property name="child-spacing">12</property>
+            <property name="line-spacing">8</property>
+            <property name="margin-start">12</property>
+            <property name="margin-end">12</property>
+            <property name="margin-top">12</property>
+            <property name="margin-bottom">12</property>
+            <child>
+              <object class="GtkLabel">
+                <property name="label" translatable="yes">Export format</property>
+                <property name="hexpand">true</property>
+                <property name="xalign">0</property>
+                <property name="wrap">true</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox" id="activity_format">
+                <property name="valign">center</property>
+                <style>
+                  <class name="linked" />
+                  <class name="preference-selection-buttons" />
+                </style>
+                <child>
+                  <object class="GtkToggleButton" id="lastfm">
+                    <property name="label">Last.fm</property>
+                    <property name="active">true</property>
+                    <style>
+                      <class name="preference-selection-button" />
+                    </style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkToggleButton" id="listenbrainz">
+                    <property name="label">ListenBrainz</property>
+                    <property name="active">false</property>
+                    <property name="group">lastfm</property>
+                    <style>
+                      <class name="preference-selection-button" />
+                    </style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkToggleButton" id="jsonl">
+                    <property name="label">JSONL</property>
+                    <property name="active">false</property>
+                    <property name="group">lastfm</property>
+                    <style>
+                      <class name="preference-selection-button" />
+                    </style>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </property>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesRow" id="activity_scope">
+        <property name="activatable">false</property>
+        <property name="child">
+          <object class="AdwWrapBox">
+            <property name="child-spacing">12</property>
+            <property name="line-spacing">8</property>
+            <property name="margin-start">12</property>
+            <property name="margin-end">12</property>
+            <property name="margin-top">12</property>
+            <property name="margin-bottom">12</property>
+            <child>
+              <object class="GtkLabel">
+                <property name="label" translatable="yes">Source</property>
+                <property name="hexpand">true</property>
+                <property name="xalign">0</property>
+                <property name="wrap">true</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox" id="scope_buttons">
+                <property name="valign">center</property>
+                <style>
+                  <class name="linked" />
+                  <class name="preference-selection-buttons" />
+                </style>
+                <child>
+                  <object class="GtkToggleButton" id="all_sources">
+                    <property name="label" translatable="yes">All</property>
+                    <property name="active">true</property>
+                    <style>
+                      <class name="preference-selection-button" />
+                    </style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkToggleButton" id="current_source">
+                    <property name="active">false</property>
+                    <property name="group">all_sources</property>
+                    <style>
+                      <class name="preference-selection-button" />
+                    </style>
+                    <property name="child">
+                      <object class="GtkLabel" id="current_source_label">
+                        <property name="ellipsize">end</property>
+                        <property name="max-width-chars">18</property>
+                        <property name="width-chars">0</property>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </property>
+      </object>
+    </child>
+    <child>
+      <object class="AdwActionRow">
+        <property name="title" translatable="yes">Export your listening history in Rufin</property>
+        <property name="title-lines">0</property>
+        <child type="suffix">
+          <object class="GtkButton" id="activity_export">
+            <property name="label" translatable="yes">Export</property>
+            <property name="valign">center</property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>

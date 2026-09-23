@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <object class="AdwToast" id="loading">
+    <property name="title" translatable="yes">Downloading Japanese dictionary...</property>
+    <property name="timeout">0</property>
+  </object>
+  <object class="AdwToast" id="failed">
+    <property name="title" translatable="yes">Couldn’t download Japanese dictionary</property>
+    <property name="button-label" translatable="yes">Retry</property>
+    <property name="timeout">0</property>
+  </object>
+</interface>

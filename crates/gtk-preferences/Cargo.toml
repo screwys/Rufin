@@ -1,0 +1,37 @@
+[package]
+name = "gtk-preferences"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish.workspace = true
+
+[dependencies]
+web.workspace = true
+presence.workspace = true
+pulldown-cmark.workspace = true
+tempfile.workspace = true
+directories.workspace = true
+secrets.workspace = true
+backup.workspace = true
+gtk-player.workspace = true
+gtk-widgets.workspace = true
+rufin-core.workspace = true
+adw = { workspace = true, features = ["v1_9", "gtk_v4_20"] }
+gtk = { workspace = true, features = ["v4_20"] }
+library.workspace = true
+localization.workspace = true
+sources.workspace = true
+playback.workspace = true
+downloads.workspace = true
+tracing.workspace = true
+
+[build-dependencies]
+glib-build-tools.workspace = true
+
+[lints]
+workspace = true

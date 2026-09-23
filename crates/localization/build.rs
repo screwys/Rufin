@@ -33,15 +33,12 @@ fn cargo_env_path(name: &str) -> BuildResult<PathBuf> {
 
 fn compile_translation_catalogs(po_files: &[PathBuf]) -> BuildResult<PathBuf> {
     let out_dir = cargo_env_path("OUT_DIR")?;
-    println!("cargo:rerun-if-env-changed=RUFIN_BUILD_LOCALEDIR");
-    let locale_dir = env::var_os("RUFIN_BUILD_LOCALEDIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| out_dir.join("share/locale"));
-    if locale_dir.exists() {
-        fs::remove_dir_all(&locale_dir)?;
-    }
+    let locale_dir = out_dir.join("share/locale");
 
     if po_files.is_empty() {
+        if locale_dir.is_dir() {
+            fs::remove_dir_all(&locale_dir)?;
+        }
         return Ok(locale_dir);
     }
     for po_file in po_files {
@@ -61,14 +58,18 @@ fn compile_translation_catalogs(po_files: &[PathBuf]) -> BuildResult<PathBuf> {
         let target_dir = locale_dir.join(lang).join("LC_MESSAGES");
         fs::create_dir_all(&target_dir)?;
         let target_file = target_dir.join("rufin.mo");
+        let compiled = target_dir.join("rufin.mo.new");
         let status = Command::new("msgfmt")
             .arg("--check")
             .arg(po_file)
             .arg("-o")
-            .arg(&target_file)
+            .arg(&compiled)
             .status();
         match status {
-            Ok(status) if status.success() => {}
+            Ok(status) if status.success() => {
+                write_if_changed(&target_file, &fs::read(&compiled)?)?;
+                fs::remove_file(compiled)?;
+            }
             Ok(status) => {
                 return Err(io::Error::other(format!(
                     "msgfmt failed for {} with status {status}",
@@ -82,6 +83,21 @@ fn compile_translation_catalogs(po_files: &[PathBuf]) -> BuildResult<PathBuf> {
                     po_file.display()
                 ))
                 .into());
+            }
+        }
+    }
+
+    // A removed language must not remain available through an older build output.
+    if locale_dir.is_dir() {
+        for entry in fs::read_dir(&locale_dir)? {
+            let entry = entry?;
+            let language = entry.file_name();
+            if entry.file_type()?.is_dir()
+                && !po_files
+                    .iter()
+                    .any(|path| path.file_stem() == Some(language.as_os_str()))
+            {
+                fs::remove_dir_all(entry.path())?;
             }
         }
     }
@@ -104,8 +120,18 @@ fn write_translator_credits(po_files: &[PathBuf]) -> BuildResult<()> {
         }
         credits.push(translator);
     }
-    fs::write(out_dir.join("translator_credits.txt"), credits.join("\n"))?;
+    write_if_changed(
+        &out_dir.join("translator_credits.txt"),
+        credits.join("\n").as_bytes(),
+    )?;
     Ok(())
+}
+
+fn write_if_changed(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    if fs::read(path).is_ok_and(|current| current == bytes) {
+        return Ok(());
+    }
+    fs::write(path, bytes)
 }
 
 fn po_header_value(text: &str, key: &str) -> Option<String> {

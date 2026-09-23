@@ -409,9 +409,9 @@ _test *args:
             echo "NEXTEST_JOBS must be a positive integer." >&2; \
             exit 1; \
         fi; \
-        cargo nextest run --locked --test-threads "$nextest_jobs" {{ args }}; \
+        cargo nextest run --locked --features app-identity/development --test-threads "$nextest_jobs" {{ args }}; \
     else \
-        cargo_args=(--locked); \
+        cargo_args=(--locked --features app-identity/development); \
         if [[ -z "{{ args }}" ]]; then \
             cargo_args+=(--lib --bins --tests --benches --examples); \
         fi; \
@@ -430,7 +430,7 @@ _lint:
     @if [[ "$(uname -s)" == Darwin ]]; then \
         export GETTEXT_DIR="$(brew --prefix gettext)"; \
     fi; \
-    cargo clippy --workspace --all-targets --locked
+    cargo clippy --workspace --all-targets --locked --features app-identity/development
 
 # Regenerate Linux package dependency metadata.
 deps:

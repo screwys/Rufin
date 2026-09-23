@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+
+  <template class="RufinRecycledFolderCell" parent="GtkBox">
+    <property name="spacing">8</property>
+    <property name="halign">start</property>
+    <property name="valign">center</property>
+    <style><class name="folder-table-row"/></style>
+    <child>
+      <object class="GtkImage" id="icon">
+        <property name="icon-name">rufin-folders-symbolic</property>
+        <property name="pixel-size">20</property>
+        <property name="width-request">32</property>
+        <property name="height-request">32</property>
+        <property name="valign">center</property>
+      </object>
+    </child>
+    <child>
+      <object class="RufinRecycledArtworkCell" id="cover">
+        <property name="visible">false</property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkLabel" id="label">
+        <property name="xalign">0</property>
+        <property name="valign">center</property>
+        <property name="hexpand">true</property>
+        <property name="ellipsize">end</property>
+        <style><class name="folder-row-label"/></style>
+      </object>
+    </child>
+  </template>
+</interface>

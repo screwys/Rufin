@@ -98,7 +98,7 @@ fn run_inner(mut arguments: impl Iterator<Item = std::ffi::OsString>) -> Result<
                 let listener = tokio::net::TcpListener::bind(address).await?;
                 let _ = writeln!(io::stdout().lock(), "Rufin API listening on http://{}", listener.local_addr()?);
                 tokio::select! {
-                    result = rufin_core::api::serve(listener, inputs.products.clone(), token.unwrap()) => result,
+                    result = web::serve(listener, inputs.products.clone(), token.unwrap()) => result,
                     result = wait_for_shutdown() => result,
                 }
             } else {

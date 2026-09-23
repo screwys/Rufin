@@ -278,3 +278,18 @@ pub fn identify_artist_metadata(
             .map(|found| found.map(|values| (values, None)))
     })
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MetadataItemId {
+    Track(String),
+    Album(String),
+    Artist(String),
+}
+
+impl MetadataItemId {
+    pub fn media_uri(&self) -> &str {
+        match self {
+            Self::Track(uri) | Self::Album(uri) | Self::Artist(uri) => uri,
+        }
+    }
+}

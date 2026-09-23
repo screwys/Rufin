@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+
+  <template class="RufinHomeSectionHeaderView" parent="GtkBox">
+    <property name="orientation">horizontal</property><property name="hexpand">true</property>
+    <property name="halign">fill</property><property name="width-request">1</property>
+    <child><object class="GtkLabel" id="heading"><property name="xalign">0</property><property name="width-chars">1</property><property name="ellipsize">end</property><style><class name="section-heading"/></style></object></child>
+    <child><object class="GtkButton" id="refresh"><property name="icon-name">rufin-view-refresh-symbolic</property><property name="tooltip-text" translatable="yes">Refresh section</property><accessibility><property name="label" translatable="yes">Refresh section</property></accessibility><style><class name="icon-button"/><class name="flat"/><class name="circular"/><class name="home-section-control-button"/></style></object></child>
+    <child><object class="GtkBox"><property name="hexpand">true</property></object></child>
+    <child>
+      <object class="GtkBox">
+        <property name="orientation">horizontal</property><property name="halign">end</property>
+        <child><object class="GtkButton" id="previous"><property name="icon-name">rufin-go-previous-symbolic</property><property name="tooltip-text" translatable="yes">Previous page</property><accessibility><property name="label" translatable="yes">Previous page</property></accessibility><style><class name="icon-button"/><class name="flat"/><class name="circular"/></style></object></child>
+        <child><object class="GtkButton" id="next"><property name="icon-name">rufin-go-next-symbolic</property><property name="tooltip-text" translatable="yes">Next page</property><accessibility><property name="label" translatable="yes">Next page</property></accessibility><style><class name="icon-button"/><class name="flat"/><class name="circular"/><class name="home-section-control-button"/></style></object></child>
+      </object>
+    </child>
+  </template>
+</interface>

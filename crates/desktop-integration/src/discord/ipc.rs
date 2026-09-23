@@ -4,8 +4,7 @@ use std::sync::Arc;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 
-use playback::{CurrentMedia, PlaybackView, TransportStatus};
-use serde::{Deserialize, Serialize};
+use presence::Activity;
 use serde_json::{Value, json};
 use tracing::debug;
 
@@ -174,12 +173,8 @@ mod transport {
 
 use transport::IpcStream;
 
-pub const DEFAULT_CLIENT_ID: &str = "1505345384686419979";
-pub(crate) const APP_ICON_ASSET: &str = "rufin";
 pub(crate) const SUPPORTED: bool = cfg!(any(unix, windows));
 
-const MAX_TEXT_LENGTH: usize = 127;
-const MAX_URL_LENGTH: usize = 256;
 const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 
 const IPC_VERSION: u8 = 1;
@@ -188,145 +183,6 @@ const OP_FRAME: u32 = 1;
 const OP_CLOSE: u32 = 2;
 const OP_PING: u32 = 3;
 const OP_PONG: u32 = 4;
-
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub enum DisplayType {
-    #[serde(rename = "artist")]
-    Artist,
-    #[serde(rename = "application", alias = "app")]
-    #[default]
-    Application,
-    #[serde(rename = "song")]
-    Song,
-}
-
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub enum LinkType {
-    #[serde(rename = "last_fm")]
-    LastFm,
-    #[serde(rename = "musicbrainz")]
-    #[default]
-    MusicBrainz,
-    #[serde(rename = "musicbrainz_last_fm")]
-    MusicBrainzLastFm,
-    #[serde(rename = "none")]
-    None,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(default)]
-pub struct Settings {
-    #[serde(rename = "discord_presence_enabled")]
-    pub enabled: bool,
-    #[serde(rename = "discord_client_id")]
-    pub client_id: String,
-    #[serde(rename = "discord_display_type")]
-    pub display_type: DisplayType,
-    #[serde(rename = "discord_link_type")]
-    pub link_type: LinkType,
-    #[serde(rename = "discord_show_paused")]
-    pub show_paused: bool,
-    #[serde(rename = "discord_show_as_listening")]
-    pub show_as_listening: bool,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            client_id: DEFAULT_CLIENT_ID.to_string(),
-            display_type: DisplayType::Application,
-            link_type: LinkType::MusicBrainz,
-            show_paused: false,
-            show_as_listening: true,
-        }
-    }
-}
-
-impl Settings {
-    pub fn sanitize(&mut self) {
-        self.client_id = self.client_id.trim().to_string();
-        if self.client_id.is_empty() {
-            self.client_id = DEFAULT_CLIENT_ID.to_string();
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum PlaybackState {
-    Playing,
-    Paused,
-}
-
-#[derive(Clone)]
-pub(crate) struct Activity {
-    settings: Settings,
-    media: Arc<CurrentMedia>,
-    playback_state: PlaybackState,
-    pub(crate) started_at_millis: Option<u64>,
-    pub(crate) ended_at_millis: Option<u64>,
-    pub(crate) large_image: String,
-}
-
-impl Activity {
-    pub(crate) fn new(
-        settings: &Settings,
-        view: &PlaybackView,
-        now_millis: u64,
-        large_image: String,
-    ) -> Option<Self> {
-        let playback_state = visible_playback_state(settings, view.transport.state)?;
-        let media = Arc::clone(view.transport.current.as_ref()?);
-        media.id.run?;
-        let duration_millis = duration_millis(&media);
-        let started_at_millis = match playback_state {
-            PlaybackState::Playing => {
-                Some(now_millis.saturating_sub(view.transport.position_millis))
-            }
-            PlaybackState::Paused => None,
-        };
-        Some(Self {
-            settings: settings.clone(),
-            media,
-            playback_state,
-            started_at_millis,
-            ended_at_millis: started_at_millis.and_then(|started| {
-                (duration_millis > 0).then(|| started.saturating_add(duration_millis))
-            }),
-            large_image,
-        })
-    }
-
-    pub(crate) fn matches(&self, view: &PlaybackView) -> bool {
-        Some(self.playback_state) == visible_playback_state(&self.settings, view.transport.state)
-            && view
-                .transport
-                .current
-                .as_ref()
-                .is_some_and(|media| media.as_ref() == self.media.as_ref())
-    }
-}
-
-fn duration_millis(media: &CurrentMedia) -> u64 {
-    u64::try_from(media.duration_millis.max(0)).unwrap_or(u64::MAX)
-}
-
-pub(crate) fn visible_playback_state(
-    settings: &Settings,
-    state: TransportStatus,
-) -> Option<PlaybackState> {
-    if !settings.enabled {
-        return None;
-    }
-    Some(match state {
-        TransportStatus::Playing | TransportStatus::Buffering => PlaybackState::Playing,
-        TransportStatus::Paused if settings.show_paused => PlaybackState::Paused,
-        TransportStatus::Stopped
-        | TransportStatus::Resolving
-        | TransportStatus::Paused
-        | TransportStatus::Failed => return None,
-    })
-}
 
 pub(crate) struct Worker {
     mailbox: Option<LatestSender<Option<Arc<Activity>>>>,
@@ -416,7 +272,7 @@ impl Connection {
             }
             return false;
         };
-        let client_id = activity.settings.client_id.as_str();
+        let client_id = activity.client_id();
         if self
             .client_id
             .as_deref()
@@ -445,7 +301,7 @@ impl Connection {
             "cmd": "SET_ACTIVITY",
             "args": {
                 "pid": std::process::id(),
-                "activity": activity.map(activity_json),
+                "activity": activity.map(Activity::json),
             },
             "nonce": format!("rufin-{}", self.nonce),
         })
@@ -494,153 +350,6 @@ fn worker_ipc_paths() -> Vec<PathBuf> {
     }
 }
 
-fn activity_json(activity: &Activity) -> Value {
-    let track = &activity.media;
-    let (small_image, small_text) = match activity.playback_state {
-        PlaybackState::Playing => ("playing", "Playing"),
-        PlaybackState::Paused => ("paused", "Paused"),
-    };
-    let mut value = json!({
-        "details": discord_text(&track.title, "Idle"),
-        "state": discord_text(&track.artist, "Unknown artist"),
-        "assets": {
-            "large_image": activity.large_image,
-            "large_text": discord_text(&track.album, "Unknown album"),
-            "small_image": small_image,
-            "small_text": small_text,
-        },
-        "timestamps": {},
-        "instance": false,
-        "status_display_type": status_display_type(activity.settings.display_type),
-        "type": if activity.settings.show_as_listening { 2 } else { 0 },
-    });
-    if let Some(start) = activity.started_at_millis {
-        value["timestamps"]["start"] = json!(start / 1_000);
-    }
-    if let Some(end) = activity.ended_at_millis {
-        value["timestamps"]["end"] = json!(end / 1_000);
-    }
-    let (details_url, state_url) = activity_urls(activity);
-    if let Some(details_url) = details_url {
-        value["details_url"] = json!(details_url);
-    }
-    if let Some(state_url) = state_url {
-        value["state_url"] = json!(state_url);
-    }
-    value
-}
-
-const fn status_display_type(display_type: DisplayType) -> u8 {
-    match display_type {
-        DisplayType::Application => 0,
-        DisplayType::Artist => 1,
-        DisplayType::Song => 2,
-    }
-}
-
-fn activity_urls(activity: &Activity) -> (Option<String>, Option<String>) {
-    let track = &activity.media;
-    let track_artist = track.artist.trim();
-    let album_artist = activity
-        .media
-        .album_display_artist
-        .as_deref()
-        .map(str::trim)
-        .filter(|artist| !artist.is_empty())
-        .unwrap_or(track_artist);
-    let mut details = None;
-    let mut state = None;
-    if matches!(
-        activity.settings.link_type,
-        LinkType::LastFm | LinkType::MusicBrainzLastFm
-    ) {
-        state = lastfm_artist_url(track_artist);
-        details = lastfm_track_url(album_artist, &track.album, &track.title);
-    }
-    if matches!(
-        activity.settings.link_type,
-        LinkType::MusicBrainz | LinkType::MusicBrainzLastFm
-    ) {
-        if activity.settings.link_type == LinkType::MusicBrainz {
-            state = track
-                .primary_artist_musicbrainz_id
-                .as_deref()
-                .and_then(|id| musicbrainz_url("artist", id));
-        }
-        details = track
-            .musicbrainz_release_track_id
-            .as_deref()
-            .and_then(|id| musicbrainz_url("track", id))
-            .or_else(|| {
-                track
-                    .musicbrainz_recording_id
-                    .as_deref()
-                    .and_then(|id| musicbrainz_url("recording", id))
-            })
-            .or(details);
-    }
-    (details, state)
-}
-
-fn lastfm_artist_url(artist: &str) -> Option<String> {
-    let artist = artist.trim();
-    (!artist.is_empty()).then(|| format!("https://www.last.fm/music/{}", encode_segment(artist)))
-}
-
-fn lastfm_track_url(artist: &str, album: &str, title: &str) -> Option<String> {
-    let artist = artist.trim();
-    let title = title.trim();
-    if artist.is_empty() || title.is_empty() {
-        return None;
-    }
-    let album = if album.trim().is_empty() { "_" } else { album };
-    let url = format!(
-        "https://www.last.fm/music/{}/{}/{}",
-        encode_segment(artist),
-        encode_segment(album),
-        encode_segment(title)
-    );
-    (url.len() <= MAX_URL_LENGTH).then_some(url)
-}
-
-fn musicbrainz_url(entity: &str, id: &str) -> Option<String> {
-    let id = id.trim();
-    if id.is_empty() {
-        return None;
-    }
-    Some(format!(
-        "https://musicbrainz.org/{entity}/{}",
-        encode_segment(id)
-    ))
-}
-
-fn discord_text(value: &str, fallback: &str) -> String {
-    let text = if value.trim().is_empty() {
-        fallback
-    } else {
-        value.trim()
-    };
-    let mut text = text.chars().take(MAX_TEXT_LENGTH).collect::<String>();
-    if text.chars().count() < 2 {
-        text.push(' ');
-    }
-    text
-}
-
-fn encode_segment(value: &str) -> String {
-    let mut encoded = String::with_capacity(value.len());
-    for byte in value.as_bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                encoded.push(char::from(*byte));
-            }
-            b' ' => encoded.push_str("%20"),
-            byte => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    encoded
-}
-
 fn write_packet(stream: &mut IpcStream, opcode: u32, payload: &Value) -> Result<(), String> {
     let bytes = serde_json::to_vec(payload).map_err(|error| error.to_string())?;
     let length = u32::try_from(bytes.len()).map_err(|_| "Discord IPC payload is too large")?;
@@ -683,54 +392,54 @@ fn read_response(stream: &mut IpcStream) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use playback::TransportStatus;
+    use presence::{APP_ICON_ASSET, LinkType, Settings};
 
     #[test]
     fn lastfm_album_url_uses_the_album_display_artist() {
         let view = super::super::tests::test_view(1, "Album", TransportStatus::Playing, 0);
-        let activity = Activity {
-            settings: Settings {
+        let activity = Activity::new(
+            &Settings {
+                enabled: true,
                 link_type: LinkType::LastFm,
                 ..Settings::default()
             },
-            media: view.transport.current.expect("current media"),
-            playback_state: PlaybackState::Playing,
-            started_at_millis: None,
-            ended_at_millis: None,
-            large_image: APP_ICON_ASSET.to_string(),
-        };
+            &view,
+            0,
+            APP_ICON_ASSET.to_string(),
+        )
+        .expect("visible activity");
 
-        let (details, state) = activity_urls(&activity);
+        let payload = activity.json();
+        let details = payload["details_url"].as_str();
+        let state = payload["state_url"].as_str();
         assert_eq!(
-            details.as_deref(),
+            details,
             Some("https://www.last.fm/music/Album%20Artist/Album/Track")
         );
-        assert_eq!(state.as_deref(), Some("https://www.last.fm/music/Artist"));
+        assert_eq!(state, Some("https://www.last.fm/music/Artist"));
     }
 
     #[test]
     fn musicbrainz_links_use_the_queue_snapshot_ids() {
         let view = super::super::tests::test_view(1, "Album", TransportStatus::Playing, 0);
-        let activity = Activity {
-            settings: Settings {
+        let activity = Activity::new(
+            &Settings {
+                enabled: true,
                 link_type: LinkType::MusicBrainz,
                 ..Settings::default()
             },
-            media: view.transport.current.expect("current media"),
-            playback_state: PlaybackState::Playing,
-            started_at_millis: None,
-            ended_at_millis: None,
-            large_image: APP_ICON_ASSET.to_string(),
-        };
+            &view,
+            0,
+            APP_ICON_ASSET.to_string(),
+        )
+        .expect("visible activity");
 
-        let (details, state) = activity_urls(&activity);
-        assert_eq!(
-            details.as_deref(),
-            Some("https://musicbrainz.org/track/track-id")
-        );
-        assert_eq!(
-            state.as_deref(),
-            Some("https://musicbrainz.org/artist/artist-id")
-        );
+        let payload = activity.json();
+        let details = payload["details_url"].as_str();
+        let state = payload["state_url"].as_str();
+        assert_eq!(details, Some("https://musicbrainz.org/track/track-id"));
+        assert_eq!(state, Some("https://musicbrainz.org/artist/artist-id"));
     }
 
     #[cfg(unix)]
@@ -772,17 +481,17 @@ mod tests {
             nonce: 0,
         };
         let view = super::super::tests::test_view(1, "Album", TransportStatus::Playing, 0);
-        let activity = Activity {
-            settings: Settings {
+        let activity = Activity::new(
+            &Settings {
+                enabled: true,
                 client_id: "client".to_string(),
                 ..Settings::default()
             },
-            media: view.transport.current.expect("current media"),
-            playback_state: PlaybackState::Playing,
-            started_at_millis: None,
-            ended_at_millis: None,
-            large_image: APP_ICON_ASSET.to_string(),
-        };
+            &view,
+            0,
+            APP_ICON_ASSET.to_string(),
+        )
+        .expect("visible activity");
 
         assert!(connection.apply(Some(&activity)));
         assert!(connection.stream.is_none());

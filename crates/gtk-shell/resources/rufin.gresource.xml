@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Desktop interface definitions and base style. -->
+<gresources>
+
+  <gresource prefix="/io/github/screwys/Rufin/ui">
+    <file compressed="true">shell/activity.ui</file>
+    <file compressed="true">shell/activity_genre.ui</file>
+    <file alias="showcase.css" compressed="true">../../../resources/showcase.css</file>
+    <file compressed="true">application/about.ui</file>
+    <file compressed="true">player/random_play.ui</file>
+    <file compressed="true">shell/diagnostics.ui</file>
+    <file compressed="true">shell/content_chrome.ui</file>
+    <file compressed="true">shell/navigation.ui</file>
+    <file compressed="true">shell/topbar.ui</file>
+    <file compressed="true">shell/search_popover.ui</file>
+    <file compressed="true">shell/search_row.ui</file>
+    <file compressed="true">shell/root.ui</file>
+    <file compressed="true">shell/shortcuts.ui</file>
+  </gresource>
+</gresources>

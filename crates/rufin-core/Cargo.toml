@@ -13,8 +13,6 @@ publish.workspace = true
 [dependencies]
 rufin-connect.workspace = true
 age.workspace = true
-axum.workspace = true
-askama.workspace = true
 image.workspace = true
 thiserror.workspace = true
 backup.workspace = true
@@ -22,15 +20,11 @@ audio-processing.workspace = true
 app-identity.workspace = true
 metadata-lookup.workspace = true
 async-channel.workspace = true
-bytes.workspace = true
 blake3.workspace = true
 futures-util.workspace = true
 flate2.workspace = true
-http-body-util.workspace = true
-hyper.workspace = true
-hyper-util.workspace = true
 artwork.workspace = true
-desktop-integration.workspace = true
+presence.workspace = true
 directories.workspace = true
 downloads.workspace = true
 getrandom.workspace = true
@@ -62,4 +56,5 @@ windows-updater.workspace = true
 workspace = true
 
 [dev-dependencies]
+axum.workspace = true
 image.workspace = true

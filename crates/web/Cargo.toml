@@ -1,0 +1,45 @@
+[package]
+name = "web"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish.workspace = true
+
+[dependencies]
+artwork.workspace = true
+askama.workspace = true
+async-channel.workspace = true
+axum.workspace = true
+blake3.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
+getrandom.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+image.workspace = true
+library.workspace = true
+localization.workspace = true
+lyrics.workspace = true
+playback.workspace = true
+playback-cast.workspace = true
+rufin-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sources.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
+tracing.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+reqwest = { workspace = true, features = ["json"] }
+secrets.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

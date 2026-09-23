@@ -21,6 +21,13 @@ audio-processing = { path = "crates/audio-processing" }
 backup = { path = "crates/backup" }
 desktop-integration = { path = "crates/desktop-integration" }
 downloads = { path = "crates/downloads" }
+gtk-editors = { path = "crates/gtk-editors" }
+gtk-library = { path = "crates/gtk-library" }
+gtk-media-menus = { path = "crates/gtk-media-menus" }
+gtk-player = { path = "crates/gtk-player" }
+gtk-preferences = { path = "crates/gtk-preferences" }
+gtk-shell = { path = "crates/gtk-shell" }
+gtk-widgets = { path = "crates/gtk-widgets" }
 library = { path = "crates/library" }
 localization = { path = "crates/localization" }
 lyrics = { path = "crates/lyrics" }
@@ -28,17 +35,15 @@ metadata-lookup = { path = "crates/metadata-lookup" }
 playback = { path = "crates/playback" }
 playback-cast = { path = "crates/playback-cast" }
 playback-gstreamer = { path = "crates/playback-gstreamer" }
+presence = { path = "crates/presence" }
 rufin-connect = { path = "crates/rufin-connect" }
 rufin-controller = { path = "crates/rufin-controller" }
 rufin-core = { path = "crates/rufin-core" }
 scrobbling = { path = "crates/scrobbling" }
 secrets = { path = "crates/secrets" }
 sources = { path = "crates/sources" }
-ui-library = { path = "crates/ui-library" }
-ui-player = { path = "crates/ui-player" }
-ui-shared = { path = "crates/ui-shared" }
-ui-shell = { path = "crates/ui-shell" }
 windows-updater = { path = "crates/windows-updater" }
+web = { path = "crates/web" }
 
 # External dependencies
 axum = "0.8.9"
@@ -70,6 +75,7 @@ fcast-sender-sdk = { version = "0.3.0", default-features = false, features = ["c
 futures-util = "0.3.32"
 getrandom = "0.4.0"
 gettext-rs = { version = "0.8.0", features = ["gettext-system"] }
+spiritless_po = "1.1.0"
 gio = "0.22.6"
 gstreamer = "0.25.2"
 gstreamer-app = "0.25.2"

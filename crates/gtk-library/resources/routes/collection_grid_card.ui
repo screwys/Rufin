@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+
+  <template class="RufinCollectionGridCardView" parent="GtkBox">
+    <property name="orientation">vertical</property>
+    <property name="spacing">2</property>
+    <property name="hexpand">true</property>
+    <property name="vexpand">false</property>
+    <property name="halign">fill</property>
+    <property name="valign">start</property>
+    <child>
+      <object class="GtkBox" id="title_row">
+        <property name="spacing">5</property>
+        <property name="hexpand">true</property>
+        <child>
+          <object class="GtkLabel" id="title">
+            <property name="width-request">1</property>
+            <property name="height-request">20</property>
+            <property name="halign">start</property>
+            <property name="valign">center</property>
+            <property name="hexpand">false</property>
+            <property name="xalign">0</property>
+            <property name="justify">left</property>
+            <property name="wrap">false</property>
+            <property name="single-line-mode">true</property>
+            <property name="lines">1</property>
+            <property name="ellipsize">end</property>
+            <style>
+              <class name="track-title"/>
+            </style>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+</interface>

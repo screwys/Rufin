@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <object class="AdwAlertDialog" id="dialog">
+    <property name="heading" translatable="yes">Discord access in Flatpak</property>
+    <property name="body" translatable="yes">If Discord is not installed as a flatpak, you need to give socket access to Rufin. If it is installed as a flatpak, this is not needed.</property>
+    <property name="close-response">close</property>
+    <property name="default-response">close</property>
+    <property name="extra-child">
+      <object class="GtkBox">
+        <property name="orientation">vertical</property>
+        <property name="spacing">12</property>
+        <child><object class="GtkLabel">
+          <property name="label" translatable="yes">User flatpak:</property>
+          <property name="xalign">0</property><property name="wrap">true</property>
+          <style><class name="heading"/></style>
+        </object></child>
+        <child><object class="GtkBox">
+          <property name="spacing">12</property>
+          <style><class name="command-block"/></style>
+          <child><object class="GtkLabel" id="user_command">
+            <property name="label">flatpak override --user --filesystem=xdg-run/discord-ipc-0 io.github.screwys.Rufin</property>
+            <property name="selectable">true</property><property name="wrap">true</property>
+            <property name="wrap-mode">word-char</property><property name="max-width-chars">40</property>
+            <property name="xalign">0</property><property name="hexpand">true</property>
+            <style><class name="monospace"/></style>
+          </object></child>
+          <child><object class="GtkButton" id="copy_user">
+            <property name="child"><object class="GtkImage" id="copy_user_icon"><property name="icon-name">rufin-edit-copy-symbolic</property></object></property>
+            <property name="tooltip-text" translatable="yes">Copy</property>
+            <property name="valign">center</property>
+          </object></child>
+        </object></child>
+        <child><object class="GtkLabel">
+          <property name="label" translatable="yes">System flatpak:</property>
+          <property name="xalign">0</property><property name="wrap">true</property>
+          <style><class name="heading"/></style>
+        </object></child>
+        <child><object class="GtkBox">
+          <property name="spacing">12</property>
+          <style><class name="command-block"/></style>
+          <child><object class="GtkLabel" id="system_command">
+            <property name="label">sudo flatpak override --filesystem=xdg-run/discord-ipc-0 io.github.screwys.Rufin</property>
+            <property name="selectable">true</property><property name="wrap">true</property>
+            <property name="wrap-mode">word-char</property><property name="max-width-chars">40</property>
+            <property name="xalign">0</property><property name="hexpand">true</property>
+            <style><class name="monospace"/></style>
+          </object></child>
+          <child><object class="GtkButton" id="copy_system">
+            <property name="child"><object class="GtkImage" id="copy_system_icon"><property name="icon-name">rufin-edit-copy-symbolic</property></object></property>
+            <property name="tooltip-text" translatable="yes">Copy</property>
+            <property name="valign">center</property>
+          </object></child>
+        </object></child>
+      </object>
+    </property>
+    <responses><response id="close" translatable="yes">Close</response></responses>
+  </object>
+</interface>

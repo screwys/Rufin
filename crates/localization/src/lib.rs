@@ -4,6 +4,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(target_os = "android")]
+mod android;
+#[cfg(target_os = "android")]
+pub use android::{install_catalogs, tr, trn};
+
 pub const DOMAIN: &str = "rufin";
 const ENGLISH_LANGUAGE_PREFERENCE: &str = "en";
 pub const SYSTEM_LANGUAGE_PREFERENCE: &str = "system";
@@ -76,6 +81,7 @@ pub struct LanguageOption {
 }
 
 /// Binds the Rufin gettext domain before GTK initializes the process locale.
+#[cfg(not(target_os = "android"))]
 pub fn initialize() -> Result<(), String> {
     let localedir = locale_dir();
     gettextrs::bindtextdomain(DOMAIN, &localedir).map_err(|error| {
@@ -172,10 +178,12 @@ pub fn language_option_index(options: &[LanguageOption], language_preference: &s
         .unwrap_or_default() as u32
 }
 
+#[cfg(not(target_os = "android"))]
 pub fn tr(message: &str) -> String {
     gettextrs::dgettext(DOMAIN, message)
 }
 
+#[cfg(not(target_os = "android"))]
 pub fn trn(singular: &str, plural: &str, count: u64) -> String {
     gettextrs::dngettext(
         DOMAIN,

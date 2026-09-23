@@ -493,7 +493,7 @@ fn replace_name(value: &str, previous: &str, replacement: &str) -> String {
         .join("; ")
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "android", target_os = "linux", target_os = "macos"))]
 fn replace(replacement: &mut tempfile::TempPath, target: &Path) -> Result<(), SourceMetadataError> {
     rustix::fs::renameat_with(
         rustix::fs::CWD,
@@ -526,7 +526,12 @@ fn replace(replacement: &mut tempfile::TempPath, target: &Path) -> Result<(), So
     Ok(())
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+#[cfg(not(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "windows"
+)))]
 fn replace(
     _replacement: &mut tempfile::TempPath,
     _target: &Path,
@@ -856,7 +861,12 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    #[cfg(any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "windows"
+    ))]
     fn aggregate_commit_failure_restores_every_replaced_file() {
         let directory = tempfile::tempdir().expect("metadata directory");
         let first = directory.path().join("first.wav");

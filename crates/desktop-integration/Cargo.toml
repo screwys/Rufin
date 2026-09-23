@@ -18,7 +18,7 @@ gio.workspace = true
 glib.workspace = true
 localization.workspace = true
 playback.workspace = true
-serde.workspace = true
+presence.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 

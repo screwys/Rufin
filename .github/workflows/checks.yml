@@ -119,7 +119,7 @@ jobs:
               fi
 
               case "$path" in
-                resources/themes/*|crates/ui-shell/resources/*|crates/ui-shared/resources/*|crates/ui-library/resources/*|crates/ui-player/resources/*)
+                resources/themes/*|crates/gtk-*/resources/*)
                   add_jobs "${workspace_jobs[@]}"
                   ;;
                 LICENSE|resources|resources/*|web|web/*|locales/*|*.md|*.ui|*.xml|.github/FUNDING.yml|.github/ISSUE_TEMPLATE/*)

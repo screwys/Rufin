@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="AdwDialog" id="new_dialog">
+    <property name="title" translatable="yes">New Playlist</property>
+    <property name="content-width">320</property>
+    <property name="default-widget">new_create</property>
+    <property name="focus-widget">new_entry</property>
+    <property name="child"><object class="AdwToolbarView">
+      <child type="top"><object class="AdwHeaderBar"/></child>
+      <property name="content">
+      <object class="GtkBox">
+        <property name="orientation">vertical</property>
+        <property name="spacing">12</property>
+        <property name="margin-start">18</property>
+        <property name="margin-end">18</property>
+        <property name="margin-bottom">18</property>
+        <child>
+          <object class="GtkOverlay">
+            <property name="child">
+              <object class="GtkEntry" id="new_entry">
+                <property name="placeholder-text" translatable="yes">Playlist name</property>
+                <property name="activates-default">true</property>
+                <style><class name="playlist-name-owner-entry"/></style>
+              </object>
+            </property>
+            <child type="overlay">
+              <object class="GtkToggleButton" id="new_owner">
+                <property name="halign">end</property>
+                <property name="valign">center</property>
+                <property name="margin-end">4</property>
+                <style>
+                  <class name="flat"/>
+                  <class name="circular"/>
+                  <class name="playlist-name-owner"/>
+                </style>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child><object class="GtkBox" id="new_public_options">
+          <property name="visible">false</property>
+          <property name="spacing">8</property>
+          <child><object class="GtkSwitch" id="new_public">
+            <property name="valign">center</property>
+            <accessibility><relation name="labelled-by">new_public_label</relation></accessibility>
+          </object></child>
+          <child><object class="GtkLabel" id="new_public_label"><property name="label" translatable="yes">Public</property></object></child>
+        </object></child>
+        <child><object class="GtkBox">
+          <property name="halign">end</property>
+          <property name="spacing">8</property>
+          <property name="margin-top">6</property>
+          <child><object class="GtkButton" id="new_cancel"><property name="label" translatable="yes">Cancel</property></object></child>
+          <child><object class="GtkButton" id="new_create"><property name="label" translatable="yes">Create</property><style><class name="suggested-action"/></style></object></child>
+        </object></child>
+      </object>
+      </property>
+    </object></property>
+  </object>
+
+  <object class="AdwDialog" id="rename_dialog">
+    <property name="title" translatable="yes">Edit Playlist</property>
+    <property name="content-width">320</property>
+    <property name="default-widget">rename_apply</property>
+    <property name="focus-widget">rename_entry</property>
+    <property name="child"><object class="AdwToolbarView">
+      <child type="top"><object class="AdwHeaderBar"/></child>
+      <property name="content"><object class="GtkBox">
+      <property name="orientation">vertical</property>
+      <property name="spacing">12</property>
+      <property name="margin-start">18</property>
+      <property name="margin-end">18</property>
+      <property name="margin-bottom">18</property>
+      <child><object class="GtkEntry" id="rename_entry">
+      <property name="placeholder-text" translatable="yes">Playlist name</property>
+      <property name="activates-default">true</property>
+      </object></child>
+      <child><object class="GtkBox" id="playlist_public_options">
+        <property name="visible">false</property>
+        <property name="spacing">8</property>
+        <child><object class="GtkSwitch" id="playlist_public">
+          <property name="valign">center</property>
+          <accessibility><relation name="labelled-by">playlist_public_label</relation></accessibility>
+        </object></child>
+        <child><object class="GtkLabel" id="playlist_public_label"><property name="label" translatable="yes">Public</property></object></child>
+      </object></child>
+      <child><object class="GtkBox">
+        <property name="halign">end</property>
+        <property name="spacing">8</property>
+        <property name="margin-top">6</property>
+        <child><object class="GtkButton" id="rename_cancel"><property name="label" translatable="yes">Cancel</property></object></child>
+        <child><object class="GtkButton" id="rename_apply"><property name="label" translatable="yes">Apply</property><style><class name="suggested-action"/></style></object></child>
+      </object></child>
+      </object></property>
+    </object></property>
+  </object>
+  <object class="AdwDialog" id="edit_dialog">
+    <property name="title" translatable="yes">Edit Playlist</property>
+    <property name="content-width">600</property>
+    <property name="default-widget">save_edit</property>
+    <property name="focus-widget">name_entry</property>
+    <property name="child">
+      <object class="AdwToolbarView">
+        <child type="top"><object class="AdwHeaderBar">
+          <property name="show-start-title-buttons">false</property>
+          <property name="show-end-title-buttons">false</property>
+          <child type="start"><object class="GtkButton" id="cancel_edit"><property name="label" translatable="yes">Cancel</property></object></child>
+          <child type="end"><object class="GtkButton" id="save_edit"><property name="label" translatable="yes">Apply</property><style><class name="suggested-action"/></style></object></child>
+        </object></child>
+        <property name="content"><object class="GtkBox">
+          <property name="orientation">vertical</property>
+          <property name="spacing">12</property>
+          <property name="margin-start">18</property>
+          <property name="margin-end">18</property>
+          <property name="margin-bottom">18</property>
+          <child><object class="GtkEntry" id="name_entry"><property name="activates-default">true</property><property name="placeholder-text" translatable="yes">Playlist name</property></object></child>
+          <child>
+      <object class="GtkScrolledWindow">
+        <property name="hscrollbar-policy">never</property>
+        <property name="propagate-natural-height">true</property>
+        <property name="child">
+      <object class="GtkBox">
+        <property name="orientation">vertical</property>
+        <property name="spacing">12</property>
+        <child><object class="GtkListBox" id="file_options">
+          <property name="selection-mode">none</property>
+          <style><class name="boxed-list"/></style>
+          <child>
+            <object class="AdwActionRow" id="linked_file">
+              <property name="title" translatable="yes">Linked file</property>
+              <property name="subtitle" translatable="yes">No file linked</property>
+              <property name="subtitle-lines">2</property>
+              <child type="suffix">
+                <object class="GtkButton" id="link_file">
+                  <property name="label" translatable="yes">Open</property>
+                  <property name="valign">center</property>
+                </object>
+              </child>
+            </object>
+          </child>
+          <child><object class="AdwEntryRow" id="file_name"><property name="title" translatable="yes">Filename</property><property name="show-apply-button">true</property></object></child>
+          <child><object class="AdwSwitchRow" id="auto_refresh"><property name="title" translatable="yes">Refresh automatically</property></object></child>
+          <child><object class="AdwComboRow" id="auto_save"><property name="title" translatable="yes">Save changes automatically</property><property name="model"><object class="GtkStringList"><items><item translatable="yes">Use source setting</item><item translatable="yes">Off</item><item translatable="yes">On</item></items></object></property></object></child>
+          <child><object class="AdwComboRow" id="path_mode"><property name="title" translatable="yes">Path format</property><property name="model"><object class="GtkStringList"><items><item translatable="yes">Automatic</item><item translatable="yes">Relative</item><item translatable="yes">Absolute</item></items></object></property></object></child>
+        </object></child>
+        <child><object class="GtkLabel" id="file_error"><property name="wrap">true</property><property name="visible">false</property><style><class name="error"/></style></object></child>
+        <child><object class="GtkBox" id="file_actions"><property name="homogeneous">true</property><property name="spacing">6</property>
+          <child><object class="GtkButton" id="save_file"><property name="child"><object class="GtkLabel"><property name="label" translatable="yes">Save</property><property name="wrap">true</property></object></property></object></child>
+          <child><object class="GtkButton" id="reload_file"><property name="child"><object class="GtkLabel"><property name="label" translatable="yes">Reload</property><property name="wrap">true</property></object></property></object></child>
+          <child><object class="GtkButton" id="unlink_file"><property name="child"><object class="GtkLabel"><property name="label" translatable="yes">Unlink</property><property name="wrap">true</property></object></property></object></child>
+          <child><object class="GtkButton" id="delete_file"><property name="child"><object class="GtkLabel"><property name="label" translatable="yes">Delete</property><property name="wrap">true</property></object></property><style><class name="destructive-action"/></style></object></child>
+        </object></child>
+      </object>
+        </property>
+      </object>
+          </child>
+        </object></property>
+      </object>
+    </property>
+  </object>
+  <object class="AdwAlertDialog" id="link_choice">
+    <property name="heading" translatable="yes">Link to file...</property>
+    <property name="close-response">cancel</property>
+    <responses><response id="cancel" translatable="yes">Cancel</response><response id="load" translatable="yes">Load file contents</response><response id="replace" translatable="yes" appearance="destructive">Replace file contents</response></responses>
+  </object>
+  <object class="AdwAlertDialog" id="file_conflict">
+    <property name="heading" translatable="yes">Playlist file changed</property>
+    <property name="close-response">cancel</property>
+    <responses><response id="cancel" translatable="yes">Cancel</response><response id="load" translatable="yes">Reload from file</response><response id="replace" translatable="yes" appearance="destructive">Replace file contents</response></responses>
+  </object>
+  <object class="AdwAlertDialog" id="file_delete_confirmation">
+    <property name="heading" translatable="yes">Delete playlist file</property>
+    <property name="close-response">cancel</property>
+    <responses><response id="cancel" translatable="yes">Cancel</response><response id="delete" translatable="yes" appearance="destructive">Delete</response></responses>
+  </object>
+</interface>

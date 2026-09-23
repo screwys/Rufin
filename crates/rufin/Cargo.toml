@@ -30,7 +30,7 @@ playback.workspace = true
 playback-gstreamer.workspace = true
 sources.workspace = true
 tracing.workspace = true
-ui-shell.workspace = true
+gtk-shell.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-updater.workspace = true

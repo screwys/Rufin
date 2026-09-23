@@ -9596,6 +9596,19 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/spiritless_po/spiritless_po-1.1.0.crate",
+        "sha256": "be26bb1dc09d661d3e4cbd60d975ec6f9fe8bb56b0b3ac27666cd931334898cc",
+        "dest": "cargo/vendor/spiritless_po-1.1.0"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"be26bb1dc09d661d3e4cbd60d975ec6f9fe8bb56b0b3ac27666cd931334898cc\", \"files\": {}}",
+        "dest": "cargo/vendor/spiritless_po-1.1.0",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/spki/spki-0.7.3.crate",
         "sha256": "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d",
         "dest": "cargo/vendor/spki-0.7.3"

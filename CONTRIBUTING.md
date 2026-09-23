@@ -52,7 +52,7 @@ Rufin's crates try to follow a product ownership model. The goal is to separate 
 | `artwork` | artwork selection, loading, and caching |
 | `audio-processing` | waveform, loudness, transcoding and spectrum analysis |
 | `backup` | backup archives, encryption, staging and scheduling rules |
-| `desktop-integration` | MPRIS, notifications, the tray, and Discord RPC |
+| `desktop-integration` | desktop media controls, notifications, the tray, and Discord IPC |
 | `downloads` | server track downloads and download management |
 | `library` | music items, listening activity, and the database |
 | `localization` | translation tooling and locales |
@@ -61,23 +61,28 @@ Rufin's crates try to follow a product ownership model. The goal is to separate 
 | `playback` | playback behavior and the queue |
 | `playback-cast` | UPnP, Chromecast and AirPlay casting integration |
 | `playback-gstreamer` | the GStreamer playback backend |
+| `presence` | shared Discord preferences, playback activity and payload construction |
 | `rufin` | executable startup, desktop paths, backend construction and native observers |
-| `rufin-core` | shared application runtime, operations, settings, sources and HTTP API |
+| `rufin-core` | shared application runtime, operations, settings and sources |
 | `rufin-connect` | Connect networking, pairing, and profile synchronization|
 | `rufin-controller` | headless executable with optional HTTP access |
 | `scrobbling` | scrobbling services|
 | `secrets` | storage for credentials and service keys |
 | `sources` | source-specific operations |
-| `ui-shell` | desktop window composition, navigation admission, preferences and native actions |
-| `ui-library` | browsing pages, bounded projections, models and page selection |
-| `ui-shared` | shared GTK controls, menus, editors, artwork presentation and resources |
-| `ui-player` | persistent playback, queue, lyrics, outputs and visualizer presentation |
+| `gtk-shell` | desktop window composition, navigation admission and native actions |
+| `gtk-library` | browsing pages, bounded projections, models and page selection |
+| `gtk-widgets` | shared GTK controls, field selection, artwork presentation and resources |
+| `gtk-player` | persistent playback, queue, lyrics, and visualizer presentation |
+| `gtk-preferences` | preferences, source setup, and appearance |
+| `gtk-editors` | metadata and smart playlist editors |
+| `gtk-media-menus` | media context menus and playlist picking |
+| `web` | HTTP routes, server lifetime and embedded browser presentation |
 | `windows-updater` | automatic windows updates from .exe |
 | `xtask` | development and packaging commands |
 
 The `web/` directory contains the browser interface: Askama templates,
 HTMX, JavaScript and CSS. Assets are bundled into the executable.
-The HTTP command reference is in `crates/rufin-core/src/api/help.json` and served by `GET /api`.
+The HTTP command reference is in `crates/web/src/help.json` and served by `GET /api`.
 
 ## Development commands
 

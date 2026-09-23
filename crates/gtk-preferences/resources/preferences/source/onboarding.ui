@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+  <object class="AdwDialog" id="dialog">
+    <property name="title" translatable="yes">Add Source</property>
+    <property name="content-width">700</property>
+    <property name="content-height">760</property>
+    <property name="child"><object class="AdwToolbarView" id="toolbar">
+      <child type="top"><object class="AdwHeaderBar"><property name="show-title">false</property></object></child>
+    </object></property>
+  </object>
+</interface>

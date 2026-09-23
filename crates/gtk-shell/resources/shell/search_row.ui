@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <template class="RufinSearchPreviewRow" parent="GtkBox">
+    <property name="spacing">12</property>
+    <style><class name="search-preview-row"/></style>
+    <child><object class="GtkOverlay" id="cover_overlay">
+      <style><class name="search-preview-cover"/></style>
+      <property name="valign">center</property>
+      <property name="child"><object class="GtkBox" id="cover_host"/></property>
+      <child type="overlay"><object class="GtkButton" id="play">
+        <property name="icon-name">rufin-media-playback-start-symbolic</property>
+        <property name="tooltip-text" translatable="yes">Play</property>
+        <property name="focus-on-click">false</property>
+        <style><class name="flat"/><class name="search-preview-play"/></style>
+      </object></child>
+    </object></child>
+    <child><object class="GtkBox">
+      <property name="orientation">vertical</property>
+      <property name="spacing">4</property>
+      <property name="valign">center</property>
+      <property name="hexpand">true</property>
+      <child><object class="GtkBox" id="title_row">
+        <property name="spacing">5</property>
+        <child><object class="GtkLabel" id="title">
+        <property name="hexpand">true</property>
+        <property name="xalign">0</property><property name="ellipsize">end</property><property name="max-width-chars">36</property>
+        <style><class name="search-result-title"/></style>
+        </object></child>
+      </object></child>
+      <child><object class="GtkBox">
+        <property name="spacing">6</property>
+        <child><object class="GtkStack" id="kind">
+          <property name="hhomogeneous">false</property>
+          <style><class name="dim-label"/></style>
+          <child><object class="GtkStackPage"><property name="name">track</property><property name="child"><object class="GtkLabel"><property name="label" translatable="yes">Track</property></object></property></object></child>
+          <child><object class="GtkStackPage"><property name="name">album</property><property name="child"><object class="GtkLabel"><property name="label" translatable="yes">Album</property></object></property></object></child>
+          <child><object class="GtkStackPage"><property name="name">artist</property><property name="child"><object class="GtkLabel"><property name="label" translatable="yes">Artist</property></object></property></object></child>
+        </object></child>
+        <child><object class="GtkLabel" id="separator">
+          <property name="label">·</property>
+          <property name="visible">false</property>
+          <style><class name="dim-label"/></style>
+        </object></child>
+      <child><object class="GtkLabel" id="subtitle">
+        <property name="xalign">0</property><property name="ellipsize">end</property><property name="max-width-chars">36</property>
+        <style><class name="dim-label"/><class name="search-result-subtitle"/></style>
+      </object></child>
+      </object></child>
+    </object></child>
+    <child><object class="GtkButton" id="menu">
+      <property name="icon-name">rufin-more-symbolic</property>
+      <property name="tooltip-text" translatable="yes">Options</property>
+      <property name="focus-on-click">false</property><property name="valign">center</property>
+      <style><class name="flat"/><class name="row-menu-button"/></style>
+    </object></child>
+    <child><object class="GtkButton" id="remove">
+      <property name="icon-name">window-close-symbolic</property>
+      <property name="tooltip-text" translatable="yes">Remove search</property>
+      <property name="focus-on-click">false</property><property name="valign">center</property>
+      <property name="visible">false</property>
+      <style><class name="flat"/><class name="search-preview-remove"/></style>
+    </object></child>
+  </template>
+</interface>
