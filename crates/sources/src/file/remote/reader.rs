@@ -101,13 +101,22 @@ impl FileReader {
             || input.position >= input.buffer_start + input.buffer.len() as u64
         {
             let end = input.position.saturating_add(READ_BYTES).min(input.length) - 1;
-            let (buffer, length, _) = input.runtime.block_on(read_chunk(
-                &input.client,
-                &input.uri,
-                input.position,
-                end,
-                input.validator.as_ref(),
-            ))?;
+            let client = input.client.clone();
+            let uri = input.uri.clone();
+            let start = input.position;
+            let validator = input.validator.clone();
+            let (sender, receiver) = tokio::sync::oneshot::channel();
+            // Runtime shutdown cancels the request and releases the blocking reader.
+            input.runtime.spawn(async move {
+                let result = read_chunk(&client, &uri, start, end, validator.as_ref()).await;
+                let _ = sender.send(result);
+            });
+            let (buffer, length, _) = receiver.blocking_recv().map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "Remote file reader runtime stopped",
+                )
+            })??;
             if length != input.length {
                 return Err(io::Error::other(
                     "Remote file length changed while reading metadata",

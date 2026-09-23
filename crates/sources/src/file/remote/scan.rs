@@ -9,7 +9,7 @@ use crate::file::remote::input::{FileInput, FileInputServer};
 use crate::file::{media, scan::stage_audio_tracks_batch};
 use crate::{LocalImageRef, SourceError, SourceReadProgress, SourceReadStage, SourceResult};
 
-pub(crate) const PARSER_VERSION: i64 = 2;
+pub(crate) const PARSER_VERSION: i64 = 3;
 
 impl RemoteSource {
     pub(crate) async fn stat(
@@ -388,7 +388,11 @@ impl RemoteSource {
                         }
                         media::MediaRead::Unreadable => {
                             file.state = LocalFileState::Unreadable;
-                            scan.incomplete();
+                            scan.clear_freshness();
+                            if let Some(old) = prior {
+                                scan.retain_local_media_paths(std::slice::from_ref(&old.path))
+                                    .await?;
+                            }
                             scan.write_local_files(&[(file, vec![])]).await?;
                         }
                     }

@@ -20,6 +20,7 @@ pub fn library_list_title(value: LibraryListKey) -> &'static str {
         LibraryListKey::Artists => msgid("Artists"),
         LibraryListKey::AlbumArtists => msgid("Album artists"),
         LibraryListKey::Tracks => msgid("Tracks"),
+        LibraryListKey::Folders => msgid("Folders"),
         LibraryListKey::FavoriteTracks => msgid("Favorites"),
         LibraryListKey::History => msgid("History"),
         LibraryListKey::Genres => msgid("Genres"),

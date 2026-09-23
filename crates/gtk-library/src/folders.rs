@@ -63,9 +63,9 @@ impl CatalogUi {
         gtk_widgets::controls::configure_search_entry(&search);
         search.set_placeholder_text(Some(&tr("Search current folder")));
         let toolbar = self.library_toolbar_projection_without_detail(
-            LibraryListKey::Tracks,
+            LibraryListKey::Folders,
             Some(search.clone()),
-            crate::available_sort_fields(LibraryListKey::Tracks),
+            crate::available_sort_fields(LibraryListKey::Folders),
         );
         toolbar.set_layout_control_visible(false);
         wrapper.imp().toolbar_host.append(&toolbar.widget());
@@ -73,9 +73,9 @@ impl CatalogUi {
             .imp()
             .breadcrumb_host
             .append(&folder_path_switcher(self, &path));
-        let (resume, download_change) = match prepared {
+        let (resume, refresh, download_change) = match prepared {
             Ok(prepared) => {
-                let (content, resume, download_change) = folder_page(
+                let (content, resume, refresh, download_change) = folder_page(
                     self,
                     selected,
                     path,
@@ -86,19 +86,34 @@ impl CatalogUi {
                     prepared.first_tracks,
                 );
                 wrapper.append(&content);
-                (resume, download_change)
+                (resume, refresh, download_change)
             }
             Err(error) => {
                 tracing::warn!(%error, "failed to prepare Folder route");
                 wrapper.append(&folder_error_view(self));
                 (
                     Rc::new(|| {}) as FolderResume,
+                    Rc::new(|| {}) as FolderResume,
                     Rc::new(|_: &downloads::DownloadEvent| {})
                         as gtk_widgets::mounted_route::MountedDownloadChange,
                 )
             }
         };
+        let shell = Rc::downgrade(self);
+        let resume = Rc::new(move || {
+            let Some(shell) = shell.upgrade() else { return };
+            toolbar.apply(
+                LibraryListKey::Folders,
+                &shell
+                    .settings
+                    .current
+                    .borrow()
+                    .library_list(LibraryListKey::Folders),
+            );
+            resume();
+        });
         MountedRoute::new(wrapper.upcast(), resume)
+            .with_catalog_refresh(refresh)
             .with_search(search)
             .with_download_change(download_change)
     }
@@ -272,6 +287,7 @@ fn folder_page(
 ) -> (
     gtk::Widget,
     FolderResume,
+    FolderResume,
     gtk_widgets::mounted_route::MountedDownloadChange,
 ) {
     search.set_visible(true);
@@ -306,7 +322,7 @@ fn folder_page(
         .settings
         .current
         .borrow()
-        .library_list(LibraryListKey::Tracks);
+        .library_list(LibraryListKey::Folders);
     let queue_input = Rc::new(RefCell::new(match &source {
         FolderTrackSource::Live(_) => None,
         FolderTrackSource::CachedFolder(folder) => Some(library::QueueInput::Query {
@@ -390,7 +406,7 @@ fn folder_page(
     sections.append(&track_sparse.list_model());
     let rows = gtk::FlattenListModel::new(Some(sections));
     let table_initial_width = folder_table_initial_width(route_width);
-    let (table, table_width_fit) = folder_table(
+    let table = folder_table(
         shell,
         rows,
         Rc::clone(&folder_sparse),
@@ -398,17 +414,19 @@ fn folder_page(
         path.clone(),
         table_initial_width,
         Rc::clone(&queue_input),
+        &settings.row_fields,
     );
 
     let table_scroller = gtk::ScrolledWindow::new();
     gtk_widgets::layout::configure_fill_width_clip(&table_scroller, gtk::PolicyType::Automatic);
     table_scroller.set_hexpand(true);
     table_scroller.set_vexpand(true);
-    table_scroller.set_child(Some(&table));
+    table_scroller.set_child(Some(&table.widget()));
     let table_view = crate::route_layout::route_scroller_widget(table_scroller.clone());
     let resize_table_scroller = table_scroller.clone();
+    let resize_table = table.clone();
     let table_view = gtk_widgets::layout::width_allocation_owner(&table_view, move |width| {
-        table_width_fit.fit_scroller_allocation(&resize_table_scroller, width);
+        resize_table.fit_scroller_allocation(&resize_table_scroller, width);
     })
     .upcast::<gtk::Widget>();
     let table_stack = gtk::Stack::new();
@@ -529,25 +547,46 @@ fn folder_page(
     );
     let request = {
         let shell = Rc::downgrade(shell);
-        Rc::new(move |query: String| {
+        let folder_sparse = Rc::clone(&folder_sparse);
+        let previous = RefCell::new(crate::track_model::TrackProjectionRequest {
+            query: String::new(),
+            settings,
+        });
+        Rc::new(move |query: String, refresh: bool| {
             let Some(shell) = shell.upgrade() else { return };
-            read.request_with(crate::track_model::TrackProjectionRequest {
+            let request = crate::track_model::TrackProjectionRequest {
                 query,
                 settings: shell
                     .settings
                     .current
                     .borrow()
-                    .library_list(LibraryListKey::Tracks),
-            });
+                    .library_list(LibraryListKey::Folders),
+            };
+            let name_changed = folder_name_field(&previous.borrow().settings.row_fields)
+                != folder_name_field(&request.settings.row_fields);
+            table.apply_fields(&request.settings.row_fields);
+            if name_changed {
+                folder_sparse.update_matching(|_| true, |_| {});
+            }
+            let query_changed = !previous.borrow().same_query(&request);
+            previous.replace(request.clone());
+            if refresh || query_changed {
+                read.request_with(request);
+            }
         })
     };
     let search_request = Rc::downgrade(&request);
     search.connect_search_changed(move |entry| {
         if let Some(request) = search_request.upgrade() {
-            request(entry.text().trim().to_string());
+            request(entry.text().trim().to_string(), false);
         }
     });
-    let resume = Rc::new(move || request(search.text().trim().to_string())) as FolderResume;
+    let refresh = {
+        let request = Rc::clone(&request);
+        let search = search.clone();
+        Rc::new(move || request(search.text().trim().to_string(), true)) as FolderResume
+    };
+    let resume = Rc::new(move || request(search.text().trim().to_string(), false)) as FolderResume;
     let download_change = Rc::new(move |event: &downloads::DownloadEvent| {
         let downloads::DownloadEvent::Changed {
             media_uri,
@@ -569,7 +608,7 @@ fn folder_page(
             },
         );
     });
-    (table_stack.upcast(), resume, download_change)
+    (table_stack.upcast(), resume, refresh, download_change)
 }
 
 fn folder_table(
@@ -580,66 +619,31 @@ fn folder_table(
     path: Vec<FolderPathItem>,
     initial_width: i32,
     queue_input: Rc<RefCell<Option<library::QueueInput>>>,
-) -> (
-    gtk::ColumnView,
-    gtk_widgets::table_sizing::ColumnViewWidthFit,
-) {
-    let selection = gtk::SingleSelection::new(Some(rows));
+    fields: &[LibraryField],
+) -> crate::collections::CollectionTableProjection {
+    let selection = gtk::SingleSelection::new(Some(rows.clone()));
     selection.set_autoselect(false);
     selection.set_can_unselect(true);
-    let table = gtk::ColumnView::new(Some(selection));
-    table.add_css_class("folder-table");
-    table.add_css_class("folders-table");
-    table.add_css_class("data-table");
-    table.set_show_column_separators(false);
-    table.set_show_row_separators(false);
-    table.set_hexpand(true);
-    table.set_halign(gtk::Align::Fill);
-    table.set_vexpand(true);
-    let columns = vec![
-        folder_index_column(shell, Rc::clone(&folders)),
-        folder_merged_column(shell, path.clone()),
-        folder_album_column(shell, path.clone()),
-        folder_year_column(shell, path.clone()),
-        folder_duration_column(shell, path.clone()),
-        super::columns::mapped_track_favorite_column::<FolderTableRow, _, _>(
-            shell,
-            |row| match row {
-                FolderTableRow::Track(track) => Some(track.media_uri.clone()),
-                _ => None,
-            },
-            |row| match row {
-                FolderTableRow::Track(track) => Some((track.media_uri.clone(), track.favorite)),
-                _ => None,
-            },
-        ),
-    ];
-    for column in &columns {
-        table.append_column(column);
-    }
-    let width_fit = gtk_widgets::table_sizing::install_column_view_width_fit(
-        &table,
-        columns
-            .iter()
-            .map(|column| (column.clone(), column.fixed_width()))
-            .collect(),
-        initial_width,
-    );
+    let playing = super::columns::TrackRowPlayingIndicator::new();
+    let current_playing = playing.clone();
+    shell.register_current_route_track_selection(Rc::new(move |current| {
+        current_playing.set_current(
+            current.map(|current| current.media_uri.as_str()),
+            gtk::INVALID_LIST_POSITION,
+        );
+        current_playing.set_paused(current.is_some_and(|current| current.paused));
+        true
+    }));
+    let column_shell = Rc::clone(shell);
+    let column_path = path.clone();
+    let column_folders = Rc::clone(&folders);
     let activate_shell = Rc::clone(shell);
     let activate_folders = Rc::clone(&folders);
     let activate_tracks = Rc::clone(&tracks);
-    table.connect_activate(move |_, position| {
+    let activate = move |position: u32, row: FolderTableRow| {
         let folder_count = activate_folders.len();
         let position = position as usize;
-        let row = if position < folder_count {
-            activate_folders.ready(position as u32)
-        } else {
-            activate_tracks.ready((position - folder_count) as u32)
-        };
-        let Some(row) = row else {
-            return;
-        };
-        match row.as_ref() {
+        match row {
             FolderTableRow::Folder(folder) => {
                 let mut next = path.clone();
                 next.push(FolderPathItem {
@@ -690,24 +694,39 @@ fn folder_table(
                 ));
             }
         }
-    });
-    (table, width_fit)
+    };
+    let table = crate::collections::dynamic_collection_table(
+        shell,
+        LibraryListKey::Folders,
+        rows,
+        fields,
+        Vec::new(),
+        move |field| {
+            folder_column(
+                &column_shell,
+                column_path.clone(),
+                Rc::clone(&column_folders),
+                &playing,
+                field,
+            )
+        },
+        |field| super::columns::track_column_width(LibraryListKey::Folders, field),
+        false,
+        Some(Box::new(activate)),
+        Some(selection.upcast()),
+        initial_width,
+    );
+    let widget = table.widget();
+    widget.add_css_class("folder-table");
+    widget.add_css_class("folders-table");
+    widget.add_css_class("data-table");
+    table
 }
 
 fn folder_index_column(
-    shell: &Rc<CatalogUi>,
     folders: Rc<gtk_widgets::sparse_model::SparseRouteModel<FolderLink, FolderTableRow>>,
+    playing: super::columns::TrackRowPlayingIndicator,
 ) -> gtk::ColumnViewColumn {
-    let playing = super::columns::TrackRowPlayingIndicator::new();
-    let current_playing = playing.clone();
-    shell.register_current_route_track_selection(Rc::new(move |current| {
-        current_playing.set_current(
-            current.map(|current| current.media_uri.as_str()),
-            gtk::INVALID_LIST_POSITION,
-        );
-        current_playing.set_paused(current.is_some_and(|current| current.paused));
-        true
-    }));
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(|_, item| {
         if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
@@ -756,7 +775,7 @@ fn folder_index_column(
         gtk::ColumnViewColumn::new(Some(super::columns::ROW_INDEX_COLUMN_TITLE), Some(factory));
     configure_folder_column(
         &column,
-        super::columns::track_column_width(LibraryListKey::Tracks, LibraryField::RowIndex),
+        super::columns::track_column_width(LibraryListKey::Folders, LibraryField::RowIndex),
     );
     column
 }
@@ -887,82 +906,106 @@ fn folder_merged_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk
     );
     configure_folder_column(
         &column,
-        super::columns::track_column_width(LibraryListKey::Tracks, LibraryField::TitleMerged),
+        super::columns::track_column_width(LibraryListKey::Folders, LibraryField::TitleMerged),
     );
     column
 }
 
-fn folder_album_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk::ColumnViewColumn {
-    let column = folder_text_column(
-        shell,
-        path,
-        gtk_widgets::settings::library_field_title(LibraryField::Album),
-        24,
-        false,
-        |row| match row {
-            FolderTableRow::Folder(_) => String::new(),
-            FolderTableRow::Track(track) => track.album.clone(),
-        },
-        |row| match row {
-            FolderTableRow::Folder(_) => None,
-            FolderTableRow::Track(track) => Some(gtk_widgets::detail_links::DetailLinks::route(
-                &track.album,
-                track.album_media_uri.clone().map(Route::AlbumDetail),
-            )),
-        },
-    );
-    configure_folder_column(
-        &column,
-        super::columns::track_column_width(LibraryListKey::Tracks, LibraryField::Album),
-    );
-    column
-}
-
-fn folder_year_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk::ColumnViewColumn {
-    let column = folder_text_column(
-        shell,
-        path,
-        gtk_widgets::settings::library_field_title(LibraryField::Year),
-        8,
-        true,
-        |row| match row {
-            FolderTableRow::Folder(_) => String::new(),
-            FolderTableRow::Track(track) => {
-                gtk_widgets::library_fields::track_field(track, LibraryField::Year)
-            }
-        },
-        |_| None,
-    );
-    configure_folder_column(
-        &column,
-        super::columns::track_column_width(LibraryListKey::Tracks, LibraryField::Year),
-    );
-    column
-}
-
-fn folder_duration_column(
+fn folder_column(
     shell: &Rc<CatalogUi>,
     path: Vec<FolderPathItem>,
+    folders: Rc<gtk_widgets::sparse_model::SparseRouteModel<FolderLink, FolderTableRow>>,
+    playing: &super::columns::TrackRowPlayingIndicator,
+    field: LibraryField,
 ) -> gtk::ColumnViewColumn {
+    use gtk_widgets::library_fields::TrackPresentation;
+    let width = super::columns::track_column_width(LibraryListKey::Folders, field);
+    match field {
+        LibraryField::RowIndex => return folder_index_column(folders, playing.clone()),
+        LibraryField::TitleMerged => return folder_merged_column(shell, path),
+        LibraryField::Image => {
+            return super::columns::mapped_track_image_column::<FolderTableRow, _, _>(
+                shell,
+                gtk_widgets::settings::library_field_title(field),
+                width,
+                |row| match row {
+                    FolderTableRow::Track(track) => Some(track.media_uri.clone()),
+                    FolderTableRow::Folder(_) => None,
+                },
+                |row| match row {
+                    FolderTableRow::Track(track) => gtk_widgets::library_fields::opaque_artwork(
+                        track.artwork_binding.as_deref(),
+                    ),
+                    FolderTableRow::Folder(_) => Default::default(),
+                },
+            );
+        }
+        LibraryField::Tools => {
+            return super::columns::mapped_track_favorite_column::<FolderTableRow, _, _>(
+                shell,
+                |row| match row {
+                    FolderTableRow::Track(track) => Some(track.media_uri.clone()),
+                    FolderTableRow::Folder(_) => None,
+                },
+                |row| match row {
+                    FolderTableRow::Track(track) => Some((track.media_uri.clone(), track.favorite)),
+                    FolderTableRow::Folder(_) => None,
+                },
+            );
+        }
+        _ => {}
+    }
+    let value_shell = Rc::clone(shell);
     let column = folder_text_column(
         shell,
         path,
-        super::columns::track_column_title(LibraryField::Duration),
-        8,
-        true,
-        |row| match row {
-            FolderTableRow::Folder(_) => String::new(),
-            FolderTableRow::Track(track) => {
-                gtk_widgets::format_duration((track.duration_millis.max(0) / 1_000) as u32)
+        super::columns::track_column_title(field),
+        24,
+        !matches!(
+            field,
+            LibraryField::Title
+                | LibraryField::Artist
+                | LibraryField::AlbumArtist
+                | LibraryField::Album
+                | LibraryField::Genre
+        ),
+        move |row| match row {
+            FolderTableRow::Folder(folder) => {
+                let fields = value_shell
+                    .settings
+                    .current
+                    .borrow()
+                    .library_list(LibraryListKey::Folders)
+                    .row_fields;
+                if folder_name_field(&fields) == Some(field) {
+                    folder.name.clone()
+                } else {
+                    String::new()
+                }
             }
+            FolderTableRow::Track(track) => track.field(field),
         },
-        |_| None,
+        move |row| match row {
+            FolderTableRow::Folder(_) => None,
+            FolderTableRow::Track(track) => Some(track.links(field)),
+        },
     );
-    configure_folder_column(
-        &column,
-        super::columns::track_column_width(LibraryListKey::Tracks, LibraryField::Duration),
-    );
+    configure_folder_column(&column, width);
     column
+}
+
+fn folder_name_field(fields: &[LibraryField]) -> Option<LibraryField> {
+    [LibraryField::TitleMerged, LibraryField::Title]
+        .into_iter()
+        .find(|field| fields.contains(field))
+        .or_else(|| {
+            fields.iter().copied().find(|field| {
+                !matches!(
+                    field,
+                    LibraryField::RowIndex | LibraryField::Image | LibraryField::Tools
+                )
+            })
+        })
 }
 
 fn folder_text_column(

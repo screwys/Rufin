@@ -16,6 +16,60 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn cue_receipts_migrate_the_backing_index() {
+        use sqlx::Connection;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("old.sqlite");
+        let mut connection = sqlx::SqliteConnection::connect_with(
+            &sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(&path)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+        sqlx::query("CREATE TABLE connect_media_files(media_uri TEXT NOT NULL,encoding TEXT NOT NULL,revision TEXT NOT NULL,path TEXT NOT NULL,managed INTEGER NOT NULL,hash TEXT,PRIMARY KEY(media_uri,encoding)) STRICT").execute(&mut connection).await.unwrap();
+        let backing = url::Url::from_file_path(root.path().join("album.flac"))
+            .unwrap()
+            .to_string();
+        for index in 0..130 {
+            let uri = crate::cue_media_uri(
+                &index.to_string(),
+                &backing,
+                index * 1000,
+                (index + 1) * 1000,
+            );
+            sqlx::query("INSERT INTO connect_media_files VALUES(?1,'original','v1',?2,1,'blob')")
+                .bind(uri)
+                .bind(&backing)
+                .execute(&mut connection)
+                .await
+                .unwrap();
+        }
+        drop(connection);
+        let database = Database::open(&path).await.unwrap();
+        let mut reader = database.acquire_reader().await.unwrap();
+        let count: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM connect_media_files WHERE backing_uri=?1")
+                .bind(&backing)
+                .fetch_one(&mut *reader)
+                .await
+                .unwrap();
+        assert_eq!(count, 130);
+        drop(reader);
+        let uri = crate::cue_media_uri("new-track", &backing, 130_000, 131_000);
+        let shared = database
+            .connect_backing_media_file(&uri, "original", "v1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(shared.path, backing);
+        assert_eq!(
+            database.connect_media_file_users(&shared).await.unwrap(),
+            (true, true)
+        );
+    }
+
+    #[tokio::test]
     async fn direct_continuation_access_stays_local_and_removal_preserves_original() {
         let root = tempfile::tempdir().unwrap();
         let database = Database::open(root.path().join("library.sqlite"))
@@ -180,10 +234,48 @@ impl Database {
         )
     }
 
+    pub async fn connect_media_file_at_path(
+        &self,
+        path: &str,
+        encoding: &str,
+        revision: &str,
+    ) -> LibraryResult<Option<ConnectMediaFile>> {
+        let mut reader = self.acquire_reader().await?;
+        Ok(sqlx::query_as("SELECT * FROM connect_media_files WHERE path=?1 AND encoding=?2 ORDER BY revision=?3 DESC,managed DESC LIMIT 1")
+            .bind(path).bind(encoding).bind(revision)
+            .fetch_optional(&mut *reader).await?)
+    }
+
+    pub async fn connect_backing_media_file(
+        &self,
+        uri: &str,
+        encoding: &str,
+        revision: &str,
+    ) -> LibraryResult<Option<ConnectMediaFile>> {
+        let backing = crate::cue_media_parts(uri).map(|(_, backing, _, _)| backing);
+        let mut reader = self.acquire_reader().await?;
+        Ok(sqlx::query_as("SELECT * FROM connect_media_files WHERE backing_uri=?1 AND encoding=?2 AND revision=?3 ORDER BY managed DESC LIMIT 1")
+            .bind(backing.as_deref().unwrap_or(uri)).bind(encoding).bind(revision)
+            .fetch_optional(&mut *reader).await?)
+    }
+
+    /// Other tracks can use the same backing file or transferred blob.
+    pub async fn connect_media_file_users(
+        &self,
+        file: &ConnectMediaFile,
+    ) -> LibraryResult<(bool, bool)> {
+        let mut reader = self.acquire_reader().await?;
+        Ok(sqlx::query_as("SELECT EXISTS(SELECT 1 FROM connect_media_files WHERE path=?1 AND (media_uri,encoding,revision,path)<>(?2,?3,?5,?1)), EXISTS(SELECT 1 FROM connect_media_files WHERE hash=?4 AND (media_uri,encoding,revision,path)<>(?2,?3,?5,?1))")
+            .bind(&file.path).bind(&file.media_uri).bind(&file.encoding).bind(&file.hash).bind(&file.revision)
+            .fetch_one(&mut *reader).await?)
+    }
+
     pub async fn connect_save_media_file(&self, file: &ConnectMediaFile) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        sqlx::query("INSERT INTO connect_media_files(media_uri,encoding,revision,path,managed,hash) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(media_uri,encoding) DO UPDATE SET revision=excluded.revision,path=excluded.path,managed=excluded.managed,hash=excluded.hash")
+        let backing = crate::cue_media_parts(&file.media_uri).map(|(_, backing, _, _)| backing);
+        sqlx::query("INSERT INTO connect_media_files(media_uri,encoding,revision,path,managed,hash,backing_uri) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(media_uri,encoding) DO UPDATE SET revision=excluded.revision,path=excluded.path,managed=excluded.managed,hash=excluded.hash,backing_uri=excluded.backing_uri")
             .bind(&file.media_uri).bind(&file.encoding).bind(&file.revision).bind(&file.path).bind(file.managed).bind(&file.hash)
+            .bind(backing.as_deref().unwrap_or(&file.media_uri))
             .execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?).await?;
         Ok(())
     }

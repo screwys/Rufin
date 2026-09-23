@@ -35,6 +35,260 @@ fn saved_settings_enable_only_remembered_legacy_profiles() {
 }
 
 struct IdleBackend;
+
+#[test]
+fn cue_backing_file_reuse_and_removal() {
+    let root = tempfile::tempdir().unwrap();
+    app::with_runtime(|runtime| {
+        runtime.block_on(Box::pin(async {
+            let inputs = device(root.path(), "cue-files", diagnostics(), Arc::new(secrets::MemorySecretStore::new())).await;
+            let owner = &inputs.products.connect;
+            for (case, mapped, original_exists, encoding) in [
+                ("existing", true, true, Encoding::Original),
+                ("empty", true, false, Encoding::Original),
+                ("private", false, false, Encoding::Original),
+                ("smaller", true, false, Encoding::Mp3),
+            ] {
+                let folder = root.path().join(case);
+                std::fs::create_dir_all(&folder).unwrap();
+                let original = folder.join("album.flac");
+                if original_exists { std::fs::write(&original, b"whole audio").unwrap(); }
+                owner.status.send_modify(|status| {
+                    status.settings.encoding = encoding;
+                    status.settings.folders.clear();
+                    if mapped { status.settings.folders.insert(case.into(), folder.clone()); }
+                });
+                let remote = url::Url::from_file_path(root.path().join(format!("remote-{case}.flac"))).unwrap().to_string();
+                let mut uris = Vec::new();
+                for index in 0..3 {
+                    let uri = library::cue_media_uri(&format!("{case}:{index}"), &remote, index * 1000, (index + 1) * 1000);
+                    owner.database.connect_apply(&[ConnectRecord {
+                        kind: "track".into(), key: uri.clone(), value: Some(serde_json::json!({
+                            "object_id":format!("{case}:{index}"), "media_uri":uri, "source_id":case,
+                            "title":format!("Track {index}"), "normalized_search":"track", "display_album":"Album", "display_artist":"Artist", "sort_text":"track", "duration_millis":1000,
+                            "source_favorite":false, "disc_number":1, "track_number":index+1, "relative_path":"album.flac", "source_format":"flac", "revision":"v1"
+                        }))
+                    }]).await.unwrap();
+                    uris.push(uri);
+                }
+                let mut stored = Vec::new();
+                for (index, uri) in uris.iter().enumerate() {
+                    if index == 1 {
+                        assert!(downloads::ConnectDownload::reuse(owner.as_ref(), uri).await.unwrap(), "reuse {case}");
+                    } else {
+                        let part = folder.join(format!("input-{index}.part"));
+                        std::fs::write(&part, b"whole audio").unwrap();
+                        let destination = downloads::ConnectDownload::destination(owner.as_ref(), uri).await.unwrap()
+                            .unwrap_or_else(|| folder.join("private.audio"));
+                        downloads::ConnectDownload::finish(owner.as_ref(), library::ConnectMediaFile {
+                            media_uri: uri.clone(), encoding:encoding.name().into(), revision:"\"v1\"".into(),
+                            path:url::Url::from_file_path(&part).unwrap().into(), managed:true, hash:None,
+                        }, &destination).await.unwrap();
+                    }
+                    let file = owner.database.connect_media_file(uri, encoding.name()).await.unwrap().unwrap();
+                    assert_eq!(file.managed, !original_exists);
+                    stored.push(file.path);
+                    let stream = crate::playback::prepare_stream(&owner.database, playback::StreamRequest::original(uri), |_| async { panic!("CUE uses its backing file") }).await.unwrap();
+                    assert_eq!(stream.window().unwrap().start_millis, index as u64 * 1000);
+                    assert_eq!(stream.window().unwrap().end_millis, (index as u64 + 1) * 1000);
+                }
+                assert!(stored.iter().all(|path| path == &stored[0]), "shared backing for {case}: {stored:?}");
+                let file = library::file_media_path(&stored[0]).unwrap();
+                assert_eq!(downloads::ConnectDownload::remove(owner.as_ref(), &uris[0]).await.unwrap(), 0);
+                assert!(file.is_file());
+                assert_eq!(downloads::ConnectDownload::remove(owner.as_ref(), &uris[1]).await.unwrap(), 0);
+                assert!(file.is_file());
+                assert_eq!(downloads::ConnectDownload::remove(owner.as_ref(), &uris[2]).await.unwrap(), usize::from(!original_exists));
+                assert_eq!(file.is_file(), original_exists);
+            }
+            inputs.receivers.visualizer.close();
+            let playback = inputs.products.playback.transport.clone();
+            tokio::task::spawn_blocking(move || playback.shutdown()).await.unwrap();
+        }))
+    }).unwrap();
+}
+
+#[test]
+fn cue_concurrent_completion_and_revision_changes() {
+    let root = tempfile::tempdir().unwrap();
+    app::with_runtime(|runtime| {
+        runtime.block_on(Box::pin(async {
+            let inputs = device(root.path(), "cue-revisions", diagnostics(), Arc::new(secrets::MemorySecretStore::new())).await;
+            let owner = &inputs.products.connect;
+            for original_exists in [false, true] {
+                let folder = root.path().join(format!("mapped-{original_exists}"));
+                std::fs::create_dir_all(&folder).unwrap();
+                let original = folder.join("album.flac");
+                if original_exists { std::fs::write(&original, b"old audio").unwrap(); }
+                owner.status.send_modify(|status| { status.settings.folders.insert("cue".into(), folder.clone()); });
+                let remote = url::Url::from_file_path(folder.join("remote.flac")).unwrap().to_string();
+                let mut uris = Vec::new();
+                for index in 0..3 {
+                    let uri = library::cue_media_uri(&format!("{original_exists}:{index}"), &remote, index*1000, (index+1)*1000);
+                    owner.database.connect_apply(&[ConnectRecord {
+                        kind:"track".into(), key:uri.clone(), value:Some(serde_json::json!({
+                            "object_id":format!("{original_exists}:{index}"), "media_uri":uri, "source_id":"cue",
+                            "title":"Track", "normalized_search":"track", "display_album":"Album", "display_artist":"Artist", "sort_text":"track", "duration_millis":1000,
+                            "source_favorite":false, "disc_number":1, "track_number":index+1, "relative_path":"album.flac", "source_format":"flac", "revision":"v1"
+                        }))
+                    }]).await.unwrap();
+                    uris.push(uri);
+                }
+                let mut completions = Vec::new();
+                for (index, uri) in uris[..2].iter().enumerate() {
+                    let part = folder.join(format!("old-{index}.part"));
+                    std::fs::write(&part, b"old audio").unwrap();
+                    completions.push(library::ConnectMediaFile { media_uri:uri.clone(), encoding:"original".into(), revision:"\"v1\"".into(), path:url::Url::from_file_path(part).unwrap().into(), managed:true, hash:None });
+                }
+                let second = completions.pop().unwrap();
+                let first = completions.pop().unwrap();
+                let (first, second) = tokio::join!(
+                    downloads::ConnectDownload::finish(owner.as_ref(), first, &original),
+                    downloads::ConnectDownload::finish(owner.as_ref(), second, &original)
+                );
+                first.unwrap(); second.unwrap();
+                let a = owner.database.connect_media_file(&uris[0], "original").await.unwrap().unwrap();
+                let b = owner.database.connect_media_file(&uris[1], "original").await.unwrap().unwrap();
+                assert_eq!(a.path, b.path);
+                let mut new_paths = Vec::new();
+                for uri in &uris {
+                    let mut reference = owner.database.connect_track_reference(uri).await.unwrap().unwrap();
+                    reference["revision"] = "v2".into();
+                    owner.database.connect_apply(&[ConnectRecord {kind:"track".into(),key:uri.clone(),value:Some(reference)}]).await.unwrap();
+                    let part = folder.join("new.part");
+                    std::fs::write(&part, b"new audio").unwrap();
+                    downloads::ConnectDownload::finish(owner.as_ref(), library::ConnectMediaFile {
+                        media_uri:uri.clone(),encoding:"original".into(),revision:"\"v2\"".into(),path:url::Url::from_file_path(part).unwrap().into(),managed:true,hash:None,
+                    }, &original).await.unwrap();
+                    let file = owner.database.connect_media_file(uri,"original").await.unwrap().unwrap();
+                    assert_eq!(std::fs::read(library::file_media_path(&file.path).unwrap()).unwrap(),b"new audio");
+                    new_paths.push(file.path);
+                    if new_paths.len() == 1 || original_exists { assert_eq!(std::fs::read(&original).unwrap(), b"old audio"); }
+                }
+                assert!(new_paths.iter().all(|path| path==&new_paths[0]));
+                assert_eq!(original.is_file(), original_exists);
+            }
+            inputs.receivers.visualizer.close();
+            let playback = inputs.products.playback.transport.clone();
+            tokio::task::spawn_blocking(move || playback.shutdown()).await.unwrap();
+        }))
+    }).unwrap();
+}
+
+#[test]
+fn cue_direct_continuation_transfers_one_file_without_enrollment() {
+    let root = tempfile::tempdir().unwrap();
+    app::with_runtime(|runtime| {
+        runtime.block_on(Box::pin(async {
+            let host = device(
+                root.path(),
+                "direct-host",
+                diagnostics(),
+                Arc::new(secrets::MemorySecretStore::new()),
+            )
+            .await;
+            let guest = device(
+                root.path(),
+                "direct-guest",
+                diagnostics(),
+                Arc::new(secrets::MemorySecretStore::new()),
+            )
+            .await;
+            let a = &host.products.connect;
+            let b = &guest.products.connect;
+            execute(a, Action::Create).await.unwrap();
+            pair(a, b).await;
+            let source = root.path().join("whole.flac");
+            std::fs::write(&source, b"complete backing audio").unwrap();
+            let remote = url::Url::from_file_path(&source).unwrap().to_string();
+            let mut files = Vec::new();
+            for index in 0..2 {
+                let uri = library::cue_media_uri(
+                    &format!("direct:{index}"),
+                    &remote,
+                    index * 1000,
+                    (index + 1) * 1000,
+                );
+                let mut item =
+                    library::QueueItem::direct(&uri, "Cue track", "Artist", "Album", 1000);
+                item.source_format = Some("flac".into());
+                let queue = a
+                    .database
+                    .read_queue(library::QueueReadRequest::Capture {
+                        input: Box::new(library::QueueInput::Items(vec![(
+                            item.clone(),
+                            library::QueueProvenance::Manual,
+                        )])),
+                        anchor_index: 0,
+                        random_start: None,
+                        shuffled: None,
+                    })
+                    .await
+                    .unwrap();
+                b.fetch_direct_continuation(
+                    &a.status().identity.unwrap(),
+                    &item,
+                    &queue.entries[0].occurrence,
+                )
+                .await
+                .unwrap();
+                assert!(
+                    b.database
+                        .connect_track_reference(&uri)
+                        .await
+                        .unwrap()
+                        .is_none()
+                );
+                let file = b
+                    .database
+                    .connect_media_file(&uri, "original")
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let path = library::file_media_path(&file.path).unwrap();
+                assert_eq!(std::fs::read(&path).unwrap(), b"complete backing audio");
+                let stream = crate::playback::prepare_stream(
+                    &b.database,
+                    playback::StreamRequest::original(&uri),
+                    |_| async { panic!("downloaded file") },
+                )
+                .await
+                .unwrap();
+                assert_eq!(stream.window().unwrap().start_millis, index as u64 * 1000);
+                assert_eq!(
+                    stream.window().unwrap().end_millis,
+                    (index as u64 + 1) * 1000
+                );
+                files.push((uri, file.path));
+            }
+            assert_eq!(files[0].1, files[1].1);
+            assert_eq!(
+                downloads::ConnectDownload::remove(b.as_ref(), &files[0].0)
+                    .await
+                    .unwrap(),
+                0
+            );
+            assert!(library::file_media_path(&files[1].1).unwrap().is_file());
+            assert_eq!(
+                downloads::ConnectDownload::remove(b.as_ref(), &files[1].0)
+                    .await
+                    .unwrap(),
+                1
+            );
+            assert!(source.is_file());
+            for inputs in [guest, host] {
+                inputs.products.connect.close_network().await.unwrap();
+                inputs.receivers.visualizer.close();
+                let playback = inputs.products.playback.transport.clone();
+                tokio::task::spawn_blocking(move || playback.shutdown())
+                    .await
+                    .unwrap();
+            }
+        }))
+    })
+    .unwrap();
+}
+
 impl PlaybackBackend for IdleBackend {
     fn send(&mut self, _: BackendCommand) -> Result<(), BackendError> {
         Ok(())

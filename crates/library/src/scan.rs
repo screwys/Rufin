@@ -267,6 +267,10 @@ impl Scan {
 
     pub fn incomplete(&mut self) {
         self.authoritative = false;
+        self.clear_freshness();
+    }
+
+    pub fn clear_freshness(&mut self) {
         self.freshness = None;
     }
 
