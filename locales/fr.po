@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-25 12:51+0000\n"
+"PO-Revision-Date: 2026-09-26 11:14+0000\n"
 "Last-Translator: Arnaud Constantin <a.constantin@laposte.net>\n"
 "Language-Team: French <https://hosted.weblate.org/projects/rufin/app/fr/>\n"
 "Language: fr\n"
@@ -673,7 +673,7 @@ msgid "Clear"
 msgstr "Effacer"
 
 msgid "Clearing queue also clears the current song"
-msgstr "Effacer la file d'attente efface également la chanson actuelle"
+msgstr "Effacer la file d'attente efface également la chanson en cours"
 
 msgid "Close Window"
 msgstr "Fermer la fenêtre"
@@ -970,7 +970,7 @@ msgid "Descending"
 msgstr "Descendant"
 
 msgid "Detail track columns"
-msgstr "Colonnes détaillées des pistes"
+msgstr "Colonnes des morceaux détaillées"
 
 msgid "Detail"
 msgstr "Détail"
@@ -1117,7 +1117,7 @@ msgid "Edit"
 msgstr "Editer"
 
 msgid "Embed in track"
-msgstr "Insérer dans la morceau"
+msgstr "Dans la morceau"
 
 msgid "Emby Connect"
 msgstr "Emby Connect"
@@ -1206,7 +1206,7 @@ msgid "Export playlist"
 msgstr "Exporter la playlist"
 
 msgid "Export your listening history in Rufin"
-msgstr "Exportez votre historique d'écoute dans Rufin"
+msgstr "Exportez votre historique d'écoute de Rufin"
 
 msgid "Export"
 msgstr "Exporter"
@@ -1277,7 +1277,7 @@ msgid "Find shares"
 msgstr "Rechercher des partages"
 
 msgid "Find your ListenBrainz user token"
-msgstr "Trouvez votre jeton d'utilisateur ListenBrainz"
+msgstr "retrouvez votre jeton d'utilisateur ListenBrainz"
 
 msgid "Finding lyrics..."
 msgstr "Trouver les paroles..."
@@ -1337,7 +1337,7 @@ msgid "Full Treble"
 msgstr "Aigus au maximum"
 
 msgid "Full"
-msgstr "Plein"
+msgstr "Complète"
 
 msgid "Fullscreen"
 msgstr "Plein écran"
@@ -1409,7 +1409,7 @@ msgid "Help"
 msgstr "Aide"
 
 msgid "Hidden"
-msgstr "Caché"
+msgstr "Cachée"
 
 msgid "Hide sidebar"
 msgstr "Cacher la barre latérale"
@@ -1442,7 +1442,7 @@ msgid "Identifying..."
 msgstr "Identification…"
 
 msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
-msgstr "Si la page ne se charge pas, alors Libre.fm bloque votre IP/VPN"
+msgstr "Si la page ne se charge pas, Libre.fm bloque sûrement votre IP/VPN"
 
 msgid "If you do not have API keys, create them"
 msgstr "Si vous n'avez pas de clés API, créez-les"
