@@ -110,6 +110,7 @@ impl Shell {
             session.dialogs.register(&dialog);
         }
 
+        self.chrome.topbar.close_search_popup();
         present_light_dismiss_dialog(&dialog, &self.chrome.window);
     }
 

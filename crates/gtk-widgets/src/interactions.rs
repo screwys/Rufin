@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -32,6 +32,7 @@ pub struct ContextMenuSurface {
     menu: gio::Menu,
     popover: gtk::PopoverMenu,
     actions: gio::SimpleActionGroup,
+    action_activated: Rc<Cell<bool>>,
     position: Option<(f64, f64)>,
     entries: RefCell<Vec<ContextMenuEntry<gio::MenuItem>>>,
     custom_children: RefCell<Vec<ContextMenuCustomChild>>,
@@ -89,6 +90,7 @@ impl ContextMenuSurface {
             popover: context_popover(target, position, &menu),
             menu,
             actions: gio::SimpleActionGroup::new(),
+            action_activated: Rc::new(Cell::new(false)),
             position,
             entries: RefCell::new(Vec::new()),
             custom_children: RefCell::new(Vec::new()),
@@ -244,7 +246,9 @@ impl ContextMenuSurface {
         let action = gio::SimpleAction::new(name, None);
         action.set_enabled(enabled);
         let popover = self.popover.downgrade();
+        let action_activated = Rc::clone(&self.action_activated);
         action.connect_activate(move |_, _| {
+            action_activated.set(true);
             if let Some(popover) = popover.upgrade() {
                 popdown_native_menu(&popover);
             }
@@ -295,7 +299,15 @@ impl ContextMenuSurface {
                 child.primary_click,
             ) {
                 (Ok(Some(owner)), Some(primary_click)) => {
-                    install_native_submenu_primary_click(&owner, &self.popover, primary_click);
+                    let action_activated = Rc::clone(&self.action_activated);
+                    install_native_submenu_primary_click(
+                        &owner,
+                        &self.popover,
+                        Rc::new(move || {
+                            action_activated.set(true);
+                            primary_click();
+                        }),
+                    );
                 }
                 (Ok(_), _) => {}
                 (Err(()), _) => tracing::error!(
@@ -327,13 +339,20 @@ impl ContextMenuSurface {
         ))));
         // Keep the anchor alive until its manually parented popover is detached.
         let target = self.target.clone();
+        let action_activated = self.action_activated;
         self.popover.connect_closed(move |popover| {
             popdown_nested_native_menus_from(popover.upcast_ref());
             let popover = popover.clone();
             let target = target.clone();
             let unmap_handler = Rc::clone(&unmap_handler);
             let hover_owners = Rc::clone(&hover_owners);
+            let action_activated = Rc::clone(&action_activated);
             glib::idle_add_local_once(move || {
+                // GTK closes menu buttons before activating their actions.
+                // Outside dismissal also needs to close the enclosing search popup.
+                if !action_activated.get() {
+                    let _ = target.activate_action("context-menu.dismiss", None);
+                }
                 if let Some(handler) = unmap_handler.borrow_mut().take() {
                     target.disconnect(handler);
                 }

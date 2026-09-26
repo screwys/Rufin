@@ -38,6 +38,12 @@ impl Topbar {
         }
     }
 
+    pub fn close_search_popup(&self) {
+        if let Some(popup) = self.search_popup.borrow().as_ref() {
+            popup.close();
+        }
+    }
+
     pub fn refresh_search_playback(
         &self,
         current: Option<&gtk_widgets::mounted_route::RouteCurrentTrack>,

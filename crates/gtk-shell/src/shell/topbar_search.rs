@@ -153,6 +153,17 @@ impl SearchPopup {
     }
 
     fn connect(self: &Rc<Self>, clear: &gtk::Button) {
+        let actions = gtk::gio::SimpleActionGroup::new();
+        let dismiss = gtk::gio::SimpleAction::new("dismiss", None);
+        let weak = Rc::downgrade(self);
+        dismiss.connect_activate(move |_, _| {
+            if let Some(popup) = weak.upgrade() {
+                popup.close();
+            }
+        });
+        actions.add_action(&dismiss);
+        self.host
+            .insert_action_group("context-menu", Some(&actions));
         for category in CollectionCategory::ALL {
             let index = category as usize;
             let weak = Rc::downgrade(self);
@@ -261,8 +272,10 @@ impl SearchPopup {
         self.host.add_controller(focus);
 
         let click = gtk::GestureClick::new();
+        // The text field claims clicks, so reopen before it handles the press.
+        click.set_propagation_phase(gtk::PropagationPhase::Capture);
         let weak = Rc::downgrade(self);
-        click.connect_released(move |_, _, _, _| {
+        click.connect_pressed(move |_, _, _, _| {
             if let Some(popup) = weak.upgrade() {
                 if !popup.popover.is_visible() {
                     popup.open();
@@ -532,7 +545,7 @@ impl SearchPopup {
         }
     }
 
-    fn close(&self) {
+    pub(super) fn close(&self) {
         if !self.popover.is_visible() {
             return;
         }
