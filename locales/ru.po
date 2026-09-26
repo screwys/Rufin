@@ -2356,9 +2356,6 @@ msgstr "Предпочитать отдельные обложки для тре
 msgid "Prefer server lyrics"
 msgstr "Предпочитать тексты песен с сервера"
 
-msgid "Prefer server playlist covers"
-msgstr "Предпочитать обложки плейлистов, хранящиеся на сервере"
-
 msgid "Prefer translations"
 msgstr "Предпочитать переводы"
 
@@ -3752,6 +3749,9 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Prefer server playlist covers"
+#~ msgstr "Предпочитать обложки плейлистов, хранящиеся на сервере"
 
 #~ msgid "Artist / Album"
 #~ msgstr "Исполнитель / Альбом"

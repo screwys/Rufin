@@ -2360,9 +2360,6 @@ msgstr "Separate Cover für einzelne Titel bevorzugen"
 msgid "Prefer server lyrics"
 msgstr "Server-Liedtexte bevorzugen"
 
-msgid "Prefer server playlist covers"
-msgstr "Wiedergabelisten-Cover vom Server bevorzugen"
-
 msgid "Prefer translations"
 msgstr "Übersetzungen bevorzugen"
 
@@ -3748,6 +3745,9 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#~ msgid "Prefer server playlist covers"
+#~ msgstr "Wiedergabelisten-Cover vom Server bevorzugen"
 
 #~ msgid "Artist / Album"
 #~ msgstr "Künstler / Album"

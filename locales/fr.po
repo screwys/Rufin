@@ -2347,9 +2347,6 @@ msgstr "Préférer des pochettes distinctes pour les pistes"
 msgid "Prefer server lyrics"
 msgstr "Préférer les paroles du serveur"
 
-msgid "Prefer server playlist covers"
-msgstr "Préférer les pochettes de playlist du serveur"
-
 msgid "Prefer translations"
 msgstr "Préférer les traductions"
 
@@ -3732,6 +3729,9 @@ msgstr "L'option de mise à jour automatique de {app_name} est invalide."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenue sur l'installateur de Rufin"
+
+#~ msgid "Prefer server playlist covers"
+#~ msgstr "Préférer les pochettes de playlist du serveur"
 
 #~ msgid "Artist / Album"
 #~ msgstr "Artiste / Album"

@@ -2554,9 +2554,6 @@ msgstr ""
 msgid "Prefer server lyrics"
 msgstr "偏好伺服器歌詞"
 
-msgid "Prefer server playlist covers"
-msgstr "偏好伺服器的播放清單封面"
-
 msgid "Prefer translations"
 msgstr "偏好翻譯"
 
@@ -4065,6 +4062,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Prefer server playlist covers"
+#~ msgstr "偏好伺服器的播放清單封面"
 
 #~ msgid "Artist / Album"
 #~ msgstr "藝人 / 專輯"

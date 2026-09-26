@@ -2372,9 +2372,6 @@ msgstr ""
 msgid "Prefer server lyrics"
 msgstr ""
 
-msgid "Prefer server playlist covers"
-msgstr ""
-
 msgid "Prefer translations"
 msgstr ""
 

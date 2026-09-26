@@ -2446,9 +2446,6 @@ msgstr ""
 msgid "Prefer server lyrics"
 msgstr "Suosi palvelimen sanoituksia"
 
-msgid "Prefer server playlist covers"
-msgstr "Suosi palvelimen soittolistan kansikuvia"
-
 msgid "Prefer translations"
 msgstr "Suosi käännöksiä"
 
@@ -3951,6 +3948,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#~ msgid "Prefer server playlist covers"
+#~ msgstr "Suosi palvelimen soittolistan kansikuvia"
 
 #~ msgid "Artist / Album"
 #~ msgstr "Esittäjä / Albumi"

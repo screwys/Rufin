@@ -2336,9 +2336,6 @@ msgstr "Eelista lugude eraldi kaanepilte"
 msgid "Prefer server lyrics"
 msgstr "Eelista laulusõnu serverist"
 
-msgid "Prefer server playlist covers"
-msgstr "Eelistata serveri esitusloendi kaanepilte"
-
 msgid "Prefer translations"
 msgstr "Eelista tõlkeid"
 
@@ -3714,6 +3711,9 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#~ msgid "Prefer server playlist covers"
+#~ msgstr "Eelistata serveri esitusloendi kaanepilte"
 
 #~ msgid "Artist / Album"
 #~ msgstr "Esitaja / Album"
