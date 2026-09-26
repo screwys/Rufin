@@ -26,7 +26,7 @@ const PROVIDER_PLAYLIST_PAGE: usize = 256;
 pub(crate) const LIVE_CHANGE_LIMIT: usize = 128;
 
 enum MetadataOwner {
-    Track(library::TrackRow),
+    Track(Box<library::TrackRow>),
     Album(library::AlbumRow),
     Artist(library::ArtistRow),
 }
@@ -1574,13 +1574,13 @@ impl Source {
     ) -> Result<ScanOutcome, crate::SourceMetadataError> {
         let cancellation = library::ReadCancellation::new();
         let owner = match &edit {
-            crate::MetadataEdit::Track(_) => MetadataOwner::Track(
+            crate::MetadataEdit::Track(_) => MetadataOwner::Track(Box::new(
                 database
                     .track_row_by_uri(media_uri, &cancellation)
                     .await
                     .map_err(metadata_database_error)?
                     .ok_or(crate::SourceMetadataError::Unavailable)?,
-            ),
+            )),
             crate::MetadataEdit::Album(_) => MetadataOwner::Album(
                 database
                     .album_row_by_media_uri(media_uri, &cancellation)
