@@ -527,6 +527,7 @@ pub async fn build(
     build_normal_navigation(&shell);
     build_compact_navigation(&shell);
     connect_shell_actions(&shell);
+    super::drop_import::install(&shell);
     shell.chrome.topbar.bind(&shell);
     install_application_quit(&shell);
     install_desktop_lifecycle(&shell);

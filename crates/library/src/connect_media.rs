@@ -180,8 +180,18 @@ impl Database {
         {
             return Ok(Some(path));
         }
-        let path: Option<String> = sqlx::query_scalar("SELECT f.path FROM catalog.tracks t JOIN catalog.local_files f ON f.source_key=t.source_key AND f.path=t.source_path WHERE t.media_uri=?1 LIMIT 1")
-            .bind(uri).fetch_optional(&mut *reader).await?;
+        let backing = crate::cue_media_parts(uri).map(|(_, backing, _, _)| backing);
+        let native = crate::file_media_path(backing.as_deref().unwrap_or(uri)).is_some();
+        // Native scans set source_path; Connect never copies it from another device.
+        // Playlist imports keep that path without configuring a folder.
+        let path: Option<String> = sqlx::query_scalar(
+            "SELECT source_path FROM catalog.tracks t WHERE media_uri=?1 AND source_path IS NOT NULL
+             AND (?2 OR EXISTS(SELECT 1 FROM catalog.local_files f WHERE f.source_key=t.source_key AND f.path=t.source_path))",
+        )
+        .bind(uri)
+        .bind(native)
+        .fetch_optional(&mut *reader)
+        .await?;
         Ok(path
             .map(std::path::PathBuf::from)
             .filter(|path| path.is_file()))

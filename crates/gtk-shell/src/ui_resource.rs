@@ -7,6 +7,7 @@ pub(crate) const ABOUT_RESOURCE: &str = "/io/github/screwys/Rufin/ui/application
 pub(crate) const RANDOM_PLAY_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/random_play.ui";
 
 pub(crate) const DIAGNOSTICS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/diagnostics.ui";
+pub(crate) const DROP_IMPORT_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/drop_import.ui";
 pub(crate) const CONTENT_CHROME_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/shell/content_chrome.ui";
 pub(crate) const TOPBAR_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/topbar.ui";
@@ -25,6 +26,7 @@ pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     ABOUT_RESOURCE,
     CONTENT_CHROME_RESOURCE,
     DIAGNOSTICS_RESOURCE,
+    DROP_IMPORT_RESOURCE,
     TOPBAR_RESOURCE,
     SEARCH_POPOVER_RESOURCE,
     SEARCH_ROW_RESOURCE,

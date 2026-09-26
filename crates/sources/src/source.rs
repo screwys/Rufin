@@ -23,6 +23,32 @@ use crate::{
 
 const PROVIDER_PLAYLIST_PAGE: usize = 256;
 
+/// A missing file differs from a path that could not be checked.
+pub async fn local_files_available(paths: Vec<Vec<PathBuf>>) -> SourceResult<Vec<bool>> {
+    tokio::task::spawn_blocking(move || {
+        paths
+            .into_iter()
+            .map(|paths| {
+                let mut failure = None;
+                for path in paths {
+                    match std::fs::metadata(path) {
+                        Ok(metadata) if metadata.is_file() => return Ok(true),
+                        Ok(_) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(error) => failure = Some(error),
+                    }
+                }
+                match failure {
+                    Some(error) => Err(SourceError::Other(error.to_string())),
+                    None => Ok(false),
+                }
+            })
+            .collect()
+    })
+    .await
+    .map_err(|error| SourceError::Other(error.to_string()))?
+}
+
 pub(crate) const LIVE_CHANGE_LIMIT: usize = 128;
 
 enum MetadataOwner {
@@ -840,6 +866,16 @@ impl Source {
 
     pub fn source_id(&self) -> &SourceId {
         &self.source_id
+    }
+
+    /// Check file metadata without opening a stream or transferring audio.
+    pub async fn media_file_exists(&self, path: &str) -> SourceResult<bool> {
+        match &self.implementation {
+            Implementation::Files(source) => source.media_file_exists(path).await,
+            _ => Err(SourceError::InvalidRequest(
+                "The source is not a network file library",
+            )),
+        }
     }
 
     pub async fn refresh_if_needed(
@@ -2597,34 +2633,27 @@ impl Source {
         if !matches!(&self.implementation, Implementation::Local(_)) {
             return Ok(None);
         }
-        let mut page = database
-            .unreferenced_import_page(self.source_id.as_str())
+        database
+            .remove_unreferenced_import_access(self.source_id.as_str())
             .await?;
-        if page.is_empty() {
-            return Ok(None);
-        }
-        let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
-        loop {
+        let mut page = database
+            .unreferenced_import_page(self.source_id.as_str(), "")
+            .await?;
+        let mut scan = Scan::begin_local_items(database, self.source_id.as_str()).await?;
+        while !page.is_empty() {
             scan.begin_batch().await?;
-            for (_, object, watched) in &page {
-                if !watched {
-                    if let Some(object) = object {
-                        scan.remove_track(object).await?;
-                    }
-                }
+            for object in &page {
+                scan.remove_track(object).await?;
             }
             scan.finish_batch().await?;
-            for (key, _, _) in page {
-                database.remove_local_access(key).await?;
-            }
             page = database
-                .unreferenced_import_page(self.source_id.as_str())
+                .unreferenced_import_page(self.source_id.as_str(), page.last().unwrap())
                 .await?;
-            if page.is_empty() {
-                break;
-            }
         }
-        Ok(Some(scan.finish().await?))
+        match scan.finish().await? {
+            ScanOutcome::Identical(_) => Ok(None),
+            outcome => Ok(Some(outcome)),
+        }
     }
 
     pub async fn import_playlist_files(
@@ -2640,6 +2669,30 @@ impl Source {
             }
             _ => Err(SourceError::InvalidRequest(
                 "playlist file import requires Local",
+            )),
+        }
+    }
+
+    pub async fn import_local_paths(
+        &self,
+        database: &Database,
+        paths: Vec<std::path::PathBuf>,
+        name: &str,
+        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+    ) -> SourceResult<(library::PlaylistKey, ScanOutcome)> {
+        match &self.implementation {
+            Implementation::Local(_) => {
+                crate::file::local::scan::import_paths(
+                    database,
+                    self.source_id.as_str(),
+                    paths,
+                    name,
+                    progress,
+                )
+                .await
+            }
+            _ => Err(SourceError::InvalidRequest(
+                "local path import requires Local",
             )),
         }
     }

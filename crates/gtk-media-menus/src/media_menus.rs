@@ -10,7 +10,7 @@ use library::{
 use playback::{QueuePlacement, RadioPlayRequest};
 
 use gtk_widgets::controls::{ADD_ICON, DELETE_ICON, EDIT_ICON, REMOVE_ICON, TRASH_ICON};
-use gtk_widgets::downloads::{OperationFeedback, OperationFeedbackKind};
+use gtk_widgets::downloads::{OperationArtwork, OperationFeedback, OperationFeedbackKind};
 use gtk_widgets::favorites::{FAVORITE_ADD_ICON, FAVORITE_REMOVE_ICON};
 use gtk_widgets::interactions::{
     ContextMenuSurface, DOWNLOAD_ICON, GO_TO_ICON, RADIO_ICON, go_to_context_submenu,
@@ -65,7 +65,7 @@ pub fn add_drag_to_playlist(
                     (menus.operation_feedback)(
                         &OperationFeedback {
                             subject: subject.clone(),
-                            preview_uris: preview_uris.clone(),
+                            artwork: OperationArtwork::MediaUris(preview_uris.clone()),
                             item_count: accepted,
                             kind: OperationFeedbackKind::PlaylistAdded {
                                 destination: playlist.name.clone(),
@@ -101,6 +101,7 @@ pub struct MediaMenus {
     pub publish_smart_playlist_change:
         Rc<dyn Fn(SmartPlaylistChange, Option<Rc<dyn Fn(Result<(), String>)>>)>,
     pub operation_feedback: Rc<dyn Fn(&OperationFeedback, Option<Box<dyn FnOnce()>>)>,
+    pub show_error: Rc<dyn Fn(String)>,
     pub picker_target: Rc<dyn Fn(&ContextMenuSurface, PlaybackTarget)>,
     pub picker_payload: Rc<dyn Fn(&ContextMenuSurface, gtk_widgets::media_drag::MediaDragSource)>,
     pub play_target: Rc<dyn Fn(&PlaybackTarget, QueuePlacement, bool)>,
@@ -544,7 +545,7 @@ pub fn remove_playlist_entry_selection(
         rufin_core::playlists::remove_playlist_entries(&menus.source, selection.playlist, entries);
         let feedback = OperationFeedback {
             subject: DownloadSubject::for_media_uris("playlist", Some("Playlist"), &media_uris),
-            preview_uris: media_uris.iter().take(4).cloned().collect(),
+            artwork: OperationArtwork::MediaUris(media_uris.iter().take(4).cloned().collect()),
             item_count,
             kind: OperationFeedbackKind::PlaylistRemoved {
                 destination: selection.playlist_name.to_string(),
@@ -1020,6 +1021,50 @@ pub fn present_playlist_context_menu(
     }
     if playlist.writable {
         surface.append_fixed_action(msgid("Add current"), "add-current", ADD_ICON);
+    }
+    if rufin_core::playlists::can_remove_unavailable(&menus.source, &playlist) {
+        surface.append_fixed_action(
+            msgid("Remove unavailable tracks"),
+            "remove-unavailable",
+            TRASH_ICON,
+        );
+        let cleanup_menus = Rc::downgrade(menus);
+        let key = playlist.playlist_key;
+        let name = playlist.name.clone();
+        let artwork = gtk_widgets::library_fields::playlist_artwork(&playlist);
+        surface.add_action("remove-unavailable", move || {
+            let Some(menus) = cleanup_menus.upgrade() else {
+                return;
+            };
+            let result = rufin_core::playlists::remove_unavailable_tracks(&menus.source, key);
+            let menus = Rc::downgrade(&menus);
+            let name = name.clone();
+            let artwork = artwork.clone();
+            gtk::glib::spawn_future_local(async move {
+                let Ok(result) = result.recv().await else {
+                    return;
+                };
+                let Some(menus) = menus.upgrade() else {
+                    return;
+                };
+                let removed = match result {
+                    Ok(removed) => removed,
+                    Err(error) => {
+                        (menus.show_error)(error);
+                        return;
+                    }
+                };
+                (menus.operation_feedback)(
+                    &OperationFeedback {
+                        subject: DownloadSubject::for_media_uris("playlist", Some(&name), &[]),
+                        artwork: OperationArtwork::Bindings(artwork),
+                        item_count: removed,
+                        kind: OperationFeedbackKind::PlaylistRemoved { destination: name },
+                    },
+                    None,
+                );
+            });
+        });
     }
     if playlist.metadata_writable {
         surface.append_fixed_action(msgid("Delete"), "delete", DELETE_ICON);

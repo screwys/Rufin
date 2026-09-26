@@ -156,11 +156,8 @@ impl LocalSource {
         source_id: &str,
         playlist: library::PlaylistKey,
     ) -> SourceResult<library::ScanOutcome> {
-        database
-            .import_local_playlist_paths(source_id, playlist)
-            .await?;
-        let mut scan = library::Scan::begin_items(database, source_id).await?;
-        scan::stage_imported_paths(database, &mut scan).await?;
+        let mut scan = library::Scan::begin_local_items(database, source_id).await?;
+        scan::stage_imported_paths(database, &mut scan, Some(playlist)).await?;
         crate::file::artwork::ArtworkFiles::Local
             .stage(database, &mut scan, &|| false)
             .await?;
@@ -296,6 +293,7 @@ pub(crate) fn edit(
 
 pub(crate) fn configured_roots(roots: Vec<PathBuf>) -> SourceResult<Vec<PathBuf>> {
     let mut configured = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for root in roots {
         if !root.is_absolute() {
             return Err(SourceError::InvalidConfig(format!(
@@ -303,7 +301,7 @@ pub(crate) fn configured_roots(roots: Vec<PathBuf>) -> SourceResult<Vec<PathBuf>
                 root.display()
             )));
         }
-        if !configured.iter().any(|accepted| accepted == &root) {
+        if seen.insert(root.clone()) {
             configured.push(root);
         }
     }
@@ -342,20 +340,21 @@ fn excluded_paths(roots: &[PathBuf], folders: &[PathBuf]) -> Vec<PathBuf> {
 
 fn normalize_roots(roots: Vec<PathBuf>) -> SourceResult<Vec<PathBuf>> {
     let mut normalized = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for root in roots {
         let root = fs::canonicalize(&root).map_err(|error| {
             SourceError::Other(format!("Could not read {}: {error}", root.display()))
         })?;
-        if !root.is_dir() {
-            return Err(SourceError::Other(format!(
-                "{} is not a music folder",
-                root.display()
-            )));
+        if root.is_dir() {
+            fs::read_dir(&root).map_err(|error| {
+                SourceError::Other(format!("Could not read {}: {error}", root.display()))
+            })?;
+        } else {
+            fs::File::open(&root).map_err(|error| {
+                SourceError::Other(format!("Could not read {}: {error}", root.display()))
+            })?;
         }
-        fs::read_dir(&root).map_err(|error| {
-            SourceError::Other(format!("Could not read {}: {error}", root.display()))
-        })?;
-        if !normalized.iter().any(|accepted| accepted == &root) {
+        if seen.insert(root.clone()) {
             normalized.push(root);
         }
     }

@@ -1,4 +1,5 @@
 //! The configured sources and the one selected Database-backed source session.
+mod availability;
 mod integrations;
 pub use integrations::FileIntegration;
 
@@ -1226,7 +1227,7 @@ impl SourceOwner {
         self.finish_refresh(source_id, result).await;
     }
 
-    async fn finish_refresh(
+    pub(crate) async fn finish_refresh(
         &self,
         source_id: &SourceId,
         result: sources::SourceResult<ScanOutcome>,
@@ -1345,31 +1346,16 @@ impl SourceOwner {
                 }
             } else {
                 if replacement.configuration.is_local() || exclusions_changed {
-                    let outcome = source
-                        .manual_refresh(
-                            &self.shared.database,
-                            &replacement.configuration.name,
-                            &|_| {},
-                            Arc::clone(&cancelled),
-                        )
-                        .await;
-                    if let Err(SourceError::IncompleteScan { outcome, .. }) = &outcome {
-                        self.accept_scan(
-                            &replacement.configuration.source_id,
-                            *outcome,
-                            CatalogChange::Broad,
-                        )
-                        .await;
-                    }
-                    let outcome = outcome.map_err(string_error)?;
-                    self.accept_scan(
+                    self.refresh_now(
                         &replacement.configuration.source_id,
-                        outcome,
-                        CatalogChange::Broad,
+                        &source,
+                        &replacement.configuration.name,
+                        Arc::clone(&cancelled),
                     )
-                    .await;
+                    .await?;
+                } else {
+                    self.publish_operation(SourceOperation::Idle).await;
                 }
-                self.publish_operation(SourceOperation::Idle).await;
             }
             Ok(())
         }
@@ -2352,10 +2338,88 @@ impl SourceOwner {
         receiver
     }
 
-    pub fn add_local_folder(&self, path: PathBuf) {
-        edit_local_roots(self, move |roots| {
-            roots.push(path);
+    pub(crate) async fn ensure_local_source(&self) -> Result<Arc<Source>, String> {
+        let stored = self.shared.settings.load();
+        let local = stored
+            .sources
+            .configured
+            .iter()
+            .find(|item| item.configuration.is_local());
+        let source = if let Some(local) = local {
+            self.client(&local.configuration.source_id)?
+        } else {
+            let connected = Source::connect(
+                fresh_source_id()?,
+                SourceSetupInput::Local(sources::LocalFolderHostInput { roots: Vec::new() }),
+            )
+            .await
+            .map_err(string_error)?;
+            let (configuration, source, credential) = connected.into_parts();
+            self.persist_connected_source(
+                &ConfiguredSource {
+                    configuration: configuration.clone(),
+                    credential_ref: None,
+                    music_folder_id: None,
+                    local_access: None,
+                    enable_half_stars: false,
+                },
+                credential,
+            )?;
+            library::Scan::begin(
+                &self.shared.database,
+                configuration.source_id.as_str(),
+                &configuration.name,
+                "local",
+                None,
+            )
+            .await
+            .map_err(string_error)?
+            .finish()
+            .await
+            .map_err(string_error)?;
+            self.shared
+                .send(SourceEvent::Configured(
+                    self.shared
+                        .configured_sources(self.shared.selected().as_deref()),
+                ))
+                .await;
+            Arc::new(source)
+        };
+        Ok(source)
+    }
+
+    pub fn add_local_paths(&self, paths: Vec<PathBuf>) -> Receiver<Result<(), String>> {
+        let (sender, receiver) = async_channel::bounded(1);
+        let cancelled = self.shared.begin_acquisition();
+        self.spawn_serialized(move |owner| async move {
+            let result = async {
+                let source = owner.ensure_local_source().await?;
+                let configuration = owner
+                    .configuration(source.source_id())
+                    .ok_or_else(source_access_unavailable)?;
+                let mut roots = local_roots(&configuration)?;
+                roots.extend(paths);
+                owner
+                    .edit_configured_source(
+                        source.source_id().clone(),
+                        SourceSettingsInput::Local {
+                            roots,
+                            excluded_folders: None,
+                        },
+                        Arc::clone(&cancelled),
+                    )
+                    .await?;
+                if owner.shared.selected().is_none() {
+                    owner
+                        .select_now(source.source_id().clone(), cancelled)
+                        .await?;
+                }
+                Ok(())
+            }
+            .await;
+            let _ = sender.send(result).await;
         });
+        receiver
     }
 
     pub fn replace_local_folder(&self, current: String, replacement: PathBuf) {
@@ -3878,7 +3942,7 @@ fn source_progress(progress: SourceReadProgress) -> SourceProgress {
     }
 }
 
-fn refreshing_progress(
+pub(crate) fn refreshing_progress(
     shared: Arc<Shared>,
     source_id: SourceId,
 ) -> impl Fn(SourceReadProgress) + Send + Sync {
@@ -4450,6 +4514,7 @@ mod artwork_preparation_tests {
                 crate::playback::prepare_stream(
                     &database,
                     playback::StreamRequest::new(&local_uri, playback::StreamQuality::Original),
+                    None,
                     |_| session.initialized_source(),
                 ),
             )

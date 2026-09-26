@@ -80,6 +80,10 @@ msgid ""
 msgstr ""
 
 msgid ""
+"Only imports the tracks as a playlist, does not watch the folder for changes."
+msgstr ""
+
+msgid ""
 "Open Rufin Connect on another device, connect via Join button or by copying "
 "invitation code"
 msgstr ""
@@ -133,11 +137,6 @@ msgstr ""
 msgid ""
 "The folder is relative to the selected account. Applying it changes storage "
 "on all devices."
-msgstr ""
-
-msgid ""
-"These folders are combined into the Local source and shown through folder "
-"browsing"
 msgstr ""
 
 msgid ""
@@ -277,6 +276,9 @@ msgstr ""
 msgid "Add image"
 msgstr ""
 
+msgid "Add music"
+msgstr ""
+
 msgid "Add to Favorites"
 msgstr ""
 
@@ -284,6 +286,9 @@ msgid "Add to Pins"
 msgstr ""
 
 msgid "Add to Playlist"
+msgstr ""
+
+msgid "Add to library"
 msgstr ""
 
 msgid "Add tracks when fewer than this many remain"
@@ -710,6 +715,10 @@ msgstr ""
 msgid "Configure another"
 msgstr ""
 
+#, rust-format
+msgid "Configured items: {count}"
+msgstr ""
+
 msgid "Confirm"
 msgstr ""
 
@@ -878,6 +887,9 @@ msgid "Country"
 msgstr ""
 
 msgid "Create a playlist from queue"
+msgstr ""
+
+msgid "Create playlist"
 msgstr ""
 
 msgid "Create"
@@ -1474,6 +1486,9 @@ msgstr ""
 msgid "Import"
 msgstr ""
 
+msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr ""
 
@@ -1662,6 +1677,9 @@ msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
 msgstr[1] ""
+
+msgid "Local files and folders"
+msgstr ""
 
 msgid "Local folder"
 msgstr ""
@@ -1990,7 +2008,7 @@ msgstr ""
 msgid "No local file mapping"
 msgstr ""
 
-msgid "No local folders configured"
+msgid "No local files or folders configured"
 msgstr ""
 
 msgid "No lyrics available."
@@ -2612,9 +2630,6 @@ msgstr ""
 msgid "Remove Downloads"
 msgstr ""
 
-msgid "Remove Local Folder"
-msgstr ""
-
 msgid "Remove Rule and Delete Downloads"
 msgstr ""
 
@@ -2652,6 +2667,9 @@ msgid "Remove rule"
 msgstr ""
 
 msgid "Remove search"
+msgstr ""
+
+msgid "Remove unavailable tracks"
 msgstr ""
 
 msgid "Remove"
@@ -2944,6 +2962,10 @@ msgid "Select {title}"
 msgstr ""
 
 msgid "Selected folders"
+msgstr ""
+
+#, rust-format
+msgid "Selected items: {count}"
 msgstr ""
 
 msgid "Selection"

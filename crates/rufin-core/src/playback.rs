@@ -616,15 +616,6 @@ impl PlaybackOwner {
             .unwrap_or_else(|p| p.into_inner())
             .upgrade();
         let task = self.runtime.spawn(async move {
-            if let Some(connect) = connect {
-                if let Err(error) = connect.resolve_media(&occurrence).await {
-                    let _ = tokio::task::spawn_blocking(move || {
-                        playback.resolve_stream(run, Err(error))
-                    })
-                    .await;
-                    return;
-                }
-            }
             let (track, album) = database
                 .playback_loudness(&occurrence.item.media_uri, &ReadCancellation::new())
                 .await
@@ -633,15 +624,22 @@ impl PlaybackOwner {
                 track: track.map(Box::new),
                 album: album.map(Box::new),
             };
-            let result = prepare_stream(&database, request, move |source_id| async move {
-                tokio::task::spawn_blocking(move || {
-                    source_owner
-                        .ok_or_else(crate::source::source_access_unavailable)?
-                        .client(&source_id)
-                })
-                .await
-                .map_err(string_error)?
-            })
+            let result = prepare_stream(
+                &database,
+                request,
+                connect
+                    .as_deref()
+                    .map(|connect| (connect, occurrence.as_ref())),
+                move |source_id| async move {
+                    tokio::task::spawn_blocking(move || {
+                        source_owner
+                            .ok_or_else(crate::source::source_access_unavailable)?
+                            .client(&source_id)
+                    })
+                    .await
+                    .map_err(string_error)?
+                },
+            )
             .await
             .map(|stream| prepare_media_stream(stream, loudness, occurrence));
             let _ = tokio::task::spawn_blocking(move || playback.resolve_stream(run, result)).await;
@@ -1126,16 +1124,44 @@ impl TransportCommandPort for PlaybackOwner {
 pub(crate) async fn prepare_stream<F>(
     database: &Database,
     request: StreamRequest,
+    file_transfer: Option<(&crate::connect::ConnectOwner, &playback::QueueOccurrence)>,
     source: impl FnOnce(sources::SourceId) -> F + Send,
 ) -> Result<playback::ResolvedStream, String>
 where
     F: std::future::Future<Output = Result<Arc<sources::Source>, String>> + Send,
 {
-    let access = database
+    let mut access = database
         .playback_access(&request.media_uri)
         .await
         .ok()
         .flatten();
+    let cue = library::cue_media_parts(&request.media_uri);
+    let file_uri = cue
+        .as_ref()
+        .map_or(request.media_uri.as_str(), |(_, uri, _, _)| uri);
+    if let Some((connect, occurrence)) = file_transfer
+        && let Some(path) = library::file_media_path(file_uri)
+    {
+        let remote = database
+            .file_media_is_remote(&request.media_uri, &occurrence.occurrence)
+            .await
+            .map_err(string_error)?;
+        let local_access = access
+            .as_ref()
+            .and_then(|(uri, _)| library::file_media_path(uri))
+            .filter(|path| path.is_file());
+        let available = local_access.is_some() || path.is_file();
+        if remote || !available {
+            let fetched = connect.fetch_playback_file(occurrence).await?;
+            if remote && fetched.is_none() && local_access.is_none() {
+                return Err(sources::SourceError::NotFound.to_string());
+            }
+            access = database
+                .playback_access(&request.media_uri)
+                .await
+                .map_err(string_error)?;
+        }
+    }
     // Downloads names its owned file using the actual transcoded extension.
     // Mapped and original files still use their parsed source format.
     let content_type = access
@@ -1148,7 +1174,7 @@ where
                 .and_then(audio_mime)
         });
     let access_uri = access.map(|(uri, _)| uri);
-    if let Some((_, file_uri, start, end)) = library::cue_media_parts(&request.media_uri) {
+    if let Some((_, file_uri, start, end)) = cue {
         return Ok(
             playback::ResolvedStream::new(access_uri.unwrap_or(file_uri))
                 .with_content_type(content_type)
@@ -1367,6 +1393,7 @@ mod tests {
                 occurrence.media_uri.clone(),
                 playback::StreamQuality::Original,
             ),
+            None,
             |_| async { panic!("a completed download must resolve without contacting its source") },
         )
         .await

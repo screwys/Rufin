@@ -1188,7 +1188,16 @@ mod tests {
         );
         assert_eq!(
             database
-                .playlist_file_uri_page(second.playlist, -1)
+                .playlist_entries_page(
+                    second.playlist,
+                    None,
+                    crate::PlaylistEntrySort::Position,
+                    false,
+                    "",
+                    0,
+                    128,
+                    &crate::ReadCancellation::new()
+                )
                 .await
                 .unwrap()
                 .len(),
@@ -1485,11 +1494,21 @@ mod tests {
             .unwrap();
         assert_eq!(report.imported, 3);
         let entries = database
-            .playlist_file_uri_page(report.playlist, -1)
+            .playlist_entries_page(
+                report.playlist,
+                None,
+                crate::PlaylistEntrySort::Position,
+                false,
+                "",
+                0,
+                128,
+                &crate::ReadCancellation::new(),
+            )
             .await
             .unwrap();
         assert_eq!(entries.len(), 3);
-        for (_, actual) in entries {
+        for entry in entries {
+            let actual = entry.media_uri;
             assert_eq!(actual, uri);
             assert_eq!(crate::file_media_path(&actual).unwrap(), path);
         }

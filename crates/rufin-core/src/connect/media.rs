@@ -451,11 +451,10 @@ impl ConnectOwner {
         {
             path
         } else {
-            self.database
-                .connect_local_file(uri)
-                .await
-                .map_err(error)?
-                .ok_or("The original media is unavailable on this device")?
+            let Some(path) = self.database.connect_local_file(uri).await.map_err(error)? else {
+                return Ok(serde_json::Value::Null);
+            };
+            path
         };
         let original_managed = original_receipt.as_ref().is_some_and(|receipt| {
             receipt.managed && file_path(receipt).as_ref() == Some(&original)
@@ -697,7 +696,8 @@ impl ConnectOwner {
         {
             let identity = self.active().await?.identity.clone();
             self.request_media(&identity, uri, encoding, &cancel, None)
-                .await?;
+                .await
+                .map_err(error)?;
             reusable = self.reusable_media(uri, encoding, &reference).await?;
         }
         if let Some(path) = reusable {
@@ -705,7 +705,8 @@ impl ConnectOwner {
         }
         let offer = self
             .request_media(peer, uri, encoding, &cancel, None)
-            .await?;
+            .await
+            .map_err(error)?;
         let mut destination = self.media_path(
             uri,
             &offer.revision,
@@ -738,7 +739,8 @@ impl ConnectOwner {
         let cancel = CancellationToken::new();
         let offer = self
             .request_media(peer, &item.media_uri, encoding, &cancel, Some(occurrence))
-            .await?;
+            .await
+            .map_err(error)?;
         let destination = self.media_path(
             &item.media_uri,
             &offer.revision,
@@ -768,28 +770,32 @@ impl ConnectOwner {
         encoding: Encoding,
         cancel: &CancellationToken,
         occurrence: Option<&library::OccurrenceId>,
-    ) -> Result<OfferedMedia, String> {
+    ) -> sources::SourceResult<OfferedMedia> {
+        use sources::SourceError;
         let mut nonce = [0u8; 16];
-        getrandom::fill(&mut nonce).map_err(error)?;
+        getrandom::fill(&mut nonce).map_err(|error| SourceError::Other(error.to_string()))?;
         let id = blake3::hash(&nonce).to_hex().to_string();
-        let local = self.active().await?.identity == peer;
+        let local = self.active().await.map_err(SourceError::Network)?.identity == peer;
         self.status.send_modify(|status| {
             status.media_status = Some(localization::tr("Waiting for media provider"))
         });
         let offer = tokio::select! {
             offer = async {
-                if local { self.serve_media(peer, &id, uri, encoding, occurrence).await }
-                else { self.request(peer, Request::Media { id: id.clone(), uri: uri.into(), encoding, occurrence: occurrence.cloned() }).await }
+                if local { self.serve_media(peer, &id, uri, encoding, occurrence).await.map_err(SourceError::Other) }
+                else { self.request(peer, Request::Media { id: id.clone(), uri: uri.into(), encoding, occurrence: occurrence.cloned() }).await.map_err(SourceError::Network) }
             } => offer?,
             _ = cancel.cancelled() => {
                 if local { self.cancel_serving(peer, &id); }
                 else { let _ = self.request(peer, Request::CancelMedia { id }).await; }
-                return Err("Transfer cancelled".into());
+                return Err(SourceError::Cancelled);
             }
         };
-        let offer: OfferedMedia = serde_json::from_value(offer).map_err(error)?;
+        let offer: Option<OfferedMedia> = serde_json::from_value(offer)?;
+        let offer = offer.ok_or(SourceError::NotFound)?;
         if offer.encoding != encoding {
-            return Err("The provider returned a different media representation".into());
+            return Err(SourceError::Other(
+                "The provider returned a different media representation".into(),
+            ));
         }
         Ok(offer)
     }
@@ -839,9 +845,8 @@ impl ConnectOwner {
         })
     }
 
-    /// Called by the shared player for current/upcoming media, including handoff.
-    /// It consults locators rather than treating another device's path as local.
-    pub(crate) async fn resolve_media(
+    /// Fetch a missing file or resolve a file reference received from another device.
+    pub(crate) async fn fetch_playback_file(
         &self,
         occurrence: &library::QueueOccurrence,
     ) -> Result<Option<PathBuf>, String> {
@@ -908,9 +913,7 @@ impl ConnectOwner {
                         reference = Some(value);
                         break;
                     }
-                    _ if library::file_media_path(uri).is_some()
-                        || library::cue_media_parts(uri).is_some() =>
-                    {
+                    _ => {
                         match self
                             .fetch_direct_continuation(
                                 &peer,
@@ -925,24 +928,15 @@ impl ConnectOwner {
                             Err(error) => unavailable = error,
                         }
                     }
-                    _ => {}
                 }
             }
-            if reference.is_none()
-                && (library::file_media_path(uri).is_some()
-                    || library::cue_media_parts(uri).is_some())
-            {
+            if reference.is_none() {
                 return Err(unavailable);
             }
         }
         let Some(reference) = reference else {
             return Ok(None);
         };
-        let is_local =
-            library::file_media_path(uri).is_some() || library::cue_media_parts(uri).is_some();
-        if !is_local {
-            return Ok(None);
-        }
         let encoding = self.status().settings.encoding;
         if let Some(path) = self.reusable_media(uri, encoding, &reference).await? {
             return Ok(Some(path));
@@ -958,7 +952,8 @@ impl ConnectOwner {
         {
             let identity = session.identity.clone();
             self.request_media(&identity, uri, encoding, &CancellationToken::new(), None)
-                .await?;
+                .await
+                .map_err(error)?;
             if let Some(path) = self.reusable_media(uri, encoding, &reference).await? {
                 return Ok(Some(path));
             }
@@ -1151,8 +1146,7 @@ impl ConnectOwner {
                 .identity
                 .clone();
             self.request_media(&identity, uri, encoding, &cancel, None)
-                .await
-                .map_err(SourceError::Other)?;
+                .await?;
             reusable = self
                 .reusable_media(uri, encoding, &reference)
                 .await
@@ -1173,7 +1167,8 @@ impl ConnectOwner {
             });
         }
         let session = self.active().await.map_err(SourceError::Network)?;
-        let mut unavailable = "Waiting for a device with this media".to_string();
+        let mut unavailable = None;
+        let mut missing = false;
         for peer in self
             .connected_network()
             .await
@@ -1190,8 +1185,12 @@ impl ConnectOwner {
                 .await
             {
                 Ok(offer) => offer,
+                Err(SourceError::NotFound) => {
+                    missing = true;
+                    continue;
+                }
                 Err(error) if !cancel.is_cancelled() => {
-                    unavailable = error;
+                    unavailable = Some(error);
                     continue;
                 }
                 Err(_) => return Err(SourceError::Cancelled),
@@ -1201,7 +1200,13 @@ impl ConnectOwner {
                 .await
                 .map_err(SourceError::Network);
         }
-        Err(SourceError::Network(unavailable))
+        Err(unavailable.unwrap_or_else(|| {
+            if missing {
+                SourceError::NotFound
+            } else {
+                SourceError::Network("Waiting for a device with this media".into())
+            }
+        }))
     }
 }
 

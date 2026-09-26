@@ -540,6 +540,7 @@ async fn icon(
         icon!("rufin-more-symbolic.svg"),
         icon!("rufin-open-menu-symbolic.svg"),
         icon!("rufin-process-stop-symbolic.svg"),
+        icon!("rufin-user-trash-symbolic.svg"),
         icon!("rufin-home-symbolic.svg"),
         icon!("rufin-sort-name-symbolic.svg"),
         icon!("rufin-sort-name-descending-symbolic.svg"),

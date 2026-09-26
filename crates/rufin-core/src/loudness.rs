@@ -429,7 +429,7 @@ async fn analyze_uri(
     cancelled: &Arc<AtomicBool>,
 ) -> Result<LoudnessAnalysis, String> {
     let request = StreamRequest::new(media_uri, StreamQuality::Original);
-    let stream = prepare_stream(&state.database, request, move |_| async move {
+    let stream = prepare_stream(&state.database, request, None, move |_| async move {
         selected
             .upgrade()
             .ok_or_else(crate::source::source_access_unavailable)?

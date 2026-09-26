@@ -37,8 +37,6 @@ pub struct ConnectSettings {
     #[serde(alias = "joined")]
     pub established: bool,
     pub setup_pending: bool,
-    /// This device's received queue digest and its original player's identity.
-    pub continued_queue: Option<(String, String)>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,7 +64,6 @@ impl Default for ConnectSettings {
             adopting: false,
             established: false,
             setup_pending: false,
-            continued_queue: None,
         }
     }
 }
@@ -128,6 +125,12 @@ pub struct Status {
 }
 
 impl Status {
+    pub fn continuation_device(&self) -> Option<&Device> {
+        self.devices.iter().find(|device| {
+            self.settings.enabled && device.enrolled && device.reachable && device.has_playback
+        })
+    }
+
     pub fn storage_path(&self, source: Option<&sources::SourceId>) -> String {
         match (source, self.settings.destination.as_ref()) {
             (None, Some(portable::Destination::Local { path })) => {
@@ -246,6 +249,9 @@ enum Request {
     },
     TrackReference {
         uri: String,
+    },
+    MediaAvailability {
+        uris: Vec<String>,
     },
     StopContinuation,
     Control {
@@ -379,6 +385,39 @@ impl ConnectOwner {
         self.status.subscribe()
     }
 
+    pub(crate) async fn media_availability(&self, uris: &[String]) -> Result<Vec<bool>, String> {
+        if self.status().settings.profile.is_none() {
+            return Ok(vec![false; uris.len()]);
+        }
+        let session = self.active().await?;
+        let peers = self
+            .connected_network()
+            .await?
+            .members()
+            .await
+            .map_err(error)?;
+        let mut available = vec![false; uris.len()];
+        for peer in peers.into_iter().filter(|peer| *peer != session.identity) {
+            let answer: Vec<bool> = serde_json::from_value(
+                self.request(
+                    &peer,
+                    Request::MediaAvailability {
+                        uris: uris.to_vec(),
+                    },
+                )
+                .await?,
+            )
+            .map_err(error)?;
+            if answer.len() != uris.len() {
+                return Err("Invalid media availability response".into());
+            }
+            for (current, incoming) in available.iter_mut().zip(answer) {
+                *current |= incoming;
+            }
+        }
+        Ok(available)
+    }
+
     pub async fn roots(&self, source: &str) -> Result<Vec<library::ConnectRoot>, String> {
         let sources = self.source.list_sources();
         if !sources
@@ -389,14 +428,6 @@ impl ConnectOwner {
             return Ok(Vec::new());
         }
         self.database.connect_roots(source).await.map_err(error)
-    }
-
-    async fn queue_content_id(&self) -> Result<String, String> {
-        let local = self.playback.queue_content_id().await?;
-        Ok(match self.status().settings.continued_queue {
-            Some((received, original)) if received == local => original,
-            _ => local,
-        })
     }
 
     /// Called when a client offers continuation after inactivity. This only reads
@@ -413,13 +444,7 @@ impl ConnectOwner {
             return Ok(None);
         }
         self.refresh_devices().await?;
-        let local_queue = self.queue_content_id().await?;
-        Ok(self.status().devices.into_iter().find(|device| {
-            device.enrolled
-                && device.reachable
-                && device.has_playback
-                && device.queue_content_id.as_deref() != Some(local_queue.as_str())
-        }))
+        Ok(self.status().continuation_device().cloned())
     }
 
     pub(crate) fn start(self: &Arc<Self>) {
@@ -1695,7 +1720,9 @@ impl ConnectOwner {
             .await
             .map_err(error)?;
         network.check_membership(&peer).await.map_err(error)?;
-        let staged = self.fetch_snapshot(network, &peer, true).await?;
+        // Scans on the joining device must edit the existing catalog history.
+        // Starting those documents independently can conflict with pruned history.
+        let staged = self.fetch_snapshot(network, &peer).await?;
         let _action = self.actions.lock().await;
         if !self.joining.load(std::sync::atomic::Ordering::Acquire)
             || !self
@@ -1748,12 +1775,11 @@ impl ConnectOwner {
         &self,
         network: &ConnectNetwork,
         peer: &str,
-        setup: bool,
     ) -> Result<tempfile::TempPath, String> {
         let answer = network
             .request(
                 peer,
-                serde_json::to_vec(&Request::ProfileSnapshot { setup }).map_err(error)?,
+                serde_json::to_vec(&Request::ProfileSnapshot { setup: false }).map_err(error)?,
             )
             .await
             .map_err(error)?;
@@ -2101,7 +2127,7 @@ impl ConnectOwner {
             Request::Presence => {
                 let active = self.playback.has_continuation();
                 serde_json::json!({"name":self.status().settings.name,"playback":active,
-                    "queue_content_id":self.queue_content_id().await?})
+                    "queue_content_id":self.playback.queue_content_id().await?})
             }
             Request::Continuation => {
                 let playback = Arc::clone(&self.playback);
@@ -2111,7 +2137,8 @@ impl ConnectOwner {
                         .map_err(error)??
                         .ok_or("There is no playback to continue")?;
                 let mut value = serde_json::to_value(&snapshot.header).map_err(error)?;
-                value["queue_content_id"] = serde_json::json!(self.queue_content_id().await?);
+                value["queue_content_id"] =
+                    serde_json::json!(self.playback.queue_content_id().await?);
                 let mut transfers = self.transfers.lock().unwrap_or_else(|p| p.into_inner());
                 transfers.retain(|_, (started, _)| started.elapsed() < Duration::from_secs(300));
                 transfers.insert(peer.to_owned(), (Instant::now(), snapshot));
@@ -2135,6 +2162,19 @@ impl ConnectOwner {
                     .map_err(error)?,
             )
             .map_err(error)?,
+            Request::MediaAvailability { uris } => {
+                if uris.len() > 256 {
+                    return Err("Too many media availability requests".into());
+                }
+                let paths = self
+                    .database
+                    .local_media_paths(&uris)
+                    .await
+                    .map_err(error)?;
+                let paths = paths.into_iter().map(|(_, paths, _)| paths).collect();
+                serde_json::to_value(sources::local_files_available(paths).await.map_err(error)?)
+                    .map_err(error)?
+            }
             Request::StopContinuation => {
                 let snapshot = self
                     .transfers
@@ -2186,7 +2226,6 @@ impl ConnectOwner {
 
     async fn continue_from(&self, peer: &str) -> Result<(), String> {
         let answer = self.request(peer, Request::Continuation).await?;
-        let original_queue = answer["queue_content_id"].as_str().map(str::to_owned);
         let header: playback::ContinuationHeader = serde_json::from_value(answer).map_err(error)?;
         let transfer = format!("connect-{}", blake3::hash(peer.as_bytes()).to_hex());
         let result = async {
@@ -2212,12 +2251,17 @@ impl ConnectOwner {
                     .await?;
             }
             let current = current.ok_or("The source queue has no current track")?;
-            if self
-                .database
-                .connect_track_reference(&current.media_uri)
-                .await
-                .map_err(error)?
-                .is_none()
+            let cue = library::cue_media_parts(&current.media_uri);
+            let file_uri = cue
+                .as_ref()
+                .map_or(current.media_uri.as_str(), |(_, uri, _, _)| uri);
+            if library::file_media_path(file_uri).is_some()
+                && self
+                    .database
+                    .connect_track_reference(&current.media_uri)
+                    .await
+                    .map_err(error)?
+                    .is_none()
             {
                 let reference = self
                     .request(
@@ -2236,9 +2280,7 @@ impl ConnectOwner {
                         }])
                         .await
                         .map_err(error)?;
-                } else if library::file_media_path(&current.media_uri).is_some()
-                    || library::cue_media_parts(&current.media_uri).is_some()
-                {
+                } else {
                     self.fetch_direct_continuation(peer, &current, &header.current)
                         .await?;
                 }
@@ -2250,13 +2292,7 @@ impl ConnectOwner {
             let fresh =
                 serde_json::from_value(self.request(peer, Request::StopContinuation).await?)
                     .map_err(error)?;
-            self.playback.apply_continuation(prepared, fresh).await?;
-            let local_queue = self.playback.queue_content_id().await?;
-            self.save(|config| {
-                config.continued_queue = original_queue
-                    .filter(|original| original != &local_queue)
-                    .map(|original| (local_queue, original));
-            })
+            self.playback.apply_continuation(prepared, fresh).await
         }
         .await;
         if result.is_err() {

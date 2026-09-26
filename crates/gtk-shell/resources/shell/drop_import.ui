@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <object class="AdwAlertDialog" id="dialog">
+    <property name="heading" translatable="yes">Add music</property>
+    <property name="default-response">add</property>
+    <property name="close-response">cancel</property>
+    <property name="extra-child">
+      <object class="GtkBox">
+        <property name="orientation">vertical</property>
+        <property name="spacing">12</property>
+        <child><object class="GtkBox">
+          <property name="homogeneous">true</property>
+          <style><class name="linked"/><class name="preference-selection-buttons"/></style>
+          <child><object class="GtkToggleButton" id="playlist">
+            <property name="active">true</property>
+            <style><class name="preference-selection-button"/></style>
+            <property name="child"><object class="GtkLabel">
+              <property name="label" translatable="yes">Create playlist</property>
+              <property name="wrap">true</property>
+            </object></property>
+          </object></child>
+          <child><object class="GtkToggleButton" id="library">
+            <property name="group">playlist</property>
+            <style><class name="preference-selection-button"/></style>
+            <property name="child"><object class="GtkLabel">
+              <property name="label" translatable="yes">Add to library</property>
+              <property name="wrap">true</property>
+            </object></property>
+          </object></child>
+        </object></child>
+        <child><object class="GtkLabel" id="playlist_description">
+          <property name="label" translatable="yes">Only imports the tracks as a playlist, does not watch the folder for changes.</property>
+          <property name="wrap">true</property>
+          <property name="xalign">0</property>
+          <property name="max-width-chars">40</property>
+          <style><class name="dim-label"/></style>
+        </object></child>
+        <child><object class="GtkLabel" id="library_description">
+          <property name="visible">false</property>
+          <property name="label" translatable="yes">Imports files into the library, and watches added folders for changes.</property>
+          <property name="wrap">true</property>
+          <property name="xalign">0</property>
+          <property name="max-width-chars">40</property>
+          <style><class name="dim-label"/></style>
+        </object></child>
+        <child><object class="GtkListBox" id="name_group">
+          <property name="selection-mode">none</property>
+          <style><class name="boxed-list"/></style>
+          <child><object class="AdwEntryRow" id="name">
+            <property name="title" translatable="yes">Name</property>
+            <property name="activates-default">true</property>
+          </object></child>
+        </object></child>
+      </object>
+    </property>
+    <responses>
+      <response id="cancel" translatable="yes">Cancel</response>
+      <response id="add" translatable="yes" appearance="suggested">Add</response>
+    </responses>
+  </object>
+</interface>

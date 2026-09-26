@@ -32,10 +32,15 @@ pub fn install(shell: &Rc<Preferences>) {
 
     let inactive = Rc::new(std::cell::Cell::new(None::<std::time::Instant>));
     let offered = Rc::new(std::cell::Cell::new(false));
+    let offer_task = Rc::new(RefCell::new(None::<gtk::glib::JoinHandle<()>>));
+    let running = offer_task.clone();
     let weak = Rc::downgrade(shell);
     shell.window.connect_is_active_notify(move |window| {
         if !window.is_active() {
             inactive.set(Some(std::time::Instant::now()));
+            if let Some(task) = running.borrow_mut().take() {
+                task.abort();
+            }
             return;
         }
         if offered.get() {
@@ -49,15 +54,23 @@ pub fn install(shell: &Rc<Preferences>) {
         }
         let Some(shell) = weak.upgrade() else { return };
         let owner = shell.products.connect.clone();
+        let mut updates = owner.subscribe();
         let result = shell
             .products
             .runtime
             .spawn(async move { owner.continuation_offer().await });
         let weak = Rc::downgrade(&shell);
         let offered = offered.clone();
-        gtk::glib::spawn_future_local(async move {
-            let Ok(Ok(Some(device))) = result.await else {
-                return;
+        *running.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
+            let _ = result.await;
+            let device = loop {
+                let device = updates.borrow_and_update().continuation_device().cloned();
+                if let Some(device) = device {
+                    break device;
+                }
+                if updates.changed().await.is_err() {
+                    return;
+                }
             };
             let Some(shell) = weak.upgrade() else { return };
             if offered.replace(true) {
@@ -83,7 +96,12 @@ pub fn install(shell: &Rc<Preferences>) {
                 }
             });
             shell.toast_overlay.add_toast(toast);
-        });
+        }));
+    });
+    shell.window.connect_destroy(move |_| {
+        if let Some(task) = offer_task.borrow_mut().take() {
+            task.abort();
+        }
     });
 }
 
@@ -285,26 +303,24 @@ pub fn bind_controller(
             .runtime
             .spawn(async move { owner.continuation_offer().await });
         *running.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
-            let device = offer.await.ok().and_then(Result::ok).flatten();
-            if let Some(button) = button.upgrade() {
-                button.set_visible(device.is_some());
-                if let Some(device) = &device {
-                    let label = localization::tr_with(
-                        "Continue from where {device} left off",
-                        &[("device", &device.name)],
-                    );
-                    button.set_tooltip_text(Some(&label));
-                    button.update_property(&[gtk::accessible::Property::Label(&label)]);
-                }
-            }
-            *offered.borrow_mut() = device;
+            let _ = offer.await;
             loop {
-                let enabled = updates.borrow_and_update().settings.enabled;
+                let state = updates.borrow_and_update().clone();
+                let device = state.continuation_device().cloned();
                 let Some(row) = row.upgrade() else { return };
-                row.set_active(enabled);
-                if !enabled && let Some(button) = button.upgrade() {
-                    button.set_visible(false);
+                row.set_active(state.settings.enabled);
+                if let Some(button) = button.upgrade() {
+                    button.set_visible(device.is_some());
+                    if let Some(device) = &device {
+                        let label = localization::tr_with(
+                            "Continue from where {device} left off",
+                            &[("device", &device.name)],
+                        );
+                        button.set_tooltip_text(Some(&label));
+                        button.update_property(&[gtk::accessible::Property::Label(&label)]);
+                    }
                 }
+                *offered.borrow_mut() = device;
                 drop(row);
                 if updates.changed().await.is_err() {
                     return;

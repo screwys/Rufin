@@ -45,16 +45,15 @@ pub struct PlaylistArtworkBinding {
     pub revision: String,
 }
 
-// Use the catalog's stable album shuffle order, with one cover per member album.
+// Media identities keep the choice and order the same on every device.
 pub(crate) fn collection_artwork_sql(members: &str) -> String {
     format!(
-        "SELECT min(track.track_key) track_key FROM ({members}) member
+        "SELECT track.track_key,min(track.media_uri) media_uri FROM ({members}) member
          CROSS JOIN tracks track USING(media_uri)
          LEFT JOIN albums album USING(album_key)
          WHERE COALESCE(track.artwork_binding,album.artwork_binding) IS NOT NULL
-         GROUP BY album.album_key,CASE WHEN album.album_key IS NULL THEN track.track_key END
-         ORDER BY ((COALESCE(album.album_key,min(track.track_key))*1103515245)%2147483647),
-                  album.album_key,min(track.track_key) LIMIT 4"
+         GROUP BY COALESCE(album.media_uri,track.media_uri)
+         ORDER BY COALESCE(album.media_uri,min(track.media_uri)),min(track.media_uri) LIMIT 4"
     )
 }
 

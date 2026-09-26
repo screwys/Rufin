@@ -256,7 +256,7 @@ impl Database {
             .bind(source)
             .fetch_all(&mut *transaction)
             .await?;
-            let tracks: Vec<String> = sqlx::query_scalar("SELECT track.object_id FROM tracks track WHERE track.source_key=?1 AND NOT EXISTS(SELECT 1 FROM local_files file WHERE file.source_key=track.source_key AND file.path=track.source_path)")
+            let tracks: Vec<String> = sqlx::query_scalar("SELECT track.object_id FROM tracks track WHERE track.source_key=?1 AND NOT EXISTS(SELECT 1 FROM local_files file WHERE file.source_key=track.source_key AND file.path=coalesce(track.cue_path,track.source_path) AND file.relative_path<>'')")
                 .bind(source).fetch_all(&mut *transaction).await?;
             if roots.len() == 1 && tracks.is_empty() {
                 parent = roots.pop();
@@ -420,6 +420,66 @@ impl Database {
         .bind(media_uri)
         .fetch_optional(&mut *connection)
         .await?)
+    }
+
+    /// Paths admitted on this device, including downloaded and mapped copies.
+    pub async fn local_media_paths(
+        &self,
+        uris: &[String],
+    ) -> LibraryResult<Vec<(String, Vec<std::path::PathBuf>, bool)>> {
+        let mut connection = self.acquire_reader().await?;
+        let rows: Vec<(String, String, bool, bool)> = sqlx::query_as(
+            "SELECT requested.value,
+                (SELECT json_group_array(path) FROM (
+                    SELECT path FROM main.local_locators WHERE media_uri=requested.value
+                    UNION SELECT source_path FROM catalog.tracks
+                      WHERE media_uri=requested.value AND source_path IS NOT NULL
+                        AND (media_uri LIKE 'file:%' OR media_uri LIKE 'rufin:cue/%'))),
+                EXISTS(SELECT 1 FROM connect_collection WHERE media_uri=requested.value),
+                EXISTS(SELECT 1 FROM main.playlist_entries WHERE media_uri=requested.value)
+                    OR EXISTS(SELECT 1 FROM queue_occurrences WHERE media_uri=requested.value AND NOT received_from_connect)
+             FROM json_each(?1) requested",
+        )
+        .bind(serde_json::to_string(uris)?)
+        .fetch_all(&mut *connection).await?;
+        rows.into_iter()
+            .map(|(uri, paths, shared, direct)| {
+                let mut paths: Vec<std::path::PathBuf> = serde_json::from_str(&paths)?;
+                // A direct import can be checked before its metadata has been read.
+                if direct && !shared {
+                    let backing = crate::cue_media_parts(&uri).map(|(_, backing, _, _)| backing);
+                    if let Some(path) = crate::file_media_path(backing.as_deref().unwrap_or(&uri)) {
+                        paths.push(path);
+                    }
+                }
+                Ok((uri, paths, shared))
+            })
+            .collect()
+    }
+
+    pub async fn catalog_missing_media(
+        &self,
+        media: &[(String, crate::SourceId)],
+    ) -> LibraryResult<Vec<String>> {
+        let mut connection = self.acquire_reader().await?;
+        Ok(sqlx::query_scalar("SELECT json_extract(requested.value,'$[0]') FROM json_each(?1) requested
+            WHERE EXISTS(SELECT 1 FROM catalog.sources WHERE object_id=json_extract(requested.value,'$[1]') AND catalog_complete=1)
+              AND NOT EXISTS(SELECT 1 FROM catalog.tracks WHERE media_uri=json_extract(requested.value,'$[0]'))")
+            .bind(serde_json::to_string(media)?).fetch_all(&mut *connection).await?)
+    }
+
+    /// A native scan establishes local access even if the URI is also shared.
+    pub async fn file_media_is_remote(
+        &self,
+        media_uri: &str,
+        occurrence: &crate::OccurrenceId,
+    ) -> LibraryResult<bool> {
+        let mut connection = self.acquire_reader().await?;
+        Ok(sqlx::query_scalar("SELECT
+            NOT EXISTS(SELECT 1 FROM tracks WHERE media_uri=?1 AND source_path IS NOT NULL)
+            AND (EXISTS(SELECT 1 FROM connect_collection WHERE media_uri=?1)
+                OR EXISTS(SELECT 1 FROM queue_occurrences WHERE object_id=?2 AND received_from_connect))")
+            .bind(media_uri).bind(occurrence.as_str()).fetch_one(&mut *connection).await?)
     }
 
     pub async fn observed_media_file(
@@ -1003,75 +1063,66 @@ async fn read_local_locators(
 }
 
 impl Database {
-    pub async fn playlist_file_uri_page(
+    pub async fn imported_local_uri_page(
         &self,
-        playlist: crate::PlaylistKey,
-        after: i64,
-    ) -> LibraryResult<Vec<(i64, String)>> {
+        playlist: Option<crate::PlaylistKey>,
+        after: &str,
+    ) -> LibraryResult<Vec<(String, Option<String>)>> {
         let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
-        Ok(sqlx::query_as("SELECT position,media_uri FROM playlist_entries WHERE playlist_key=?1 AND position>?2 AND media_uri LIKE 'file:%' ORDER BY position LIMIT 128").bind(playlist).bind(after).fetch_all(&mut *connection).await?)
+        Ok(sqlx::query_as(
+            "SELECT imported.media_uri,track.cue_path FROM (SELECT media_uri FROM main.playlist_entries
+            WHERE (?1 IS NULL OR playlist_key=?1) AND media_uri>?2
+              AND (media_uri LIKE 'file:%' OR media_uri LIKE 'rufin:cue/%')
+            UNION SELECT media_uri FROM catalog.native_playlist_entries
+            WHERE (?1 IS NULL OR -playlist_key=?1) AND media_uri>?2
+              AND (media_uri LIKE 'file:%' OR media_uri LIKE 'rufin:cue/%')
+            UNION SELECT media_uri FROM user_media_state WHERE ?1 IS NULL AND media_uri>?2
+              AND (favorite=1 OR rating IS NOT NULL)
+              AND (media_uri LIKE 'file:%' OR media_uri LIKE 'rufin:cue/%')
+            ) imported LEFT JOIN tracks track USING(media_uri)
+            WHERE track.source_path IS NOT NULL OR NOT EXISTS(
+                SELECT 1 FROM connect_collection received WHERE received.media_uri=imported.media_uri)
+            ORDER BY imported.media_uri LIMIT 128",
+        )
+        .bind(playlist)
+        .bind(after)
+        .fetch_all(&mut *connection)
+        .await?)
     }
-    pub async fn import_local_playlist_paths(
-        &self,
-        source_id: &str,
-        playlist: crate::PlaylistKey,
-    ) -> LibraryResult<()> {
-        let mut after = -1;
-        loop {
-            let page = self.playlist_file_uri_page(playlist, after).await?;
-            if page.is_empty() {
-                break;
-            }
-            after = page.last().unwrap().0;
-            let mut writer = self.writer().await?;
-            let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-            let mut transaction = connection.begin().await?;
-            for (_, uri) in page {
-                let Some(path) = crate::file_media_path(&uri).filter(|path| path.is_file()) else {
-                    continue;
-                };
-                let watched: bool =
-                    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM tracks WHERE media_uri=?1)")
-                        .bind(&uri)
-                        .fetch_one(&mut *transaction)
-                        .await?;
-                if watched {
-                    continue;
-                }
-                write_local_locator(
-                    &mut transaction,
-                    &LocalLocatorWrite {
-                        source_id: Some(source_id.to_owned()),
-                        media_uri: uri.clone(),
-                        origin: "import".into(),
-                        path: path.to_string_lossy().into_owned(),
-                        root: String::new(),
-                        relative_path: String::new(),
-                        access_uri: uri,
-                    },
-                )
-                .await?;
-            }
-            transaction.commit().await?;
-        }
+}
+
+impl Database {
+    pub async fn remove_unreferenced_import_access(&self, source_id: &str) -> LibraryResult<()> {
+        let mut writer = self.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut transaction = connection.begin().await?;
+        let unreferenced = "SELECT locator.access_uri FROM main.local_locators locator
+            JOIN main.source_ids source USING(source_key) WHERE source.object_id=?1 AND locator.origin='import'
+            AND NOT EXISTS(SELECT 1 FROM playlist_entries entry WHERE entry.media_uri=locator.media_uri)
+            AND NOT EXISTS(SELECT 1 FROM user_media_state state WHERE state.media_uri=locator.media_uri AND (state.favorite=1 OR state.rating IS NOT NULL))";
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM catalog.local_access_metadata WHERE access_uri IN ({unreferenced})"
+        )))
+        .bind(source_id)
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM main.local_locators WHERE origin='import' AND access_uri IN ({unreferenced})")))
+            .bind(source_id).execute(&mut *transaction).await?;
+        transaction.commit().await?;
         Ok(())
     }
-    pub async fn imported_local_path_page(
+
+    pub async fn unreferenced_import_page(
         &self,
         source_id: &str,
         after: &str,
     ) -> LibraryResult<Vec<String>> {
         let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
-        Ok(sqlx::query_scalar("SELECT locator.path FROM main.local_locators locator JOIN main.source_ids source USING(source_key) WHERE source.object_id=?1 AND locator.origin='import' AND locator.path>?2 AND EXISTS(SELECT 1 FROM playlist_entries entry WHERE entry.media_uri=locator.media_uri) ORDER BY locator.path LIMIT 128").bind(source_id).bind(after).fetch_all(&mut *connection).await?)
-    }
-}
-
-impl Database {
-    pub async fn unreferenced_import_page(
-        &self,
-        source_id: &str,
-    ) -> LibraryResult<Vec<(LocalAccessFileKey, Option<String>, bool)>> {
-        let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
-        Ok(sqlx::query_as("SELECT locator.local_access_file_key,track.object_id,EXISTS(SELECT 1 FROM local_files file WHERE file.source_key=(SELECT source_key FROM catalog.sources WHERE object_id=source.object_id) AND file.path=locator.path) FROM main.local_locators locator JOIN main.source_ids source USING(source_key) LEFT JOIN tracks track USING(media_uri) WHERE source.object_id=?1 AND locator.origin='import' AND NOT EXISTS(SELECT 1 FROM playlist_entries entry WHERE entry.media_uri=locator.media_uri) AND NOT EXISTS(SELECT 1 FROM user_media_state state WHERE state.media_uri=locator.media_uri AND (state.favorite=1 OR state.rating IS NOT NULL)) ORDER BY locator.local_access_file_key LIMIT 128").bind(source_id).fetch_all(&mut *connection).await?)
+        Ok(sqlx::query_scalar("SELECT track.object_id FROM tracks track JOIN sources source USING(source_key)
+            WHERE source.object_id=?1 AND track.object_id>?2 AND track.source_path IS NOT NULL
+              AND NOT EXISTS(SELECT 1 FROM local_files file WHERE file.source_key=track.source_key AND file.path=coalesce(track.cue_path,track.source_path))
+              AND NOT EXISTS(SELECT 1 FROM playlist_entries entry WHERE entry.media_uri=track.media_uri)
+              AND NOT EXISTS(SELECT 1 FROM user_media_state state WHERE state.media_uri=track.media_uri AND (state.favorite=1 OR state.rating IS NOT NULL))
+            ORDER BY track.object_id LIMIT 128").bind(source_id).bind(after).fetch_all(&mut *connection).await?)
     }
 }

@@ -179,8 +179,10 @@ fn library_sources_page(
     }
 
     if local_source.is_some() || !configured.local_folders.is_empty() {
-        let mut subtitle =
-            super::source::folder_selected_text(configured.local_folders.len() as u64);
+        let mut subtitle = localization::tr_with(
+            "Configured items: {count}",
+            &[("count", &configured.local_folders.len().to_string())],
+        );
         if let Some(summary) = local_source.as_ref().and_then(|source| {
             configured
                 .local_access
@@ -428,7 +430,7 @@ pub fn local_sources_page(shell: &Rc<Preferences>, dialog: &adw::Dialog) -> adw:
                 .title(local_folder_title(&folder.path))
                 .subtitle(desktop_integration::display_path(Path::new(&folder.path)))
                 .build();
-            row.add_prefix(&gtk::Image::from_icon_name("rufin-folders-symbolic"));
+            row.add_prefix(&gtk::Image::from_icon_name("rufin-library-music-symbolic"));
             let remove = gtk::Button::from_icon_name("rufin-window-close-symbolic");
             remove.set_tooltip_text(Some(&tr("Remove")));
             remove.add_css_class("flat");
@@ -466,8 +468,11 @@ pub fn local_sources_page(shell: &Rc<Preferences>, dialog: &adw::Dialog) -> adw:
             let Some(path) = folder.path() else {
                 return;
             };
-            shell.products.source.add_local_folder(path);
+            let result = shell.products.source.add_local_paths(vec![path]);
             dialog.close();
+            if let Ok(Err(error)) = result.recv().await {
+                shell.control_feedback.show_feedback_toast(error);
+            }
         });
     });
     forget_local.set_visible(local_source.is_some());
@@ -1109,7 +1114,7 @@ fn confirm_remove_all_downloads(
 
 fn confirm_remove_local_folder(shell: &Rc<Preferences>, path: String, row: adw::ActionRow) {
     let dialog = adw::AlertDialog::builder()
-        .heading(tr("Remove Local Folder"))
+        .heading(tr("Remove"))
         .body(path.clone())
         .build();
     let cancel = tr("Cancel");

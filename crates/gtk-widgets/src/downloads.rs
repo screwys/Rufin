@@ -26,9 +26,14 @@ pub enum OperationFeedbackKind {
     PlaylistRemoved { destination: String },
 }
 
+pub enum OperationArtwork {
+    MediaUris(Vec<String>),
+    Bindings(Vec<ArtworkBinding>),
+}
+
 pub struct OperationFeedback {
     pub subject: DownloadSubject,
-    pub preview_uris: Vec<String>,
+    pub artwork: OperationArtwork,
     pub item_count: usize,
     pub kind: OperationFeedbackKind,
 }

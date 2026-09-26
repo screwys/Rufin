@@ -3,6 +3,7 @@
 
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Connection, FromRow, QueryBuilder, Row, Sqlite, SqliteConnection};
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 
 use crate::{
     Database, FolderKey, LibraryError, LibraryResult, PlaylistEntryKey, PlaylistKey,
@@ -12,6 +13,49 @@ use crate::{
 const PLAYLIST_ROW_LIMIT: usize = 128;
 const PLAYLIST_ENTRY_ROW_LIMIT: usize = 256;
 const PLAYLIST_DELETE_BATCH: usize = 400;
+
+/// Stage a large removal on disk; change the playlist once after checks finish.
+pub struct PlaylistEntryRemovals {
+    file: BufWriter<std::fs::File>,
+    count: usize,
+}
+
+impl PlaylistEntryRemovals {
+    pub fn new() -> LibraryResult<Self> {
+        Ok(Self {
+            file: BufWriter::new(tempfile::tempfile()?),
+            count: 0,
+        })
+    }
+
+    pub fn push(&mut self, entry: PlaylistEntryKey) -> LibraryResult<()> {
+        self.file.write_all(&entry.raw().to_le_bytes())?;
+        self.count += 1;
+        Ok(())
+    }
+
+    pub async fn apply(
+        mut self,
+        database: &Database,
+        source: Option<SourceKey>,
+        playlist: PlaylistKey,
+    ) -> LibraryResult<usize> {
+        if self.count == 0 {
+            return Ok(0);
+        }
+        self.file.flush()?;
+        self.file.seek(SeekFrom::Start(0))?;
+        let mut reader = BufReader::new(self.file.get_ref());
+        let entries = (0..self.count).map(move |_| {
+            let mut bytes = [0; 8];
+            reader.read_exact(&mut bytes)?;
+            Ok(PlaylistEntryKey::from_raw(i64::from_le_bytes(bytes)))
+        });
+        database
+            .remove_playlist_entry_iter(source, playlist, entries)
+            .await
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PlaylistSort {
@@ -626,6 +670,23 @@ impl Database {
             .await?)
     }
 
+    pub async fn playlist_entry_uri_page(
+        &self,
+        playlist: PlaylistKey,
+        after_position: i64,
+    ) -> LibraryResult<Vec<(PlaylistEntryKey, i64, String)>> {
+        let mut connection = self.acquire_reader().await?;
+        Ok(sqlx::query_as(
+            "SELECT playlist_entry_key,position,media_uri FROM main.playlist_entries
+            WHERE playlist_key=?1 AND position>?2 ORDER BY position LIMIT ?3",
+        )
+        .bind(playlist)
+        .bind(after_position)
+        .bind(PLAYLIST_ENTRY_ROW_LIMIT as i64)
+        .fetch_all(&mut *connection)
+        .await?)
+    }
+
     pub async fn source_playlist_object_ids(
         &self,
         source: SourceKey,
@@ -766,18 +827,8 @@ impl Database {
             transaction.rollback().await?;
             return Ok(None);
         }
-        let (playlist, object_id) = sqlx::query_as::<_, (PlaylistKey, String)>(
-            "INSERT INTO main.playlists(
-                 source_key, object_id, name, normalized_name, sort_text, position
-             ) SELECT (SELECT durable.source_key FROM main.source_ids durable JOIN catalog.sources source USING(object_id) WHERE source.source_key=?1),id,?2,lower(?2),lower(?2),
-                      (SELECT COALESCE(max(position)+1,0) FROM playlists)
-               FROM (SELECT 'rufin:playlist:' || lower(hex(randomblob(16))) id)
-               RETURNING playlist_key,object_id",
-        )
-        .bind(source)
-        .bind(name)
-        .fetch_one(&mut *transaction)
-        .await?;
+        let (playlist, object_id) =
+            create_playlist_identity(&mut transaction, source, name).await?;
         insert_playlist_media(&mut transaction, playlist, 0, media_uris, false).await?;
         transaction.commit().await?;
         Ok(Some((playlist, object_id)))
@@ -963,6 +1014,16 @@ impl Database {
         if entries.is_empty() {
             return Ok(0);
         }
+        self.remove_playlist_entry_iter(source, playlist, entries.iter().copied().map(Ok))
+            .await
+    }
+
+    async fn remove_playlist_entry_iter(
+        &self,
+        source: Option<SourceKey>,
+        playlist: PlaylistKey,
+        mut entries: impl Iterator<Item = LibraryResult<PlaylistEntryKey>> + Send,
+    ) -> LibraryResult<usize> {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         let mut transaction = connection.begin().await?;
@@ -971,7 +1032,14 @@ impl Database {
             return Ok(0);
         }
         let mut removed = 0usize;
-        for batch in entries.chunks(PLAYLIST_DELETE_BATCH) {
+        loop {
+            let batch = entries
+                .by_ref()
+                .take(PLAYLIST_DELETE_BATCH)
+                .collect::<LibraryResult<Vec<_>>>()?;
+            if batch.is_empty() {
+                break;
+            }
             let mut query = QueryBuilder::<Sqlite>::new(
                 "DELETE FROM main.playlist_entries WHERE playlist_key=",
             );
@@ -979,7 +1047,7 @@ impl Database {
                 .push_bind(playlist)
                 .push(" AND playlist_entry_key IN (");
             let mut separated = query.separated(", ");
-            for entry in batch {
+            for entry in &batch {
                 separated.push_bind(*entry);
             }
             separated.push_unseparated(")");
@@ -1350,6 +1418,26 @@ pub(crate) async fn load_playlist_entry_rows(
             Ok(entry)
         })
         .collect()
+}
+
+pub(crate) async fn create_playlist_identity(
+    transaction: &mut sqlx::Transaction<'_, Sqlite>,
+    source: Option<SourceKey>,
+    name: &str,
+) -> LibraryResult<(PlaylistKey, String)> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(LibraryError::InvalidRequest(
+            "Playlist name cannot be empty".into(),
+        ));
+    }
+    Ok(sqlx::query_as(
+        "INSERT INTO main.playlists(source_key,object_id,name,normalized_name,sort_text,position)
+         SELECT (SELECT durable.source_key FROM main.source_ids durable JOIN catalog.sources source USING(object_id) WHERE source.source_key=?1),id,?2,lower(?2),lower(?2),
+                (SELECT coalesce(max(position)+1,0) FROM playlists)
+         FROM (SELECT 'rufin:playlist:'||lower(hex(randomblob(16))) id)
+         RETURNING playlist_key,object_id"
+    ).bind(source).bind(name).fetch_one(&mut **transaction).await?)
 }
 
 async fn insert_playlist_media(

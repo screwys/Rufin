@@ -600,6 +600,8 @@ impl Database {
         Ok(())
     }
 
+    /// Returns whether catalog views changed. Listens are stored just like local
+    /// activity; recording a play does not reload an open collection.
     pub async fn connect_apply(&self, records: &[ConnectRecord]) -> LibraryResult<bool> {
         if records.is_empty() {
             return Ok(false);
@@ -616,7 +618,8 @@ impl Database {
         let mut changed = false;
         let mut sources = BTreeMap::new();
         for record in records {
-            changed |= apply_record(&mut transaction, record, &mut sources).await?;
+            let applied = apply_record(&mut transaction, record, &mut sources).await?;
+            changed |= applied && !matches!(record.kind.as_str(), "listen" | "legacy_activity");
         }
         for (source, artwork_changed) in sources {
             sqlx::query("UPDATE catalog.sources SET catalog_revision=catalog_revision+1,artwork_digest=CASE WHEN ?2 THEN randomblob(32) ELSE artwork_digest END WHERE source_key=?1")

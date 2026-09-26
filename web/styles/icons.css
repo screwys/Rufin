@@ -197,6 +197,10 @@
   mask-image: url("/icons/rufin-process-stop-symbolic.svg");
 }
 
+.icon[data-icon="trash"] {
+  mask-image: url("/icons/rufin-user-trash-symbolic.svg");
+}
+
 .icon[data-icon="check"] {
   mask-image: url("/icons/rufin-object-select-symbolic.svg");
 }

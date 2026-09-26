@@ -266,6 +266,16 @@ impl FileSourceSettings {
 }
 
 impl RemoteSource {
+    pub(crate) async fn media_file_exists(&self, path: &str) -> SourceResult<bool> {
+        let relative = self.relative(path)?;
+        let input = self.input().await?;
+        match self.stat(&input, &relative).await {
+            Ok(file) => Ok(file.kind != library::LocalFileKind::Directory),
+            Err(SourceError::NotFound) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
     pub(crate) fn open(
         configuration: &SourceConfiguration,
         credential: Option<String>,
