@@ -28,12 +28,9 @@
     </property>
   </object>
 
-  <object class="GtkCenterBox" id="switcher_bar">
+  <object class="AdwHeaderBar" id="switcher_bar">
     <property name="hexpand">true</property>
-    <style>
-      <class name="preferences-tab-bar"/>
-    </style>
-    <property name="start-widget">
+    <child type="start">
       <object class="GtkBox" id="top_start_controls">
         <property name="spacing">4</property>
         <child>
@@ -58,18 +55,8 @@
           </object>
         </child>
       </object>
-    </property>
-    <property name="center-widget">switcher</property>
-    <property name="end-widget">
-      <object class="GtkButton" id="close_button">
-        <property name="icon-name">rufin-window-close-symbolic</property>
-        <property name="tooltip-text" translatable="yes">Close</property>
-        <style>
-          <class name="flat"/>
-          <class name="preferences-dialog-close"/>
-        </style>
-      </object>
-    </property>
+    </child>
+    <property name="title-widget">switcher</property>
   </object>
 
   <object class="GtkSizeGroup">
@@ -77,7 +64,6 @@
     <widgets>
       <widget name="switcher"/>
       <widget name="top_start_controls"/>
-      <widget name="close_button"/>
     </widgets>
   </object>
 

@@ -199,7 +199,15 @@ fn connect_startup_configuration(app: &adw::Application, options: Rc<RefCell<App
     app.connect_startup(move |_| {
         configure_app_icon();
         let requested_options = options.borrow();
-        let Some(layout) = requested_options.decoration_layout.as_deref() else {
+        let layout = requested_options.decoration_layout.as_deref().or(
+            match requested_options.window_bar_preview {
+                Some(WindowBarPreview::Macos) => Some("close,minimize,maximize:"),
+                Some(WindowBarPreview::Windows) => Some(":minimize,maximize,close"),
+                None if cfg!(target_os = "macos") => Some("close,minimize,maximize:"),
+                None => None,
+            },
+        );
+        let Some(layout) = layout else {
             return;
         };
         let Some(settings) = gtk::Settings::default() else {
@@ -232,12 +240,6 @@ pub(crate) fn application_window(
         content.remove(header);
         let window = gtk_application_window(app, title, default_width, default_height, content);
         header.set_use_native_controls(platform == WindowBarPreview::Macos && preview.is_none());
-        if preview.is_some() {
-            header.set_decoration_layout(Some(match platform {
-                WindowBarPreview::Macos => "close,minimize,maximize:",
-                WindowBarPreview::Windows => ":minimize,maximize,close",
-            }));
-        }
         window.set_titlebar(Some(header));
         return window;
     }

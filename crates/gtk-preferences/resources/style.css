@@ -1244,10 +1244,6 @@ entry.metadata-identified-change:dir(rtl) {
   margin-top: -4px;
 }
 
-.preferences-tab-bar {
-  padding: 6px 12px 8px;
-}
-
 .preferences-bottom-tab-bar {
   min-height: 46px;
   padding: 1px 0;
@@ -1285,7 +1281,6 @@ entry.metadata-identified-change:dir(rtl) {
 }
 
 .preferences-search-button,
-.preferences-dialog-close,
 .preferences-nested-back {
   min-width: 28px;
   min-height: 28px;
