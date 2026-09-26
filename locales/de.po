@@ -103,6 +103,10 @@ msgstr ""
 "Freigegebene und manuelle Downloads bleiben erhalten"
 
 msgid ""
+"Only imports the tracks as a playlist, does not watch the folder for changes."
+msgstr ""
+
+msgid ""
 "Open Rufin Connect on another device, connect via Join button or by copying "
 "invitation code"
 msgstr ""
@@ -180,13 +184,6 @@ msgid ""
 msgstr ""
 "Der Ordner ist relativ zum ausgewählten Konto. Beim Anwenden ändert sich der "
 "Speicher auf allen Geräten."
-
-msgid ""
-"These folders are combined into the Local source and shown through folder "
-"browsing"
-msgstr ""
-"Diese Ordner werden in der lokalen Quelle kombiniert und über die "
-"Ordnersuche bereitgestellt"
 
 msgid ""
 "This is a fallback artwork Rufin uses, do you want to set this as the item "
@@ -348,6 +345,11 @@ msgstr "Ordner hinzufügen"
 msgid "Add image"
 msgstr "Titel hinzufügen"
 
+#, fuzzy
+#| msgid "My music"
+msgid "Add music"
+msgstr "Meine Musik"
+
 msgid "Add to Favorites"
 msgstr "Zu Favoriten hinzufügen"
 
@@ -356,6 +358,11 @@ msgstr "Anheften"
 
 msgid "Add to Playlist"
 msgstr "Zur Playlist hinzufügen"
+
+#, fuzzy
+#| msgid "Add music library"
+msgid "Add to library"
+msgstr "Musikbibliothek hinzufügen"
 
 msgid "Add tracks when fewer than this many remain"
 msgstr "Neue Titel hinzufügen, wenn weniger als dieser Wert verbleibt"
@@ -795,6 +802,9 @@ msgstr ""
 msgid "Configure another"
 msgstr "Weiteres konfigurieren"
 
+msgid "Configured items: {count}"
+msgstr ""
+
 msgid "Confirm"
 msgstr "Bestätigen"
 
@@ -960,6 +970,11 @@ msgstr ""
 
 msgid "Create a playlist from queue"
 msgstr "Playlist aus Warteschlange erstellen"
+
+#, fuzzy
+#| msgid "Export playlist"
+msgid "Create playlist"
+msgstr "Wiedergabeliste exportieren"
 
 msgid "Create"
 msgstr "Erstellen"
@@ -1573,6 +1588,9 @@ msgstr "Wiedergabeliste importieren"
 msgid "Import"
 msgstr "Importieren"
 
+msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr "Detaillierte Rufin-Diagnosedaten in dieser Sitzung einschließen"
 
@@ -1765,6 +1783,11 @@ msgstr[0] ""
 "Zuordnung lokaler Dateien: {matched} von {total} Serverpfad zugeordnet"
 msgstr[1] ""
 "Zuordnung lokaler Dateien: {matched} von {total} Serverpfaden zugeordnet"
+
+#, fuzzy
+#| msgid "Local music folders"
+msgid "Local files and folders"
+msgstr "Lokale Musikordner"
 
 msgid "Local folder"
 msgstr "Lokaler Ordner"
@@ -2100,7 +2123,9 @@ msgstr "Keine Höraktivität in diesem Zeitraum"
 msgid "No local file mapping"
 msgstr "Keine Zuordnung lokaler Dateien"
 
-msgid "No local folders configured"
+#, fuzzy
+#| msgid "No local folders configured"
+msgid "No local files or folders configured"
 msgstr "Keine lokalen Ordner konfiguriert"
 
 msgid "No lyrics available."
@@ -2732,9 +2757,6 @@ msgstr "Download entfernen"
 msgid "Remove Downloads"
 msgstr "Downloads entfernen"
 
-msgid "Remove Local Folder"
-msgstr "Lokalen Ordner entfernen"
-
 msgid "Remove Rule and Delete Downloads"
 msgstr "Regel entfernen und Downloads löschen"
 
@@ -2773,6 +2795,11 @@ msgstr "Regel entfernen"
 
 msgid "Remove search"
 msgstr "Suche entfernen"
+
+#, fuzzy
+#| msgid "Album unavailable"
+msgid "Remove unavailable tracks"
+msgstr "Album nicht verfügbar"
 
 msgid "Remove"
 msgstr "Entfernen"
@@ -3066,6 +3093,9 @@ msgstr "{title} auswählen"
 
 msgid "Selected folders"
 msgstr "Ausgewählte Ordner"
+
+msgid "Selected items: {count}"
+msgstr ""
 
 msgid "Selection"
 msgstr "Auswahl"
@@ -3942,6 +3972,16 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
 
+#~ msgid ""
+#~ "These folders are combined into the Local source and shown through folder "
+#~ "browsing"
+#~ msgstr ""
+#~ "Diese Ordner werden in der lokalen Quelle kombiniert und über die "
+#~ "Ordnersuche bereitgestellt"
+
+#~ msgid "Remove Local Folder"
+#~ msgstr "Lokalen Ordner entfernen"
+
 #~ msgid "Played"
 #~ msgstr "Abgespielt"
 
@@ -4132,9 +4172,6 @@ msgstr "Willkommen beim Rufin-Setup"
 
 #~ msgid "Add folders to use the Local source."
 #~ msgstr "Ordner hinzufügen, um die lokale Quelle zu nutzen."
-
-#~ msgid "Add music library"
-#~ msgstr "Musikbibliothek hinzufügen"
 
 #~ msgid "Cached entries will appear here after sync finishes"
 #~ msgstr ""

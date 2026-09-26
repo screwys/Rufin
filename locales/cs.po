@@ -86,6 +86,10 @@ msgstr ""
 "ručně stažené soubory zůstanou zachovány"
 
 msgid ""
+"Only imports the tracks as a playlist, does not watch the folder for changes."
+msgstr ""
+
+msgid ""
 "Open Rufin Connect on another device, connect via Join button or by copying "
 "invitation code"
 msgstr ""
@@ -143,13 +147,6 @@ msgid ""
 "The folder is relative to the selected account. Applying it changes storage "
 "on all devices."
 msgstr ""
-
-msgid ""
-"These folders are combined into the Local source and shown through folder "
-"browsing"
-msgstr ""
-"Tyto složky jsou sloučeny do lokálního zdroje a zobrazeny při procházení "
-"složek"
 
 msgid ""
 "This is a fallback artwork Rufin uses, do you want to set this as the item "
@@ -306,6 +303,11 @@ msgstr "Přidat složku"
 msgid "Add image"
 msgstr "Přidat název"
 
+#, fuzzy
+#| msgid "Local music folder"
+msgid "Add music"
+msgstr "Místní hudební složka"
+
 msgid "Add to Favorites"
 msgstr "Přidat do oblíbených"
 
@@ -313,6 +315,11 @@ msgid "Add to Pins"
 msgstr "Připnout"
 
 msgid "Add to Playlist"
+msgstr "Přidat do playlistu"
+
+#, fuzzy
+#| msgid "Add to Playlist"
+msgid "Add to library"
 msgstr "Přidat do playlistu"
 
 msgid "Add tracks when fewer than this many remain"
@@ -817,6 +824,9 @@ msgstr ""
 msgid "Configure another"
 msgstr ""
 
+msgid "Configured items: {count}"
+msgstr ""
+
 msgid "Confirm"
 msgstr ""
 
@@ -1034,6 +1044,11 @@ msgstr ""
 #| msgid "Delete Playlist"
 msgid "Create a playlist from queue"
 msgstr "Smazat playlist"
+
+#, fuzzy
+#| msgid "Smart playlists"
+msgid "Create playlist"
+msgstr "Chytré playlisty"
 
 msgid "Create"
 msgstr "Vytvořit"
@@ -1713,6 +1728,9 @@ msgstr "Chytrý Playlist"
 msgid "Import"
 msgstr "Uživatelská podpora"
 
+msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr "Do této relace zahrňte podrobnou diagnostiku aplikace Rufin"
 
@@ -1920,6 +1938,11 @@ msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
 msgstr[1] ""
 msgstr[2] ""
+
+#, fuzzy
+#| msgid "Local music folder"
+msgid "Local files and folders"
+msgstr "Místní hudební složka"
 
 #, fuzzy
 #| msgid "Local Folders"
@@ -2301,7 +2324,9 @@ msgstr "Využít funkci poslechu"
 msgid "No local file mapping"
 msgstr "Žádné mapování místních souborů"
 
-msgid "No local folders configured"
+#, fuzzy
+#| msgid "No local folders configured"
+msgid "No local files or folders configured"
 msgstr "Nebyly nakonfigurovány žádné místní složky"
 
 #, fuzzy
@@ -3037,9 +3062,6 @@ msgstr "Odebrat ze seznamu stahování"
 msgid "Remove Downloads"
 msgstr "Smazat stažené soubory"
 
-msgid "Remove Local Folder"
-msgstr "Odebrat místní složku"
-
 msgid "Remove Rule and Delete Downloads"
 msgstr "Odebrat pravidlo a smazat stažené soubory"
 
@@ -3084,6 +3106,11 @@ msgstr "Odebrat pravidlo"
 #| msgid "Remove folder"
 msgid "Remove search"
 msgstr "Odebrat složku"
+
+#, fuzzy
+#| msgid "Album title"
+msgid "Remove unavailable tracks"
+msgstr "Název alba"
 
 msgid "Remove"
 msgstr "Odebrat"
@@ -3426,6 +3453,9 @@ msgstr "Vybrat vše"
 #| msgid "Select Music Folder"
 msgid "Selected folders"
 msgstr "Vybrat složku s hudbou"
+
+msgid "Selected items: {count}"
+msgstr ""
 
 msgid "Selection"
 msgstr "Výběr"
@@ -4376,6 +4406,16 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid ""
+#~ "These folders are combined into the Local source and shown through folder "
+#~ "browsing"
+#~ msgstr ""
+#~ "Tyto složky jsou sloučeny do lokálního zdroje a zobrazeny při procházení "
+#~ "složek"
+
+#~ msgid "Remove Local Folder"
+#~ msgstr "Odebrat místní složku"
 
 #~ msgid "Played"
 #~ msgstr "Přehráno"

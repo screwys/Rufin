@@ -83,6 +83,10 @@ msgstr ""
 "lataukset säilyvät"
 
 msgid ""
+"Only imports the tracks as a playlist, does not watch the folder for changes."
+msgstr ""
+
+msgid ""
 "Open Rufin Connect on another device, connect via Join button or by copying "
 "invitation code"
 msgstr ""
@@ -140,13 +144,6 @@ msgid ""
 "The folder is relative to the selected account. Applying it changes storage "
 "on all devices."
 msgstr ""
-
-msgid ""
-"These folders are combined into the Local source and shown through folder "
-"browsing"
-msgstr ""
-"Nämä kansiot on yhdistetty paikalliseksi lähteeksi ja ne näytetään kansiota "
-"selatessa"
 
 msgid ""
 "This is a fallback artwork Rufin uses, do you want to set this as the item "
@@ -289,6 +286,11 @@ msgstr "Lisää kansio"
 msgid "Add image"
 msgstr ""
 
+#, fuzzy
+#| msgid "My music"
+msgid "Add music"
+msgstr "Oma musiikki"
+
 msgid "Add to Favorites"
 msgstr "Lisää suosikkeihin"
 
@@ -296,6 +298,11 @@ msgid "Add to Pins"
 msgstr "Lisää kiinnityksiin"
 
 msgid "Add to Playlist"
+msgstr "Lisää soittolistaan"
+
+#, fuzzy
+#| msgid "Add to Playlist"
+msgid "Add to library"
 msgstr "Lisää soittolistaan"
 
 msgid "Add tracks when fewer than this many remain"
@@ -761,6 +768,9 @@ msgstr ""
 msgid "Configure another"
 msgstr "Määritä toinen"
 
+msgid "Configured items: {count}"
+msgstr ""
+
 msgid "Confirm"
 msgstr "Vahvista"
 
@@ -970,6 +980,11 @@ msgstr ""
 #| msgid "Delete Playlist"
 msgid "Create a playlist from queue"
 msgstr "Poista soittolista"
+
+#, fuzzy
+#| msgid "Export playlist"
+msgid "Create playlist"
+msgstr "Vie soittolista"
 
 msgid "Create"
 msgstr "Luo"
@@ -1611,6 +1626,9 @@ msgstr "Tuo soittolista"
 msgid "Import"
 msgstr "Vie"
 
+msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr ""
 
@@ -1809,6 +1827,11 @@ msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
 msgstr[1] ""
+
+#, fuzzy
+#| msgid "Local music folders"
+msgid "Local files and folders"
+msgstr "Paikalliset musiikkikansiot"
 
 msgid "Local folder"
 msgstr "Paikallinen kansio"
@@ -2158,8 +2181,10 @@ msgstr ""
 msgid "No local file mapping"
 msgstr ""
 
-msgid "No local folders configured"
-msgstr ""
+#, fuzzy
+#| msgid "No sources configured"
+msgid "No local files or folders configured"
+msgstr "Lähteitä ei ole määritetty"
 
 #, fuzzy
 #| msgid "This isn't available"
@@ -2841,9 +2866,6 @@ msgstr "Poista lataus"
 msgid "Remove Downloads"
 msgstr "Poista lataukset"
 
-msgid "Remove Local Folder"
-msgstr "Poista paikallinen kansio"
-
 msgid "Remove Rule and Delete Downloads"
 msgstr "Poista sääntö ja poista lataukset"
 
@@ -2886,6 +2908,11 @@ msgstr "Poista sääntö"
 #| msgid "Remove rule"
 msgid "Remove search"
 msgstr "Poista sääntö"
+
+#, fuzzy
+#| msgid "Search is unavailable"
+msgid "Remove unavailable tracks"
+msgstr "Haku ei ole saatavilla"
 
 msgid "Remove"
 msgstr ""
@@ -3203,6 +3230,9 @@ msgstr "Valitse kaikki"
 
 msgid "Selected folders"
 msgstr "Valitut kansiot"
+
+msgid "Selected items: {count}"
+msgstr ""
 
 msgid "Selection"
 msgstr "Valinta"
@@ -4138,6 +4168,16 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#~ msgid ""
+#~ "These folders are combined into the Local source and shown through folder "
+#~ "browsing"
+#~ msgstr ""
+#~ "Nämä kansiot on yhdistetty paikalliseksi lähteeksi ja ne näytetään "
+#~ "kansiota selatessa"
+
+#~ msgid "Remove Local Folder"
+#~ msgstr "Poista paikallinen kansio"
 
 #~ msgid "Played"
 #~ msgstr "Toistettu"

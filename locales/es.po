@@ -86,6 +86,10 @@ msgstr ""
 "compartidas y manuales"
 
 msgid ""
+"Only imports the tracks as a playlist, does not watch the folder for changes."
+msgstr ""
+
+msgid ""
 "Open Rufin Connect on another device, connect via Join button or by copying "
 "invitation code"
 msgstr ""
@@ -141,13 +145,6 @@ msgid ""
 "The folder is relative to the selected account. Applying it changes storage "
 "on all devices."
 msgstr ""
-
-msgid ""
-"These folders are combined into the Local source and shown through folder "
-"browsing"
-msgstr ""
-"Estas carpetas están combinadas en la fuente local y se muestran a través de "
-"la navegación de carpetas"
 
 msgid ""
 "This is a fallback artwork Rufin uses, do you want to set this as the item "
@@ -300,6 +297,11 @@ msgstr "Agregar carpeta"
 msgid "Add image"
 msgstr "Añadir un título"
 
+#, fuzzy
+#| msgid "Add folder"
+msgid "Add music"
+msgstr "Agregar carpeta"
+
 msgid "Add to Favorites"
 msgstr "Añadir a Favoritos"
 
@@ -307,6 +309,11 @@ msgid "Add to Pins"
 msgstr "Añadir a Fijados"
 
 msgid "Add to Playlist"
+msgstr "Añadir a la lista de reproducción"
+
+#, fuzzy
+#| msgid "Add to Playlist"
+msgid "Add to library"
 msgstr "Añadir a la lista de reproducción"
 
 msgid "Add tracks when fewer than this many remain"
@@ -760,6 +767,9 @@ msgstr ""
 msgid "Configure another"
 msgstr ""
 
+msgid "Configured items: {count}"
+msgstr ""
+
 msgid "Confirm"
 msgstr ""
 
@@ -931,6 +941,11 @@ msgstr ""
 #| msgid "All Playlists"
 msgid "Create a playlist from queue"
 msgstr "Todas las listas"
+
+#, fuzzy
+#| msgid "Add to Playlist"
+msgid "Create playlist"
+msgstr "Añadir a la lista de reproducción"
 
 msgid "Create"
 msgstr ""
@@ -1544,6 +1559,9 @@ msgstr "Añadir a la lista de reproducción"
 msgid "Import"
 msgstr ""
 
+msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr ""
 
@@ -1732,6 +1750,11 @@ msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
 msgstr[1] ""
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "Local files and folders"
+msgstr "Agregar carpeta"
 
 #, fuzzy
 #| msgid "Add folder"
@@ -2063,7 +2086,7 @@ msgstr ""
 msgid "No local file mapping"
 msgstr ""
 
-msgid "No local folders configured"
+msgid "No local files or folders configured"
 msgstr ""
 
 msgid "No lyrics available."
@@ -2691,9 +2714,6 @@ msgstr ""
 msgid "Remove Downloads"
 msgstr ""
 
-msgid "Remove Local Folder"
-msgstr ""
-
 msgid "Remove Rule and Delete Downloads"
 msgstr ""
 
@@ -2732,6 +2752,11 @@ msgstr ""
 
 msgid "Remove search"
 msgstr ""
+
+#, fuzzy
+#| msgid "Album title"
+msgid "Remove unavailable tracks"
+msgstr "Título de álbum"
 
 msgid "Remove"
 msgstr ""
@@ -3037,6 +3062,9 @@ msgstr "Añadir un título"
 #| msgid "Add folder"
 msgid "Selected folders"
 msgstr "Agregar carpeta"
+
+msgid "Selected items: {count}"
+msgstr ""
 
 msgid "Selection"
 msgstr ""
@@ -3893,6 +3921,13 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid ""
+#~ "These folders are combined into the Local source and shown through folder "
+#~ "browsing"
+#~ msgstr ""
+#~ "Estas carpetas están combinadas en la fuente local y se muestran a través "
+#~ "de la navegación de carpetas"
 
 #~ msgid "Artist / Album"
 #~ msgstr "Artista / Album"

@@ -94,6 +94,10 @@ msgstr ""
 "manuāli lejupielādētie faili paliks"
 
 msgid ""
+"Only imports the tracks as a playlist, does not watch the folder for changes."
+msgstr ""
+
+msgid ""
 "Open Rufin Connect on another device, connect via Join button or by copying "
 "invitation code"
 msgstr ""
@@ -167,12 +171,6 @@ msgid ""
 "The folder is relative to the selected account. Applying it changes storage "
 "on all devices."
 msgstr ""
-
-msgid ""
-"These folders are combined into the Local source and shown through folder "
-"browsing"
-msgstr ""
-"Šīs mapes tiek apvienotas vienā lokālā avotā un parādītas, pārlūkojot mapes"
 
 msgid ""
 "This is a fallback artwork Rufin uses, do you want to set this as the item "
@@ -328,6 +326,11 @@ msgstr "Pievienot mapi"
 msgid "Add image"
 msgstr "Pievienot nosaukumu"
 
+#, fuzzy
+#| msgid "My music"
+msgid "Add music"
+msgstr "Mana mūzika"
+
 msgid "Add to Favorites"
 msgstr "Pievienot izlasei"
 
@@ -336,6 +339,11 @@ msgstr "Pievienot izlasei"
 
 msgid "Add to Playlist"
 msgstr "Pievienot atskaņošanas sarakstam"
+
+#, fuzzy
+#| msgid "Add music library"
+msgid "Add to library"
+msgstr "Pievienot mūzikas bibliotēku"
 
 msgid "Add tracks when fewer than this many remain"
 msgstr "Pievienot dziesmas, kad paliek mazāk par šo skaitu"
@@ -791,6 +799,9 @@ msgstr ""
 msgid "Configure another"
 msgstr "Konfigurēt kolonnas"
 
+msgid "Configured items: {count}"
+msgstr ""
+
 msgid "Confirm"
 msgstr "Apstiprināt"
 
@@ -980,6 +991,11 @@ msgstr ""
 #| msgid "Delete playlist file"
 msgid "Create a playlist from queue"
 msgstr "Dzēst atskaņošanas saraksta failu"
+
+#, fuzzy
+#| msgid "Export playlist"
+msgid "Create playlist"
+msgstr "Eksportēt atskaņošanas sarakstu"
 
 msgid "Create"
 msgstr "Izveidot"
@@ -1612,6 +1628,9 @@ msgstr "Importēt atskaņošanas sarakstu"
 msgid "Import"
 msgstr "Importēt"
 
+msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr "Iekļaut detalizētu Rufin diagnostikas informāciju šajā sesijā"
 
@@ -1810,6 +1829,11 @@ msgstr[1] ""
 "Lokālo failu atbilžu noteikšana: {matched} no {total} servera ceļiem"
 msgstr[2] ""
 "Lokālo failu atbilžu noteikšana: {matched} no {total} servera ceļiem"
+
+#, fuzzy
+#| msgid "Local music folder"
+msgid "Local files and folders"
+msgstr "Lokālā mūzikas mape"
 
 #, fuzzy
 #| msgid "Local Folders"
@@ -2165,7 +2189,9 @@ msgstr "Izmantot klausīšanās aktivitāti"
 msgid "No local file mapping"
 msgstr "Nav lokālu failu sasaistījumu"
 
-msgid "No local folders configured"
+#, fuzzy
+#| msgid "No local folders configured"
+msgid "No local files or folders configured"
 msgstr "Nav konfigurētas lokālās mapes"
 
 msgid "No lyrics available."
@@ -2813,9 +2839,6 @@ msgstr "Noņemt no lejupielāžu saraksta"
 msgid "Remove Downloads"
 msgstr "Dzēst lejupielādes"
 
-msgid "Remove Local Folder"
-msgstr "Noņemt lokālo mapi"
-
 msgid "Remove Rule and Delete Downloads"
 msgstr "Noņemt noteikumu un dzēst lejupielādes"
 
@@ -2858,6 +2881,11 @@ msgstr "Noņemt noteikumu"
 #| msgid "Remove folder"
 msgid "Remove search"
 msgstr "Dzēst mapi"
+
+#, fuzzy
+#| msgid "Album unavailable"
+msgid "Remove unavailable tracks"
+msgstr "Albums nav pieejams"
 
 msgid "Remove"
 msgstr "Noņemt"
@@ -3158,6 +3186,9 @@ msgstr "Atlasiet {title}"
 
 msgid "Selected folders"
 msgstr "Atlasītās mapes"
+
+msgid "Selected items: {count}"
+msgstr ""
 
 msgid "Selection"
 msgstr "Atlasīšana"
@@ -4078,6 +4109,16 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
 
+#~ msgid ""
+#~ "These folders are combined into the Local source and shown through folder "
+#~ "browsing"
+#~ msgstr ""
+#~ "Šīs mapes tiek apvienotas vienā lokālā avotā un parādītas, pārlūkojot "
+#~ "mapes"
+
+#~ msgid "Remove Local Folder"
+#~ msgstr "Noņemt lokālo mapi"
+
 #~ msgid "Played"
 #~ msgstr "Atskaņots"
 
@@ -4277,9 +4318,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 
 #~ msgid "Add folders to use the Local source."
 #~ msgstr "Pievienojiet mapes, lai izmantotu lokālo avotu."
-
-#~ msgid "Add music library"
-#~ msgstr "Pievienot mūzikas bibliotēku"
 
 #~ msgid "Cached entries will appear here after sync finishes"
 #~ msgstr "Kešotie ieraksti parādīsies šeit pēc sinhronizācijas pabeigšanas"

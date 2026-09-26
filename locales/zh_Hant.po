@@ -81,6 +81,10 @@ msgid ""
 msgstr "只有根據規則下載的內容會被刪除。共享與手動的下載會保留"
 
 msgid ""
+"Only imports the tracks as a playlist, does not watch the folder for changes."
+msgstr ""
+
+msgid ""
 "Open Rufin Connect on another device, connect via Join button or by copying "
 "invitation code"
 msgstr ""
@@ -133,11 +137,6 @@ msgstr "感謝您使用 Rufin！如果遇到問題或有任何建議，請在 Gi
 msgid ""
 "The folder is relative to the selected account. Applying it changes storage "
 "on all devices."
-msgstr ""
-
-msgid ""
-"These folders are combined into the Local source and shown through folder "
-"browsing"
 msgstr ""
 
 msgid ""
@@ -289,6 +288,11 @@ msgstr "新增資料夾"
 msgid "Add image"
 msgstr "新增標題"
 
+#, fuzzy
+#| msgid "Local music folder"
+msgid "Add music"
+msgstr "本地音樂資料夾"
+
 msgid "Add to Favorites"
 msgstr "加入最愛"
 
@@ -296,6 +300,11 @@ msgid "Add to Pins"
 msgstr "加入釘選"
 
 msgid "Add to Playlist"
+msgstr "加入播放清單"
+
+#, fuzzy
+#| msgid "Add to Playlist"
+msgid "Add to library"
 msgstr "加入播放清單"
 
 msgid "Add tracks when fewer than this many remain"
@@ -786,6 +795,9 @@ msgstr ""
 msgid "Configure another"
 msgstr ""
 
+msgid "Configured items: {count}"
+msgstr ""
+
 msgid "Confirm"
 msgstr ""
 
@@ -1001,6 +1013,11 @@ msgstr ""
 #| msgid "Delete Playlist"
 msgid "Create a playlist from queue"
 msgstr "刪除播放清單"
+
+#, fuzzy
+#| msgid "Smart playlists"
+msgid "Create playlist"
+msgstr "智慧播放清單"
 
 msgid "Create"
 msgstr "建立"
@@ -1668,6 +1685,9 @@ msgstr "智慧播放清單"
 msgid "Import"
 msgstr ""
 
+msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr ""
 
@@ -1867,6 +1887,11 @@ msgstr ""
 msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
+
+#, fuzzy
+#| msgid "Local music folder"
+msgid "Local files and folders"
+msgstr "本地音樂資料夾"
 
 #, fuzzy
 #| msgid "Local Folders"
@@ -2242,8 +2267,10 @@ msgstr ""
 msgid "No local file mapping"
 msgstr ""
 
-msgid "No local folders configured"
-msgstr ""
+#, fuzzy
+#| msgid "No sources configured"
+msgid "No local files or folders configured"
+msgstr "未設置來源"
 
 #, fuzzy
 #| msgid "No lyrics"
@@ -2961,9 +2988,6 @@ msgstr "移除下載內容"
 msgid "Remove Downloads"
 msgstr "移除下載內容"
 
-msgid "Remove Local Folder"
-msgstr "移除本地資料夾"
-
 msgid "Remove Rule and Delete Downloads"
 msgstr "移除規則並刪除下載內容"
 
@@ -3008,6 +3032,11 @@ msgstr "移除規則"
 #| msgid "Remove folder"
 msgid "Remove search"
 msgstr "移除資料夾"
+
+#, fuzzy
+#| msgid "Album title"
+msgid "Remove unavailable tracks"
+msgstr "專輯標題"
 
 msgid "Remove"
 msgstr "移除"
@@ -3338,6 +3367,9 @@ msgstr "全選"
 #| msgid "Select Music Folder"
 msgid "Selected folders"
 msgstr "選擇音樂資料夾"
+
+msgid "Selected items: {count}"
+msgstr ""
 
 msgid "Selection"
 msgstr "選擇"
@@ -4252,6 +4284,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Remove Local Folder"
+#~ msgstr "移除本地資料夾"
 
 #~ msgid "Played"
 #~ msgstr "已播放"

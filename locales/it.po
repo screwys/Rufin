@@ -91,6 +91,10 @@ msgstr ""
 "manuali rimarranno"
 
 msgid ""
+"Only imports the tracks as a playlist, does not watch the folder for changes."
+msgstr ""
+
+msgid ""
 "Open Rufin Connect on another device, connect via Join button or by copying "
 "invitation code"
 msgstr ""
@@ -163,11 +167,6 @@ msgstr ""
 msgid ""
 "The folder is relative to the selected account. Applying it changes storage "
 "on all devices."
-msgstr ""
-
-msgid ""
-"These folders are combined into the Local source and shown through folder "
-"browsing"
 msgstr ""
 
 msgid ""
@@ -319,6 +318,11 @@ msgstr "Aggiungi cartella"
 msgid "Add image"
 msgstr "Aggiungi un titolo"
 
+#, fuzzy
+#| msgid "Add a music folder"
+msgid "Add music"
+msgstr "Aggiungi una cartella con la musica"
+
 msgid "Add to Favorites"
 msgstr "Aggiungi ai Preferiti"
 
@@ -326,6 +330,11 @@ msgid "Add to Pins"
 msgstr "Aggiungi agli elementi fissati"
 
 msgid "Add to Playlist"
+msgstr "Aggiungi alla Playlist"
+
+#, fuzzy
+#| msgid "Add to Playlist"
+msgid "Add to library"
 msgstr "Aggiungi alla Playlist"
 
 #, fuzzy
@@ -770,6 +779,9 @@ msgstr ""
 msgid "Configure another"
 msgstr ""
 
+msgid "Configured items: {count}"
+msgstr ""
+
 msgid "Confirm"
 msgstr "Conferma"
 
@@ -958,6 +970,11 @@ msgstr ""
 #, fuzzy
 #| msgid "Delete Playlist"
 msgid "Create a playlist from queue"
+msgstr "Cancella Playlist"
+
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Create playlist"
 msgstr "Cancella Playlist"
 
 msgid "Create"
@@ -1570,6 +1587,9 @@ msgstr ""
 msgid "Import"
 msgstr ""
 
+msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr ""
 
@@ -1760,6 +1780,11 @@ msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
 msgstr[1] ""
+
+#, fuzzy
+#| msgid "Add a music folder"
+msgid "Local files and folders"
+msgstr "Aggiungi una cartella con la musica"
 
 #, fuzzy
 #| msgid "Add folder"
@@ -2097,7 +2122,7 @@ msgstr ""
 msgid "No local file mapping"
 msgstr ""
 
-msgid "No local folders configured"
+msgid "No local files or folders configured"
 msgstr ""
 
 msgid "No lyrics available."
@@ -2723,9 +2748,6 @@ msgstr ""
 msgid "Remove Downloads"
 msgstr ""
 
-msgid "Remove Local Folder"
-msgstr ""
-
 msgid "Remove Rule and Delete Downloads"
 msgstr ""
 
@@ -2764,6 +2786,11 @@ msgstr ""
 
 msgid "Remove search"
 msgstr ""
+
+#, fuzzy
+#| msgid "Album unavailable"
+msgid "Remove unavailable tracks"
+msgstr "Album non disponibile"
 
 msgid "Remove"
 msgstr ""
@@ -3058,6 +3085,9 @@ msgid "Select {title}"
 msgstr ""
 
 msgid "Selected folders"
+msgstr ""
+
+msgid "Selected items: {count}"
 msgstr ""
 
 msgid "Selection"

@@ -105,6 +105,10 @@ msgstr ""
 "загрузки останутся"
 
 msgid ""
+"Only imports the tracks as a playlist, does not watch the folder for changes."
+msgstr ""
+
+msgid ""
 "Open Rufin Connect on another device, connect via Join button or by copying "
 "invitation code"
 msgstr ""
@@ -182,13 +186,6 @@ msgid ""
 msgstr ""
 "Папка привязана к выбранной учётной записи. Применение этих настроек изменит "
 "хранилище на всех устройствах."
-
-msgid ""
-"These folders are combined into the Local source and shown through folder "
-"browsing"
-msgstr ""
-"Эти папки объединены в локальный источник и отображаются при просмотре "
-"содержимого папок"
 
 msgid ""
 "This is a fallback artwork Rufin uses, do you want to set this as the item "
@@ -349,6 +346,11 @@ msgstr "Добавить папку"
 msgid "Add image"
 msgstr "Добавить название"
 
+#, fuzzy
+#| msgid "My music"
+msgid "Add music"
+msgstr "Моя музыка"
+
 msgid "Add to Favorites"
 msgstr "Добавить в избранное"
 
@@ -357,6 +359,11 @@ msgstr "Добавить в закрепленные"
 
 msgid "Add to Playlist"
 msgstr "Добавить в плейлист"
+
+#, fuzzy
+#| msgid "Add music library"
+msgid "Add to library"
+msgstr "Добавить музыкальную библиотеку"
 
 msgid "Add tracks when fewer than this many remain"
 msgstr ""
@@ -799,6 +806,9 @@ msgstr ""
 msgid "Configure another"
 msgstr "Настроить другие"
 
+msgid "Configured items: {count}"
+msgstr ""
+
 msgid "Confirm"
 msgstr "Подтвердить"
 
@@ -962,6 +972,11 @@ msgstr ""
 
 msgid "Create a playlist from queue"
 msgstr "Создать плейлист из очереди"
+
+#, fuzzy
+#| msgid "Export playlist"
+msgid "Create playlist"
+msgstr "Экспортировать плейлист"
 
 msgid "Create"
 msgstr "Создать"
@@ -1569,6 +1584,9 @@ msgstr "Импортировать плейлист"
 msgid "Import"
 msgstr "Импорт"
 
+msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr "Включить подробную диагностику Rufin в текущей сессии"
 
@@ -1766,6 +1784,11 @@ msgstr[1] ""
 msgstr[2] ""
 "Локальное сопоставление файлов: {matched} совпад из {total} с путями на "
 "сервере"
+
+#, fuzzy
+#| msgid "Local music folders"
+msgid "Local files and folders"
+msgstr "Локальный источник, папки с музыкой"
 
 msgid "Local folder"
 msgstr "Локальная папка"
@@ -2099,7 +2122,9 @@ msgstr "Нет активности прослушивания в этот пе�
 msgid "No local file mapping"
 msgstr "Нет сопоставлений для локального файла"
 
-msgid "No local folders configured"
+#, fuzzy
+#| msgid "No local folders configured"
+msgid "No local files or folders configured"
 msgstr "Не настроено ни одной локальной папки"
 
 msgid "No lyrics available."
@@ -2729,9 +2754,6 @@ msgstr "Удалить загрузку"
 msgid "Remove Downloads"
 msgstr "Удалить загрузки"
 
-msgid "Remove Local Folder"
-msgstr "Удалить Локальную Папку"
-
 msgid "Remove Rule and Delete Downloads"
 msgstr "Убрать правило и удалить загрузки"
 
@@ -2770,6 +2792,11 @@ msgstr "Удалить правило"
 
 msgid "Remove search"
 msgstr "Удалить из поиска"
+
+#, fuzzy
+#| msgid "Album unavailable"
+msgid "Remove unavailable tracks"
+msgstr "Альбом недоступен"
 
 msgid "Remove"
 msgstr "Удалить"
@@ -3067,6 +3094,9 @@ msgstr "Выбрать {title}"
 
 msgid "Selected folders"
 msgstr "Выбранные папки"
+
+msgid "Selected items: {count}"
+msgstr ""
 
 msgid "Selection"
 msgstr "Выбор"
@@ -3949,6 +3979,16 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
 
+#~ msgid ""
+#~ "These folders are combined into the Local source and shown through folder "
+#~ "browsing"
+#~ msgstr ""
+#~ "Эти папки объединены в локальный источник и отображаются при просмотре "
+#~ "содержимого папок"
+
+#~ msgid "Remove Local Folder"
+#~ msgstr "Удалить Локальную Папку"
+
 #~ msgid "Played"
 #~ msgstr "Воспроизведено"
 
@@ -4161,9 +4201,6 @@ msgstr "Добро пожаловать в программу установки
 
 #~ msgid "Add local folder access"
 #~ msgstr "Предоставить доступ к локальной папке"
-
-#~ msgid "Add music library"
-#~ msgstr "Добавить музыкальную библиотеку"
 
 #~ msgid "Add to queue"
 #~ msgstr "Добавить в очередь воспроизведения"

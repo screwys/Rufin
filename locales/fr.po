@@ -106,6 +106,10 @@ msgstr ""
 "téléchargements partagés et manuels restent"
 
 msgid ""
+"Only imports the tracks as a playlist, does not watch the folder for changes."
+msgstr ""
+
+msgid ""
 "Open Rufin Connect on another device, connect via Join button or by copying "
 "invitation code"
 msgstr ""
@@ -182,13 +186,6 @@ msgid ""
 msgstr ""
 "Le dossier est relatif au compte sélectionné. Son application modifie le "
 "stockage sur tous les appareils."
-
-msgid ""
-"These folders are combined into the Local source and shown through folder "
-"browsing"
-msgstr ""
-"Ces dossiers sont combinés dans la source locale et affichés dans la "
-"navigation des dossiers"
 
 msgid ""
 "This is a fallback artwork Rufin uses, do you want to set this as the item "
@@ -347,6 +344,11 @@ msgstr "Ajouter un dossier"
 msgid "Add image"
 msgstr "Ajouter un morceau"
 
+#, fuzzy
+#| msgid "My music"
+msgid "Add music"
+msgstr "Ma musique"
+
 msgid "Add to Favorites"
 msgstr "Ajouter aux favoris"
 
@@ -354,6 +356,11 @@ msgid "Add to Pins"
 msgstr "Ajouter aux Pins"
 
 msgid "Add to Playlist"
+msgstr "Ajouter à une playlist"
+
+#, fuzzy
+#| msgid "Add to Playlist"
+msgid "Add to library"
 msgstr "Ajouter à une playlist"
 
 msgid "Add tracks when fewer than this many remain"
@@ -793,6 +800,9 @@ msgstr ""
 msgid "Configure another"
 msgstr "Configurer un autre"
 
+msgid "Configured items: {count}"
+msgstr ""
+
 msgid "Confirm"
 msgstr "Confirmer"
 
@@ -956,6 +966,11 @@ msgstr ""
 
 msgid "Create a playlist from queue"
 msgstr "Créer une playlist à partir de la fil d'attente"
+
+#, fuzzy
+#| msgid "Export playlist"
+msgid "Create playlist"
+msgstr "Exporter la playlist"
 
 msgid "Create"
 msgstr "Créer"
@@ -1560,6 +1575,9 @@ msgstr "Importer une playlist"
 msgid "Import"
 msgstr "Importer"
 
+msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr "Inclure des diagnostics détaillés dans cette session"
 
@@ -1755,6 +1773,11 @@ msgstr[0] ""
 msgstr[1] ""
 "Mappage de fichiers locaux : {matched} chemins de serveur sur {total} "
 "correspondent"
+
+#, fuzzy
+#| msgid "Local music folders"
+msgid "Local files and folders"
+msgstr "Dossiers de musique locaux"
 
 msgid "Local folder"
 msgstr "Dossier local"
@@ -2088,7 +2111,9 @@ msgstr "Aucune activité d’écoute pendant cette période"
 msgid "No local file mapping"
 msgstr "Aucun mappage de fichier local"
 
-msgid "No local folders configured"
+#, fuzzy
+#| msgid "No local folders configured"
+msgid "No local files or folders configured"
 msgstr "Aucun dossier local configuré"
 
 msgid "No lyrics available."
@@ -2718,9 +2743,6 @@ msgstr "Supprimer le téléchargement"
 msgid "Remove Downloads"
 msgstr "Supprimer les téléchargements"
 
-msgid "Remove Local Folder"
-msgstr "Supprimer le dossier local"
-
 msgid "Remove Rule and Delete Downloads"
 msgstr "Supprimer les règles et supprimer les téléchargements"
 
@@ -2759,6 +2781,11 @@ msgstr "Supprimer la règle"
 
 msgid "Remove search"
 msgstr "Supprimer la recherche"
+
+#, fuzzy
+#| msgid "Album unavailable"
+msgid "Remove unavailable tracks"
+msgstr "Album non disponible"
 
 msgid "Remove"
 msgstr "Supprimer"
@@ -3054,6 +3081,9 @@ msgstr "Sélectionnez {title}"
 
 msgid "Selected folders"
 msgstr "Sélectionner les dossiers"
+
+msgid "Selected items: {count}"
+msgstr ""
 
 msgid "Selection"
 msgstr "Sélection"
@@ -3925,6 +3955,16 @@ msgstr "L'option de mise à jour automatique de {app_name} est invalide."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenue sur l'installateur de Rufin"
+
+#~ msgid ""
+#~ "These folders are combined into the Local source and shown through folder "
+#~ "browsing"
+#~ msgstr ""
+#~ "Ces dossiers sont combinés dans la source locale et affichés dans la "
+#~ "navigation des dossiers"
+
+#~ msgid "Remove Local Folder"
+#~ msgstr "Supprimer le dossier local"
 
 #~ msgid "Played"
 #~ msgstr "Lu"
