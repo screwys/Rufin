@@ -152,6 +152,11 @@ msgstr ""
 "složek"
 
 msgid ""
+"This is a fallback artwork Rufin uses, do you want to set this as the item "
+"artwork?"
+msgstr ""
+
+msgid ""
 "This is not supported natively by this source, but Rufin can show partial "
 "stars and then round them up for the source"
 msgstr ""
@@ -296,6 +301,11 @@ msgstr "Přidat aktuální"
 msgid "Add folder"
 msgstr "Přidat složku"
 
+#, fuzzy
+#| msgid "Add a title"
+msgid "Add image"
+msgstr "Přidat název"
+
 msgid "Add to Favorites"
 msgstr "Přidat do oblíbených"
 
@@ -325,6 +335,11 @@ msgstr "Zdroje"
 msgid "Album Artists"
 msgstr "Interpreti alba"
 
+#, fuzzy
+#| msgid "Album artists"
+msgid "Album artist sort"
+msgstr "Interpreti alba"
+
 msgid "Album artist"
 msgstr "Interpret alba"
 
@@ -333,6 +348,11 @@ msgstr "Interpreti alba"
 
 msgid "Album radio"
 msgstr "Rádio podle alba"
+
+#, fuzzy
+#| msgid "Albums"
+msgid "Album sort"
+msgstr "Alba"
 
 msgid "Album title"
 msgstr "Název alba"
@@ -356,6 +376,9 @@ msgstr "Všechna hudba"
 
 msgid "All Playlists"
 msgstr "Všechny playlisty"
+
+msgid "All time"
+msgstr ""
 
 msgid "All tracks"
 msgstr "Všechny skladby"
@@ -431,6 +454,11 @@ msgstr "Jméno interpreta"
 msgid "Artist radio"
 msgstr "Rádio interpereta"
 
+#, fuzzy
+#| msgid "Artists"
+msgid "Artist sort"
+msgstr "Interpreti"
+
 msgid "Artist tracks"
 msgstr "Skladby interpreta"
 
@@ -444,6 +472,21 @@ msgstr "Interpret"
 
 msgid "Artists"
 msgstr "Interpreti"
+
+#, fuzzy
+#| msgid "Metadata editing is no longer available"
+msgid "Artwork editing is no longer available"
+msgstr "Úprava metadat již není k dispozici"
+
+#, fuzzy
+#| msgid "No folder selected"
+msgid "Artwork selected"
+msgstr "Nebyla vybrána žádná složka"
+
+#, fuzzy
+#| msgid "Secret storage"
+msgid "Artwork storage"
+msgstr "Tajné úložiště"
 
 msgid "Artwork"
 msgstr ""
@@ -677,6 +720,11 @@ msgid "Clear Mapping"
 msgstr "Vymazat mapování"
 
 #, fuzzy
+#| msgid "Play album"
+msgid "Clear album"
+msgstr "Přehrát album"
+
+#, fuzzy
 #| msgid "Play artist"
 msgid "Clear artist"
 msgstr "Přehrát interpreta"
@@ -752,7 +800,18 @@ msgstr "Kompaktní"
 msgid "Compare these emoji on both devices"
 msgstr ""
 
+#, fuzzy
+#| msgid "Collection"
+msgid "Compilation"
+msgstr "Sbírka"
+
 msgid "Complete sign-in in your browser"
+msgstr ""
+
+msgid "Composer sort"
+msgstr ""
+
+msgid "Composer"
 msgstr ""
 
 msgid "Configure another"
@@ -911,6 +970,11 @@ msgid "Copy"
 msgstr "Kopírovat"
 
 #, fuzzy
+#| msgid "Copy"
+msgid "Copyright"
+msgstr "Kopírovat"
+
+#, fuzzy
 #| msgid "Couldn't load this folder"
 msgid "Could not load listening overview"
 msgstr "Nelze načíst tuto složku"
@@ -963,6 +1027,9 @@ msgstr "Nepodařilo se vyhledat text skladby"
 msgid "Couldn’t download Japanese dictionary"
 msgstr ""
 
+msgid "Country"
+msgstr ""
+
 #, fuzzy
 #| msgid "Delete Playlist"
 msgid "Create a playlist from queue"
@@ -979,6 +1046,9 @@ msgstr "Režim prolínání"
 
 msgid "Crossfade"
 msgstr "Přechod"
+
+msgid "Current artwork"
+msgstr ""
 
 msgid "Custom HTTP headers"
 msgstr ""
@@ -1008,6 +1078,9 @@ msgstr "Tmavý"
 
 msgid "Date added"
 msgstr "Datum přidání"
+
+msgid "Date"
+msgstr ""
 
 msgid "Days after month ends"
 msgstr ""
@@ -1297,6 +1370,11 @@ msgstr "Celá knihovna"
 msgid "Equalizer"
 msgstr "Ekvalizér"
 
+#, fuzzy
+#| msgid "Never Played"
+msgid "Ever played"
+msgstr "Nikdy nepřehráno"
+
 msgid "Everything, including new tracks"
 msgstr "Vše, včetně nových skladeb"
 
@@ -1564,6 +1642,9 @@ msgstr "Popisky mřížky"
 msgid "Grid"
 msgstr "Mřížka"
 
+msgid "Grouping"
+msgstr ""
+
 msgid "Guest / public access"
 msgstr ""
 
@@ -1610,6 +1691,11 @@ msgstr ""
 
 msgid "If you do not have API keys, create them"
 msgstr "Pokud nemáte klíče API, vytvořte si je"
+
+#, fuzzy
+#| msgid "Saved Sources"
+msgid "Image files"
+msgstr "Uložené zdroje"
 
 msgid "Image"
 msgstr "Obrázek"
@@ -1702,6 +1788,9 @@ msgstr "Klávesové zkratky"
 msgid "LRCLIB"
 msgstr "LRCLIB"
 
+msgid "Labels"
+msgstr ""
+
 msgid "Language and readings"
 msgstr "Jazyk a četba"
 
@@ -1710,6 +1799,19 @@ msgstr "Jazyk"
 
 msgid "Laptop/Headphones"
 msgstr "Laptop/sluchátka"
+
+#, fuzzy
+#| msgid "Last played"
+msgid "Last 30 days"
+msgstr "Naposledy hrálo"
+
+msgid "Last 365 days"
+msgstr ""
+
+#, fuzzy
+#| msgid "Last played"
+msgid "Last 7 days"
+msgstr "Naposledy hrálo"
 
 msgid "Last played"
 msgstr "Naposledy hrálo"
@@ -2031,6 +2133,11 @@ msgstr "Toto zařízení"
 msgid "MusicBrainz + Last.fm"
 msgstr "MusicBrainz + Last.fm"
 
+#, fuzzy
+#| msgid "MusicBrainz artist ID"
+msgid "MusicBrainz album artist ID"
+msgstr "ID interpreta v MusicBrainz"
+
 msgid "MusicBrainz artist ID"
 msgstr "ID interpreta v MusicBrainz"
 
@@ -2048,6 +2155,11 @@ msgstr "ID skladby vydané na MusicBrainz"
 
 msgid "MusicBrainz"
 msgstr "MusicBrainz"
+
+#, fuzzy
+#| msgid "Music Folder"
+msgid "Musical key"
+msgstr "Hudební složka"
 
 msgid "Mute"
 msgstr "Ztlumit"
@@ -2143,6 +2255,11 @@ msgstr "Nebyly nalezeny žádné servery"
 
 msgid "No albums from this artist yet"
 msgstr "Tento interpret zatím nemá žádná alba"
+
+#, fuzzy
+#| msgid "No network devices found"
+msgid "No artwork found"
+msgstr "Nebyly nalezeny žádné sítové zařízení"
 
 msgid "No cached server path yet"
 msgstr "Cesta k serveru zatím není uložena v mezipaměti"
@@ -2419,6 +2536,11 @@ msgstr "Akce serveru"
 msgid "Orange"
 msgstr "Oranžová"
 
+#, fuzzy
+#| msgid "Release date"
+msgid "Original release date"
+msgstr "Datum vydání"
+
 msgid "Original"
 msgstr "Originál"
 
@@ -2476,6 +2598,12 @@ msgstr ""
 
 msgid "Perceptual"
 msgstr "Percentuální"
+
+msgid "Performer"
+msgstr ""
+
+msgid "Period"
+msgstr ""
 
 msgid "Pink"
 msgstr "Růžová"
@@ -2564,9 +2692,6 @@ msgstr "Rychlost přehrávání"
 
 msgid "Playback"
 msgstr "Přehrávání"
-
-msgid "Played"
-msgstr "Přehráno"
 
 msgid "Playing on this device"
 msgstr "Přehrává se na tomto zařízení"
@@ -2809,6 +2934,11 @@ msgstr "Doporučeno, pokud to váš server poskytuje"
 msgid "Reconnect"
 msgstr "Znovu se připojit"
 
+#, fuzzy
+#| msgid "Grid labels"
+msgid "Record label"
+msgstr "Popisky mřížky"
+
 msgid "Red"
 msgstr "Červená"
 
@@ -2840,6 +2970,9 @@ msgid "Regenerate access token"
 msgstr ""
 
 msgid "Regenerate access token?"
+msgstr ""
+
+msgid "Regenerate"
 msgstr ""
 
 #, fuzzy
@@ -3094,6 +3227,11 @@ msgid "Save changes automatically"
 msgstr "Vyhledávání se spustí automaticky"
 
 #, fuzzy
+#| msgid "Remove folder"
+msgid "Save in folder"
+msgstr "Odebrat složku"
+
+#, fuzzy
 #| msgid "Searching will start automatically"
 msgid "Save lyrics automatically"
 msgstr "Vyhledávání se spustí automaticky"
@@ -3155,6 +3293,11 @@ msgid "Search Again"
 msgstr "Hledat znovu"
 
 msgid "Search Lyrics"
+msgstr "Hledat Texty"
+
+#, fuzzy
+#| msgid "Search Lyrics"
+msgid "Search artwork"
 msgstr "Hledat Texty"
 
 #, fuzzy
@@ -3288,9 +3431,6 @@ msgid "Selection"
 msgstr "Výběr"
 
 msgid "Self-host an Iroh Relay"
-msgstr ""
-
-msgid "Separate .lrc file"
 msgstr ""
 
 msgid "September {year}"
@@ -3473,6 +3613,11 @@ msgstr ""
 msgid "Sign in"
 msgstr ""
 
+#, fuzzy
+#| msgid "Play artist"
+msgid "Similar artists"
+msgstr "Přehrát interpreta"
+
 msgid "SimpMusic"
 msgstr "SimpMusic"
 
@@ -3583,6 +3728,16 @@ msgstr ""
 msgid "Stream quality"
 msgstr "Kvalita streamu"
 
+#, fuzzy
+#| msgid "Audio"
+msgid "Studio"
+msgstr "Zvuk"
+
+#, fuzzy
+#| msgid "Audio"
+msgid "Studios"
+msgstr "Zvuk"
+
 msgid "Style"
 msgstr ""
 
@@ -3615,6 +3770,9 @@ msgstr "Výchozí nastavení systému"
 msgid "System"
 msgstr "Systém"
 
+msgid "Tags"
+msgstr ""
+
 msgid "Target loudness"
 msgstr ""
 
@@ -3639,6 +3797,14 @@ msgstr "Text"
 
 msgid "The API token was not accepted. Please connect again."
 msgstr ""
+
+msgid "TheAudioDB album ID"
+msgstr ""
+
+#, fuzzy
+#| msgid "MusicBrainz artist ID"
+msgid "TheAudioDB artist ID"
+msgstr "ID interpreta v MusicBrainz"
 
 msgid "Theme"
 msgstr "Téma"
@@ -3700,6 +3866,14 @@ msgstr "Všechny žánry"
 #, fuzzy
 #| msgid "Mood tracks"
 msgid "Top tracks"
+msgstr "Skladby podle nálady"
+
+msgid "Total discs"
+msgstr ""
+
+#, fuzzy
+#| msgid "Mood tracks"
+msgid "Total tracks"
 msgstr "Skladby podle nálady"
 
 msgid "Track number"
@@ -3795,6 +3969,9 @@ msgid "Updated Rufin to {version}"
 msgstr ""
 
 msgid "Updating Rufin to {version}..."
+msgstr ""
+
+msgid "Upload artwork"
 msgstr ""
 
 msgid "Use API key"
@@ -4200,6 +4377,9 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
 
+#~ msgid "Played"
+#~ msgstr "Přehráno"
+
 #~ msgid "Prefer server playlist covers"
 #~ msgstr "Upřednostnit obaly playlistů ze serveru"
 
@@ -4219,9 +4399,6 @@ msgstr ""
 
 #~ msgid "Choose an existing local folder"
 #~ msgstr "Vyberte existující lokální složku"
-
-#~ msgid "No folder selected"
-#~ msgstr "Nebyla vybrána žádná složka"
 
 #~ msgid "Save Mapping"
 #~ msgstr "Uložit mapování"
