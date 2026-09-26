@@ -5384,14 +5384,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/lofty/lofty-0.25.2.crate",
-        "sha256": "615d6334c1196e2f23f2708455bf8d71c374818cad7c34adaa0f8f885abf5d7c",
-        "dest": "cargo/vendor/lofty-0.25.2"
+        "url": "https://static.crates.io/crates/lofty/lofty-0.25.3.crate",
+        "sha256": "d47265289f8d95377487c1e253409cefaa37d95afb5bb5d515459aa374047899",
+        "dest": "cargo/vendor/lofty-0.25.3"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"615d6334c1196e2f23f2708455bf8d71c374818cad7c34adaa0f8f885abf5d7c\", \"files\": {}}",
-        "dest": "cargo/vendor/lofty-0.25.2",
+        "contents": "{\"package\": \"d47265289f8d95377487c1e253409cefaa37d95afb5bb5d515459aa374047899\", \"files\": {}}",
+        "dest": "cargo/vendor/lofty-0.25.3",
         "dest-filename": ".cargo-checksum.json"
     },
     {
