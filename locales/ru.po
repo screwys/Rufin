@@ -112,6 +112,11 @@ msgstr ""
 "«Присоединиться» или путём копирования кода приглашения"
 
 msgid ""
+"Relative paths start at the music folder or source URL. Local paths can also "
+"be absolute."
+msgstr ""
+
+msgid ""
 "Remove Local and its cached library from Rufin? Your music files will not be "
 "deleted."
 msgstr ""
@@ -184,6 +189,11 @@ msgid ""
 msgstr ""
 "Эти папки объединены в локальный источник и отображаются при просмотре "
 "содержимого папок"
+
+msgid ""
+"This is a fallback artwork Rufin uses, do you want to set this as the item "
+"artwork?"
+msgstr ""
 
 msgid ""
 "This is not supported natively by this source, but Rufin can show partial "
@@ -334,6 +344,11 @@ msgstr "Добавить текущий"
 msgid "Add folder"
 msgstr "Добавить папку"
 
+#, fuzzy
+#| msgid "Add a title"
+msgid "Add image"
+msgstr "Добавить название"
+
 msgid "Add to Favorites"
 msgstr "Добавить в избранное"
 
@@ -362,6 +377,11 @@ msgstr "Добавление источника"
 msgid "Album Artists"
 msgstr "Авторы альбома"
 
+#, fuzzy
+#| msgid "Album artists"
+msgid "Album artist sort"
+msgstr "Авторы альбома"
+
 msgid "Album artist"
 msgstr "Исполнитель альбома"
 
@@ -370,6 +390,11 @@ msgstr "Авторы альбома"
 
 msgid "Album radio"
 msgstr "Радио по альбому"
+
+#, fuzzy
+#| msgid "Albums"
+msgid "Album sort"
+msgstr "Альбомы"
 
 msgid "Album title"
 msgstr "Название альбома"
@@ -391,6 +416,9 @@ msgstr "Вся Музыка"
 
 msgid "All Playlists"
 msgstr "Все плейлисты"
+
+msgid "All time"
+msgstr ""
 
 msgid "All tracks"
 msgstr "Все треки"
@@ -458,6 +486,11 @@ msgstr "Имя исполнителя"
 msgid "Artist radio"
 msgstr "Радио по исполнителю"
 
+#, fuzzy
+#| msgid "Artists"
+msgid "Artist sort"
+msgstr "Исполнители"
+
 msgid "Artist tracks"
 msgstr "Треки исполнителя"
 
@@ -469,6 +502,21 @@ msgstr "Исполнитель"
 
 msgid "Artists"
 msgstr "Исполнители"
+
+#, fuzzy
+#| msgid "Metadata editing is no longer available"
+msgid "Artwork editing is no longer available"
+msgstr "Редактирование метаданных больше недоступно"
+
+#, fuzzy
+#| msgid "folders selected"
+msgid "Artwork selected"
+msgstr "папок выбрано"
+
+#, fuzzy
+#| msgid "Secret storage"
+msgid "Artwork storage"
+msgstr "Скрытое хранилище"
 
 msgid "Artwork"
 msgstr "Обложка"
@@ -663,6 +711,11 @@ msgstr "Классическая"
 msgid "Clear Mapping"
 msgstr "Удалить Соответствия"
 
+#, fuzzy
+#| msgid "Play album"
+msgid "Clear album"
+msgstr "Воспроизвести альбом"
+
 msgid "Clear artist"
 msgstr "Очистить исполнителя"
 
@@ -729,8 +782,19 @@ msgstr "Компактный"
 msgid "Compare these emoji on both devices"
 msgstr "Сравните эти эмодзи на обоих устройствах"
 
+#, fuzzy
+#| msgid "Copy invitation"
+msgid "Compilation"
+msgstr "Скопировать приглашение"
+
 msgid "Complete sign-in in your browser"
 msgstr "Завершите вход в систему в вашем браузере"
+
+msgid "Composer sort"
+msgstr ""
+
+msgid "Composer"
+msgstr ""
 
 msgid "Configure another"
 msgstr "Настроить другие"
@@ -849,6 +913,11 @@ msgstr "Скопировать текущий внешний вид в буфе�
 msgid "Copy"
 msgstr "Копировать"
 
+#, fuzzy
+#| msgid "Copy"
+msgid "Copyright"
+msgstr "Копировать"
+
 msgid "Could not load listening overview"
 msgstr "Не удалось загрузить обзор прослушивания"
 
@@ -888,6 +957,9 @@ msgstr "Не удалось найти текст песни"
 msgid "Couldn’t download Japanese dictionary"
 msgstr "Не удалось загрузить японский словарь"
 
+msgid "Country"
+msgstr ""
+
 msgid "Create a playlist from queue"
 msgstr "Создать плейлист из очереди"
 
@@ -902,6 +974,11 @@ msgstr "Режим кроссфейда"
 
 msgid "Crossfade"
 msgstr "Кроссфейд"
+
+#, fuzzy
+#| msgid "Current server"
+msgid "Current artwork"
+msgstr "Текущий сервер"
 
 msgid "Custom HTTP headers"
 msgstr "Настраиваемые HTTP-заголовки"
@@ -929,6 +1006,9 @@ msgstr "Темная тема"
 
 msgid "Date added"
 msgstr "Дата добавления"
+
+msgid "Date"
+msgstr ""
 
 msgid "Days after month ends"
 msgstr "Дни после конца месяца"
@@ -1176,8 +1256,18 @@ msgstr "Вся библиотека"
 msgid "Equalizer"
 msgstr "Эквалайзер"
 
+#, fuzzy
+#| msgid "Never Played"
+msgid "Ever played"
+msgstr "Ни разу не воспроизводилось"
+
 msgid "Everything, including new tracks"
 msgstr "Всё, включая новые треки"
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "Excluded folders"
+msgstr "Добавить папку"
 
 msgid "Existing profile file"
 msgstr "Существующий файл профиля"
@@ -1294,6 +1384,11 @@ msgstr "Фиксированное расположение"
 msgid "Flat"
 msgstr "Плоский"
 
+#, fuzzy
+#| msgid "Folder"
+msgid "Folder path"
+msgstr "Папка"
+
 msgid "Folders"
 msgstr "Папки"
 
@@ -1407,6 +1502,9 @@ msgstr "Метки сетки"
 msgid "Grid"
 msgstr "Сетка"
 
+msgid "Grouping"
+msgstr ""
+
 msgid "Guest / public access"
 msgstr "Гостевой / публичный доступ"
 
@@ -1453,6 +1551,11 @@ msgstr ""
 
 msgid "If you do not have API keys, create them"
 msgstr "Если у вас нет ключей API, создайте их"
+
+#, fuzzy
+#| msgid "Change Profile"
+msgid "Image files"
+msgstr "Изменить профиль"
 
 msgid "Image"
 msgstr "Изображение"
@@ -1537,6 +1640,9 @@ msgstr "Сочетания клавиш"
 msgid "LRCLIB"
 msgstr "LRCLIB"
 
+msgid "Labels"
+msgstr ""
+
 msgid "Language and readings"
 msgstr "Язык и чтение"
 
@@ -1545,6 +1651,19 @@ msgstr "Язык"
 
 msgid "Laptop/Headphones"
 msgstr "Ноутбук/Наушники"
+
+#, fuzzy
+#| msgid "Last played"
+msgid "Last 30 days"
+msgstr "Посл. прослушано"
+
+msgid "Last 365 days"
+msgstr ""
+
+#, fuzzy
+#| msgid "Last played"
+msgid "Last 7 days"
+msgstr "Посл. прослушано"
 
 msgid "Last played"
 msgstr "Посл. прослушано"
@@ -1828,6 +1947,11 @@ msgstr "Музыка на этом устройстве"
 msgid "MusicBrainz + Last.fm"
 msgstr "MusicBrainz и Last.fm"
 
+#, fuzzy
+#| msgid "MusicBrainz artist ID"
+msgid "MusicBrainz album artist ID"
+msgstr "MusicBrainz ID исполнителя"
+
 msgid "MusicBrainz artist ID"
 msgstr "MusicBrainz ID исполнителя"
 
@@ -1845,6 +1969,11 @@ msgstr "MusicBrainz ID трека релиза"
 
 msgid "MusicBrainz"
 msgstr "MusicBrainz"
+
+#, fuzzy
+#| msgid "Music Folder"
+msgid "Musical key"
+msgstr "Папка с музыкой"
 
 msgid "Mute"
 msgstr "Отключить звук"
@@ -1934,6 +2063,11 @@ msgstr "Серверы не найдены"
 
 msgid "No albums from this artist yet"
 msgstr "Пока нет альбомов этого исполнителя"
+
+#, fuzzy
+#| msgid "No network devices found"
+msgid "No artwork found"
+msgstr "Устройства в сети не найдены"
 
 msgid "No cached server path yet"
 msgstr "Пока нет кэшированных путей к серверу"
@@ -2168,6 +2302,11 @@ msgstr "Параметры"
 msgid "Orange"
 msgstr "Оранжевый"
 
+#, fuzzy
+#| msgid "Release date"
+msgid "Original release date"
+msgstr "Дата выпуска"
+
 msgid "Original"
 msgstr "Оригинал"
 
@@ -2217,6 +2356,12 @@ msgstr ""
 
 msgid "Perceptual"
 msgstr "Воспринимаемая"
+
+msgid "Performer"
+msgstr ""
+
+msgid "Period"
+msgstr ""
 
 msgid "Pink"
 msgstr "Розовый"
@@ -2295,9 +2440,6 @@ msgstr "Скорость воспроизведения"
 
 msgid "Playback"
 msgstr "Плеер"
-
-msgid "Played"
-msgstr "Воспроизведено"
 
 msgid "Playing on this device"
 msgstr "Играет на этом устройстве"
@@ -2502,6 +2644,11 @@ msgstr "Рекомендуется, если ваш сервер предост�
 msgid "Reconnect"
 msgstr "Повторное подключение"
 
+#, fuzzy
+#| msgid "Grid labels"
+msgid "Record label"
+msgstr "Метки сетки"
+
 msgid "Red"
 msgstr "Красный"
 
@@ -2528,6 +2675,11 @@ msgstr "Сгенерировать новый токен доступа"
 
 msgid "Regenerate access token?"
 msgstr "Сгенерировать новый токен доступа?"
+
+#, fuzzy
+#| msgid "Regenerate access token"
+msgid "Regenerate"
+msgstr "Сгенерировать новый токен доступа"
 
 msgid "Related"
 msgstr "Похожие"
@@ -2749,6 +2901,11 @@ msgstr ""
 msgid "Save changes automatically"
 msgstr "Автоматически сохранять изменения"
 
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Save in folder"
+msgstr "Удалить папку"
+
 msgid "Save lyrics automatically"
 msgstr "Автоматически сохранять текст песни"
 
@@ -2805,6 +2962,11 @@ msgstr "Повторить поиск"
 
 msgid "Search Lyrics"
 msgstr "Поиск текстов песен"
+
+#, fuzzy
+#| msgid "Show artwork"
+msgid "Search artwork"
+msgstr "Показать обложку"
 
 msgid "Search current folder"
 msgstr "Поиск в текущей папке"
@@ -2910,9 +3072,6 @@ msgstr "Выбор"
 
 msgid "Self-host an Iroh Relay"
 msgstr "Разместите Iroh Relay на собственном сервере"
-
-msgid "Separate .lrc file"
-msgstr "Отдельный файл .lrc"
 
 msgid "September {year}"
 msgstr "Сентябрь {year}"
@@ -3077,6 +3236,11 @@ msgstr "Войти используя код"
 msgid "Sign in"
 msgstr "Войти"
 
+#, fuzzy
+#| msgid "Clear artist"
+msgid "Similar artists"
+msgstr "Очистить исполнителя"
+
 msgid "SimpMusic"
 msgstr "SimpMusic"
 
@@ -3175,6 +3339,16 @@ msgstr ""
 msgid "Stream quality"
 msgstr "Качество потока"
 
+#, fuzzy
+#| msgid "Audio"
+msgid "Studio"
+msgstr "Аудио"
+
+#, fuzzy
+#| msgid "Audio"
+msgid "Studios"
+msgstr "Аудио"
+
 msgid "Style"
 msgstr "Стиль"
 
@@ -3205,6 +3379,9 @@ msgstr "Система Flatpak:"
 msgid "System"
 msgstr "Система"
 
+msgid "Tags"
+msgstr ""
+
 msgid "Target loudness"
 msgstr "Целевая громкость"
 
@@ -3225,6 +3402,14 @@ msgstr "Текст"
 
 msgid "The API token was not accepted. Please connect again."
 msgstr "Токен API не был принят. Пожалуйста, повторите подключение."
+
+msgid "TheAudioDB album ID"
+msgstr ""
+
+#, fuzzy
+#| msgid "MusicBrainz artist ID"
+msgid "TheAudioDB artist ID"
+msgstr "MusicBrainz ID исполнителя"
 
 msgid "Theme"
 msgstr "Тема"
@@ -3282,6 +3467,14 @@ msgid "Top genres"
 msgstr "Лучшие жанры"
 
 msgid "Top tracks"
+msgstr "Лучшие треки"
+
+msgid "Total discs"
+msgstr ""
+
+#, fuzzy
+#| msgid "Top tracks"
+msgid "Total tracks"
 msgstr "Лучшие треки"
 
 msgid "Track number"
@@ -3370,6 +3563,11 @@ msgstr "Rufin обновлён на {version}"
 
 msgid "Updating Rufin to {version}..."
 msgstr "Обновляю Rufin на {version}..."
+
+#, fuzzy
+#| msgid "Show artwork"
+msgid "Upload artwork"
+msgstr "Показать обложку"
 
 msgid "Use API key"
 msgstr "Использовать ключ API"
@@ -3750,14 +3948,17 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
 
+#~ msgid "Played"
+#~ msgstr "Воспроизведено"
+
+#~ msgid "Separate .lrc file"
+#~ msgstr "Отдельный файл .lrc"
+
 #~ msgid "Prefer server playlist covers"
 #~ msgstr "Предпочитать обложки плейлистов, хранящиеся на сервере"
 
 #~ msgid "Artist / Album"
 #~ msgstr "Исполнитель / Альбом"
-
-#~ msgid "Folder"
-#~ msgstr "Папка"
 
 #~ msgid "This is not a valid Rufin visualizer preset."
 #~ msgstr "Это недействительный пресет визуализации для Rufin."
@@ -4051,9 +4252,6 @@ msgstr "Добро пожаловать в программу установки
 #~ "Настройте сохраненные музыкальные серверы и параметры локального "
 #~ "воспроизведения."
 
-#~ msgid "Current server"
-#~ msgstr "Текущий сервер"
-
 #~ msgid "Current version:"
 #~ msgstr "Текущая версия:"
 
@@ -4344,9 +4542,6 @@ msgstr "Добро пожаловать в программу установки
 
 #~ msgid "appears on"
 #~ msgstr "появляется в"
-
-#~ msgid "folders selected"
-#~ msgstr "папок выбрано"
 
 #~ msgid "no account"
 #~ msgstr "нет учётной записи"

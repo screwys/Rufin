@@ -86,6 +86,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"Relative paths start at the music folder or source URL. Local paths can also "
+"be absolute."
+msgstr ""
+
+msgid ""
 "Remove Local and its cached library from Rufin? Your music files will not be "
 "deleted."
 msgstr ""
@@ -133,6 +138,11 @@ msgstr ""
 msgid ""
 "These folders are combined into the Local source and shown through folder "
 "browsing"
+msgstr ""
+
+msgid ""
+"This is a fallback artwork Rufin uses, do you want to set this as the item "
+"artwork?"
 msgstr ""
 
 msgid ""
@@ -274,6 +284,11 @@ msgstr ""
 msgid "Add folder"
 msgstr "新增資料夾"
 
+#, fuzzy
+#| msgid "Add a title"
+msgid "Add image"
+msgstr "新增標題"
+
 msgid "Add to Favorites"
 msgstr "加入最愛"
 
@@ -303,6 +318,11 @@ msgstr "新增來源"
 msgid "Album Artists"
 msgstr "專輯藝人"
 
+#, fuzzy
+#| msgid "Album artists"
+msgid "Album artist sort"
+msgstr "專輯藝人"
+
 msgid "Album artist"
 msgstr "專輯藝人"
 
@@ -311,6 +331,11 @@ msgstr "專輯藝人"
 
 msgid "Album radio"
 msgstr "專輯電台"
+
+#, fuzzy
+#| msgid "Albums"
+msgid "Album sort"
+msgstr "專輯"
 
 msgid "Album title"
 msgstr "專輯標題"
@@ -334,6 +359,9 @@ msgstr "所有音樂"
 
 msgid "All Playlists"
 msgstr "所有播放清單"
+
+msgid "All time"
+msgstr ""
 
 msgid "All tracks"
 msgstr "所有曲目"
@@ -405,6 +433,11 @@ msgstr "藝人名稱"
 msgid "Artist radio"
 msgstr "藝人電台"
 
+#, fuzzy
+#| msgid "Artists"
+msgid "Artist sort"
+msgstr "藝人"
+
 msgid "Artist tracks"
 msgstr "藝人曲目"
 
@@ -418,6 +451,21 @@ msgstr "藝人"
 
 msgid "Artists"
 msgstr "藝人"
+
+#, fuzzy
+#| msgid "Metadata editing is no longer available"
+msgid "Artwork editing is no longer available"
+msgstr "元資料已經不再能編輯"
+
+#, fuzzy
+#| msgid "No folder selected"
+msgid "Artwork selected"
+msgstr "無資料夾被選擇"
+
+#, fuzzy
+#| msgid "Secret storage"
+msgid "Artwork storage"
+msgstr "私密儲存空間"
 
 msgid "Artwork"
 msgstr ""
@@ -641,6 +689,11 @@ msgid "Clear Mapping"
 msgstr ""
 
 #, fuzzy
+#| msgid "Play album"
+msgid "Clear album"
+msgstr "播放專輯"
+
+#, fuzzy
 #| msgid "Play artist"
 msgid "Clear artist"
 msgstr "播放藝人"
@@ -716,7 +769,18 @@ msgstr "緊湊"
 msgid "Compare these emoji on both devices"
 msgstr ""
 
+#, fuzzy
+#| msgid "Collection"
+msgid "Compilation"
+msgstr "收藏"
+
 msgid "Complete sign-in in your browser"
+msgstr ""
+
+msgid "Composer sort"
+msgstr ""
+
+msgid "Composer"
 msgstr ""
 
 msgid "Configure another"
@@ -873,6 +937,11 @@ msgid "Copy"
 msgstr "複製"
 
 #, fuzzy
+#| msgid "Copy"
+msgid "Copyright"
+msgstr "複製"
+
+#, fuzzy
 #| msgid "Couldn't load this folder"
 msgid "Could not load listening overview"
 msgstr "無法載入此資料夾"
@@ -925,6 +994,9 @@ msgstr "無法搜尋到歌詞"
 msgid "Couldn’t download Japanese dictionary"
 msgstr ""
 
+msgid "Country"
+msgstr ""
+
 #, fuzzy
 #| msgid "Delete Playlist"
 msgid "Create a playlist from queue"
@@ -941,6 +1013,9 @@ msgstr "交叉淡入淡出模式"
 
 msgid "Crossfade"
 msgstr "交叉淡入淡出"
+
+msgid "Current artwork"
+msgstr ""
 
 msgid "Custom HTTP headers"
 msgstr ""
@@ -968,6 +1043,9 @@ msgstr "深色"
 
 msgid "Date added"
 msgstr "新增日期"
+
+msgid "Date"
+msgstr ""
 
 msgid "Days after month ends"
 msgstr ""
@@ -1255,8 +1333,18 @@ msgstr "整個媒體庫"
 msgid "Equalizer"
 msgstr "等化器"
 
+#, fuzzy
+#| msgid "Never Played"
+msgid "Ever played"
+msgstr "從未播放"
+
 msgid "Everything, including new tracks"
 msgstr "所有內容，包含新曲目"
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "Excluded folders"
+msgstr "新增資料夾"
 
 msgid "Existing profile file"
 msgstr ""
@@ -1389,6 +1477,11 @@ msgstr "固定位置"
 msgid "Flat"
 msgstr ""
 
+#, fuzzy
+#| msgid "Folder"
+msgid "Folder path"
+msgstr "資料夾"
+
 msgid "Folders"
 msgstr "資料夾"
 
@@ -1508,6 +1601,9 @@ msgstr ""
 msgid "Grid"
 msgstr "網格"
 
+msgid "Grouping"
+msgstr ""
+
 msgid "Guest / public access"
 msgstr ""
 
@@ -1552,6 +1648,11 @@ msgstr "如果頁面沒有載入，表示 Libre.fm 阻擋了您的 IP 區段或 
 
 msgid "If you do not have API keys, create them"
 msgstr "如果你尚未擁有 API 金鑰，請建立它"
+
+#, fuzzy
+#| msgid "Change Secret Storage"
+msgid "Image files"
+msgstr "變更敏感存儲空間"
 
 msgid "Image"
 msgstr "圖像"
@@ -1640,6 +1741,9 @@ msgstr "快捷鍵"
 msgid "LRCLIB"
 msgstr "LRCLIB"
 
+msgid "Labels"
+msgstr ""
+
 msgid "Language and readings"
 msgstr ""
 
@@ -1648,6 +1752,19 @@ msgstr "語言"
 
 msgid "Laptop/Headphones"
 msgstr ""
+
+#, fuzzy
+#| msgid "Last played"
+msgid "Last 30 days"
+msgstr "最後播放"
+
+msgid "Last 365 days"
+msgstr ""
+
+#, fuzzy
+#| msgid "Last played"
+msgid "Last 7 days"
+msgstr "最後播放"
 
 msgid "Last played"
 msgstr "最後播放"
@@ -1961,6 +2078,11 @@ msgstr "此裝置"
 msgid "MusicBrainz + Last.fm"
 msgstr ""
 
+#, fuzzy
+#| msgid "MusicBrainz artist ID"
+msgid "MusicBrainz album artist ID"
+msgstr "MusicBrainz 藝人 ID"
+
 msgid "MusicBrainz artist ID"
 msgstr "MusicBrainz 藝人 ID"
 
@@ -1978,6 +2100,11 @@ msgstr ""
 
 msgid "MusicBrainz"
 msgstr "MusicBrainz"
+
+#, fuzzy
+#| msgid "Music Folder"
+msgid "Musical key"
+msgstr "音樂資料夾"
 
 msgid "Mute"
 msgstr "靜音"
@@ -2071,6 +2198,11 @@ msgstr "未找到伺服器"
 
 msgid "No albums from this artist yet"
 msgstr "暫無此藝人的專輯"
+
+#, fuzzy
+#| msgid "No network devices found"
+msgid "No artwork found"
+msgstr "找不到網路裝置"
 
 msgid "No cached server path yet"
 msgstr "暫無快取伺服器路徑"
@@ -2342,6 +2474,11 @@ msgstr "收藏"
 msgid "Orange"
 msgstr "橘色"
 
+#, fuzzy
+#| msgid "Release date"
+msgid "Original release date"
+msgstr "發行日期"
+
 msgid "Original"
 msgstr ""
 
@@ -2396,6 +2533,12 @@ msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
 msgstr ""
 
 msgid "Perceptual"
+msgstr ""
+
+msgid "Performer"
+msgstr ""
+
+msgid "Period"
 msgstr ""
 
 msgid "Pink"
@@ -2485,9 +2628,6 @@ msgstr "播放速度"
 
 msgid "Playback"
 msgstr "播放"
-
-msgid "Played"
-msgstr "已播放"
 
 msgid "Playing on this device"
 msgstr "在此裝置上播放"
@@ -2728,6 +2868,9 @@ msgstr ""
 msgid "Reconnect"
 msgstr "重新連接"
 
+msgid "Record label"
+msgstr ""
+
 msgid "Red"
 msgstr "紅色"
 
@@ -2757,6 +2900,9 @@ msgid "Regenerate access token"
 msgstr ""
 
 msgid "Regenerate access token?"
+msgstr ""
+
+msgid "Regenerate"
 msgstr ""
 
 msgid "Related"
@@ -3002,6 +3148,11 @@ msgstr ""
 msgid "Save changes automatically"
 msgstr ""
 
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Save in folder"
+msgstr "移除資料夾"
+
 msgid "Save lyrics automatically"
 msgstr ""
 
@@ -3058,6 +3209,11 @@ msgid "Search Again"
 msgstr "重新搜尋"
 
 msgid "Search Lyrics"
+msgstr "搜尋歌詞"
+
+#, fuzzy
+#| msgid "Search Lyrics"
+msgid "Search artwork"
 msgstr "搜尋歌詞"
 
 #, fuzzy
@@ -3187,9 +3343,6 @@ msgid "Selection"
 msgstr "選擇"
 
 msgid "Self-host an Iroh Relay"
-msgstr ""
-
-msgid "Separate .lrc file"
 msgstr ""
 
 msgid "September {year}"
@@ -3372,6 +3525,11 @@ msgstr ""
 msgid "Sign in"
 msgstr ""
 
+#, fuzzy
+#| msgid "Play artist"
+msgid "Similar artists"
+msgstr "播放藝人"
+
 msgid "SimpMusic"
 msgstr ""
 
@@ -3480,6 +3638,16 @@ msgstr ""
 msgid "Stream quality"
 msgstr "串流品質"
 
+#, fuzzy
+#| msgid "Audio"
+msgid "Studio"
+msgstr "音訊"
+
+#, fuzzy
+#| msgid "Audio"
+msgid "Studios"
+msgstr "音訊"
+
 msgid "Style"
 msgstr ""
 
@@ -3512,6 +3680,9 @@ msgstr "系統預設值"
 msgid "System"
 msgstr "系統"
 
+msgid "Tags"
+msgstr ""
+
 msgid "Target loudness"
 msgstr ""
 
@@ -3534,6 +3705,14 @@ msgstr ""
 
 msgid "The API token was not accepted. Please connect again."
 msgstr ""
+
+msgid "TheAudioDB album ID"
+msgstr ""
+
+#, fuzzy
+#| msgid "MusicBrainz artist ID"
+msgid "TheAudioDB artist ID"
+msgstr "MusicBrainz 藝人 ID"
 
 msgid "Theme"
 msgstr "主題"
@@ -3595,6 +3774,14 @@ msgstr "任何曲風"
 #, fuzzy
 #| msgid "Mood tracks"
 msgid "Top tracks"
+msgstr "氛圍曲目"
+
+msgid "Total discs"
+msgstr ""
+
+#, fuzzy
+#| msgid "Mood tracks"
+msgid "Total tracks"
 msgstr "氛圍曲目"
 
 msgid "Track number"
@@ -3686,6 +3873,9 @@ msgid "Updated Rufin to {version}"
 msgstr ""
 
 msgid "Updating Rufin to {version}..."
+msgstr ""
+
+msgid "Upload artwork"
 msgstr ""
 
 msgid "Use API key"
@@ -4063,14 +4253,14 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
 
+#~ msgid "Played"
+#~ msgstr "已播放"
+
 #~ msgid "Prefer server playlist covers"
 #~ msgstr "偏好伺服器的播放清單封面"
 
 #~ msgid "Artist / Album"
 #~ msgstr "藝人 / 專輯"
-
-#~ msgid "Folder"
-#~ msgstr "資料夾"
 
 #~ msgid "Color scheme"
 #~ msgstr "色彩配置"
@@ -4085,9 +4275,6 @@ msgstr ""
 
 #~ msgid "Choose an existing local folder"
 #~ msgstr "選擇已存在的本地資料夾"
-
-#~ msgid "No folder selected"
-#~ msgstr "無資料夾被選擇"
 
 #, fuzzy
 #~| msgid "Smart Playlist"

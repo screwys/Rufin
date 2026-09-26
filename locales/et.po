@@ -111,6 +111,11 @@ msgstr ""
 "kopeerides kutsekoodi"
 
 msgid ""
+"Relative paths start at the music folder or source URL. Local paths can also "
+"be absolute."
+msgstr ""
+
+msgid ""
 "Remove Local and its cached library from Rufin? Your music files will not be "
 "deleted."
 msgstr ""
@@ -182,6 +187,11 @@ msgid ""
 msgstr ""
 "Need kaustad on koondatud kohalikku andmekogusse ja neid saad näha kaustade "
 "sirvimise vaatest"
+
+msgid ""
+"This is a fallback artwork Rufin uses, do you want to set this as the item "
+"artwork?"
+msgstr ""
 
 msgid ""
 "This is not supported natively by this source, but Rufin can show partial "
@@ -328,6 +338,11 @@ msgstr "Lisa praegune"
 msgid "Add folder"
 msgstr "Lisa kaust"
 
+#, fuzzy
+#| msgid "Add a title"
+msgid "Add image"
+msgstr "Lisa pealkiri"
+
 msgid "Add to Favorites"
 msgstr "Lisa lemmikuks"
 
@@ -355,6 +370,11 @@ msgstr "Lisan allikat"
 msgid "Album Artists"
 msgstr "Albumi esitajad"
 
+#, fuzzy
+#| msgid "Album artists"
+msgid "Album artist sort"
+msgstr "Albumi esitajad"
+
 msgid "Album artist"
 msgstr "Albumi esitaja"
 
@@ -363,6 +383,11 @@ msgstr "Albumi esitajad"
 
 msgid "Album radio"
 msgstr "Albumipõhine raadio"
+
+#, fuzzy
+#| msgid "Albums"
+msgid "Album sort"
+msgstr "Albumid"
 
 msgid "Album title"
 msgstr "Albumi pealkiri"
@@ -384,6 +409,9 @@ msgstr "Kogu muusika"
 
 msgid "All Playlists"
 msgstr "Kõik esitusloendid"
+
+msgid "All time"
+msgstr ""
 
 msgid "All tracks"
 msgstr "Kõik lood"
@@ -451,6 +479,11 @@ msgstr "Esitaja nimi"
 msgid "Artist radio"
 msgstr "Esitajapõhine raadio"
 
+#, fuzzy
+#| msgid "Artists"
+msgid "Artist sort"
+msgstr "Esitajaid"
+
 msgid "Artist tracks"
 msgstr "Esitaja lood"
 
@@ -462,6 +495,21 @@ msgstr "Esitaja"
 
 msgid "Artists"
 msgstr "Esitajaid"
+
+#, fuzzy
+#| msgid "Metadata editing is no longer available"
+msgid "Artwork editing is no longer available"
+msgstr "Metateabe muutmine pole enam saadaval"
+
+#, fuzzy
+#| msgid "folders selected"
+msgid "Artwork selected"
+msgstr "valitud kausta"
+
+#, fuzzy
+#| msgid "Secret storage"
+msgid "Artwork storage"
+msgstr "Salajane salvestusruum"
 
 msgid "Artwork"
 msgstr "Kaanepildid"
@@ -653,6 +701,11 @@ msgstr "Klassikaline muusika"
 msgid "Clear Mapping"
 msgstr "Eemalda vastendus"
 
+#, fuzzy
+#| msgid "Play album"
+msgid "Clear album"
+msgstr "Esita albumit"
+
 msgid "Clear artist"
 msgstr "Eemalda esitaja"
 
@@ -719,8 +772,19 @@ msgstr "Kompaktne"
 msgid "Compare these emoji on both devices"
 msgstr "Võrdle neid emojisid mõlemas seadmes"
 
+#, fuzzy
+#| msgid "Copy invitation"
+msgid "Compilation"
+msgstr "Kopeeri kutse"
+
 msgid "Complete sign-in in your browser"
 msgstr "Lõpeta sisselogimine veebibrauseris"
+
+msgid "Composer sort"
+msgstr ""
+
+msgid "Composer"
+msgstr ""
 
 msgid "Configure another"
 msgstr "Seadista veel üks"
@@ -839,6 +903,11 @@ msgstr "Kopeeri praegune välimus lõikelauale"
 msgid "Copy"
 msgstr "Kopeeri"
 
+#, fuzzy
+#| msgid "Copy"
+msgid "Copyright"
+msgstr "Kopeeri"
+
 msgid "Could not load listening overview"
 msgstr "Kuulamiste ülevaate laadimine ei õnnestunud"
 
@@ -878,6 +947,9 @@ msgstr "Laulusõnade otsimine ei õnenstunud"
 msgid "Couldn’t download Japanese dictionary"
 msgstr "Jaapani keele sõnastiku laadimine ei õnnestunud"
 
+msgid "Country"
+msgstr ""
+
 msgid "Create a playlist from queue"
 msgstr "Koosta esitusloend esitusjärjekorrast"
 
@@ -892,6 +964,11 @@ msgstr "Risthajumise viis"
 
 msgid "Crossfade"
 msgstr "Risthajutamine"
+
+#, fuzzy
+#| msgid "Current server"
+msgid "Current artwork"
+msgstr "Praegune server"
 
 msgid "Custom HTTP headers"
 msgstr "Sinu seadistatud HTTP-päised"
@@ -919,6 +996,9 @@ msgstr "Tume kujundus"
 
 msgid "Date added"
 msgstr "Lisamise kuupäev"
+
+msgid "Date"
+msgstr ""
 
 msgid "Days after month ends"
 msgstr "Päevi peale kuu lõppu"
@@ -1166,8 +1246,18 @@ msgstr "Terve muusikakogu"
 msgid "Equalizer"
 msgstr "Ekvalaiser"
 
+#, fuzzy
+#| msgid "Never Played"
+msgid "Ever played"
+msgstr "Esitamata"
+
 msgid "Everything, including new tracks"
 msgstr "Kõik, sealhulgas uued lood"
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "Excluded folders"
+msgstr "Lisa kaust"
 
 msgid "Existing profile file"
 msgstr "Olemasolev profiilifail"
@@ -1282,6 +1372,11 @@ msgstr "Fikseeritud asukoht"
 msgid "Flat"
 msgstr "Ühetasane"
 
+#, fuzzy
+#| msgid "Folder"
+msgid "Folder path"
+msgstr "Kaust"
+
 msgid "Folders"
 msgstr "Kaustad"
 
@@ -1395,6 +1490,9 @@ msgstr "Ruudustikuvaate sildid"
 msgid "Grid"
 msgstr "Ruudustikuvaade"
 
+msgid "Grouping"
+msgstr ""
+
 msgid "Guest / public access"
 msgstr "Avalik ligipääs, sh külalistele"
 
@@ -1441,6 +1539,11 @@ msgstr ""
 
 msgid "If you do not have API keys, create them"
 msgstr "Kui sul pole APi võtmeid, siis saad nad luua"
+
+#, fuzzy
+#| msgid "Change Profile"
+msgid "Image files"
+msgstr "Muuda profiili"
 
 msgid "Image"
 msgstr "Pilt"
@@ -1525,6 +1628,9 @@ msgstr "Klaviatuuri kiirklahvid"
 msgid "LRCLIB"
 msgstr "LRCLIB"
 
+msgid "Labels"
+msgstr ""
+
 msgid "Language and readings"
 msgstr "Keeled ja lugemised"
 
@@ -1533,6 +1639,19 @@ msgstr "Keel"
 
 msgid "Laptop/Headphones"
 msgstr "Sülearvuti/kõrvaklapid"
+
+#, fuzzy
+#| msgid "Last played"
+msgid "Last 30 days"
+msgstr "Viimati esitatud"
+
+msgid "Last 365 days"
+msgstr ""
+
+#, fuzzy
+#| msgid "Last played"
+msgid "Last 7 days"
+msgstr "Viimati esitatud"
 
 msgid "Last played"
 msgstr "Viimati esitatud"
@@ -1810,6 +1929,11 @@ msgstr "Muusika selles seadmes"
 msgid "MusicBrainz + Last.fm"
 msgstr "MusicBrainz + Last.fm"
 
+#, fuzzy
+#| msgid "MusicBrainz artist ID"
+msgid "MusicBrainz album artist ID"
+msgstr "MusicBrainzi esineja tunnus"
+
 msgid "MusicBrainz artist ID"
 msgstr "MusicBrainzi esineja tunnus"
 
@@ -1827,6 +1951,11 @@ msgstr "MusicBrainzi väljaande loo tunnus"
 
 msgid "MusicBrainz"
 msgstr "MusicBrainz"
+
+#, fuzzy
+#| msgid "Music Folder"
+msgid "Musical key"
+msgstr "Muusikafailide kaust"
 
 msgid "Mute"
 msgstr "Summuta"
@@ -1916,6 +2045,11 @@ msgstr "Ühtegi serverit ei leidu"
 
 msgid "No albums from this artist yet"
 msgstr "Sellelt esitajalt pole veel albumeid"
+
+#, fuzzy
+#| msgid "No network devices found"
+msgid "No artwork found"
+msgstr "Ühtegi võrguseadet ei leidu"
 
 msgid "No cached server path yet"
 msgstr "Serveri puhverdatud asukoht pole veel saadaval"
@@ -2148,6 +2282,11 @@ msgstr "Valikud"
 msgid "Orange"
 msgstr "Oranž"
 
+#, fuzzy
+#| msgid "Release date"
+msgid "Original release date"
+msgstr "Avaldamise kuupäev"
+
 msgid "Original"
 msgstr "Algne"
 
@@ -2197,6 +2336,12 @@ msgstr ""
 
 msgid "Perceptual"
 msgstr "Tajutav"
+
+msgid "Performer"
+msgstr ""
+
+msgid "Period"
+msgstr ""
 
 msgid "Pink"
 msgstr "Roosa"
@@ -2275,9 +2420,6 @@ msgstr "Taasesituse kiirus"
 
 msgid "Playback"
 msgstr "Taasesitus"
-
-msgid "Played"
-msgstr "Esitatud"
 
 msgid "Playing on this device"
 msgstr "Esitamisel selles seadmes"
@@ -2480,6 +2622,11 @@ msgstr "Kui su server seda tagab, siis soovitame kasutada"
 msgid "Reconnect"
 msgstr "Ühenda uuesti"
 
+#, fuzzy
+#| msgid "Grid labels"
+msgid "Record label"
+msgstr "Ruudustikuvaate sildid"
+
 msgid "Red"
 msgstr "Punane"
 
@@ -2506,6 +2653,11 @@ msgstr "Loo ligipääsu tunnusluba uuesti"
 
 msgid "Regenerate access token?"
 msgstr "Kas lood ligipääsu tunnusloa uuesti?"
+
+#, fuzzy
+#| msgid "Regenerate access token"
+msgid "Regenerate"
+msgstr "Loo ligipääsu tunnusluba uuesti"
 
 msgid "Related"
 msgstr "Seaotud"
@@ -2726,6 +2878,11 @@ msgstr "Salvestamine talletab laulusõnad sinu andmeallikasse"
 msgid "Save changes automatically"
 msgstr "Salvesta muudatused automaatselt"
 
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Save in folder"
+msgstr "Eemalda kaust"
+
 msgid "Save lyrics automatically"
 msgstr "Salvesta laulusõnad automaatselt"
 
@@ -2778,6 +2935,11 @@ msgstr "Otsi uuesti"
 
 msgid "Search Lyrics"
 msgstr "Otsi laulusõnu"
+
+#, fuzzy
+#| msgid "Show artwork"
+msgid "Search artwork"
+msgstr "Näita kaanepilte"
 
 msgid "Search current folder"
 msgstr "Otsi sellest kaustas"
@@ -2883,9 +3045,6 @@ msgstr "Valik"
 
 msgid "Self-host an Iroh Relay"
 msgstr "Sinu enda hallatud Irohi edastusserver"
-
-msgid "Separate .lrc file"
-msgstr "Eraldi .lrc fail"
 
 msgid "September {year}"
 msgstr "September {year}"
@@ -3049,6 +3208,11 @@ msgstr "Logi sisse koodiga"
 msgid "Sign in"
 msgstr "Logi sisse"
 
+#, fuzzy
+#| msgid "Clear artist"
+msgid "Similar artists"
+msgstr "Eemalda esitaja"
+
 msgid "SimpMusic"
 msgstr "SimpMusic"
 
@@ -3146,6 +3310,16 @@ msgstr ""
 msgid "Stream quality"
 msgstr "Voogedastuse kvaliteet"
 
+#, fuzzy
+#| msgid "Audio"
+msgid "Studio"
+msgstr "Heli"
+
+#, fuzzy
+#| msgid "Audio"
+msgid "Studios"
+msgstr "Heli"
+
 msgid "Style"
 msgstr "Stiil"
 
@@ -3176,6 +3350,9 @@ msgstr "Süsteemi flatpak:"
 msgid "System"
 msgstr "Süsteem"
 
+msgid "Tags"
+msgstr ""
+
 msgid "Target loudness"
 msgstr "Sihtvaljus"
 
@@ -3196,6 +3373,14 @@ msgstr "Tekst"
 
 msgid "The API token was not accepted. Please connect again."
 msgstr "API tunnusluba polnud õige. Palun ühenda uuesti."
+
+msgid "TheAudioDB album ID"
+msgstr ""
+
+#, fuzzy
+#| msgid "MusicBrainz artist ID"
+msgid "TheAudioDB artist ID"
+msgstr "MusicBrainzi esineja tunnus"
 
 msgid "Theme"
 msgstr "Kujundus"
@@ -3251,6 +3436,14 @@ msgid "Top genres"
 msgstr "Populaarsemad žanrid"
 
 msgid "Top tracks"
+msgstr "Populaarsemad lood"
+
+msgid "Total discs"
+msgstr ""
+
+#, fuzzy
+#| msgid "Top tracks"
+msgid "Total tracks"
 msgstr "Populaarsemad lood"
 
 msgid "Track number"
@@ -3339,6 +3532,11 @@ msgstr "Rufin on uuendatud versioonini {version}"
 
 msgid "Updating Rufin to {version}..."
 msgstr "Rufin on uuendamisel versioonini {version}..."
+
+#, fuzzy
+#| msgid "Show artwork"
+msgid "Upload artwork"
+msgstr "Näita kaanepilte"
 
 msgid "Use API key"
 msgstr "Kasuta API-võtit"
@@ -3712,14 +3910,17 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
+#~ msgid "Played"
+#~ msgstr "Esitatud"
+
+#~ msgid "Separate .lrc file"
+#~ msgstr "Eraldi .lrc fail"
+
 #~ msgid "Prefer server playlist covers"
 #~ msgstr "Eelistata serveri esitusloendi kaanepilte"
 
 #~ msgid "Artist / Album"
 #~ msgstr "Esitaja / Album"
-
-#~ msgid "Folder"
-#~ msgstr "Kaust"
 
 #~ msgid "Color scheme"
 #~ msgstr "Kasutatavad värvid"
@@ -4142,9 +4343,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 #~ msgstr ""
 #~ "Seadista salvestatud muusikaservereid ja kohaliku taasesituse vastendusi"
 
-#~ msgid "Current server"
-#~ msgstr "Praegune server"
-
 #, fuzzy
 #~ msgid "Current version:"
 #~ msgstr "Praegune versioon:"
@@ -4275,9 +4473,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
 #~ msgid "appears on"
 #~ msgstr "esineb"
-
-#~ msgid "folders selected"
-#~ msgstr "valitud kausta"
 
 #~ msgid "no account"
 #~ msgstr "kasutajakontot pole"
