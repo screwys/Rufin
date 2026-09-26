@@ -19,9 +19,20 @@ impl Shell {
                     key,
                     name,
                     definition,
+                    artwork,
                 } => {
                     database
-                        .update_smart_playlist(key, &name, &definition)
+                        .update_smart_playlist(
+                            key,
+                            &name,
+                            &definition,
+                            artwork.as_ref().map(|change| match change {
+                                sources::ArtworkChange::Replace(image) => {
+                                    Some(image.bytes.as_slice())
+                                }
+                                sources::ArtworkChange::Remove => None,
+                            }),
+                        )
                         .await
                 }
                 SmartPlaylistChange::Delete(key) => database.delete_smart_playlist(key).await,
@@ -123,6 +134,12 @@ impl Shell {
                     shell.publish_smart_playlist_change(change, settled);
                 }
             }),
+            &self.products.source,
+            &self.artwork,
+            self.selected_library()
+                .as_ref()
+                .map(|selected| (Some(selected.source_key), selected.music_folder_key))
+                .unwrap_or_default(),
         );
         self.present_selected_dialog(&dialog);
     }

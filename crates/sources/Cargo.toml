@@ -25,6 +25,8 @@ futures-util.workspace = true
 getrandom.workspace = true
 gstreamer-pbutils = { workspace = true, features = ["v1_26"] }
 if-addrs.workspace = true
+image.workspace = true
+jxl-image-rs-integration.workspace = true
 library.workspace = true
 lofty.workspace = true
 md5.workspace = true
@@ -33,7 +35,7 @@ notify.workspace = true
 playback.workspace = true
 percent-encoding.workspace = true
 quick-xml.workspace = true
-reqwest = { workspace = true, features = ["json", "stream", "form", "query"] }
+reqwest = { workspace = true, features = ["json", "stream", "form", "query", "multipart"] }
 sha2.workspace = true
 smb.workspace = true
 smb-fscc.workspace = true

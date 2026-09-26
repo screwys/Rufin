@@ -37,8 +37,11 @@ pub(crate) fn directory_image(directory: &Path) -> Option<PathBuf> {
         if !supported_image(&path) || !path.is_file() {
             continue;
         }
-        count += 1;
         let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        if crate::file::artwork::is_artist_image(&name) {
+            continue;
+        }
+        count += 1;
         let rank = image_rank(&name);
         let candidate = (rank, path);
         if best.as_ref().is_none_or(|current| &candidate < current) {
@@ -47,6 +50,35 @@ pub(crate) fn directory_image(directory: &Path) -> Option<PathBuf> {
     }
     best.filter(|(rank, _)| *rank != usize::MAX || count == 1)
         .map(|(_, path)| path)
+}
+
+pub(crate) fn directory_artist_image_for(
+    directory: &Path,
+    artist: &str,
+    allow_generic: bool,
+) -> Option<PathBuf> {
+    fs::read_dir(directory)
+        .ok()?
+        .flatten()
+        .filter_map(|entry| {
+            let rank = crate::file::artwork::artist_image_rank_for(
+                &entry.file_name().to_string_lossy(),
+                artist,
+                allow_generic,
+            );
+            (rank != usize::MAX && entry.path().is_file()).then(|| (rank, entry.path()))
+        })
+        .min()
+        .map(|(_, path)| path)
+}
+
+pub(crate) fn inspect_artist_pictures(path: &Path) -> Vec<crate::file::artwork::ArtistPicture> {
+    read_lofty(path, true)
+        .ok()
+        .flatten()
+        .map_or_else(Vec::new, |file| {
+            crate::file::artwork::artist_pictures(&file)
+        })
 }
 
 pub(crate) fn file_reference(source_id: &str, path: &Path, revision: String) -> LocalImageRef {
@@ -127,4 +159,14 @@ fn read_bounded(mut file: fs::File) -> SourceResult<Vec<u8>> {
 
 fn file_error(error: std::io::Error) -> SourceError {
     SourceError::Other(error.to_string())
+}
+
+pub(crate) fn revision(path: &Path) -> Option<String> {
+    let metadata = fs::metadata(path).ok()?;
+    let modified = metadata
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?;
+    Some(format!("{}-{}", metadata.len(), modified.as_nanos()))
 }

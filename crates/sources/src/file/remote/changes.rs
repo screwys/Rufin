@@ -217,7 +217,9 @@ impl RemoteSource {
         }
         self.stage_files(database, &mut scan, &|_| {}, &|| false, rename.as_ref())
             .await?;
-        self.stage_artwork(database, &mut scan, &|| false).await?;
+        crate::file::artwork::ArtworkFiles::Remote(self)
+            .stage(database, &mut scan, &|| false)
+            .await?;
         Ok(scan.finish().await?)
     }
 }

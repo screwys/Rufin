@@ -159,7 +159,7 @@ impl Shell {
                 let weak = Rc::downgrade(self);
                 Rc::new(move |artwork| {
                     if let Some(shell) = weak.upgrade() {
-                        shell.present_full_artwork(artwork);
+                        shell.present_full_artwork_group(artwork);
                     }
                 })
             },

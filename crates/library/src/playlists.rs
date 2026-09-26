@@ -36,6 +36,7 @@ pub struct PlaylistRow {
     pub object_id: String,
     pub name: String,
     pub writable: bool,
+    pub metadata_writable: bool,
     pub artwork_binding: Option<Vec<u8>>,
     pub track_count: i64,
     pub duration_millis: i64,
@@ -59,6 +60,7 @@ impl<'row> FromRow<'row, SqliteRow> for PlaylistRow {
             object_id: row.try_get("object_id")?,
             name: row.try_get("name")?,
             writable: row.try_get("writable")?,
+            metadata_writable: row.try_get("metadata_writable")?,
             artwork_binding: row.try_get("artwork_binding")?,
             track_count: row.try_get("track_count")?,
             duration_millis: row.try_get("duration_millis")?,
@@ -533,7 +535,7 @@ impl Database {
             };
             let Some(mut row) = sqlx::query_as::<_, PlaylistRow>(sqlx::AssertSqlSafe(format!(
                 "SELECT playlist.playlist_key,playlist.source_key,{source_identity} source_id,playlist.object_id,
-                        playlist.name,playlist.writable,playlist.artwork_binding,
+                        playlist.name,playlist.writable,playlist.metadata_writable,playlist.artwork_binding,
                         count(entry.playlist_entry_key) track_count,
                         COALESCE(sum(COALESCE(track.duration_millis,entry.duration_millis)),0) duration_millis,
                         count(CASE WHEN EXISTS(SELECT 1 FROM local_access_files access
@@ -546,15 +548,10 @@ impl Database {
             .bind(key).bind(key.raw().checked_abs()).fetch_optional(&mut *connection).await? else {
                 continue;
             };
-            row.representative_artwork = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-                "SELECT track.artwork_binding FROM {entries} entry
-                 CROSS JOIN tracks track USING(media_uri)
-                 WHERE entry.playlist_key=?1 AND track.artwork_binding IS NOT NULL
-                 ORDER BY entry.position LIMIT 4"
-            )))
-            .bind(key.raw().checked_abs())
-            .fetch_all(&mut *connection)
-            .await?;
+            if row.artwork_binding.is_none() {
+                row.representative_artwork =
+                    crate::artwork::playlist_representative_artwork_on(connection, *key).await?;
+            }
             row.genres =
                 sqlx::query_as::<_, (crate::GenreKey, String)>(sqlx::AssertSqlSafe(format!(
                     "SELECT genre.genre_key,genre.name FROM {entries} entry
@@ -786,34 +783,35 @@ impl Database {
         Ok(Some((playlist, object_id)))
     }
 
-    pub async fn rename_playlist(
+    pub async fn update_playlist(
         &self,
         source: Option<SourceKey>,
         playlist: PlaylistKey,
-        name: &str,
+        name: Option<&str>,
+        artwork: Option<Option<(&[u8], Option<&str>)>>,
     ) -> LibraryResult<bool> {
-        let name = name.trim();
-        if name.is_empty() {
+        let name = name.map(str::trim);
+        if name.is_some_and(str::is_empty) {
             return Err(LibraryError::InvalidRequest(
-                "Playlist name cannot be empty".to_string(),
+                "Playlist name cannot be empty".into(),
             ));
         }
+        let image = artwork.flatten();
+        let revision = image.map(|(bytes, _)| blake3::hash(bytes).to_hex().to_string());
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         let mut transaction = connection.begin().await?;
         let changed = sqlx::query(
-            "UPDATE main.playlists SET name=?3, normalized_name=lower(?3), sort_text=lower(?3)
+            "UPDATE main.playlists SET name=COALESCE(?3,name), normalized_name=COALESCE(lower(?3),normalized_name), sort_text=COALESCE(lower(?3),sort_text),
+             artwork_bytes=CASE WHEN ?4 THEN ?5 ELSE artwork_bytes END,
+             artwork_mime=CASE WHEN ?4 THEN ?6 ELSE artwork_mime END,
+             artwork_revision=CASE WHEN ?4 THEN ?7 ELSE artwork_revision END
              WHERE ((?1 IS NULL AND source_key IS NULL) OR source_key=(SELECT durable.source_key FROM main.source_ids durable JOIN catalog.sources source USING(object_id) WHERE source.source_key=?1))
-               AND playlist_key=?2 AND name IS NOT ?3",
-        )
-        .bind(source)
-        .bind(playlist)
-        .bind(name)
-        .execute(&mut *transaction)
-        .await?
-        .rows_affected()
-            == 1;
-        if changed {
+               AND playlist_key=?2 AND ((?3 IS NOT NULL AND name IS NOT ?3) OR (?4 AND artwork_revision IS NOT ?7))",
+        ).bind(source).bind(playlist).bind(name).bind(artwork.is_some())
+            .bind(image.map(|(bytes, _)| bytes)).bind(image.and_then(|(_, mime)| mime)).bind(revision)
+            .execute(&mut *transaction).await?.rows_affected() == 1;
+        if changed && name.is_some() {
             crate::playlist_links::mark_dirty_on(&mut transaction, playlist).await?;
         }
         transaction.commit().await?;
@@ -1217,7 +1215,7 @@ mod point_projection_tests {
                 .unwrap()
                 .remove_progress_handler();
             assert_eq!(rows[0].track_count, 15);
-            assert_eq!(rows[0].representative_artwork.len(), 4);
+            assert!(rows[0].artwork_binding.is_none());
             assert_eq!(entry, "track:1");
             assert_eq!(order.len(), 15);
             assert!(
@@ -1431,6 +1429,15 @@ pub struct PlaylistEntryWrite {
 enum PlaylistRecord {
     Playlist(PlaylistIdentity),
     File(crate::playlist_links::PlaylistFileRecord),
+    Artwork(PlaylistArtworkRecord),
+}
+
+#[derive(serde::Serialize, serde::Deserialize, sqlx::FromRow)]
+struct PlaylistArtworkRecord {
+    source_id: Option<String>,
+    object_id: String,
+    bytes: Vec<u8>,
+    content_type: Option<String>,
 }
 
 pub(crate) async fn write_playlist_identity(
@@ -1508,6 +1515,13 @@ pub(crate) async fn export_playlist_order_jsonl_on(
         count += 1;
     }
     drop(rows);
+    let mut images = sqlx::query_as::<_, PlaylistArtworkRecord>("SELECT source.object_id source_id,playlist.object_id,playlist.artwork_bytes bytes,playlist.artwork_mime content_type FROM main.playlists playlist LEFT JOIN main.source_ids source USING(source_key) WHERE playlist.artwork_bytes IS NOT NULL").fetch(&mut *connection);
+    while let Some(image) = images.try_next().await? {
+        serde_json::to_writer(&mut output, &PlaylistRecord::Artwork(image))?;
+        output.write_all(b"\n")?;
+    }
+    drop(images);
+
     crate::playlist_links::backup_records_on(connection, |record| {
         serde_json::to_writer(&mut output, &PlaylistRecord::File(record))?;
         output.write_all(b"\n")?;
@@ -1526,6 +1540,11 @@ pub(crate) async fn import_playlists_jsonl_on(
             PlaylistRecord::Playlist(identity) => {
                 write_playlist_identity(connection, &identity).await?;
                 count += 1;
+            }
+            PlaylistRecord::Artwork(image) => {
+                let revision = blake3::hash(&image.bytes).to_hex().to_string();
+                sqlx::query("UPDATE main.playlists SET artwork_bytes=?3,artwork_mime=?4,artwork_revision=?5 WHERE object_id=?1 AND source_key IS (SELECT source_key FROM main.source_ids WHERE object_id=?2)")
+                    .bind(image.object_id).bind(image.source_id).bind(image.bytes).bind(image.content_type).bind(revision).execute(&mut *connection).await?;
             }
             PlaylistRecord::File(record) => {
                 crate::playlist_links::restore_record_on(connection, record).await?

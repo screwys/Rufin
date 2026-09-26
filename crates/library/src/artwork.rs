@@ -7,6 +7,44 @@ use crate::{Database, FolderKey, LibraryError, LibraryResult, ReadCancellation, 
 
 const ARTWORK_PAGE_LIMIT: usize = 128;
 
+pub(crate) async fn playlist_representative_artwork_on(
+    connection: &mut sqlx::SqliteConnection,
+    playlist: crate::PlaylistKey,
+) -> LibraryResult<Vec<Vec<u8>>> {
+    if playlist.raw() < 0 {
+        return Ok(Vec::new());
+    }
+    let covers =
+        collection_artwork_sql("SELECT media_uri FROM main.playlist_entries WHERE playlist_key=?1");
+    Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT COALESCE(track.artwork_binding,album.artwork_binding)
+         FROM ({covers}) selected JOIN tracks track USING(track_key)
+         LEFT JOIN albums album USING(album_key)"
+    )))
+    .bind(playlist)
+    .fetch_all(connection)
+    .await?)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename = "artist")]
+pub struct ArtistArtworkBinding {
+    pub artist_name: String,
+    pub musicbrainz_artist_id: Option<String>,
+    pub source: Option<Vec<u8>>,
+    pub fallback: Option<Vec<u8>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename = "playlist")]
+pub struct PlaylistArtworkBinding {
+    #[serde(default)]
+    pub smart: bool,
+    pub source_id: Option<String>,
+    pub object_id: String,
+    pub revision: String,
+}
+
 // Use the catalog's stable album shuffle order, with one cover per member album.
 pub(crate) fn collection_artwork_sql(members: &str) -> String {
     format!(
@@ -29,6 +67,49 @@ pub enum RepresentativeArtworkScope {
 }
 
 impl Database {
+    pub async fn playlist_representative_artwork(
+        &self,
+        playlist: crate::PlaylistKey,
+    ) -> LibraryResult<Vec<Vec<u8>>> {
+        let mut connection = self.acquire_reader().await?;
+        playlist_representative_artwork_on(&mut connection, playlist).await
+    }
+
+    pub async fn playlist_artwork_binding(
+        &self,
+        playlist: crate::PlaylistKey,
+    ) -> LibraryResult<Option<Vec<u8>>> {
+        let mut connection = self.acquire_reader().await?;
+        Ok(
+            sqlx::query_scalar("SELECT artwork_binding FROM playlists WHERE playlist_key=?1")
+                .bind(playlist)
+                .fetch_optional(&mut *connection)
+                .await?
+                .flatten(),
+        )
+    }
+    pub async fn playlist_image(
+        &self,
+        image: &PlaylistArtworkBinding,
+    ) -> LibraryResult<Option<Vec<u8>>> {
+        let mut connection = self.acquire_reader().await?;
+        if image.smart {
+            return Ok(sqlx::query_scalar("SELECT artwork_bytes FROM main.smart_playlists WHERE object_id=?1 AND artwork_revision=?2 AND artwork_bytes IS NOT NULL")
+                .bind(&image.object_id).bind(&image.revision).fetch_optional(&mut *connection).await?);
+        }
+        Ok(sqlx::query_scalar("SELECT playlist.artwork_bytes FROM main.playlists playlist LEFT JOIN main.source_ids source USING(source_key) WHERE playlist.object_id=?1 AND source.object_id IS ?2 AND playlist.artwork_revision=?3 AND playlist.artwork_bytes IS NOT NULL")
+            .bind(&image.object_id).bind(&image.source_id).bind(&image.revision).fetch_optional(&mut *connection).await?)
+    }
+
+    pub async fn random_playlist_artwork(
+        &self,
+        playlist: crate::PlaylistKey,
+    ) -> LibraryResult<Vec<Vec<u8>>> {
+        let mut connection = self.acquire_reader().await?;
+        Ok(sqlx::query_scalar("SELECT COALESCE(track.artwork_binding,album.artwork_binding) binding FROM playlist_entries entry JOIN tracks track USING(media_uri) LEFT JOIN albums album USING(album_key) WHERE entry.playlist_key=?1 AND binding IS NOT NULL GROUP BY binding ORDER BY random() LIMIT 4")
+            .bind(playlist).fetch_all(&mut *connection).await?)
+    }
+
     pub async fn track_artwork_bindings(
         &self,
         media_uris: &[String],

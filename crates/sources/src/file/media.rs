@@ -29,6 +29,7 @@ pub(crate) struct ScannedTrack {
     pub(crate) disc_number: u16,
     pub(crate) track_number: u16,
     pub(crate) local_artwork: Option<LocalImageRef>,
+    pub(crate) artist_pictures: Vec<super::artwork::ArtistPicture>,
     pub(crate) musicbrainz_recording_id: Option<String>,
     pub(crate) musicbrainz_release_track_id: Option<String>,
     pub(crate) source_path: String,
@@ -570,6 +571,7 @@ fn scanned_track(path: &Path, metadata: AudioMetadata) -> ScannedTrack {
         disc_number,
         track_number,
         local_artwork,
+        artist_pictures: Vec::new(),
         musicbrainz_recording_id,
         musicbrainz_release_track_id,
         audio_revision: blake3::Hasher::new(),
@@ -948,17 +950,27 @@ mod tests {
                 .expect("read audio metadata");
             assert!(metadata.writable.title, "{name}");
             metadata.values.title = "Updated".into();
-            crate::file::metadata::write_track(
-                &path,
-                Some("mp3"),
+            crate::file::metadata::write_metadata(
+                &[crate::file::metadata::MetadataFileTarget {
+                    path: (&path).to_path_buf(),
+                    format: Some("mp3").map(str::to_owned),
+                    tag_writable: true,
+                }],
                 metadata.revision.as_deref().expect("file revision"),
-                &crate::TrackMetadataEdit {
-                    values: metadata.values,
-                    changed: crate::TrackMetadataWritable {
-                        title: true,
-                        ..Default::default()
-                    },
-                },
+                "",
+                &crate::MetadataEdit::Track(
+                    (*&crate::TrackMetadataEdit {
+                        extra: Default::default(),
+                        artwork: None,
+                        values: metadata.values,
+                        changed: crate::TrackMetadataWritable {
+                            title: true,
+                            ..Default::default()
+                        },
+                    })
+                        .clone(),
+                ),
+                None,
             )
             .expect("write audio metadata");
             let updated = crate::file::metadata::read_track_metadata(&path, Some("mp3"))

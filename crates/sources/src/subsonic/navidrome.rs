@@ -262,15 +262,14 @@ impl SubsonicSource {
         endpoint: &str,
         query: &[(&str, String)],
     ) -> SourceResult<T> {
-        let mut retried = false;
-        loop {
-            let token = self.navidrome_token().await?;
-            let mut url = navidrome_endpoint(&self.base_url, &format!("api/{endpoint}"))?;
-            url.query_pairs_mut()
-                .extend_pairs(query.iter().map(|(key, value)| (*key, value.as_str())));
-            let response = remote_http::json_with_header(
+        let mut url = navidrome_endpoint(&self.base_url, &format!("api/{endpoint}"))?;
+        url.query_pairs_mut()
+            .extend_pairs(query.iter().map(|(key, value)| (*key, value.as_str())));
+        let url = &url;
+        self.navidrome_authenticated(|token| async move {
+            remote_http::json_with_header(
                 self.client
-                    .get(url)
+                    .get(url.clone())
                     .header(&NAVIDROME_AUTH_HEADER, format!("Bearer {token}")),
                 NAVIDROME_HTTP,
                 BodyLimit {
@@ -279,7 +278,22 @@ impl SubsonicSource {
                 },
                 &NAVIDROME_AUTH_HEADER,
             )
-            .await;
+            .await
+        })
+        .await
+    }
+
+    async fn navidrome_authenticated<T, F>(
+        &self,
+        mut send: impl FnMut(String) -> F,
+    ) -> SourceResult<T>
+    where
+        F: Future<Output = SourceResult<(T, Option<String>)>>,
+    {
+        let mut retried = false;
+        loop {
+            let token = self.navidrome_token().await?;
+            let response = send(token.clone()).await;
             match response {
                 Ok((body, rotated)) => {
                     if let Some(rotated) = rotated.filter(|value| !value.trim().is_empty()) {
@@ -297,6 +311,50 @@ impl SubsonicSource {
                 Err(error) => return Err(error),
             }
         }
+    }
+
+    pub(crate) fn supports_playlist_artwork(&self) -> bool {
+        self.flavor == super::SubsonicFlavor::Navidrome
+            && self.credential.navidrome_password().is_some()
+    }
+
+    pub(crate) async fn change_playlist_artwork(
+        &self,
+        object: &str,
+        change: &crate::ArtworkChange,
+    ) -> SourceResult<()> {
+        if !self.supports_playlist_artwork() {
+            return Err(SourceError::InvalidRequest(
+                "This server cannot edit playlist artwork",
+            ));
+        }
+        let raw = crate::policy::raw_item_id(object);
+        let url = navidrome_endpoint(&self.base_url, &format!("api/playlist/{raw}/image"))?;
+        let url = &url;
+        self.navidrome_authenticated(|token| async move {
+            let request = match change {
+                crate::ArtworkChange::Replace(image) => {
+                    let part = reqwest::multipart::Part::bytes(image.bytes.clone())
+                        .file_name("artwork")
+                        .mime_str(
+                            image
+                                .content_type
+                                .as_deref()
+                                .unwrap_or("application/octet-stream"),
+                        )
+                        .map_err(|error| SourceError::Other(error.to_string()))?;
+                    self.client
+                        .post(url.clone())
+                        .multipart(reqwest::multipart::Form::new().part("image", part))
+                }
+                crate::ArtworkChange::Remove => self.client.delete(url.clone()),
+            }
+            .header(&NAVIDROME_AUTH_HEADER, format!("Bearer {token}"));
+            remote_http::unit_with_header(request, NAVIDROME_HTTP, &NAVIDROME_AUTH_HEADER)
+                .await
+                .map(|rotated| ((), rotated))
+        })
+        .await
     }
 
     async fn navidrome_token(&self) -> SourceResult<String> {

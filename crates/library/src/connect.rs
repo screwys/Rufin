@@ -57,6 +57,13 @@ const PROJECTIONS: &[Projection] = &[
         extra: "'source_id',(SELECT object_id FROM main.source_ids WHERE source_key=r.source_key)",
     },
     Projection {
+        kind: "playlist_artwork",
+        table: "main.playlists",
+        key: "json_array((SELECT object_id FROM main.source_ids WHERE source_key=r.source_key),r.object_id)",
+        fields: "artwork_bytes artwork_mime artwork_revision",
+        extra: "",
+    },
+    Projection {
         kind: "entry",
         table: "main.playlist_entries",
         key: "json_array((SELECT object_id FROM main.source_ids WHERE source_key=(SELECT source_key FROM main.playlists WHERE playlist_key=r.playlist_key)),(SELECT object_id FROM main.playlists WHERE playlist_key=r.playlist_key),r.object_id)",
@@ -67,7 +74,7 @@ const PROJECTIONS: &[Projection] = &[
         kind: "smart",
         table: "main.smart_playlists",
         key: "r.object_id",
-        fields: "object_id name normalized_name definition_json position",
+        fields: "object_id name normalized_name definition_json position artwork_bytes artwork_revision",
         extra: "",
     },
     Projection {
@@ -192,7 +199,7 @@ fn object(projection: &Projection, alias: &str) -> String {
     let mut pairs = projection
         .fields
         .split_whitespace()
-        .map(|field| if field == "artwork_binding" {
+        .map(|field| if matches!(field, "artwork_binding" | "artwork_bytes") {
             format!("'{field}',CASE WHEN {alias}.{field} IS NULL THEN NULL ELSE hex({alias}.{field}) END")
         } else { format!("'{field}',{alias}.{field}") })
         .collect::<Vec<_>>();
@@ -232,6 +239,13 @@ pub(crate) async fn initialize(connection: &mut SqliteConnection) -> LibraryResu
             } else {
                 String::new()
             };
+            if projection.kind == "playlist_artwork" {
+                predicate = if operation == "UPDATE" {
+                    " AND NEW.artwork_revision IS NOT OLD.artwork_revision".into()
+                } else {
+                    format!(" AND {row}.artwork_bytes IS NOT NULL")
+                };
+            }
             if operation == "DELETE" && projection.kind == "entry" {
                 predicate.push_str(
                     " AND EXISTS(SELECT 1 FROM main.playlists WHERE playlist_key=OLD.playlist_key)",
@@ -476,7 +490,9 @@ impl Database {
                     projection.key,
                     object(projection, "r"),
                     projection.table,
-                    if artwork_only {
+                    if kind == "playlist_artwork" {
+                        " AND r.artwork_bytes IS NOT NULL"
+                    } else if artwork_only {
                         " AND r.artwork_binding IS NOT NULL"
                     } else {
                         ""
@@ -493,9 +509,14 @@ impl Database {
                 "SELECT r.rowid,{key},{value} FROM catalog.{table} r WHERE r.rowid>?1 ORDER BY r.rowid LIMIT ?2"
             )
         };
+        let page_size = if kind == "playlist_artwork" {
+            1
+        } else {
+            CONNECT_PAGE_SIZE
+        };
         let rows = sqlx::query(sqlx::AssertSqlSafe(statement))
             .bind(cursor)
-            .bind(CONNECT_PAGE_SIZE as i64)
+            .bind(page_size as i64)
             .fetch_all(&mut *transaction)
             .await?;
         let mut last = cursor;
@@ -517,7 +538,7 @@ impl Database {
         sqlx::query("UPDATE connect_seed SET cursor=?2,complete=?3 WHERE kind=?1")
             .bind(&kind)
             .bind(last)
-            .bind(rows.len() < CONNECT_PAGE_SIZE)
+            .bind(rows.len() < page_size)
             .execute(&mut *transaction)
             .await?;
         if kind == "entry" && !rows.is_empty() {
@@ -531,7 +552,7 @@ impl Database {
 
     pub async fn connect_changes(&self) -> LibraryResult<Vec<ConnectChange>> {
         let mut connection = self.acquire_reader().await?;
-        let rows=sqlx::query("SELECT sequence,kind,object_key,payload FROM connect_changes ORDER BY sequence LIMIT ?1").bind(CONNECT_PAGE_SIZE as i64).fetch_all(&mut *connection).await?;
+        let rows=sqlx::query("SELECT sequence,kind,object_key,payload FROM connect_changes WHERE sequence<=coalesce((SELECT min(sequence) FROM connect_changes WHERE kind='playlist_artwork'),9223372036854775807) ORDER BY sequence LIMIT ?1").bind(CONNECT_PAGE_SIZE as i64).fetch_all(&mut *connection).await?;
         rows.into_iter()
             .map(|row| {
                 Ok(ConnectChange {
@@ -790,6 +811,16 @@ async fn apply_record(
     record: &ConnectRecord,
     sources: &mut BTreeMap<i64, bool>,
 ) -> LibraryResult<bool> {
+    if record.kind == "playlist_artwork" {
+        let payload = record
+            .value
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
+        let identity: (Option<String>, String) = serde_json::from_str(&record.key)?;
+        return Ok(sqlx::query("UPDATE main.playlists SET artwork_bytes=unhex(json_extract(?3,'$.artwork_bytes')),artwork_mime=json_extract(?3,'$.artwork_mime'),artwork_revision=json_extract(?3,'$.artwork_revision') WHERE object_id=?1 AND source_key IS (SELECT source_key FROM main.source_ids WHERE object_id=?2) AND artwork_revision IS NOT json_extract(?3,'$.artwork_revision')")
+            .bind(identity.1).bind(identity.0).bind(payload).execute(connection).await?.rows_affected()>0);
+    }
     if record.kind == "root" {
         if let Some(value) = &record.value {
             remember_root(connection, value).await?;
@@ -1119,7 +1150,7 @@ async fn apply_record(
             .await?;
         }
         "smart" => {
-            sqlx::query("INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position) VALUES(?1,json_extract(?2,'$.name'),json_extract(?2,'$.normalized_name'),json_extract(?2,'$.definition_json'),(SELECT coalesce(max(position),-1)+1 FROM smart_playlists)) ON CONFLICT(object_id) DO UPDATE SET name=excluded.name,normalized_name=excluded.normalized_name,definition_json=excluded.definition_json").bind(&record.key).bind(payload).execute(connection).await?;
+            sqlx::query("INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position,artwork_bytes,artwork_revision) VALUES(?1,json_extract(?2,'$.name'),json_extract(?2,'$.normalized_name'),json_extract(?2,'$.definition_json'),(SELECT coalesce(max(position),-1)+1 FROM smart_playlists),unhex(json_extract(?2,'$.artwork_bytes')),json_extract(?2,'$.artwork_revision')) ON CONFLICT(object_id) DO UPDATE SET name=excluded.name,normalized_name=excluded.normalized_name,definition_json=excluded.definition_json,artwork_bytes=excluded.artwork_bytes,artwork_revision=excluded.artwork_revision").bind(&record.key).bind(payload).execute(connection).await?;
         }
         "track" | "album" | "artist" | "genre" | "mood" | "folder" | "native_playlist" => {
             let source = value["source_id"].as_str().ok_or_else(|| {
@@ -1347,7 +1378,10 @@ mod tests {
         );
         let bindings: Vec<Vec<u8>> = sqlx::query_scalar("SELECT artwork_binding FROM catalog.tracks UNION ALL SELECT artwork_binding FROM catalog.albums UNION ALL SELECT artwork_binding FROM catalog.artists")
             .fetch_all(&mut *destination.acquire_reader().await.unwrap()).await.unwrap();
-        assert_eq!(bindings, vec![art.to_vec(); 3]);
+        assert_eq!(&bindings[..2], &[art.to_vec(), art.to_vec()]);
+        let artist: crate::ArtistArtworkBinding = serde_json::from_slice(&bindings[2]).unwrap();
+        assert_eq!(artist.artist_name, "Artist");
+        assert_eq!(artist.source.as_deref(), Some(art.as_slice()));
         let track = records
             .iter()
             .find(|record| record.kind == "track")
@@ -1492,7 +1526,7 @@ mod tests {
             count += page.len();
             database.connect_acknowledge(&page).await.unwrap();
         }
-        assert_eq!(count, 259);
+        assert_eq!(count, 260);
         database.close().await.unwrap();
         let database = Database::open(&path).await.unwrap();
         assert!(!database.connect_seed_page().await.unwrap());

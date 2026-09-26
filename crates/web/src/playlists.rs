@@ -182,6 +182,7 @@ async fn file_update(
         input.auto_refresh,
         input.auto_save,
         input.path_mode,
+        None,
     ))
     .await?;
     Ok(json_response(StatusCode::OK, json!({"changed":true})))
@@ -354,7 +355,7 @@ pub(super) async fn list_data(
         .map_err(internal)?;
     let total = catalog::page_total(products, parameters, "playlists").await?;
     Ok(
-        json!({"total":total,"offset":offset,"limit":limit,"playlists":rows.iter().map(|row| json!({"id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":rufin_core::playlists::playlist_artwork_bindings(row).len()})).collect::<Vec<_>>()}),
+        json!({"total":total,"offset":offset,"limit":limit,"playlists":rows.iter().map(|row| json!({"id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"metadata_writable":row.metadata_writable,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":rufin_core::playlists::playlist_artwork_bindings(row).len()})).collect::<Vec<_>>()}),
     )
 }
 
@@ -491,6 +492,7 @@ async fn rename(
         input.id,
         input.name,
         input.public,
+        None,
     ))
     .await?;
     Ok(json_response(StatusCode::OK, json!({"changed":changed})))

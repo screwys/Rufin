@@ -38,11 +38,16 @@ impl SourceConfiguration {
                 let mut url = web_base(&config.base_url)?
                     .join("web/index.html")
                     .map_err(url_error)?;
+                let (route, key) = if kind == "playlist" {
+                    ("playlist", format!("/playlists/{id}"))
+                } else {
+                    ("details", format!("/library/metadata/{id}"))
+                };
                 let query = url::form_urlencoded::Serializer::new(String::new())
-                    .append_pair("key", &format!("/library/metadata/{id}"))
+                    .append_pair("key", &key)
                     .finish();
                 url.set_fragment(Some(&format!(
-                    "!/server/{}/details?{query}",
+                    "!/server/{}/{route}?{query}",
                     encode(&config.server_id)
                 )));
                 url
@@ -75,7 +80,7 @@ impl SourceConfiguration {
 
 fn entity_id<'a>(source: &str, kind: &str, id: &'a str) -> SourceResult<&'a str> {
     id.strip_prefix(&format!("{source}:{kind}:"))
-        .filter(|id| !id.is_empty() && matches!(kind, "artist" | "album"))
+        .filter(|id| !id.is_empty() && matches!(kind, "artist" | "album" | "playlist"))
         .ok_or(SourceError::NotFound)
 }
 

@@ -135,7 +135,7 @@ impl ProfileStore {
     /// index entry; their complete Loro history remains available through `updates`.
     pub async fn changes(&self, after: i64, limit: usize) -> Result<Vec<DocumentVersion>> {
         let mut connection = self.connection.lock().await;
-        Ok(sqlx::query("SELECT name,version,revision FROM documents WHERE revision>?1 ORDER BY revision,name LIMIT ?2")
+        Ok(sqlx::query("SELECT name,version,revision FROM documents WHERE revision>?1 AND revision<=coalesce((SELECT min(revision) FROM documents WHERE revision>?1 AND name GLOB 'playlist_artwork:*'),9223372036854775807) ORDER BY revision,name LIMIT ?2")
             .bind(after)
             .bind(i64::try_from(limit).unwrap_or(i64::MAX))
             .fetch_all(&mut *connection).await?
@@ -154,7 +154,7 @@ impl ProfileStore {
     ) -> Result<Vec<DocumentVersion>> {
         let mut connection = self.connection.lock().await;
         Ok(sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT name,version,revision FROM documents WHERE ({SYNC_PRIORITY})=?1 AND revision>?2 ORDER BY revision,name LIMIT ?3"
+            "SELECT name,version,revision FROM documents WHERE ({SYNC_PRIORITY})=?1 AND revision>?2 AND revision<=coalesce((SELECT min(revision) FROM documents WHERE ({SYNC_PRIORITY})=?1 AND revision>?2 AND name GLOB 'playlist_artwork:*'),9223372036854775807) ORDER BY revision,name LIMIT ?3"
         )))
         .bind(setup).bind(after).bind(i64::try_from(limit).unwrap_or(i64::MAX))
         .fetch_all(&mut *connection).await?
@@ -356,7 +356,7 @@ impl ProfileStore {
     pub async fn project(&self, database: &Database) -> Result<(Vec<ConnectRecord>, bool)> {
         let records = {
             let mut connection = self.connection.lock().await;
-            let rows=sqlx::query(sqlx::AssertSqlSafe(format!("SELECT kind,object_key,payload FROM projection ORDER BY {PROJECTION_ORDER} LIMIT ?1"))).bind(CONNECT_PAGE_SIZE as i64).fetch_all(&mut *connection).await?;
+            let rows=sqlx::query(sqlx::AssertSqlSafe(format!("SELECT kind,object_key,payload FROM projection WHERE kind!='playlist_artwork' OR NOT EXISTS(SELECT 1 FROM projection WHERE kind!='playlist_artwork') ORDER BY {PROJECTION_ORDER} LIMIT CASE WHEN EXISTS(SELECT 1 FROM projection WHERE kind!='playlist_artwork') THEN ?1 ELSE 1 END"))).bind(CONNECT_PAGE_SIZE as i64).fetch_all(&mut *connection).await?;
             rows.into_iter()
                 .map(|row| {
                     Ok(ConnectRecord {
@@ -443,7 +443,7 @@ impl ProfileStore {
             let statement = if setup {
                 "SELECT name,CASE WHEN compressed IS NULL THEN snapshot END,compressed FROM documents WHERE substr(name,1,instr(name,':')-1) IN ('source','integration','root','preference','scrobbling','device','connect_key','connect_network','connect_storage') AND name>?1 ORDER BY name LIMIT ?2"
             } else {
-                "SELECT name,CASE WHEN compressed IS NULL THEN snapshot END,compressed FROM documents WHERE name>?1 ORDER BY name LIMIT ?2"
+                "SELECT name,CASE WHEN compressed IS NULL THEN snapshot END,compressed FROM documents WHERE name>?1 AND name<=coalesce((SELECT min(name) FROM documents WHERE name>?1 AND name GLOB 'playlist_artwork:*'),char(1114111)) ORDER BY name LIMIT ?2"
             };
             let rows = sqlx::query(statement)
                 .bind(&cursor)
@@ -542,7 +542,7 @@ impl ProfileStore {
         let mut cursor = String::new();
         loop {
             let rows = sqlx::query(
-                "SELECT name,version,snapshot FROM documents WHERE name>?1 ORDER BY name LIMIT ?2",
+                "SELECT name,version,snapshot FROM documents WHERE name>?1 AND name<=coalesce((SELECT min(name) FROM documents WHERE name>?1 AND name GLOB 'playlist_artwork:*'),char(1114111)) ORDER BY name LIMIT ?2",
             )
             .bind(&cursor)
             .bind(CONNECT_PAGE_SIZE as i64)
@@ -637,7 +637,11 @@ impl ProfileStore {
                     let update: Update = serde_json::from_str(&line)?;
                     validate_version(update.version)?;
                     let meta = LoroDoc::decode_import_blob_meta(&update.bytes, true)?;
+                    let image = update.document.starts_with("playlist_artwork:");
                     page.push((update, meta.partial_end_vv));
+                    if image {
+                        break;
+                    }
                 }
                 Ok((input, page, false))
             })
@@ -687,7 +691,7 @@ impl ProfileStore {
         let mut cursor = String::new();
         loop {
             let rows = sqlx::query(
-                "SELECT name,snapshot FROM documents WHERE name>?1 ORDER BY name LIMIT ?2",
+                "SELECT name,snapshot FROM documents WHERE name>?1 AND name<=coalesce((SELECT min(name) FROM documents WHERE name>?1 AND name GLOB 'playlist_artwork:*'),char(1114111)) ORDER BY name LIMIT ?2",
             )
             .bind(&cursor)
             .bind(CONNECT_PAGE_SIZE as i64)
@@ -862,7 +866,7 @@ async fn index_documents(connection: &mut SqliteConnection) -> Result<()> {
     .await?;
     loop {
         let rows = sqlx::query(
-            "SELECT name,snapshot FROM documents WHERE revision=0 ORDER BY name LIMIT ?1",
+            "SELECT name,snapshot FROM documents WHERE revision=0 AND name<=coalesce((SELECT min(name) FROM documents WHERE revision=0 AND name GLOB 'playlist_artwork:*'),char(1114111)) ORDER BY name LIMIT ?1",
         )
         .bind(CONNECT_PAGE_SIZE as i64)
         .fetch_all(&mut *transaction)
@@ -1472,7 +1476,10 @@ mod tests {
             .artwork_preparation_page(cached.source, None, 20, &library::ReadCancellation::new())
             .await
             .unwrap();
-        assert_eq!(bindings, vec![art.to_vec()]);
+        assert_eq!(bindings.len(), 1);
+        let artist: library::ArtistArtworkBinding = serde_json::from_slice(&bindings[0]).unwrap();
+        assert_eq!(artist.artist_name, "Artist");
+        assert_eq!(artist.source.as_deref(), Some(art.as_slice()));
     }
 
     #[tokio::test]
@@ -1732,7 +1739,9 @@ mod tests {
                 scan.write_playlist("mix", "Server mix", "server mix", "server mix", Some(art))
                     .await
                     .unwrap();
-                scan.write_playlist_writable("mix", false).await.unwrap();
+                scan.write_playlist_permissions("mix", false, false)
+                    .await
+                    .unwrap();
                 for position in 0..140 {
                     let entry = if revision == 0 {
                         position

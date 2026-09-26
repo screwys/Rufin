@@ -145,7 +145,7 @@ fn identify_artist(values: &ArtistMetadataValues) -> Result<Option<ArtistMetadat
     }))
 }
 
-fn fetch_musicbrainz_entity(
+pub(crate) fn fetch_musicbrainz_entity(
     root: &str,
     id: &str,
     inc: &str,
@@ -287,7 +287,11 @@ fn positive_u16(value: Option<&Value>) -> Option<u16> {
         .map(|value| value.min(u64::from(u16::MAX)) as u16)
 }
 
-fn fetch_musicbrainz_json(client: &Client, url: Url, context: &str) -> Result<Value, String> {
+pub(crate) fn fetch_musicbrainz_json(
+    client: &Client,
+    url: Url,
+    context: &str,
+) -> Result<Value, String> {
     send_with_musicbrainz_retry(|| {
         wait_for_musicbrainz_slot();
         fetch_json(client, url.clone(), context)

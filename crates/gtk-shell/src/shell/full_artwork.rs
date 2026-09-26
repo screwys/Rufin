@@ -12,6 +12,34 @@ impl Shell {
         let cover = tile.widget();
         self.artwork
             .bind_playback_artwork_tile(&tile, candidates, size, fetch_size);
+        let tile = tile.downgrade();
+        let artwork = Rc::downgrade(&self.artwork);
+        self.present_artwork_overlay(&cover, move || {
+            if let (Some(artwork), Some(tile)) = (artwork.upgrade(), tile.upgrade()) {
+                artwork.clear_artwork_tile(&tile);
+            }
+        });
+    }
+
+    pub(crate) fn present_full_artwork_group(self: &Rc<Self>, bindings: Vec<ArtworkBinding>) {
+        if bindings.len() <= 1 {
+            self.present_full_artwork(bindings.into_iter().next().unwrap_or_default());
+            return;
+        }
+        let size = full_artwork_size(self.chrome.window.width(), self.chrome.window.height());
+        let group = self
+            .artwork
+            .cover_group_projection_for_artwork(&bindings, size, size);
+        let cover = group.widget();
+        let artwork = Rc::downgrade(&self.artwork);
+        self.present_artwork_overlay(&cover, move || {
+            if let Some(artwork) = artwork.upgrade() {
+                group.clear(&artwork);
+            }
+        });
+    }
+
+    fn present_artwork_overlay(&self, cover: &gtk::Widget, clear: impl Fn() + 'static) {
         cover.add_css_class("full-artwork-cover");
         cover.set_halign(gtk::Align::Center);
         cover.set_valign(gtk::Align::Center);
@@ -20,7 +48,7 @@ impl Shell {
         root.add_css_class("full-artwork-window");
         root.set_hexpand(true);
         root.set_vexpand(true);
-        root.set_child(Some(&cover));
+        root.set_child(Some(cover));
 
         self.chrome.app_root_overlay.add_overlay(&root);
         self.chrome
@@ -29,13 +57,8 @@ impl Shell {
 
         let overlay = self.chrome.app_root_overlay.downgrade();
         let root_for_close = root.downgrade();
-        let tile_for_close = tile.downgrade();
-        let shell_for_close = Rc::downgrade(self);
         add_widget_click(root.upcast_ref(), move || {
-            if let (Some(shell), Some(tile)) = (shell_for_close.upgrade(), tile_for_close.upgrade())
-            {
-                shell.artwork.clear_artwork_tile(&tile);
-            }
+            clear();
             if let (Some(overlay), Some(root)) = (overlay.upgrade(), root_for_close.upgrade()) {
                 overlay.remove_overlay(&root);
             }

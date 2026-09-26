@@ -14,14 +14,13 @@ use crate::CatalogUi;
 use crate::track_model::{PreparedTrackProjection, TrackProjectionRequest};
 use crate::{LibraryListKey, LibraryListSettings};
 use gtk_widgets::artwork::presentation::stable_seed;
-use gtk_widgets::controls::{ADD_ICON, EDIT_ICON};
 use gtk_widgets::format_duration_units;
 use gtk_widgets::mounted_route::{LatestMountedRouteRead, MountedRoute};
 
 use super::collections::library_route_inset;
 use super::detail_showcase::{
-    CollectionDetailShowcase, DetailShowcaseView, collection_detail_showcase, detail_action_button,
-    detail_delete_button, detail_playback_controls, detail_radio_button,
+    CollectionDetailShowcase, DetailShowcaseView, collection_detail_showcase,
+    detail_playback_controls, detail_radio_button,
 };
 use crate::route_layout::{
     DETAIL_SHOWCASE_METADATA_MIN_WIDTH, PRIMARY_ROUTE_MARGIN_START, ROUTE_TOP_MARGIN,
@@ -54,6 +53,16 @@ enum PlaylistDetailOwner {
 }
 
 impl PlaylistDetailOwner {
+    fn source_url(&self, catalog: &CatalogUi) -> Option<String> {
+        let Self::Saved { summary, .. } = self else {
+            return None;
+        };
+        let source = catalog
+            .source
+            .configuration(&sources::SourceId::new(summary.source_id.as_deref()?))?;
+        source.detail_web_url("playlist", &summary.object_id).ok()
+    }
+
     fn source_label(&self, catalog: &CatalogUi) -> (&'static str, String) {
         let source_id = match self {
             Self::Saved { summary, .. } => summary.source_id.as_deref(),
@@ -442,105 +451,38 @@ impl CatalogUi {
             ),
         ]);
         let (source_icon, source_name) = owner.source_label(self);
-        showcase_view.set_source_summary(source_icon, &source_name);
+        showcase_view.set_source_summary(
+            source_icon,
+            &source_name,
+            owner.source_url(self).as_deref(),
+        );
         let actions = showcase_view.actions();
         actions.set_halign(gtk::Align::Start);
-        let controls = detail_playback_controls(
-            &actions,
-            msgid("Play playlist"),
-            None,
-            false,
-            Rc::clone(&play),
-        );
-        match &owner {
-            PlaylistDetailOwner::Saved { key, summary } if summary.writable => {
-                let drop = gtk::DropTarget::new(
-                    glib::BoxedAnyObject::static_type(),
-                    gtk::gdk::DragAction::COPY,
-                );
-                let drop_owner = Rc::clone(&owner_state);
-                let drop_menus = Rc::downgrade(&self.media_menus);
-                drop.connect_drop(move |_, value, _, _| {
-                    let Some(menus) = drop_menus.upgrade() else {
-                        return false;
-                    };
-                    let Some(source) = gtk_widgets::media_drag::media_drag_source(value) else {
-                        return false;
-                    };
-                    let PlaylistDetailOwner::Saved { summary, .. } = drop_owner.borrow().clone()
-                    else {
-                        return false;
-                    };
-                    gtk_media_menus::media_menus::add_drag_to_playlist(&menus, summary, source)
-                });
-                wrapper.add_css_class("media-drop-target");
-                wrapper.add_controller(drop);
-
-                let edit = detail_action_button(EDIT_ICON, "Edit");
-                let edit_shell = Rc::clone(self);
-                let playlist = *key;
-                let edit_owner = Rc::clone(&owner_state);
-                edit.connect_clicked(move |_| {
-                    let name = edit_owner.borrow().name().to_string();
-                    (edit_shell.media_menus.edit_playlist_dialog)(playlist, name);
-                });
-                actions.append(&edit);
-
-                let add_current = detail_action_button(ADD_ICON, "Add current");
-                add_current.set_sensitive(self.has_current_track);
-                let add_shell = Rc::clone(self);
-                let playlist = *key;
-                let destination = summary.name.clone();
-                add_current.connect_clicked(move |_| {
-                    (add_shell.add_current_to_playlist)(playlist, destination.clone());
-                });
-                actions.append(&add_current);
-
-                let delete = detail_delete_button("Delete");
-                let delete_shell = Rc::clone(self);
-                let playlist = *key;
-                let delete_owner = Rc::clone(&owner_state);
-                delete.connect_clicked(move |_| {
-                    let name = delete_owner.borrow().name().to_string();
-                    let shell = Rc::clone(&delete_shell);
-                    let dialog = gtk_widgets::playlists::delete_playlist_dialog(&name, move || {
-                        rufin_core::playlists::delete_playlist(&shell.source, playlist);
-                        shell.navigate(gtk_widgets::route::Route::Playlists);
-                    });
-                    (delete_shell.present_selected_dialog)(dialog.upcast_ref());
-                });
-                actions.append(&delete);
-            }
-            PlaylistDetailOwner::Saved { .. } => {}
-            PlaylistDetailOwner::Smart { key, .. } => {
-                let edit = detail_action_button(EDIT_ICON, "Edit");
-                let edit_shell = Rc::clone(self);
-                let edit_owner = Rc::clone(&owner_state);
-                edit.connect_clicked(move |_| {
-                    if let PlaylistDetailOwner::Smart { summary, .. } = &*edit_owner.borrow() {
-                        (edit_shell.media_menus.edit_smart_playlist_dialog)(summary.clone());
-                    }
-                });
-                actions.append(&edit);
-
-                let delete = detail_delete_button("Delete");
-                let delete_shell = Rc::clone(self);
-                let playlist = *key;
-                let delete_owner = Rc::clone(&owner_state);
-                delete.connect_clicked(move |_| {
-                    let name = delete_owner.borrow().name().to_string();
-                    let shell = Rc::clone(&delete_shell);
-                    let dialog = gtk_widgets::playlists::delete_playlist_dialog(&name, move || {
-                        (shell.media_menus.publish_smart_playlist_change)(
-                            rufin_core::playlists::SmartPlaylistChange::Delete(playlist),
-                            None,
-                        );
-                        shell.navigate(gtk_widgets::route::Route::SmartPlaylists);
-                    });
-                    (delete_shell.present_selected_dialog)(dialog.upcast_ref());
-                });
-                actions.append(&delete);
-            }
+        let controls =
+            detail_playback_controls(&actions, msgid("Play playlist"), None, Rc::clone(&play));
+        if let PlaylistDetailOwner::Saved { summary, .. } = &owner
+            && summary.writable
+        {
+            let drop = gtk::DropTarget::new(
+                glib::BoxedAnyObject::static_type(),
+                gtk::gdk::DragAction::COPY,
+            );
+            let drop_owner = Rc::clone(&owner_state);
+            let drop_menus = Rc::downgrade(&self.media_menus);
+            drop.connect_drop(move |_, value, _, _| {
+                let Some(menus) = drop_menus.upgrade() else {
+                    return false;
+                };
+                let Some(source) = gtk_widgets::media_drag::media_drag_source(value) else {
+                    return false;
+                };
+                let PlaylistDetailOwner::Saved { summary, .. } = drop_owner.borrow().clone() else {
+                    return false;
+                };
+                gtk_media_menus::media_menus::add_drag_to_playlist(&menus, summary, source)
+            });
+            wrapper.add_css_class("media-drop-target");
+            wrapper.add_controller(drop);
         }
 
         let menu_shell = Rc::clone(self);
@@ -562,6 +504,14 @@ impl CatalogUi {
             cover: cover.clone(),
             cover_controls: controls,
             context_menu: Some(context_menu),
+            open_cover: {
+                let present = Rc::clone(&self.present_full_artwork);
+                let owner = Rc::clone(&owner_state);
+                Rc::new(move || {
+                    let artwork = owner.borrow().artwork();
+                    present(artwork);
+                })
+            },
         });
         wrapper.append(&library_route_inset(showcase));
         wrapper.append(&tracks_widget);
@@ -600,7 +550,11 @@ impl CatalogUi {
                         ),
                     ]);
                     let (source_icon, source_name) = next.source_label(&shell);
-                    showcase.set_source_summary(source_icon, &source_name);
+                    showcase.set_source_summary(
+                        source_icon,
+                        &source_name,
+                        next.source_url(&shell).as_deref(),
+                    );
                     cover.replace(&shell.artwork, &next.artwork());
                     shell.append_playlist_detail_kind_controls(&showcase, &next);
                     apply_owner.replace(next);
@@ -840,6 +794,7 @@ mod tests {
             key: PlaylistKey::from_raw(1),
             summary: PlaylistRow {
                 writable: true,
+                metadata_writable: true,
                 playlist_key: PlaylistKey::from_raw(1),
                 source_key: Some(library::SourceKey::from_raw(1)),
                 source_id: Some("source".into()),
@@ -849,7 +804,7 @@ mod tests {
                 track_count: 4,
                 duration_millis: 1,
                 downloaded_count: 0,
-                representative_artwork: vec![vec![2], vec![3], vec![4], vec![5]],
+                representative_artwork: Vec::new(),
                 genres: Vec::new(),
             },
         };

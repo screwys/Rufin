@@ -38,7 +38,6 @@ pub(crate) fn present_metadata_dialog(shell: &Rc<Shell>, item: MetadataItemId) {
                         .current
                         .borrow()
                         .allows_external_metadata_lookup(),
-                    shell.chrome.window.height(),
                 );
                 shell.present_selected_dialog(&dialog);
             }

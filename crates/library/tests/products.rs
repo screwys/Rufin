@@ -947,7 +947,7 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
     ));
     definition.limit = Some(3);
     database
-        .update_smart_playlist(key, "Toolbar", &definition)
+        .update_smart_playlist(key, "Toolbar", &definition, None)
         .await
         .unwrap();
     let limited = database
@@ -976,7 +976,7 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
     assert_eq!(order, uris[8..]);
     definition.limit = None;
     database
-        .update_smart_playlist(key, "Toolbar", &definition)
+        .update_smart_playlist(key, "Toolbar", &definition, None)
         .await
         .unwrap();
     sqlx::query("DELETE FROM listens WHERE media_uri=?1")
@@ -1192,10 +1192,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                 assert!(order.contains(&global));
                 let row = rows.iter().find(|row| row.playlist_key == global).unwrap();
                 assert_eq!(row.track_count, 2);
-                assert_eq!(
-                    row.representative_artwork,
-                    [expected_sample.clone(), expected_sample.clone()].concat()
-                );
+                assert!(row.artwork_binding.is_none());
             }
             let detail = database
                 .playlist_detail_page(
@@ -1241,7 +1238,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
             assert_eq!(summary.artwork_bindings, expected_sample);
         }
         let current_rows = database.playlist_rows(&[current], &cancel).await.unwrap();
-        assert_eq!(current_rows[0].representative_artwork, expected_sample);
+        assert!(current_rows[0].artwork_binding.is_none());
         let preview = database
             .track_artwork_bindings(
                 &[
@@ -1867,7 +1864,10 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
     assert_ne!(track_artist.artist_key, album_artist.artist_key);
     assert_eq!((track_artist.album_count, track_artist.track_count), (1, 2));
     assert_eq!((album_artist.album_count, album_artist.track_count), (1, 2));
-    assert_eq!(track_artist.artwork_binding, None);
+    let track_artwork: library::ArtistArtworkBinding =
+        serde_json::from_slice(track_artist.artwork_binding.as_ref().unwrap()).unwrap();
+    assert_eq!(track_artwork.source, None);
+    assert_eq!(track_artwork.fallback, None);
     assert_eq!(
         album_artist.artwork_binding.as_deref(),
         Some(b"album-artist-art".as_slice())
@@ -2348,7 +2348,7 @@ async fn all_smart_playlists_admit_direct_media_while_current_is_an_exact_subset
     definition.current = true;
     fixture
         .database
-        .update_smart_playlist(smart, "Direct", &definition)
+        .update_smart_playlist(smart, "Direct", &definition, None)
         .await
         .expect("make Smart Playlist Current");
     assert!(
@@ -2429,7 +2429,7 @@ async fn completed_direct_download_is_an_all_media_owner_without_a_source() {
     definition.current = true;
     fixture
         .database
-        .update_smart_playlist(smart, "Downloaded direct", &definition)
+        .update_smart_playlist(smart, "Downloaded direct", &definition, None)
         .await
         .expect("make direct download Smart Playlist Current");
     assert!(
@@ -2485,7 +2485,7 @@ async fn smart_visible_window_keeps_uri_order_and_latest_snapshot_without_rechec
     });
     fixture
         .database
-        .update_smart_playlist(key, "Window", &definition)
+        .update_smart_playlist(key, "Window", &definition, None)
         .await
         .unwrap();
     let requested = vec![direct.clone(), fixture.track_uris[0].clone(), direct];
@@ -2562,7 +2562,7 @@ async fn global_playlist_media_remains_in_all_when_its_source_is_forgotten() {
     definition.current = true;
     fixture
         .database
-        .update_smart_playlist(smart, "Retained", &definition)
+        .update_smart_playlist(smart, "Retained", &definition, None)
         .await
         .expect("make retained-source Smart Playlist Current");
     assert_eq!(
@@ -2590,7 +2590,7 @@ async fn global_playlist_media_remains_in_all_when_its_source_is_forgotten() {
     definition.current = false;
     fixture
         .database
-        .update_smart_playlist(smart, "Retained", &definition)
+        .update_smart_playlist(smart, "Retained", &definition, None)
         .await
         .expect("make retained-source Smart Playlist All");
     assert_eq!(
@@ -2879,7 +2879,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
         assert!(
             fixture
                 .database
-                .update_smart_playlist(smart, "Played", &played)
+                .update_smart_playlist(smart, "Played", &played, None)
                 .await
                 .expect("update period template")
         );
@@ -2939,7 +2939,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
     assert!(
         fixture
             .database
-            .update_smart_playlist(second, "Optional", &optional)
+            .update_smart_playlist(second, "Optional", &optional, None)
             .await
             .expect("update optional rule")
     );

@@ -1,5 +1,5 @@
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
     rc::Rc,
 };
@@ -8,23 +8,21 @@ use adw::prelude::*;
 use localization::{msgid, tr, trn_with};
 use sources::{
     AlbumMetadata, AlbumMetadataEdit, AlbumMetadataValues, AlbumMetadataWritable, ArtistMetadata,
-    ArtistMetadataEdit, ArtistMetadataValues, ArtistMetadataWritable, SourceMetadataError,
-    TrackMetadata, TrackMetadataEdit, TrackMetadataValues, TrackMetadataWritable,
+    ArtistMetadataEdit, ArtistMetadataValues, ArtistMetadataWritable, MetadataEdit,
+    SourceMetadataError, TrackMetadata, TrackMetadataEdit, TrackMetadataValues,
+    TrackMetadataWritable,
 };
 
-use gtk_widgets::field_layout::{
-    compact_field_row_group, install_compact_field_row_responsiveness_at, style_compact_field_row,
-};
-use gtk_widgets::layout::{large_popup_content_height, large_popup_content_width};
+use gtk_widgets::field_layout::{compact_field_row_group, style_compact_field_row};
+use gtk_widgets::layout::large_popup_content_width;
 use rufin_core::source::SourceOwner;
 use std::sync::Arc;
 
 const EDITOR_WIDTH: i32 = 650;
-const EDITOR_MAX_HEIGHT: i32 = 720;
-const EDITOR_FIELD_STACK_WIDTH: i32 = 520;
-const FIELD_COLUMN_SPACING: i32 = 18;
 
 use rufin_core::metadata::MetadataItemId;
+
+mod artwork;
 
 #[derive(Clone)]
 #[expect(
@@ -56,6 +54,7 @@ enum MetadataField {
     MusicBrainzReleaseGroupId,
     MusicBrainzArtistId,
     Locked,
+    Extra(usize),
 }
 
 struct MetadataEntry {
@@ -76,6 +75,8 @@ struct Editor {
     save: gtk::Button,
     cancel: gtk::Button,
     external_lookup_allowed: bool,
+    busy: Cell<bool>,
+    artwork: artwork::ArtworkEditor,
 }
 
 pub fn metadata_error_dialog(message: &str) -> adw::Dialog {
@@ -123,14 +124,15 @@ pub fn build_dialog(
     item: MetadataItemId,
     draft: MetadataDraft,
     external_lookup_allowed: bool,
-    window_height: i32,
 ) -> adw::Dialog {
     let resource = crate::ui_resource::METADATA_DIALOG_RESOURCE;
     let builder = crate::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
         editor_dialog: adw::Dialog,
-        editor_scroller: gtk::ScrolledWindow,
+        editor_toolbar: adw::ToolbarView,
+        editor_pages: gtk::Stack,
         fields: gtk::Box,
+        artwork_host: gtk::Box,
         identify_scope: gtk::Label,
         identify_spacer: gtk::Box,
         identify: gtk::Button,
@@ -138,11 +140,25 @@ pub fn build_dialog(
         cancel: gtk::Button,
         save: gtk::Button,
     });
-    editor_dialog.set_content_width(large_popup_content_width(EDITOR_WIDTH));
+    let width = large_popup_content_width(EDITOR_WIDTH);
+    editor_dialog.set_content_width(width);
+    editor_dialog.set_child(None::<&gtk::Widget>);
+    editor_dialog.set_child(Some(&gtk_widgets::layout::preferred_width_owner(
+        &editor_toolbar,
+        width,
+    )));
+    let dialog = editor_dialog.downgrade();
+    editor_pages.connect_visible_child_name_notify(move |pages| {
+        if let Some(dialog) = dialog.upgrade() {
+            dialog
+                .set_follows_content_size(pages.visible_child_name().as_deref() == Some("artwork"));
+        }
+    });
     identify.set_sensitive(draft.source_search() || external_lookup_allowed);
     let mut entries = Vec::new();
     let mut locked = None;
     append_draft_fields(&draft, &mut entries, &mut locked);
+    append_extra_fields(&draft, &builder, &mut entries);
     populate_metadata_fields(
         &fields,
         &identify_scope,
@@ -151,9 +167,8 @@ pub fn build_dialog(
         &entries,
         locked.as_ref(),
     );
-    editor_scroller.set_max_content_height(
-        large_popup_content_height(window_height, EDITOR_MAX_HEIGHT).saturating_sub(64),
-    );
+
+    let artwork = artwork::ArtworkEditor::new(&artwork_host, external_lookup_allowed);
 
     let editor = Rc::new(Editor {
         draft,
@@ -167,12 +182,14 @@ pub fn build_dialog(
         save,
         cancel,
         external_lookup_allowed,
+        busy: Cell::new(false),
+        artwork,
     });
     connect_editor_changes(&editor);
     seed_rufin_filled(&editor);
-    let editor_lifetime = Rc::clone(&editor);
+    let editor_lifetime = RefCell::new(Some(Rc::clone(&editor)));
     editor_dialog.connect_closed(move |_| {
-        let _ = &editor_lifetime;
+        editor_lifetime.borrow_mut().take();
     });
     let close = editor_dialog.downgrade();
     editor.cancel.connect_clicked(move |_| {
@@ -181,11 +198,34 @@ pub fn build_dialog(
         }
     });
     connect_identify(source, item.clone(), &editor);
+    artwork::connect(source, &editor);
     connect_save(source, item, &editor_dialog, &editor);
     editor_dialog
 }
 
 impl MetadataDraft {
+    fn extra(&self) -> &[sources::MetadataField] {
+        match self {
+            Self::Track(value) => &value.extra,
+            Self::Album(value) => &value.extra,
+            Self::Artist(value) => &value.extra,
+        }
+    }
+
+    fn date(&self) -> Option<&sources::MetadataField> {
+        self.extra()
+            .iter()
+            .find(|field| field.key == "recording_date")
+    }
+
+    fn artwork(&self) -> &sources::ArtworkEditing {
+        match self {
+            Self::Track(value) => &value.artwork,
+            Self::Album(value) => &value.artwork,
+            Self::Artist(value) => &value.artwork,
+        }
+    }
+
     fn source_search(&self) -> bool {
         match self {
             Self::Track(value) => value.source_search,
@@ -209,6 +249,14 @@ impl MetadataDraft {
     }
 
     fn source_value(&self, field: MetadataField) -> String {
+        if let MetadataField::Extra(index) = field {
+            return self.extra()[index].value.clone();
+        }
+        if field == MetadataField::Year {
+            if let Some(date) = self.date() {
+                return date.value.clone();
+            }
+        }
         match self {
             Self::Track(value) => track_value(&value.source_values, field),
             Self::Album(value) => album_value(&value.source_values, field),
@@ -217,6 +265,9 @@ impl MetadataDraft {
     }
 
     fn rufin_filled(&self, field: MetadataField) -> bool {
+        if matches!(field, MetadataField::Extra(_)) {
+            return false;
+        }
         match self {
             Self::Track(value) => track_writable(&value.rufin_filled, field),
             Self::Album(value) => album_writable(&value.rufin_filled, field),
@@ -224,49 +275,6 @@ impl MetadataDraft {
         }
     }
 }
-
-#[derive(Clone, Copy)]
-enum FieldLayout {
-    Pair(MetadataField, MetadataField),
-    Full(MetadataField),
-    Lock,
-}
-
-const TRACK_LAYOUT: &[FieldLayout] = &[
-    FieldLayout::Pair(MetadataField::Title, MetadataField::SortTitle),
-    FieldLayout::Pair(MetadataField::Artist, MetadataField::Album),
-    FieldLayout::Pair(MetadataField::AlbumArtist, MetadataField::Genre),
-    FieldLayout::Pair(MetadataField::TrackNumber, MetadataField::DiscNumber),
-    FieldLayout::Pair(MetadataField::Year, MetadataField::Bpm),
-    FieldLayout::Full(MetadataField::Comment),
-    FieldLayout::Pair(
-        MetadataField::MusicBrainzRecordingId,
-        MetadataField::MusicBrainzReleaseTrackId,
-    ),
-    FieldLayout::Pair(
-        MetadataField::MusicBrainzAlbumId,
-        MetadataField::MusicBrainzReleaseGroupId,
-    ),
-    FieldLayout::Lock,
-];
-const ALBUM_LAYOUT: &[FieldLayout] = &[
-    FieldLayout::Pair(MetadataField::Title, MetadataField::SortTitle),
-    FieldLayout::Pair(MetadataField::Artist, MetadataField::AlbumArtist),
-    FieldLayout::Pair(MetadataField::Year, MetadataField::Genre),
-    FieldLayout::Full(MetadataField::Comment),
-    FieldLayout::Pair(
-        MetadataField::MusicBrainzAlbumId,
-        MetadataField::MusicBrainzReleaseGroupId,
-    ),
-    FieldLayout::Lock,
-];
-const ARTIST_LAYOUT: &[FieldLayout] = &[
-    FieldLayout::Pair(MetadataField::Title, MetadataField::SortTitle),
-    FieldLayout::Full(MetadataField::Genre),
-    FieldLayout::Full(MetadataField::Comment),
-    FieldLayout::Full(MetadataField::MusicBrainzArtistId),
-    FieldLayout::Lock,
-];
 
 fn populate_metadata_fields(
     fields: &gtk::Box,
@@ -292,42 +300,13 @@ fn populate_metadata_fields(
         identify_spacer.set_visible(true);
     }
 
-    let layout = match draft {
-        MetadataDraft::Track(_) => TRACK_LAYOUT,
-        MetadataDraft::Album(_) => ALBUM_LAYOUT,
-        MetadataDraft::Artist(_) => ARTIST_LAYOUT,
-    };
-    for layout in layout {
-        match layout {
-            FieldLayout::Pair(left, right) => {
-                let Some(left) = entries.iter().find(|entry| entry.field == *left) else {
-                    continue;
-                };
-                let Some(right) = entries.iter().find(|entry| entry.field == *right) else {
-                    fields.append(&compact_field_row_group(&left.entry));
-                    continue;
-                };
-                let pair = gtk::Box::new(gtk::Orientation::Horizontal, FIELD_COLUMN_SPACING);
-                pair.set_homogeneous(true);
-                pair.set_hexpand(true);
-                pair.append(&compact_field_row_group(&left.entry));
-                pair.append(&compact_field_row_group(&right.entry));
-                fields.append(&install_compact_field_row_responsiveness_at(
-                    &pair,
-                    EDITOR_FIELD_STACK_WIDTH,
-                ));
-            }
-            FieldLayout::Full(field) => {
-                if let Some(row) = entries.iter().find(|entry| entry.field == *field) {
-                    fields.append(&compact_field_row_group(&row.entry));
-                }
-            }
-            FieldLayout::Lock => {
-                if let Some(row) = locked {
-                    fields.append(&compact_field_row_group(row));
-                }
-            }
+    for entry in entries {
+        if entry.entry.is_sensitive() || !entry.entry.text().is_empty() {
+            fields.append(&compact_field_row_group(&entry.entry));
         }
+    }
+    if let Some(row) = locked {
+        fields.append(&compact_field_row_group(row));
     }
 }
 
@@ -576,6 +555,66 @@ fn append_optional(
 ) {
     append_entry(entries, field, value.unwrap_or_default(), writable, mixed);
 }
+
+fn append_extra_fields(
+    draft: &MetadataDraft,
+    builder: &gtk::Builder,
+    entries: &mut Vec<MetadataEntry>,
+) {
+    for (index, field) in draft.extra().iter().enumerate() {
+        if field.key == "recording_date" {
+            let row = entries
+                .iter()
+                .find(|row| row.field == MetadataField::Year)
+                .expect("dated metadata has a year entry");
+            row.entry.set_title(&extra_field_title(builder, field));
+            if !field.value.is_empty() || !draft.rufin_filled(MetadataField::Year) {
+                row.entry.set_text(&field.value);
+            }
+            row.entry.set_input_purpose(gtk::InputPurpose::FreeForm);
+            row.entry.set_sensitive(field.writable);
+            continue;
+        }
+        append_named_entry(
+            entries,
+            MetadataField::Extra(index),
+            extra_field_title(builder, field),
+            &field.value,
+            field.writable,
+            false,
+        );
+        if field.kind == sources::MetadataFieldKind::Number {
+            entries
+                .last()
+                .unwrap()
+                .entry
+                .set_input_purpose(gtk::InputPurpose::Number);
+        }
+    }
+}
+
+fn extra_field_title(builder: &gtk::Builder, field: &sources::MetadataField) -> String {
+    let id = format!("field_{}", field.label.replace(' ', "_"));
+    let label = if field.key.starts_with("provider:") {
+        builder
+            .object::<gtk::Label>(&id)
+            .map(|label| label.label().to_string())
+            .unwrap_or_else(|| field.label.clone())
+    } else {
+        crate::ui_resource::object::<gtk::Label>(
+            builder,
+            crate::ui_resource::METADATA_DIALOG_RESOURCE,
+            &id,
+        )
+        .label()
+        .to_string()
+    };
+    if field.mixed {
+        format!("{label} · {}", tr("Multiple values"))
+    } else {
+        label
+    }
+}
 fn append_number(
     entries: &mut Vec<MetadataEntry>,
     field: MetadataField,
@@ -601,7 +640,24 @@ fn append_entry(
     writable: bool,
     mixed: bool,
 ) {
-    let mut title = tr(field_title(field));
+    append_named_entry(
+        entries,
+        field,
+        tr(field_title(field)),
+        value,
+        writable,
+        mixed,
+    );
+}
+
+fn append_named_entry(
+    entries: &mut Vec<MetadataEntry>,
+    field: MetadataField,
+    mut title: String,
+    value: &str,
+    writable: bool,
+    mixed: bool,
+) {
     if mixed {
         title = format!("{title} · {}", tr("Multiple values"));
     }
@@ -656,6 +712,7 @@ fn field_title(field: MetadataField) -> &'static str {
         MetadataField::MusicBrainzReleaseGroupId => msgid("MusicBrainz release group ID"),
         MetadataField::MusicBrainzArtistId => msgid("MusicBrainz artist ID"),
         MetadataField::Locked => msgid("Lock metadata"),
+        MetadataField::Extra(_) => unreachable!("extra fields carry their own label"),
     }
 }
 
@@ -738,15 +795,22 @@ fn refresh_identified_field(editor: &Editor, field: MetadataField) {
     }
 }
 fn refresh_save_state(editor: &Editor) {
-    editor
-        .save
-        .set_sensitive(!editor.touched.borrow().is_empty() || editor.token.borrow().is_some());
+    editor.save.set_sensitive(
+        !editor.busy.get()
+            && !editor.artwork.pending()
+            && (!editor.touched.borrow().is_empty()
+                || editor.token.borrow().is_some()
+                || editor.artwork.edit().is_some()),
+    );
     if let Ok(values) = current_draft_values(editor) {
-        editor.identify.set_sensitive(identification_available(
-            editor.draft.source_search(),
-            editor.external_lookup_allowed,
-            &values,
-        ));
+        editor.identify.set_sensitive(
+            !editor.busy.get()
+                && identification_available(
+                    editor.draft.source_search(),
+                    editor.external_lookup_allowed,
+                    &values,
+                ),
+        );
     }
 }
 
@@ -863,39 +927,21 @@ fn connect_save(
         editor.set_busy(true, &tr("Saving..."));
         let revision = editor.draft.revision();
         let token = editor.token.borrow().clone();
-        let receiver = match edit {
-            MetadataEdit::Track(edit) => {
-                SaveReceiver::Track(rufin_core::metadata::write_reviewed_track_metadata(
-                    &source,
-                    item.media_uri().to_string(),
-                    revision,
-                    token,
-                    edit,
-                ))
-            }
-            MetadataEdit::Album(edit) => {
-                SaveReceiver::Album(rufin_core::metadata::write_reviewed_album_metadata(
-                    &source,
-                    item.media_uri().to_string(),
-                    revision,
-                    token,
-                    edit,
-                ))
-            }
-            MetadataEdit::Artist(edit) => {
-                SaveReceiver::Artist(rufin_core::metadata::write_reviewed_artist_metadata(
-                    &source,
-                    item.media_uri().to_string(),
-                    revision,
-                    token,
-                    edit,
-                ))
-            }
-        };
+        let receiver = rufin_core::metadata::write_reviewed_metadata(
+            &source,
+            item.media_uri().to_string(),
+            revision,
+            token,
+            edit,
+            editor.draft.artwork().binding.clone(),
+        );
         let editor = Rc::downgrade(&editor);
         let dialog = dialog.clone();
         gtk::glib::spawn_future_local(async move {
-            let response = receiver.recv().await;
+            let response = receiver
+                .recv()
+                .await
+                .unwrap_or(Err(SourceMetadataError::Unavailable));
             let Some(editor) = editor.upgrade() else {
                 return;
             };
@@ -905,9 +951,15 @@ fn connect_save(
                         dialog.force_close();
                     }
                 }
-                Err(error @ SourceMetadataError::SavedRefreshFailed(_)) => {
+                Err(
+                    error @ (SourceMetadataError::SavedRefreshFailed(_)
+                    | SourceMetadataError::PartiallySaved { .. }),
+                ) => {
                     editor.show_error(&error.to_string());
-                    editor.finish_committed_save();
+                    editor.finish_committed_save(matches!(
+                        error,
+                        SourceMetadataError::SavedRefreshFailed(_)
+                    ));
                 }
                 Err(error) => {
                     editor.show_error(&error.to_string());
@@ -929,11 +981,11 @@ impl Editor {
             .entry
     }
     fn set_busy(&self, busy: bool, label: &str) {
+        self.busy.set(busy);
+        self.artwork.set_busy(busy);
         self.identify
             .set_sensitive(!busy && self.draft.source_search());
-        self.save.set_sensitive(
-            !busy && (!self.touched.borrow().is_empty() || self.token.borrow().is_some()),
-        );
+        refresh_save_state(self);
         self.cancel.set_sensitive(!busy);
         for row in self.entries.iter() {
             row.entry.set_sensitive(!busy && self.writable(row.field));
@@ -954,10 +1006,13 @@ impl Editor {
         self.status.set_visible(true);
     }
 
-    fn finish_committed_save(&self) {
+    fn finish_committed_save(&self, fully_saved: bool) {
+        self.busy.set(true);
+        self.artwork.set_busy(true);
         self.identify.set_sensitive(false);
         self.save.set_sensitive(false);
-        self.save.set_label(&tr("Saved"));
+        self.save
+            .set_label(&if fully_saved { tr("Saved") } else { tr("Save") });
         self.cancel.set_sensitive(true);
         self.cancel.set_label(&tr("Close"));
         for row in self.entries.iter() {
@@ -968,6 +1023,14 @@ impl Editor {
         }
     }
     fn writable(&self, field: MetadataField) -> bool {
+        if let MetadataField::Extra(index) = field {
+            return self.draft.extra()[index].writable;
+        }
+        if field == MetadataField::Year {
+            if let Some(date) = self.draft.date() {
+                return date.writable;
+            }
+        }
         match &self.draft {
             MetadataDraft::Track(value) => track_writable(&value.writable, field),
             MetadataDraft::Album(value) => album_writable(&value.writable, field),
@@ -1024,12 +1087,6 @@ impl CurrentValues {
 fn usable_identity(value: &str) -> bool {
     !value.trim().is_empty()
 }
-enum MetadataEdit {
-    Track(TrackMetadataEdit),
-    Album(AlbumMetadataEdit),
-    Artist(ArtistMetadataEdit),
-}
-
 fn current_values(item: &MetadataItemId, editor: &Editor) -> Result<CurrentValues, String> {
     match item {
         MetadataItemId::Track(_) => Ok(CurrentValues::Track(track_values(editor)?)),
@@ -1045,18 +1102,37 @@ fn current_draft_values(editor: &Editor) -> Result<CurrentValues, String> {
     }
 }
 fn metadata_edit(item: &MetadataItemId, editor: &Editor) -> Result<MetadataEdit, String> {
+    let extra = editor
+        .entries
+        .iter()
+        .filter(|row| editor.touched.borrow().contains(&row.field))
+        .filter_map(|row| {
+            let key = match row.field {
+                MetadataField::Extra(index) => &editor.draft.extra()[index].key,
+                MetadataField::Year => &editor.draft.date()?.key,
+                _ => return None,
+            };
+            Some((key.clone(), row.entry.text().trim().to_string()))
+        })
+        .collect();
     match item {
         MetadataItemId::Track(_) => Ok(MetadataEdit::Track(TrackMetadataEdit {
             values: track_values(editor)?,
             changed: track_changed(editor),
+            artwork: editor.artwork.edit(),
+            extra,
         })),
         MetadataItemId::Album(_) => Ok(MetadataEdit::Album(AlbumMetadataEdit {
             values: album_values(editor)?,
             changed: album_changed(editor),
+            artwork: editor.artwork.edit(),
+            extra,
         })),
         MetadataItemId::Artist(_) => Ok(MetadataEdit::Artist(ArtistMetadataEdit {
             values: artist_values(editor)?,
             changed: artist_changed(editor),
+            artwork: editor.artwork.edit(),
+            extra,
         })),
     }
 }
@@ -1180,6 +1256,10 @@ fn apply_number(
         return Ok(());
     }
     let value = editor.entry(field).text().trim().to_string();
+    if field == MetadataField::Year && editor.draft.date().is_some() {
+        *target = value.split('-').next().and_then(|year| year.parse().ok());
+        return Ok(());
+    }
     *target = if value.is_empty() {
         None
     } else {
@@ -1210,7 +1290,7 @@ fn track_changed(editor: &Editor) -> TrackMetadataWritable {
             MetadataField::AlbumArtist => changed.album_artist = true,
             MetadataField::TrackNumber => changed.track_number = true,
             MetadataField::DiscNumber => changed.disc_number = true,
-            MetadataField::Year => changed.year = true,
+            MetadataField::Year => changed.year = editor.draft.date().is_none(),
             MetadataField::Genre => changed.genre = true,
             MetadataField::Comment => changed.comment = true,
             MetadataField::Bpm => changed.bpm = true,
@@ -1220,6 +1300,7 @@ fn track_changed(editor: &Editor) -> TrackMetadataWritable {
             MetadataField::MusicBrainzReleaseGroupId => changed.musicbrainz_release_group_id = true,
             MetadataField::MusicBrainzArtistId => changed.musicbrainz_artist_id = true,
             MetadataField::Locked => changed.locked = true,
+            MetadataField::Extra(_) => {}
         }
     }
     changed
@@ -1237,7 +1318,7 @@ fn album_changed(editor: &Editor) -> AlbumMetadataWritable {
             MetadataField::SortTitle => changed.sort_title = true,
             MetadataField::Artist => changed.artist = true,
             MetadataField::AlbumArtist => changed.album_artist = true,
-            MetadataField::Year => changed.year = true,
+            MetadataField::Year => changed.year = editor.draft.date().is_none(),
             MetadataField::Genre => changed.genre = true,
             MetadataField::Comment => changed.comment = true,
             MetadataField::MusicBrainzAlbumId => changed.musicbrainz_album_id = true,
@@ -1288,6 +1369,7 @@ fn track_writable(value: &TrackMetadataWritable, field: MetadataField) -> bool {
         MetadataField::MusicBrainzReleaseGroupId => value.musicbrainz_release_group_id,
         MetadataField::MusicBrainzArtistId => value.musicbrainz_artist_id,
         MetadataField::Locked => value.locked,
+        MetadataField::Extra(_) => false,
     }
 }
 fn album_writable(value: &AlbumMetadataWritable, field: MetadataField) -> bool {
@@ -1359,7 +1441,7 @@ fn track_value(values: &TrackMetadataValues, field: MetadataField) -> String {
         MetadataField::MusicBrainzArtistId => {
             values.musicbrainz_artist_id.clone().unwrap_or_default()
         }
-        MetadataField::Locked => String::new(),
+        MetadataField::Locked | MetadataField::Extra(_) => String::new(),
     }
 }
 
@@ -1490,6 +1572,13 @@ fn apply_artist_values(editor: &Editor, values: &ArtistMetadataValues) {
 fn set_identified(editor: &Editor, field: MetadataField, value: &str) {
     if editor.writable(field) {
         let current = editor.entry(field).text().to_string();
+        // Identify supplies a year. Keep a more precise date when that year already matches.
+        if field == MetadataField::Year
+            && editor.draft.date().is_some()
+            && current.split('-').next() == Some(value)
+        {
+            return;
+        }
         if current == value {
             return;
         }
@@ -1541,22 +1630,6 @@ impl IdentifyReceiver {
                 .await
                 .map_err(|_| tr(msgid("Metadata editing is no longer available")))?
                 .map(|value| value.map(|(values, token)| Identified::Artist(values, token))),
-        }
-    }
-}
-
-enum SaveReceiver {
-    Track(async_channel::Receiver<Result<(), SourceMetadataError>>),
-    Album(async_channel::Receiver<Result<(), SourceMetadataError>>),
-    Artist(async_channel::Receiver<Result<(), SourceMetadataError>>),
-}
-impl SaveReceiver {
-    async fn recv(self) -> Result<(), SourceMetadataError> {
-        match self {
-            Self::Track(receiver) | Self::Album(receiver) | Self::Artist(receiver) => receiver
-                .recv()
-                .await
-                .map_err(|_| SourceMetadataError::Unavailable)?,
         }
     }
 }

@@ -96,7 +96,7 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
                 database.playlist_rows(&[key], &cancellation).await.map_err(internal)?.pop()
                     .map(|row| {
                         let artwork = rufin_core::playlists::playlist_artwork_bindings(&row);
-                        json!({"kind":"playlist","id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":artwork.len(),"artwork_revision":artwork_revision(artwork)})
+                        json!({"kind":"playlist","id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"metadata_writable":row.metadata_writable,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":artwork.len(),"artwork_revision":artwork_revision(artwork)})
                     })
             }
             SidebarPin::SmartPlaylist { playlist_id } => {

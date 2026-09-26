@@ -594,7 +594,6 @@ async fn exercise_http_api(
         .pop()
         .unwrap();
     cover_row.artwork_binding = Some(vec![1]);
-    cover_row.representative_artwork = vec![vec![2], vec![3]];
     assert_eq!(
         rufin_core::playlists::playlist_artwork_bindings(&cover_row),
         &[vec![1]]
@@ -602,7 +601,7 @@ async fn exercise_http_api(
     cover_row.artwork_binding = None;
     assert_eq!(
         rufin_core::playlists::playlist_artwork_bindings(&cover_row),
-        &[vec![2], vec![3]]
+        &[] as &[Vec<u8>]
     );
     let listed = api(reqwest::Method::GET, "playlists", Value::Null).await;
     let row = listed["playlists"]

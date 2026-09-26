@@ -81,6 +81,7 @@ async fn remote_relocation_keeps_media_identity_and_updates_observed_access() {
         inode: None,
         native_id: Some("oc-fileid:123".into()),
         picture_index: None,
+        artist_pictures: None,
         revision: Some("etag-1".into()),
         parse_version: Some(1),
         state: LocalFileState::Accepted,
@@ -276,6 +277,7 @@ async fn local_component_paths_page_beyond_one_batch() {
             inode: None,
             native_id: None,
             picture_index: None,
+            artist_pictures: None,
             revision: None,
             parse_version: None,
             state: LocalFileState::Observed,
@@ -295,6 +297,7 @@ async fn local_component_paths_page_beyond_one_batch() {
                 inode: None,
                 native_id: None,
                 picture_index: None,
+                artist_pictures: None,
                 revision: None,
                 parse_version: Some(1),
                 state: LocalFileState::Accepted,
@@ -865,15 +868,15 @@ async fn artwork_publication_keeps_one_effective_binding_per_entity() {
 
     write_small_catalog(&database, "shared", "Track One", false, b"genre-art").await;
     let mut reader = connection(&path).await;
-    assert_eq!(
-        sqlx::query_scalar::<_, Vec<u8>>(
-            "SELECT artwork_binding FROM artists WHERE object_id='artist-one'"
-        )
-        .fetch_one(&mut reader)
-        .await
-        .expect("Artist keeps its own image"),
-        b"artist-art"
-    );
+    let artist = sqlx::query_scalar::<_, Vec<u8>>(
+        "SELECT artwork_binding FROM artists WHERE object_id='artist-one'",
+    )
+    .fetch_one(&mut reader)
+    .await
+    .expect("Artist keeps its own image");
+    let artist: library::ArtistArtworkBinding = serde_json::from_slice(&artist).unwrap();
+    assert_eq!(artist.source.as_deref(), Some(b"artist-art".as_slice()));
+    assert_eq!(artist.fallback.as_deref(), Some(b"album-art".as_slice()));
     let shared = sqlx::query_as::<_, (Vec<u8>, Vec<u8>, Vec<u8>)>(
         "SELECT album.artwork_binding,first.artwork_binding,second.artwork_binding
          FROM albums album
@@ -1147,6 +1150,7 @@ async fn identical_and_artwork_only_incomplete_scans_retain_unseen_local_files()
                 inode: None,
                 native_id: None,
                 picture_index: None,
+                artist_pictures: None,
                 revision: None,
                 parse_version: Some(1),
                 state: LocalFileState::Accepted,

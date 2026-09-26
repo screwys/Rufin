@@ -35,7 +35,7 @@ pub use activity::{
     ActivityRecord, ActivityTrackRow, CalendarActivityPeriod, CalendarActivitySummary, HistoryRow,
     ListenDeliveryTarget, ListenWrite, PendingListenDelivery,
 };
-pub use artwork::RepresentativeArtworkScope;
+pub use artwork::{ArtistArtworkBinding, PlaylistArtworkBinding, RepresentativeArtworkScope};
 pub use backup::{BackupRestoreReport, StateGroups};
 pub use collections::{
     AlbumArtistLink, AlbumGenreLink, AlbumMetadataWrite, AlbumReleaseCandidate, AlbumReleaseClass,

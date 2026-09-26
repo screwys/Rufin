@@ -556,6 +556,10 @@ async fn artwork_pages_distinct_opaque_bindings_by_digest() {
     let fixture = fixture().await;
     let digest = [9; 32];
     let mut raw = connection(&fixture.path).await;
+    sqlx::query("UPDATE artists SET artwork_binding=NULL")
+        .execute(&mut raw)
+        .await
+        .unwrap();
     sqlx::query("UPDATE tracks SET artwork_binding=?2 WHERE track_key=?1")
         .bind(fixture.tracks[0])
         .bind(b"binding-a".as_slice())
@@ -659,6 +663,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
         inode: Some(2),
         native_id: None,
         picture_index: None,
+        artist_pictures: None,
         revision: None,
         parse_version: Some(1),
         state: LocalFileState::Accepted,

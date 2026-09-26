@@ -131,6 +131,8 @@ pub struct LocalArtworkCandidate {
     pub path: String,
     pub root: Option<String>,
     pub picture_index: Option<i64>,
+    pub artist_pictures: Option<String>,
+    pub primary_artist: bool,
     pub revision: Option<String>,
     pub disc_number: i64,
     pub track_number: i64,
@@ -297,7 +299,7 @@ impl Scan {
         self.stage(
             sqlx::query(
                 "INSERT INTO temp.scan_playlists
-             SELECT object_id,name,normalized_name,sort_text,artwork_binding,writable,provider_revision,valid_until,1
+             SELECT object_id,name,normalized_name,sort_text,artwork_binding,writable,metadata_writable,provider_revision,valid_until,1
              FROM catalog.native_playlists WHERE source_key=?1",
             )
             .bind(self.existing_source_key),
@@ -338,14 +340,47 @@ impl Scan {
     pub async fn clear_local_artwork_candidates(&mut self) -> LibraryResult<()> {
         self.local_point_update = self.point_update;
         if self.point_update {
+            self.stage(sqlx::query("CREATE TEMP TABLE IF NOT EXISTS scan_artist_previous_images(binding BLOB PRIMARY KEY)")).await?;
+            self.stage(sqlx::query("DELETE FROM temp.scan_artist_previous_images"))
+                .await?;
+            let mut after = String::new();
+            loop {
+                let rows: Vec<(String, Option<Vec<u8>>)> = {
+                    let mut writer = self.database.writer().await?;
+                    let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+                    sqlx::query_as("SELECT artist.object_id,artist.artwork_binding FROM artists artist JOIN temp.scan_artists staged USING(object_id) WHERE artist.source_key=?1 AND artist.object_id>?2 ORDER BY artist.object_id LIMIT 128")
+                        .bind(self.existing_source_key).bind(&after).fetch_all(connection).await?
+                };
+                if rows.is_empty() {
+                    break;
+                }
+                for (id, binding) in rows {
+                    after = id;
+                    let Some(binding) = binding else {
+                        continue;
+                    };
+                    let images =
+                        match serde_json::from_slice::<crate::ArtistArtworkBinding>(&binding) {
+                            Ok(binding) => [binding.source, binding.fallback],
+                            Err(_) => [Some(binding), None],
+                        };
+                    for image in images.into_iter().flatten() {
+                        self.stage(
+                            sqlx::query(
+                                "INSERT OR IGNORE INTO temp.scan_artist_previous_images VALUES(?1)",
+                            )
+                            .bind(image),
+                        )
+                        .await?;
+                    }
+                }
+            }
             // Borrowed group images must be rediscovered with their changed artist;
             // an old effective binding is not an independent image candidate.
             self.retain_local_tracks_where(
                 "track.album_key IN (
-                     SELECT album.album_key FROM temp.scan_artists staged
-                     JOIN artists artist ON artist.source_key=?1 AND artist.object_id=staged.object_id
-                     JOIN albums album ON album.source_key=?1 AND album.artwork_binding=artist.artwork_binding
-                     WHERE artist.artwork_binding IS NOT NULL)
+                     SELECT album.album_key FROM temp.scan_artist_previous_images image
+                     JOIN albums album ON album.source_key=?1 AND album.artwork_binding=image.binding)
                 AND NOT EXISTS(SELECT 1 FROM temp.scan_tracks staged WHERE staged.object_id=track.object_id)
                 AND NOT EXISTS(SELECT 1 FROM temp.scan_removals removed
                      WHERE (removed.entity_kind='track' AND removed.object_id=track.object_id)
@@ -381,6 +416,116 @@ impl Scan {
         ).bind(after).fetch_all(connection).await?)
     }
 
+    pub async fn local_artwork_artist_page(
+        &self,
+        after: &str,
+    ) -> LibraryResult<Vec<(String, String)>> {
+        let mut writer = self.database.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        Ok(sqlx::query_as("SELECT object_id,name FROM temp.scan_artists WHERE object_id>?1 ORDER BY object_id LIMIT 128")
+            .bind(after).fetch_all(connection).await?)
+    }
+
+    pub async fn local_artwork_directory_has_artist(
+        &self,
+        prefix: &str,
+        artist: &str,
+    ) -> LibraryResult<bool> {
+        let mut writer = self.database.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        Ok(sqlx::query_scalar(
+            "WITH directory_tracks AS NOT MATERIALIZED (
+                SELECT track.object_id,track.album_object_id,1 staged FROM temp.scan_tracks track WHERE source_path>=?1 AND source_path<?1||char(1114111)
+                UNION ALL
+                SELECT track.object_id,album.object_id,0 FROM tracks track LEFT JOIN albums album USING(album_key)
+                WHERE ?4 AND track.source_key=?3 AND track.source_path>=?1 AND track.source_path<?1||char(1114111)
+                  AND NOT EXISTS(SELECT 1 FROM temp.scan_tracks staged WHERE staged.object_id=track.object_id)
+                  AND NOT EXISTS(SELECT 1 FROM temp.scan_removals removed WHERE removed.entity_kind='track' AND removed.object_id=track.object_id)
+                  AND NOT EXISTS(SELECT 1 FROM temp.scan_local_file_removals removed WHERE removed.path=track.source_path)
+             ) SELECT EXISTS(SELECT 1 FROM directory_tracks) AND NOT EXISTS(
+                 SELECT 1 FROM directory_tracks track WHERE NOT EXISTS(
+                    SELECT 1 FROM temp.scan_album_artists relation WHERE relation.owner_id=track.album_object_id AND relation.related_id=?2
+                      AND relation.position=(SELECT min(position) FROM temp.scan_album_artists WHERE owner_id=track.album_object_id)
+                    UNION ALL
+                    SELECT 1 FROM albums album JOIN album_artists relation USING(album_key) JOIN artists artist USING(artist_key)
+                    WHERE track.staged=0 AND album.source_key=?3 AND album.object_id=track.album_object_id AND artist.object_id=?2
+                      AND relation.position=(SELECT min(position) FROM album_artists WHERE album_key=album.album_key)
+                      AND NOT EXISTS(SELECT 1 FROM temp.scan_albums staged WHERE staged.object_id=album.object_id)
+                 ))")
+            .bind(prefix).bind(artist).bind(self.existing_source_key).bind(self.point_update).fetch_one(connection).await?)
+    }
+
+    pub async fn local_artwork_artist_track_page(
+        &self,
+        artist: &str,
+        after: &str,
+    ) -> LibraryResult<Vec<LocalArtworkCandidate>> {
+        let mut writer = self.database.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        Ok(sqlx::query_as(
+            "WITH artist_tracks AS (
+                SELECT track.object_id,track.album_object_id,track.source_path,track.disc_number,track.track_number,track.sort_text FROM temp.scan_tracks track WHERE track.object_id IN (
+                    SELECT owner_id FROM temp.scan_track_artists WHERE related_id=?1
+                    UNION SELECT track.object_id FROM temp.scan_album_artists relation JOIN temp.scan_tracks track ON track.album_object_id=relation.owner_id WHERE relation.related_id=?1)
+                UNION ALL
+                SELECT track.object_id,(SELECT object_id FROM albums WHERE album_key=track.album_key),track.source_path,track.disc_number,track.track_number,track.sort_text FROM tracks track
+                WHERE ?4 AND track.source_key=?3 AND track.track_key IN (
+                    SELECT relation.track_key FROM artists artist JOIN track_artists relation USING(artist_key) WHERE artist.source_key=?3 AND artist.object_id=?1
+                    UNION SELECT track.track_key FROM artists artist JOIN album_artists relation USING(artist_key) JOIN tracks track USING(album_key) WHERE artist.source_key=?3 AND artist.object_id=?1)
+                AND NOT EXISTS(SELECT 1 FROM temp.scan_tracks staged WHERE staged.object_id=track.object_id)
+                AND NOT EXISTS(SELECT 1 FROM temp.scan_removals removed WHERE removed.entity_kind='track' AND removed.object_id=track.object_id)
+                AND NOT EXISTS(SELECT 1 FROM temp.scan_local_file_removals removed WHERE removed.path=track.source_path)
+             )
+             SELECT track.object_id,track.source_path path,track.disc_number,track.track_number,track.sort_text,
+                COALESCE(COALESCE((SELECT related_id FROM temp.scan_album_artists WHERE owner_id=track.album_object_id ORDER BY position LIMIT 1),
+                    (SELECT artist.object_id FROM albums album JOIN album_artists relation USING(album_key) JOIN artists artist USING(artist_key) WHERE album.source_key=?3 AND album.object_id=track.album_object_id ORDER BY relation.position LIMIT 1))=?1,0) primary_artist,
+                COALESCE(staged.root,current.root) root,
+                CASE WHEN staged.path IS NOT NULL THEN staged.picture_index ELSE current.picture_index END picture_index,
+                CASE WHEN staged.path IS NULL OR (staged.size_bytes IS current.size_bytes AND staged.mtime_ns=current.mtime_ns AND staged.revision IS current.revision) THEN COALESCE(staged.artist_pictures,current.artist_pictures) ELSE staged.artist_pictures END artist_pictures,
+                CASE WHEN staged.path IS NOT NULL THEN COALESCE(staged.revision,CAST(staged.size_bytes AS TEXT)||'-'||CAST(staged.mtime_ns AS TEXT)) ELSE COALESCE(current.revision,CAST(current.size_bytes AS TEXT)||'-'||CAST(current.mtime_ns AS TEXT)) END revision
+             FROM artist_tracks track
+             LEFT JOIN temp.scan_local_files staged ON staged.path=track.source_path
+             LEFT JOIN local_files current ON current.source_key=?3 AND current.path=track.source_path
+             WHERE track.object_id>?2 AND track.source_path IS NOT NULL
+             ORDER BY track.object_id LIMIT 128")
+            .bind(artist).bind(after).bind(self.existing_source_key).bind(self.point_update).fetch_all(connection).await?)
+    }
+
+    pub async fn write_local_artist_artwork(
+        &mut self,
+        artist: &str,
+        binding: &[u8],
+    ) -> LibraryResult<()> {
+        self.stage(
+            sqlx::query("UPDATE temp.scan_artists SET artwork_binding=?2 WHERE object_id=?1")
+                .bind(artist)
+                .bind(binding),
+        )
+        .await
+    }
+
+    pub async fn record_artist_pictures(
+        &mut self,
+        path: &str,
+        pictures: &str,
+    ) -> LibraryResult<()> {
+        self.stage(
+            sqlx::query("UPDATE temp.scan_local_files SET artist_pictures=?2 WHERE path=?1")
+                .bind(path)
+                .bind(pictures),
+        )
+        .await?;
+        self.stage(
+            sqlx::query(
+                "UPDATE local_files SET artist_pictures=?3 WHERE source_key=?1 AND path=?2",
+            )
+            .bind(self.existing_source_key)
+            .bind(path)
+            .bind(pictures),
+        )
+        .await
+    }
+
     pub async fn file_artwork_image_page(
         &self,
         prefix: &str,
@@ -409,9 +554,11 @@ impl Scan {
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         Ok(sqlx::query_as(
             "SELECT track.object_id,track.source_path path,track.disc_number,track.track_number,track.sort_text,
+               0 primary_artist,
                CASE WHEN staged.path IS NOT NULL THEN staged.root ELSE current.root END root,
                CASE WHEN staged.path IS NOT NULL THEN staged.picture_index ELSE current.picture_index END picture_index,
-               CASE WHEN staged.path IS NOT NULL THEN staged.revision ELSE current.revision END revision
+               CASE WHEN staged.path IS NULL OR (staged.size_bytes IS current.size_bytes AND staged.mtime_ns=current.mtime_ns AND staged.revision IS current.revision) THEN COALESCE(staged.artist_pictures,current.artist_pictures) ELSE staged.artist_pictures END artist_pictures,
+               CASE WHEN staged.path IS NOT NULL THEN COALESCE(staged.revision,CAST(staged.size_bytes AS TEXT)||'-'||CAST(staged.mtime_ns AS TEXT)) ELSE COALESCE(current.revision,CAST(current.size_bytes AS TEXT)||'-'||CAST(current.mtime_ns AS TEXT)) END revision
              FROM temp.scan_tracks track
              LEFT JOIN temp.scan_local_files staged ON staged.path=track.source_path
              LEFT JOIN local_files current ON current.source_key=?6 AND current.path=track.source_path
@@ -888,7 +1035,7 @@ impl Scan {
             ])?;
         }
         let mut observations = QueryBuilder::<Sqlite>::new(
-            "INSERT INTO temp.scan_local_files(path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,parse_version,state) ",
+            "INSERT INTO temp.scan_local_files(path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,artist_pictures,parse_version,state) ",
         );
         observations.push_values(files, |mut row, (file, _)| {
             row.push_bind(&file.path)
@@ -902,10 +1049,11 @@ impl Scan {
                 .push_bind(&file.native_id)
                 .push_bind(&file.revision)
                 .push_bind(file.picture_index)
+                .push_bind(&file.artist_pictures)
                 .push_bind(file.parse_version)
                 .push_bind(file.state.as_str());
         });
-        observations.push(" ON CONFLICT(path) DO UPDATE SET root=excluded.root,relative_path=excluded.relative_path,kind=excluded.kind,size_bytes=excluded.size_bytes,mtime_ns=excluded.mtime_ns,device_id=excluded.device_id,inode=excluded.inode,native_id=excluded.native_id,revision=excluded.revision,picture_index=excluded.picture_index,parse_version=excluded.parse_version,state=excluded.state");
+        observations.push(" ON CONFLICT(path) DO UPDATE SET root=excluded.root,relative_path=excluded.relative_path,kind=excluded.kind,size_bytes=excluded.size_bytes,mtime_ns=excluded.mtime_ns,device_id=excluded.device_id,inode=excluded.inode,native_id=excluded.native_id,revision=excluded.revision,picture_index=excluded.picture_index,artist_pictures=excluded.artist_pictures,parse_version=excluded.parse_version,state=excluded.state");
         self.stage(observations.build()).await?;
 
         let mut clear = QueryBuilder::<Sqlite>::new(
@@ -1016,7 +1164,7 @@ impl Scan {
         sqlx::query(
             "INSERT OR IGNORE INTO temp.scan_local_files
              SELECT path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,
-                    native_id,revision,picture_index,parse_version,
+                    native_id,revision,picture_index,artist_pictures,parse_version,
                     CASE WHEN kind='directory' THEN 'accepted' ELSE state END
              FROM local_files WHERE source_key=?1 AND path>=?2 AND path<?2||char(1114111)",
         )
@@ -1039,7 +1187,7 @@ impl Scan {
             sqlx::query(
                 "INSERT OR IGNORE INTO temp.scan_local_files
              SELECT path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,
-                    native_id,revision,picture_index,parse_version,
+                    native_id,revision,picture_index,artist_pictures,parse_version,
                     CASE WHEN kind='directory' THEN 'observed' ELSE state END
              FROM local_files WHERE source_key=?1 AND path>=?2 AND path<?2||char(1114111)
                AND instr(substr(rtrim(path,'/'),length(?2)+1),'/')=0",
@@ -1093,7 +1241,7 @@ impl Scan {
         after: Option<&str>,
     ) -> LibraryResult<Vec<crate::LocalFileWrite>> {
         let query = || {
-            sqlx::query("SELECT path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,parse_version,state FROM temp.scan_local_files WHERE kind=?1 AND path>?2 ORDER BY path LIMIT 128")
+            sqlx::query("SELECT path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,artist_pictures,parse_version,state FROM temp.scan_local_files WHERE kind=?1 AND path>?2 ORDER BY path LIMIT 128")
             .bind(kind.as_str()).bind(after.unwrap_or(""))
         };
         let rows = if let Some(writer) = self.batch_writer.as_mut() {
@@ -1122,7 +1270,7 @@ impl Scan {
             ));
         }
         let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,parse_version,state FROM temp.scan_local_files WHERE path IN (",
+            "SELECT path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,artist_pictures,parse_version,state FROM temp.scan_local_files WHERE path IN (",
         );
         let mut values = query.separated(",");
         for path in paths {
@@ -1710,15 +1858,17 @@ impl Scan {
         .await
     }
 
-    pub async fn write_playlist_writable(
+    pub async fn write_playlist_permissions(
         &mut self,
         object_id: &str,
         writable: bool,
+        metadata_writable: bool,
     ) -> LibraryResult<()> {
         self.stage(
-            sqlx::query("UPDATE temp.scan_playlists SET writable=?2 WHERE object_id=?1")
+            sqlx::query("UPDATE temp.scan_playlists SET writable=?2,metadata_writable=?3 WHERE object_id=?1")
                 .bind(object_id)
-                .bind(writable),
+                .bind(writable)
+                .bind(metadata_writable),
         )
         .await
     }
@@ -2301,9 +2451,18 @@ UPDATE temp.scan_albums AS album SET artwork_binding=COALESCE(
     )
     .execute(&mut *connection)
     .await?;
+    sqlx::raw_sql(
+        "CREATE TEMP TABLE IF NOT EXISTS scan_artist_artwork(
+             object_id TEXT PRIMARY KEY,source BLOB,fallback BLOB,binding BLOB);
+         DELETE FROM temp.scan_artist_artwork;
+         INSERT INTO temp.scan_artist_artwork(object_id,source)
+         SELECT object_id,artwork_binding FROM temp.scan_artists;",
+    )
+    .execute(&mut *connection)
+    .await?;
     sqlx::query(
         r###"
-UPDATE temp.scan_artists AS artist SET artwork_binding=COALESCE(
+UPDATE temp.scan_artist_artwork AS artist SET fallback=COALESCE(
     (SELECT artwork_binding FROM (
          SELECT album.artwork_binding,album.sort_text,album.object_id
          FROM temp.scan_album_artists relation
@@ -2347,12 +2506,43 @@ UPDATE temp.scan_artists AS artist SET artwork_binding=COALESCE(
            AND NOT EXISTS(SELECT 1 FROM temp.scan_tracks staged WHERE staged.object_id=track.object_id)
            AND NOT EXISTS(SELECT 1 FROM temp.scan_removals removed WHERE removed.entity_kind='track' AND removed.object_id=track.object_id)
      ) ORDER BY sort_text,object_id LIMIT 1)
-) WHERE artist.artwork_binding IS NULL
+)
 "###,
     )
-    .bind(point_source.filter(|_| local))
+    .bind(point_source)
     .execute(&mut *connection)
     .await?;
+    let mut after = String::new();
+    loop {
+        let rows: Vec<(String, String, Option<String>, Option<Vec<u8>>, Option<Vec<u8>>)> = sqlx::query_as("SELECT artist.object_id,artist.name,artist.musicbrainz_artist_id,image.source,image.fallback FROM temp.scan_artists artist JOIN temp.scan_artist_artwork image USING(object_id) WHERE artist.object_id>?1 ORDER BY artist.object_id LIMIT 128")
+            .bind(&after).fetch_all(&mut *connection).await?;
+        if rows.is_empty() {
+            break;
+        }
+        for (id, artist_name, musicbrainz_artist_id, source, fallback) in rows {
+            after.clone_from(&id);
+            let source = source
+                .as_deref()
+                .and_then(|bytes| serde_json::from_slice::<crate::ArtistArtworkBinding>(bytes).ok())
+                .map_or(source, |binding| binding.source);
+            let binding = serde_json::to_vec(&crate::ArtistArtworkBinding {
+                artist_name,
+                musicbrainz_artist_id,
+                source: source.clone(),
+                fallback,
+            })?;
+            sqlx::query(
+                "UPDATE temp.scan_artist_artwork SET source=?2,binding=?3 WHERE object_id=?1",
+            )
+            .bind(id)
+            .bind(source)
+            .bind(binding)
+            .execute(&mut *connection)
+            .await?;
+        }
+    }
+    sqlx::query("UPDATE temp.scan_artists SET artwork_binding=(SELECT COALESCE(source,fallback) FROM temp.scan_artist_artwork image WHERE image.object_id=scan_artists.object_id)")
+        .execute(&mut *connection).await?;
     sqlx::raw_sql(
         r###"
 UPDATE temp.scan_albums AS album SET artwork_binding=(
@@ -2381,6 +2571,8 @@ UPDATE temp.scan_tracks AS track SET artwork_binding=(
     .bind(distinct_track_covers)
     .execute(&mut *connection)
     .await?;
+    sqlx::query("UPDATE temp.scan_artists SET artwork_binding=(SELECT binding FROM temp.scan_artist_artwork image WHERE image.object_id=scan_artists.object_id)")
+        .execute(&mut *connection).await?;
     Ok(())
 }
 
@@ -2634,7 +2826,7 @@ async fn create_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResul
          CREATE TEMP TABLE IF NOT EXISTS scan_local_files(
              path TEXT PRIMARY KEY, root TEXT NOT NULL, relative_path TEXT NOT NULL,
              kind TEXT NOT NULL, size_bytes INTEGER, mtime_ns INTEGER NOT NULL,
-             device_id INTEGER, inode INTEGER, native_id TEXT, revision TEXT, picture_index INTEGER, parse_version INTEGER, state TEXT NOT NULL
+             device_id INTEGER, inode INTEGER, native_id TEXT, revision TEXT, picture_index INTEGER, artist_pictures TEXT, parse_version INTEGER, state TEXT NOT NULL
          ) STRICT;
          CREATE INDEX IF NOT EXISTS scan_local_files_kind_path ON scan_local_files(kind,path);
          CREATE INDEX IF NOT EXISTS scan_local_files_native_id ON scan_local_files(native_id,path) WHERE native_id IS NOT NULL;
@@ -2681,6 +2873,8 @@ async fn create_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResul
              position INTEGER NOT NULL,
              PRIMARY KEY(owner_id, related_id)
          ) STRICT;
+         CREATE INDEX IF NOT EXISTS scan_track_artists_related ON scan_track_artists(related_id,owner_id);
+         CREATE INDEX IF NOT EXISTS scan_album_artists_related ON scan_album_artists(related_id,owner_id);
          CREATE TEMP TABLE IF NOT EXISTS scan_album_genres(
              owner_id TEXT NOT NULL, related_id TEXT NOT NULL,
              position INTEGER NOT NULL,
@@ -2710,6 +2904,7 @@ async fn create_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResul
              object_id TEXT PRIMARY KEY, name TEXT NOT NULL,
              normalized_name TEXT NOT NULL, sort_text TEXT NOT NULL,
              artwork_binding BLOB, writable INTEGER NOT NULL DEFAULT 1,
+             metadata_writable INTEGER NOT NULL DEFAULT 1,
              provider_revision TEXT, valid_until INTEGER, entries_supplied INTEGER NOT NULL DEFAULT 1
          ) STRICT;
          CREATE TEMP TABLE IF NOT EXISTS scan_playlist_entries(
@@ -2983,14 +3178,15 @@ async fn publish_playlists(
                   +row_number() OVER(ORDER BY sort_text,object_id)-1
          FROM temp.scan_playlists WHERE true
          ON CONFLICT(source_key,object_id) DO NOTHING",
-        "INSERT INTO catalog.native_playlists(source_key, object_id, name, normalized_name, sort_text, writable, provider_revision, valid_until) SELECT ?1, staged.object_id, staged.name, staged.normalized_name, staged.sort_text, staged.writable, staged.provider_revision, staged.valid_until
+        "INSERT INTO catalog.native_playlists(source_key, object_id, name, normalized_name, sort_text, writable, metadata_writable, provider_revision, valid_until) SELECT ?1, staged.object_id, staged.name, staged.normalized_name, staged.sort_text, staged.writable, staged.metadata_writable, staged.provider_revision, staged.valid_until
            FROM temp.scan_playlists staged
          WHERE true ON CONFLICT(source_key,object_id) DO UPDATE SET
              name=excluded.name,
              normalized_name=excluded.normalized_name,
              sort_text=excluded.sort_text,
-             writable=excluded.writable
-         WHERE (native_playlists.name,native_playlists.normalized_name,native_playlists.sort_text,native_playlists.writable) IS NOT (excluded.name,excluded.normalized_name,excluded.sort_text,excluded.writable)",
+             writable=excluded.writable,
+             metadata_writable=excluded.metadata_writable
+         WHERE (native_playlists.name,native_playlists.normalized_name,native_playlists.sort_text,native_playlists.writable,native_playlists.metadata_writable) IS NOT (excluded.name,excluded.normalized_name,excluded.sort_text,excluded.writable,excluded.metadata_writable)",
     ] {
         changed |= sqlx::query(sql).bind(source_key).execute(&mut **transaction).await?.rows_affected() > 0;
     }
@@ -3124,17 +3320,17 @@ async fn publish_local_files(
     sqlx::query(
         "INSERT INTO local_files(
              source_key,path,root,relative_path,kind,size_bytes,mtime_ns,
-             device_id,inode,native_id,revision,picture_index,parse_version,state
+             device_id,inode,native_id,revision,picture_index,artist_pictures,parse_version,state
          )
          SELECT ?1,path,root,relative_path,kind,size_bytes,mtime_ns,
-                device_id,inode,native_id,CASE WHEN kind='directory' AND ?2=0 THEN NULL ELSE revision END,picture_index,parse_version,state
+                device_id,inode,native_id,CASE WHEN kind='directory' AND ?2=0 THEN NULL ELSE revision END,picture_index,artist_pictures,parse_version,state
          FROM temp.scan_local_files WHERE true
          ON CONFLICT(source_key,path) DO UPDATE SET
              root=excluded.root,relative_path=excluded.relative_path,
              kind=excluded.kind,size_bytes=excluded.size_bytes,
              mtime_ns=excluded.mtime_ns,device_id=excluded.device_id,
              inode=excluded.inode,parse_version=excluded.parse_version,
-             native_id=excluded.native_id,revision=excluded.revision,picture_index=excluded.picture_index,
+             native_id=excluded.native_id,revision=excluded.revision,picture_index=excluded.picture_index,artist_pictures=CASE WHEN local_files.size_bytes IS excluded.size_bytes AND local_files.mtime_ns=excluded.mtime_ns AND local_files.revision IS excluded.revision THEN COALESCE(excluded.artist_pictures,local_files.artist_pictures) ELSE excluded.artist_pictures END,
              state=excluded.state",
     )
     .bind(source_key)
@@ -3698,6 +3894,7 @@ fn local_inventory_row(row: sqlx::sqlite::SqliteRow) -> LibraryResult<crate::Loc
         native_id: row.try_get("native_id")?,
         revision: row.try_get("revision")?,
         picture_index: row.try_get("picture_index")?,
+        artist_pictures: row.try_get("artist_pictures")?,
         parse_version: row.try_get("parse_version")?,
         state: crate::LocalFileState::parse(row.try_get("state")?)?,
     })

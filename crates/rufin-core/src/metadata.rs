@@ -2,11 +2,12 @@
 use crate::runtime::CatalogChange;
 use crate::source::{SourceOwner, string_error};
 use async_channel::Receiver;
+pub use metadata_lookup::{ArtworkQuery, ArtworkResult};
 use sources::{
-    AlbumMetadata, AlbumMetadataEdit, AlbumMetadataValues, ArtistMetadata, ArtistMetadataEdit,
-    ArtistMetadataValues, Source, SourceMetadataError, TrackMetadata, TrackMetadataEdit,
-    TrackMetadataValues,
+    AlbumMetadata, AlbumMetadataValues, ArtistMetadata, ArtistMetadataValues, Source,
+    SourceMetadataError, TrackMetadata, TrackMetadataValues,
 };
+use std::sync::Arc;
 pub fn track_metadata(
     owner: &SourceOwner,
     media_uri: String,
@@ -46,12 +47,13 @@ pub fn artist_metadata(
     })
 }
 
-pub fn write_reviewed_track_metadata(
+pub fn write_reviewed_metadata(
     owner: &SourceOwner,
     media_uri: String,
     revision: Option<String>,
     token: Option<String>,
-    edit: TrackMetadataEdit,
+    edit: sources::MetadataEdit,
+    previous_artwork: Option<Vec<u8>>,
 ) -> Receiver<Result<(), SourceMetadataError>> {
     owner.reply(move |owner, database| async move {
         let target = owner.media_client(&media_uri).await;
@@ -59,80 +61,58 @@ pub fn write_reviewed_track_metadata(
         let source = match target {
             Ok(source) => source,
             Err(_) => {
-                return Source::write_direct_file_metadata(
-                    &media_uri,
-                    revision.as_deref().unwrap_or_default(),
-                    &edit,
-                );
+                return match edit {
+                    sources::MetadataEdit::Track(edit) => Source::write_direct_file_metadata(
+                        &media_uri,
+                        revision.as_deref().unwrap_or_default(),
+                        &edit,
+                    ),
+                    _ => Err(SourceMetadataError::Unavailable),
+                };
             }
         };
-        let outcome = source
-            .write_track_metadata(
+        let previous_artwork = edit.artwork().and(previous_artwork);
+        let result = source
+            .write_metadata(
                 &database,
                 &media_uri,
                 revision.as_deref().unwrap_or_default(),
                 token.as_deref(),
                 edit,
             )
-            .await?;
-        owner
-            .accept_scan(source.source_id(), outcome, CatalogChange::Broad)
             .await;
-        Ok(())
-    })
-}
-
-pub fn write_reviewed_album_metadata(
-    owner: &SourceOwner,
-    media_uri: String,
-    revision: Option<String>,
-    token: Option<String>,
-    edit: AlbumMetadataEdit,
-) -> Receiver<Result<(), SourceMetadataError>> {
-    owner.reply(move |owner, database| async move {
-        let target = owner.media_client(&media_uri).await;
-        let _lane = owner.shared.lane.lock().await;
-        let source = target.map_err(|_| SourceMetadataError::Unavailable)?;
-        let outcome = source
-            .write_album_metadata(
-                &database,
-                &media_uri,
-                revision.as_deref().unwrap_or_default(),
-                token.as_deref(),
-                edit,
-            )
-            .await?;
-        owner
-            .accept_scan(source.source_id(), outcome, CatalogChange::Broad)
-            .await;
-        Ok(())
-    })
-}
-
-pub fn write_reviewed_artist_metadata(
-    owner: &SourceOwner,
-    media_uri: String,
-    revision: Option<String>,
-    token: Option<String>,
-    edit: ArtistMetadataEdit,
-) -> Receiver<Result<(), SourceMetadataError>> {
-    owner.reply(move |owner, database| async move {
-        let target = owner.media_client(&media_uri).await;
-        let _lane = owner.shared.lane.lock().await;
-        let source = target.map_err(|_| SourceMetadataError::Unavailable)?;
-        let outcome = source
-            .write_artist_metadata(
-                &database,
-                &media_uri,
-                revision.as_deref().unwrap_or_default(),
-                token.as_deref(),
-                edit,
-            )
-            .await?;
-        owner
-            .accept_scan(source.source_id(), outcome, CatalogChange::Broad)
-            .await;
-        Ok(())
+        let mut refresh = Ok(false);
+        match &result {
+            Ok(outcome)
+            | Err(SourceMetadataError::PartiallySaved {
+                outcome: Some(outcome),
+                ..
+            }) => {
+                if let Some(binding) = previous_artwork {
+                    let artwork = owner.shared.artwork.clone();
+                    refresh = tokio::task::spawn_blocking(move || {
+                        artwork.invalidate_image(&artwork::ArtworkBinding::opaque(&binding))
+                    })
+                    .await
+                    .map_err(string_error)
+                    .and_then(|result| result.map_err(string_error));
+                }
+                let outcome = match (*outcome, &refresh) {
+                    (library::ScanOutcome::Identical(publication), Ok(true)) => {
+                        library::ScanOutcome::ArtworkChanged(publication)
+                    }
+                    (outcome, _) => outcome,
+                };
+                owner
+                    .accept_scan(source.source_id(), outcome, CatalogChange::Broad)
+                    .await;
+            }
+            Err(_) => {}
+        }
+        result?;
+        refresh
+            .map(|_| ())
+            .map_err(SourceMetadataError::SavedRefreshFailed)
     })
 }
 
@@ -292,4 +272,90 @@ impl MetadataItemId {
             Self::Track(uri) | Self::Album(uri) | Self::Artist(uri) => uri,
         }
     }
+}
+
+pub fn search_artwork(
+    owner: &SourceOwner,
+    query: ArtworkQuery,
+) -> Receiver<Result<Vec<ArtworkResult>, String>> {
+    owner.reply(move |owner, _| async move {
+        if !owner
+            .shared
+            .settings
+            .load()
+            .ui
+            .allows_external_metadata_lookup()
+        {
+            return Ok(Vec::new());
+        }
+        tokio::task::spawn_blocking(move || metadata_lookup::search_artwork(&query))
+            .await
+            .map_err(string_error)?
+    })
+}
+
+pub fn download_artwork(
+    owner: &SourceOwner,
+    url: String,
+) -> Receiver<Result<Arc<sources::ImageBytes>, String>> {
+    owner.reply(move |owner, _| async move {
+        if !owner
+            .shared
+            .settings
+            .load()
+            .ui
+            .allows_external_metadata_lookup()
+        {
+            return Err("External metadata lookup is disabled".into());
+        }
+        tokio::task::spawn_blocking(move || {
+            metadata_lookup::download_artwork(&url).and_then(checked_artwork)
+        })
+        .await
+        .map_err(string_error)?
+    })
+}
+
+pub fn prepare_artwork(
+    owner: &SourceOwner,
+    bytes: Vec<u8>,
+) -> Receiver<Result<Arc<sources::ImageBytes>, String>> {
+    owner.reply(move |_, _| async move {
+        tokio::task::spawn_blocking(move || checked_artwork(bytes))
+            .await
+            .map_err(string_error)?
+    })
+}
+
+/// Use the cached image the user has seen before asking its source for an original.
+pub fn current_artwork(
+    owner: &SourceOwner,
+    binding: Vec<u8>,
+) -> Receiver<Result<Option<Arc<sources::ImageBytes>>, String>> {
+    owner.reply(move |owner, _| async move {
+        let stored = owner.shared.settings.load();
+        let request =
+            artwork::ArtworkRequest::original(artwork::ArtworkBinding::opaque(&binding), 512)
+                .with_external(artwork::ExternalPolicy::new(
+                    stored.ui.external_metadata_enabled,
+                    stored.ui.allows_external_metadata_lookup(),
+                    stored.ui.lastfm_api_key,
+                ));
+        let bytes = owner.shared.artwork.image_bytes(request).await?;
+        tokio::task::spawn_blocking(move || bytes.map(checked_artwork).transpose())
+            .await
+            .map_err(string_error)?
+    })
+}
+
+fn checked_artwork(bytes: Vec<u8>) -> Result<Arc<sources::ImageBytes>, String> {
+    if bytes.len() > 32 * 1024 * 1024 {
+        return Err("Artwork exceeds 32 MiB".into());
+    }
+    artwork::decode_rgba(&bytes, 512).map_err(string_error)?;
+    let content_type = artwork::image_mime(&bytes).map(str::to_owned);
+    Ok(Arc::new(sources::ImageBytes {
+        bytes,
+        content_type,
+    }))
 }

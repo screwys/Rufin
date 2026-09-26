@@ -496,7 +496,7 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
     assert!(
         fixture
             .database
-            .rename_playlist(None, playlist, "Renamed global")
+            .update_playlist(None, playlist, Some("Renamed global"), None)
             .await
             .expect("rename global Playlist")
     );
@@ -518,7 +518,7 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
 }
 
 #[tokio::test]
-async fn playlist_cover_samples_follow_occurrences_and_effective_bindings() {
+async fn playlist_automatic_covers_do_not_create_saved_artwork() {
     let fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
     let first = vec![1_u8, 2, 3];
@@ -556,10 +556,7 @@ async fn playlist_cover_samples_follow_occurrences_and_effective_bindings() {
         .expect("Playlist cover samples")
         .pop()
         .expect("Playlist row");
-    assert_eq!(
-        row.representative_artwork,
-        [first.clone(), first.clone(), second, first]
-    );
+    assert!(row.artwork_binding.is_none());
 }
 
 #[tokio::test]

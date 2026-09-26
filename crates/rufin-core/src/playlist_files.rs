@@ -123,6 +123,7 @@ pub fn update(
     auto_refresh: bool,
     auto_save: Option<bool>,
     path_mode: PlaylistPathMode,
+    artwork: Option<sources::ArtworkChange>,
 ) -> Receiver<Result<(), String>> {
     run(owner, move |owner| async move {
         let mut settings_changed = false;
@@ -143,7 +144,15 @@ pub fn update(
                 .await
                 .map_err(string_error)?;
         }
-        if !crate::playlists::update_playlist_on(&owner, playlist, Some(&name), None).await? {
+        if !crate::playlists::update_playlist_on(
+            &owner,
+            playlist,
+            Some(&name),
+            None,
+            artwork.as_ref(),
+        )
+        .await?
+        {
             after_edit(&owner, playlist).await;
             if settings_changed {
                 publish(&owner, Some(playlist)).await;

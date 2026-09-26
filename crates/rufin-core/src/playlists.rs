@@ -301,14 +301,125 @@ pub fn playlist_public(
     })
 }
 
+#[derive(Clone, Debug)]
+pub struct PlaylistArtworkEditing {
+    pub binding: Option<Vec<u8>>,
+    pub representative_artwork: Vec<Vec<u8>>,
+    pub writable: bool,
+}
+
+pub fn playlist_artwork_editing(
+    owner: &SourceOwner,
+    playlist: PlaylistKey,
+) -> Receiver<Result<PlaylistArtworkEditing, String>> {
+    owner.reply(move |owner, database| async move {
+        let row = database
+            .playlist_rows(&[playlist], &ReadCancellation::new())
+            .await
+            .map_err(string_error)?
+            .pop()
+            .ok_or("Playlist no longer exists")?;
+        let writable = row.metadata_writable
+            && match playlist_source(&owner, playlist).await? {
+                PlaylistOwner::Local(_) => true,
+                PlaylistOwner::Server(source, _) => source.supports_playlist_artwork(),
+            };
+        let representative_artwork = if row.artwork_binding.is_some() {
+            database
+                .playlist_representative_artwork(playlist)
+                .await
+                .map_err(string_error)?
+        } else {
+            row.representative_artwork
+        };
+        Ok(PlaylistArtworkEditing {
+            binding: row.artwork_binding,
+            representative_artwork,
+            writable,
+        })
+    })
+}
+
+pub fn regenerate_playlist_artwork(
+    owner: &SourceOwner,
+    playlist: PlaylistKey,
+) -> Receiver<Result<Option<Arc<sources::ImageBytes>>, String>> {
+    owner.reply(move |owner, database| async move {
+        let bindings = database
+            .random_playlist_artwork(playlist)
+            .await
+            .map_err(string_error)?;
+        generate_artwork(&owner, bindings).await
+    })
+}
+
+pub fn regenerate_smart_playlist_artwork(
+    owner: &SourceOwner,
+    key: library::SmartPlaylistKey,
+    source: Option<library::SourceKey>,
+    folder: Option<library::FolderKey>,
+) -> Receiver<Result<Option<Arc<sources::ImageBytes>>, String>> {
+    owner.reply(move |owner, database| async move {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let bindings = database
+            .random_smart_playlist_artwork(key, source, folder, now)
+            .await
+            .map_err(string_error)?;
+        generate_artwork(&owner, bindings).await
+    })
+}
+
+async fn generate_artwork(
+    owner: &SourceOwner,
+    bindings: Vec<Vec<u8>>,
+) -> Result<Option<Arc<sources::ImageBytes>>, String> {
+    let stored = owner.shared.settings.load();
+    let policy = artwork::ExternalPolicy::new(
+        stored.ui.external_metadata_enabled,
+        stored.ui.allows_external_metadata_lookup(),
+        stored.ui.lastfm_api_key,
+    );
+    let mut images = Vec::with_capacity(bindings.len());
+    for binding in bindings {
+        let request =
+            artwork::ArtworkRequest::original(artwork::ArtworkBinding::opaque(&binding), 512)
+                .with_external(policy.clone());
+        if let Some(bytes) = owner.shared.artwork.image_bytes(request).await? {
+            images.push(bytes);
+        }
+    }
+    if images.is_empty() {
+        return Ok(None);
+    }
+    if images.len() == 1 {
+        let bytes = images.pop().unwrap();
+        return Ok(Some(Arc::new(sources::ImageBytes {
+            content_type: artwork::image_mime(&bytes).map(str::to_owned),
+            bytes,
+        })));
+    }
+    let bytes = tokio::task::spawn_blocking(move || artwork::collage_png(&images, 1024))
+        .await
+        .map_err(string_error)?
+        .map_err(string_error)?;
+    Ok(Some(Arc::new(sources::ImageBytes {
+        bytes,
+        content_type: Some("image/png".into()),
+    })))
+}
+
 pub fn update_playlist(
     owner: &SourceOwner,
     playlist: PlaylistKey,
     name: Option<String>,
     public: Option<bool>,
+    artwork: Option<sources::ArtworkChange>,
 ) -> Receiver<Result<bool, String>> {
     crate::playlist_files::run(owner, move |owner| async move {
-        update_playlist_on(&owner, playlist, name.as_deref(), public).await
+        update_playlist_on(&owner, playlist, name.as_deref(), public, artwork.as_ref()).await
     })
 }
 
@@ -317,33 +428,73 @@ pub(crate) async fn update_playlist_on(
     playlist: PlaylistKey,
     name: Option<&str>,
     public: Option<bool>,
+    artwork: Option<&sources::ArtworkChange>,
 ) -> Result<bool, String> {
     let target = playlist_source(owner, playlist).await?;
     let source_key = target.source_key();
+    let previous = if artwork.is_some() {
+        owner
+            .shared
+            .database
+            .playlist_artwork_binding(playlist)
+            .await
+            .map_err(string_error)?
+    } else {
+        None
+    };
     let result = match target {
         PlaylistOwner::Local(source) => {
-            if let Some(name) = name {
-                owner
-                    .shared
-                    .database
-                    .rename_playlist(source, playlist, name)
-                    .await
-                    .map(|changed| (changed, None))
-                    .map_err(string_error)
-            } else {
-                Ok((false, None))
-            }
+            let image = artwork.map(|change| match change {
+                sources::ArtworkChange::Replace(image) => {
+                    Some((image.bytes.as_slice(), image.content_type.as_deref()))
+                }
+                sources::ArtworkChange::Remove => None,
+            });
+            owner
+                .shared
+                .database
+                .update_playlist(source, playlist, name, image)
+                .await
+                .map(|changed| (changed, None))
+                .map_err(|error| sources::SourceMetadataError::Write(error.to_string()))
         }
-        PlaylistOwner::Server(source, key) => source
-            .update_playlist(&owner.shared.database, key, playlist, name, public)
-            .await
-            .map_err(string_error),
+        PlaylistOwner::Server(source, key) => {
+            source
+                .update_playlist(&owner.shared.database, key, playlist, name, public, artwork)
+                .await
+        }
     };
+    let mut publication = match &result {
+        Ok((changed, outcome)) => Ok((*changed, *outcome)),
+        Err(sources::SourceMetadataError::PartiallySaved { outcome, .. }) => Ok((true, *outcome)),
+        Err(sources::SourceMetadataError::SavedRefreshFailed(_)) => Ok((true, None)),
+        Err(error) => Err(error.to_string()),
+    };
+    if publication.as_ref().is_ok_and(|(changed, _)| *changed)
+        && let Some(binding) = previous
+    {
+        let cache = owner.shared.artwork.clone();
+        match tokio::task::spawn_blocking(move || {
+            cache.invalidate_image(&artwork::ArtworkBinding::opaque(&binding))
+        })
+        .await
+        {
+            Ok(Ok(true)) => {
+                if let Ok((_, Some(ScanOutcome::Identical(scan)))) = publication {
+                    publication = Ok((true, Some(ScanOutcome::ArtworkChanged(scan))));
+                }
+            }
+            Ok(Ok(false)) => {}
+            error => owner
+                .shared
+                .warn_nonfatal(&format!("Playlist artwork cache refresh failed: {error:?}")),
+        }
+    }
     let reply = result
         .as_ref()
         .map(|(changed, _)| *changed || public.is_some())
-        .map_err(Clone::clone);
-    accept_playlist_result(owner, source_key, Some(playlist), result).await;
+        .map_err(string_error);
+    accept_playlist_result(owner, source_key, Some(playlist), publication).await;
     reply
 }
 
@@ -740,6 +891,7 @@ pub enum SmartPlaylistChange {
         key: library::SmartPlaylistKey,
         name: String,
         definition: library::SmartPlaylistDefinition,
+        artwork: Option<sources::ArtworkChange>,
     },
     Delete(library::SmartPlaylistKey),
     Move {

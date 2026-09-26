@@ -1057,7 +1057,6 @@ fn artist_detail_header_restored(
         &actions,
         msgid("Play artist"),
         Some(artist.favorite),
-        true,
         Rc::clone(&play),
     );
     let favorite = favorite_icon_button("Favorite");

@@ -12,6 +12,7 @@ publish.workspace = true
 
 [dependencies]
 async-channel.workspace = true
+artwork.workspace = true
 gtk-widgets.workspace = true
 rufin-core.workspace = true
 adw = { workspace = true, features = ["v1_9", "gtk_v4_20"] }

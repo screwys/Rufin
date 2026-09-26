@@ -161,7 +161,9 @@ impl LocalSource {
             .await?;
         let mut scan = library::Scan::begin_items(database, source_id).await?;
         scan::stage_imported_paths(database, &mut scan).await?;
-        scan::stage_artwork(database, &mut scan, &|| false).await?;
+        crate::file::artwork::ArtworkFiles::Local
+            .stage(database, &mut scan, &|| false)
+            .await?;
         Ok(scan.finish().await?)
     }
 

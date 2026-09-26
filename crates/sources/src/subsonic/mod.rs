@@ -156,6 +156,7 @@ struct Playlist {
     revision: Option<String>,
     valid_until: Option<i64>,
     writable: bool,
+    metadata_writable: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PlaylistEntry {

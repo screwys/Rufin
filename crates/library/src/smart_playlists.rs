@@ -519,6 +519,8 @@ pub struct SmartPlaylistRow {
     pub duration_millis: i64,
     pub downloaded_count: i64,
     pub artwork_bindings: Vec<Vec<u8>>,
+    pub artwork_binding: Option<Vec<u8>>,
+    pub representative_artwork: Vec<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -530,9 +532,21 @@ pub struct SmartPlaylistValueSuggestions {
 impl<'row> FromRow<'row, SqliteRow> for SmartPlaylistRow {
     fn from_row(row: &'row SqliteRow) -> Result<Self, sqlx::Error> {
         let definition = row.try_get::<String, _>("definition_json")?;
+        let object_id: String = row.try_get("object_id")?;
+        let artwork_binding =
+            row.try_get::<Option<String>, _>("artwork_revision")?
+                .map(|revision| {
+                    serde_json::to_vec(&crate::PlaylistArtworkBinding {
+                        smart: true,
+                        source_id: None,
+                        object_id: object_id.clone(),
+                        revision,
+                    })
+                    .expect("playlist artwork binding")
+                });
         Ok(Self {
             smart_playlist_key: row.try_get("smart_playlist_key")?,
-            object_id: row.try_get("object_id")?,
+            object_id,
             name: row.try_get("name")?,
             definition: serde_json::from_str(&definition)
                 .map_err(|error| sqlx::Error::Decode(Box::new(error)))?,
@@ -540,7 +554,9 @@ impl<'row> FromRow<'row, SqliteRow> for SmartPlaylistRow {
             track_count: row.try_get("track_count")?,
             duration_millis: row.try_get("duration_millis")?,
             downloaded_count: 0,
-            artwork_bindings: Vec::new(),
+            artwork_bindings: artwork_binding.iter().cloned().collect(),
+            artwork_binding,
+            representative_artwork: Vec::new(),
         })
     }
 }
@@ -576,7 +592,7 @@ async fn load_smart_playlist_rows(
     });
     query.push(
         ") SELECT playlist.smart_playlist_key,playlist.object_id, playlist.name,
-                  playlist.definition_json, playlist.position,
+                  playlist.definition_json, playlist.position, playlist.artwork_revision,
                   0 AS track_count, 0 AS duration_millis
            FROM requested JOIN smart_playlists AS playlist USING(smart_playlist_key)",
     );
@@ -619,7 +635,10 @@ async fn load_smart_playlist_rows(
             row.duration_millis = *duration;
             row.downloaded_count = *downloaded;
         }
-        row.artwork_bindings = artwork.remove(&row.smart_playlist_key).unwrap_or_default();
+        row.representative_artwork = artwork.remove(&row.smart_playlist_key).unwrap_or_default();
+        if row.artwork_binding.is_none() {
+            row.artwork_bindings.clone_from(&row.representative_artwork);
+        }
     }
     Ok(result)
 }
@@ -755,8 +774,12 @@ impl Database {
                     row.downloaded_count = record.try_get("downloaded_count")?;
                     rows.push(row);
                 }
-                if let Some(binding) = record.try_get("artwork_binding")? {
-                    rows.last_mut().unwrap().artwork_bindings.push(binding);
+                if let Some(binding) = record.try_get::<Option<Vec<u8>>, _>("artwork_binding")? {
+                    let row = rows.last_mut().unwrap();
+                    if row.artwork_binding.is_none() {
+                        row.artwork_bindings.push(binding.clone());
+                    }
+                    row.representative_artwork.push(binding);
                 }
             }
             rows
@@ -914,6 +937,23 @@ impl Database {
         Ok(result)
     }
 
+    pub async fn random_smart_playlist_artwork(
+        &self,
+        key: SmartPlaylistKey,
+        source: Option<SourceKey>,
+        folder: Option<FolderKey>,
+        now: i64,
+    ) -> LibraryResult<Vec<Vec<u8>>> {
+        let mut connection = self.acquire_reader().await?;
+        let policy = smart_policy_sql(&mut connection, now, Some(&[key]), false).await?;
+        Ok(sqlx::query_scalar(AssertSqlSafe(format!(
+            "{policy} SELECT COALESCE(track.artwork_binding,album.artwork_binding) binding
+             FROM selected JOIN tracks track USING(media_uri) LEFT JOIN albums album ON album.album_key=track.album_key
+             WHERE binding IS NOT NULL GROUP BY binding ORDER BY random() LIMIT 4"
+        ))).persistent(false).bind(source).bind(now).bind(folder)
+            .bind(serde_json::to_string(&[key.raw()])?).fetch_all(&mut *connection).await?)
+    }
+
     pub async fn create_smart_playlist(
         &self,
         name: &str,
@@ -944,6 +984,7 @@ impl Database {
         key: SmartPlaylistKey,
         name: &str,
         definition: &SmartPlaylistDefinition,
+        artwork: Option<Option<&[u8]>>,
     ) -> LibraryResult<bool> {
         let name = require_name(name)?;
         let definition = encode_definition(definition)?;
@@ -951,12 +992,21 @@ impl Database {
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         Ok(sqlx::query(
             "UPDATE smart_playlists
-             SET name=?2, normalized_name=lower(?2), definition_json=?3
+             SET name=?2, normalized_name=lower(?2), definition_json=?3,
+                 artwork_bytes=CASE WHEN ?4 THEN ?5 ELSE artwork_bytes END,
+                 artwork_revision=CASE WHEN ?4 THEN ?6 ELSE artwork_revision END
              WHERE smart_playlist_key=?1",
         )
         .bind(key)
         .bind(name)
         .bind(definition)
+        .bind(artwork.is_some())
+        .bind(artwork.flatten())
+        .bind(
+            artwork
+                .flatten()
+                .map(|bytes| blake3::hash(bytes).to_hex().to_string()),
+        )
         .execute(connection)
         .await?
         .rows_affected()
@@ -1971,7 +2021,7 @@ WHERE (current_scope=0 OR ?3 IS NULL OR track_count>0) AND instr(normalized_name
 )
 
 SELECT ordered.definition_key,playlist.smart_playlist_key,playlist.object_id,playlist.name,
-  playlist.definition_json,playlist.position,seed.track_count,seed.duration_millis,
+  playlist.definition_json,playlist.position,playlist.artwork_revision,seed.track_count,seed.duration_millis,
   COALESCE(downloads.downloaded_count,0) downloaded_count,COALESCE(album.artwork_binding,cover.artwork_binding) artwork_binding
 FROM seed ordered JOIN seed USING(definition_key)
 LEFT JOIN smart_playlists playlist ON playlist.smart_playlist_key=seed.definition_key
@@ -1986,6 +2036,8 @@ ORDER BY ordered.row_position,artwork.key
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct SmartPlaylistWrite {
+    #[serde(default)]
+    pub artwork_bytes: Option<Vec<u8>>,
     pub object_id: String,
     pub name: String,
     pub definition_json: String,
@@ -1998,7 +2050,7 @@ pub(crate) async fn export_smart_playlists_jsonl_on(
 ) -> LibraryResult<u64> {
     output.write_all(b"{\"version\":1}\n")?;
     let mut rows = sqlx::query_as::<_, SmartPlaylistWrite>(
-        "SELECT object_id,name,definition_json,position FROM smart_playlists ORDER BY position",
+        "SELECT object_id,name,definition_json,position,artwork_bytes FROM smart_playlists ORDER BY position",
     )
     .fetch(connection);
     let mut count = 0;
@@ -2040,12 +2092,13 @@ pub(crate) async fn write_smart_playlist(
         ));
     }
     let _: SmartPlaylistDefinition = serde_json::from_str(&record.definition_json)?;
-    sqlx::query("INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position)
+    sqlx::query("INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position,artwork_bytes,artwork_revision)
        VALUES(?1,?2,lower(?2),?3,CASE WHEN EXISTS(SELECT 1 FROM smart_playlists WHERE position=?4)
-       THEN (SELECT COALESCE(max(position)+1,0) FROM smart_playlists) ELSE ?4 END)
+       THEN (SELECT COALESCE(max(position)+1,0) FROM smart_playlists) ELSE ?4 END,?5,?6)
        ON CONFLICT(object_id) DO UPDATE SET name=excluded.name,normalized_name=excluded.normalized_name,
-       definition_json=excluded.definition_json")
+       definition_json=excluded.definition_json,artwork_bytes=excluded.artwork_bytes,artwork_revision=excluded.artwork_revision")
        .bind(&record.object_id).bind(&record.name).bind(&record.definition_json).bind(record.position)
+       .bind(&record.artwork_bytes).bind(record.artwork_bytes.as_ref().map(|bytes| blake3::hash(bytes).to_hex().to_string()))
        .execute(connection).await?;
     Ok(())
 }

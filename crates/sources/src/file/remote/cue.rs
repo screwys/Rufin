@@ -66,6 +66,7 @@ impl RemoteSource {
                 {
                     file.state = LocalFileState::Accepted;
                     file.picture_index = old.picture_index;
+                    file.artist_pictures = old.artist_pictures.clone();
                     scan.begin_batch().await?;
                     scan.retain_local_cue_path(&file.path).await?;
                     for page in old.dependencies.chunks(128) {
@@ -148,6 +149,8 @@ impl RemoteSource {
                                 continue;
                             }
                         };
+                        backing_file.artist_pictures =
+                            Some(serde_json::to_string(&backing.artist_pictures)?);
                         backing_file.picture_index = match &backing.local_artwork {
                             Some(crate::LocalImageRef::Embedded { picture_index, .. }) => {
                                 Some(i64::from(*picture_index))

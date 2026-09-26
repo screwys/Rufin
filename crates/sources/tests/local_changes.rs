@@ -715,8 +715,10 @@ async fn local_artist_cover_keeps_album_order_across_point_updates() {
             .await
             .unwrap()
             .unwrap();
-        let binding: sources::LocalImageRef =
+        let artwork: library::ArtistArtworkBinding =
             serde_json::from_slice(current.artwork_binding.as_ref().unwrap()).unwrap();
+        let binding: sources::LocalImageRef =
+            serde_json::from_slice(artwork.fallback.as_ref().unwrap()).unwrap();
         assert_eq!(binding.source_id(), source.source_id());
         assert!(
             matches!(binding, sources::LocalImageRef::File { path, .. } if path == covers[0].to_string_lossy())
@@ -868,18 +870,20 @@ async fn local_metadata_save_returns_publication_after_album_identity_changes() 
         .unwrap();
     metadata.values.title = "After".to_string();
     let outcome = source
-        .write_album_metadata(
+        .write_metadata(
             &database,
             &album.media_uri,
             metadata.revision.as_deref().unwrap(),
             None,
-            sources::AlbumMetadataEdit {
+            sources::MetadataEdit::Album(sources::AlbumMetadataEdit {
+                extra: Default::default(),
+                artwork: None,
                 values: metadata.values,
                 changed: sources::AlbumMetadataWritable {
                     title: true,
                     ..Default::default()
                 },
-            },
+            }),
         )
         .await
         .unwrap();
@@ -893,15 +897,17 @@ async fn local_metadata_save_returns_publication_after_album_identity_changes() 
     assert_eq!(current.album, "After");
     let metadata = source.read_track_metadata(&database, &uri).await.unwrap();
     let unchanged = source
-        .write_track_metadata(
+        .write_metadata(
             &database,
             &uri,
             metadata.revision.as_deref().unwrap(),
             None,
-            sources::TrackMetadataEdit {
+            sources::MetadataEdit::Track(sources::TrackMetadataEdit {
+                extra: Default::default(),
+                artwork: None,
                 values: metadata.values,
                 changed: Default::default(),
-            },
+            }),
         )
         .await
         .unwrap();
@@ -1130,6 +1136,7 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
             inode: None,
             native_id: None,
             picture_index: None,
+            artist_pictures: None,
             revision: None,
             parse_version: media.parse_version,
             state: media.state,
@@ -1179,18 +1186,20 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
     let mut metadata = source.read_track_metadata(&database, uri).await.unwrap();
     metadata.values.title = "After rename".into();
     source
-        .write_track_metadata(
+        .write_metadata(
             &database,
             uri,
             metadata.revision.as_deref().unwrap(),
             None,
-            sources::TrackMetadataEdit {
+            sources::MetadataEdit::Track(sources::TrackMetadataEdit {
+                extra: Default::default(),
+                artwork: None,
                 values: metadata.values,
                 changed: sources::TrackMetadataWritable {
                     title: true,
                     ..Default::default()
                 },
-            },
+            }),
         )
         .await
         .unwrap();

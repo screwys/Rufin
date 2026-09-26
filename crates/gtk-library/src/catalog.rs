@@ -27,7 +27,7 @@ pub struct CatalogUi {
     pub reconcile: Rc<dyn Fn()>,
     pub refresh: Rc<dyn Fn()>,
     pub refresh_catalog: Rc<dyn Fn()>,
-    pub present_full_artwork: Rc<dyn Fn(artwork::ArtworkBinding)>,
+    pub present_full_artwork: Rc<dyn Fn(Vec<artwork::ArtworkBinding>)>,
     pub present_selected_dialog: Rc<dyn Fn(&adw::Dialog)>,
     pub playlist_context_menu: Rc<
         dyn Fn(

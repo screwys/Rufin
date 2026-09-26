@@ -53,8 +53,10 @@ pub use library::SourceId;
 pub use operations::{
     AlbumMetadata, AlbumMetadataEdit, AlbumMetadataMixed, AlbumMetadataValues,
     AlbumMetadataWritable, ArtistMetadata, ArtistMetadataEdit, ArtistMetadataMixed,
-    ArtistMetadataValues, ArtistMetadataWritable, ImageBytes, SourceMetadataError, TrackMetadata,
-    TrackMetadataEdit, TrackMetadataValues, TrackMetadataWritable,
+    ArtistMetadataValues, ArtistMetadataWritable, ArtworkChange, ArtworkEdit, ArtworkEditing,
+    ArtworkStorage, ImageBytes, MetadataChanges, MetadataEdit, MetadataField, MetadataFieldKind,
+    SourceMetadataError, TrackMetadata, TrackMetadataEdit, TrackMetadataValues,
+    TrackMetadataWritable,
 };
 pub use source::*;
 

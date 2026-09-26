@@ -936,7 +936,7 @@ async fn schema_43_fixture_relocates_and_migrates_every_core_durable_family_and_
             .fetch_one(&mut reader)
             .await
             .expect("read migrated version"),
-        44
+        45
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>(
@@ -954,7 +954,7 @@ async fn schema_43_fixture_relocates_and_migrates_every_core_durable_family_and_
         .fetch_all(&mut reader)
         .await
         .expect("read source observations"),
-        [(1, "Alpha".into(), 3), (2, "Beta".into(), 4)]
+        [(1, "Alpha".into(), 4), (2, "Beta".into(), 5)]
     );
     assert_eq!(sqlx::query_as::<_, (String, Option<String>, i64)>(
         "SELECT media_uri,title,position FROM catalog.native_playlist_entries WHERE object_id='native-a:missing'"
@@ -1196,7 +1196,7 @@ async fn schema_43_malformed_listen_keeps_valid_siblings_and_preserves_input() {
             .fetch_one(&mut reader)
             .await
             .expect("read rebuilt schema version"),
-        44
+        45
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>("SELECT external_id FROM listens ORDER BY listen_key")
@@ -1244,7 +1244,7 @@ async fn fresh_schema_has_exact_table_inventory() {
             .fetch_one(&mut reader)
             .await
             .expect("read final schema version"),
-        44
+        45
     );
     let tables = sqlx::query_scalar::<_, String>(
         "SELECT name FROM sqlite_schema
@@ -1499,7 +1499,7 @@ async fn schema_39_store_runs_the_committed_chain_into_current_schema() {
             .fetch_one(&mut reader)
             .await
             .expect("read current schema version"),
-        44
+        45
     );
     let definition = sqlx::query_scalar::<_, String>(
         "SELECT definition_json FROM smart_playlists WHERE object_id='smart-list'",
@@ -1540,7 +1540,7 @@ async fn released_migration_ignores_unused_catalog_damage() {
             .fetch_one(&mut restored)
             .await
             .expect("read repaired schema version"),
-        44
+        45
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sources")

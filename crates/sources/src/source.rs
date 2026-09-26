@@ -25,6 +25,29 @@ const PROVIDER_PLAYLIST_PAGE: usize = 256;
 
 pub(crate) const LIVE_CHANGE_LIMIT: usize = 128;
 
+enum MetadataOwner {
+    Track(Box<library::TrackRow>),
+    Album(library::AlbumRow),
+    Artist(library::ArtistRow),
+}
+
+impl MetadataOwner {
+    fn object_id(&self) -> &str {
+        match self {
+            Self::Track(row) => &row.object_id,
+            Self::Album(row) => &row.object_id,
+            Self::Artist(row) => &row.object_id,
+        }
+    }
+
+    fn artist_name(&self) -> &str {
+        match self {
+            Self::Artist(row) => &row.name,
+            _ => "",
+        }
+    }
+}
+
 pub struct SelectedFeed {
     source: Arc<Source>,
     pending: Mutex<Option<SelectedFeedChange>>,
@@ -1322,7 +1345,33 @@ impl Source {
         media_uri: &str,
     ) -> Result<crate::TrackMetadata, crate::SourceMetadataError> {
         let path = direct_metadata_path(media_uri)?;
-        crate::file::metadata::read_track_metadata(&path, None)
+        let mut metadata = crate::file::metadata::read_track_metadata(&path, None)?;
+        let embedded = || {
+            crate::file::local::artwork::inspect_embedded(
+                "local",
+                &mut crate::file::discovery::Reader::default(),
+                &path,
+                crate::file::metadata::revision(&path).unwrap_or_default(),
+            )
+        };
+        let image = path
+            .parent()
+            .and_then(crate::file::local::artwork::directory_image)
+            .map(|image| {
+                crate::file::local::artwork::file_reference(
+                    "local",
+                    &image,
+                    crate::file::metadata::revision(&image).unwrap_or_default(),
+                )
+            })
+            .or_else(embedded);
+        let binding = image
+            .as_ref()
+            .map(serde_json::to_vec)
+            .transpose()
+            .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?;
+        metadata.artwork = metadata.artwork.with_binding(binding, false);
+        Ok(metadata)
     }
 
     pub fn write_direct_file_metadata(
@@ -1331,7 +1380,18 @@ impl Source {
         edit: &crate::TrackMetadataEdit,
     ) -> Result<(), crate::SourceMetadataError> {
         let path = direct_metadata_path(media_uri)?;
-        crate::file::metadata::write_track(&path, None, expected_revision, edit)
+        let target = MetadataFileTarget {
+            tag_writable: crate::file::metadata::metadata_file_available(&path, None),
+            path,
+            format: None,
+        };
+        crate::file::metadata::write_metadata(
+            &[target],
+            expected_revision,
+            "",
+            &crate::MetadataEdit::Track(edit.clone()),
+            None,
+        )
     }
 
     pub async fn read_track_metadata(
@@ -1345,35 +1405,56 @@ impl Source {
             .await
             .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?
             .ok_or(crate::SourceMetadataError::Unavailable)?;
-        if let Implementation::Files(files) = &self.implementation {
-            return files.read_track_metadata(database, &track).await;
-        }
-        let source = track.source_key;
-        if let Implementation::JellyfinEmby(jellyfin) = &self.implementation {
-            return jellyfin.read_track_metadata(track).await;
-        }
-        if let Implementation::Plex(plex) = &self.implementation {
-            return plex.read_track_metadata(track).await;
-        }
-        let (path, format) = self.metadata_file_target(database, source, &track).await?;
-        if matches!(self.implementation, Implementation::OpenSubsonic(_))
-            && !self.mapped_metadata_ready().await
-        {
-            return Err(crate::SourceMetadataError::Unavailable);
-        }
-        let mut metadata = crate::file::metadata::read_track_metadata(&path, format.as_deref())?;
-        if metadata.values.musicbrainz_recording_id.is_none()
-            && track.musicbrainz_recording_id.is_some()
-        {
-            metadata.values.musicbrainz_recording_id = track.musicbrainz_recording_id;
-            metadata.rufin_filled.musicbrainz_recording_id = true;
-        }
-        if metadata.values.musicbrainz_release_track_id.is_none()
-            && track.musicbrainz_release_track_id.is_some()
-        {
-            metadata.values.musicbrainz_release_track_id = track.musicbrainz_release_track_id;
-            metadata.rufin_filled.musicbrainz_release_track_id = true;
-        }
+        let binding = track_artwork_binding(database, &track).await?;
+        let server = matches!(
+            self.implementation,
+            Implementation::JellyfinEmby(_) | Implementation::Plex(_)
+        );
+        let mut metadata = match &self.implementation {
+            Implementation::Files(files) => files.read_track_metadata(database, &track).await?,
+            Implementation::JellyfinEmby(jellyfin) => jellyfin.read_track_metadata(track).await?,
+            Implementation::Plex(plex) => plex.read_track_metadata(track).await?,
+            Implementation::Local(_) | Implementation::OpenSubsonic(_) => {
+                let (path, format) = self
+                    .metadata_file_target(database, track.source_key, &track)
+                    .await?;
+                if matches!(self.implementation, Implementation::OpenSubsonic(_))
+                    && !self.mapped_metadata_ready().await
+                {
+                    return Err(crate::SourceMetadataError::Unavailable);
+                }
+                let mut metadata = if track.cue_path.is_some() {
+                    crate::file::metadata::readonly_track_metadata(
+                        &track,
+                        Some(crate::file::metadata::revision(&path)?),
+                    )
+                } else {
+                    crate::file::metadata::read_track_metadata(&path, format.as_deref())?
+                };
+                if metadata.writable == Default::default() {
+                    let artwork = metadata.artwork;
+                    metadata =
+                        crate::file::metadata::readonly_track_metadata(&track, metadata.revision);
+                    metadata.artwork = artwork;
+                } else {
+                    if metadata.values.musicbrainz_recording_id.is_none()
+                        && track.musicbrainz_recording_id.is_some()
+                    {
+                        metadata.values.musicbrainz_recording_id = track.musicbrainz_recording_id;
+                        metadata.rufin_filled.musicbrainz_recording_id = true;
+                    }
+                    if metadata.values.musicbrainz_release_track_id.is_none()
+                        && track.musicbrainz_release_track_id.is_some()
+                    {
+                        metadata.values.musicbrainz_release_track_id =
+                            track.musicbrainz_release_track_id;
+                        metadata.rufin_filled.musicbrainz_release_track_id = true;
+                    }
+                }
+                metadata
+            }
+        };
+        metadata.artwork = metadata.artwork.with_binding(binding, server);
         Ok(metadata)
     }
 
@@ -1388,7 +1469,12 @@ impl Source {
             .await
             .map_err(metadata_database_error)?
             .ok_or(crate::SourceMetadataError::Unavailable)?;
-        match &self.implementation {
+        let binding = album.artwork_binding.clone();
+        let server = matches!(
+            self.implementation,
+            Implementation::JellyfinEmby(_) | Implementation::Plex(_)
+        );
+        let mut metadata = match &self.implementation {
             Implementation::Files(files) => files.read_album_metadata(database, album).await,
             Implementation::JellyfinEmby(jellyfin) => jellyfin.read_album_metadata(album).await,
             Implementation::Plex(plex) => plex.read_album_metadata(album).await,
@@ -1400,7 +1486,9 @@ impl Source {
                 }
                 Ok(metadata)
             }
-        }
+        }?;
+        metadata.artwork = metadata.artwork.with_binding(binding, server);
+        Ok(metadata)
     }
 
     pub async fn read_artist_metadata(
@@ -1414,7 +1502,12 @@ impl Source {
             .await
             .map_err(metadata_database_error)?
             .ok_or(crate::SourceMetadataError::Unavailable)?;
-        match &self.implementation {
+        let binding = artist.artwork_binding.clone();
+        let server = matches!(
+            self.implementation,
+            Implementation::JellyfinEmby(_) | Implementation::Plex(_)
+        );
+        let mut metadata = match &self.implementation {
             Implementation::Files(files) => files.read_artist_metadata(database, artist).await,
             Implementation::JellyfinEmby(jellyfin) => jellyfin.read_artist_metadata(artist).await,
             Implementation::Plex(plex) => plex.read_artist_metadata(artist).await,
@@ -1426,7 +1519,9 @@ impl Source {
                 }
                 Ok(metadata)
             }
-        }
+        }?;
+        metadata.artwork = metadata.artwork.with_binding(binding, server);
+        Ok(metadata)
     }
 
     pub async fn identify_album_metadata(
@@ -1469,181 +1564,137 @@ impl Source {
             .await
     }
 
-    pub async fn write_track_metadata(
+    pub async fn write_metadata(
         &self,
         database: &Database,
         media_uri: &str,
         expected_revision: &str,
         application: Option<&str>,
-        edit: crate::TrackMetadataEdit,
+        edit: crate::MetadataEdit,
     ) -> Result<ScanOutcome, crate::SourceMetadataError> {
         let cancellation = library::ReadCancellation::new();
-        let track = database
-            .track_row_by_uri(media_uri, &cancellation)
-            .await
-            .map_err(metadata_database_error)?
-            .ok_or(crate::SourceMetadataError::Unavailable)?;
-        let source = track.source_key;
-        match &self.implementation {
-            Implementation::Plex(plex) => {
-                plex.write_track_metadata(&track.object_id, expected_revision, &edit)
-                    .await?;
-                self.apply_items(database, vec![raw_item_id(&track.object_id).into()], vec![])
+        let owner = match &edit {
+            crate::MetadataEdit::Track(_) => MetadataOwner::Track(Box::new(
+                database
+                    .track_row_by_uri(media_uri, &cancellation)
                     .await
-                    .map_err(|error| {
-                        crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
-                    })
-            }
+                    .map_err(metadata_database_error)?
+                    .ok_or(crate::SourceMetadataError::Unavailable)?,
+            )),
+            crate::MetadataEdit::Album(_) => MetadataOwner::Album(
+                database
+                    .album_row_by_media_uri(media_uri, &cancellation)
+                    .await
+                    .map_err(metadata_database_error)?
+                    .ok_or(crate::SourceMetadataError::Unavailable)?,
+            ),
+            crate::MetadataEdit::Artist(_) => MetadataOwner::Artist(
+                database
+                    .artist_row_by_media_uri(media_uri, &cancellation)
+                    .await
+                    .map_err(metadata_database_error)?
+                    .ok_or(crate::SourceMetadataError::Unavailable)?,
+            ),
+        };
+        let binding = match &owner {
+            MetadataOwner::Track(track) => track_artwork_binding(database, track).await?,
+            MetadataOwner::Album(album) => album.artwork_binding.clone(),
+            MetadataOwner::Artist(artist) => artist.artwork_binding.clone(),
+        };
+        let folder_image = crate::operations::artwork_file(binding.as_deref());
+        let tags_saved = edit.tags_changed();
+        let (result, object, saved) = match &self.implementation {
             Implementation::Files(files) => {
-                files
-                    .write_track_metadata(database, &track, expected_revision, &edit)
-                    .await
-            }
-            Implementation::JellyfinEmby(jellyfin) => {
-                let raw = jellyfin
-                    .write_metadata_value(
-                        &track.object_id,
-                        "track",
+                return files
+                    .write_metadata(
+                        database,
+                        media_uri,
                         expected_revision,
-                        application,
-                        |item| {
-                            super::jellyfin_emby::metadata::apply_track_edit(
-                                jellyfin.kind,
-                                item,
-                                &edit,
-                            )
-                        },
+                        edit,
+                        owner.artist_name(),
+                        folder_image,
                     )
-                    .await?;
-                self.publish_jellyfin_emby_metadata(database, raw).await
+                    .await;
             }
             Implementation::Local(_) | Implementation::OpenSubsonic(_) => {
-                self.write_file_track_metadata(database, source, &track, expected_revision, &edit)
-                    .await
-            }
-        }
-    }
-
-    pub async fn write_album_metadata(
-        &self,
-        database: &Database,
-        media_uri: &str,
-        expected_revision: &str,
-        application: Option<&str>,
-        edit: crate::AlbumMetadataEdit,
-    ) -> Result<ScanOutcome, crate::SourceMetadataError> {
-        let cancellation = library::ReadCancellation::new();
-        let album = database
-            .album_row_by_media_uri(media_uri, &cancellation)
-            .await
-            .map_err(metadata_database_error)?
-            .ok_or(crate::SourceMetadataError::Unavailable)?;
-        let source = album.source_key;
-        match &self.implementation {
-            Implementation::Plex(plex) => {
-                plex.write_album_metadata(&album.object_id, expected_revision, &edit)
-                    .await?;
-                self.apply_items(database, vec![raw_item_id(&album.object_id).into()], vec![])
-                    .await
-                    .map_err(|error| {
-                        crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
-                    })
-            }
-            Implementation::Files(files) => {
-                files
-                    .write_album_metadata(database, &album, expected_revision, &edit)
-                    .await
-            }
-            Implementation::JellyfinEmby(jellyfin) => {
-                let raw = jellyfin
-                    .write_metadata_value(
-                        &album.object_id,
-                        "album",
+                return self
+                    .write_file_metadata(
+                        database,
+                        media_uri,
+                        &owner,
                         expected_revision,
-                        application,
-                        |item| {
-                            super::jellyfin_emby::metadata::apply_album_edit(
-                                jellyfin.kind,
-                                item,
-                                &edit,
-                            )
-                        },
+                        &edit,
+                        folder_image.as_deref(),
                     )
-                    .await?;
-                self.publish_jellyfin_emby_metadata(database, raw).await
+                    .await;
             }
-            Implementation::Local(_) | Implementation::OpenSubsonic(_) => {
-                self.write_file_album_metadata(database, source, &album, expected_revision, &edit)
-                    .await
-            }
-        }
-    }
-
-    pub async fn write_artist_metadata(
-        &self,
-        database: &Database,
-        media_uri: &str,
-        expected_revision: &str,
-        application: Option<&str>,
-        edit: crate::ArtistMetadataEdit,
-    ) -> Result<ScanOutcome, crate::SourceMetadataError> {
-        let cancellation = library::ReadCancellation::new();
-        let artist = database
-            .artist_row_by_media_uri(media_uri, &cancellation)
-            .await
-            .map_err(metadata_database_error)?
-            .ok_or(crate::SourceMetadataError::Unavailable)?;
-        let source = artist.source_key;
-        match &self.implementation {
             Implementation::Plex(plex) => {
-                plex.write_artist_metadata(&artist.object_id, expected_revision, &edit)
-                    .await?;
-                self.apply_items(
-                    database,
-                    vec![raw_item_id(&artist.object_id).into()],
-                    vec![],
+                match &edit {
+                    crate::MetadataEdit::Track(edit) => {
+                        plex.write_track_metadata(owner.object_id(), expected_revision, edit)
+                            .await?
+                    }
+                    crate::MetadataEdit::Album(edit) => {
+                        plex.write_album_metadata(owner.object_id(), expected_revision, edit)
+                            .await?
+                    }
+                    crate::MetadataEdit::Artist(edit) => {
+                        plex.write_artist_metadata(owner.object_id(), expected_revision, edit)
+                            .await?
+                    }
+                }
+                (
+                    plex.write_artwork(owner.object_id(), edit.artwork()).await,
+                    raw_item_id(owner.object_id()).to_string(),
+                    tags_saved,
                 )
-                .await
-                .map_err(|error| crate::SourceMetadataError::SavedRefreshFailed(error.to_string()))
-            }
-            Implementation::Files(files) => {
-                files
-                    .write_artist_metadata(database, &artist, expected_revision, &edit)
-                    .await
             }
             Implementation::JellyfinEmby(jellyfin) => {
                 let raw = jellyfin
                     .write_metadata_value(
-                        &artist.object_id,
-                        "artist",
+                        owner.object_id(),
+                        edit.kind(),
                         expected_revision,
                         application,
-                        |item| {
-                            super::jellyfin_emby::metadata::apply_artist_edit(
-                                jellyfin.kind,
-                                item,
-                                &edit,
-                            )
+                        tags_saved,
+                        |item| match &edit {
+                            crate::MetadataEdit::Track(edit) => {
+                                super::jellyfin_emby::metadata::apply_track_edit(
+                                    jellyfin.kind,
+                                    item,
+                                    edit,
+                                )
+                            }
+                            crate::MetadataEdit::Album(edit) => {
+                                super::jellyfin_emby::metadata::apply_album_edit(
+                                    jellyfin.kind,
+                                    item,
+                                    edit,
+                                )
+                            }
+                            crate::MetadataEdit::Artist(edit) => {
+                                super::jellyfin_emby::metadata::apply_artist_edit(
+                                    jellyfin.kind,
+                                    item,
+                                    edit,
+                                )
+                            }
                         },
                     )
                     .await?;
-                self.publish_jellyfin_emby_metadata(database, raw).await
+                let result = if let Some(artwork) = edit.artwork() {
+                    jellyfin.write_artwork(&raw, artwork).await
+                } else {
+                    Ok(())
+                };
+                (result, raw, tags_saved || application.is_some())
             }
-            Implementation::Local(_) | Implementation::OpenSubsonic(_) => {
-                self.write_file_artist_metadata(database, source, &artist, expected_revision, &edit)
-                    .await
-            }
-        }
-    }
-
-    async fn publish_jellyfin_emby_metadata(
-        &self,
-        database: &Database,
-        raw: String,
-    ) -> Result<ScanOutcome, crate::SourceMetadataError> {
-        self.apply_items(database, vec![raw], Vec::new())
+        };
+        let refresh = self
+            .apply_items(database, vec![object], Vec::new())
             .await
-            .map_err(|error| crate::SourceMetadataError::SavedRefreshFailed(error.to_string()))
+            .map_err(|error| crate::SourceMetadataError::SavedRefreshFailed(error.to_string()));
+        crate::operations::finish_metadata_save(result, refresh, saved)
     }
 
     pub async fn write_file_r128_tags(
@@ -1771,9 +1822,7 @@ impl Source {
         database: &Database,
         album: library::AlbumRow,
     ) -> Result<crate::AlbumMetadata, crate::SourceMetadataError> {
-        let targets = self
-            .album_metadata_targets(database, album.album_key)
-            .await?;
+        let targets = self.metadata_targets(database, &album.media_uri).await?;
         album_metadata_from_targets(album, &targets)
     }
 
@@ -1782,261 +1831,284 @@ impl Source {
         database: &Database,
         artist: library::ArtistRow,
     ) -> Result<crate::ArtistMetadata, crate::SourceMetadataError> {
-        let targets = self
-            .artist_metadata_targets(database, artist.artist_key)
-            .await?;
+        let targets = self.metadata_targets(database, &artist.media_uri).await?;
         artist_metadata_from_targets(artist, &targets)
     }
 
-    async fn write_file_track_metadata(
+    async fn write_file_metadata(
         &self,
         database: &Database,
-        source: library::SourceKey,
-        track: &library::TrackRow,
+        media_uri: &str,
+        owner: &MetadataOwner,
         expected_revision: &str,
-        edit: &crate::TrackMetadataEdit,
+        edit: &crate::MetadataEdit,
+        folder_image: Option<&str>,
     ) -> Result<ScanOutcome, crate::SourceMetadataError> {
-        let (path, format) = self.metadata_file_target(database, source, track).await?;
-        crate::file::metadata::write_track(&path, format.as_deref(), expected_revision, edit)?;
-        match &self.implementation {
-            Implementation::Local(local) => local
-                .publish_metadata_paths(
-                    database,
-                    self.source_id.as_str(),
-                    std::slice::from_ref(&path),
-                    None,
-                    None,
-                )
-                .await
-                .map_err(|error| crate::SourceMetadataError::SavedRefreshFailed(error.to_string())),
-            Implementation::OpenSubsonic(_) => {
-                self.refresh_remote_metadata_index()
-                    .await
-                    .map_err(|error| {
-                        crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
-                    })?;
-                database
-                    .update_track_metadata(
-                        source,
-                        track.track_key,
-                        track_write_from_values(track, &edit.values),
-                    )
-                    .await
-                    .map_err(metadata_database_error)
+        let targets = match owner {
+            MetadataOwner::Track(track) => {
+                let (path, format) = self
+                    .metadata_file_target(database, track.source_key, track)
+                    .await?;
+                vec![MetadataFileTarget {
+                    tag_writable: track.cue_path.is_none()
+                        && crate::file::metadata::metadata_file_available(&path, format.as_deref()),
+                    path,
+                    format,
+                }]
             }
-            Implementation::Plex(_)
-            | Implementation::JellyfinEmby(_)
-            | Implementation::Files(_) => {
-                unreachable!()
+            MetadataOwner::Album(album) => {
+                self.metadata_targets(database, &album.media_uri).await?
             }
-        }
-    }
-
-    async fn write_file_album_metadata(
-        &self,
-        database: &Database,
-        source: library::SourceKey,
-        album: &library::AlbumRow,
-        expected_revision: &str,
-        edit: &crate::AlbumMetadataEdit,
-    ) -> Result<ScanOutcome, crate::SourceMetadataError> {
-        let targets = self
-            .album_metadata_targets(database, album.album_key)
-            .await?;
+            MetadataOwner::Artist(artist) => {
+                self.metadata_targets(database, &artist.media_uri).await?
+            }
+        };
         let paths = targets
             .iter()
             .map(|target| target.path.clone())
             .collect::<Vec<_>>();
-        let file_targets = targets
-            .iter()
-            .map(|target| (target.path.clone(), target.format.clone()))
-            .collect::<Vec<_>>();
-        crate::file::metadata::write_album_batch(&file_targets, expected_revision, edit)?;
-        match &self.implementation {
-            Implementation::Local(local) => local
-                .publish_metadata_paths(
-                    database,
-                    self.source_id.as_str(),
-                    &paths,
-                    Some(&album.object_id),
-                    None,
-                )
-                .await
-                .map_err(|error| crate::SourceMetadataError::SavedRefreshFailed(error.to_string())),
-            Implementation::OpenSubsonic(_) => {
-                self.refresh_remote_metadata_index()
-                    .await
-                    .map_err(|error| {
-                        crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
-                    })?;
-                database
-                    .update_album_metadata(
-                        source,
-                        album.album_key,
-                        library::AlbumMetadataWrite {
-                            title: edit.values.title.clone(),
-                            normalized_title: edit.values.title.to_lowercase(),
-                            display_artist: edit
-                                .values
-                                .album_artist
-                                .clone()
-                                .unwrap_or_else(|| album.display_artist.clone()),
-                            sort_text: edit
-                                .values
-                                .sort_title
-                                .clone()
-                                .unwrap_or_else(|| edit.values.title.to_lowercase()),
-                            year: edit.values.year.map(i64::from),
-                            release_date: album.release_date.clone(),
-                            date_added: album.date_added.clone(),
-                            musicbrainz_release_id: edit.values.musicbrainz_album_id.clone(),
-                            musicbrainz_release_group_id: edit
-                                .values
-                                .musicbrainz_release_group_id
-                                .clone(),
-                            is_compilation: album.is_compilation,
-                        },
-                    )
-                    .await
-                    .map_err(metadata_database_error)
-            }
-            Implementation::Plex(_)
-            | Implementation::JellyfinEmby(_)
-            | Implementation::Files(_) => {
-                unreachable!()
+        let prepared_edit = edit.clone();
+        let expected = expected_revision.to_string();
+        let previous_artist = owner.artist_name().to_string();
+        let folder_image = folder_image.map(PathBuf::from);
+        let result = tokio::task::spawn_blocking(move || {
+            crate::file::metadata::write_metadata(
+                &targets,
+                &expected,
+                &previous_artist,
+                &prepared_edit,
+                folder_image.as_deref(),
+            )
+        })
+        .await
+        .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?;
+        if let Err(error) = &result
+            && !matches!(error, crate::SourceMetadataError::PartiallySaved { .. })
+        {
+            return Err(error.clone());
+        }
+        let refresh = async {
+            match &self.implementation {
+                Implementation::Local(local) => {
+                    if !edit.tags_changed() && edit.artwork().is_some() {
+                        return self
+                            .publish_local_artwork(
+                                database,
+                                media_uri,
+                                matches!(owner, MetadataOwner::Track(_)),
+                            )
+                            .await;
+                    }
+                    local
+                        .publish_metadata_paths(
+                            database,
+                            self.source_id.as_str(),
+                            &paths,
+                            matches!(owner, MetadataOwner::Album(_)).then(|| owner.object_id()),
+                            matches!(owner, MetadataOwner::Artist(_)).then(|| owner.object_id()),
+                        )
+                        .await
+                        .map_err(|error| {
+                            crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
+                        })
+                }
+                Implementation::OpenSubsonic(_) => {
+                    self.refresh_remote_metadata_index()
+                        .await
+                        .map_err(|error| {
+                            crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
+                        })?;
+                    if edit.artwork().is_some() {
+                        return self
+                            .apply_items(
+                                database,
+                                vec![self.item_request_id(edit.kind(), owner.object_id())],
+                                Vec::new(),
+                            )
+                            .await
+                            .map_err(|error| {
+                                crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
+                            });
+                    }
+                    match (owner, edit) {
+                        (MetadataOwner::Track(track), crate::MetadataEdit::Track(edit)) => database
+                            .update_track_metadata(
+                                track.source_key,
+                                track.track_key,
+                                track_write_from_values(track, &edit.values),
+                            )
+                            .await
+                            .map_err(metadata_database_error),
+                        (MetadataOwner::Album(album), crate::MetadataEdit::Album(edit)) => database
+                            .update_album_metadata(
+                                album.source_key,
+                                album.album_key,
+                                library::AlbumMetadataWrite {
+                                    title: edit.values.title.clone(),
+                                    normalized_title: edit.values.title.to_lowercase(),
+                                    display_artist: edit
+                                        .values
+                                        .album_artist
+                                        .clone()
+                                        .unwrap_or_else(|| album.display_artist.clone()),
+                                    sort_text: edit
+                                        .values
+                                        .sort_title
+                                        .clone()
+                                        .unwrap_or_else(|| edit.values.title.to_lowercase()),
+                                    year: edit.values.year.map(i64::from),
+                                    release_date: album.release_date.clone(),
+                                    date_added: album.date_added.clone(),
+                                    musicbrainz_release_id: edit
+                                        .values
+                                        .musicbrainz_album_id
+                                        .clone(),
+                                    musicbrainz_release_group_id: edit
+                                        .values
+                                        .musicbrainz_release_group_id
+                                        .clone(),
+                                    is_compilation: album.is_compilation,
+                                },
+                            )
+                            .await
+                            .map_err(metadata_database_error),
+                        (MetadataOwner::Artist(artist), crate::MetadataEdit::Artist(edit)) => {
+                            database
+                                .update_artist_metadata(
+                                    artist.source_key,
+                                    artist.artist_key,
+                                    library::ArtistMetadataWrite {
+                                        name: edit.values.name.clone(),
+                                        normalized_name: edit.values.name.to_lowercase(),
+                                        sort_text: edit
+                                            .values
+                                            .sort_name
+                                            .clone()
+                                            .unwrap_or_else(|| edit.values.name.to_lowercase()),
+                                        musicbrainz_artist_id: edit
+                                            .values
+                                            .musicbrainz_artist_id
+                                            .clone(),
+                                    },
+                                )
+                                .await
+                                .map_err(metadata_database_error)
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                _ => unreachable!(),
             }
         }
+        .await;
+        crate::operations::finish_metadata_save(result, refresh, false)
     }
 
-    async fn write_file_artist_metadata(
+    async fn publish_local_artwork(
         &self,
         database: &Database,
-        source: library::SourceKey,
-        artist: &library::ArtistRow,
-        expected_revision: &str,
-        edit: &crate::ArtistMetadataEdit,
+        media_uri: &str,
+        is_track: bool,
     ) -> Result<ScanOutcome, crate::SourceMetadataError> {
-        let targets = self
-            .artist_metadata_targets(database, artist.artist_key)
-            .await?;
-        let paths = targets
-            .iter()
-            .map(|target| target.path.clone())
-            .collect::<Vec<_>>();
-        let file_targets = targets
-            .iter()
-            .map(|target| (target.path.clone(), target.format.clone()))
-            .collect::<Vec<_>>();
-        crate::file::metadata::write_artist_batch(
-            &file_targets,
-            expected_revision,
-            &artist.name,
-            edit,
-        )?;
-        match &self.implementation {
-            Implementation::Local(local) => local
-                .publish_metadata_paths(
-                    database,
-                    self.source_id.as_str(),
-                    &paths,
-                    None,
-                    Some(&artist.object_id),
-                )
-                .await
-                .map_err(|error| crate::SourceMetadataError::SavedRefreshFailed(error.to_string())),
-            Implementation::OpenSubsonic(_) => {
-                self.refresh_remote_metadata_index()
+        let mut scan = library::Scan::begin_items(database, self.source_id.as_str())
+            .await
+            .map_err(metadata_database_error)?;
+        let mut after = None;
+        loop {
+            let uris = if is_track {
+                vec![media_uri.to_string()]
+            } else {
+                let page = database
+                    .file_metadata_track_page(media_uri, after)
                     .await
-                    .map_err(|error| {
-                        crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
-                    })?;
-                database
-                    .update_artist_metadata(
-                        source,
-                        artist.artist_key,
-                        library::ArtistMetadataWrite {
-                            name: edit.values.name.clone(),
-                            normalized_name: edit.values.name.to_lowercase(),
-                            sort_text: edit
-                                .values
-                                .sort_name
-                                .clone()
-                                .unwrap_or_else(|| edit.values.name.to_lowercase()),
-                            musicbrainz_artist_id: edit.values.musicbrainz_artist_id.clone(),
-                        },
-                    )
+                    .map_err(metadata_database_error)?;
+                if page.is_empty() {
+                    break;
+                }
+                after = page.last().map(|(key, _)| *key);
+                page.into_iter().map(|(_, uri)| uri).collect()
+            };
+            for uri in uris {
+                let track = database
+                    .track_row_by_uri(&uri, &library::ReadCancellation::new())
                     .await
-                    .map_err(metadata_database_error)
+                    .map_err(metadata_database_error)?
+                    .ok_or(crate::SourceMetadataError::Unavailable)?;
+                if let Some(cue) = &track.cue_path {
+                    scan.retain_local_cue_path(cue)
+                        .await
+                        .map_err(metadata_database_error)?;
+                } else if let Some((_, path)) = scan
+                    .local_track_file(&uri)
+                    .await
+                    .map_err(metadata_database_error)?
+                {
+                    scan.retain_local_media_paths(&[path])
+                        .await
+                        .map_err(metadata_database_error)?;
+                }
             }
-            Implementation::Plex(_)
-            | Implementation::JellyfinEmby(_)
-            | Implementation::Files(_) => {
-                unreachable!()
+            if is_track {
+                break;
             }
         }
-    }
-
-    async fn album_metadata_targets(
-        &self,
-        database: &Database,
-        album: library::AlbumKey,
-    ) -> Result<Vec<MetadataFileTarget>, crate::SourceMetadataError> {
-        let keys = database
-            .collection_media_uri_order(
-                &library::QueueCollection::AlbumKey(album),
-                &library::ReadCancellation::new(),
-            )
+        crate::file::artwork::ArtworkFiles::Local
+            .stage(database, &mut scan, &|| false)
             .await
-            .map_err(metadata_database_error)?;
-        self.metadata_targets(database, &keys).await
-    }
-
-    async fn artist_metadata_targets(
-        &self,
-        database: &Database,
-        artist: library::ArtistKey,
-    ) -> Result<Vec<MetadataFileTarget>, crate::SourceMetadataError> {
-        let keys = database
-            .collection_media_uri_order(
-                &library::QueueCollection::ArtistKey {
-                    key: artist,
-                    album_artist: false,
-                },
-                &library::ReadCancellation::new(),
-            )
+            .map_err(|error| crate::SourceMetadataError::SavedRefreshFailed(error.to_string()))?;
+        scan.finish()
             .await
-            .map_err(metadata_database_error)?;
-        self.metadata_targets(database, &keys).await
+            .map_err(|error| crate::SourceMetadataError::SavedRefreshFailed(error.to_string()))
     }
 
     async fn metadata_targets(
         &self,
         database: &Database,
-        media_uris: &[String],
+        media_uri: &str,
     ) -> Result<Vec<MetadataFileTarget>, crate::SourceMetadataError> {
-        if media_uris.is_empty() {
-            return Err(crate::SourceMetadataError::Unavailable);
-        }
-        let mut targets = Vec::with_capacity(media_uris.len());
-        for uris in media_uris.chunks(128) {
+        let mut targets = Vec::new();
+        let mut after = None;
+        loop {
+            let page = database
+                .file_metadata_track_page(media_uri, after)
+                .await
+                .map_err(metadata_database_error)?;
+            if page.is_empty() {
+                break;
+            }
+            after = page.last().map(|(key, _)| *key);
+            let uris = page.into_iter().map(|(_, uri)| uri).collect::<Vec<_>>();
             let rows = database
-                .track_rows_by_uri(uris, &library::ReadCancellation::new())
+                .track_rows_by_uri(&uris, &library::ReadCancellation::new())
                 .await
                 .map_err(metadata_database_error)?;
             if rows.len() != uris.len() {
                 return Err(crate::SourceMetadataError::Unavailable);
             }
             for row in rows {
-                let source = row.source_key;
-                let (path, format) = self.metadata_file_target(database, source, &row).await?;
-                if !crate::file::metadata::metadata_file_available(&path, format.as_deref()) {
-                    return Err(crate::SourceMetadataError::Unavailable);
-                }
-                targets.push(MetadataFileTarget { path, format });
+                let (path, format) = self
+                    .metadata_file_target(database, row.source_key, &row)
+                    .await?;
+                let tag_writable = row.cue_path.is_none()
+                    && crate::file::metadata::metadata_file_available(&path, format.as_deref());
+                targets.push(MetadataFileTarget {
+                    path,
+                    format,
+                    tag_writable,
+                });
             }
         }
+        if targets.is_empty() {
+            return Err(crate::SourceMetadataError::Unavailable);
+        }
         targets.sort_by(|left, right| left.path.cmp(&right.path));
-        targets.dedup_by(|left, right| left.path == right.path);
+        targets.dedup_by(|left, right| {
+            if left.path != right.path {
+                return false;
+            }
+            right.tag_writable &= left.tag_writable;
+            true
+        });
         Ok(targets)
     }
 
@@ -2063,6 +2135,23 @@ impl Source {
         source: library::SourceKey,
         track: &library::TrackRow,
     ) -> Result<(PathBuf, Option<String>), crate::SourceMetadataError> {
+        if track.cue_path.is_some() {
+            if let Some(path) = database
+                .original_file_path(&track.media_uri)
+                .await
+                .map_err(metadata_database_error)?
+            {
+                return Ok((PathBuf::from(path), track.source_format.clone()));
+            }
+            if matches!(self.implementation, Implementation::Local(_))
+                && let Some(file) = database
+                    .observed_media_file(&track.media_uri)
+                    .await
+                    .map_err(metadata_database_error)?
+            {
+                return Ok((PathBuf::from(file.path), track.source_format.clone()));
+            }
+        }
         if let Some(target) = self
             .metadata_track_path(database, track)
             .await
@@ -2149,6 +2238,14 @@ impl Source {
         }
     }
 
+    pub fn supports_playlist_artwork(&self) -> bool {
+        match &self.implementation {
+            Implementation::JellyfinEmby(_) | Implementation::Plex(_) => true,
+            Implementation::OpenSubsonic(provider) => provider.supports_playlist_artwork(),
+            Implementation::Local(_) | Implementation::Files(_) => false,
+        }
+    }
+
     pub async fn update_playlist(
         &self,
         database: &Database,
@@ -2156,34 +2253,64 @@ impl Source {
         playlist: library::PlaylistKey,
         name: Option<&str>,
         public: Option<bool>,
-    ) -> SourceResult<(bool, Option<ScanOutcome>)> {
-        let id = if name.is_some() {
-            source_playlist_id(database, source, playlist).await?
+        artwork: Option<&crate::ArtworkChange>,
+    ) -> Result<(bool, Option<ScanOutcome>), crate::SourceMetadataError> {
+        let error = |error: SourceError| crate::SourceMetadataError::Write(error.to_string());
+        if artwork.is_some() && !self.supports_playlist_artwork() {
+            return Err(crate::SourceMetadataError::Unavailable);
+        }
+        let id = if name.is_some() || artwork.is_some() {
+            source_playlist_id(database, source, playlist, false)
+                .await
+                .map_err(error)?
         } else {
             database
                 .source_playlist_object_id(source, playlist, &library::ReadCancellation::new())
-                .await?
-                .ok_or(SourceError::NotFound)?
+                .await
+                .map_err(metadata_database_error)?
+                .ok_or(crate::SourceMetadataError::Unavailable)?
         };
-        match &self.implementation {
-            Implementation::Plex(provider) => {
-                if let Some(name) = name {
-                    provider.rename_playlist(&id, name).await?
+        if name.is_some() || public.is_some() {
+            match &self.implementation {
+                Implementation::Plex(provider) => {
+                    if let Some(name) = name {
+                        provider.rename_playlist(&id, name).await.map_err(error)?;
+                    }
                 }
+                Implementation::JellyfinEmby(provider) => provider
+                    .update_playlist(&id, name, public)
+                    .await
+                    .map_err(error)?,
+                Implementation::OpenSubsonic(provider) => provider
+                    .update_playlist(&id, name, public)
+                    .await
+                    .map_err(error)?,
+                _ => unreachable!(),
             }
-            Implementation::JellyfinEmby(provider) => {
-                provider.update_playlist(&id, name, public).await?
-            }
-            Implementation::OpenSubsonic(provider) => {
-                provider.update_playlist(&id, name, public).await?
-            }
-            Implementation::Local(_) | Implementation::Files(_) => unreachable!(),
         }
-        if name.is_none() {
-            return Ok((false, None));
+        let result = if let Some(artwork) = artwork {
+            match &self.implementation {
+                Implementation::Plex(provider) => provider.change_artwork(&id, artwork).await,
+                Implementation::JellyfinEmby(provider) => {
+                    provider.change_artwork(&id, artwork).await
+                }
+                Implementation::OpenSubsonic(provider) => {
+                    provider.change_playlist_artwork(&id, artwork).await
+                }
+                _ => unreachable!(),
+            }
+            .map_err(error)
+        } else {
+            Ok(())
+        };
+        if name.is_none() && artwork.is_none() {
+            return result.map(|()| (false, None));
         }
-        self.accept_playlist_change(database, Some(id), None)
+        let refresh = self
+            .accept_playlist_change(database, Some(id), None)
             .await
+            .map_err(error);
+        crate::operations::finish_metadata_save(result, refresh, name.is_some() || public.is_some())
             .map(|outcome| (true, Some(outcome)))
     }
 
@@ -2193,7 +2320,7 @@ impl Source {
         source: library::SourceKey,
         playlist: library::PlaylistKey,
     ) -> SourceResult<(bool, Option<ScanOutcome>)> {
-        let id = source_playlist_id(database, source, playlist).await?;
+        let id = source_playlist_id(database, source, playlist, false).await?;
         match &self.implementation {
             Implementation::Plex(provider) => provider.delete_playlist(&id).await?,
             Implementation::JellyfinEmby(provider) => provider.delete_playlist(&id).await?,
@@ -2222,7 +2349,7 @@ impl Source {
                 _ => false,
             };
 
-        let id = source_playlist_id(database, source, playlist).await?;
+        let id = source_playlist_id(database, source, playlist, true).await?;
         let mut accepted = 0;
         for page in media_uris.chunks(PROVIDER_PLAYLIST_PAGE) {
             let ids =
@@ -2257,7 +2384,7 @@ impl Source {
         playlist: library::PlaylistKey,
         entries: &[library::PlaylistEntryKey],
     ) -> SourceResult<(bool, Option<ScanOutcome>)> {
-        let id = source_playlist_id(database, source, playlist).await?;
+        let id = source_playlist_id(database, source, playlist, true).await?;
         for page in entries.chunks(PROVIDER_PLAYLIST_PAGE) {
             let occurrences = database
                 .source_playlist_entry_object_ids(
@@ -2298,7 +2425,7 @@ impl Source {
         entry: library::PlaylistEntryKey,
         position: usize,
     ) -> SourceResult<(bool, Option<ScanOutcome>)> {
-        let id = source_playlist_id(database, source, playlist).await?;
+        let id = source_playlist_id(database, source, playlist, true).await?;
         let occurrence = database
             .source_playlist_entry_object_ids(
                 source,
@@ -3304,6 +3431,23 @@ mod live_acquisition_tests {
     }
 }
 
+async fn track_artwork_binding(
+    database: &Database,
+    track: &library::TrackRow,
+) -> Result<Option<Vec<u8>>, crate::SourceMetadataError> {
+    if track.artwork_binding.is_some() {
+        return Ok(track.artwork_binding.clone());
+    }
+    let Some(uri) = &track.album_media_uri else {
+        return Ok(None);
+    };
+    Ok(database
+        .album_row_by_media_uri(uri, &library::ReadCancellation::new())
+        .await
+        .map_err(metadata_database_error)?
+        .and_then(|album| album.artwork_binding))
+}
+
 fn metadata_database_error(error: library::LibraryError) -> crate::SourceMetadataError {
     crate::SourceMetadataError::Write(error.to_string())
 }
@@ -3312,15 +3456,22 @@ async fn source_playlist_id(
     database: &Database,
     source: library::SourceKey,
     playlist: library::PlaylistKey,
+    edit_tracks: bool,
 ) -> SourceResult<String> {
     if database
         .playlist_rows(&[playlist], &library::ReadCancellation::new())
         .await?
         .first()
-        .is_some_and(|row| !row.writable)
+        .is_some_and(|row| {
+            if edit_tracks {
+                !row.writable
+            } else {
+                !row.metadata_writable
+            }
+        })
     {
         return Err(SourceError::InvalidRequest(
-            "This server playlist is managed by its rules and cannot be edited",
+            "The server does not allow this playlist change",
         ));
     }
     database

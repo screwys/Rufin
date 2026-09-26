@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+  <object class="GtkBox" id="artwork_content">
+    <property name="orientation">vertical</property>
+    <property name="hexpand">true</property>
+    <child>
+      <object class="GtkBox" id="artwork_controls">
+        <property name="orientation">vertical</property>
+        <property name="spacing">12</property>
+        <property name="sensitive">false</property>
+        <child>
+          <object class="GtkAspectFrame">
+            <property name="ratio">1</property>
+            <property name="obey-child">false</property>
+            <property name="hexpand">true</property>
+            <property name="child">
+              <object class="GtkOverlay">
+                <property name="width-request">1</property>
+                <property name="height-request">1</property>
+                <property name="overflow">hidden</property>
+                <style><class name="card"/></style>
+                <child type="overlay">
+                  <object class="GtkPicture" id="preview">
+                    <property name="can-shrink">true</property>
+                    <property name="content-fit">contain</property>
+                    <property name="alternative-text" translatable="yes">Current artwork</property>
+                  </object>
+                </child>
+                <child type="overlay">
+                  <object class="GtkBox">
+                    <property name="halign">end</property>
+                    <property name="valign">end</property>
+                    <property name="margin-end">8</property>
+                    <property name="margin-bottom">8</property>
+                    <property name="spacing">6</property>
+                    <child><object class="GtkButton" id="open_search"><property name="icon-name">rufin-search-symbolic</property><property name="tooltip-text" translatable="yes">Search artwork</property><style><class name="circular"/><class name="osd"/></style></object></child>
+                    <child><object class="GtkButton" id="upload"><property name="icon-name">rufin-document-open-symbolic</property><property name="tooltip-text" translatable="yes">Upload artwork</property><style><class name="circular"/><class name="osd"/></style></object></child>
+                    <child><object class="GtkButton" id="use_current"><property name="icon-name">rufin-document-save-symbolic</property><property name="tooltip-text" translatable="yes">This is a fallback artwork Rufin uses, do you want to set this as the item artwork?</property><property name="sensitive">false</property><style><class name="circular"/><class name="osd"/></style></object></child>
+                    <child><object class="GtkButton" id="remove"><property name="icon-name">rufin-user-trash-symbolic</property><property name="tooltip-text" translatable="yes">Delete</property><property name="sensitive">false</property><style><class name="circular"/><class name="osd"/></style></object></child>
+                  </object>
+                </child>
+
+              </object>
+            </property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox" id="storage_options">
+            <property name="spacing">12</property>
+            <property name="visible">false</property>
+            <child><object class="GtkLabel"><property name="label" translatable="yes">Artwork storage</property><property name="xalign">0</property><property name="wrap">true</property><property name="hexpand">true</property><style><class name="heading"/></style></object></child>
+            <child>
+              <object class="GtkBox">
+                <property name="homogeneous">true</property>
+                <property name="halign">end</property>
+                <property name="valign">center</property>
+                <style><class name="linked"/><class name="preference-selection-buttons"/></style>
+                <child><object class="GtkToggleButton" id="folder"><property name="label" translatable="yes">Save in folder</property><style><class name="preference-selection-button"/></style></object></child>
+                <child><object class="GtkToggleButton" id="embed"><property name="label" translatable="yes">Embed in track</property><property name="group">folder</property><style><class name="preference-selection-button"/></style></object></child>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel" id="artwork_status">
+            <property name="visible">false</property>
+            <property name="wrap">true</property>
+            <property name="xalign">0</property>
+            <style><class name="dim-label"/></style>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+  <object class="AdwDialog" id="search_dialog">
+    <property name="title" translatable="yes">Search artwork</property>
+    <property name="content-width">620</property>
+    <property name="content-height">560</property>
+    <property name="focus-widget">search_artist</property>
+    <property name="child">
+      <object class="AdwToolbarView">
+        <child type="top"><object class="AdwHeaderBar"/></child>
+        <property name="content">
+          <object class="GtkBox" id="search_controls">
+            <property name="orientation">vertical</property>
+            <property name="spacing">12</property>
+            <property name="margin-start">18</property>
+            <property name="margin-end">18</property>
+            <property name="margin-bottom">18</property>
+            <child>
+              <object class="GtkBox">
+                <property name="spacing">8</property>
+                <child><object class="GtkEntry" id="search_artist"><property name="placeholder-text" translatable="yes">Artist</property><property name="hexpand">true</property><property name="width-request">1</property><property name="secondary-icon-name">rufin-edit-clear-symbolic</property><property name="secondary-icon-tooltip-text" translatable="yes">Clear artist</property><property name="secondary-icon-activatable">true</property></object></child>
+                <child><object class="GtkEntry" id="search_album"><property name="placeholder-text" translatable="yes">Album</property><property name="hexpand">true</property><property name="width-request">1</property><property name="secondary-icon-name">rufin-edit-clear-symbolic</property><property name="secondary-icon-tooltip-text" translatable="yes">Clear album</property><property name="secondary-icon-activatable">true</property></object></child>
+              </object>
+            </child>
+            <child><object class="GtkLabel" id="search_status"><property name="visible">false</property><property name="wrap">true</property><property name="xalign">0</property><style><class name="dim-label"/></style></object></child>
+            <child>
+              <object class="GtkScrolledWindow">
+                <property name="hscrollbar-policy">never</property>
+                <property name="vexpand">true</property>
+                <property name="child">
+                  <object class="GtkListBox" id="results">
+                    <property name="selection-mode">single</property>
+                    <property name="activate-on-single-click">true</property>
+                    <property name="visible">false</property>
+                    <property name="valign">start</property>
+                    <style><class name="boxed-list"/></style>
+                  </object>
+                </property>
+              </object>
+            </child>
+          </object>
+        </property>
+      </object>
+    </property>
+  </object>
+  <object class="GtkFileFilter" id="image_filter">
+    <property name="name" translatable="yes">Image files</property>
+    <mime-types><mime-type>image/*</mime-type></mime-types>
+    <patterns><pattern>*.jxl</pattern><pattern>*.JXL</pattern></patterns>
+  </object>
+  <object class="GtkFileDialog" id="chooser">
+    <property name="title" translatable="yes">Upload artwork</property>
+    <property name="default-filter">image_filter</property>
+  </object>
+  <object class="GtkLabel" id="unavailable_text"><property name="label" translatable="yes">Artwork editing is no longer available</property></object>
+  <object class="GtkLabel" id="selected_text"><property name="label" translatable="yes">Artwork selected</property></object>
+  <object class="GtkLabel" id="searching_text"><property name="label" translatable="yes">Searching...</property></object>
+  <object class="GtkLabel" id="type_to_search_text"><property name="label" translatable="yes">Type to search</property></object>
+  <object class="GtkLabel" id="empty_text"><property name="label" translatable="yes">No artwork found</property></object>
+</interface>

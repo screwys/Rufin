@@ -1015,9 +1015,13 @@ pub fn present_playlist_context_menu(
             &export_name,
         )
     });
-    if playlist.writable {
+    if playlist.metadata_writable {
         surface.append_fixed_action(msgid("Edit"), "edit", EDIT_ICON);
+    }
+    if playlist.writable {
         surface.append_fixed_action(msgid("Add current"), "add-current", ADD_ICON);
+    }
+    if playlist.metadata_writable {
         surface.append_fixed_action(msgid("Delete"), "delete", DELETE_ICON);
     }
     let playback = PlaybackTarget::Playlist(playlist.playlist_key);

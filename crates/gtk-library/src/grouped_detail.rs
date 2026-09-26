@@ -129,8 +129,7 @@ impl CatalogUi {
         });
         let actions = showcase_view.actions();
         actions.set_halign(gtk::Align::Start);
-        let cover_controls =
-            detail_playback_controls(&actions, play_label, None, true, Rc::clone(&play));
+        let cover_controls = detail_playback_controls(&actions, play_label, None, Rc::clone(&play));
         let context_menu = context_menu.map(|present| {
             let play = Rc::clone(&play);
             Rc::new(move |target: &gtk::Widget, position| {
@@ -145,6 +144,10 @@ impl CatalogUi {
             cover: cover.clone(),
             cover_controls,
             context_menu,
+            open_cover: {
+                let present = Rc::clone(&self.present_full_artwork);
+                Rc::new(move || present(artwork.clone()))
+            },
         });
         wrapper.append(&library_route_inset(showcase));
 
