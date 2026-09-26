@@ -476,6 +476,11 @@
             placeholder="{{ localization::tr("One path per line") }}"
           ></textarea>
         </div>
+        <div id="source-exclusions" hidden>
+          <label for="excluded-folders">{{ localization::tr("Excluded folders") }}</label>
+          <textarea id="excluded-folders" rows="3" placeholder="{{ localization::tr("One path per line") }}"></textarea>
+          <p>{{ localization::tr("Relative paths start at the music folder or source URL. Local paths can also be absolute.") }}</p>
+        </div>
         <div id="remote-fields" hidden>
           <label for="server-url">{{ localization::tr("Server Address") }}</label
           ><input

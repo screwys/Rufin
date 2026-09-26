@@ -261,6 +261,7 @@ mod tests {
                 ResponseTemplate::new(207).set_body_string(format!("<d:multistatus xmlns:d=\"DAV:\"><d:response><d:href>{path}</d:href><d:propstat><d:prop>{properties}</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"))
             }).mount(&server).await;
             let settings = FileSourceSettings {
+                excluded_folders: Vec::new(),
                 url: format!("{}/", server.uri()),
                 alternate_urls: vec![],
                 folders: vec![],

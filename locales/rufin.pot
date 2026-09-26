@@ -85,6 +85,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"Relative paths start at the music folder or source URL. Local paths can also "
+"be absolute."
+msgstr ""
+
+msgid ""
 "Remove Local and its cached library from Rufin? Your music files will not be "
 "deleted."
 msgstr ""
@@ -1119,6 +1124,9 @@ msgstr ""
 msgid "Everything, including new tracks"
 msgstr ""
 
+msgid "Excluded folders"
+msgstr ""
+
 msgid "Existing profile file"
 msgstr ""
 
@@ -1229,6 +1237,9 @@ msgid "Fixed position"
 msgstr ""
 
 msgid "Flat"
+msgstr ""
+
+msgid "Folder path"
 msgstr ""
 
 msgid "Folders"

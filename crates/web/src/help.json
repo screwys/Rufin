@@ -81,7 +81,7 @@
     "GET /api/albums?source=...&offset=0&limit=100": "Browse albums, up to 128 at a time. You can also set folder, q, sort, descending and favorites.",
     "GET /api/albums/tracks?id=...&offset=0&limit=100": "Browse tracks in an album, up to 128 at a time. You can also set q, sort, descending and favorites. To filter by folder, include source too. The response includes album_tracks and disc_sections: pairs of zero-based track position and disc number in the filtered result. Sections are empty for a single known disc or a sort other than track_number; disc number 0 means unknown.",
     "GET /api/folders?source=...": "Browse folders saved in Rufin, up to 128 at a time. Set parent to open a folder, or folder to choose where browsing starts. Use the folder IDs returned by this API.",
-    "GET /api/folders/live?source=...": "Browse folders directly on the server. You can set parent and folder. Returned track_ids match object_id in track results.",
+    "GET /api/folders/live?source=...": "Browse source folders. File sources use their saved directory inventory; other sources browse the server directly. You can set parent and folder. Returned track_ids match object_id in track results.",
     "GET /api/playlists?offset=0&limit=100": "Browse playlists that are not tied to a source. Set source to include its playlists too. Up to 128 at a time; you can also set folder, q, sort and descending.",
     "POST /api/playlists": {
       "name": "Evening",
@@ -235,7 +235,7 @@
   "source_update": {
     "local": {
       "type": "local",
-      "data": { "source_id": "source ID", "roots": ["/path/to/music"] }
+      "data": { "source_id": "source ID", "roots": ["/path/to/music"], "excluded_folders": ["Recordings"] }
     },
     "files": "{type: files, data: {source_id,name,settings: file_settings,credentials:{secret:null,headers:null}}}. Use null to keep the saved password and headers.",
     "plex": {
@@ -270,6 +270,7 @@
     "url": "https://your-server/music/",
     "alternate_urls": [],
     "folders": [],
+    "excluded_folders": [],
     "username": "",
     "domain": "",
     "authentication": "anonymous",
@@ -277,6 +278,7 @@
     "certificate_pem": null,
     "require_smb_encryption": false
   },
+  "folder_exclusions": "Local, WebDAV and SMB sources accept excluded_folders in their source settings. These paths skip folder discovery, including subfolders. Local paths may be absolute or relative to each music root. WebDAV and SMB paths are relative to the source URL, with forward slashes. Paths need not exist or belong to the current library. Included CUE files and playlists can still reference audio in excluded folders. An empty list clears exclusions. Omitting excluded_folders from a Local update preserves the saved list.",
   "choices": {
     "file_authentication": ["anonymous", "password", "bearer"],
     "server_kind": ["jellyfin", "emby"],

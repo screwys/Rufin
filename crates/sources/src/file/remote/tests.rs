@@ -15,6 +15,7 @@ fn file_source_locations_preserve_server_authority_and_encoded_names() {
         ("webdav", "https://nas.example:8443/Music/"),
     ] {
         let settings = FileSourceSettings {
+            excluded_folders: Vec::new(),
             url: url.into(),
             alternate_urls: vec![],
             folders: vec![],
@@ -72,6 +73,7 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
         .mount(&server)
         .await;
     let settings = FileSourceSettings {
+        excluded_folders: Vec::new(),
         url: format!("{}/", server.uri()),
         alternate_urls: vec![],
         folders: vec![],
@@ -177,6 +179,7 @@ async fn nextcloud_refresh_skips_unchanged_branches_and_keeps_selected_folder_id
         }
     }).mount(&server).await;
     let settings = FileSourceSettings {
+        excluded_folders: Vec::new(),
         url: format!("{}{ROOT}", server.uri()).replace("%E8%81%B4", "%e8%81%b4"),
         alternate_urls: vec![],
         folders: vec!["library".into()],
@@ -307,6 +310,7 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
         }
     }).mount(&server).await;
     let settings = FileSourceSettings {
+        excluded_folders: Vec::new(),
         url: format!("{}/music/", server.uri()),
         alternate_urls: vec![],
         folders: vec![],
@@ -476,6 +480,7 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
         }
     }).mount(&server).await;
     let settings = FileSourceSettings {
+        excluded_folders: Vec::new(),
         url: format!("{}/music/", server.uri()),
         alternate_urls: vec![],
         folders: vec![],
@@ -590,6 +595,7 @@ async fn dav_recovers_an_unavailable_endpoint_and_keeps_namespace_on_address_edi
         }).mount(server).await;
     }
     let mut settings = FileSourceSettings {
+        excluded_folders: Vec::new(),
         url: format!("{}/music/", primary.uri()),
         alternate_urls: vec![format!("{}/music/", alternate.uri())],
         folders: vec![],

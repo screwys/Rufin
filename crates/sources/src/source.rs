@@ -766,7 +766,10 @@ impl Source {
                 crate::file::remote::edit(current, current_credential, name, settings, credentials)
                     .await
             }
-            SourceSettingsInput::Local { roots } => crate::file::local::edit(current, roots),
+            SourceSettingsInput::Local {
+                roots,
+                excluded_folders,
+            } => crate::file::local::edit(current, roots, excluded_folders),
             SourceSettingsInput::JellyfinEmby(input) => {
                 crate::jellyfin_emby::edit(current, current_credential, input, jellyfin_device_id)
                     .await
@@ -2404,6 +2407,7 @@ impl Source {
 
     pub async fn browse_folder(
         &self,
+        database: &Database,
         folder_object_id: Option<&str>,
         music_folder_object_id: Option<&str>,
     ) -> SourceResult<LiveFolderPage> {
@@ -2413,9 +2417,22 @@ impl Source {
                     .browse_folder(folder_object_id, music_folder_object_id)
                     .await
             }
-            Implementation::Local(_) | Implementation::Files(_) => Err(
-                SourceError::InvalidRequest("File Folder browsing is Database-owned"),
-            ),
+            Implementation::Local(_) | Implementation::Files(_) => {
+                let source = database
+                    .source_identity_key(&self.source_id)
+                    .await?
+                    .ok_or(SourceError::NotFound)?;
+                let (folders, tracks) = database
+                    .local_folder_contents(source, folder_object_id.or(music_folder_object_id))
+                    .await?;
+                Ok(LiveFolderPage {
+                    folders: folders
+                        .into_iter()
+                        .map(|(object_id, name)| LiveFolder { object_id, name })
+                        .collect(),
+                    tracks,
+                })
+            }
             Implementation::JellyfinEmby(source) => {
                 source
                     .browse_folder(folder_object_id, music_folder_object_id)
@@ -3263,7 +3280,7 @@ mod live_acquisition_tests {
     use super::*;
 
     #[tokio::test]
-    async fn local_search_and_folder_are_unavailable_not_successfully_empty() {
+    async fn local_search_is_unavailable_not_successfully_empty() {
         let directory = tempfile::tempdir().unwrap();
         let local =
             crate::file::local::LocalSource::from_roots(vec![directory.path().to_path_buf()])
@@ -3282,10 +3299,6 @@ mod live_acquisition_tests {
                     20
                 )
                 .await,
-            Err(SourceError::InvalidRequest(_))
-        ));
-        assert!(matches!(
-            source.browse_folder(None, None).await,
             Err(SourceError::InvalidRequest(_))
         ));
     }
@@ -3595,6 +3608,7 @@ mod refresh_laws {
 
         let smb = Source::open(
             crate::FileSourceSettings {
+                excluded_folders: Vec::new(),
                 url: "smb://127.0.0.1:9/Music/".into(),
                 alternate_urls: vec![],
                 folders: vec![],

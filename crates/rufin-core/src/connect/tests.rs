@@ -604,6 +604,7 @@ fn webdav_exchange_leaves_an_unchanged_profile_file_untouched() {
             )
             .await;
             let settings = sources::FileSourceSettings {
+                excluded_folders: Vec::new(),
                 url: format!("http://{address}/"),
                 alternate_urls: vec![], folders: vec![], username: String::new(), domain: String::new(),
                 authentication: sources::FileAuthentication::Anonymous,

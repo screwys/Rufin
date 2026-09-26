@@ -314,6 +314,7 @@ mod tests {
             );
             // Deserialize the complete settings used by real configured sources.
             let settings = crate::FileSourceSettings {
+                excluded_folders: Vec::new(),
                 url: current.into(),
                 alternate_urls: vec![],
                 folders: vec![],

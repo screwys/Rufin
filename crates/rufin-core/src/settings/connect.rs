@@ -124,6 +124,7 @@ impl SettingsOwner {
                 let mut payload: Value = serde_json::from_str(&configuration.provider_payload)
                     .map_err(|e| e.to_string())?;
                 payload["roots"] = serde_json::json!([]);
+                payload["excluded_folders"] = serde_json::json!([]);
                 if let Some(payload) = payload.as_object_mut() {
                     payload.remove("base_url");
                     payload.remove("legacy_root");
@@ -218,17 +219,20 @@ impl SettingsOwner {
                         let mut payload: Value =
                             serde_json::from_str(&incoming.configuration.provider_payload)
                                 .map_err(|e| e.to_string())?;
-                        let roots = old
+                        let local_payload = old
                             .as_ref()
                             .filter(|s| s.configuration.kind == "local")
                             .map(|s| {
                                 serde_json::from_str::<Value>(&s.configuration.provider_payload)
                             })
                             .transpose()
-                            .map_err(|e| e.to_string())?
-                            .and_then(|p| p.get("roots").cloned())
-                            .unwrap_or_else(|| serde_json::json!([]));
-                        payload["roots"] = roots;
+                            .map_err(|e| e.to_string())?;
+                        for field in ["roots", "excluded_folders"] {
+                            payload[field] = local_payload
+                                .as_ref()
+                                .and_then(|p| p.get(field).cloned())
+                                .unwrap_or_else(|| serde_json::json!([]));
+                        }
                         incoming.configuration.provider_payload =
                             serde_json::to_string(&payload).map_err(|e| e.to_string())?;
                     }

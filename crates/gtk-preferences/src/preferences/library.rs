@@ -513,6 +513,74 @@ pub fn local_sources_page(shell: &Rc<Preferences>, dialog: &adw::Dialog) -> adw:
     local_group.add(&local_actions_row);
     local_page.add(&local_group);
 
+    if let Some(source_id) = local_source_id {
+        let initial = configured
+            .local_excluded_folders
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        let paths = Rc::new(RefCell::new(initial.clone()));
+        let draft = Rc::clone(&paths);
+        let (group, save, status) = super::source::excluded_folders::editor(
+            &shell.window,
+            &initial,
+            true,
+            Rc::new(move |value| *draft.borrow_mut() = value),
+        );
+        save.set_visible(true);
+        let source = shell.products.source.clone();
+        let dialog = dialog.downgrade();
+        save.connect_clicked(move |button| {
+            let Some(configuration) = source.configuration(&source_id) else {
+                return;
+            };
+            let Ok(sources::EditableSource::Local { roots, .. }) = configuration.editable() else {
+                return;
+            };
+            let pending =
+                source.update_source(rufin_core::runtime::source::SourceSettingsChange::Local {
+                    source_id: source_id.clone(),
+                    roots,
+                    excluded_folders: Some(
+                        paths
+                            .borrow()
+                            .iter()
+                            .map(std::path::PathBuf::from)
+                            .collect(),
+                    ),
+                });
+            button.set_sensitive(false);
+            status.set_visible(false);
+            let button = button.downgrade();
+            let status = status.downgrade();
+            let dialog = dialog.clone();
+            gtk::glib::spawn_future_local(async move {
+                match pending.recv().await {
+                    Ok(Ok(())) => {
+                        if let Some(dialog) = dialog.upgrade() {
+                            dialog.close();
+                        }
+                    }
+                    result => {
+                        let error = match result {
+                            Ok(Err(error)) => error,
+                            Err(error) => error.to_string(),
+                            _ => unreachable!(),
+                        };
+                        if let Some(status) = status.upgrade() {
+                            status.set_text(&error);
+                            status.set_visible(true);
+                        }
+                    }
+                }
+                if let Some(button) = button.upgrade() {
+                    button.set_sensitive(true);
+                }
+            });
+        });
+        local_page.add(&group);
+    }
+
     local_page
 }
 

@@ -154,6 +154,9 @@ impl RemoteSource {
         } else {
             self.settings.folders.clone()
         } {
+            if self.excludes(&folder) {
+                continue;
+            }
             let root = self.stat(&input, &folder).await?;
             if root.kind != LocalFileKind::Directory {
                 return Err(SourceError::InvalidConfig(
@@ -423,7 +426,7 @@ impl RemoteSource {
             .await?;
         let Some(token) = previous
             .iter()
-            .find(|old| old.path == path)
+            .find(|old| old.path == path && old.parse_version == Some(self.directory_version))
             .and_then(|old| old.revision.as_deref())
             .and_then(super::webdav::dav::sync_token)
         else {
@@ -531,7 +534,9 @@ impl RemoteSource {
                         .list(relative, move |entry: crate::file::remote::smb::Entry| {
                             let send = send.clone();
                             async move {
-                                if super::metadata::is_write_temporary(&entry.path) {
+                                if self.excludes(&entry.path)
+                                    || super::metadata::is_write_temporary(&entry.path)
+                                {
                                     return Ok(());
                                 }
                                 send.send(self.observation(
@@ -578,7 +583,9 @@ impl RemoteSource {
                                     let relative = percent_encoding::percent_decode_str(encoded)
                                         .decode_utf8()
                                         .map_err(|_| SourceError::NotFound)?;
-                                    if super::metadata::is_write_temporary(&relative) {
+                                    if self.excludes(relative.trim_end_matches('/'))
+                                        || super::metadata::is_write_temporary(&relative)
+                                    {
                                         return Ok(());
                                     }
                                     let revision = entry.revision();
@@ -660,7 +667,11 @@ impl RemoteSource {
             native_id,
             revision,
             picture_index: None,
-            parse_version: Some(PARSER_VERSION),
+            parse_version: Some(if directory {
+                self.directory_version
+            } else {
+                PARSER_VERSION
+            }),
             state: LocalFileState::Observed,
         })
     }

@@ -54,6 +54,7 @@ pub struct ConfiguredSources {
     pub sources: Arc<[SourceSummary]>,
     pub selected_source_id: Option<SourceId>,
     pub local_folders: Arc<[LocalFolder]>,
+    pub local_excluded_folders: Arc<[PathBuf]>,
     pub local_access: Arc<[SourceLocalAccessSummary]>,
 }
 
@@ -139,6 +140,8 @@ pub enum SourceSettingsChange {
     Local {
         source_id: SourceId,
         roots: Vec<PathBuf>,
+        #[serde(default)]
+        excluded_folders: Option<Vec<PathBuf>>,
     },
     EmbyConnect {
         source_id: SourceId,

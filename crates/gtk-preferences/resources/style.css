@@ -2179,7 +2179,7 @@ button.download-queue-pause image {
   min-width: 32px;
   min-height: 32px;
   padding: 0;
-  color: color-mix(in srgb, var(--window-fg-color) 76%, var(--window-bg-color));
+  color: var(--window-fg-color);
   background: transparent;
   box-shadow: none;
 }

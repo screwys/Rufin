@@ -130,6 +130,8 @@ pub struct FileSourceSettings {
     pub alternate_urls: Vec<String>,
     #[serde(default)]
     pub folders: Vec<String>,
+    #[serde(default)]
+    pub excluded_folders: Vec<String>,
     pub username: String,
     pub domain: String,
     pub authentication: FileAuthentication,
@@ -192,6 +194,7 @@ pub(crate) struct RemoteSource {
     name: String,
     namespace_url: String,
     settings: FileSourceSettings,
+    directory_version: i64,
     credentials: FileCredentials,
     input: Mutex<Option<Arc<FileInputServer>>>,
 }
@@ -267,8 +270,44 @@ impl RemoteSource {
         configuration: &SourceConfiguration,
         credential: Option<String>,
     ) -> SourceResult<Self> {
-        let settings = FileSourceSettings::from_configuration(configuration)?;
+        let mut settings = FileSourceSettings::from_configuration(configuration)?;
+        settings.excluded_folders = settings
+            .excluded_folders
+            .into_iter()
+            .filter(|path| !path.is_empty())
+            .map(|path| {
+                let mut parts = Vec::new();
+                for part in path.split('/') {
+                    match part {
+                        "" | "." => {}
+                        ".." if parts.last().is_some_and(|last| *last != "..") => {
+                            parts.pop();
+                        }
+                        _ => parts.push(part),
+                    }
+                }
+                if parts.is_empty() {
+                    "/".to_string()
+                } else {
+                    parts.join("/")
+                }
+            })
+            .collect();
         let payload: Payload = crate::config::decode_provider_payload(configuration)?;
+        let directory_version = if settings.excluded_folders.is_empty() {
+            scan::PARSER_VERSION
+        } else {
+            // A directory listing depends on both the reader and the excluded paths.
+            let mut hash = blake3::Hasher::new();
+            hash.update(&scan::PARSER_VERSION.to_le_bytes());
+            for folder in &settings.excluded_folders {
+                hash.update(&(folder.len() as u64).to_le_bytes());
+                hash.update(folder.as_bytes());
+            }
+            let mut bytes = [0; 8];
+            bytes.copy_from_slice(&hash.finalize().as_bytes()[..8]);
+            i64::from_le_bytes(bytes)
+        };
         let credentials = credential
             .map(|text| serde_json::from_str(&text))
             .transpose()?
@@ -279,6 +318,7 @@ impl RemoteSource {
             name: configuration.name.clone(),
             namespace_url: payload.namespace_url,
             settings,
+            directory_version,
             credentials,
             input: Mutex::new(None),
         })
@@ -296,7 +336,7 @@ impl RemoteSource {
             return Ok(None);
         }
         let mut hash = blake3::Hasher::new();
-        hash.update(&scan::PARSER_VERSION.to_le_bytes());
+        hash.update(&self.directory_version.to_le_bytes());
         for folder in if self.settings.folders.is_empty() {
             vec![String::new()]
         } else {
@@ -408,9 +448,25 @@ impl RemoteSource {
     }
 
     pub(crate) fn includes(&self, relative: &str) -> bool {
-        self.settings.folders.is_empty()
-            || self.settings.folders.iter().any(|folder| {
-                relative == folder
+        !self.excludes(relative)
+            && (self.settings.folders.is_empty()
+                || self.settings.folders.iter().any(|folder| {
+                    relative == folder
+                        || relative
+                            .strip_prefix(folder)
+                            .is_some_and(|rest| rest.starts_with('/'))
+                }))
+    }
+
+    pub(crate) fn excludes(&self, relative: &str) -> bool {
+        self.settings
+            .excluded_folders
+            .iter()
+            .filter(|folder| !folder.is_empty())
+            .any(|folder| {
+                let folder = folder.trim_matches('/');
+                folder.is_empty()
+                    || relative == folder
                     || relative
                         .strip_prefix(folder)
                         .is_some_and(|rest| rest.starts_with('/'))

@@ -8,6 +8,7 @@ use rufin_core::runtime::source::{
     SourceProgressStage, SourceSummary,
 };
 
+pub(super) mod excluded_folders;
 pub(super) mod local_access;
 pub mod login;
 

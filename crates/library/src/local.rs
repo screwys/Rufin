@@ -237,6 +237,76 @@ impl LocalFileState {
 }
 
 impl Database {
+    /// Uses the saved file inventory for the shared source folder browser.
+    pub async fn local_folder_contents(
+        &self,
+        source: SourceKey,
+        parent: Option<&str>,
+    ) -> LibraryResult<(Vec<(String, String)>, Vec<String>)> {
+        let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
+        let mut transaction = connection.begin().await?;
+        let mut parent = parent.map(str::to_owned);
+        if parent.is_none() {
+            let mut roots: Vec<String> = sqlx::query_scalar(
+                "SELECT DISTINCT root FROM local_files WHERE source_key=?1 AND kind='directory'",
+            )
+            .bind(source)
+            .fetch_all(&mut *transaction)
+            .await?;
+            let tracks: Vec<String> = sqlx::query_scalar("SELECT track.object_id FROM tracks track WHERE track.source_key=?1 AND NOT EXISTS(SELECT 1 FROM local_files file WHERE file.source_key=track.source_key AND file.path=track.source_path)")
+                .bind(source).fetch_all(&mut *transaction).await?;
+            if roots.len() == 1 && tracks.is_empty() {
+                parent = roots.pop();
+            } else {
+                transaction.commit().await?;
+                return Ok((
+                    roots
+                        .into_iter()
+                        .map(|path| {
+                            let name = folder_path_name(&path);
+                            (path, name)
+                        })
+                        .collect(),
+                    tracks,
+                ));
+            }
+        }
+        let parent = parent.expect("single root or requested folder");
+        let separator = if url::Url::parse(&parent).is_ok_and(|url| url.has_host()) {
+            '/'
+        } else {
+            std::path::MAIN_SEPARATOR
+        };
+        let prefix = format!("{}{separator}", parent.trim_end_matches(separator));
+        let prefix = crate::source_window::quote(&prefix);
+        let separator = crate::source_window::quote(&separator.to_string());
+        let tail = format!("substr(path,length({prefix})+1)");
+        let folders: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT DISTINCT {prefix}||CASE WHEN instr({tail},{separator})>0 THEN substr({tail},1,instr({tail},{separator})-1) ELSE {tail} END
+                FROM local_files WHERE source_key=?1 AND kind='directory'
+                  AND path>={prefix} AND path<{prefix}||char(1114111) AND {tail}<>''"
+        ))).bind(source).fetch_all(&mut *transaction).await?;
+        let tracks = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT object_id FROM tracks WHERE source_key=?1 AND source_path>={prefix}
+               AND source_path<{prefix}||char(1114111)
+               AND instr(substr(source_path,length({prefix})+1),{separator})=0"
+        )))
+        .bind(source)
+        .fetch_all(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok((
+            folders
+                .into_iter()
+                .map(|path| {
+                    let name = folder_path_name(&path);
+                    (path, name)
+                })
+                .collect(),
+            tracks,
+        ))
+    }
+
     /// Lexical endpoints are sufficient to find the common directory of all
     /// member paths. Keep the result bounded even for a very large artist.
     pub async fn collection_source_path_bounds(
@@ -722,6 +792,27 @@ impl Database {
         }
         transaction.commit().await?;
         Ok(removed)
+    }
+}
+
+fn folder_path_name(path: &str) -> String {
+    if let Some(url) = url::Url::parse(path).ok().filter(|url| url.has_host()) {
+        url.path()
+            .trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .filter(|name| !name.is_empty())
+            .map(|name| {
+                percent_encoding::percent_decode_str(name)
+                    .decode_utf8_lossy()
+                    .into_owned()
+            })
+            .unwrap_or_else(|| url.host_str().unwrap_or(path).to_string())
+    } else {
+        std::path::Path::new(path)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.to_string())
     }
 }
 
