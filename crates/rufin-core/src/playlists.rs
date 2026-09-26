@@ -1,19 +1,56 @@
 //! Playlist routing and publication.
 use crate::runtime::source::PlaylistExport;
 use crate::runtime::{CatalogChange, CatalogPublication, SourceEvent};
-use crate::settings::{ConfiguredSource, fresh_source_id};
 use crate::source::{SourceOwner, string_error};
 use async_channel::Receiver;
 use library::{
     Database, FolderKey, PlaylistEntryKey, PlaylistKey, ReadCancellation, ScanOutcome, SourceKey,
 };
-use sources::{Source, SourceConfiguration, SourceId, SourceSetupInput};
+use sources::{Source, SourceConfiguration, SourceId};
 use std::{
     future::Future,
     path::PathBuf,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
+pub fn import_local_paths(
+    owner: &SourceOwner,
+    paths: Vec<PathBuf>,
+    name: String,
+) -> Receiver<Result<PlaylistKey, String>> {
+    let (sender, receiver) = async_channel::bounded(1);
+    owner.spawn_serialized(move |owner| async move {
+        let result = async {
+            let source = owner.ensure_local_source().await?;
+            let progress = crate::source::refreshing_progress(
+                Arc::clone(&owner.shared),
+                source.source_id().clone(),
+            );
+            progress(sources::SourceReadProgress {
+                stage: sources::SourceReadStage::Files,
+                completed: 0,
+                total: None,
+            });
+            let result = source
+                .import_local_paths(&owner.shared.database, paths, &name, &progress)
+                .await;
+            let playlist = result
+                .as_ref()
+                .map(|(playlist, _)| *playlist)
+                .map_err(string_error);
+            owner
+                .finish_refresh(source.source_id(), result.map(|(_, outcome)| outcome))
+                .await;
+            let playlist = playlist?;
+            accept_playlist_result(&owner, None, Some(playlist), Ok((true, None))).await;
+            Ok(playlist)
+        }
+        .await;
+        let _ = sender.send(result).await;
+    });
+    receiver
+}
+
 pub fn import_playlist(
     owner: &SourceOwner,
     path: PathBuf,
@@ -610,6 +647,62 @@ pub fn remove_playlist_entries(
     })
 }
 
+pub fn can_remove_unavailable(owner: &SourceOwner, playlist: &library::PlaylistRow) -> bool {
+    playlist.writable
+        && playlist.source_id.as_ref().is_none_or(|id| {
+            owner
+                .configuration(&SourceId::new(id))
+                .is_some_and(|source| source.is_file_library())
+        })
+}
+
+pub fn remove_unavailable_tracks(
+    owner: &SourceOwner,
+    playlist: PlaylistKey,
+) -> Receiver<Result<usize, String>> {
+    let (sender, receiver) = async_channel::bounded(1);
+    owner.spawn_serialized(move |owner| async move {
+        let result = async {
+            let PlaylistOwner::Local(source) = playlist_source(&owner, playlist).await? else {
+                return Err("This playlist belongs to a server".to_string());
+            };
+            let database = &owner.shared.database;
+            let mut removals = library::PlaylistEntryRemovals::new().map_err(string_error)?;
+            let mut after = -1;
+            loop {
+                let page = database
+                    .playlist_entry_uri_page(playlist, after)
+                    .await
+                    .map_err(string_error)?;
+                let Some(last) = page.last() else { break };
+                after = last.1;
+                let uris: Vec<_> = page.iter().map(|(_, _, uri)| uri.clone()).collect();
+                let missing = owner.missing_media(&uris).await?;
+                for (entry, _, uri) in page {
+                    if missing.contains(&uri) {
+                        removals.push(entry).map_err(string_error)?;
+                    }
+                }
+            }
+            let removed = removals
+                .apply(database, source, playlist)
+                .await
+                .map_err(string_error)?;
+            if removed > 0 {
+                prune_imported_playlist_files(&owner).await;
+                accept_playlist_result(&owner, source, Some(playlist), Ok((true, None))).await;
+            }
+            Ok(removed)
+        }
+        .await;
+        if let Err(error) = &result {
+            owner.shared.warn_nonfatal(error);
+        }
+        let _ = sender.send(result).await;
+    });
+    receiver
+}
+
 pub fn move_playlist_entry(
     owner: &SourceOwner,
     playlist: PlaylistKey,
@@ -711,76 +804,31 @@ async fn enrich_imported_playlist(
     owner: &SourceOwner,
     playlist: library::PlaylistKey,
 ) -> Result<(), String> {
-    let mut after = -1;
+    let mut after = String::new();
     let mut readable = false;
     loop {
         let page = owner
             .shared
             .database
-            .playlist_file_uri_page(playlist, after)
+            .imported_local_uri_page(Some(playlist), &after)
             .await
             .map_err(string_error)?;
         if page.is_empty() {
             break;
         }
-        after = page.last().unwrap().0;
-        if page
-            .iter()
-            .any(|(_, uri)| library::file_media_path(uri).is_some_and(|path| path.is_file()))
-        {
+        after = page.last().unwrap().0.clone();
+        if page.iter().any(|(uri, cue)| {
+            cue.as_ref()
+                .map(PathBuf::from)
+                .or_else(|| library::file_media_path(uri))
+                .is_some_and(|path| path.is_file())
+        }) {
             readable = true;
             break;
         }
     }
     if readable {
-        let stored = owner.shared.settings.load();
-        let local = stored
-            .sources
-            .configured
-            .iter()
-            .find(|item| item.configuration.is_local());
-        let source = if let Some(local) = local {
-            owner.client(&local.configuration.source_id)?
-        } else {
-            let connected = Source::connect(
-                fresh_source_id()?,
-                SourceSetupInput::Local(sources::LocalFolderHostInput { roots: Vec::new() }),
-            )
-            .await
-            .map_err(string_error)?;
-            let (configuration, source, credential) = connected.into_parts();
-            owner.persist_connected_source(
-                &ConfiguredSource {
-                    configuration: configuration.clone(),
-                    credential_ref: None,
-                    music_folder_id: None,
-                    local_access: None,
-                    enable_half_stars: false,
-                },
-                credential,
-            )?;
-            library::Scan::begin(
-                &owner.shared.database,
-                configuration.source_id.as_str(),
-                &configuration.name,
-                "local",
-                None,
-            )
-            .await
-            .map_err(string_error)?
-            .finish()
-            .await
-            .map_err(string_error)?;
-            owner
-                .shared
-                .send(SourceEvent::Configured(
-                    owner
-                        .shared
-                        .configured_sources(owner.shared.selected().as_deref()),
-                ))
-                .await;
-            Arc::new(source)
-        };
+        let source = owner.ensure_local_source().await?;
         let outcome = source
             .import_playlist_files(&owner.shared.database, playlist)
             .await
@@ -805,15 +853,9 @@ pub(crate) async fn prune_imported_playlist_files(owner: &SourceOwner) {
         if let Ok(client) = owner.client(&local.configuration.source_id) {
             match client.prune_imported_files(&owner.shared.database).await {
                 Ok(Some(outcome)) => {
-                    if let Some(selected) = owner
-                        .shared
-                        .selected()
-                        .filter(|selected| selected.source_id() == client.source_id())
-                    {
-                        owner
-                            .accept_scan(selected.source_id(), outcome, CatalogChange::Broad)
-                            .await;
-                    }
+                    owner
+                        .accept_scan(client.source_id(), outcome, CatalogChange::Broad)
+                        .await;
                 }
                 Err(error) => owner.shared.warn_nonfatal(&error.to_string()),
                 Ok(None) => {}

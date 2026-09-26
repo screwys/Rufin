@@ -68,10 +68,19 @@ impl LocalChangeFeed {
         let (messages, receiver) = mpsc::sync_channel(1);
         let overflow = Arc::new(AtomicBool::new(false));
         let callback_overflow = Arc::clone(&overflow);
+        let roots = self.roots.iter().cloned().collect::<HashSet<_>>();
         let listener = std::thread::current();
         let mut watcher = notify::recommended_watcher(move |event: notify::Result<Event>| {
             let message = match event {
-                Ok(event) if !matches!(event.kind, EventKind::Access(_)) => {
+                Ok(mut event) if !matches!(event.kind, EventKind::Access(_)) => {
+                    if !event.paths.is_empty() {
+                        event.paths.retain(|path| {
+                            path.ancestors().any(|ancestor| roots.contains(ancestor))
+                        });
+                        if event.paths.is_empty() {
+                            return;
+                        }
+                    }
                     FeedMessage::Change(event_evidence(event))
                 }
                 Ok(_) => return,
@@ -85,12 +94,12 @@ impl LocalChangeFeed {
 
         let mut watched = 0;
         let mut failed_roots = Vec::new();
-        for root in ordered_roots(self.roots.clone()) {
-            match watcher.watch(&root, RecursiveMode::Recursive) {
+        for (root, mode) in watch_targets(&self.roots) {
+            match watcher.watch(&root, mode) {
                 Ok(()) => watched += 1,
                 Err(error) => {
                     warn!(%error, root = %root.display(), "failed to watch Local music folder");
-                    failed_roots.push(root);
+                    failed_roots.push((root, mode));
                 }
             }
         }
@@ -143,15 +152,15 @@ impl LocalChangeFeed {
             if !failed_roots.is_empty() && Instant::now() >= retry_failed_roots_at {
                 let mut still_failed = Vec::new();
                 let mut recovered = false;
-                for root in failed_roots.drain(..) {
+                for (root, mode) in failed_roots.drain(..) {
                     if should_stop() {
                         return Ok(());
                     }
-                    match watcher.watch(&root, RecursiveMode::Recursive) {
+                    match watcher.watch(&root, mode) {
                         Ok(()) => recovered = true,
                         Err(error) => {
                             warn!(%error, root = %root.display(), "failed to retry Local music folder");
-                            still_failed.push(root);
+                            still_failed.push((root, mode));
                         }
                     }
                 }
@@ -232,12 +241,24 @@ fn wait_for_message(
     }
 }
 
-fn ordered_roots(roots: Vec<PathBuf>) -> Vec<PathBuf> {
-    let mut seen = HashSet::new();
-    roots
-        .into_iter()
-        .filter(|root| seen.insert(root.clone()))
-        .collect()
+fn watch_targets(roots: &[PathBuf]) -> std::collections::BTreeMap<PathBuf, RecursiveMode> {
+    let mut targets = std::collections::BTreeMap::new();
+    for root in roots {
+        let (path, mode) = if root.is_file() {
+            (root.parent().unwrap_or(root), RecursiveMode::NonRecursive)
+        } else {
+            (root.as_path(), RecursiveMode::Recursive)
+        };
+        targets
+            .entry(path.to_path_buf())
+            .and_modify(|existing| {
+                if mode == RecursiveMode::Recursive {
+                    *existing = mode;
+                }
+            })
+            .or_insert(mode);
+    }
+    targets
 }
 
 fn feed_error(error: notify::Error) -> SourceError {

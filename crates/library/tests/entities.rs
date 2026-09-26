@@ -241,7 +241,7 @@ async fn named_card_batches_preserve_requested_rows_and_scoped_cover_order() {
     drop(raw);
     let cancel = ReadCancellation::new();
     for (folder, covers, count) in [
-        (None, vec![vec![2], vec![1]], 4),
+        (None, vec![vec![1], vec![2]], 4),
         (Some(fixture.folder), vec![vec![1]], 2),
     ] {
         let genres = fixture

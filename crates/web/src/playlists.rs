@@ -83,6 +83,10 @@ pub(super) fn routes() -> Router<ProductHandles> {
         )
         .route("/api/playlists/import", post(import_file))
         .route("/api/playlists/export", post(export_file))
+        .route(
+            "/api/playlists/remove-unavailable",
+            post(remove_unavailable),
+        )
         .route("/api/playlists/public", get(public))
         .route(
             "/api/playlists",
@@ -99,6 +103,18 @@ pub(super) fn routes() -> Router<ProductHandles> {
                 .delete(remove_entries)
                 .patch(move_entry),
         )
+}
+
+async fn remove_unavailable(
+    State(products): State<ProductHandles>,
+    Query(parameters): Query<HashMap<String, String>>,
+) -> Result<Response<Body>, Error> {
+    let removed = completion(rufin_core::playlists::remove_unavailable_tracks(
+        &products.source,
+        key(&parameters, "id")?,
+    ))
+    .await?;
+    Ok(json_response(StatusCode::OK, json!({"removed": removed})))
 }
 
 async fn source_file_settings(
@@ -355,7 +371,7 @@ pub(super) async fn list_data(
         .map_err(internal)?;
     let total = catalog::page_total(products, parameters, "playlists").await?;
     Ok(
-        json!({"total":total,"offset":offset,"limit":limit,"playlists":rows.iter().map(|row| json!({"id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"metadata_writable":row.metadata_writable,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":rufin_core::playlists::playlist_artwork_bindings(row).len()})).collect::<Vec<_>>()}),
+        json!({"total":total,"offset":offset,"limit":limit,"playlists":rows.iter().map(|row| json!({"id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"metadata_writable":row.metadata_writable,"can_remove_unavailable":rufin_core::playlists::can_remove_unavailable(&products.source, row),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":rufin_core::playlists::playlist_artwork_bindings(row).len()})).collect::<Vec<_>>()}),
     )
 }
 

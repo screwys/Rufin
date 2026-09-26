@@ -2,7 +2,7 @@ use adw::prelude::*;
 use downloads::DownloadSubject;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gio, glib};
-use gtk_widgets::downloads::{OperationFeedback, OperationFeedbackKind};
+use gtk_widgets::downloads::{OperationArtwork, OperationFeedback, OperationFeedbackKind};
 use gtk_widgets::interactions::popdown_native_menu;
 use gtk_widgets::library_fields::playlist_artwork;
 use localization::tr;
@@ -141,7 +141,7 @@ pub fn populate_context_playlist_picker(
                 if accepted > 0 {
                     feedback(&OperationFeedback {
                         subject: subject.clone(),
-                        preview_uris: preview_uris.clone(),
+                        artwork: OperationArtwork::MediaUris(preview_uris.clone()),
                         item_count: accepted,
                         kind: OperationFeedbackKind::PlaylistAdded {
                             destination: destination.clone(),
@@ -284,7 +284,7 @@ pub fn playlist_picker_dialog(
                         };
                         feedback(&OperationFeedback {
                             subject: feedback_subject.clone(),
-                            preview_uris: preview_uris.clone(),
+                            artwork: OperationArtwork::MediaUris(preview_uris.clone()),
                             item_count: accepted.get(),
                             kind: OperationFeedbackKind::PlaylistAdded { destination },
                         });

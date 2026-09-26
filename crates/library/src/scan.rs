@@ -140,6 +140,32 @@ pub struct LocalArtworkCandidate {
 }
 
 impl Scan {
+    /// Save the selected files as playlist entries without retaining a folder inventory.
+    pub async fn create_local_playlist(&mut self, name: &str) -> LibraryResult<crate::PlaylistKey> {
+        let mut writer = self.database.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut transaction = connection.begin().await?;
+        let (playlist, _) =
+            crate::playlists::create_playlist_identity(&mut transaction, None, name).await?;
+        sqlx::query("INSERT INTO main.playlist_entries(
+            playlist_key,object_id,media_uri,title,artist,album,album_display_artist,
+            duration_millis,disc_number,track_number,year,release_date,source_format,
+            musicbrainz_recording_id,musicbrainz_release_track_id,position)
+            SELECT ?1,'rufin:entry:'||lower(hex(randomblob(16))),track.media_uri,
+                track.title,track.display_artist,track.display_album,album.display_artist,
+                track.duration_millis,track.disc_number,track.track_number,track.year,
+                track.release_date,track.source_format,track.musicbrainz_recording_id,
+                track.musicbrainz_release_track_id,
+                row_number() OVER (ORDER BY coalesce(track.cue_path,track.source_path),track.disc_number,track.track_number,track.object_id)-1
+            FROM temp.scan_tracks track LEFT JOIN temp.scan_albums album ON album.object_id=track.album_object_id
+            WHERE EXISTS(SELECT 1 FROM temp.scan_local_files file WHERE file.path=coalesce(track.cue_path,track.source_path))")
+            .bind(playlist).execute(&mut *transaction).await?;
+        sqlx::raw_sql("DELETE FROM temp.scan_local_files; DELETE FROM temp.scan_local_file_dependencies; DELETE FROM temp.scan_local_dependency_paths;")
+            .execute(&mut *transaction).await?;
+        transaction.commit().await?;
+        Ok(playlist)
+    }
+
     pub fn source_id(&self) -> &str {
         &self.source_id
     }
@@ -264,6 +290,12 @@ impl Scan {
         )
         .await?;
         scan.point_update = true;
+        Ok(scan)
+    }
+
+    pub async fn begin_local_items(database: &Database, source_id: &str) -> LibraryResult<Self> {
+        let mut scan = Self::begin_items(database, source_id).await?;
+        scan.local_point_update = true;
         Ok(scan)
     }
 
@@ -396,6 +428,20 @@ impl Scan {
             self.stage(sqlx::query(sql)).await?;
         }
         Ok(())
+    }
+
+    pub async fn staged_media_uris(&self, uris: &[&str]) -> LibraryResult<Vec<String>> {
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT media_uri FROM temp.scan_tracks WHERE media_uri IN (",
+        );
+        let mut values = query.separated(",");
+        for uri in uris {
+            values.push_bind(uri);
+        }
+        values.push_unseparated(")");
+        let mut writer = self.database.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        Ok(query.build_query_scalar().fetch_all(connection).await?)
     }
 
     pub async fn local_track_file(
@@ -1515,6 +1561,16 @@ impl Scan {
         self.retain_local_tracks("track.cue_path=?2", path).await
     }
 
+    pub async fn retain_connected_file_tracks(&mut self) -> LibraryResult<()> {
+        self.retain_local_tracks_where(
+            "track.source_path IS NULL AND EXISTS(
+                SELECT 1 FROM main.connect_collection received WHERE received.media_uri=track.media_uri)
+             AND NOT EXISTS(SELECT 1 FROM temp.scan_tracks staged WHERE staged.object_id=track.object_id)",
+            None,
+        )
+        .await
+    }
+
     async fn retain_local_tracks(
         &mut self,
         predicate: &'static str,
@@ -2107,10 +2163,8 @@ impl Scan {
         }
         user_changed |= publish_activity_baseline(&mut transaction, source).await?;
         metadata_changed |= publish_source_loudness(&mut transaction, source, full).await?;
-        if self.local_point_update
-            && (metadata_changed || user_changed || home_changed || playlists_changed)
-        {
-            prune_local_orphans(&mut transaction, source).await?;
+        if self.local_point_update {
+            metadata_changed |= prune_local_orphans(&mut transaction, source).await?;
         }
         publish_local_files(&mut transaction, source, full).await?;
         publish_playlist_freshness(&mut transaction, source).await?;
@@ -2118,6 +2172,14 @@ impl Scan {
             || current.display_name != self.display_name
             || current.normalized_name != self.normalized_name;
         let changed = metadata_changed || user_changed || home_changed || playlists_changed;
+        if full {
+            sqlx::query(
+                "UPDATE sources SET catalog_complete=1 WHERE source_key=?1 AND catalog_complete=0",
+            )
+            .bind(source)
+            .execute(&mut *transaction)
+            .await?;
+        }
         let freshness = if !self.point_update {
             self.freshness.as_ref().map(Freshness::as_bytes)
         } else if metadata_changed {
@@ -3362,7 +3424,8 @@ async fn publish_local_files(
 async fn prune_local_orphans(
     transaction: &mut Transaction<'_, Sqlite>,
     source_key: i64,
-) -> LibraryResult<()> {
+) -> LibraryResult<bool> {
+    let mut changed = false;
     for sql in [
         "DELETE FROM albums WHERE source_key=?1 AND NOT EXISTS (SELECT 1 FROM tracks WHERE tracks.album_key=albums.album_key)",
         "DELETE FROM artists WHERE source_key=?1 AND NOT EXISTS (SELECT 1 FROM track_artists WHERE track_artists.artist_key=artists.artist_key) AND NOT EXISTS (SELECT 1 FROM album_artists WHERE album_artists.artist_key=artists.artist_key)",
@@ -3370,12 +3433,14 @@ async fn prune_local_orphans(
         "DELETE FROM moods WHERE source_key=?1 AND NOT EXISTS (SELECT 1 FROM track_moods WHERE track_moods.mood_key=moods.mood_key)",
         "DELETE FROM folders WHERE source_key=?1 AND NOT EXISTS (SELECT 1 FROM track_folders WHERE track_folders.folder_key=folders.folder_key)",
     ] {
-        sqlx::query(sql)
+        changed |= sqlx::query(sql)
             .bind(source_key)
             .execute(&mut **transaction)
-            .await?;
+            .await?
+            .rows_affected()
+            > 0;
     }
-    Ok(())
+    Ok(changed)
 }
 
 async fn publish_ratings(connection: &mut SqliteConnection, source: i64) -> LibraryResult<bool> {

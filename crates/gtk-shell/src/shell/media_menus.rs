@@ -91,6 +91,14 @@ pub(super) fn build(
                 }
             })
         },
+        show_error: {
+            let weak = weak.clone();
+            Rc::new(move |error| {
+                if let Some(shell) = weak.upgrade() {
+                    shell.control_feedback.show_feedback_toast(error);
+                }
+            })
+        },
         picker_target: {
             let weak = weak.clone();
             Rc::new(move |surface, target| {

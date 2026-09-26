@@ -870,6 +870,15 @@ function bindCards(host) {
       const pin = pinAction(kind, row, row.source ?? state.source);
       if (pin) actions.push(pin);
       if (kind === "playlist") actions.push([tr("Export Playlist"), () => openPlaylistTransfer(row), "export"]);
+      if (kind === "playlist" && row.can_remove_unavailable)
+        actions.push([
+          tr("Remove unavailable tracks"),
+          async () => {
+            const result = await api(`/playlists/remove-unavailable?id=${row.id}`, "POST");
+            if (result.removed) await loadView();
+          },
+          "trash",
+        ]);
       if (row.metadata_writable)
         actions.push(
           [tr("Edit"), () => openName(row)],

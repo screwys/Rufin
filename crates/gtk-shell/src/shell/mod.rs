@@ -2,6 +2,7 @@ mod activity;
 pub(crate) mod build;
 pub(crate) mod chrome;
 mod diagnostics;
+mod drop_import;
 pub(crate) mod layout;
 pub(crate) mod navigation;
 mod topbar;

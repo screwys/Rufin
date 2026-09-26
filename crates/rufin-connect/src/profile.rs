@@ -424,6 +424,7 @@ impl ProfileStore {
     }
 
     async fn export_documents(&self, file: File, setup: bool, peer: Option<&str>) -> Result<()> {
+        self.compress_documents(setup).await?;
         let mut output = tokio::task::spawn_blocking(move || -> Result<_> {
             let mut output = BufWriter::new(file);
             let mut header = GzEncoder::new(&mut output, Compression::default());
@@ -457,8 +458,7 @@ impl ProfileStore {
             // Reuse unchanged gzip members. Concatenating them preserves the
             // portable snapshot stream without serializing the catalog again.
             let mut author = author.take();
-            let (writer, encoded) = tokio::task::spawn_blocking(move || -> Result<_> {
-                let mut encoded = Vec::new();
+            output = tokio::task::spawn_blocking(move || -> Result<_> {
                 for row in rows {
                     let cached: Option<Vec<u8>> = row.get(2);
                     if author.is_none()
@@ -482,29 +482,10 @@ impl ProfileStore {
                     compressed.write_all(b"\n")?;
                     let compressed = compressed.finish()?;
                     output.write_all(&compressed)?;
-                    if update.author.is_none() {
-                        encoded.push((update.document, update.bytes, compressed));
-                    }
                 }
-                Ok((output, encoded))
+                Ok(output)
             })
             .await??;
-            output = writer;
-            if !encoded.is_empty() {
-                let mut connection = self.connection.lock().await;
-                let mut transaction = connection.begin().await?;
-                for (name, snapshot, compressed) in encoded {
-                    // An edit or pruning may have changed this document while
-                    // the export's read transaction kept its previous snapshot.
-                    sqlx::query("UPDATE documents SET compressed=?3 WHERE name=?1 AND snapshot=?2")
-                        .bind(name)
-                        .bind(snapshot)
-                        .bind(compressed)
-                        .execute(&mut *transaction)
-                        .await?;
-                }
-                transaction.commit().await?;
-            }
         }
         tokio::task::spawn_blocking(move || -> Result<()> {
             let mut end = GzEncoder::new(&mut output, Compression::default());
@@ -516,6 +497,53 @@ impl ProfileStore {
         })
         .await??;
         snapshot.commit().await?;
+        Ok(())
+    }
+
+    // Fill the cache before pinning the export's read snapshot. Writing compressed
+    // copies during that snapshot prevents WAL checkpoints until the export ends.
+    async fn compress_documents(&self, setup: bool) -> Result<()> {
+        let mut cursor = String::new();
+        loop {
+            let rows = {
+                let mut connection = self.connection.lock().await;
+                sqlx::query("SELECT name,snapshot FROM documents WHERE compressed IS NULL AND name>?1 AND (?3=0 OR substr(name,1,instr(name,':')-1) IN ('source','integration','root','preference','scrobbling','device','connect_key','connect_network','connect_storage')) AND (?3=1 OR name<=coalesce((SELECT min(name) FROM documents WHERE compressed IS NULL AND name>?1 AND name GLOB 'playlist_artwork:*'),char(1114111))) ORDER BY name LIMIT ?2")
+                    .bind(&cursor).bind(CONNECT_PAGE_SIZE as i64).bind(setup)
+                    .fetch_all(&mut *connection).await?
+            };
+            if rows.is_empty() {
+                break;
+            }
+            cursor = rows.last().unwrap().get(0);
+            let encoded = tokio::task::spawn_blocking(move || -> Result<_> {
+                rows.into_iter()
+                    .map(|row| {
+                        let update = Update {
+                            version: FORMAT,
+                            document: row.get(0),
+                            bytes: row.get(1),
+                            author: None,
+                        };
+                        let mut compressed = GzEncoder::new(Vec::new(), Compression::default());
+                        serde_json::to_writer(&mut compressed, &update)?;
+                        compressed.write_all(b"\n")?;
+                        Ok((update.document, update.bytes, compressed.finish()?))
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })
+            .await??;
+            let mut connection = self.connection.lock().await;
+            let mut transaction = connection.begin().await?;
+            for (name, snapshot, compressed) in encoded {
+                sqlx::query("UPDATE documents SET compressed=?3 WHERE name=?1 AND snapshot=?2")
+                    .bind(name)
+                    .bind(snapshot)
+                    .bind(compressed)
+                    .execute(&mut *transaction)
+                    .await?;
+            }
+            transaction.commit().await?;
+        }
         Ok(())
     }
 
@@ -855,6 +883,7 @@ async fn index_documents(connection: &mut SqliteConnection) -> Result<()> {
         DROP TABLE IF EXISTS outgoing;
         DROP INDEX IF EXISTS documents_sync_priority;
         CREATE TRIGGER IF NOT EXISTS documents_compressed_changed AFTER UPDATE OF snapshot ON documents BEGIN UPDATE documents SET compressed=NULL WHERE name=NEW.name; END;
+        CREATE INDEX IF NOT EXISTS documents_uncompressed ON documents(name) WHERE compressed IS NULL;
         CREATE INDEX IF NOT EXISTS documents_revision ON documents(revision,name);",
     )
     .execute(&mut *transaction)

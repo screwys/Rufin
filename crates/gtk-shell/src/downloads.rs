@@ -1,4 +1,4 @@
-use gtk_widgets::downloads::{OperationFeedback, OperationFeedbackKind};
+use gtk_widgets::downloads::{OperationArtwork, OperationFeedback, OperationFeedbackKind};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -32,7 +32,7 @@ impl Shell {
             DownloadEvent::Feedback(feedback) => {
                 self.show_operation_feedback(&OperationFeedback {
                     subject: feedback.subject,
-                    preview_uris: feedback.preview_uris,
+                    artwork: OperationArtwork::MediaUris(feedback.preview_uris),
                     item_count: feedback.item_count,
                     kind: match feedback.kind {
                         DownloadFeedbackKind::Started => OperationFeedbackKind::DownloadStarted,
@@ -72,15 +72,20 @@ impl Shell {
         while let Some(child) = self.chrome.operation_feedback_artwork.first_child() {
             self.chrome.operation_feedback_artwork.remove(&child);
         }
-        self.chrome
-            .operation_feedback_artwork
-            .append(&gtk_widgets::downloads::media_artwork(
+        let artwork = match &feedback.artwork {
+            OperationArtwork::MediaUris(uris) => gtk_widgets::downloads::media_artwork(
                 &self.artwork,
                 &self.products.library,
                 &self.products.runtime,
-                &feedback.preview_uris,
+                uris,
                 48,
-            ));
+            ),
+            OperationArtwork::Bindings(bindings) => self
+                .artwork
+                .cover_group_projection_for_artwork(bindings, 48, 48)
+                .widget(),
+        };
+        self.chrome.operation_feedback_artwork.append(&artwork);
         self.chrome.operation_feedback_title.set_text(&title);
         self.chrome.operation_feedback_subtitle.set_visible(true);
         self.chrome.operation_feedback_subtitle.set_text(&subtitle);

@@ -284,7 +284,7 @@ CREATE INDEX IF NOT EXISTS local_locators_precedence_idx ON local_locators(media
 "#;
 pub(crate) const CATALOG_SCHEMA: &str = r#"PRAGMA application_id = 1381320270;
 
-PRAGMA user_version = 49;
+PRAGMA user_version = 50;
 
 CREATE TABLE IF NOT EXISTS sources (
     source_key INTEGER PRIMARY KEY,
@@ -292,7 +292,8 @@ CREATE TABLE IF NOT EXISTS sources (
     display_name TEXT NOT NULL, normalized_name TEXT NOT NULL, freshness BLOB,
     artwork_digest BLOB NOT NULL CHECK (length(artwork_digest) = 32),
     distinct_track_covers INTEGER NOT NULL DEFAULT 0 CHECK (distinct_track_covers IN (0,1)),
-    catalog_revision INTEGER NOT NULL DEFAULT 0 CHECK (catalog_revision >= 0)
+    catalog_revision INTEGER NOT NULL DEFAULT 0 CHECK (catalog_revision >= 0),
+    catalog_complete INTEGER NOT NULL DEFAULT 0 CHECK (catalog_complete IN (0,1))
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS albums (
@@ -734,6 +735,8 @@ pub(crate) async fn initialize_catalog(connection: &mut SqliteConnection) -> Lib
 }
 
 async fn initialize(connection: &mut SqliteConnection, schema: &'static str) -> LibraryResult<()> {
+    let upgrade_catalog_complete =
+        schema == CATALOG_SCHEMA && pragma(connection, "user_version").await? < 50;
     let upgrade_artist_artwork =
         schema == CATALOG_SCHEMA && pragma(connection, "user_version").await? < 48;
     let upgrade_playlist_permissions =
@@ -773,6 +776,11 @@ async fn initialize(connection: &mut SqliteConnection, schema: &'static str) -> 
         }
     }
     sqlx::raw_sql(schema).execute(&mut *transaction).await?;
+    if upgrade_catalog_complete {
+        sqlx::query("UPDATE sources SET catalog_complete=1 WHERE freshness IS NOT NULL")
+            .execute(&mut *transaction)
+            .await?;
+    }
     if upgrade_playlist_permissions {
         sqlx::query("UPDATE native_playlists SET metadata_writable=writable")
             .execute(&mut *transaction)

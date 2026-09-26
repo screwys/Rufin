@@ -29,7 +29,7 @@ pub(crate) async fn publish_metadata_paths(
     removed_album: Option<&str>,
     removed_artist: Option<&str>,
 ) -> SourceResult<library::ScanOutcome> {
-    let mut scan = Scan::begin_items(database, source_id).await?;
+    let mut scan = Scan::begin_local_items(database, source_id).await?;
     scan.begin_batch().await?;
     if let Some(album) = removed_album {
         scan.remove_album(album).await?;
@@ -82,12 +82,19 @@ pub(crate) async fn catch_up(
     progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
     cancelled: &(dyn Fn() -> bool + Send + Sync),
 ) -> SourceResult<library::ScanOutcome> {
-    let roots = local.roots();
-    for root in roots.iter().filter(|root| !local.excludes(root)) {
+    let roots = &local
+        .roots()
+        .iter()
+        .map(PathBuf::as_path)
+        .collect::<BTreeSet<_>>();
+    for root in roots
+        .iter()
+        .filter(|root| !local.excludes(root) && !root.is_file())
+    {
         fs::read_dir(root)
             .map_err(|error| SourceError::Other(format!("{}: {error}", root.display())))?;
     }
-    let mut scan = Scan::begin_items(database, source_id).await?;
+    let mut scan = Scan::begin_local_items(database, source_id).await?;
     let mut after = None;
     let mut completed = 0_usize;
     let mut changed = false;
@@ -170,14 +177,18 @@ pub(crate) async fn publish_paths(
     paths: &[PathBuf],
     rename: Option<&(PathBuf, PathBuf)>,
 ) -> SourceResult<library::ScanOutcome> {
-    let roots = local.roots();
+    let roots = &local
+        .roots()
+        .iter()
+        .map(PathBuf::as_path)
+        .collect::<BTreeSet<_>>();
     let paths = paths
         .iter()
         .map(|path| normalize_observed_path(path))
         .filter(|path| !local.excludes(path))
         .collect::<Vec<_>>();
     if paths.is_empty() {
-        return Ok(Scan::begin_items(database, source_id)
+        return Ok(Scan::begin_local_items(database, source_id)
             .await?
             .finish()
             .await?);
@@ -188,6 +199,7 @@ pub(crate) async fn publish_paths(
         .iter()
         .filter(|root| !local.excludes(root))
         .filter(|root| paths.iter().any(|path| path.starts_with(root)))
+        .filter(|root| !root.is_file())
     {
         fs::read_dir(root)
             .map_err(|error| SourceError::Other(format!("{}: {error}", root.display())))?;
@@ -205,7 +217,7 @@ pub(crate) async fn publish_paths(
     let artwork_only = paths
         .iter()
         .all(|path| crate::file::artwork::supported_image(path));
-    let mut scan = Scan::begin_items(database, source_id).await?;
+    let mut scan = Scan::begin_local_items(database, source_id).await?;
     stage_component_paths(&mut scan, source, local, &paths, &seeds, &|| false).await?;
     stage_component(
         database,
@@ -327,7 +339,7 @@ async fn stage_component_path_page(
 async fn stage_component(
     database: &library::Database,
     source: library::SourceKey,
-    roots: &[PathBuf],
+    roots: &BTreeSet<&Path>,
     scan: &mut Scan,
     artwork_only: bool,
     rename: Option<&(PathBuf, PathBuf)>,
@@ -450,7 +462,7 @@ async fn stage_component(
 
 async fn stage_exact_cue(
     database: &library::Database,
-    roots: &[PathBuf],
+    roots: &BTreeSet<&Path>,
     scan: &mut Scan,
     path: &Path,
     retain_unreadable: bool,
@@ -553,7 +565,45 @@ pub(crate) async fn stage_catalog(
     cancelled: &(dyn Fn() -> bool + Send + Sync),
     reuse_unchanged: bool,
 ) -> SourceResult<()> {
-    let roots = local.roots();
+    stage_roots(database, local, scan, progress, cancelled, reuse_unchanged).await?;
+    stage_imported_paths(database, scan, None).await?;
+    crate::file::artwork::ArtworkFiles::Local
+        .stage(database, scan, cancelled)
+        .await?;
+    scan.retain_connected_file_tracks().await?;
+    Ok(())
+}
+
+pub(crate) async fn import_paths(
+    database: &library::Database,
+    source_id: &str,
+    paths: Vec<PathBuf>,
+    name: &str,
+    progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+) -> SourceResult<(library::PlaylistKey, library::ScanOutcome)> {
+    let local = LocalSource::from_roots(paths)?;
+    let mut scan = Scan::begin_local_items(database, source_id).await?;
+    stage_roots(database, &local, &mut scan, progress, &|| false, true).await?;
+    crate::file::artwork::ArtworkFiles::Local
+        .stage(database, &mut scan, &|| false)
+        .await?;
+    let playlist = scan.create_local_playlist(name).await?;
+    Ok((playlist, scan.finish().await?))
+}
+
+async fn stage_roots(
+    database: &library::Database,
+    local: &LocalSource,
+    scan: &mut Scan,
+    progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+    cancelled: &(dyn Fn() -> bool + Send + Sync),
+    reuse_unchanged: bool,
+) -> SourceResult<()> {
+    let roots = &local
+        .roots()
+        .iter()
+        .map(PathBuf::as_path)
+        .collect::<BTreeSet<_>>();
     let mut observations = Vec::with_capacity(LOCAL_BATCH_SIZE);
     let mut completed = 0_usize;
     for root in roots.iter().filter(|root| !local.excludes(root)) {
@@ -696,17 +746,13 @@ pub(crate) async fn stage_catalog(
         completed: parsed,
         total: Some(parsed),
     });
-    stage_imported_paths(database, scan).await?;
-    crate::file::artwork::ArtworkFiles::Local
-        .stage(database, scan, cancelled)
-        .await?;
     Ok(())
 }
 
 async fn unchanged_cue(
     database: &library::Database,
     scan: &Scan,
-    roots: &[PathBuf],
+    roots: &BTreeSet<&Path>,
     path: &Path,
 ) -> SourceResult<Option<Vec<String>>> {
     let observation = file_observation(
@@ -732,7 +778,7 @@ async fn unchanged_cue(
 async fn retained_cue_dependencies(
     database: &library::Database,
     scan: &Scan,
-    roots: &[PathBuf],
+    roots: &BTreeSet<&Path>,
     path: &Path,
 ) -> SourceResult<Vec<String>> {
     let observation = file_observation(
@@ -770,7 +816,7 @@ async fn cached_cue(
 
 async fn stage_audio_batch(
     database: &library::Database,
-    roots: &[PathBuf],
+    roots: &BTreeSet<&Path>,
     scan: &mut Scan,
     paths: &[PathBuf],
     cancelled: &(dyn Fn() -> bool + Send + Sync),
@@ -982,7 +1028,7 @@ struct PathReuse {
 async fn path_reuse(
     database: &library::Database,
     scan: &Scan,
-    roots: &[PathBuf],
+    roots: &BTreeSet<&Path>,
     paths: &[PathBuf],
     explicit_rename: Option<&(PathBuf, PathBuf)>,
 ) -> SourceResult<PathReuse> {
@@ -1111,17 +1157,16 @@ fn read_cue_tracks(
 }
 
 fn file_observation(
-    roots: &[PathBuf],
+    roots: &BTreeSet<&Path>,
     path: &Path,
     kind: library::LocalFileKind,
     state: library::LocalFileState,
     dependencies: &[String],
 ) -> SourceResult<(library::LocalFileWrite, Vec<String>)> {
     let metadata = fs::metadata(path).ok();
-    let root = roots
-        .iter()
-        .filter(|root| path.starts_with(root))
-        .max_by_key(|root| root.components().count())
+    let root = path
+        .ancestors()
+        .find(|ancestor| roots.contains(ancestor))
         .ok_or(SourceError::NotFound)?;
     let relative_path = path
         .strip_prefix(root)
@@ -1214,26 +1259,49 @@ fn check_cancelled(cancelled: &(dyn Fn() -> bool + Send + Sync)) -> SourceResult
 pub(crate) async fn stage_imported_paths(
     database: &library::Database,
     scan: &mut Scan,
+    playlist: Option<library::PlaylistKey>,
 ) -> SourceResult<()> {
     let mut after = String::new();
     let mut worker = media::Worker::default();
     loop {
-        let paths = database
-            .imported_local_path_page(scan.source_id(), &after)
-            .await?;
-        if paths.is_empty() {
+        let uris = database.imported_local_uri_page(playlist, &after).await?;
+        if uris.is_empty() {
             break;
         }
-        after = paths.last().unwrap().clone();
-        let tracks = paths
+        after = uris.last().unwrap().0.clone();
+        let staged = scan
+            .staged_media_uris(&uris.iter().map(|(uri, _)| uri.as_str()).collect::<Vec<_>>())
+            .await?
             .into_iter()
-            .filter_map(
-                |path| match read_media(&mut worker, PathBuf::from(path), None) {
-                    MediaRead::Accepted(track) => Some(*track),
-                    _ => None,
-                },
-            )
-            .collect::<Vec<_>>();
+            .collect::<BTreeSet<_>>();
+        let mut tracks = Vec::new();
+        let mut cue_tracks = BTreeMap::new();
+        let mut cue_path = None;
+        for (uri, cue) in uris.into_iter().filter(|(uri, _)| !staged.contains(uri)) {
+            if let Some(path) = cue.map(PathBuf::from) {
+                if cue_path.as_ref() != Some(&path) {
+                    cue_tracks.clear();
+                    if let CueRead::Accepted(sheet) = read_cue(&path)
+                        && let Some(cues) = read_cue_tracks(&mut worker, &path, sheet)
+                    {
+                        cue_tracks.extend(cues.into_iter().map(|track| (track.id.clone(), track)));
+                    }
+                    cue_path = Some(path);
+                }
+                if let Some((identity, _, _, _)) = library::cue_media_parts(&uri)
+                    && let Some(track) = cue_tracks.remove(&identity)
+                {
+                    tracks.push(track);
+                }
+            } else if let Some(path) = library::file_media_path(&uri)
+                && let MediaRead::Accepted(mut track) = read_media(&mut worker, path, None)
+            {
+                if let Some((id, _)) = scan.local_track_file(&uri).await? {
+                    track.id = id;
+                }
+                tracks.push(*track);
+            }
+        }
         scan.begin_batch().await?;
         stage_audio_tracks_batch(scan, &tracks).await?;
         scan.finish_batch().await?;

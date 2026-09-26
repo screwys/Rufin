@@ -87,7 +87,9 @@ pub(super) fn add_current_to_playlist(
             {
                 shell.show_operation_feedback(&gtk_widgets::downloads::OperationFeedback {
                     subject: subject.clone(),
-                    preview_uris: preview_uris.clone(),
+                    artwork: gtk_widgets::downloads::OperationArtwork::MediaUris(
+                        preview_uris.clone(),
+                    ),
                     item_count: accepted,
                     kind: gtk_widgets::downloads::OperationFeedbackKind::PlaylistAdded {
                         destination: destination.clone(),
