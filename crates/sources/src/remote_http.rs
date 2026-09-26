@@ -118,6 +118,20 @@ pub async fn unit(request: reqwest::RequestBuilder, policy: RemoteHttpPolicy) ->
     Ok(())
 }
 
+pub async fn unit_with_header(
+    request: reqwest::RequestBuilder,
+    policy: RemoteHttpPolicy,
+    header: &header::HeaderName,
+) -> SourceResult<Option<String>> {
+    let checked = checked_response(request, policy).await?;
+    Ok(checked
+        .response
+        .headers()
+        .get(header)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string))
+}
+
 pub async fn bytes(
     request: reqwest::RequestBuilder,
     policy: RemoteHttpPolicy,

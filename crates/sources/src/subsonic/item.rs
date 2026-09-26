@@ -563,6 +563,11 @@ fn normalized_timestamp(value: Option<String>) -> Option<String> {
 
 pub(super) fn playlist_from_json(source: &SubsonicSource, playlist: &Value) -> Option<Playlist> {
     let raw_id = json::id(&playlist["id"])?;
+    let writable = !json::boolean(&playlist["readonly"]).unwrap_or(false);
+    // Navidrome's readonly also covers owned playlists with file-managed or smart tracks.
+    let metadata_writable = writable
+        || (source.flavor == SubsonicFlavor::Navidrome
+            && playlist["owner"].as_str() == Some(source.username.as_str()));
     Some(Playlist {
         id: String::from(source.id("playlist", &raw_id)),
         name: json::field(playlist, "name").unwrap_or_else(|| "Untitled Playlist".to_string()),
@@ -571,7 +576,8 @@ pub(super) fn playlist_from_json(source: &SubsonicSource, playlist: &Value) -> O
         track_count: json::items(&playlist["entry"]).len(),
         revision: json::field::<String>(playlist, "changed").filter(|value| !value.is_empty()),
         valid_until: crate::policy::unix_seconds(json::field(playlist, "validUntil")),
-        writable: !json::boolean(&playlist["readonly"]).unwrap_or(false),
+        writable,
+        metadata_writable,
     })
 }
 
@@ -592,6 +598,6 @@ pub(super) async fn stage_playlist_header(
         artwork.as_deref(),
     )
     .await?;
-    scan.write_playlist_writable(&playlist.id, playlist.writable)
+    scan.write_playlist_permissions(&playlist.id, playlist.writable, playlist.metadata_writable)
         .await
 }

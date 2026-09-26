@@ -4,9 +4,9 @@
   <requires lib="libadwaita" version="1.9"/>
 
   <object class="AdwDialog" id="dialog">
-    <property name="content-height">510</property>
+    <property name="follows-content-size">true</property>
     <property name="child">
-      <object class="AdwToolbarView">
+      <object class="AdwToolbarView" id="toolbar">
         <child type="top">
           <object class="AdwHeaderBar">
             <property name="title-widget">
@@ -21,10 +21,27 @@
               <object class="GtkScrolledWindow" id="scroller">
                 <property name="hscrollbar-policy">never</property>
                 <property name="vscrollbar-policy">automatic</property>
-                <property name="max-content-height">510</property>
+                <property name="propagate-natural-height">true</property>
+                <property name="propagate-natural-width">true</property>
+                <property name="max-content-width">1000</property>
                 <property name="vexpand">true</property>
                 <property name="child">
-                  <object class="GtkBox" id="content">
+                  <object class="GtkBox" id="editor_content">
+                    <property name="orientation">vertical</property>
+                    <property name="margin-start">18</property>
+                    <property name="margin-end">18</property>
+                    <child><object class="GtkBox" id="editor_layout">
+                      <property name="spacing">18</property>
+                      <child><object class="GtkBox" id="artwork_host">
+                        <property name="hexpand">true</property>
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">8</property>
+                        <property name="valign">start</property>
+                        <property name="visible">false</property>
+                      </object></child>
+                      <child>
+                  <object class="GtkBox" id="rules_column">
+                    <property name="hexpand">true</property>
                     <property name="orientation">vertical</property>
                     <property name="spacing">14</property>
                     <property name="margin-top">4</property>
@@ -58,84 +75,6 @@
                       </object>
                     </child>
                     <child><object class="GtkEntry" id="name_entry"><property name="placeholder-text" translatable="yes">Playlist name</property></object></child>
-                    <child>
-                      <object class="GtkBox" id="settings">
-                        <property name="orientation">horizontal</property>
-                        <property name="spacing">8</property>
-                        <child>
-                          <object class="GtkBox">
-                            <property name="orientation">vertical</property>
-                            <property name="spacing">4</property>
-                            <child>
-                              <object class="GtkLabel" id="sort_label">
-                                <property name="label" translatable="yes">Sort</property>
-                                <property name="xalign">0</property>
-                                <style><class name="muted"/></style>
-                              </object>
-                            </child>
-                            <child><object class="GtkDropDown" id="sort"/></child>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="GtkBox">
-                            <property name="orientation">vertical</property>
-                            <property name="spacing">4</property>
-                            <child>
-                              <object class="GtkLabel" id="direction_label">
-                                <property name="label" translatable="yes">Direction</property>
-                                <property name="xalign">0</property>
-                                <style><class name="muted"/></style>
-                              </object>
-                            </child>
-                            <child><object class="GtkCheckButton" id="descending"><property name="label" translatable="yes">Descending</property></object></child>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="GtkBox">
-                            <property name="orientation">vertical</property>
-                            <property name="spacing">4</property>
-                            <child>
-                              <object class="GtkLabel" id="activity_label">
-                                <property name="label" translatable="yes">Activity</property>
-                                <property name="xalign">0</property>
-                                <style><class name="muted"/></style>
-                              </object>
-                            </child>
-                            <child><object class="GtkDropDown" id="activity_period"/></child>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="GtkBox">
-                            <property name="orientation">vertical</property>
-                            <property name="spacing">4</property>
-                            <child>
-                              <object class="GtkLabel" id="limit_label">
-                                <property name="label" translatable="yes">Limit</property>
-                                <property name="xalign">0</property>
-                                <style><class name="muted"/></style>
-                              </object>
-                            </child>
-                            <child>
-                              <object class="GtkEntry" id="limit">
-                                <property name="placeholder-text" translatable="yes">No limit</property>
-                                <property name="width-chars">8</property>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="GtkToggleButton" id="owner">
-                            <property name="hexpand">true</property>
-                            <property name="halign">end</property>
-                            <property name="valign">end</property>
-                            <style>
-                              <class name="flat"/>
-                              <class name="circular"/>
-                            </style>
-                          </object>
-                        </child>
-                      </object>
-                    </child>
                     <child>
                       <object class="GtkBox" id="rules">
                         <property name="orientation">vertical</property>
@@ -195,6 +134,97 @@
                         </child>
                       </object>
                     </child>
+                    <child>
+                      <object class="AdwWrapBox" id="settings">
+                        <property name="child-spacing">8</property>
+                        <property name="line-spacing">8</property>
+                        <child>
+                          <object class="GtkBox">
+                            <property name="orientation">vertical</property>
+                            <property name="spacing">4</property>
+                            <child>
+                              <object class="GtkLabel" id="sort_label">
+                                <property name="label" translatable="yes">Sort</property>
+                                <property name="xalign">0</property>
+                                <style><class name="muted"/></style>
+                              </object>
+                            </child>
+                            <child><object class="GtkDropDown" id="sort"/></child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkBox">
+                            <property name="orientation">vertical</property>
+                            <property name="spacing">4</property>
+                            <child>
+                              <object class="GtkLabel" id="direction_label">
+                                <property name="label" translatable="yes">Direction</property>
+                                <property name="xalign">0</property>
+                                <style><class name="muted"/></style>
+                              </object>
+                            </child>
+                            <child><object class="GtkCheckButton" id="descending"><property name="label" translatable="yes">Descending</property></object></child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkBox">
+                            <property name="orientation">vertical</property>
+                            <property name="spacing">4</property>
+                            <child>
+                              <object class="GtkLabel" id="limit_label">
+                                <property name="label" translatable="yes">Limit</property>
+                                <property name="xalign">0</property>
+                                <style><class name="muted"/></style>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkEntry" id="limit">
+                                <property name="placeholder-text" translatable="yes">No limit</property>
+                                <property name="width-chars">4</property>
+                                <property name="max-width-chars">4</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkBox" id="period_control">
+                            <property name="orientation">vertical</property>
+                            <property name="spacing">4</property>
+                            <property name="visible">false</property>
+                            <child>
+                              <object class="GtkLabel" id="activity_label">
+                                <property name="label" translatable="yes">Period</property>
+                                <property name="xalign">0</property>
+                                <style><class name="muted"/></style>
+                              </object>
+                            </child>
+                            <child><object class="GtkDropDown" id="activity_period">
+                              <property name="model"><object class="GtkStringList"><items>
+                                <item translatable="yes">Last 7 days</item>
+                                <item translatable="yes">Last 30 days</item>
+                                <item translatable="yes">Last 365 days</item>
+                                <item translatable="yes">All time</item>
+                              </items></object></property>
+                            </object></child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkToggleButton" id="owner">
+                            <property name="hexpand">true</property>
+                            <property name="halign">end</property>
+                            <property name="valign">end</property>
+                            <style>
+                              <class name="flat"/>
+                              <class name="circular"/>
+                            </style>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+
+                  </object>
+                      </child>
+                    </object></child>
                   </object>
                 </property>
               </object>

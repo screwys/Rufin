@@ -230,7 +230,8 @@ pub(super) async fn stage_item(scan: &mut Scan, item: &Value) -> SourceResult<()
             let smart = crate::remote_json::boolean(&item["smart"])
                 .or_else(|| field::<i64>(item, "smart").map(|v| v != 0))
                 .unwrap_or(false);
-            scan.write_playlist_writable(&object, !smart).await?;
+            scan.write_playlist_permissions(&object, !smart, !smart)
+                .await?;
         }
         _ => return Ok(()),
     }

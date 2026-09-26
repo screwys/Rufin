@@ -68,7 +68,9 @@ pub(crate) async fn publish_metadata_paths(
         stage_audio_tracks_batch(&mut scan, &tracks).await?;
         scan.finish_batch().await?;
     }
-    stage_artwork(database, &mut scan, &|| false).await?;
+    crate::file::artwork::ArtworkFiles::Local
+        .stage(database, &mut scan, &|| false)
+        .await?;
     Ok(scan.finish().await?)
 }
 
@@ -134,7 +136,9 @@ pub(crate) async fn catch_up(
     }
     if changed {
         stage_component(database, source, roots, &mut scan, false, None, cancelled).await?;
-        stage_artwork(database, &mut scan, cancelled).await?;
+        crate::file::artwork::ArtworkFiles::Local
+            .stage(database, &mut scan, cancelled)
+            .await?;
     }
     Ok(scan.finish().await?)
 }
@@ -213,7 +217,9 @@ pub(crate) async fn publish_paths(
         &|| false,
     )
     .await?;
-    stage_artwork(database, &mut scan, &|| false).await?;
+    crate::file::artwork::ArtworkFiles::Local
+        .stage(database, &mut scan, &|| false)
+        .await?;
     Ok(scan.finish().await?)
 }
 
@@ -691,136 +697,12 @@ pub(crate) async fn stage_catalog(
         total: Some(parsed),
     });
     stage_imported_paths(database, scan).await?;
-    stage_artwork(database, scan, cancelled).await?;
+    crate::file::artwork::ArtworkFiles::Local
+        .stage(database, scan, cancelled)
+        .await?;
     Ok(())
 }
 
-pub(crate) async fn stage_artwork(
-    database: &library::Database,
-    scan: &mut Scan,
-    cancelled: &(dyn Fn() -> bool + Send + Sync),
-) -> SourceResult<()> {
-    scan.clear_local_artwork_candidates().await?;
-    let source_id = scan.source_id().to_string();
-    let distinct = database.distinct_track_covers();
-    let mut after_album = String::new();
-    let mut discoverer = crate::file::discovery::Reader::default();
-    loop {
-        let albums = scan.local_artwork_album_page(&after_album).await?;
-        if albums.is_empty() {
-            break;
-        }
-        for album in albums {
-            check_cancelled(cancelled)?;
-            after_album.clone_from(&album);
-            let mut group = None;
-            let mut after_track = None;
-            let mut directory_images: [Option<(PathBuf, Option<crate::LocalImageRef>)>; 2] =
-                [None, None];
-            loop {
-                let candidates = scan
-                    .local_artwork_track_page(&album, after_track.as_ref())
-                    .await?;
-                if candidates.is_empty() {
-                    break;
-                }
-                for candidate in candidates {
-                    check_cancelled(cancelled)?;
-                    let path = Path::new(&candidate.path);
-                    if group.is_none() {
-                        for (priority, directory) in path
-                            .parent()
-                            .into_iter()
-                            .chain(path.parent().and_then(Path::parent))
-                            .filter(|directory| {
-                                candidate
-                                    .root
-                                    .as_ref()
-                                    .is_some_and(|root| directory.starts_with(root))
-                            })
-                            .enumerate()
-                        {
-                            let cached = &mut directory_images[priority];
-                            if cached.as_ref().is_none_or(|(path, _)| path != directory) {
-                                let mut prefix = directory
-                                    .to_string_lossy()
-                                    .trim_end_matches(['/', '\\'])
-                                    .to_string();
-                                prefix.push(std::path::MAIN_SEPARATOR);
-                                // A sibling cover belongs to the directory, including CUE
-                                // and standalone copies with separate album identities.
-                                let image = if priority == 0
-                                    || scan
-                                        .local_artwork_directory_is_single_album(&prefix)
-                                        .await?
-                                {
-                                    super::artwork::directory_image(directory).and_then(|path| {
-                                        artwork_revision(&path).map(|revision| {
-                                            super::artwork::file_reference(
-                                                &source_id, &path, revision,
-                                            )
-                                        })
-                                    })
-                                } else {
-                                    None
-                                };
-                                *cached = Some((directory.to_path_buf(), image));
-                            }
-                            group = cached.as_ref().and_then(|(_, image)| image.clone());
-                            if group.is_some() {
-                                break;
-                            }
-                        }
-                    }
-                    let embedded = if distinct || group.is_none() {
-                        artwork_revision(path).and_then(|revision| {
-                            super::artwork::inspect_embedded(
-                                &source_id,
-                                &mut discoverer,
-                                path,
-                                revision,
-                            )
-                        })
-                    } else {
-                        None
-                    };
-                    if group.is_none() {
-                        group.clone_from(&embedded);
-                    }
-                    let group_bytes = group.as_ref().map(serde_json::to_vec).transpose()?;
-                    let track_bytes = distinct
-                        .then_some(embedded.as_ref())
-                        .flatten()
-                        .map(serde_json::to_vec)
-                        .transpose()?;
-                    if group_bytes.is_some() || track_bytes.is_some() {
-                        scan.write_local_artwork_candidate(
-                            &album,
-                            &candidate.object_id,
-                            group_bytes.as_deref(),
-                            track_bytes.as_deref(),
-                        )
-                        .await?;
-                    }
-                    after_track = Some(candidate);
-                    if !distinct && group.is_some() {
-                        break;
-                    }
-                }
-                if !distinct && group.is_some() {
-                    break;
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn artwork_revision(path: &Path) -> Option<String> {
-    let metadata = fs::metadata(path).ok()?;
-    let modified = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
-    Some(format!("{}-{}", metadata.len(), modified.as_nanos()))
-}
 async fn unchanged_cue(
     database: &library::Database,
     scan: &Scan,
@@ -1278,6 +1160,7 @@ fn file_observation(
         inode,
         native_id: None,
         picture_index: None,
+        artist_pictures: None,
         revision: None,
         parse_version: Some(i64::from(LOCAL_PARSER_VERSION)),
         state,

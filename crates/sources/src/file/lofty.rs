@@ -60,7 +60,16 @@ impl MetadataWriter {
 
 fn metadata_key_is_writable(tag_type: lofty::tag::TagType, key: ItemKey) -> bool {
     key.map_key(tag_type).is_some()
-        || tag_type == lofty::tag::TagType::Id3v2 && key == ItemKey::MusicBrainzRecordingId
+        || tag_type == lofty::tag::TagType::Id3v2
+            && matches!(
+                key,
+                ItemKey::MusicBrainzRecordingId
+                    | ItemKey::Producer
+                    | ItemKey::Arranger
+                    | ItemKey::Engineer
+                    | ItemKey::MixDj
+                    | ItemKey::MixEngineer
+            )
 }
 
 pub(crate) fn bpm_key(tag_type: lofty::tag::TagType) -> Option<ItemKey> {

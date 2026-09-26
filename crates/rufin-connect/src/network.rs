@@ -963,7 +963,12 @@ impl ConnectNetwork {
                             .acknowledge_sync(&peer.to_string(), setup, last.revision)
                             .await?;
                     }
-                    if page.versions.len() < SYNC_PAGE {
+                    if page.versions.len() < SYNC_PAGE
+                        && !page
+                            .versions
+                            .last()
+                            .is_some_and(|version| version.name.starts_with("playlist_artwork:"))
+                    {
                         if !setup {
                             return Ok(());
                         }

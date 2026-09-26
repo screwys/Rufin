@@ -15,6 +15,7 @@ use gtk_widgets::source_labels::configure_ownership_toggle;
 use localization::{msgid, tr};
 
 const SMART_PLAYLIST_DIALOG_WIDTH: i32 = 700;
+const SMART_PLAYLIST_ARTWORK_WIDTH: i32 = 320;
 
 use rufin_core::playlists::SmartPlaylistChange;
 
@@ -106,6 +107,11 @@ struct SmartPlaylistDialog {
     match_any_add_rule: gtk::Button,
     cancel: gtk::Button,
     submit: gtk::Button,
+    editor_content: gtk::Box,
+    artwork_host: gtk::Box,
+    editor_layout: gtk::Box,
+    rules_column: gtk::Box,
+    period_control: gtk::Box,
 }
 
 impl RuleValueSuggestions {
@@ -180,10 +186,12 @@ fn smart_playlist_dialog(
         match_any_add_rule: gtk::Button,
         cancel: gtk::Button,
         submit: gtk::Button,
+        editor_content: gtk::Box, artwork_host: gtk::Box,
+        editor_layout: gtk::Box, rules_column: gtk::Box, toolbar: adw::ToolbarView,
+        settings: adw::WrapBox, period_control: gtk::Box,
     });
 
     dialog.set_title(&tr(dialog_title));
-    dialog.set_content_width(large_popup_content_width(SMART_PLAYLIST_DIALOG_WIDTH));
     title.set_title(&tr(dialog_title));
     if let Some(name) = name {
         name_entry.set_text(name);
@@ -195,20 +203,35 @@ fn smart_playlist_dialog(
     configure_ownership_toggle(&owner, source, definition.current);
     set_dropdown_labels(&sort, &sort_labels(), sort_index(definition.sort_field));
     descending.set_active(definition.descending);
-    set_dropdown_titles(
-        &activity_period,
-        &["Weekly", "Monthly", "Yearly", "Lifetime"],
-        match definition.activity_period {
-            SmartPlaylistActivityPeriod::Weekly => 0,
-            SmartPlaylistActivityPeriod::Monthly => 1,
-            SmartPlaylistActivityPeriod::Yearly => 2,
-            SmartPlaylistActivityPeriod::Lifetime => 3,
-        },
-    );
+    activity_period.set_selected(match definition.activity_period {
+        SmartPlaylistActivityPeriod::Weekly => 0,
+        SmartPlaylistActivityPeriod::Monthly => 1,
+        SmartPlaylistActivityPeriod::Yearly => 2,
+        SmartPlaylistActivityPeriod::Lifetime => 3,
+    });
     if let Some(value) = definition.limit {
         limit.set_text(&value.to_string());
     }
     submit.set_label(&tr(submit_label));
+    let rules_width = settings.measure(gtk::Orientation::Horizontal, -1).1
+        + rules_column.margin_start()
+        + rules_column.margin_end();
+    let preferred_width = if name.is_some() {
+        (SMART_PLAYLIST_ARTWORK_WIDTH
+            + editor_layout.spacing()
+            + rules_width
+            + editor_content.margin_start()
+            + editor_content.margin_end())
+        .max(1000)
+    } else {
+        large_popup_content_width(SMART_PLAYLIST_DIALOG_WIDTH)
+            .max(rules_width + editor_content.margin_start() + editor_content.margin_end())
+    };
+    dialog.set_child(None::<&gtk::Widget>);
+    dialog.set_child(Some(&gtk_widgets::layout::preferred_width_owner(
+        &toolbar,
+        preferred_width,
+    )));
 
     SmartPlaylistDialog {
         dialog,
@@ -231,6 +254,11 @@ fn smart_playlist_dialog(
         match_any_add_rule,
         cancel,
         submit,
+        editor_content,
+        artwork_host,
+        editor_layout,
+        rules_column,
+        period_control,
     }
 }
 
@@ -249,6 +277,36 @@ fn configure_smart_playlist_editor(
         surface.template_control.set_visible(true);
     }
 
+    let update_period: Rc<dyn Fn()> = {
+        let control = surface.period_control.downgrade();
+        let sort = editor.sort.downgrade();
+        let all = Rc::clone(&editor.match_all);
+        let any = Rc::clone(&editor.match_any);
+        Rc::new(move || {
+            let (Some(control), Some(sort)) = (control.upgrade(), sort.upgrade()) else {
+                return;
+            };
+            let uses_period = matches!(
+                SmartPlaylistSort::ALL.get(sort.selected() as usize),
+                Some(
+                    SmartPlaylistSort::PlayCount
+                        | SmartPlaylistSort::SkipCount
+                        | SmartPlaylistSort::LastPlayed
+                )
+            ) || all.borrow().iter().chain(any.borrow().iter()).any(|rule| {
+                matches!(
+                    rule.field,
+                    SmartPlaylistRuleField::PlayCount
+                        | SmartPlaylistRuleField::SkipCount
+                        | SmartPlaylistRuleField::LastPlayed
+                )
+            });
+            control.set_visible(uses_period);
+        })
+    };
+    let update = Rc::clone(&update_period);
+    editor.sort.connect_selected_notify(move |_| update());
+
     let value_suggestions = Rc::new(value_suggestions);
     let rerender_slot: RerenderSlot = Rc::new(RefCell::new(None));
     let rerender: Rc<dyn Fn()> = {
@@ -259,6 +317,7 @@ fn configure_smart_playlist_editor(
         let value_suggestions = Rc::clone(&value_suggestions);
         let rerender_slot = Rc::clone(&rerender_slot);
         Rc::new(move || {
+            update_period();
             let (Some(match_all_host), Some(match_any_host)) =
                 (match_all_host.upgrade(), match_any_host.upgrade())
             else {
@@ -356,6 +415,7 @@ fn append_rule_rows(
     rerender: Rc<dyn Fn()>,
 ) {
     let current_rules = rules.borrow().clone();
+    parent.set_visible(!current_rules.is_empty());
     for (index, rule) in current_rules.into_iter().enumerate() {
         append_rule_row(
             parent,
@@ -376,13 +436,16 @@ fn append_rule_row(
     rule: SmartPlaylistRule,
     rerender: Rc<dyn Fn()>,
 ) {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    let row = adw::WrapBox::builder()
+        .child_spacing(8)
+        .line_spacing(8)
+        .build();
     row.set_hexpand(true);
 
     let field_labels = field_labels();
     let field = dropdown_from_labels(&field_labels, field_index(rule.field));
     field.set_hexpand(false);
-    field.set_size_request(150, -1);
+
     {
         let rules = Rc::clone(&rules);
         let rerender = Rc::clone(&rerender);
@@ -402,7 +465,7 @@ fn append_rule_row(
     let operators = rule.field.operators();
     let operator_titles = op_labels(rule.field, operators);
     let operator = dropdown_from_labels(&operator_titles, operator_index(operators, rule.operator));
-    operator.set_size_request(150, -1);
+
     {
         let rules = Rc::clone(&rules);
         let rerender = Rc::clone(&rerender);
@@ -737,7 +800,7 @@ fn field_title(field: SmartPlaylistRuleField) -> &'static str {
         SmartPlaylistRuleField::Rating => msgid("Rating"),
         SmartPlaylistRuleField::Year => msgid("Year"),
         SmartPlaylistRuleField::Favorite => msgid("Favorite"),
-        SmartPlaylistRuleField::Played => msgid("Played"),
+        SmartPlaylistRuleField::Played => msgid("Ever played"),
         SmartPlaylistRuleField::PlayCount => msgid("Play count"),
         SmartPlaylistRuleField::SkipCount => msgid("Skip count"),
         SmartPlaylistRuleField::LastPlayed => msgid("Last played"),
@@ -790,11 +853,6 @@ fn op_title(field: SmartPlaylistRuleField, operator: SmartPlaylistRuleOperator) 
 fn dropdown_from_titles(titles: &[&str], selected: usize) -> gtk::DropDown {
     let labels = titles.iter().map(|title| tr(title)).collect::<Vec<_>>();
     dropdown_from_labels(&labels, selected)
-}
-
-fn set_dropdown_titles(dropdown: &gtk::DropDown, titles: &[&str], selected: usize) {
-    let labels = titles.iter().map(|title| tr(title)).collect::<Vec<_>>();
-    set_dropdown_labels(dropdown, &labels, selected);
 }
 
 fn dropdown_from_labels(labels: &[String], selected: usize) -> gtk::DropDown {
@@ -983,6 +1041,9 @@ pub fn build_dialog(
     value_suggestions: RuleValueSuggestions,
     source: Option<rufin_core::runtime::source::SourceSummary>,
     publish: SmartPlaylistSubmit,
+    owner: &std::sync::Arc<rufin_core::source::SourceOwner>,
+    artwork_state: &Rc<gtk_widgets::artwork::ArtworkState>,
+    scope: (Option<library::SourceKey>, Option<library::FolderKey>),
 ) -> adw::Dialog {
     let templates = playlist
         .is_none()
@@ -1001,6 +1062,89 @@ pub fn build_dialog(
         source.as_ref(),
     );
     configure_smart_playlist_editor(&surface, &templates, value_suggestions);
+    let artwork = playlist.as_ref().map(|playlist| {
+        let key = playlist.smart_playlist_key;
+        let artwork = crate::playlist_artwork::ArtworkEditor::new(
+            owner,
+            artwork_state,
+            rufin_core::playlists::PlaylistArtworkEditing {
+                binding: playlist.artwork_binding.clone(),
+                representative_artwork: playlist.representative_artwork.clone(),
+                writable: true,
+            },
+            &surface.editor_content,
+            &surface.submit,
+            move |owner| {
+                rufin_core::playlists::regenerate_smart_playlist_artwork(
+                    owner, key, scope.0, scope.1,
+                )
+            },
+        );
+        artwork.overlay.set_size_request(1, 1);
+        artwork.overlay.set_halign(gtk::Align::Fill);
+        artwork.overlay.set_valign(gtk::Align::Fill);
+        artwork.frame.set_hexpand(true);
+        surface.artwork_host.append(&artwork.frame);
+        surface.artwork_host.append(&artwork.status);
+        surface.artwork_host.set_visible(true);
+        surface.editor_content.remove(&surface.editor_layout);
+        let layout = surface.editor_layout.downgrade();
+        let cover = artwork.frame.downgrade();
+        let cover_host = surface.artwork_host.downgrade();
+        let rules = surface.rules_column.downgrade();
+        surface
+            .editor_content
+            .append(&gtk_widgets::layout::width_allocation_owner(
+                &surface.editor_layout,
+                move |width| {
+                    let (Some(layout), Some(cover), Some(cover_host), Some(rules)) = (
+                        layout.upgrade(),
+                        cover.upgrade(),
+                        cover_host.upgrade(),
+                        rules.upgrade(),
+                    ) else {
+                        return;
+                    };
+                    let stacked = width
+                        < SMART_PLAYLIST_ARTWORK_WIDTH
+                            + rules.measure(gtk::Orientation::Horizontal, -1).0
+                            + layout.spacing();
+                    let orientation = if stacked {
+                        gtk::Orientation::Vertical
+                    } else {
+                        gtk::Orientation::Horizontal
+                    };
+                    if layout.orientation() != orientation {
+                        layout.set_orientation(orientation);
+                    }
+                    if cover_host.hexpands() != stacked {
+                        cover_host.set_hexpand(stacked);
+                    }
+                    let cover_width = if stacked {
+                        width
+                    } else {
+                        SMART_PLAYLIST_ARTWORK_WIDTH
+                    };
+                    let width_request = if stacked {
+                        -1
+                    } else {
+                        SMART_PLAYLIST_ARTWORK_WIDTH
+                    };
+                    if cover.width_request() != width_request {
+                        cover.set_width_request(width_request);
+                    }
+                    if cover.height_request() != cover_width {
+                        cover.set_height_request(cover_width);
+                    }
+                },
+            ));
+        artwork
+    });
+    let artwork_weak = artwork.as_ref().map(Rc::downgrade);
+    let lifetime = RefCell::new(artwork);
+    surface.dialog.connect_closed(move |_| {
+        lifetime.borrow_mut().take();
+    });
     let SmartPlaylistDialog {
         dialog,
         editor,
@@ -1029,13 +1173,24 @@ pub fn build_dialog(
                 key,
                 name,
                 definition,
+                artwork: artwork_weak
+                    .as_ref()
+                    .and_then(Weak::upgrade)
+                    .and_then(|editor| editor.change()),
             },
             None => SmartPlaylistChange::Create { name, definition },
         };
+        if let Some(artwork) = artwork_weak.as_ref().and_then(Weak::upgrade) {
+            artwork.set_busy(true);
+        }
+        let artwork = artwork_weak.clone();
         let dialog = close.clone();
         publish(
             change,
             Some(Rc::new(move |result| {
+                if let Some(artwork) = artwork.as_ref().and_then(Weak::upgrade) {
+                    artwork.set_busy(false);
+                }
                 if result.is_ok()
                     && let Some(dialog) = dialog.upgrade()
                 {

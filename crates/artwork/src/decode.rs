@@ -126,6 +126,37 @@ pub fn decode_rgba(bytes: &[u8], render_size: u32) -> Result<RgbaImage, ArtworkE
 }
 
 pub fn square_thumbnail_png(bytes: &[u8], size: u32) -> Result<Vec<u8>, ArtworkError> {
+    encode_png(&square_thumbnail(bytes, size)?)
+}
+
+pub fn collage_png(images: &[Vec<u8>], size: u32) -> Result<Vec<u8>, ArtworkError> {
+    if images.is_empty() {
+        return Err(ArtworkError::Decode(
+            "No track artwork is available for this playlist".into(),
+        ));
+    }
+    if images.len() == 1 {
+        return square_thumbnail_png(&images[0], size);
+    }
+    let cell = size.max(2) / 2;
+    let tiles = images
+        .iter()
+        .take(4)
+        .map(|bytes| square_thumbnail(bytes, cell))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut canvas = DynamicImage::new_rgba8(cell * 2, cell * 2);
+    for index in 0..4 {
+        image::imageops::overlay(
+            &mut canvas,
+            &tiles[index % tiles.len()],
+            (index % 2) as i64 * i64::from(cell),
+            (index / 2) as i64 * i64::from(cell),
+        );
+    }
+    encode_png(&canvas)
+}
+
+fn square_thumbnail(bytes: &[u8], size: u32) -> Result<DynamicImage, ArtworkError> {
     register_decoders();
     let image = decode_reader(
         ImageReader::new(Cursor::new(bytes))
@@ -147,7 +178,7 @@ pub fn square_thumbnail_png(bytes: &[u8], size: u32) -> Result<Vec<u8>, ArtworkE
     } else {
         resize_exact(cropped, target, target, FilterType::Bilinear)?
     };
-    encode_png(&thumbnail)
+    Ok(thumbnail)
 }
 
 pub(crate) fn decode_cached(

@@ -676,3 +676,24 @@ mod tests {
         assert_eq!(prime.pending(), 0);
     }
 }
+
+pub async fn texture_from_image(
+    image: Arc<sources::ImageBytes>,
+    size: u32,
+) -> Result<gtk::gdk::Texture, String> {
+    let pixels = gtk::gio::spawn_blocking(move || ::artwork::decode_rgba(&image.bytes, size))
+        .await
+        .expect("artwork decoder worker completed")
+        .map_err(|error| error.to_string())?;
+    let width = pixels.width() as i32;
+    let height = pixels.height() as i32;
+    let stride = pixels.row_stride() as usize;
+    Ok(gtk::gdk::MemoryTexture::new(
+        width,
+        height,
+        gtk::gdk::MemoryFormat::R8g8b8a8,
+        &gtk::glib::Bytes::from_owned(pixels),
+        stride,
+    )
+    .upcast())
+}

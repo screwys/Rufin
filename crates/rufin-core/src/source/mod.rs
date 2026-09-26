@@ -332,7 +332,7 @@ impl ArtworkPreparationOwner {
 pub(crate) struct Shared {
     home_showcase_variation: i64,
     home_explore_variation: std::sync::atomic::AtomicI64,
-    artwork: Artwork,
+    pub(crate) artwork: Artwork,
     pub(crate) database: Arc<Database>,
     downloads: Downloads,
     pub(crate) settings: SettingsFile,

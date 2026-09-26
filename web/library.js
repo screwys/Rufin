@@ -870,7 +870,7 @@ function bindCards(host) {
       const pin = pinAction(kind, row, row.source ?? state.source);
       if (pin) actions.push(pin);
       if (kind === "playlist") actions.push([tr("Export Playlist"), () => openPlaylistTransfer(row), "export"]);
-      if (row.writable)
+      if (row.metadata_writable)
         actions.push(
           [tr("Edit"), () => openName(row)],
           [

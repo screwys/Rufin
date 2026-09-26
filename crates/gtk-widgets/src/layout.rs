@@ -7,12 +7,16 @@ pub const LARGE_POPUP_BASE_WIDTH: i32 = 700;
 pub const LARGE_POPUP_BASE_HEIGHT: i32 = 640;
 
 mod allocation_owner_imp {
-    use std::{cell::RefCell, rc::Rc};
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+    };
 
     use gtk::{glib, prelude::*, subclass::prelude::*};
 
     #[derive(Default)]
     pub struct AllocationOwner {
+        pub(super) preferred_width: Cell<i32>,
         pub(super) on_width: RefCell<Option<Rc<dyn Fn(i32)>>>,
         pub(super) on_size: RefCell<Option<Rc<dyn Fn(i32, i32)>>>,
         pub(super) after_size: RefCell<Option<Rc<dyn Fn()>>>,
@@ -62,7 +66,14 @@ mod allocation_owner_imp {
                     self.apply_width(for_size);
                 }
             }
-            child.measure(orientation, for_size)
+            let (minimum, natural, minimum_baseline, natural_baseline) =
+                child.measure(orientation, for_size);
+            let natural = if orientation == gtk::Orientation::Horizontal {
+                natural.max(self.preferred_width.get())
+            } else {
+                natural
+            };
+            (minimum, natural, minimum_baseline, natural_baseline)
         }
 
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
@@ -164,6 +175,15 @@ fn allocation_owner_for_child(child: &impl IsA<gtk::Widget>) -> AllocationOwner 
     owner.set_valign(child.valign());
     owner.set_accessible_role(gtk::AccessibleRole::Presentation);
     child.set_parent(&owner);
+    owner
+}
+
+/// Requests a default width while allowing the parent to shrink to the child's minimum.
+pub fn preferred_width_owner(child: &impl IsA<gtk::Widget>, width: i32) -> AllocationOwner {
+    use gtk::subclass::prelude::ObjectSubclassIsExt;
+
+    let owner = allocation_owner_for_child(child);
+    owner.imp().preferred_width.set(width);
     owner
 }
 

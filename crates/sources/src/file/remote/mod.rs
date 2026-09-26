@@ -473,7 +473,7 @@ impl RemoteSource {
             })
     }
 
-    fn location(&self, relative: &str) -> SourceResult<String> {
+    pub(super) fn location(&self, relative: &str) -> SourceResult<String> {
         let mut url = collection_url(&self.namespace_url)?;
         {
             let mut parts = url.path_segments_mut().map_err(|_| SourceError::NotFound)?;
@@ -493,7 +493,7 @@ impl RemoteSource {
         Ok(url.into())
     }
 
-    fn relative(&self, location: &str) -> SourceResult<String> {
+    pub(super) fn relative(&self, location: &str) -> SourceResult<String> {
         let base = collection_url(&self.namespace_url)?;
         let url = Url::parse(location).map_err(|_| SourceError::NotFound)?;
         // SMB URLs have opaque web origins; compare their actual server authority.

@@ -9,7 +9,7 @@ use crate::file::remote::input::{FileInput, FileInputServer};
 use crate::file::{media, scan::stage_audio_tracks_batch};
 use crate::{LocalImageRef, SourceError, SourceReadProgress, SourceReadStage, SourceResult};
 
-pub(crate) const PARSER_VERSION: i64 = 3;
+pub(crate) const PARSER_VERSION: i64 = 4;
 
 impl RemoteSource {
     pub(crate) async fn stat(
@@ -52,7 +52,9 @@ impl RemoteSource {
     ) -> SourceResult<library::ScanOutcome> {
         let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
         self.stage_saved_file(&mut scan, media_uri, copy).await?;
-        self.stage_artwork(database, &mut scan, &|| false).await?;
+        crate::file::artwork::ArtworkFiles::Remote(self)
+            .stage(database, &mut scan, &|| false)
+            .await?;
         scan.finish().await.map_err(Into::into)
     }
 
@@ -78,19 +80,21 @@ impl RemoteSource {
                 uri.as_str(),
                 None,
             );
-            let picture = crate::file::artwork::inspect_embedded_input(
+            let (picture, artist_picture) = crate::file::artwork::inspect_embedded_input(
                 &mut worker.discovery,
                 &mut file,
                 uri.as_str(),
             );
-            (parsed, picture)
+            (parsed, picture, artist_picture)
         })
         .await
         .map_err(|e| SourceError::Other(e.to_string()))?;
-        let (media::MediaRead::Accepted(mut track), picture) = parsed else {
+        let (media::MediaRead::Accepted(mut track), picture, artist_picture) = parsed else {
             return Err(SourceError::Other("Saved media could not be read".into()));
         };
         observation.picture_index = picture.map(i64::from);
+        observation.artist_pictures = Some(serde_json::to_string(&artist_picture)?);
+        track.artist_pictures = artist_picture;
         track.local_artwork = picture.map(|picture_index| LocalImageRef::Embedded {
             source_id: self.source_id.clone(),
             path: observation.path.clone(),
@@ -205,7 +209,9 @@ impl RemoteSource {
             completed: 0,
             total: None,
         });
-        self.stage_artwork(database, scan, cancelled).await
+        crate::file::artwork::ArtworkFiles::Remote(self)
+            .stage(database, scan, cancelled)
+            .await
     }
 
     pub(crate) async fn stage_files(
@@ -313,6 +319,7 @@ impl RemoteSource {
                     {
                         file.state = old.state;
                         file.picture_index = old.picture_index;
+                        file.artist_pictures = old.artist_pictures.clone();
                         scan.write_local_files(&[(file, old.dependencies.clone())])
                             .await?;
                     }
@@ -349,6 +356,7 @@ impl RemoteSource {
                 if let Some(old) = reusable {
                     file.state = old.state;
                     file.picture_index = old.picture_index;
+                    file.artist_pictures = old.artist_pictures.clone();
                     scan.begin_batch().await?;
                     scan.write_local_files(&[(file, old.dependencies.clone())])
                         .await?;
@@ -376,6 +384,8 @@ impl RemoteSource {
                                 }
                                 _ => None,
                             };
+                            file.artist_pictures =
+                                Some(serde_json::to_string(&track.artist_pictures)?);
                             self.locate_track(&mut track, &file);
                             file.state = LocalFileState::Accepted;
                             scan.begin_batch().await?;
@@ -497,12 +507,13 @@ impl RemoteSource {
                 None,
             );
             if let media::MediaRead::Accepted(track) = &mut parsed {
-                track.local_artwork = crate::file::artwork::inspect_embedded_input(
+                let (cover, portraits) = crate::file::artwork::inspect_embedded_input(
                     &mut worker.discovery,
                     &mut reader,
                     &uri,
-                )
-                .map(|picture_index| LocalImageRef::Embedded {
+                );
+                track.artist_pictures = portraits;
+                track.local_artwork = cover.map(|picture_index| LocalImageRef::Embedded {
                     source_id,
                     path: artwork_path,
                     picture_index,
@@ -667,6 +678,7 @@ impl RemoteSource {
             native_id,
             revision,
             picture_index: None,
+            artist_pictures: None,
             parse_version: Some(if directory {
                 self.directory_version
             } else {

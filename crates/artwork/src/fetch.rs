@@ -15,11 +15,22 @@ pub(crate) enum FetchOutcome {
 #[derive(Clone)]
 pub(crate) struct FetchContext {
     source_resolver: Arc<Mutex<Option<Arc<SourceResolver>>>>,
+    database: Arc<Mutex<Option<Arc<library::Database>>>>,
 }
 
 impl FetchContext {
     pub(crate) fn new(source_resolver: Arc<Mutex<Option<Arc<SourceResolver>>>>) -> Self {
-        Self { source_resolver }
+        Self {
+            source_resolver,
+            database: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    pub(crate) fn install_database(&self, database: Arc<library::Database>) {
+        *self
+            .database
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(database);
     }
 
     fn source(&self, source_id: &sources::SourceId) -> Result<Arc<sources::Source>, String> {
@@ -40,6 +51,41 @@ impl FetchContext {
         policy: &ExternalPolicy,
     ) -> Result<FetchOutcome, String> {
         match candidate {
+            Candidate::Playlist(image) => {
+                let database = self
+                    .database
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone()
+                    .ok_or_else(|| "Playlist artwork storage is unavailable".to_string())?;
+                runtime
+                    .block_on(database.playlist_image(image))
+                    .map(|bytes| {
+                        bytes
+                            .map(FetchOutcome::Ready)
+                            .unwrap_or(FetchOutcome::Missing)
+                    })
+                    .map_err(|error| error.to_string())
+            }
+            Candidate::Artist {
+                name,
+                musicbrainz_id,
+                ..
+            } => {
+                if !policy.allow_musicbrainz {
+                    return Ok(FetchOutcome::Missing);
+                }
+                metadata_lookup::lookup_artist_image(
+                    name,
+                    musicbrainz_id.as_deref(),
+                    size == ImageSize::Original,
+                )
+                .map(|bytes| {
+                    bytes
+                        .map(FetchOutcome::Ready)
+                        .unwrap_or(FetchOutcome::Missing)
+                })
+            }
             Candidate::Native(image_ref) => {
                 let source = self.source(&image_ref.source_id)?;
                 runtime

@@ -61,6 +61,7 @@ pub struct LocalFileWrite {
     pub native_id: Option<String>,
     pub revision: Option<String>,
     pub picture_index: Option<i64>,
+    pub artist_pictures: Option<String>,
     pub parse_version: Option<i64>,
     pub state: LocalFileState,
 }
@@ -79,6 +80,7 @@ pub struct LocalFileRow {
     pub native_id: Option<String>,
     pub revision: Option<String>,
     pub picture_index: Option<i64>,
+    pub artist_pictures: Option<String>,
     pub parse_version: Option<i64>,
     pub state: LocalFileState,
     pub dependencies: Vec<String>,
@@ -99,6 +101,7 @@ struct LocalFileScalar {
     native_id: Option<String>,
     revision: Option<String>,
     picture_index: Option<i64>,
+    artist_pictures: Option<String>,
     parse_version: Option<i64>,
     state: String,
 }
@@ -354,9 +357,9 @@ impl Database {
                  ORDER BY track.track_key LIMIT 128"
             }
             Some(kind) if kind == "artist" => {
-                "SELECT DISTINCT track.track_key,track.media_uri FROM artists artist
-                 JOIN track_artists relation USING(artist_key) JOIN tracks track USING(track_key)
-                 WHERE artist.media_uri=?1 AND track.track_key>coalesce(?2,0)
+                "SELECT track.track_key,track.media_uri FROM tracks track WHERE track.track_key>coalesce(?2,0) AND track.track_key IN (
+                    SELECT relation.track_key FROM artists artist JOIN track_artists relation USING(artist_key) WHERE artist.media_uri=?1
+                    UNION SELECT track.track_key FROM artists artist JOIN album_artists relation USING(artist_key) JOIN tracks track USING(album_key) WHERE artist.media_uri=?1)
                  ORDER BY track.track_key LIMIT 128"
             }
             _ => return Ok(Vec::new()),
@@ -561,7 +564,7 @@ impl Database {
         let limit = limit.clamp(1, LOCAL_FILE_PAGE_LIMIT) as i64;
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let scalars = sqlx::query_as::<_, LocalFileScalar>("SELECT local_file_key,path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,parse_version,state FROM local_files WHERE source_key=?1 AND local_file_key>?2 ORDER BY local_file_key LIMIT ?3")
+        let scalars = sqlx::query_as::<_, LocalFileScalar>("SELECT local_file_key,path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,artist_pictures,parse_version,state FROM local_files WHERE source_key=?1 AND local_file_key>?2 ORDER BY local_file_key LIMIT ?3")
             .bind(source).bind(after.map_or(0, LocalFileKey::raw)).bind(limit)
             .fetch_all(&mut *transaction).await?;
         let rows = load_local_file_rows(&mut transaction, source, scalars).await?;
@@ -598,7 +601,7 @@ impl Database {
                     .push_bind(position as i64);
             },
         );
-        query.push(") SELECT file.local_file_key,file.path,file.root,file.relative_path,file.kind,file.size_bytes,file.mtime_ns,file.device_id,file.inode,file.native_id,file.revision,file.picture_index,file.parse_version,file.state FROM requested JOIN local_files file ON file.source_key=")
+        query.push(") SELECT file.local_file_key,file.path,file.root,file.relative_path,file.kind,file.size_bytes,file.mtime_ns,file.device_id,file.inode,file.native_id,file.revision,file.picture_index,file.artist_pictures,file.parse_version,file.state FROM requested JOIN local_files file ON file.source_key=")
             .push_bind(source)
             .push(" AND (file.path=requested.path OR (requested.native_id IS NOT NULL AND file.native_id=requested.native_id) OR (requested.device_id IS NOT NULL AND requested.inode IS NOT NULL AND file.device_id=requested.device_id AND file.inode=requested.inode)) ORDER BY requested.position,CASE WHEN file.path=requested.path THEN 0 ELSE 1 END,file.local_file_key");
         let scalars = query
@@ -885,6 +888,7 @@ async fn load_local_file_rows(
                 native_id: scalar.native_id,
                 revision: scalar.revision,
                 picture_index: scalar.picture_index,
+                artist_pictures: scalar.artist_pictures,
                 parse_version: scalar.parse_version,
                 state: LocalFileState::parse(&scalar.state)?,
                 dependencies: dependencies

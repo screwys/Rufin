@@ -292,6 +292,12 @@ impl FilesystemCache {
         self.remove_dir_budgeted(&self.root.join("originals/native").join(source))
     }
 
+    pub(crate) fn invalidate_image(&self, candidate: &Candidate) -> io::Result<()> {
+        remove_dir_if_present(&self.candidate_directory("ready", candidate))?;
+        remove_dir_if_present(&self.candidate_directory("missing", candidate))?;
+        self.remove_dir_budgeted(&self.candidate_directory("originals", candidate))
+    }
+
     pub(crate) fn source_manifest_complete(
         &self,
         source_id: &SourceId,
@@ -334,7 +340,10 @@ impl FilesystemCache {
                 .join(state)
                 .join("native")
                 .join(digest(binding.source_id().as_str())),
-            Candidate::Album(_) => self.root.join(state).join("external"),
+            Candidate::Album(_) | Candidate::Artist { .. } => {
+                self.root.join(state).join("external")
+            }
+            Candidate::Playlist(_) => self.root.join(state).join("playlists"),
         };
         root.join(identity)
     }

@@ -10,9 +10,46 @@ use crate::{
     TrackMetadataValues, TrackMetadataWritable,
 };
 
-const ITEM_FIELDS: &str = "Genres,ProviderIds,AlbumArtists,ArtistItems,Overview,ProductionYear,Settings,OriginalTitle,CustomRating,Etag";
+const ITEM_FIELDS: &str = "Genres,ProviderIds,AlbumArtists,ArtistItems,Overview,ProductionYear,Settings,OriginalTitle,CustomRating,Tags,Studios,Etag";
 
 impl JellyfinEmbySource {
+    pub(crate) async fn write_artwork(
+        &self,
+        raw: &str,
+        edit: &crate::ArtworkEdit,
+    ) -> Result<(), SourceMetadataError> {
+        if edit.storage != crate::ArtworkStorage::Server {
+            return Err(SourceMetadataError::Unavailable);
+        }
+        self.change_artwork(raw, &edit.change)
+            .await
+            .map_err(metadata_write)
+    }
+
+    pub(crate) async fn change_artwork(
+        &self,
+        object: &str,
+        change: &crate::ArtworkChange,
+    ) -> SourceResult<()> {
+        use base64::Engine;
+        let raw = crate::policy::raw_item_id(object);
+        let url = endpoint(&self.base_url, &format!("Items/{raw}/Images/Primary"))?;
+        let request = match change {
+            crate::ArtworkChange::Replace(image) => self
+                .client
+                .post(url)
+                .header(
+                    reqwest::header::CONTENT_TYPE,
+                    image
+                        .content_type
+                        .as_deref()
+                        .unwrap_or("application/octet-stream"),
+                )
+                .body(base64::engine::general_purpose::STANDARD.encode(&image.bytes)),
+            crate::ArtworkChange::Remove => self.client.delete(url),
+        };
+        self.send_unit(request).await
+    }
     pub(crate) async fn read_track_metadata(
         &self,
         track: library::TrackRow,
@@ -33,6 +70,8 @@ impl JellyfinEmbySource {
             rufin_filled.musicbrainz_release_track_id = true;
         }
         Ok(TrackMetadata {
+            extra: extra_fields(self.kind, &item, &editor, "track"),
+            artwork: Default::default(),
             writable: track_writable(&editor),
             source_search: false,
             revision: Some(revision(&item)?),
@@ -62,6 +101,8 @@ impl JellyfinEmbySource {
             rufin_filled.musicbrainz_release_group_id = true;
         }
         Ok(AlbumMetadata {
+            extra: extra_fields(self.kind, &item, &editor, "album"),
+            artwork: Default::default(),
             writable: album_writable(&editor),
             source_search: true,
             revision: Some(revision(&item)?),
@@ -87,6 +128,8 @@ impl JellyfinEmbySource {
             rufin_filled.musicbrainz_artist_id = true;
         }
         Ok(ArtistMetadata {
+            extra: extra_fields(self.kind, &item, &editor, "artist"),
+            artwork: Default::default(),
             writable: artist_writable(&editor),
             source_search: true,
             revision: Some(revision(&item)?),
@@ -121,6 +164,7 @@ impl JellyfinEmbySource {
         kind: &str,
         expected_revision: &str,
         application: Option<&str>,
+        tags_changed: bool,
         update: impl FnOnce(&mut Map<String, Value>),
     ) -> Result<String, SourceMetadataError> {
         let raw = raw_id(self.kind, object_id, kind)?;
@@ -143,6 +187,9 @@ impl JellyfinEmbySource {
                 .read_metadata_item(raw)
                 .await
                 .map_err(|error| SourceMetadataError::SavedRefreshFailed(error.to_string()))?;
+        }
+        if !tags_changed {
+            return Ok(raw.to_string());
         }
         let object = item.as_object_mut().ok_or_else(|| {
             SourceMetadataError::Write("Jellyfin returned an invalid metadata item".to_string())
@@ -251,6 +298,7 @@ pub(crate) fn apply_track_edit(
     item: &mut Map<String, Value>,
     edit: &crate::TrackMetadataEdit,
 ) {
+    apply_extra(server, item, &edit.extra);
     let values = &edit.values;
     let changed = &edit.changed;
     if changed.title {
@@ -330,6 +378,7 @@ pub(crate) fn apply_album_edit(
     item: &mut Map<String, Value>,
     edit: &crate::AlbumMetadataEdit,
 ) {
+    apply_extra(server, item, &edit.extra);
     let values = &edit.values;
     let changed = &edit.changed;
     if changed.title {
@@ -379,6 +428,7 @@ pub(crate) fn apply_artist_edit(
     item: &mut Map<String, Value>,
     edit: &crate::ArtistMetadataEdit,
 ) {
+    apply_extra(server, item, &edit.extra);
     let values = &edit.values;
     let changed = &edit.changed;
     if changed.name {
@@ -525,6 +575,135 @@ fn artist_writable(info: &Value) -> ArtistMetadataWritable {
         locked: true,
         musicbrainz_artist_id: external(info, "MusicBrainzArtist"),
     }
+}
+
+const EXTRA_FIELDS: &[(&str, &str, crate::MetadataFieldKind)] = &[
+    (
+        "PremiereDate",
+        "Release date",
+        crate::MetadataFieldKind::Date,
+    ),
+    ("Tags", "Tags", crate::MetadataFieldKind::List),
+    ("Studios", "Studios", crate::MetadataFieldKind::List),
+];
+
+fn extra_fields(
+    server: ServerKind,
+    item: &Value,
+    editor: &Value,
+    kind: &str,
+) -> Vec<crate::MetadataField> {
+    let mut fields = EXTRA_FIELDS
+        .iter()
+        .map(|&(key, label, kind)| {
+            let value = match key {
+                "Tags" if server == ServerKind::Emby => named(item, "TagItems"),
+                "Tags" => string_array(item, key),
+                "Studios" => named(item, key),
+                "PremiereDate" => string(item, key)
+                    .map(|value| value.split('T').next().unwrap_or(&value).to_string()),
+                _ => string(item, key),
+            }
+            .unwrap_or_default();
+            crate::MetadataField {
+                key: key.into(),
+                label: label.into(),
+                kind,
+                value,
+                writable: true,
+                mixed: false,
+            }
+        })
+        .collect::<Vec<_>>();
+    let typed_ids: &[&str] = match kind {
+        "track" => &[
+            "MusicBrainzRecording",
+            "MusicBrainzTrack",
+            "MusicBrainzAlbum",
+            "MusicBrainzReleaseGroup",
+            "MusicBrainzArtist",
+        ],
+        "album" => &["MusicBrainzAlbum", "MusicBrainzReleaseGroup"],
+        _ => &["MusicBrainzArtist"],
+    };
+    for info in crate::remote_json::items(&editor["ExternalIdInfos"]) {
+        let Some(key) = info["Key"].as_str() else {
+            continue;
+        };
+        if typed_ids
+            .iter()
+            .any(|typed| key.eq_ignore_ascii_case(typed))
+        {
+            continue;
+        }
+        let label = match key {
+            "MusicBrainzArtist" => "MusicBrainz artist ID".into(),
+            "MusicBrainzAlbumArtist" => "MusicBrainz album artist ID".into(),
+            "AudioDbAlbum" => "TheAudioDB album ID".into(),
+            "AudioDbArtist" => "TheAudioDB artist ID".into(),
+            _ => {
+                let name = info["Name"].as_str().unwrap_or(key);
+                match info["Type"].as_str().filter(|kind| !kind.is_empty()) {
+                    Some(kind) => format!("{name} ({kind})"),
+                    None => name.into(),
+                }
+            }
+        };
+        fields.push(crate::MetadataField {
+            key: format!("provider:{key}"),
+            label,
+            kind: crate::MetadataFieldKind::Text,
+            value: provider(item, key).unwrap_or_default(),
+            writable: true,
+            mixed: false,
+        });
+    }
+    fields
+}
+
+fn apply_extra(
+    server: ServerKind,
+    item: &mut Map<String, Value>,
+    changes: &crate::MetadataChanges,
+) {
+    for (key, value) in changes {
+        if let Some(provider) = key.strip_prefix("provider:") {
+            set_provider(item, provider, Some(value));
+        } else {
+            match key.as_str() {
+                "Tags" if server == ServerKind::Emby => set_named_list(item, "TagItems", value),
+                "Tags" => {
+                    item.insert(key.clone(), json!(split_values(Some(value))));
+                }
+                "Studios" => set_named_list(item, key, value),
+                "PremiereDate" if value.trim().len() == 10 => {
+                    set_string(item, key, Some(&format!("{}T00:00:00Z", value.trim())));
+                }
+                _ if EXTRA_FIELDS.iter().any(|(field, _, _)| *field == key) => {
+                    set_string(item, key, Some(value))
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn set_named_list(item: &mut Map<String, Value>, key: &str, value: &str) {
+    let values = split_values(Some(value))
+        .into_iter()
+        .map(|name| {
+            item.get(key)
+                .and_then(Value::as_array)
+                .and_then(|items| {
+                    items
+                        .iter()
+                        .find(|item| item["Name"].as_str() == Some(&name))
+                })
+                .cloned()
+                .unwrap_or_else(|| json!({"Name": name}))
+        })
+        .collect();
+    item.insert(key.into(), Value::Array(values));
 }
 
 fn external(info: &Value, key: &str) -> bool {
@@ -814,6 +993,8 @@ mod tests {
         let mut item = json!({"Id":"11","Name":"Song","GenreItems":[{"Id":"1","Name":"Rock"},{"Id":"2","Name":"Pop"}],"ArtistItems":[{"Id":"artist","Name":"Artist"}],"ProviderIds":{"MusicBrainzTrack":"release-track"}}).as_object().unwrap().clone();
         let original = item.clone();
         let mut edit = crate::TrackMetadataEdit {
+            extra: Default::default(),
+            artwork: None,
             values: crate::TrackMetadataValues::default(),
             changed: crate::TrackMetadataWritable::default(),
         };
@@ -929,6 +1110,8 @@ mod tests {
             crate::ServerKind::Jellyfin,
             &mut item,
             &crate::TrackMetadataEdit {
+                extra: Default::default(),
+                artwork: None,
                 values: TrackMetadataValues {
                     title: "Track".to_string(),
                     artist: Some("Artist".to_string()),

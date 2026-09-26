@@ -63,10 +63,11 @@
   </object>
 
   <object class="AdwDialog" id="editor_dialog">
+    <property name="content-height">1140</property>
     <property name="title" translatable="yes">Edit metadata</property>
     <style><class name="preferences"/></style>
     <property name="child">
-      <object class="AdwToolbarView">
+      <object class="AdwToolbarView" id="editor_toolbar">
         <child type="top">
           <object class="AdwHeaderBar">
             <property name="show-start-title-buttons">false</property>
@@ -79,11 +80,17 @@
             <property name="orientation">vertical</property>
             <property name="spacing">12</property>
             <child>
+              <object class="GtkStackSwitcher">
+                <property name="stack">editor_pages</property>
+                <property name="halign">center</property>
+              </object>
+            </child>
+            <child>
               <object class="GtkScrolledWindow" id="editor_scroller">
+                <property name="propagate-natural-height">true</property>
                 <property name="hscrollbar-policy">never</property>
                 <property name="vscrollbar-policy">automatic</property>
-                <property name="propagate-natural-height">true</property>
-                <property name="vexpand">false</property>
+                <property name="vexpand">true</property>
                 <property name="child">
                   <object class="AdwClamp">
                     <property name="maximum-size">650</property>
@@ -92,35 +99,57 @@
                     <property name="margin-start">24</property>
                     <property name="margin-end">24</property>
                     <property name="child">
-                      <object class="GtkBox" id="fields">
-                        <property name="orientation">vertical</property>
-                        <property name="spacing">14</property>
-                        <property name="hexpand">true</property>
+                      <object class="GtkStack" id="editor_pages">
+                        <property name="vhomogeneous">false</property>
                         <child>
-                          <object class="GtkBox" id="identify_actions">
-                            <property name="orientation">horizontal</property>
-                            <property name="spacing">8</property>
-                            <property name="hexpand">true</property>
-                            <child>
-                              <object class="GtkLabel" id="identify_scope">
-                                <property name="visible">false</property>
-                                <property name="halign">start</property>
+                          <object class="GtkStackPage">
+                            <property name="name">tags</property>
+                            <property name="title" translatable="yes">Tags</property>
+                            <property name="child">
+                              <object class="GtkBox" id="fields">
+                                <property name="orientation">vertical</property>
+                                <property name="spacing">14</property>
                                 <property name="hexpand">true</property>
-                                <style><class name="dim-label"/></style>
+                                <child>
+                                  <object class="GtkBox" id="identify_actions">
+                                    <property name="orientation">horizontal</property>
+                                    <property name="spacing">8</property>
+                                    <property name="hexpand">true</property>
+                                    <child>
+                                      <object class="GtkLabel" id="identify_scope">
+                                        <property name="visible">false</property>
+                                        <property name="halign">start</property>
+                                        <property name="hexpand">true</property>
+                                        <style><class name="dim-label"/></style>
+                                      </object>
+                                    </child>
+                                    <child>
+                                      <object class="GtkBox" id="identify_spacer">
+                                        <property name="orientation">horizontal</property>
+                                        <property name="hexpand">true</property>
+                                      </object>
+                                    </child>
+                                    <child>
+                                      <object class="GtkButton" id="identify">
+                                        <property name="label" translatable="yes">Identify</property>
+                                        <style><class name="destructive-action"/></style>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
                               </object>
-                            </child>
-                            <child>
-                              <object class="GtkBox" id="identify_spacer">
-                                <property name="orientation">horizontal</property>
-                                <property name="hexpand">true</property>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkStackPage">
+                            <property name="name">artwork</property>
+                            <property name="title" translatable="yes">Artwork</property>
+                            <property name="child">
+                              <object class="GtkBox" id="artwork_host">
+                                <property name="orientation">vertical</property>
                               </object>
-                            </child>
-                            <child>
-                              <object class="GtkButton" id="identify">
-                                <property name="label" translatable="yes">Identify</property>
-                                <style><class name="destructive-action"/></style>
-                              </object>
-                            </child>
+                            </property>
                           </object>
                         </child>
                       </object>
@@ -173,4 +202,33 @@
       </object>
     </property>
   </object>
+  <object class="GtkLabel" id="field_Album_artist_sort"><property name="label" translatable="yes">Album artist sort</property></object>
+  <object class="GtkLabel" id="field_Album_sort"><property name="label" translatable="yes">Album sort</property></object>
+  <object class="GtkLabel" id="field_Artist_sort"><property name="label" translatable="yes">Artist sort</property></object>
+  <object class="GtkLabel" id="field_Collections"><property name="label" translatable="yes">Collections</property></object>
+  <object class="GtkLabel" id="field_Compilation"><property name="label" translatable="yes">Compilation</property></object>
+  <object class="GtkLabel" id="field_Composer"><property name="label" translatable="yes">Composer</property></object>
+  <object class="GtkLabel" id="field_Composer_sort"><property name="label" translatable="yes">Composer sort</property></object>
+  <object class="GtkLabel" id="field_Copyright"><property name="label" translatable="yes">Copyright</property></object>
+  <object class="GtkLabel" id="field_Country"><property name="label" translatable="yes">Country</property></object>
+  <object class="GtkLabel" id="field_Date"><property name="label" translatable="yes">Date</property></object>
+  <object class="GtkLabel" id="field_Grouping"><property name="label" translatable="yes">Grouping</property></object>
+  <object class="GtkLabel" id="field_Labels"><property name="label" translatable="yes">Labels</property></object>
+  <object class="GtkLabel" id="field_Mood"><property name="label" translatable="yes">Mood</property></object>
+  <object class="GtkLabel" id="field_MusicBrainz_album_artist_ID"><property name="label" translatable="yes">MusicBrainz album artist ID</property></object>
+  <object class="GtkLabel" id="field_MusicBrainz_artist_ID"><property name="label" translatable="yes">MusicBrainz artist ID</property></object>
+  <object class="GtkLabel" id="field_TheAudioDB_album_ID"><property name="label" translatable="yes">TheAudioDB album ID</property></object>
+  <object class="GtkLabel" id="field_TheAudioDB_artist_ID"><property name="label" translatable="yes">TheAudioDB artist ID</property></object>
+  <object class="GtkLabel" id="field_Musical_key"><property name="label" translatable="yes">Musical key</property></object>
+  <object class="GtkLabel" id="field_Original_release_date"><property name="label" translatable="yes">Original release date</property></object>
+  <object class="GtkLabel" id="field_Performer"><property name="label" translatable="yes">Performer</property></object>
+  <object class="GtkLabel" id="field_Record_label"><property name="label" translatable="yes">Record label</property></object>
+  <object class="GtkLabel" id="field_Release_date"><property name="label" translatable="yes">Release date</property></object>
+  <object class="GtkLabel" id="field_Similar_artists"><property name="label" translatable="yes">Similar artists</property></object>
+  <object class="GtkLabel" id="field_Studio"><property name="label" translatable="yes">Studio</property></object>
+  <object class="GtkLabel" id="field_Studios"><property name="label" translatable="yes">Studios</property></object>
+  <object class="GtkLabel" id="field_Style"><property name="label" translatable="yes">Style</property></object>
+  <object class="GtkLabel" id="field_Tags"><property name="label" translatable="yes">Tags</property></object>
+  <object class="GtkLabel" id="field_Total_discs"><property name="label" translatable="yes">Total discs</property></object>
+  <object class="GtkLabel" id="field_Total_tracks"><property name="label" translatable="yes">Total tracks</property></object>
 </interface>

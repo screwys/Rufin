@@ -428,6 +428,7 @@ async fn import_smart(
                 object.remove("source_id");
             }
             let record = crate::SmartPlaylistWrite {
+                artwork_bytes: None,
                 object_id: string(&row, "object_id")
                     .or_else(|| string(&row, "smart_playlist_id"))
                     .ok_or_else(|| {

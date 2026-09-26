@@ -22,7 +22,9 @@ mod pipeline;
 mod selection;
 
 pub use animation::{Animation, AnimationFrame};
-pub use decode::{DecodedImage, RgbaImage, decode_rgba, image_mime, square_thumbnail_png};
+pub use decode::{
+    DecodedImage, RgbaImage, collage_png, decode_rgba, image_mime, square_thumbnail_png,
+};
 pub use selection::ArtworkBinding;
 pub use sources::ImageSize;
 
@@ -110,7 +112,7 @@ pub struct ArtworkKey {
 
 impl ArtworkKey {
     fn derive(
-        candidate: Option<&selection::Candidate>,
+        binding: &ArtworkBinding,
         sizes: (ImageSize, u32),
         external: Option<&ExternalPolicy>,
         allow_fetch: bool,
@@ -120,16 +122,8 @@ impl ArtworkKey {
             .map(|policy| format!("{policy:?}\0{}", epochs.1))
             .unwrap_or_default();
         Self {
-            asset: Self::binding_digest(
-                &candidate
-                    .map(selection::Candidate::asset_identity)
-                    .unwrap_or_default(),
-            ),
-            binding: Self::binding_digest(
-                &candidate
-                    .map(selection::Candidate::stable_identity)
-                    .unwrap_or_default(),
-            ),
+            asset: Self::binding_digest(binding.asset_identity()),
+            binding: Self::binding_digest(binding.stable_identity()),
             variant: Self::binding_digest(&format!(
                 "{policy}\0{allow_fetch}\0{}\0{}",
                 epochs.0,
@@ -264,6 +258,9 @@ impl SourceManifest {
 }
 
 impl Artwork {
+    pub fn install_database(&self, database: Arc<library::Database>) {
+        self.pipeline.install_database(database);
+    }
     pub fn begin_source_manifest(
         &self,
         source_id: SourceId,
@@ -325,7 +322,40 @@ impl Artwork {
     }
 
     pub fn cache_only_file(&self, request: &ArtworkRequest) -> Option<PathBuf> {
-        self.pipeline.cache_only_file(request)
+        self.pipeline
+            .cache_only_file(request, &[request.fetch_size])
+    }
+
+    /// Reuse a cached image before asking its source for the original bytes.
+    pub async fn image_bytes(
+        &self,
+        mut request: ArtworkRequest,
+    ) -> Result<Option<Vec<u8>>, String> {
+        request.fetch_size = ImageSize::Original;
+        let pipeline = self.pipeline.clone();
+        let cached_request = request.clone();
+        let cached = tokio::task::spawn_blocking(move || {
+            pipeline
+                .cache_only_file(&cached_request, pipeline::CACHED_IMAGE_SIZES)
+                .map(std::fs::read)
+                .transpose()
+        })
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+        if cached.is_some() {
+            return Ok(cached);
+        }
+        let loaded = match self.load(request) {
+            ArtworkLoad::Ready(loaded) => loaded,
+            ArtworkLoad::Missing => return Ok(None),
+            ArtworkLoad::Pending(pending) => match pending.finish().await {
+                ArtworkOutcome::Ready(loaded) => loaded,
+                ArtworkOutcome::Missing | ArtworkOutcome::Invalidated => return Ok(None),
+                ArtworkOutcome::Failed(error) => return Err(error.to_string()),
+            },
+        };
+        Ok(loaded.original.map(|bytes| bytes.to_vec()))
     }
 
     pub fn retry_external(&self) -> Result<(), ArtworkError> {
@@ -334,6 +364,10 @@ impl Artwork {
 
     pub fn invalidate_source(&self, source_id: &SourceId) -> Result<(), ArtworkError> {
         self.pipeline.invalidate_source(source_id)
+    }
+
+    pub fn invalidate_image(&self, binding: &ArtworkBinding) -> Result<bool, ArtworkError> {
+        self.pipeline.invalidate_image(binding)
     }
 }
 
@@ -452,7 +486,7 @@ mod preparation_tests {
         .unwrap();
         cache
             .write_ready(
-                binding.candidate().unwrap(),
+                binding.candidates.first().unwrap(),
                 ImageSize::Thumbnail(256),
                 png.get_ref(),
             )

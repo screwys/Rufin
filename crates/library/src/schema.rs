@@ -14,7 +14,7 @@ pub(crate) async fn pragma(
 }
 pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA application_id = 1381320270;
 
-PRAGMA user_version = 44;
+PRAGMA user_version = 45;
 
 CREATE TABLE IF NOT EXISTS source_ids (source_key INTEGER PRIMARY KEY, object_id TEXT NOT NULL UNIQUE CHECK(object_id<>'')) STRICT;
 
@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS playlists (
     normalized_name TEXT,
     sort_text TEXT,
     position INTEGER NOT NULL CHECK (position >= 0),
+    artwork_bytes BLOB,
+    artwork_mime TEXT,
+    artwork_revision TEXT,
     UNIQUE (source_key, object_id)
 ) STRICT;
 
@@ -94,6 +97,8 @@ CREATE TABLE IF NOT EXISTS smart_playlists (
     name TEXT NOT NULL,
     normalized_name TEXT NOT NULL,
     definition_json TEXT NOT NULL CHECK (json_valid(definition_json)),
+    artwork_bytes BLOB,
+    artwork_revision TEXT,
     position INTEGER NOT NULL CHECK (position >= 0),
     UNIQUE (object_id),
     UNIQUE (position)
@@ -279,7 +284,7 @@ CREATE INDEX IF NOT EXISTS local_locators_precedence_idx ON local_locators(media
 "#;
 pub(crate) const CATALOG_SCHEMA: &str = r#"PRAGMA application_id = 1381320270;
 
-PRAGMA user_version = 47;
+PRAGMA user_version = 49;
 
 CREATE TABLE IF NOT EXISTS sources (
     source_key INTEGER PRIMARY KEY,
@@ -540,6 +545,7 @@ CREATE TABLE IF NOT EXISTS native_playlists (
     sort_text TEXT NOT NULL,
     artwork_binding BLOB,
     writable INTEGER NOT NULL DEFAULT 1,
+    metadata_writable INTEGER NOT NULL DEFAULT 1,
     provider_revision TEXT,
     valid_until INTEGER,
     UNIQUE (source_key, object_id)
@@ -643,6 +649,7 @@ CREATE TABLE IF NOT EXISTS local_files (
     inode INTEGER,
     native_id TEXT,
     picture_index INTEGER,
+    artist_pictures TEXT,
     revision TEXT,
     parse_version INTEGER,
     state TEXT NOT NULL CHECK (state IN ('accepted', 'rejected', 'unreadable', 'observed')),
@@ -727,6 +734,10 @@ pub(crate) async fn initialize_catalog(connection: &mut SqliteConnection) -> Lib
 }
 
 async fn initialize(connection: &mut SqliteConnection, schema: &'static str) -> LibraryResult<()> {
+    let upgrade_artist_artwork =
+        schema == CATALOG_SCHEMA && pragma(connection, "user_version").await? < 48;
+    let upgrade_playlist_permissions =
+        schema == CATALOG_SCHEMA && pragma(connection, "user_version").await? < 49;
     let mut transaction = connection.begin().await?;
     for statement in sql_parts(schema, ';') {
         let Some(table) = statement.strip_prefix("CREATE TABLE IF NOT EXISTS ") else {
@@ -762,6 +773,19 @@ async fn initialize(connection: &mut SqliteConnection, schema: &'static str) -> 
         }
     }
     sqlx::raw_sql(schema).execute(&mut *transaction).await?;
+    if upgrade_playlist_permissions {
+        sqlx::query("UPDATE native_playlists SET metadata_writable=writable")
+            .execute(&mut *transaction)
+            .await?;
+    }
+    if upgrade_artist_artwork {
+        // Revisit image directories while retaining the parsed media facts.
+        sqlx::query("UPDATE local_files SET mtime_ns=-1,revision=NULL WHERE kind='directory'")
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("UPDATE sources SET freshness=NULL,artwork_digest=zeroblob(32),catalog_revision=catalog_revision+1")
+            .execute(&mut *transaction).await?;
+    }
     transaction.commit().await?;
     Ok(())
 }
@@ -866,7 +890,8 @@ pub(crate) async fn initialize_local_activity(
 
 const CONNECTION_VIEWS: &str = r#"CREATE TEMP VIEW playlists AS
           SELECT owned.playlist_key,source.source_key,owned.object_id,owned.name,
-                 owned.normalized_name,owned.sort_text,owned.position,NULL artwork_binding,1 writable
+                 owned.normalized_name,owned.sort_text,owned.position,
+                 CASE WHEN owned.artwork_revision IS NOT NULL THEN CAST(json_object('kind','playlist','source_id',identity.object_id,'object_id',owned.object_id,'revision',owned.artwork_revision) AS BLOB) END artwork_binding,1 writable,1 metadata_writable
           FROM main.playlists owned
           LEFT JOIN main.source_ids identity ON identity.source_key=owned.source_key
           LEFT JOIN catalog.sources source ON source.object_id=identity.object_id
@@ -875,7 +900,7 @@ const CONNECTION_VIEWS: &str = r#"CREATE TEMP VIEW playlists AS
           SELECT -observed.playlist_key,observed.source_key,observed.object_id,
                  observed.name,observed.normalized_name,observed.sort_text,
                  COALESCE(identity.position,(SELECT COALESCE(max(position),0) FROM main.playlists)+observed.playlist_key),
-                 observed.artwork_binding,observed.writable
+                 observed.artwork_binding,observed.writable,observed.metadata_writable
           FROM catalog.native_playlists observed
           JOIN catalog.sources source ON source.source_key=observed.source_key
           LEFT JOIN main.source_ids durable ON durable.object_id=source.object_id

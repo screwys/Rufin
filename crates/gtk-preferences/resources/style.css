@@ -2082,6 +2082,7 @@ button.download-queue-pause image {
 .detail-showcase-action-button .action-button-shadow {
   min-width: 48px;
   min-height: 48px;
+  transition: none;
   box-shadow:
     0 8px 24px rgba(0, 0, 0, 0.18),
     inset 0 0 0 1px rgba(0, 0, 0, 0.08);
@@ -2097,24 +2098,12 @@ button.download-queue-pause image {
   transform: scale(1.08);
 }
 
-.detail-showcase-action-button:hover .action-button-shadow {
-  box-shadow:
-    0 10px 26px rgba(0, 0, 0, 0.26),
-    inset 0 0 0 1px rgba(0, 0, 0, 0.12);
-}
-
 .detail-showcase-action-button:active {
   box-shadow: none;
 }
 
 .detail-showcase-action-button:active .detail-showcase-action-face {
   transform: scale(0.96);
-}
-
-.detail-showcase-action-button:active .action-button-shadow {
-  box-shadow:
-    0 6px 18px rgba(0, 0, 0, 0.24),
-    inset 0 0 0 1px rgba(0, 0, 0, 0.14);
 }
 
 .detail-showcase-play-button {

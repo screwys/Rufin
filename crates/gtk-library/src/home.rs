@@ -676,13 +676,8 @@ impl CatalogUi {
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {
             (play_shell.media_menus.play_target)(&play_target, placement, shuffled);
         });
-        let controls = detail_playback_controls(
-            &actions,
-            msgid("Play album"),
-            Some(album.favorite),
-            true,
-            play,
-        );
+        let controls =
+            detail_playback_controls(&actions, msgid("Play album"), Some(album.favorite), play);
         let favorite = favorite_icon_button("Favorite");
         configure_action_button(&favorite, ActionButtonVariant::DetailFavorite);
         set_favorite_button_active(&favorite, album.favorite);

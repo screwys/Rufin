@@ -140,7 +140,6 @@ impl CatalogUi {
             &actions,
             msgid("Play album"),
             Some(album.favorite),
-            true,
             Rc::clone(&play),
         );
 

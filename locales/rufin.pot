@@ -141,6 +141,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"This is a fallback artwork Rufin uses, do you want to set this as the item "
+"artwork?"
+msgstr ""
+
+msgid ""
 "This is not supported natively by this source, but Rufin can show partial "
 "stars and then round them up for the source"
 msgstr ""
@@ -269,6 +274,9 @@ msgstr ""
 msgid "Add folder"
 msgstr ""
 
+msgid "Add image"
+msgstr ""
+
 msgid "Add to Favorites"
 msgstr ""
 
@@ -296,6 +304,9 @@ msgstr ""
 msgid "Album Artists"
 msgstr ""
 
+msgid "Album artist sort"
+msgstr ""
+
 msgid "Album artist"
 msgstr ""
 
@@ -303,6 +314,9 @@ msgid "Album artists"
 msgstr ""
 
 msgid "Album radio"
+msgstr ""
+
+msgid "Album sort"
 msgstr ""
 
 msgid "Album title"
@@ -324,6 +338,9 @@ msgid "All Music"
 msgstr ""
 
 msgid "All Playlists"
+msgstr ""
+
+msgid "All time"
 msgstr ""
 
 msgid "All tracks"
@@ -393,6 +410,9 @@ msgstr ""
 msgid "Artist radio"
 msgstr ""
 
+msgid "Artist sort"
+msgstr ""
+
 msgid "Artist tracks"
 msgstr ""
 
@@ -403,6 +423,15 @@ msgid "Artist"
 msgstr ""
 
 msgid "Artists"
+msgstr ""
+
+msgid "Artwork editing is no longer available"
+msgstr ""
+
+msgid "Artwork selected"
+msgstr ""
+
+msgid "Artwork storage"
 msgstr ""
 
 msgid "Artwork"
@@ -597,6 +626,9 @@ msgstr ""
 msgid "Clear Mapping"
 msgstr ""
 
+msgid "Clear album"
+msgstr ""
+
 msgid "Clear artist"
 msgstr ""
 
@@ -663,7 +695,16 @@ msgstr ""
 msgid "Compare these emoji on both devices"
 msgstr ""
 
+msgid "Compilation"
+msgstr ""
+
 msgid "Complete sign-in in your browser"
+msgstr ""
+
+msgid "Composer sort"
+msgstr ""
+
+msgid "Composer"
 msgstr ""
 
 msgid "Configure another"
@@ -787,6 +828,9 @@ msgstr ""
 msgid "Copy"
 msgstr ""
 
+msgid "Copyright"
+msgstr ""
+
 msgid "Could not load listening overview"
 msgstr ""
 
@@ -830,6 +874,9 @@ msgstr ""
 msgid "Couldn\342\200\231t download Japanese dictionary"
 msgstr ""
 
+msgid "Country"
+msgstr ""
+
 msgid "Create a playlist from queue"
 msgstr ""
 
@@ -843,6 +890,9 @@ msgid "Crossfade mode"
 msgstr ""
 
 msgid "Crossfade"
+msgstr ""
+
+msgid "Current artwork"
 msgstr ""
 
 msgid "Custom HTTP headers"
@@ -870,6 +920,9 @@ msgid "Dark"
 msgstr ""
 
 msgid "Date added"
+msgstr ""
+
+msgid "Date"
 msgstr ""
 
 msgid "Days after month ends"
@@ -1121,6 +1174,9 @@ msgstr ""
 msgid "Equalizer"
 msgstr ""
 
+msgid "Ever played"
+msgstr ""
+
 msgid "Everything, including new tracks"
 msgstr ""
 
@@ -1355,6 +1411,9 @@ msgstr ""
 msgid "Grid"
 msgstr ""
 
+msgid "Grouping"
+msgstr ""
+
 msgid "Guest / public access"
 msgstr ""
 
@@ -1398,6 +1457,9 @@ msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
 msgstr ""
 
 msgid "If you do not have API keys, create them"
+msgstr ""
+
+msgid "Image files"
 msgstr ""
 
 msgid "Image"
@@ -1484,6 +1546,9 @@ msgstr ""
 msgid "LRCLIB"
 msgstr ""
 
+msgid "Labels"
+msgstr ""
+
 msgid "Language and readings"
 msgstr ""
 
@@ -1491,6 +1556,15 @@ msgid "Language"
 msgstr ""
 
 msgid "Laptop/Headphones"
+msgstr ""
+
+msgid "Last 30 days"
+msgstr ""
+
+msgid "Last 365 days"
+msgstr ""
+
+msgid "Last 7 days"
 msgstr ""
 
 msgid "Last played"
@@ -1772,6 +1846,9 @@ msgstr ""
 msgid "MusicBrainz + Last.fm"
 msgstr ""
 
+msgid "MusicBrainz album artist ID"
+msgstr ""
+
 msgid "MusicBrainz artist ID"
 msgstr ""
 
@@ -1788,6 +1865,9 @@ msgid "MusicBrainz release track ID"
 msgstr ""
 
 msgid "MusicBrainz"
+msgstr ""
+
+msgid "Musical key"
 msgstr ""
 
 msgid "Mute"
@@ -1875,6 +1955,9 @@ msgid "No Servers Found"
 msgstr ""
 
 msgid "No albums from this artist yet"
+msgstr ""
+
+msgid "No artwork found"
 msgstr ""
 
 msgid "No cached server path yet"
@@ -2111,6 +2194,9 @@ msgstr ""
 msgid "Orange"
 msgstr ""
 
+msgid "Original release date"
+msgstr ""
+
 msgid "Original"
 msgstr ""
 
@@ -2157,6 +2243,12 @@ msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
 msgstr ""
 
 msgid "Perceptual"
+msgstr ""
+
+msgid "Performer"
+msgstr ""
+
+msgid "Period"
 msgstr ""
 
 msgid "Pink"
@@ -2235,9 +2327,6 @@ msgid "Playback speed"
 msgstr ""
 
 msgid "Playback"
-msgstr ""
-
-msgid "Played"
 msgstr ""
 
 msgid "Playing on this device"
@@ -2442,6 +2531,9 @@ msgstr ""
 msgid "Reconnect"
 msgstr ""
 
+msgid "Record label"
+msgstr ""
+
 msgid "Red"
 msgstr ""
 
@@ -2467,6 +2559,9 @@ msgid "Regenerate access token"
 msgstr ""
 
 msgid "Regenerate access token?"
+msgstr ""
+
+msgid "Regenerate"
 msgstr ""
 
 msgid "Related"
@@ -2689,6 +2784,9 @@ msgstr ""
 msgid "Save changes automatically"
 msgstr ""
 
+msgid "Save in folder"
+msgstr ""
+
 msgid "Save lyrics automatically"
 msgstr ""
 
@@ -2741,6 +2839,9 @@ msgid "Search Again"
 msgstr ""
 
 msgid "Search Lyrics"
+msgstr ""
+
+msgid "Search artwork"
 msgstr ""
 
 msgid "Search current folder"
@@ -2849,9 +2950,6 @@ msgid "Selection"
 msgstr ""
 
 msgid "Self-host an Iroh Relay"
-msgstr ""
-
-msgid "Separate .lrc file"
 msgstr ""
 
 #, rust-format
@@ -3019,6 +3117,9 @@ msgstr ""
 msgid "Sign in"
 msgstr ""
 
+msgid "Similar artists"
+msgstr ""
+
 msgid "SimpMusic"
 msgstr ""
 
@@ -3115,6 +3216,12 @@ msgstr ""
 msgid "Stream quality"
 msgstr ""
 
+msgid "Studio"
+msgstr ""
+
+msgid "Studios"
+msgstr ""
+
 msgid "Style"
 msgstr ""
 
@@ -3145,6 +3252,9 @@ msgstr ""
 msgid "System"
 msgstr ""
 
+msgid "Tags"
+msgstr ""
+
 msgid "Target loudness"
 msgstr ""
 
@@ -3164,6 +3274,12 @@ msgid "Text"
 msgstr ""
 
 msgid "The API token was not accepted. Please connect again."
+msgstr ""
+
+msgid "TheAudioDB album ID"
+msgstr ""
+
+msgid "TheAudioDB artist ID"
 msgstr ""
 
 msgid "Theme"
@@ -3220,6 +3336,12 @@ msgid "Top genres"
 msgstr ""
 
 msgid "Top tracks"
+msgstr ""
+
+msgid "Total discs"
+msgstr ""
+
+msgid "Total tracks"
 msgstr ""
 
 msgid "Track number"
@@ -3309,6 +3431,9 @@ msgstr ""
 
 #, rust-format
 msgid "Updating Rufin to {version}..."
+msgstr ""
+
+msgid "Upload artwork"
 msgstr ""
 
 msgid "Use API key"

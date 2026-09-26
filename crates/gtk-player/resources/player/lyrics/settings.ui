@@ -40,7 +40,7 @@
                 <style><class name="linked"/><class name="preference-selection-buttons"/></style>
                 <child>
                   <object class="GtkToggleButton" id="sidecar">
-                    <property name="label" translatable="yes">Separate .lrc file</property>
+                    <property name="label" translatable="yes">Save in folder</property>
                     <style><class name="preference-selection-button"/></style>
                   </object>
                 </child>

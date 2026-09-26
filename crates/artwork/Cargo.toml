@@ -12,6 +12,7 @@ publish.workspace = true
 
 [dependencies]
 metadata-lookup.workspace = true
+library.workspace = true
 futures-util.workspace = true
 tokio-util = { workspace = true, features = ["rt"] }
 image.workspace = true

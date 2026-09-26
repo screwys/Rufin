@@ -249,6 +249,7 @@ async fn smart(source: &mut SqliteConnection, target: &mut SqliteConnection) -> 
             crate::smart_playlists::write_smart_playlist(
                 target,
                 &crate::smart_playlists::SmartPlaylistWrite {
+                    artwork_bytes: None,
                     object_id: required(&row, "smart_playlist_id")?,
                     name: required(&row, "name")?,
                     definition_json: serde_json::to_string(&definition)?,

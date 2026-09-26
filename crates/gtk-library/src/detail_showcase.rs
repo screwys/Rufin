@@ -14,7 +14,7 @@ use crate::CatalogUi;
 use gtk_widgets::artwork::presentation::add_album_seed_gradient_class;
 use gtk_widgets::artwork::{ArtworkTile, CoverGroupProjection, LARGE_COVER_SIZE};
 use gtk_widgets::controls::{ActionButtonVariant, configure_action_button, icon_button};
-use gtk_widgets::controls::{DELETE_ICON, PLAY_LATER_ICON, PLAY_NEXT_ICON};
+use gtk_widgets::controls::{PLAY_LATER_ICON, PLAY_NEXT_ICON};
 use gtk_widgets::interactions::{ContextMenuOpen, RADIO_ICON};
 use gtk_widgets::layout::width_allocation_owner;
 use gtk_widgets::localization::bind_label_text_with;
@@ -72,6 +72,10 @@ mod showcase_imp {
         pub summary_item_2: TemplateChild<gtk::Box>,
         #[template_child]
         pub summary_icon_2: TemplateChild<gtk::Image>,
+        #[template_child]
+        pub source_link: TemplateChild<gtk::LinkButton>,
+        #[template_child]
+        pub source_link_icon: TemplateChild<gtk::Image>,
         #[template_child]
         pub summary_label_2: TemplateChild<gtk::Label>,
         #[template_child]
@@ -190,7 +194,7 @@ impl DetailShowcaseView {
         self.imp().summary.set_visible(any);
     }
 
-    pub fn set_source_summary(&self, icon: &str, name: &str) {
+    pub fn set_source_summary(&self, icon: &str, name: &str, uri: Option<&str>) {
         self.imp().summary_icon_2.set_icon_name(Some(icon));
         self.imp()
             .summary_icon_2
@@ -200,6 +204,19 @@ impl DetailShowcaseView {
             .update_property(&[gtk::accessible::Property::Label(name)]);
         self.imp().summary_label_2.set_visible(false);
         self.imp().summary_item_2.set_tooltip_text(Some(name));
+        self.imp().summary_icon_2.set_visible(uri.is_none());
+        self.imp().source_link.set_visible(uri.is_some());
+        if let Some(uri) = uri {
+            self.imp().source_link.set_uri(uri);
+            self.imp().source_link.set_tooltip_text(Some(name));
+            self.imp()
+                .source_link
+                .update_property(&[gtk::accessible::Property::Label(name)]);
+            self.imp().source_link_icon.set_icon_name(Some(icon));
+            self.imp()
+                .source_link_icon
+                .set_pixel_size(gtk_widgets::source_labels::source_icon_pixel_size(icon, 14));
+        }
         self.imp().summary_item_2.set_visible(true);
         self.imp().summary.set_visible(true);
     }
@@ -285,6 +302,7 @@ pub struct CollectionDetailShowcase {
     pub cover: CoverGroupProjection,
     pub cover_controls: CoverHoverControls,
     pub context_menu: Option<ContextMenuOpen>,
+    pub open_cover: Rc<dyn Fn()>,
 }
 
 pub fn media_showcase(config: MediaShowcase) -> gtk::Widget {
@@ -349,8 +367,10 @@ impl MediaShowcasePresentation {
 pub fn collection_detail_showcase(config: CollectionDetailShowcase) -> gtk::Widget {
     let view = config.view;
     view.set_collection_layout(config.wide_spacing);
+    let button = detail_cover_button(&config.cover.widget());
+    button.connect_clicked(move |_| (config.open_cover)());
     view.attach_cover(&showcase_cover_overlay(
-        &config.cover.widget(),
+        button.upcast_ref(),
         config.cover_controls,
         config.context_menu,
     ));
@@ -418,18 +438,6 @@ pub fn detail_action_button(icon_name: &str, label: &str) -> gtk::Button {
     button
 }
 
-pub fn detail_delete_button(label: &str) -> gtk::Button {
-    let button = gtk::Button::new();
-    button.add_css_class("icon-button");
-    button.add_css_class("flat");
-    button.add_css_class("circular");
-    button.set_valign(gtk::Align::Center);
-    button.set_tooltip_text(Some(&tr(label)));
-    button.set_child(Some(&gtk::Image::from_icon_name(DELETE_ICON)));
-    configure_action_button(&button, ActionButtonVariant::DetailAction);
-    button
-}
-
 pub fn detail_primary_action_button(icon_name: &str, label: &str) -> gtk::Button {
     let button = icon_button(icon_name, label);
     configure_action_button(&button, ActionButtonVariant::DetailPrimary);
@@ -453,7 +461,6 @@ pub fn detail_playback_controls(
     actions: &gtk::Box,
     play_label: &str,
     favorite_active: Option<bool>,
-    show_queue_actions: bool,
     play: CollectionPlay,
 ) -> CoverHoverControls {
     let controls = favorite_active.map_or_else(
@@ -479,11 +486,9 @@ pub fn detail_playback_controls(
             controls.play_last.clone(),
         ),
     ] {
-        if show_queue_actions {
-            let button = detail_action_button(icon, label);
-            connect_collection_play(&button, Rc::clone(&play), placement);
-            actions.append(&button);
-        }
+        let button = detail_action_button(icon, label);
+        connect_collection_play(&button, Rc::clone(&play), placement);
+        actions.append(&button);
         connect_collection_play(&hover, Rc::clone(&play), placement);
     }
     connect_collection_play(&controls.play, play, playback::QueuePlacement::Now);
@@ -560,7 +565,7 @@ pub fn media_cover_projection(
     cover_class: &str,
 ) -> MediaCoverProjection {
     media_cover_projection_with_open(shell, candidates, size, cover_class, |shell, candidates| {
-        (shell.present_full_artwork)(candidates)
+        (shell.present_full_artwork)(vec![candidates])
     })
 }
 
@@ -602,13 +607,7 @@ fn media_cover_projection_with_open(
         cover.add_css_class(cover_class);
     }
 
-    let button = gtk::Button::new();
-    button.add_css_class("flat");
-    button.add_css_class("detail-cover-button");
-    button.set_halign(gtk::Align::Start);
-    button.set_valign(gtk::Align::Start);
-    button.set_cursor_from_name(Some("pointer"));
-    button.set_child(Some(&cover));
+    let button = detail_cover_button(&cover);
 
     let candidates = Rc::new(RefCell::new(candidates));
     let open_candidates = Rc::clone(&candidates);
@@ -627,6 +626,17 @@ fn media_cover_projection_with_open(
 
 fn detail_cover_render_size() -> i32 {
     detail_showcase_cover_size(i32::MAX)
+}
+
+fn detail_cover_button(cover: &gtk::Widget) -> gtk::Button {
+    let button = gtk::Button::new();
+    button.add_css_class("flat");
+    button.add_css_class("detail-cover-button");
+    button.set_halign(gtk::Align::Start);
+    button.set_valign(gtk::Align::Start);
+    button.set_cursor_from_name(Some("pointer"));
+    button.set_child(Some(cover));
+    button
 }
 
 pub fn detail_showcase_frame(header: gtk::Widget) -> gtk::Widget {

@@ -155,6 +155,7 @@ where
             discovery: discovery_events,
         },
     );
+    artwork.install_database(Arc::clone(&library));
     let artwork_source = Arc::downgrade(&source);
     artwork.install_source_resolver(move |source_id| {
         artwork_source

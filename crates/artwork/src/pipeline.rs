@@ -25,6 +25,12 @@ pub(crate) const PREPARATION_WORKERS: usize = WORKERS - 1;
 pub(crate) const PREPARATION_WINDOW: usize = PREPARATION_WORKERS * 4;
 const MAX_DECODED_INDEX_ENTRIES: usize = 4_096;
 const SOURCE_ARTWORK_SIZE: u32 = 256;
+pub(crate) const CACHED_IMAGE_SIZES: &[ImageSize] = &[
+    ImageSize::Original,
+    ImageSize::Thumbnail(512),
+    ImageSize::Thumbnail(256),
+    ImageSize::Thumbnail(96),
+];
 
 pub(crate) struct Pipeline {
     shared: Arc<Shared>,
@@ -51,7 +57,7 @@ struct State {
 }
 
 struct JobRecord {
-    request: Arc<CandidateRequest>,
+    request: Arc<ArtworkRequest>,
     subscribers: HashMap<RequestId, Subscriber>,
     active: bool,
 }
@@ -63,19 +69,10 @@ struct Subscriber {
 
 struct Work {
     key: ArtworkKey,
-    request: Arc<CandidateRequest>,
+    request: Arc<ArtworkRequest>,
     source_epoch: u64,
     external_epoch: u64,
     decode: bool,
-}
-
-#[derive(Clone)]
-struct CandidateRequest {
-    candidate: Candidate,
-    fetch_size: ImageSize,
-    render_size: u32,
-    external: ExternalPolicy,
-    allow_fetch: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -119,6 +116,9 @@ pub(crate) enum Resolution {
 }
 
 impl Pipeline {
+    pub(crate) fn install_database(&self, database: Arc<library::Database>) {
+        self.shared.fetch.install_database(database);
+    }
     pub(crate) fn begin_source_manifest(
         &self,
         source_id: &SourceId,
@@ -133,7 +133,8 @@ impl Pipeline {
         bindings: &[Vec<u8>],
     ) -> std::io::Result<()> {
         for binding in bindings {
-            if let Some(candidate) = ArtworkBinding::opaque(binding).candidate() {
+            let binding = ArtworkBinding::opaque(binding);
+            for candidate in &binding.candidates {
                 self.shared
                     .cache
                     .mark_source_manifest_identity(staging, &candidate.stable_identity())?;
@@ -194,15 +195,15 @@ impl Pipeline {
                 original: None,
             });
         }
-        let Some(candidate) = request.binding.candidate().cloned() else {
+        if request.binding.candidates.is_empty() {
             return ArtworkLoad::Missing;
-        };
+        }
         let request_id = RequestId(state.next_request);
         state.next_request = state.next_request.wrapping_add(1).max(1);
         let (completion, receiver) = oneshot::channel();
         let job = enqueue(
             &mut state,
-            candidate_request(&request, candidate),
+            request,
             request_id,
             Subscriber {
                 priority,
@@ -307,15 +308,14 @@ impl Pipeline {
         self.shared.wake.notify_all();
     }
 
-    pub(crate) fn cache_only_file(&self, request: &ArtworkRequest) -> Option<std::path::PathBuf> {
-        let candidate = request.binding.candidate()?;
-        if candidate.is_external() && !request.external.allow_cached {
-            return None;
-        }
-        self.shared
-            .cache
-            .ready_entry(candidate, request.fetch_size)
-            .map(|entry| entry.path)
+    pub(crate) fn cache_only_file(
+        &self,
+        request: &ArtworkRequest,
+        sizes: &[ImageSize],
+    ) -> Option<std::path::PathBuf> {
+        request.binding.candidates.iter().find_map(|candidate| {
+            cached_leaf_file(&self.shared, candidate, sizes, &request.external)
+        })
     }
 
     pub(crate) fn key(&self, request: &ArtworkRequest) -> ArtworkKey {
@@ -334,8 +334,30 @@ impl Pipeline {
     }
 
     pub(crate) fn invalidate_source(&self, source_id: &SourceId) -> Result<(), ArtworkError> {
+        self.invalidate_source_images(source_id, None)
+    }
+
+    pub(crate) fn invalidate_image(&self, binding: &ArtworkBinding) -> Result<bool, ArtworkError> {
+        let Some(candidate) = binding.candidates.first() else {
+            return Ok(false);
+        };
+        let Some(source_id) = candidate.source_id() else {
+            return Ok(false);
+        };
+        self.invalidate_source_images(source_id, Some(candidate))?;
+        Ok(true)
+    }
+
+    fn invalidate_source_images(
+        &self,
+        source_id: &SourceId,
+        image: Option<&Candidate>,
+    ) -> Result<(), ArtworkError> {
         let commit = lock_cache_commit(&self.shared);
-        self.shared.cache.invalidate_source(source_id)?;
+        match image {
+            Some(image) => self.shared.cache.invalidate_image(image)?,
+            None => self.shared.cache.invalidate_source(source_id)?,
+        }
         let mut state = lock_state(&self.shared);
         *state.source_epochs.entry(source_id.clone()).or_default() = state
             .source_epochs
@@ -347,7 +369,7 @@ impl Pipeline {
         let keys = state
             .jobs
             .iter()
-            .filter(|(_, record)| candidate_belongs_to_source(&record.request.candidate, source_id))
+            .filter(|(_, record)| record.request.binding.source_id() == Some(source_id))
             .map(|(key, _)| key.clone())
             .collect::<Vec<_>>();
         let completions = keys
@@ -370,17 +392,10 @@ impl Pipeline {
 }
 
 fn request_key(state: &State, request: &ArtworkRequest) -> ArtworkKey {
-    let source_epoch = request
-        .binding
-        .candidate()
-        .map(|candidate| source_epoch(state, candidate))
-        .unwrap_or(0);
-    ArtworkKey::derive(
-        request.binding.candidate(),
-        (request.fetch_size, request.render_size),
-        request.binding.has_external().then_some(&request.external),
-        !request.cache_only,
-        (source_epoch, state.external_epoch),
+    job_key(
+        request,
+        source_epoch(state, &request.binding),
+        state.external_epoch,
     )
 }
 
@@ -389,11 +404,10 @@ fn decoded_from_memory(
     request: &ArtworkRequest,
     key: &ArtworkKey,
 ) -> Option<Arc<DecodedImage>> {
-    let candidate = request.binding.candidate()?;
     if request.fetch_size == ImageSize::Original {
         return None;
     }
-    if candidate.is_external() && !request.external.allow_cached {
+    if request.binding.has_external() && !request.external.allow_cached {
         return None;
     }
     state.decoded_index.get_for_request(key)
@@ -535,7 +549,7 @@ impl JobRecord {
 
 fn enqueue(
     state: &mut State,
-    request: CandidateRequest,
+    request: ArtworkRequest,
     request_id: RequestId,
     subscriber: Subscriber,
 ) -> ArtworkKey {
@@ -599,41 +613,19 @@ fn remove_queued(state: &mut State, key: &ArtworkKey) {
     state.preparations.retain(|queued| queued != key);
 }
 
-fn job_key(request: &CandidateRequest, source_epoch: u64, external_epoch: u64) -> ArtworkKey {
+fn job_key(request: &ArtworkRequest, source_epoch: u64, external_epoch: u64) -> ArtworkKey {
     ArtworkKey::derive(
-        Some(&request.candidate),
+        &request.binding,
         (request.fetch_size, request.render_size),
-        request.candidate.is_external().then_some(&request.external),
-        request.allow_fetch,
+        request.binding.has_external().then_some(&request.external),
+        !request.cache_only,
         (source_epoch, external_epoch),
     )
 }
 
-fn candidate_request(request: &ArtworkRequest, candidate: Candidate) -> CandidateRequest {
-    CandidateRequest {
-        candidate,
-        fetch_size: request.fetch_size,
-        render_size: request.render_size,
-        external: request.external.clone(),
-        allow_fetch: !request.cache_only,
-    }
-}
-
-fn candidate_source(candidate: &Candidate) -> Option<SourceId> {
-    match candidate {
-        Candidate::Native(binding) => Some(binding.source_id.clone()),
-        Candidate::Local(binding) => Some(binding.source_id().clone()),
-        Candidate::Album(_) => None,
-    }
-}
-
-fn candidate_belongs_to_source(candidate: &Candidate, source_id: &SourceId) -> bool {
-    candidate_source(candidate).as_ref() == Some(source_id)
-}
-
-fn source_epoch(state: &State, candidate: &Candidate) -> u64 {
-    candidate_source(candidate)
-        .as_ref()
+fn source_epoch(state: &State, binding: &ArtworkBinding) -> u64 {
+    binding
+        .source_id()
         .and_then(|source_id| state.source_epochs.get(source_id))
         .copied()
         .unwrap_or_default()
@@ -670,7 +662,7 @@ fn next_work(shared: &Shared, foreground_reserved: bool) -> Work {
             let decode = record.priority() == JobPriority::Foreground;
             return Work {
                 key,
-                source_epoch: source_epoch(&state, &request.candidate),
+                source_epoch: source_epoch(&state, &request.binding),
                 external_epoch: state.external_epoch,
                 request,
                 decode,
@@ -684,35 +676,70 @@ fn next_work(shared: &Shared, foreground_reserved: bool) -> Work {
 }
 
 fn resolve(shared: &Shared, work: &Work) -> Resolution {
-    let result =
-        resolve_request(shared, work).unwrap_or_else(|error| Resolution::Failed(error.into()));
+    let mut failure = None;
+    for candidate in &work.request.binding.candidates {
+        match resolve_candidate(shared, work, candidate) {
+            Resolution::Missing => {}
+            Resolution::Failed(error) => failure = Some(error),
+            resolved => return resolved,
+        }
+    }
+    failure
+        .map(Resolution::Failed)
+        .unwrap_or(Resolution::Missing)
+}
+
+fn cached_leaf_file(
+    shared: &Shared,
+    candidate: &Candidate,
+    sizes: &[ImageSize],
+    external: &ExternalPolicy,
+) -> Option<std::path::PathBuf> {
+    if candidate.is_external() && !external.allow_cached {
+        return None;
+    }
+    sizes.iter().find_map(|size| {
+        shared
+            .cache
+            .ready_entry(candidate, *size)
+            .map(|entry| entry.path)
+    })
+}
+
+fn resolve_candidate(shared: &Shared, work: &Work, candidate: &Candidate) -> Resolution {
+    let result = resolve_request(shared, work, candidate)
+        .unwrap_or_else(|error| Resolution::Failed(error.into()));
     let request = &work.request;
     if request.fetch_size == ImageSize::Original
         && matches!(result, Resolution::Missing | Resolution::Failed(_))
-        && (!request.candidate.is_external() || request.external.allow_cached)
-        && let Some(entry) = [512, 256, 96].into_iter().find_map(|size| {
-            shared
-                .cache
-                .ready_entry(&request.candidate, ImageSize::Thumbnail(size))
-        })
-        && let Ok(image) = decode_cached(
-            &entry.path,
+        && let Some(path) = cached_leaf_file(
+            shared,
+            candidate,
+            &CACHED_IMAGE_SIZES[1..],
+            &request.external,
+        )
+        && let Ok(bytes) = std::fs::read(path)
+        && let Ok(image) = decode_original(
+            &bytes,
             job_key(request, work.source_epoch, work.external_epoch),
             request.render_size,
         )
     {
         return Resolution::Ready {
             image: Arc::new(image),
-            original: None,
+            original: Some(Arc::from(bytes)),
             cached: true,
         };
     }
     result
 }
 
-fn resolve_request(shared: &Shared, work: &Work) -> Result<Resolution, String> {
+fn resolve_request(
+    shared: &Shared,
+    work: &Work,
+    candidate: &Candidate,
+) -> Result<Resolution, String> {
     let request = &work.request;
-    let candidate = &request.candidate;
     let artwork_key = job_key(request, work.source_epoch, work.external_epoch);
     let may_read_cache = !candidate.is_external() || request.external.allow_cached;
     if may_read_cache {
@@ -746,7 +773,7 @@ fn resolve_request(shared: &Shared, work: &Work) -> Result<Resolution, String> {
             && let Some(entry) = shared.cache.ready_entry(candidate, ImageSize::Original)
         {
             if let Ok(bytes) = std::fs::read(&entry.path) {
-                match store_image(shared, work, bytes, true) {
+                match store_image(shared, work, candidate, bytes, true) {
                     Ok(resolved) => return Ok(resolved),
                     Err(ArtworkError::Decode(_)) => {}
                     Err(error) => return Err(error.to_string()),
@@ -758,7 +785,7 @@ fn resolve_request(shared: &Shared, work: &Work) -> Result<Resolution, String> {
             return Ok(Resolution::Missing);
         }
     }
-    if !request.allow_fetch || (candidate.is_external() && !request.external.allow_network) {
+    if request.cache_only || (candidate.is_external() && !request.external.allow_network) {
         return Ok(Resolution::Missing);
     }
     match shared.fetch.fetch(
@@ -768,10 +795,10 @@ fn resolve_request(shared: &Shared, work: &Work) -> Result<Resolution, String> {
         &request.external,
     )? {
         FetchOutcome::Ready(bytes) => {
-            store_image(shared, work, bytes, false).map_err(|error| error.to_string())
+            store_image(shared, work, candidate, bytes, false).map_err(|error| error.to_string())
         }
         FetchOutcome::Missing => {
-            mark_missing(shared, work).map_err(|error| error.to_string())?;
+            mark_missing(shared, work, candidate).map_err(|error| error.to_string())?;
             Ok(Resolution::Missing)
         }
     }
@@ -780,6 +807,7 @@ fn resolve_request(shared: &Shared, work: &Work) -> Result<Resolution, String> {
 fn store_image(
     shared: &Shared,
     work: &Work,
+    candidate: &Candidate,
     bytes: Vec<u8>,
     cached: bool,
 ) -> Result<Resolution, ArtworkError> {
@@ -795,14 +823,14 @@ fn store_image(
             return Ok(Resolution::Invalidated);
         }
         shared.cache.write_ready(
-            &request.candidate,
+            candidate,
             ImageSize::Thumbnail(thumbnail_size),
             thumbnail.bytes(),
         )?;
         if request.fetch_size == ImageSize::Original {
             shared
                 .cache
-                .write_ready(&request.candidate, ImageSize::Original, &bytes)?;
+                .write_ready(candidate, ImageSize::Original, &bytes)?;
         }
     }
     if !work.decode {
@@ -824,7 +852,7 @@ fn store_image(
     })
 }
 
-fn mark_missing(shared: &Shared, work: &Work) -> std::io::Result<bool> {
+fn mark_missing(shared: &Shared, work: &Work, candidate: &Candidate) -> std::io::Result<bool> {
     let _commit = lock_cache_commit(shared);
     let state = lock_state(shared);
     if !work_is_current(&state, work) {
@@ -833,13 +861,13 @@ fn mark_missing(shared: &Shared, work: &Work) -> std::io::Result<bool> {
     drop(state);
     shared
         .cache
-        .mark_missing(&work.request.candidate, work.request.fetch_size)?;
+        .mark_missing(candidate, work.request.fetch_size)?;
     Ok(true)
 }
 
 fn work_is_current(state: &State, work: &Work) -> bool {
-    source_epoch(state, &work.request.candidate) == work.source_epoch
-        && (!work.request.candidate.is_external() || state.external_epoch == work.external_epoch)
+    source_epoch(state, &work.request.binding) == work.source_epoch
+        && (!work.request.binding.has_external() || state.external_epoch == work.external_epoch)
 }
 
 fn finish(shared: &Shared, work: Work, resolution: Resolution) {
@@ -860,7 +888,7 @@ fn finish(shared: &Shared, work: Work, resolution: Resolution) {
     {
         state.decoded_index.insert(
             image.key().clone(),
-            candidate_source(&work.request.candidate),
+            work.request.binding.source_id().cloned(),
             Arc::clone(image),
         );
     }
@@ -909,15 +937,15 @@ mod tests {
     async fn shared_foreground_and_preparation_disk_hit_counts_as_cached() {
         let directory = tempfile::tempdir().unwrap();
         let cache = FilesystemCache::new(directory.path().to_path_buf()).unwrap();
-        let request = CandidateRequest {
-            candidate: Candidate::Native(sources::NativeArtworkBinding {
-                source_id: SourceId::new("source"),
-                image: NativeImageRef::new("album", None),
-            }),
+        let request = ArtworkRequest {
+            binding: ArtworkBinding::opaque(
+                &sources::native_artwork_binding("source", &NativeImageRef::new("album", None))
+                    .unwrap(),
+            ),
             fetch_size: ImageSize::Thumbnail(256),
             render_size: 144,
             external: ExternalPolicy::default(),
-            allow_fetch: true,
+            cache_only: false,
         };
         let mut png = std::io::Cursor::new(Vec::new());
         image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
@@ -928,7 +956,11 @@ mod tests {
         .write_to(&mut png, image::ImageFormat::Png)
         .unwrap();
         cache
-            .write_ready(&request.candidate, ImageSize::Thumbnail(256), png.get_ref())
+            .write_ready(
+                request.binding.candidates.first().unwrap(),
+                ImageSize::Thumbnail(256),
+                png.get_ref(),
+            )
             .unwrap();
         // Drive one shared job explicitly so worker scheduling cannot separate its subscribers.
         let mut state = State::default();
@@ -997,15 +1029,18 @@ mod tests {
     #[test]
     fn identical_foreground_requests_share_one_fetch_job() {
         let mut state = State::default();
-        let request = CandidateRequest {
-            candidate: Candidate::Native(sources::NativeArtworkBinding {
-                source_id: SourceId::new("source"),
-                image: NativeImageRef::new("album", Some("tag".to_string())),
-            }),
+        let request = ArtworkRequest {
+            binding: ArtworkBinding::opaque(
+                &sources::native_artwork_binding(
+                    "source",
+                    &NativeImageRef::new("album", Some("tag".to_string())),
+                )
+                .unwrap(),
+            ),
             fetch_size: ImageSize::Thumbnail(256),
             render_size: 144,
             external: ExternalPolicy::default(),
-            allow_fetch: true,
+            cache_only: false,
         };
         let first = enqueue(
             &mut state,

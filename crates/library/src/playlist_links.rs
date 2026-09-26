@@ -221,7 +221,11 @@ mod tests {
         database
             .ignore_playlist_file(Some(&source), "0/ignored.pls")
             .await?;
-        check!(!database.rename_playlist(None, playlist, "Music").await?);
+        check!(
+            !database
+                .update_playlist(None, playlist, Some("Music"), None)
+                .await?
+        );
         check!(
             !database
                 .get_playlist_file_link(playlist)
@@ -242,7 +246,9 @@ mod tests {
                 .unwrap()
                 .dirty
         );
-        database.rename_playlist(None, playlist, "New name").await?;
+        database
+            .update_playlist(None, playlist, Some("New name"), None)
+            .await?;
         check!(
             database
                 .get_playlist_file_link(playlist)
