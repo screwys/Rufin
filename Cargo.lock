@@ -8708,7 +8708,7 @@ dependencies = [
  "library",
  "lofty",
  "lyrics",
- "md-5 0.10.6",
+ "md-5 0.11.0",
  "md5 0.8.1",
  "notify",
  "percent-encoding",
