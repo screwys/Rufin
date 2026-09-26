@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-24 06:59+0000\n"
+"PO-Revision-Date: 2026-09-26 23:13+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
 "Language: ru\n"
@@ -472,7 +472,7 @@ msgid "Applying..."
 msgstr "Применяется..."
 
 msgid "Approve sign-in in your browser"
-msgstr "Подтвердите вход в системе в вашем браузере"
+msgstr "Подтвердить вход в системе в вашем браузере"
 
 msgid "April {year}"
 msgstr "Апрель {year}"
@@ -905,7 +905,7 @@ msgid "Copy link"
 msgstr "Копировать ссылку"
 
 msgid "Copy preset"
-msgstr "Скопировать пресет"
+msgstr "Скопировать предустановку"
 
 msgid "Copy the current appearance to the clipboard"
 msgstr "Скопировать текущий внешний вид в буфер обмена"
@@ -1873,7 +1873,7 @@ msgid "Minimum year"
 msgstr "Минимальный год"
 
 msgid "Mirrored bars"
-msgstr "Отражённые панели"
+msgstr "Отражённые полосы"
 
 msgid "Monday"
 msgstr "Понедельник"
@@ -2012,7 +2012,7 @@ msgid "Nearby devices"
 msgstr "Ближайшие устройства"
 
 msgid "Nearby discovery"
-msgstr "Обнаружено поблизости"
+msgstr "Обнаружение поблизости"
 
 msgid "Needs attention"
 msgstr "Требуется внимание"
@@ -2314,7 +2314,7 @@ msgid "Other releases"
 msgstr "Другие выпуски"
 
 msgid "Outline bars"
-msgstr "Отображать панели"
+msgstr "Обводка полос"
 
 msgid "Overview"
 msgstr "Обзор"
@@ -2829,7 +2829,8 @@ msgid "Restore User State"
 msgstr "Восстановить состояние пользователя"
 
 msgid "Restore defaults without deleting saved presets"
-msgstr "Восстановить настройки по умолчанию, не удаляя сохраненные пресеты"
+msgstr ""
+"Восстановить настройки по умолчанию, не удаляя сохраненные предустановки"
 
 msgid "Restore player layout"
 msgstr "Восстановить макет плеера"
@@ -2859,7 +2860,7 @@ msgid "Romaji"
 msgstr "Ромадзи"
 
 msgid "Rounded bars"
-msgstr "Закруглённые панели"
+msgstr "Закруглённые полосы"
 
 msgid "Rows"
 msgstr "Строки"
@@ -2931,7 +2932,7 @@ msgstr[2] ""
 "Сопоставление сохранено. {matched} совпадений из {total} с путями на сервере"
 
 msgid "Saved preset"
-msgstr "Сохраненный пресет"
+msgstr "Сохраненная предустановка"
 
 msgid "Saved to"
 msgstr "Сохранено в"
@@ -3044,7 +3045,7 @@ msgid "Seekbar"
 msgstr "Индикатор прогресса"
 
 msgid "Segmented bars"
-msgstr "Сегментированные панели"
+msgstr "Сегментированные полосы"
 
 msgid "Select All"
 msgstr "Выбрать всё"
@@ -3092,7 +3093,7 @@ msgid "Server Prefix"
 msgstr "Префикс Сервера"
 
 msgid "Server Sample"
-msgstr "Пример Сервера"
+msgstr "Пример сервера"
 
 msgid "Server Settings"
 msgstr "Настройки Сервера"
@@ -3272,7 +3273,7 @@ msgid "Smart playlists"
 msgstr "Умные плейлисты"
 
 msgid "Solid bars"
-msgstr "Сплошные панели"
+msgstr "Сплошные полосы"
 
 msgid "Some playlist entries could not be imported"
 msgstr "Некоторые элементы плейлиста не удалось импортировать"
@@ -3311,7 +3312,7 @@ msgid "Spectrum line"
 msgstr "Линия спектра"
 
 msgid "Sponsor"
-msgstr "Спонсор"
+msgstr "Поддержать"
 
 msgid "Start minimized"
 msgstr "Запускать в свернутом виде"
@@ -3520,10 +3521,10 @@ msgid "Turn on private mode"
 msgstr "Включить приватный режим"
 
 msgid "Type to search or create a new playlist"
-msgstr "Введите текст для поиска или создания нового плейлиста"
+msgstr "Ввести текст для поиска или создания нового плейлиста"
 
 msgid "Type to search"
-msgstr "Введите текст для поиска"
+msgstr "Ввести текст для поиска"
 
 msgid "Typography"
 msgstr "Оформление"
@@ -3706,7 +3707,7 @@ msgid "Waveform seekbar"
 msgstr "Индикатор прогресса воспроизведения в виде волновой формы"
 
 msgid "WebDAV / Nextcloud"
-msgstr "WebDAV / Следующий"
+msgstr "WebDAV / Nextcloud"
 
 msgid "WebDAV"
 msgstr "WebDAV"
