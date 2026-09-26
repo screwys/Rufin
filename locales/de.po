@@ -110,6 +110,11 @@ msgstr ""
 "Schaltfläche „Beitreten“ oder indem du den Einladungscode kopierst"
 
 msgid ""
+"Relative paths start at the music folder or source URL. Local paths can also "
+"be absolute."
+msgstr ""
+
+msgid ""
 "Remove Local and its cached library from Rufin? Your music files will not be "
 "deleted."
 msgstr ""
@@ -1183,6 +1188,11 @@ msgstr "Equalizer"
 msgid "Everything, including new tracks"
 msgstr "Alles, einschließlich neuer Titel"
 
+#, fuzzy
+#| msgid "Add folder"
+msgid "Excluded folders"
+msgstr "Ordner hinzufügen"
+
 msgid "Existing profile file"
 msgstr "Vorhandene Profildatei"
 
@@ -1298,6 +1308,11 @@ msgstr "Feste Position"
 
 msgid "Flat"
 msgstr "Neutral"
+
+#, fuzzy
+#| msgid "Folder"
+msgid "Folder path"
+msgstr "Ordner"
 
 msgid "Folders"
 msgstr "Ordner"
@@ -3751,9 +3766,6 @@ msgstr "Willkommen beim Rufin-Setup"
 
 #~ msgid "Artist / Album"
 #~ msgstr "Künstler / Album"
-
-#~ msgid "Folder"
-#~ msgstr "Ordner"
 
 #~ msgid "This is not a valid Rufin visualizer preset."
 #~ msgstr "Dies ist keine gültige Rufin-Visualisierungsvoreinstellung."

@@ -88,6 +88,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"Relative paths start at the music folder or source URL. Local paths can also "
+"be absolute."
+msgstr ""
+
+msgid ""
 "Remove Local and its cached library from Rufin? Your music files will not be "
 "deleted."
 msgstr ""
@@ -1215,6 +1220,11 @@ msgstr "Taajuuskorjain"
 msgid "Everything, including new tracks"
 msgstr "Kaikki, mukaan lukien uudet kappaleet"
 
+#, fuzzy
+#| msgid "Add folder"
+msgid "Excluded folders"
+msgstr "Lisää kansio"
+
 msgid "Existing profile file"
 msgstr "Olemassa oleva profiilitiedosto"
 
@@ -1337,6 +1347,11 @@ msgstr ""
 
 msgid "Flat"
 msgstr ""
+
+#, fuzzy
+#| msgid "Folder"
+msgid "Folder path"
+msgstr "Kansio"
 
 msgid "Folders"
 msgstr "Kansiot"
@@ -3954,9 +3969,6 @@ msgstr "Tervetuloa Rufinin asennukseen"
 
 #~ msgid "Artist / Album"
 #~ msgstr "Esittäjä / Albumi"
-
-#~ msgid "Folder"
-#~ msgstr "Kansio"
 
 #~ msgid "Updated Rufin to {version}. Restart to apply."
 #~ msgstr ""

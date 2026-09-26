@@ -112,6 +112,11 @@ msgstr ""
 "«Присоединиться» или путём копирования кода приглашения"
 
 msgid ""
+"Relative paths start at the music folder or source URL. Local paths can also "
+"be absolute."
+msgstr ""
+
+msgid ""
 "Remove Local and its cached library from Rufin? Your music files will not be "
 "deleted."
 msgstr ""
@@ -1179,6 +1184,11 @@ msgstr "Эквалайзер"
 msgid "Everything, including new tracks"
 msgstr "Всё, включая новые треки"
 
+#, fuzzy
+#| msgid "Add folder"
+msgid "Excluded folders"
+msgstr "Добавить папку"
+
 msgid "Existing profile file"
 msgstr "Существующий файл профиля"
 
@@ -1293,6 +1303,11 @@ msgstr "Фиксированное расположение"
 
 msgid "Flat"
 msgstr "Плоский"
+
+#, fuzzy
+#| msgid "Folder"
+msgid "Folder path"
+msgstr "Папка"
 
 msgid "Folders"
 msgstr "Папки"
@@ -3755,9 +3770,6 @@ msgstr "Добро пожаловать в программу установки
 
 #~ msgid "Artist / Album"
 #~ msgstr "Исполнитель / Альбом"
-
-#~ msgid "Folder"
-#~ msgstr "Папка"
 
 #~ msgid "This is not a valid Rufin visualizer preset."
 #~ msgstr "Это недействительный пресет визуализации для Rufin."

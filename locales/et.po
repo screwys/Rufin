@@ -111,6 +111,11 @@ msgstr ""
 "kopeerides kutsekoodi"
 
 msgid ""
+"Relative paths start at the music folder or source URL. Local paths can also "
+"be absolute."
+msgstr ""
+
+msgid ""
 "Remove Local and its cached library from Rufin? Your music files will not be "
 "deleted."
 msgstr ""
@@ -1169,6 +1174,11 @@ msgstr "Ekvalaiser"
 msgid "Everything, including new tracks"
 msgstr "Kõik, sealhulgas uued lood"
 
+#, fuzzy
+#| msgid "Add folder"
+msgid "Excluded folders"
+msgstr "Lisa kaust"
+
 msgid "Existing profile file"
 msgstr "Olemasolev profiilifail"
 
@@ -1281,6 +1291,11 @@ msgstr "Fikseeritud asukoht"
 
 msgid "Flat"
 msgstr "Ühetasane"
+
+#, fuzzy
+#| msgid "Folder"
+msgid "Folder path"
+msgstr "Kaust"
 
 msgid "Folders"
 msgstr "Kaustad"
@@ -3717,9 +3732,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
 #~ msgid "Artist / Album"
 #~ msgstr "Esitaja / Album"
-
-#~ msgid "Folder"
-#~ msgstr "Kaust"
 
 #~ msgid "Color scheme"
 #~ msgstr "Kasutatavad värvid"

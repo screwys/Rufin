@@ -99,6 +99,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"Relative paths start at the music folder or source URL. Local paths can also "
+"be absolute."
+msgstr ""
+
+msgid ""
 "Remove Local and its cached library from Rufin? Your music files will not be "
 "deleted."
 msgstr ""
@@ -1213,6 +1218,11 @@ msgstr "Ekvalaizers"
 msgid "Everything, including new tracks"
 msgstr "Viss, ieskaitot jaunās dziesmas"
 
+#, fuzzy
+#| msgid "Add folder"
+msgid "Excluded folders"
+msgstr "Pievienot mapi"
+
 msgid "Existing profile file"
 msgstr ""
 
@@ -1333,6 +1343,11 @@ msgstr "Fiksēta pozīcija"
 
 msgid "Flat"
 msgstr "Plakans"
+
+#, fuzzy
+#| msgid "Folder"
+msgid "Folder path"
+msgstr "Mape"
 
 msgid "Folders"
 msgstr "Mapes"
@@ -3885,9 +3900,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 
 #~ msgid "Artist / Album"
 #~ msgstr "Izpildītājs / Albums"
-
-#~ msgid "Folder"
-#~ msgstr "Mape"
 
 #~ msgid "This is not a valid Rufin visualizer preset."
 #~ msgstr "Šis nav derīgs Rufin vizualizācijas iepriekš iestatītais veids."
