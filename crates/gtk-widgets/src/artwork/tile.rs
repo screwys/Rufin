@@ -155,6 +155,8 @@ impl ArtworkTile {
                 }
             };
             if mapped {
+                // Mapping resumes an existing animation; artwork requests belong to bind.
+                // ast-grep-ignore: artwork-tile-must-not-admit-on-map
                 self.area.connect_map(refresh);
             } else {
                 self.area.connect_unmap(refresh);
