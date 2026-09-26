@@ -18,6 +18,7 @@ pub(super) fn build(
             let weak = weak.clone();
             Rc::new(move |route| {
                 if let Some(shell) = weak.upgrade() {
+                    shell.chrome.topbar.close_search_popup();
                     shell.navigate(route);
                 }
             })
