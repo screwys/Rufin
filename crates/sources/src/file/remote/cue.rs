@@ -118,13 +118,19 @@ impl RemoteSource {
                         if cancelled() {
                             return Err(SourceError::Cancelled);
                         }
-                        let Some(mut backing_file) = scan
+                        let mut backing_file = match scan
                             .local_inventory_files(std::slice::from_ref(path))
                             .await?
                             .pop()
-                        else {
-                            failure = Some(SourceError::NotFound);
-                            continue;
+                        {
+                            Some(file) => file,
+                            None => match self.stat(&input, &self.relative(path)?).await {
+                                Ok(file) => file,
+                                Err(error) => {
+                                    failure = Some(error);
+                                    continue;
+                                }
+                            },
                         };
                         let mut backing = match self
                             .read_audio(&backing_file, Arc::clone(&worker))

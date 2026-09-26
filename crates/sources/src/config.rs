@@ -139,6 +139,7 @@ pub enum SourceSettingsInput {
     },
     Local {
         roots: Vec<PathBuf>,
+        excluded_folders: Option<Vec<PathBuf>>,
     },
 }
 
@@ -166,6 +167,7 @@ pub enum EditableSource {
     Local {
         source_id: SourceId,
         roots: Vec<PathBuf>,
+        excluded_folders: Vec<PathBuf>,
     },
 }
 
@@ -228,7 +230,11 @@ impl SourceConfiguration {
             source_id,
             crate::file::local::LOCAL_SOURCE_ID,
             name,
-            crate::file::local::LocalSourceConfig { roots }.into_payload(),
+            crate::file::local::LocalSourceConfig {
+                roots,
+                excluded_folders: Vec::new(),
+            }
+            .into_payload(),
         ))
     }
 
@@ -363,6 +369,7 @@ impl SourceConfiguration {
                 Ok(EditableSource::Local {
                     source_id: self.source_id.clone(),
                     roots: config.roots,
+                    excluded_folders: config.excluded_folders,
                 })
             }
             kind => Err(SourceError::InvalidConfig(format!(

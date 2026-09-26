@@ -46,6 +46,8 @@ struct LocalSourcePayload {
     version: u32,
     #[serde(default)]
     roots: Vec<String>,
+    #[serde(default)]
+    excluded_folders: Vec<PathBuf>,
     #[serde(default, alias = "base_url")]
     legacy_root: Option<String>,
 }
@@ -53,6 +55,7 @@ struct LocalSourcePayload {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalSourceConfig {
     pub roots: Vec<PathBuf>,
+    pub excluded_folders: Vec<PathBuf>,
 }
 
 impl LocalSourceConfig {
@@ -76,7 +79,10 @@ impl LocalSourceConfig {
         {
             roots.push(PathBuf::from(root));
         }
-        Ok(Self { roots })
+        Ok(Self {
+            roots,
+            excluded_folders: payload.excluded_folders,
+        })
     }
 
     pub(crate) fn into_payload(self) -> serde_json::Value {
@@ -85,9 +91,15 @@ impl LocalSourceConfig {
             .iter()
             .map(|root| root.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
+        let excluded_folders = self
+            .excluded_folders
+            .iter()
+            .map(|folder| folder.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
         serde_json::json!({
             "version": SOURCE_CONFIG_VERSION,
             "roots": roots,
+            "excluded_folders": excluded_folders,
         })
     }
 }
@@ -95,22 +107,36 @@ impl LocalSourceConfig {
 #[derive(Debug)]
 pub struct LocalSource {
     roots: Vec<PathBuf>,
+    excluded_folders: Vec<PathBuf>,
 }
 
 impl LocalSource {
     pub fn from_configuration(configuration: &SourceConfiguration) -> SourceResult<Self> {
         let config = LocalSourceConfig::from_configuration(configuration)?;
         let roots = configured_roots(config.roots)?;
-        Ok(Self { roots })
+        let excluded_folders = excluded_paths(&roots, &config.excluded_folders);
+        Ok(Self {
+            roots,
+            excluded_folders,
+        })
     }
 
     pub fn from_roots(roots: Vec<PathBuf>) -> SourceResult<Self> {
         let roots = normalize_roots(roots)?;
-        Ok(Self { roots })
+        Ok(Self {
+            roots,
+            excluded_folders: Vec::new(),
+        })
     }
 
     pub fn roots(&self) -> &[PathBuf] {
         &self.roots
+    }
+
+    pub(crate) fn excludes(&self, path: &std::path::Path) -> bool {
+        self.excluded_folders
+            .iter()
+            .any(|folder| path.starts_with(folder))
     }
 
     pub(crate) async fn stage_catalog(
@@ -121,15 +147,7 @@ impl LocalSource {
         cancelled: &(dyn Fn() -> bool + Send + Sync),
         reuse_unchanged: bool,
     ) -> SourceResult<()> {
-        scan::stage_catalog(
-            database,
-            &self.roots,
-            scan,
-            progress,
-            cancelled,
-            reuse_unchanged,
-        )
-        .await
+        scan::stage_catalog(database, self, scan, progress, cancelled, reuse_unchanged).await
     }
 
     pub(crate) async fn import_playlist_files(
@@ -167,7 +185,7 @@ impl LocalSource {
         paths: &[PathBuf],
         rename: Option<&(PathBuf, PathBuf)>,
     ) -> SourceResult<library::ScanOutcome> {
-        scan::publish_paths(database, source, source_id, &self.roots, paths, rename).await
+        scan::publish_paths(database, source, source_id, self, paths, rename).await
     }
 
     pub(crate) async fn catch_up(
@@ -178,15 +196,7 @@ impl LocalSource {
         progress: &(dyn Fn(crate::SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<library::ScanOutcome> {
-        scan::catch_up(
-            database,
-            source,
-            source_id,
-            &self.roots,
-            progress,
-            cancelled,
-        )
-        .await
+        scan::catch_up(database, source, source_id, self, progress, cancelled).await
     }
 
     pub(crate) fn image_bytes(&self, artwork: &crate::LocalImageRef) -> SourceResult<ImageBytes> {
@@ -245,6 +255,7 @@ pub(crate) fn connect(
         "Local",
         LocalSourceConfig {
             roots: source.roots().to_vec(),
+            excluded_folders: Vec::new(),
         }
         .into_payload(),
     );
@@ -254,15 +265,22 @@ pub(crate) fn connect(
 pub(crate) fn edit(
     current: SourceConfiguration,
     roots: Vec<PathBuf>,
+    excluded_folders: Option<Vec<PathBuf>>,
 ) -> SourceResult<SourceEditResult> {
     crate::source::require_source_edit(&current, LOCAL_SOURCE_ID)?;
-    let source = LocalSource::from_roots(roots)?;
+    let excluded_folders = match excluded_folders {
+        Some(folders) => folders,
+        None => LocalSourceConfig::from_configuration(&current)?.excluded_folders,
+    };
+    let mut source = LocalSource::from_roots(roots)?;
+    source.excluded_folders = excluded_paths(source.roots(), &excluded_folders);
     let configuration = crate::config::encode_provider_payload(
         current.source_id.clone(),
         LOCAL_SOURCE_ID,
         current.name.clone(),
         LocalSourceConfig {
             roots: source.roots().to_vec(),
+            excluded_folders,
         }
         .into_payload(),
     );
@@ -288,6 +306,36 @@ pub(crate) fn configured_roots(roots: Vec<PathBuf>) -> SourceResult<Vec<PathBuf>
         }
     }
     Ok(configured)
+}
+
+fn excluded_paths(roots: &[PathBuf], folders: &[PathBuf]) -> Vec<PathBuf> {
+    folders
+        .iter()
+        .filter(|folder| !folder.as_os_str().is_empty())
+        .flat_map(|folder| {
+            if folder.is_absolute() {
+                vec![scan::normalize_observed_path(folder)]
+            } else {
+                roots
+                    .iter()
+                    .map(|root| scan::normalize_observed_path(&root.join(folder)))
+                    .collect()
+            }
+        })
+        .map(|path| {
+            let mut normalized = PathBuf::new();
+            for part in path.components() {
+                match part {
+                    std::path::Component::CurDir => {}
+                    std::path::Component::ParentDir => {
+                        normalized.pop();
+                    }
+                    _ => normalized.push(part.as_os_str()),
+                }
+            }
+            normalized
+        })
+        .collect()
 }
 
 fn normalize_roots(roots: Vec<PathBuf>) -> SourceResult<Vec<PathBuf>> {

@@ -129,13 +129,11 @@ pub async fn prepare_folder_route(
     let source = selected.source_key;
     let selected_folder = selected.music_folder_key;
     let folder_object_id = path.last().map(|item| item.id.clone());
-    let live = (selected.source_id.as_str() != sources::LOCAL_LIBRARY_SOURCE_ID).then(|| {
-        selected.operations.folder(
+    {
+        let live = selected.operations.folder(
             folder_object_id.clone(),
             selected.music_folder_object_id.clone(),
-        )
-    });
-    if let Some(live) = live {
+        );
         match live.recv().await {
             Ok(Ok(page)) => {
                 let track_ids = page.tracks;

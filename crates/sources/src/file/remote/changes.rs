@@ -138,6 +138,7 @@ impl RemoteSource {
                     if folder
                         .strip_prefix(path)
                         .is_some_and(|rest| rest.starts_with('/'))
+                        && !self.excludes(folder)
                         && !affected.contains(folder)
                     {
                         affected.push(folder.clone());

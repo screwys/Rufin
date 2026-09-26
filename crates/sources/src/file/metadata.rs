@@ -989,7 +989,10 @@ mod tests {
         let edit = crate::Source::edit(
             configuration,
             None,
-            crate::SourceSettingsInput::Local { roots: Vec::new() },
+            crate::SourceSettingsInput::Local {
+                roots: Vec::new(),
+                excluded_folders: None,
+            },
             None,
         )
         .await

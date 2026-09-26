@@ -36,6 +36,8 @@ pub const CONNECTION_PROGRESS_RESOURCE: &str =
 pub const CREDENTIAL_HOST_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/source/credential_host.ui";
 pub const FILE_HOST_RESOURCE: &str = "/io/github/screwys/Rufin/ui/preferences/source/file_host.ui";
+pub const EXCLUDED_FOLDERS_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/preferences/source/excluded_folders.ui";
 pub const LOCAL_SETUP_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/source/local_setup.ui";
 pub const ONBOARDING_RESOURCE: &str =
@@ -79,6 +81,7 @@ pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     CONNECTION_PROGRESS_RESOURCE,
     CREDENTIAL_HOST_RESOURCE,
     FILE_HOST_RESOURCE,
+    EXCLUDED_FOLDERS_RESOURCE,
     LOCAL_SETUP_RESOURCE,
     ONBOARDING_RESOURCE,
     SERVER_ACTIONS_RESOURCE,

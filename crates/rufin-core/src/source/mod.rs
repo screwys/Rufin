@@ -1276,6 +1276,26 @@ impl SourceOwner {
                     credential = Some(existing.encode().map_err(string_error)?);
                 }
             }
+            let exclusions_changed = match (
+                previous.configuration.editable().map_err(string_error)?,
+                replacement.configuration.editable().map_err(string_error)?,
+            ) {
+                (
+                    sources::EditableSource::Local {
+                        excluded_folders: old,
+                        ..
+                    },
+                    sources::EditableSource::Local {
+                        excluded_folders: new,
+                        ..
+                    },
+                ) => old != new,
+                (
+                    sources::EditableSource::Files { settings: old, .. },
+                    sources::EditableSource::Files { settings: new, .. },
+                ) => old.excluded_folders != new.excluded_folders,
+                _ => false,
+            };
             self.persist_connected_source(&replacement, credential)?;
             if let (Ok(old), Ok(new)) = (
                 local_roots(&previous.configuration),
@@ -1324,7 +1344,7 @@ impl SourceOwner {
                         .await;
                 }
             } else {
-                if replacement.configuration.is_local() {
+                if replacement.configuration.is_local() || exclusions_changed {
                     let outcome = source
                         .manual_refresh(
                             &self.shared.database,
@@ -1896,11 +1916,13 @@ impl SourceOwner {
         music_folder_object_id: Option<String>,
     ) -> Receiver<Result<LiveFolderPage, String>> {
         self.reply(move |owner, _| async move {
+            let database = Arc::clone(&owner.shared.database);
             let source = tokio::task::spawn_blocking(move || owner.client(&source_id))
                 .await
                 .map_err(string_error)??;
             source
                 .browse_folder(
+                    &database,
                     folder_object_id.as_deref(),
                     music_folder_object_id.as_deref(),
                 )
@@ -2902,6 +2924,7 @@ impl ActiveSource {
                 .ok_or_else(source_access_unavailable)?;
             source
                 .browse_folder(
+                    &selected.database,
                     folder_object_id.as_deref(),
                     music_folder_object_id.as_deref(),
                 )
@@ -3450,7 +3473,10 @@ fn edit_local_roots(owner: &SourceOwner, edit: impl FnOnce(&mut Vec<PathBuf>) + 
     };
     let mut roots = local_roots(&local.configuration).unwrap_or_default();
     edit(&mut roots);
-    let input = SourceSettingsInput::Local { roots };
+    let input = SourceSettingsInput::Local {
+        roots,
+        excluded_folders: None,
+    };
     let source_id = local.configuration.source_id;
     let cancelled = owner.shared.begin_acquisition();
     owner.spawn_serialized(move |owner| async move {
@@ -3540,6 +3566,18 @@ fn configured_sources(
         sources: sources.into(),
         selected_source_id: stored.sources.selected_source_id.clone(),
         local_folders: local_folders.into(),
+        local_excluded_folders: stored
+            .sources
+            .configured
+            .iter()
+            .flat_map(|configured| match configured.configuration.editable() {
+                Ok(sources::EditableSource::Local {
+                    excluded_folders, ..
+                }) => excluded_folders,
+                _ => Vec::new(),
+            })
+            .collect::<Vec<_>>()
+            .into(),
         local_access: local_access.into(),
     }
 }
@@ -3715,7 +3753,14 @@ fn source_setup_input(input: SourceSetup, jellyfin_device_id: &str) -> SourceSet
 
 fn source_settings_input(input: SourceSettingsChange) -> SourceSettingsInput {
     match input {
-        SourceSettingsChange::Local { roots, .. } => SourceSettingsInput::Local { roots },
+        SourceSettingsChange::Local {
+            roots,
+            excluded_folders,
+            ..
+        } => SourceSettingsInput::Local {
+            roots,
+            excluded_folders,
+        },
         SourceSettingsChange::EmbyConnect {
             server,
             source_name,

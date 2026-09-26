@@ -869,7 +869,7 @@ fn detail_source_button(
         _ => return None,
     };
     let icon = if folder {
-        "rufin-folders-symbolic"
+        "rufin-document-open-symbolic"
     } else {
         gtk_widgets::source_labels::source_kind_icon_name(&source.kind)?
     };

@@ -10,6 +10,7 @@ use std::time::UNIX_EPOCH;
 use library::Scan;
 use walkdir::WalkDir;
 
+use super::LocalSource;
 use super::media::read_media;
 use crate::file::cue::{CueSheet, cue_track, parse_cue_sheet};
 use crate::file::media::{self as media, MediaRead, ScannedTrack};
@@ -75,11 +76,12 @@ pub(crate) async fn catch_up(
     database: &library::Database,
     source: library::SourceKey,
     source_id: &str,
-    roots: &[PathBuf],
+    local: &LocalSource,
     progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
     cancelled: &(dyn Fn() -> bool + Send + Sync),
 ) -> SourceResult<library::ScanOutcome> {
-    for root in roots {
+    let roots = local.roots();
+    for root in roots.iter().filter(|root| !local.excludes(root)) {
         fs::read_dir(root)
             .map_err(|error| SourceError::Other(format!("{}: {error}", root.display())))?;
     }
@@ -119,7 +121,8 @@ pub(crate) async fn catch_up(
                 .iter()
                 .map(|path| path.to_string_lossy().into_owned())
                 .collect::<Vec<_>>();
-            stage_component_paths(&mut scan, source, &changed_paths, &seeds, cancelled).await?;
+            stage_component_paths(&mut scan, source, local, &changed_paths, &seeds, cancelled)
+                .await?;
             changed = true;
         }
         completed = completed.saturating_add(page.len());
@@ -159,18 +162,27 @@ pub(crate) async fn publish_paths(
     database: &library::Database,
     source: library::SourceKey,
     source_id: &str,
-    roots: &[PathBuf],
+    local: &LocalSource,
     paths: &[PathBuf],
     rename: Option<&(PathBuf, PathBuf)>,
 ) -> SourceResult<library::ScanOutcome> {
+    let roots = local.roots();
     let paths = paths
         .iter()
         .map(|path| normalize_observed_path(path))
+        .filter(|path| !local.excludes(path))
         .collect::<Vec<_>>();
+    if paths.is_empty() {
+        return Ok(Scan::begin_items(database, source_id)
+            .await?
+            .finish()
+            .await?);
+    }
     let rename =
         rename.map(|(old, new)| (normalize_observed_path(old), normalize_observed_path(new)));
     for root in roots
         .iter()
+        .filter(|root| !local.excludes(root))
         .filter(|root| paths.iter().any(|path| path.starts_with(root)))
     {
         fs::read_dir(root)
@@ -190,7 +202,7 @@ pub(crate) async fn publish_paths(
         .iter()
         .all(|path| crate::file::artwork::supported_image(path));
     let mut scan = Scan::begin_items(database, source_id).await?;
-    stage_component_paths(&mut scan, source, &paths, &seeds, &|| false).await?;
+    stage_component_paths(&mut scan, source, local, &paths, &seeds, &|| false).await?;
     stage_component(
         database,
         source,
@@ -205,7 +217,7 @@ pub(crate) async fn publish_paths(
     Ok(scan.finish().await?)
 }
 
-fn normalize_observed_path(path: &Path) -> PathBuf {
+pub(super) fn normalize_observed_path(path: &Path) -> PathBuf {
     if let Ok(path) = fs::canonicalize(path) {
         return path;
     }
@@ -230,6 +242,7 @@ fn normalize_observed_path(path: &Path) -> PathBuf {
 async fn stage_component_paths(
     scan: &mut Scan,
     source: library::SourceKey,
+    local: &LocalSource,
     paths: &[PathBuf],
     seeds: &[String],
     cancelled: &(dyn Fn() -> bool + Send + Sync),
@@ -244,6 +257,8 @@ async fn stage_component_paths(
         for entry in WalkDir::new(directory)
             .follow_links(false)
             .sort_by_file_name()
+            .into_iter()
+            .filter_entry(|entry| !local.excludes(entry.path()))
         {
             check_cancelled(cancelled)?;
             let entry = entry.map_err(|error| {
@@ -526,16 +541,22 @@ async fn stage_exact_cue(
 
 pub(crate) async fn stage_catalog(
     database: &library::Database,
-    roots: &[PathBuf],
+    local: &LocalSource,
     scan: &mut Scan,
     progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
     cancelled: &(dyn Fn() -> bool + Send + Sync),
     reuse_unchanged: bool,
 ) -> SourceResult<()> {
+    let roots = local.roots();
     let mut observations = Vec::with_capacity(LOCAL_BATCH_SIZE);
     let mut completed = 0_usize;
-    for root in roots {
-        for entry in WalkDir::new(root).follow_links(false).sort_by_file_name() {
+    for root in roots.iter().filter(|root| !local.excludes(root)) {
+        for entry in WalkDir::new(root)
+            .follow_links(false)
+            .sort_by_file_name()
+            .into_iter()
+            .filter_entry(|entry| !local.excludes(entry.path()))
+        {
             check_cancelled(cancelled)?;
             let entry =
                 entry.map_err(|error| SourceError::Other(format!("Local walk failed: {error}")))?;

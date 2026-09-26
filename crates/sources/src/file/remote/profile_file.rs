@@ -267,6 +267,7 @@ mod tests {
             .mount(&server)
             .await;
         let settings = FileSourceSettings {
+            excluded_folders: Vec::new(),
             url: format!("{}/", server.uri()),
             alternate_urls: vec![],
             folders: vec![],

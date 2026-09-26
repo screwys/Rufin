@@ -126,12 +126,15 @@ async fn editable(
         .source
         .configuration(&id)
         .ok_or_else(|| bad_request("Source not found"))?;
-    if let sources::EditableSource::Local { roots, .. } =
-        configuration.editable().map_err(bad_request)?
+    if let sources::EditableSource::Local {
+        roots,
+        excluded_folders,
+        ..
+    } = configuration.editable().map_err(bad_request)?
     {
         return Ok(json_response(
             StatusCode::OK,
-            json!({"id":id,"kind":"local","roots":roots}),
+            json!({"id":id,"kind":"local","roots":roots,"excluded_folders":excluded_folders}),
         ));
     }
     let preset = products

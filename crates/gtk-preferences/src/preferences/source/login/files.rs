@@ -45,6 +45,7 @@ impl Draft {
         let settings = saved
             .and_then(|saved| saved.file_settings.clone())
             .unwrap_or(FileSourceSettings {
+                excluded_folders: Vec::new(),
                 url: String::new(),
                 alternate_urls: vec![],
                 folders: vec![],
@@ -515,6 +516,16 @@ fn form(
         authentication_options.splice(2, 1, &[]);
     }
     let value = draft.borrow().clone();
+    if music {
+        let state = Rc::clone(draft);
+        let (exclusions, _, _) = crate::preferences::source::excluded_folders::editor(
+            &shell.window,
+            &value.settings.excluded_folders,
+            false,
+            Rc::new(move |paths| state.borrow_mut().settings.excluded_folders = paths),
+        );
+        section.append(&exclusions);
+    }
     let display_name = if value.name.is_empty() && !editing {
         tr(if smb { "SMB / Samba" } else { "WebDAV" })
     } else {

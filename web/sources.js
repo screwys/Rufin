@@ -185,6 +185,7 @@ async function openSource(item = null, integration = null) {
   if (fileSource) $("source-playlist-save").checked = (await api(`/playlists/source-settings?source=${encodeURIComponent(item.id)}`)).auto_save;
   if (editingSource?.kind === "local")
     $("source-paths").value = editingSource.roots.join("\n");
+  $("excluded-folders").value = (editingSource?.excluded_folders || editingSource?.preset?.file_settings?.excluded_folders || []).join("\n");
   if (editingSource?.preset) {
     const preset = editingSource.preset;
     $("source-label").value = preset.credentials.source_name;
@@ -242,6 +243,7 @@ function sourceFields() {
     document.querySelector(`label[for="${id}"]`).hidden = kind === "plex";
   }
   const files = kind === "web_dav" || kind === "smb";
+  $("source-exclusions").hidden = !!integrationSaved || !(files || (local && editingSource));
   const choices = files
     ? [
         ["password", tr("Password")],
@@ -396,10 +398,12 @@ function sourceInput() {
     secret = $("password").value,
     trust = $("trust-certificate").checked;
   let input;
+  const excludedFolders = $("excluded-folders").value.split("\n").filter((path) => path.length);
   if (kind === "local")
     input = {
       type: "local",
       data: {
+        ...(editingSource ? { excluded_folders: excludedFolders } : {}),
         roots: $("source-paths")
           .value.split("\n")
           .map((path) => path.trim())
@@ -415,6 +419,7 @@ function sourceInput() {
           url,
           alternate_urls: [],
           folders: [],
+          excluded_folders: excludedFolders,
           username,
           domain: "",
           authentication: $("authentication").value,
@@ -468,6 +473,7 @@ function sourceInput() {
           name,
           settings: {
             ...preset.file_settings,
+            excluded_folders: excludedFolders,
             url,
             username,
             authentication: $("authentication").value,
