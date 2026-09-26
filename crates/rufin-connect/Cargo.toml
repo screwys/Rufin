@@ -21,7 +21,7 @@ serde_json.workspace = true
 sqlx.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["rt"] }
-vodozemac = { version = "=0.10.0", default-features = false }
+vodozemac = { version = "=0.11.0", default-features = false }
 tempfile.workspace = true
 
 [lints]
