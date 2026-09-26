@@ -92,7 +92,7 @@ function showPlayback(value) {
     showLyrics({ state: "empty" });
     coverRequest?.abort();
     coverRequest = new AbortController();
-    $("mini-cover").replaceChildren(icon("cover-fallback"));
+    if (!track) $("mini-cover").replaceChildren(icon("cover-fallback"));
     if (track) {
       const id = state.currentId;
       currentFavoriteRequest = (async () => {
@@ -104,7 +104,15 @@ function showPlayback(value) {
       })();
       run(() => currentFavoriteRequest);
       const signal = AbortSignal.any([session.signal, coverRequest.signal]);
-      run(() => cover($("mini-cover"), track.uri, signal));
+      run(async () => {
+        const shown = await cover(
+          $("mini-cover"),
+          { uri: track.uri, original: true },
+          signal,
+        );
+        if (!shown && !signal.aborted)
+          $("mini-cover").replaceChildren(icon("cover-fallback"));
+      });
       run(async () => {
         await api("/lyrics", "POST", {});
         showLyrics(await api("/lyrics"));

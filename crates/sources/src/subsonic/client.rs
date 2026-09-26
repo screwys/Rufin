@@ -468,10 +468,12 @@ impl SubsonicSource {
     pub(crate) async fn image_bytes(
         &self,
         image_ref: &ImageRef,
-        size: u32,
+        size: crate::ImageSize,
     ) -> SourceResult<ImageBytes> {
         let mut extra = vec![("id", raw_item_id(&image_ref.item_id).to_string())];
-        if size > 0 {
+        if let crate::ImageSize::Thumbnail(size) = size
+            && size > 0
+        {
             extra.push(("size", size.to_string()));
         }
         let url = self.authenticated_url("getCoverArt", &extra)?;

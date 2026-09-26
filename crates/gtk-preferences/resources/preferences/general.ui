@@ -65,7 +65,6 @@
     <child>
       <object class="AdwPreferencesGroup">
         <property name="title" translatable="yes">Metadata</property>
-        <child><object class="AdwSwitchRow" id="prefer_server_playlist_row"><property name="title" translatable="yes">Prefer server playlist covers</property></object></child>
         <child><object class="AdwSwitchRow" id="prefer_distinct_track_covers_row"><property name="title" translatable="yes">Prefer distinct track covers</property><property name="subtitle" translatable="yes">Use each track's own cover when available</property></object></child>
         <child><object class="AdwSwitchRow" id="external_metadata_row"><property name="title" translatable="yes">External metadata lookup</property></object></child>
         <child><object class="AdwSwitchRow" id="external_lyrics_row"><property name="title" translatable="yes">External lyrics lookup</property></object></child>

@@ -87,6 +87,9 @@ glib-build-tools = "0.22.8"
 pangocairo = "0.22.9"
 httpdate = "1.0.3"
 image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "tiff", "webp"] }
+jxl = "0.7.4"
+jxl-image-rs-integration = "0.7.4"
+gif = "0.14.2"
 fast_image_resize = { version = "6.1.0", features = ["image"] }
 if-addrs = "0.15.0"
 mdns-sd = { version = "0.21.0", default-features = false }

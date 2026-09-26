@@ -640,10 +640,11 @@ impl RemoteSource {
             .to_ascii_lowercase();
         let kind = if directory {
             LocalFileKind::Directory
+        } else if crate::file::artwork::supported_image(std::path::Path::new(relative)) {
+            LocalFileKind::Image
         } else {
             match extension.as_str() {
                 "cue" => LocalFileKind::Cue,
-                "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" => LocalFileKind::Image,
                 _ => LocalFileKind::Media,
             }
         };

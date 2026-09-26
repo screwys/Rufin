@@ -712,25 +712,12 @@ async fn accept_playlist_result(
             .await;
     }
 }
-pub fn playlist_artwork_bindings(
-    playlist: &library::PlaylistRow,
-    prefer_server: bool,
-) -> &[Vec<u8>] {
-    if prefer_server {
-        playlist
-            .artwork_binding
-            .as_ref()
-            .map(std::slice::from_ref)
-            .unwrap_or(&playlist.representative_artwork)
-    } else if playlist.representative_artwork.is_empty() {
-        playlist
-            .artwork_binding
-            .as_ref()
-            .map(std::slice::from_ref)
-            .unwrap_or_default()
-    } else {
-        &playlist.representative_artwork
-    }
+pub fn playlist_artwork_bindings(playlist: &library::PlaylistRow) -> &[Vec<u8>] {
+    playlist
+        .artwork_binding
+        .as_ref()
+        .map(std::slice::from_ref)
+        .unwrap_or(&playlist.representative_artwork)
 }
 
 pub fn smart_playlist_display_name(playlist: &library::SmartPlaylistRow) -> String {

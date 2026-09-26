@@ -293,8 +293,8 @@ pub fn playlist_field(playlist: &PlaylistRow, field: LibraryField) -> String {
     }
 }
 
-pub fn playlist_artwork(playlist: &PlaylistRow, prefer_server: bool) -> Vec<ArtworkBinding> {
-    let bindings = rufin_core::playlists::playlist_artwork_bindings(playlist, prefer_server);
+pub fn playlist_artwork(playlist: &PlaylistRow) -> Vec<ArtworkBinding> {
+    let bindings = rufin_core::playlists::playlist_artwork_bindings(playlist);
     bindings
         .iter()
         .map(|binding| ArtworkBinding::opaque(binding))

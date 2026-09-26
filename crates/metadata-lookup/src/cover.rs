@@ -77,9 +77,10 @@ impl AlbumCoverPolicy {
 /// Exact Cover Art Archive identities remain ahead of Last.fm and text
 /// searches so a known album identity cannot be replaced by an approximate
 /// result.
+/// A missing size requests the original Cover Art Archive image.
 pub fn lookup_album_cover(
     album: &AlbumCover,
-    size: u32,
+    size: Option<u32>,
     policy: &AlbumCoverPolicy,
 ) -> Result<Option<Vec<u8>>, String> {
     let client = client()?;
@@ -162,14 +163,14 @@ pub fn public_album_cover_url(
             (RELEASE_URL, album.release_id.as_deref()),
         ] {
             if let Some(id) = id {
-                return Ok(Some(cover_art_url(root, id, size)));
+                return Ok(Some(cover_art_url(root, id, Some(size))));
             }
         }
         if let Some((artist, title)) = album.text() {
             match search_album_release_ids(artist, title) {
                 Ok(ids) => {
                     if let Some(id) = ids.into_iter().find_map(|id| {
-                        usable_mbid(&id).map(|valid| cover_art_url(RELEASE_URL, valid, size))
+                        usable_mbid(&id).map(|valid| cover_art_url(RELEASE_URL, valid, Some(size)))
                     }) {
                         return Ok(Some(id));
                     }
@@ -185,7 +186,7 @@ fn download_identities(
     client: &reqwest::blocking::Client,
     root: &str,
     ids: Vec<String>,
-    size: u32,
+    size: Option<u32>,
     failures: &mut Vec<String>,
 ) -> Option<Vec<u8>> {
     for id in ids {
@@ -250,11 +251,11 @@ fn lastfm_image_url(
     Ok(None)
 }
 
-fn cover_art_url(root: &str, id: &str, size: u32) -> String {
-    let suffix = if size <= 250 {
-        "front-250"
-    } else {
-        "front-500"
+fn cover_art_url(root: &str, id: &str, size: Option<u32>) -> String {
+    let suffix = match size {
+        None => "front",
+        Some(size) if size <= 250 => "front-250",
+        Some(_) => "front-500",
     };
     format!("{root}/{id}/{suffix}")
 }

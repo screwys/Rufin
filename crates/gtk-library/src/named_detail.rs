@@ -146,8 +146,9 @@ impl NamedDetailSummary {
             Self::Genre(row) => row
                 .artwork_binding
                 .as_ref()
-                .or_else(|| row.representative_artwork.first())
-                .into_iter()
+                .map(std::slice::from_ref)
+                .unwrap_or(&row.representative_artwork)
+                .iter()
                 .map(|binding| ArtworkBinding::opaque(binding))
                 .collect(),
             Self::Mood(row) => row

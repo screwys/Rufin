@@ -7,39 +7,35 @@ use ::lofty::picture::{Picture, PictureType};
 use std::io::{Read, Seek};
 use std::path::Path;
 const LOCAL_IMAGE_MAX_BYTES: usize = 32 * 1024 * 1024;
+const IMAGE_FORMATS: &[(&str, &str)] = &[
+    ("jpg", "image/jpeg"),
+    ("jpeg", "image/jpeg"),
+    ("png", "image/png"),
+    ("webp", "image/webp"),
+    ("jxl", "image/jxl"),
+    ("gif", "image/gif"),
+    ("apng", "image/apng"),
+    ("bmp", "image/bmp"),
+    ("tif", "image/tiff"),
+    ("tiff", "image/tiff"),
+];
 
 pub(crate) fn supported_image(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            ["jpg", "jpeg", "png", "webp"]
-                .iter()
-                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
-        })
+    image_format(path).is_some()
 }
 
 pub(crate) fn image_rank(name: &str) -> usize {
-    [
-        "cover.jpg",
-        "cover.jpeg",
-        "cover.png",
-        "cover.webp",
-        "folder.jpg",
-        "folder.jpeg",
-        "folder.png",
-        "folder.webp",
-        "front.jpg",
-        "front.jpeg",
-        "front.png",
-        "front.webp",
-        "album.jpg",
-        "album.jpeg",
-        "album.png",
-        "album.webp",
-    ]
-    .iter()
-    .position(|candidate| candidate.eq_ignore_ascii_case(name))
-    .unwrap_or(usize::MAX)
+    let path = Path::new(name);
+    let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+        return usize::MAX;
+    };
+    ["cover", "folder", "front", "album"]
+        .iter()
+        .position(|candidate| candidate.eq_ignore_ascii_case(stem))
+        .zip(image_format(path))
+        .map_or(usize::MAX, |(name, format)| {
+            name * IMAGE_FORMATS.len() + format
+        })
 }
 
 pub(crate) fn inspect_embedded_input(
@@ -119,15 +115,12 @@ pub(crate) fn read_image_input(
 }
 
 pub(crate) fn content_type(path: &Path) -> Option<String> {
-    match path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-    {
-        Some("jpg" | "jpeg") => Some("image/jpeg".to_string()),
-        Some("png") => Some("image/png".to_string()),
-        Some("webp") => Some("image/webp".to_string()),
-        _ => None,
-    }
+    image_format(path).map(|format| IMAGE_FORMATS[format].1.to_string())
+}
+
+fn image_format(path: &Path) -> Option<usize> {
+    let extension = path.extension()?.to_str()?;
+    IMAGE_FORMATS
+        .iter()
+        .position(|(candidate, _)| extension.eq_ignore_ascii_case(candidate))
 }

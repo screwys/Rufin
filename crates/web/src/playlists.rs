@@ -318,7 +318,6 @@ pub(super) async fn list_data(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
-    let prefer_server_covers = products.settings.load().prefer_server_playlist_covers;
     let cancellation = library::ReadCancellation::new();
     let (source, folder) = if parameters.contains_key("source") {
         let (source, folder) = catalog::scope(products, parameters).await?;
@@ -355,7 +354,7 @@ pub(super) async fn list_data(
         .map_err(internal)?;
     let total = catalog::page_total(products, parameters, "playlists").await?;
     Ok(
-        json!({"total":total,"offset":offset,"limit":limit,"playlists":rows.iter().map(|row| json!({"id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":rufin_core::playlists::playlist_artwork_bindings(row, prefer_server_covers).len()})).collect::<Vec<_>>()}),
+        json!({"total":total,"offset":offset,"limit":limit,"playlists":rows.iter().map(|row| json!({"id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":rufin_core::playlists::playlist_artwork_bindings(row).len()})).collect::<Vec<_>>()}),
     )
 }
 

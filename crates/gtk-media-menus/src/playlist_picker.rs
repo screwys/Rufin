@@ -194,7 +194,6 @@ struct PickerRow {
 pub fn playlist_picker_dialog(
     source: rufin_core::runtime::SourceHandle,
     artwork: Rc<gtk_widgets::artwork::ArtworkState>,
-    settings: Rc<gtk_widgets::settings::SettingsState>,
     create_playlist: Rc<dyn Fn(String, Vec<String>)>,
     feedback: Rc<dyn Fn(&OperationFeedback)>,
     playlists: Vec<library::PlaylistRow>,
@@ -214,7 +213,7 @@ pub fn playlist_picker_dialog(
     });
     gtk_widgets::controls::configure_search_entry(&search);
     let rows = Rc::new(RefCell::new(Vec::<PickerRow>::new()));
-    replace_picker_rows(&artwork, &settings, &list, &create, &rows, &add, playlists);
+    replace_picker_rows(&artwork, &list, &create, &rows, &add, playlists);
 
     let close = dialog.downgrade();
     cancel.connect_clicked(move |_| {
@@ -300,7 +299,7 @@ pub fn playlist_picker_dialog(
     let refresh_dialog = dialog.downgrade();
     let update = Rc::new(move |playlists| {
         if refresh_dialog.upgrade().is_some() {
-            replace_picker_rows(&artwork, &settings, &list, &create, &rows, &add, playlists);
+            replace_picker_rows(&artwork, &list, &create, &rows, &add, playlists);
         }
     });
     (dialog, update)
@@ -308,7 +307,6 @@ pub fn playlist_picker_dialog(
 
 fn replace_picker_rows(
     artwork: &Rc<gtk_widgets::artwork::ArtworkState>,
-    settings: &Rc<gtk_widgets::settings::SettingsState>,
     list: &gtk::Box,
     create: &gtk::Button,
     rows: &Rc<RefCell<Vec<PickerRow>>>,
@@ -320,11 +318,10 @@ fn replace_picker_rows(
     }
     list.append(create);
     rows.borrow_mut().clear();
-    let prefer_server = settings.current.borrow().prefer_server_playlist_covers;
     for playlist in playlists {
         let row = PlaylistPickerRowView::new();
         let check = row.imp().check.get();
-        let bindings = playlist_artwork(&playlist, prefer_server);
+        let bindings = playlist_artwork(&playlist);
         let cover = artwork
             .cover_group_projection_for_artwork(
                 &bindings,

@@ -1,10 +1,7 @@
 //! Catalog paging and progress coordination for artwork preparation.
 use artwork::{Artwork, ArtworkError};
 use sources::SourceId;
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PreparationError {
@@ -21,7 +18,7 @@ pub async fn prepare_database_source(
     source_id: &SourceId,
     accepted_digest: [u8; 32],
     progress: &(dyn Fn(u64, usize) + Send + Sync),
-    cancelled: Arc<AtomicBool>,
+    cancelled: CancellationToken,
 ) -> Result<Option<u64>, PreparationError> {
     let accepted_revision = digest_revision(&accepted_digest);
     if artwork.source_preparation_complete(source_id, accepted_revision)? {
@@ -38,7 +35,7 @@ pub async fn prepare_database_source(
     let manifest = artwork.begin_source_manifest(source_id.clone(), revision)?;
     let mut after_binding = None;
     loop {
-        if cancelled.load(Ordering::Acquire) {
+        if cancelled.is_cancelled() {
             return Err(ArtworkError::Cancelled.into());
         }
         let page = database
@@ -54,15 +51,7 @@ pub async fn prepare_database_source(
         }
         after_binding = page.last().cloned();
         manifest.record_page(&page)?;
-        let artwork = artwork.clone();
-        let page_cancelled = Arc::clone(&cancelled);
-        let summary = tokio::task::spawn_blocking(move || {
-            artwork.prefetch_source_artwork(page.into(), &|_, _| {}, &|| {
-                page_cancelled.load(Ordering::Acquire)
-            })
-        })
-        .await
-        .map_err(|error| ArtworkError::Decode(error.to_string()))??;
+        let summary = artwork.prefetch_source_artwork(&page, &cancelled).await?;
         completed = completed.saturating_add(summary.total);
         tracing::debug!(
             ?source_key,
@@ -91,7 +80,7 @@ fn digest_revision(digest: &[u8; 32]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::runtime::Handle;
     #[tokio::test]
     async fn newly_fetched_background_artwork_reports_progress() {
@@ -140,7 +129,7 @@ mod tests {
                 &|_, completed| {
                     progress.store(completed, Ordering::Relaxed);
                 },
-                Arc::new(AtomicBool::new(false)),
+                CancellationToken::new(),
             )
             .await
             .unwrap();
@@ -180,7 +169,7 @@ mod tests {
             &|_, fetched| {
                 progress.store(fetched, Ordering::Relaxed);
             },
-            Arc::new(AtomicBool::new(false)),
+            CancellationToken::new(),
         )
         .await
         .unwrap();
@@ -223,7 +212,7 @@ mod tests {
             &|_, _| {
                 progress.fetch_add(1, Ordering::Relaxed);
             },
-            Arc::new(AtomicBool::new(false)),
+            CancellationToken::new(),
         )
         .await
         .unwrap();
@@ -257,7 +246,7 @@ mod tests {
             &|_, _| {
                 progress.fetch_add(1, Ordering::Relaxed);
             },
-            Arc::new(AtomicBool::new(false)),
+            CancellationToken::new(),
         )
         .await
         .unwrap();

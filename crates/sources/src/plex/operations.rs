@@ -6,20 +6,35 @@ impl PlexSource {
     pub(crate) async fn image_bytes(
         &self,
         image: &crate::NativeImageRef,
-        size: u32,
+        size: crate::ImageSize,
     ) -> SourceResult<crate::ImageBytes> {
-        let request = self
-            .request(
-                Method::GET,
-                "/photo/:/transcode",
-                &[
-                    ("url", image.item_id.clone()),
-                    ("width", size.to_string()),
-                    ("height", size.to_string()),
-                    ("minSize", "1".into()),
-                ],
-            )
-            .await?;
+        let request = match size {
+            crate::ImageSize::Original => {
+                let base = reqwest::Url::parse(&self.config.base_url)
+                    .map_err(|error| SourceError::InvalidConfig(error.to_string()))?;
+                let url = base
+                    .join(&image.item_id)
+                    .map_err(|_| SourceError::InvalidRequest("invalid Plex image URL"))?;
+                if url.origin() == base.origin() {
+                    self.request(Method::GET, &image.item_id, &[]).await?
+                } else {
+                    self.client.get(url)
+                }
+            }
+            crate::ImageSize::Thumbnail(size) => {
+                self.request(
+                    Method::GET,
+                    "/photo/:/transcode",
+                    &[
+                        ("url", image.item_id.clone()),
+                        ("width", size.to_string()),
+                        ("height", size.to_string()),
+                        ("minSize", "1".into()),
+                    ],
+                )
+                .await?
+            }
+        };
         remote_http::bytes(request, HTTP, RESPONSE).await
     }
     pub(crate) async fn set_rating(&self, object: &str, rating: Option<u8>) -> SourceResult<()> {

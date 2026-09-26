@@ -259,11 +259,17 @@ impl LocalImageRef {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ImageSize {
+    Original,
+    Thumbnail(u32),
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SourceImageRequest {
     Native {
         image_ref: NativeImageRef,
-        size: u32,
+        size: ImageSize,
     },
     Local(LocalImageRef),
 }
