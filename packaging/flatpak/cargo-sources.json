@@ -9843,14 +9843,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/syn/syn-3.0.3.crate",
-        "sha256": "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3",
-        "dest": "cargo/vendor/syn-3.0.3"
+        "url": "https://static.crates.io/crates/syn/syn-3.0.6.crate",
+        "sha256": "8593e8e72159ed2257d083c7a454a85cbf854f37a0966d8d483aff8c8a3ebcee",
+        "dest": "cargo/vendor/syn-3.0.6"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3\", \"files\": {}}",
-        "dest": "cargo/vendor/syn-3.0.3",
+        "contents": "{\"package\": \"8593e8e72159ed2257d083c7a454a85cbf854f37a0966d8d483aff8c8a3ebcee\", \"files\": {}}",
+        "dest": "cargo/vendor/syn-3.0.6",
         "dest-filename": ".cargo-checksum.json"
     },
     {
