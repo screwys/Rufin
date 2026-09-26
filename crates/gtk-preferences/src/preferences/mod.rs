@@ -160,16 +160,9 @@ enum PreferencesTabLayout {
 
 fn preferences_tab_layout_for(
     width: i32,
-    top_tabs_width: i32,
-    top_start_width: i32,
-    top_end_width: i32,
+    top_required: i32,
     bottom_tabs_width: i32,
 ) -> PreferencesTabLayout {
-    const TOP_BAR_HORIZONTAL_PADDING: i32 = 24;
-    let top_required = top_tabs_width
-        .saturating_add(top_start_width)
-        .saturating_add(top_end_width)
-        .saturating_add(TOP_BAR_HORIZONTAL_PADDING);
     if width >= top_required {
         PreferencesTabLayout::Top
     } else if width >= bottom_tabs_width {
@@ -345,11 +338,9 @@ fn rebuild_preferences_dialog(
         switcher: adw::ViewSwitcher,
         bottom_tab_bar: gtk::CenterBox,
         bottom_switcher: adw::ViewSwitcher,
-        top_start_controls: gtk::Box,
         back: gtk::Button,
         search_button: gtk::ToggleButton,
-        close_button: gtk::Button,
-        switcher_bar: gtk::CenterBox,
+        switcher_bar: adw::HeaderBar,
         search_entry: gtk::SearchEntry,
         search_bar: gtk::SearchBar,
         search_results: adw::PreferencesPage,
@@ -359,13 +350,6 @@ fn rebuild_preferences_dialog(
     gtk_widgets::controls::configure_search_entry(&search_entry);
     let navigation_controls = PreferencesNavigationControls::new(back);
     search_button.update_property(&[gtk::accessible::Property::Label(&tr("Search"))]);
-    close_button.update_property(&[gtk::accessible::Property::Label(&tr("Close"))]);
-    let dialog_for_close = dialog.downgrade();
-    close_button.connect_clicked(move |_| {
-        if let Some(dialog) = dialog_for_close.upgrade() {
-            dialog.close();
-        }
-    });
     toolbar.add_top_bar(&switcher_bar);
     toolbar.add_bottom_bar(&bottom_tab_bar);
 
@@ -574,8 +558,7 @@ fn rebuild_preferences_dialog(
     let responsive_bottom_bar = bottom_tab_bar.clone();
     let responsive_bottom_switcher = bottom_switcher.clone();
     let responsive_toolbar_view = toolbar.clone();
-    let responsive_top_start = top_start_controls.clone();
-    let responsive_top_end = close_button.clone();
+    let responsive_header = switcher_bar.clone();
     let responsive_top_tabs_width = Rc::clone(&top_tabs_width);
     let responsive_bottom_tabs_min_width = Rc::clone(&bottom_tabs_min_width);
     let responsive_applied_layout = Rc::clone(&applied_tab_layout);
@@ -586,16 +569,16 @@ fn rebuild_preferences_dialog(
             &responsive_bottom_switcher,
             &responsive_bottom_tabs_min_width,
         );
-        let (_, top_start_width, _, _) =
-            responsive_top_start.measure(gtk::Orientation::Horizontal, -1);
-        let (_, top_end_width, _, _) = responsive_top_end.measure(gtk::Orientation::Horizontal, -1);
-        let layout = preferences_tab_layout_for(
-            width,
-            top_tabs_width,
-            top_start_width,
-            top_end_width,
-            bottom_tabs_width,
-        );
+        let (header_min_width, _, _, _) =
+            responsive_header.measure(gtk::Orientation::Horizontal, -1);
+        let (visible_tabs_min_width, _, _, _) =
+            responsive_switcher.measure(gtk::Orientation::Horizontal, -1);
+        // The header's natural width reserves extra space for exact centering.
+        // Keep full tab labels, but allow the header to shift them beside its controls.
+        let top_required = header_min_width
+            .saturating_sub(visible_tabs_min_width)
+            .saturating_add(top_tabs_width);
+        let layout = preferences_tab_layout_for(width, top_required, bottom_tabs_width);
         if responsive_applied_layout.replace(Some(layout)) == Some(layout) {
             return;
         }
@@ -847,15 +830,15 @@ mod search_tests {
     #[test]
     fn preference_tabs_move_then_drop_labels_as_width_contracts() {
         assert_eq!(
-            preferences_tab_layout_for(524, 400, 60, 40, 330),
+            preferences_tab_layout_for(524, 524, 330),
             PreferencesTabLayout::Top
         );
         assert_eq!(
-            preferences_tab_layout_for(523, 400, 60, 40, 330),
+            preferences_tab_layout_for(523, 524, 330),
             PreferencesTabLayout::BottomLabels
         );
         assert_eq!(
-            preferences_tab_layout_for(329, 400, 60, 40, 330),
+            preferences_tab_layout_for(329, 524, 330),
             PreferencesTabLayout::BottomIcons
         );
     }

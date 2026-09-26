@@ -433,7 +433,6 @@ impl PlayerUi {
         let builder = gtk_widgets::ui_resource::builder(resource);
         gtk_widgets::objects!(builder, resource, {
             dialog: adw::Dialog,
-            close_button: gtk::Button,
             artist_entry: gtk::Entry,
             title_entry: gtk::Entry,
             status: gtk::Label,
@@ -480,13 +479,6 @@ impl PlayerUi {
             }
             if let Some(lyrics) = close_shell.selected_lyrics() {
                 lyrics.search_dialog.borrow_mut().take();
-            }
-        });
-
-        let close_dialog = dialog.downgrade();
-        close_button.connect_clicked(move |_| {
-            if let Some(dialog) = close_dialog.upgrade() {
-                dialog.close();
             }
         });
 
