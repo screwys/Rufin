@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.3.13\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-25 12:51+0000\n"
+"PO-Revision-Date: 2026-09-26 11:14+0000\n"
 "Last-Translator: Priit Jõerüüt <jrthwlate@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Estonian <https://hosted.weblate.org/projects/rufin/app/et/>\n"
 "Language: et\n"
@@ -1221,7 +1221,7 @@ msgid "Fade audio when playback is paused or resumed"
 msgstr "Sujuv helivaljuse muutmine taasesituse peatamisel või jätkamisel"
 
 msgid "Fall speed (%)"
-msgstr ""
+msgstr "Allalangemise kiirus (%)"
 
 msgid "Favorite current track"
 msgstr "Märgi praegune lugu lemmikuks"
@@ -2185,10 +2185,10 @@ msgid "Pause"
 msgstr "Peata esitus"
 
 msgid "Peak fall speed (% per second)"
-msgstr ""
+msgstr "Tipumarkeri allalangemise kiirus (% sekundis)"
 
 msgid "Peak hold (seconds)"
-msgstr ""
+msgstr "Tipumarkeri kuvamine (sekundites)"
 
 msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
 msgstr ""
@@ -2335,9 +2335,6 @@ msgstr "Eelista lugude eraldi kaanepilte"
 
 msgid "Prefer server lyrics"
 msgstr "Eelista laulusõnu serverist"
-
-msgid "Prefer server playlist covers"
-msgstr "Eelistata serveri esitusloendi kaanepilte"
 
 msgid "Prefer translations"
 msgstr "Eelista tõlkeid"
@@ -2679,7 +2676,7 @@ msgid "Retry"
 msgstr "Proovi uuesti"
 
 msgid "Rise speed (%)"
-msgstr ""
+msgstr "Tõusu kiirus (%)"
 
 msgid "Rock"
 msgstr "Rokkmuusika"
@@ -2858,7 +2855,7 @@ msgid "Seekbar"
 msgstr "Kerimisriba"
 
 msgid "Segmented bars"
-msgstr "Segmenteeritud ribad"
+msgstr "Klotsidest ribad"
 
 msgid "Select All"
 msgstr "Vali kõik"
@@ -3714,6 +3711,9 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#~ msgid "Prefer server playlist covers"
+#~ msgstr "Eelistata serveri esitusloendi kaanepilte"
 
 #~ msgid "Artist / Album"
 #~ msgstr "Esitaja / Album"

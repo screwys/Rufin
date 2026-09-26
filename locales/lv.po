@@ -2426,9 +2426,6 @@ msgstr "Izmantot atšķirīgus dziesmu vākus"
 msgid "Prefer server lyrics"
 msgstr "Dot priekšroku servera tekstiem"
 
-msgid "Prefer server playlist covers"
-msgstr "Dot priekšroku servera atskaņošanas sarakstu vākiem"
-
 msgid "Prefer translations"
 msgstr "Izmantot tulkojumus"
 
@@ -3882,6 +3879,9 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "Prefer server playlist covers"
+#~ msgstr "Dot priekšroku servera atskaņošanas sarakstu vākiem"
 
 #~ msgid "Artist / Album"
 #~ msgstr "Izpildītājs / Albums"

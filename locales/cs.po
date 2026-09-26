@@ -2618,9 +2618,6 @@ msgstr ""
 msgid "Prefer server lyrics"
 msgstr "Upřednostnit texty skladeb ze serveru"
 
-msgid "Prefer server playlist covers"
-msgstr "Upřednostnit obaly playlistů ze serveru"
-
 msgid "Prefer translations"
 msgstr "Upřednostnit překlady"
 
@@ -4187,6 +4184,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Prefer server playlist covers"
+#~ msgstr "Upřednostnit obaly playlistů ze serveru"
 
 #~ msgid "Artist / Album"
 #~ msgstr "Interpret / Album"
