@@ -258,7 +258,10 @@ fn artist_images(id: &str, title: &str, detail: &str) -> Result<Vec<ArtworkResul
             continue;
         };
         let entity = resource.rsplit('/').next().unwrap_or_default();
-        if !entity.starts_with('Q') || !entity[1..].bytes().all(|byte| byte.is_ascii_digit()) {
+        if entity
+            .strip_prefix('Q')
+            .is_none_or(|id| !id.bytes().all(|byte| byte.is_ascii_digit()))
+        {
             continue;
         }
         let url = Url::parse_with_params(
