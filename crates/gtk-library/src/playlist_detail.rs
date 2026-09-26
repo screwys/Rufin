@@ -101,9 +101,9 @@ impl PlaylistDetailOwner {
         }
     }
 
-    fn artwork(&self, prefer_server: bool) -> Vec<ArtworkBinding> {
+    fn artwork(&self) -> Vec<ArtworkBinding> {
         match self {
-            Self::Saved { summary, .. } => playlist_artwork(summary, prefer_server),
+            Self::Saved { summary, .. } => playlist_artwork(summary),
             Self::Smart { summary, .. } => summary
                 .artwork_bindings
                 .iter()
@@ -416,7 +416,7 @@ impl CatalogUi {
             (self.route_width)(),
             PRIMARY_ROUTE_MARGIN_START,
         );
-        let artwork = owner.artwork(self.settings.current.borrow().prefer_server_playlist_covers);
+        let artwork = owner.artwork();
         let cover = self.artwork.cover_group_projection_for_artwork(
             &artwork,
             playlist_cover_size(width),
@@ -601,16 +601,7 @@ impl CatalogUi {
                     ]);
                     let (source_icon, source_name) = next.source_label(&shell);
                     showcase.set_source_summary(source_icon, &source_name);
-                    cover.replace(
-                        &shell.artwork,
-                        &next.artwork(
-                            shell
-                                .settings
-                                .current
-                                .borrow()
-                                .prefer_server_playlist_covers,
-                        ),
-                    );
+                    cover.replace(&shell.artwork, &next.artwork());
                     shell.append_playlist_detail_kind_controls(&showcase, &next);
                     apply_owner.replace(next);
                 },
@@ -863,8 +854,7 @@ mod tests {
             },
         };
 
-        assert_eq!(owner.artwork(true).len(), 1);
-        assert_eq!(owner.artwork(false).len(), 4);
+        assert_eq!(owner.artwork().len(), 1);
     }
 }
 

@@ -692,7 +692,7 @@ impl SidebarPinItem {
         }
     }
 
-    fn artwork(&self, prefer_server_playlist_covers: bool) -> Vec<ArtworkBinding> {
+    fn artwork(&self) -> Vec<ArtworkBinding> {
         match self {
             Self::Album(album) => album
                 .artwork_binding
@@ -707,11 +707,12 @@ impl SidebarPinItem {
             Self::Genre(genre) => genre
                 .artwork_binding
                 .as_ref()
-                .or_else(|| genre.representative_artwork.first())
-                .into_iter()
+                .map(std::slice::from_ref)
+                .unwrap_or(&genre.representative_artwork)
+                .iter()
                 .map(|binding| ArtworkBinding::opaque(binding))
                 .collect(),
-            Self::Playlist(playlist) => playlist_artwork(playlist, prefer_server_playlist_covers),
+            Self::Playlist(playlist) => playlist_artwork(playlist),
             Self::SmartPlaylist(playlist) => playlist
                 .artwork_bindings
                 .iter()
@@ -796,34 +797,20 @@ fn append_sidebar_pins(shell: &Rc<Shell>) {
     heading.set_xalign(0.0);
     shell.navigation_view.normal_nav_pins.append(&heading);
 
-    let prefer_server_playlist_covers = shell
-        .settings
-        .current
-        .borrow()
-        .prefer_server_playlist_covers;
     for pin in pins {
         shell
             .navigation_view
             .normal_nav_pins
-            .append(&sidebar_pin_row(shell, pin, prefer_server_playlist_covers));
+            .append(&sidebar_pin_row(shell, pin));
     }
 }
 
 fn append_compact_sidebar_pins(shell: &Rc<Shell>) {
-    let prefer_server_playlist_covers = shell
-        .settings
-        .current
-        .borrow()
-        .prefer_server_playlist_covers;
     for pin in sidebar_pin_items(shell) {
         shell
             .navigation_view
             .compact_nav
-            .append(&compact_sidebar_pin(
-                shell,
-                pin,
-                prefer_server_playlist_covers,
-            ));
+            .append(&compact_sidebar_pin(shell, pin));
     }
 }
 
@@ -1123,11 +1110,7 @@ fn reconcile_sidebar_pin_widgets(shell: &Rc<Shell>, items: &[SidebarPinItem]) {
         update_sidebar_pin_playback(shell.as_ref());
         return;
     }
-    let prefer_server_playlist_covers = shell
-        .settings
-        .current
-        .borrow()
-        .prefer_server_playlist_covers;
+
     let previous_items = shell
         .navigation
         .pin_items
@@ -1137,7 +1120,7 @@ fn reconcile_sidebar_pin_widgets(shell: &Rc<Shell>, items: &[SidebarPinItem]) {
         .collect::<HashMap<_, _>>();
     let row_changed = |key: &str, item: &SidebarPinItem| {
         previous_items.get(key).is_some_and(|previous| {
-            previous.artwork(prefer_server_playlist_covers) != item.artwork(prefer_server_playlist_covers)
+            previous.artwork() != item.artwork()
                 || matches!((previous, item), (SidebarPinItem::SmartPlaylist(previous), SidebarPinItem::SmartPlaylist(next))
                     if previous.definition.current != next.definition.current)
         })
@@ -1175,9 +1158,7 @@ fn reconcile_sidebar_pin_widgets(shell: &Rc<Shell>, items: &[SidebarPinItem]) {
                     true
                 }
             })
-            .unwrap_or_else(|| {
-                sidebar_pin_row(shell, item.clone(), prefer_server_playlist_covers).upcast()
-            });
+            .unwrap_or_else(|| sidebar_pin_row(shell, item.clone()).upcast());
         update_sidebar_pin_widget_metadata(&widget, item);
         if widget.parent().is_some() {
             normal.reorder_child_after(&widget, previous.as_ref());
@@ -1205,9 +1186,7 @@ fn reconcile_sidebar_pin_widgets(shell: &Rc<Shell>, items: &[SidebarPinItem]) {
                     true
                 }
             })
-            .unwrap_or_else(|| {
-                compact_sidebar_pin(shell, item.clone(), prefer_server_playlist_covers).upcast()
-            });
+            .unwrap_or_else(|| compact_sidebar_pin(shell, item.clone()).upcast());
         if widget.parent().is_some() {
             compact.reorder_child_after(&widget, previous.as_ref());
         } else {
@@ -1294,16 +1273,12 @@ fn compact_pin_anchor(container: &gtk::Box) -> Option<gtk::Widget> {
     anchor
 }
 
-fn sidebar_pin_row(
-    shell: &Rc<Shell>,
-    pin: SidebarPinItem,
-    prefer_server_playlist_covers: bool,
-) -> gtk::Overlay {
+fn sidebar_pin_row(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
     let route = pin.route();
     let title = pin.title();
     let track_count = pin.track_count();
     let duration_seconds = pin.duration_seconds();
-    let artwork = pin.artwork(prefer_server_playlist_covers);
+    let artwork = pin.artwork();
     let row = gtk::Overlay::new();
     row.add_css_class("nav-button");
     row.add_css_class(SIDEBAR_PIN_ROW_CLASS);
@@ -1452,14 +1427,10 @@ fn sidebar_pin_row(
     row
 }
 
-fn compact_sidebar_pin(
-    shell: &Rc<Shell>,
-    pin: SidebarPinItem,
-    prefer_server_playlist_covers: bool,
-) -> gtk::Overlay {
+fn compact_sidebar_pin(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
     let route = pin.route();
     let title = pin.title();
-    let artwork = pin.artwork(prefer_server_playlist_covers);
+    let artwork = pin.artwork();
     let route_key =
         sidebar_pin_route_key(&route).expect("a compact sidebar pin always has a detail route");
     let row = gtk::Overlay::new();

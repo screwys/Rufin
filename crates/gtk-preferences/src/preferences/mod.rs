@@ -910,7 +910,6 @@ fn general_page(
         control_notifications_row: adw::SwitchRow,
         notifications_row: adw::SwitchRow,
         release_notifications_row: adw::SwitchRow,
-        prefer_server_playlist_row: adw::SwitchRow,
         prefer_distinct_track_covers_row: adw::SwitchRow,
         external_metadata_row: adw::SwitchRow,
         external_lyrics_row: adw::SwitchRow,
@@ -1088,21 +1087,6 @@ fn general_page(
             |settings| &mut settings.release_notifications_enabled,
         );
     });
-    prefer_server_playlist_row.set_active(settings.prefer_server_playlist_covers);
-    let prefer_server_playlist_shell = Rc::clone(shell);
-    prefer_server_playlist_row.connect_active_notify(move |row| {
-        if prefer_server_playlist_shell
-            .settings
-            .set_app_setting("playlist cover setting", row.is_active(), |settings| {
-                &mut settings.prefer_server_playlist_covers
-            })
-            .is_some()
-        {
-            (prefer_server_playlist_shell.effects)(crate::Effect::CatalogChanged);
-            (prefer_server_playlist_shell.effects)(crate::Effect::PlaylistPickerChanged);
-        }
-    });
-
     prefer_distinct_track_covers_row.set_active(settings.prefer_distinct_track_covers);
     let distinct_track_covers_shell = Rc::clone(shell);
     prefer_distinct_track_covers_row.connect_active_notify(move |row| {

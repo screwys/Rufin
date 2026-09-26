@@ -261,7 +261,7 @@ async fn named_card_batches_preserve_requested_rows_and_scoped_cover_order() {
         assert_eq!(genres.len(), 2);
         assert_eq!(genres[0], genres[1]);
         assert_eq!(genres[0].track_count, count);
-        assert_eq!(genres[0].representative_artwork, covers[..1]);
+        assert_eq!(genres[0].representative_artwork, covers);
         let single = fixture
             .database
             .genre_rows(fixture.source, &[fixture.genre], folder, &cancel)

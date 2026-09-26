@@ -343,7 +343,7 @@ pub trait NamedCollectionRow: Clone + PartialEq + 'static {
 
     fn name(&self) -> &str;
     fn route(&self) -> Route;
-    fn artwork(&self, prefer_server_playlist_covers: bool) -> Vec<artwork::ArtworkBinding>;
+    fn artwork(&self) -> Vec<artwork::ArtworkBinding>;
     fn playback(&self) -> rufin_core::playback::PlaybackTarget;
     fn field(&self, field: LibraryField) -> String;
     fn downloaded(&self) -> bool;
@@ -391,11 +391,12 @@ impl NamedCollectionRow for GenreRow {
     fn route(&self) -> Route {
         Route::GenreDetail(self.genre_key)
     }
-    fn artwork(&self, _: bool) -> Vec<artwork::ArtworkBinding> {
+    fn artwork(&self) -> Vec<artwork::ArtworkBinding> {
         self.artwork_binding
             .as_ref()
-            .or_else(|| self.representative_artwork.first())
-            .into_iter()
+            .map(std::slice::from_ref)
+            .unwrap_or(&self.representative_artwork)
+            .iter()
             .map(|binding| artwork::ArtworkBinding::opaque(binding))
             .collect()
     }
@@ -445,7 +446,7 @@ impl NamedCollectionRow for MoodRow {
     fn route(&self) -> Route {
         Route::MoodDetail(self.mood_key)
     }
-    fn artwork(&self, _: bool) -> Vec<artwork::ArtworkBinding> {
+    fn artwork(&self) -> Vec<artwork::ArtworkBinding> {
         self.representative_artwork
             .iter()
             .map(|binding| artwork::ArtworkBinding::opaque(binding))
@@ -496,8 +497,8 @@ impl NamedCollectionRow for PlaylistRow {
     fn route(&self) -> Route {
         Route::PlaylistDetail(self.playlist_key)
     }
-    fn artwork(&self, prefer_server_playlist_covers: bool) -> Vec<artwork::ArtworkBinding> {
-        playlist_artwork(self, prefer_server_playlist_covers)
+    fn artwork(&self) -> Vec<artwork::ArtworkBinding> {
+        playlist_artwork(self)
     }
     fn field(&self, field: LibraryField) -> String {
         playlist_field(self, field)
@@ -548,7 +549,7 @@ impl NamedCollectionRow for SmartPlaylistRow {
     fn route(&self) -> Route {
         Route::SmartPlaylistDetail(self.smart_playlist_key)
     }
-    fn artwork(&self, _: bool) -> Vec<artwork::ArtworkBinding> {
+    fn artwork(&self) -> Vec<artwork::ArtworkBinding> {
         self.artwork_bindings
             .iter()
             .map(|binding| artwork::ArtworkBinding::opaque(binding))
@@ -724,13 +725,7 @@ impl<T: NamedCollectionRow> ReusableCollectionGridCell<T> for NamedCollectionGri
 
     fn bind(&self, _: u32, item: T) {
         self.body.bind_playing_target(&self.shell, item.playback());
-        let artwork = item.artwork(
-            self.shell
-                .settings
-                .current
-                .borrow()
-                .prefer_server_playlist_covers,
-        );
+        let artwork = item.artwork();
         self.cover.replace(&self.shell.artwork, &artwork);
         self.body
             .bind(item.name(), |field| DetailLinks::text(&item.field(field)));
@@ -798,25 +793,13 @@ fn named_collection_column<T: NamedCollectionRow>(
         LibraryField::RowIndex => {
             mapped_row_index_column::<T>(shell, collection_column_width(field), T::playback)
         }
-        LibraryField::Image => {
-            let prefer_server_playlist_covers = shell
-                .settings
-                .current
-                .borrow()
-                .prefer_server_playlist_covers;
-            artwork_column::<T, _>(
-                shell,
-                gtk_widgets::settings::library_field_title(field),
-                collection_column_width(field),
-                move |item| {
-                    item.artwork(prefer_server_playlist_covers)
-                        .into_iter()
-                        .next()
-                        .unwrap_or_default()
-                },
-                Some(|item| (item.playback(), item.name().to_string())),
-            )
-        }
+        LibraryField::Image => artwork_column::<T, _>(
+            shell,
+            gtk_widgets::settings::library_field_title(field),
+            collection_column_width(field),
+            move |item| item.artwork().into_iter().next().unwrap_or_default(),
+            Some(|item| (item.playback(), item.name().to_string())),
+        ),
         LibraryField::Title | LibraryField::TitleMerged => {
             let factory = gtk::SignalListItemFactory::new();
             super::columns::bind_collection_title::<T>(&factory, shell, T::playback);

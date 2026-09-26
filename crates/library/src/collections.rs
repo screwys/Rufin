@@ -1557,47 +1557,11 @@ impl Database {
     ) -> LibraryResult<Option<GenreRow>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let genre = load_genre_facts(&mut transaction, source, &[key], folder)
+        let genre = load_genre_rows(&mut transaction, source, &[key], folder)
             .await?
             .pop();
-        let Some(mut genre) = genre else {
-            transaction.commit().await?;
-            return Ok(None);
-        };
-        genre.representative_artwork = sqlx::query_scalar::<_, Option<Vec<u8>>>(
-            "WITH representatives AS (
-               SELECT track.album_key, track.date_added
-               FROM track_genres credit
-               JOIN tracks track USING(track_key)
-               WHERE credit.genre_key=?1 AND track.source_key=?2 AND track.album_key IS NOT NULL
-                 AND (?3 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))
-               UNION ALL
-               SELECT credit.album_key, track.date_added
-               FROM album_genres credit
-               JOIN albums album ON album.album_key=credit.album_key AND album.source_key=?2
-               JOIN tracks track USING(album_key)
-               WHERE credit.genre_key=?1
-                 AND (?3 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))
-             ),
-             ordered AS (
-               SELECT album_key
-               FROM representatives
-               GROUP BY album_key
-               ORDER BY max(date_added) DESC NULLS LAST,album_key
-               LIMIT 16
-             )
-             SELECT album.artwork_binding FROM ordered JOIN albums album USING(album_key)",
-        )
-        .bind(key)
-        .bind(source)
-        .bind(folder)
-        .fetch_all(&mut *transaction)
-        .await?
-        .into_iter()
-        .flatten()
-        .collect();
         transaction.commit().await?;
-        Ok(Some(genre))
+        Ok(genre)
     }
 
     pub async fn mood_detail(
@@ -1609,44 +1573,11 @@ impl Database {
     ) -> LibraryResult<Option<MoodRow>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let mood = sqlx::query_as::<_, MoodRow>(
-            "SELECT mood.mood_key,mood.source_key,mood.name,
-              count(DISTINCT track.track_key) track_count,
-              COALESCE(sum(track.duration_millis),0) duration_millis,
-              count(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download') THEN track.track_key END) downloaded_count
-             FROM moods mood LEFT JOIN track_moods credit USING(mood_key)
-             LEFT JOIN tracks track ON track.track_key=credit.track_key
-               AND (?3 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))
-             WHERE mood.source_key=?1 AND mood.mood_key=?2
-             GROUP BY mood.mood_key",
-        )
-        .bind(source)
-        .bind(key)
-        .bind(folder)
-        .fetch_optional(&mut *transaction)
-        .await?;
-        let Some(mut mood) = mood else {
-            transaction.commit().await?;
-            return Ok(None);
-        };
-        mood.representative_artwork = sqlx::query_scalar::<_, Option<Vec<u8>>>(
-            "WITH representatives AS MATERIALIZED (SELECT DISTINCT track.album_key FROM track_moods credit
-             JOIN tracks track USING(track_key)
-             WHERE credit.mood_key=?1 AND track.source_key=?2 AND track.album_key IS NOT NULL
-               AND (?3 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))
-             ORDER BY track.date_added DESC NULLS LAST,track.album_key LIMIT 16)
-             SELECT album.artwork_binding FROM representatives CROSS JOIN albums album USING(album_key)",
-        )
-        .bind(key)
-        .bind(source)
-        .bind(folder)
-        .fetch_all(&mut *transaction)
-        .await?
-        .into_iter()
-        .flatten()
-        .collect();
+        let mood = load_mood_rows(&mut transaction, source, &[key], folder)
+            .await?
+            .pop();
         transaction.commit().await?;
-        Ok(Some(mood))
+        Ok(mood)
     }
 
     pub async fn update_album_metadata(
@@ -2029,19 +1960,18 @@ async fn named_collection_artwork(
     folder: Option<FolderKey>,
     keys: &[impl serde::Serialize],
     kind: &str,
-    limit: usize,
 ) -> LibraryResult<BTreeMap<i64, Vec<Vec<u8>>>> {
     if keys.is_empty() {
         return Ok(BTreeMap::new());
     }
     let candidates = if kind == "genre" {
-        "SELECT track.album_key, track.date_added
+        "SELECT track.media_uri
          FROM track_genres credit
          JOIN tracks track USING(track_key)
          WHERE credit.genre_key=requested.value AND track.source_key=?2
            AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))
-         UNION ALL
-         SELECT credit.album_key, track.date_added
+         UNION
+         SELECT track.media_uri
          FROM album_genres credit
          JOIN albums album ON album.album_key=credit.album_key AND album.source_key=?2
          JOIN tracks track USING(album_key)
@@ -2050,25 +1980,20 @@ async fn named_collection_artwork(
             .to_string()
     } else {
         format!(
-            "SELECT track.album_key, track.date_added
+            "SELECT track.media_uri
              FROM track_{kind}s credit
              JOIN tracks track USING(track_key)
              WHERE credit.{kind}_key=requested.value AND track.source_key=?2
                AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))"
         )
     };
+    let selection = crate::artwork::collection_artwork_sql(&candidates);
     let sql = format!(
         "WITH requested AS (SELECT DISTINCT value FROM json_each(?1))
-         SELECT requested.value,album.artwork_binding FROM requested
-         CROSS JOIN json_each((SELECT json_group_array(album_key) FROM (
-             SELECT candidate.album_key FROM (
-                 {candidates}
-             ) candidate
-             JOIN albums album USING(album_key)
-             WHERE album.artwork_binding IS NOT NULL
-             GROUP BY candidate.album_key
-             ORDER BY max(candidate.date_added) DESC NULLS LAST,candidate.album_key LIMIT {limit}
-         ))) artwork JOIN albums album ON album.album_key=artwork.value
+         SELECT requested.value,COALESCE(album.artwork_binding,track.artwork_binding) FROM requested
+         CROSS JOIN json_each((SELECT json_group_array(track_key) FROM ({selection}))) artwork
+         JOIN tracks track ON track.track_key=artwork.value
+         LEFT JOIN albums album USING(album_key)
          ORDER BY requested.value,artwork.key"
     );
     let mut artwork = BTreeMap::<i64, Vec<Vec<u8>>>::new();
@@ -2092,7 +2017,7 @@ async fn load_genre_rows(
 ) -> LibraryResult<Vec<GenreRow>> {
     let mut rows = load_genre_facts(connection, source, keys, folder).await?;
     let keys = rows.iter().map(|row| row.genre_key).collect::<Vec<_>>();
-    let artwork = named_collection_artwork(connection, source, folder, &keys, "genre", 1).await?;
+    let artwork = named_collection_artwork(connection, source, folder, &keys, "genre").await?;
     for row in &mut rows {
         row.representative_artwork = artwork
             .get(&row.genre_key.raw())
@@ -2144,7 +2069,7 @@ async fn load_mood_rows(
         .fetch_all(&mut *connection)
         .await?;
     let keys = rows.iter().map(|row| row.mood_key).collect::<Vec<_>>();
-    let artwork = named_collection_artwork(connection, source, folder, &keys, "mood", 4).await?;
+    let artwork = named_collection_artwork(connection, source, folder, &keys, "mood").await?;
     for row in &mut rows {
         row.representative_artwork = artwork
             .get(&row.mood_key.raw())

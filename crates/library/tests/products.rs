@@ -1679,7 +1679,7 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
 }
 
 #[tokio::test]
-async fn genre_rows_prepare_only_one_representative_cover() {
+async fn genre_rows_prepare_one_cover_per_member_album() {
     let fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
     for (index, album) in fixture.albums.iter().copied().enumerate() {
@@ -1705,7 +1705,7 @@ async fn genre_rows_prepare_only_one_representative_cover() {
         .pop()
         .expect("Genre row");
 
-    assert_eq!(row.representative_artwork.len(), 1);
+    assert_eq!(row.representative_artwork.len(), 2);
 }
 
 #[tokio::test]

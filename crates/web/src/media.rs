@@ -343,16 +343,25 @@ async fn artwork(
 ) -> Result<Response<Body>, Error> {
     let cancel = library::ReadCancellation::new();
     let binding = if parameters.contains_key("genre") {
-        let (source, _) = catalog::scope(&products, &parameters).await?;
+        let (source, folder) = catalog::scope(&products, &parameters).await?;
         products
             .library
-            .genre_rows(source, &[key(&parameters, "genre")?], None, &cancel)
+            .genre_rows(source, &[key(&parameters, "genre")?], folder, &cancel)
             .await
             .map_err(internal)?
             .pop()
             .and_then(|row| {
                 row.artwork_binding
-                    .or_else(|| row.representative_artwork.into_iter().next())
+                    .as_ref()
+                    .map(std::slice::from_ref)
+                    .unwrap_or(&row.representative_artwork)
+                    .get(
+                        parameters
+                            .get("part")
+                            .and_then(|part| part.parse::<usize>().ok())
+                            .unwrap_or(0),
+                    )
+                    .cloned()
             })
     } else if parameters.contains_key("playlist") {
         products
@@ -363,17 +372,14 @@ async fn artwork(
             .into_iter()
             .next()
             .and_then(|row| {
-                rufin_core::playlists::playlist_artwork_bindings(
-                    &row,
-                    products.settings.load().prefer_server_playlist_covers,
-                )
-                .get(
-                    parameters
-                        .get("part")
-                        .and_then(|part| part.parse::<usize>().ok())
-                        .unwrap_or(0),
-                )
-                .cloned()
+                rufin_core::playlists::playlist_artwork_bindings(&row)
+                    .get(
+                        parameters
+                            .get("part")
+                            .and_then(|part| part.parse::<usize>().ok())
+                            .unwrap_or(0),
+                    )
+                    .cloned()
             })
     } else if parameters.contains_key("smart_playlist") {
         let (source, folder) = if parameters.contains_key("source") {
@@ -433,23 +439,26 @@ async fn artwork(
         }
     }
     .ok_or_else(|| error(StatusCode::NOT_FOUND, "No cover image"))?;
-    let owner = products.artwork.clone();
-    let settings = products.settings.load().clone();
-    let load = tokio::task::spawn_blocking(move || {
-        let external = artwork::ExternalPolicy::new(
+    let external = {
+        let settings = products.settings.load();
+        artwork::ExternalPolicy::new(
             settings.external_metadata_enabled,
             settings.allows_external_metadata_lookup(),
             settings.lastfm_api_key.clone(),
-        );
-        let request =
-            artwork::ArtworkRequest::new(artwork::ArtworkBinding::opaque(&binding), 256, 256)
-                .with_external(external);
-        owner.request_prepared(owner.prepare(request))
-    })
-    .await
-    .map_err(internal)?
-    .map_err(internal)?;
-    let image = match load {
+        )
+    };
+    let binding = artwork::ArtworkBinding::opaque(&binding);
+    let request = if parameters
+        .get("original")
+        .is_some_and(|value| value == "true")
+    {
+        artwork::ArtworkRequest::original(binding, 512)
+    } else {
+        artwork::ArtworkRequest::new(binding, 256, 256)
+    }
+    .with_external(external);
+    let load = products.artwork.load(request);
+    let loaded = match load {
         artwork::ArtworkLoad::Ready(image) => image,
         artwork::ArtworkLoad::Pending(pending) => match pending.finish().await {
             artwork::ArtworkOutcome::Ready(image) => image,
@@ -460,6 +469,16 @@ async fn artwork(
             return Err(error(StatusCode::NOT_FOUND, "No cover image"));
         }
     };
+    if let Some(original) = loaded.original
+        && let Some(mime) = artwork::image_mime(&original)
+    {
+        return Ok(Response::builder()
+            .header("content-type", mime)
+            .header("cache-control", "private, max-age=300")
+            .body(Body::from(bytes::Bytes::from_owner(original)))
+            .expect("image headers"));
+    }
+    let image = loaded.image;
     let bytes = tokio::task::spawn_blocking(move || {
         use image::ImageEncoder;
         let mut bytes = Vec::new();

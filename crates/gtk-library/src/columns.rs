@@ -524,31 +524,23 @@ pub fn playlist_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::Colum
             column_width(field),
             super::named_collections::NamedCollectionRow::playback,
         ),
-        LibraryField::Image => {
-            let settings_shell = Rc::clone(shell);
-            artwork_column::<PlaylistRow, _>(
-                shell,
-                "Image",
-                column_width(LibraryField::Image),
-                move |playlist| {
-                    let prefer_server_cover = settings_shell
-                        .settings
-                        .current
-                        .borrow()
-                        .prefer_server_playlist_covers;
-                    playlist_artwork(playlist, prefer_server_cover)
-                        .into_iter()
-                        .next()
-                        .unwrap_or_default()
-                },
-                Some(|playlist| {
-                    (
-                        PlaybackTarget::Playlist(playlist.playlist_key),
-                        playlist.name,
-                    )
-                }),
-            )
-        }
+        LibraryField::Image => artwork_column::<PlaylistRow, _>(
+            shell,
+            "Image",
+            column_width(LibraryField::Image),
+            move |playlist| {
+                playlist_artwork(playlist)
+                    .into_iter()
+                    .next()
+                    .unwrap_or_default()
+            },
+            Some(|playlist| {
+                (
+                    PlaybackTarget::Playlist(playlist.playlist_key),
+                    playlist.name,
+                )
+            }),
+        ),
         LibraryField::Title | LibraryField::TitleMerged => {
             playlist_title_column(shell, "Title", 220, |playlist| playlist.name.clone())
         }

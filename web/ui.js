@@ -151,24 +151,78 @@ function initAppearance() {
 
 const coverUrls = new Map();
 
-async function cover(node, uri, signal) {
-  const response = await fetch(
-    `/api/artwork?${new URLSearchParams(typeof uri === "string" ? { uri } : uri)}`,
-    {
-      signal,
-    },
-  );
-  if (!response.ok) return;
-  const blob = await response.blob();
-  if (signal.aborted || !node.isConnected) return;
-  const url = URL.createObjectURL(blob);
-  const previous = coverUrls.get(node);
-  if (previous) URL.revokeObjectURL(previous);
-  coverUrls.set(node, url);
-  const image = el("img");
-  image.alt = "";
-  image.src = url;
-  node.replaceChildren(image);
+function finishCoverReveal(node) {
+  const image = node.querySelector("img");
+  for (const animation of image?.getAnimations() || []) {
+    if (animation.playState === "finished") {
+      animation.cancel();
+      image.animate(
+        { filter: ["blur(1px)", "blur(0)"] },
+        { duration: 80, easing: "ease-out" },
+      );
+    } else {
+      animation.effect.setKeyframes({ filter: ["blur(4px)", "blur(0)"] });
+      animation.onfinish = () => animation.cancel();
+    }
+  }
+}
+
+async function cover(node, uri, signal, reveal = "none") {
+  const query = typeof uri === "string" ? { uri } : uri;
+  const { original, ...still } = query;
+  const preview = original ? cover(node, still, signal, "preview") : false;
+  try {
+    const [response, previewShown] = await Promise.all([
+      fetch(`/api/artwork?${new URLSearchParams(query)}`, { signal }),
+      preview,
+    ]);
+    if (original) reveal = previewShown ? "none" : "ready";
+    if (!response.ok) return previewShown;
+    const blob = await response.blob();
+    if (signal.aborted || !node.isConnected) return false;
+    const url = URL.createObjectURL(blob);
+    const image = el("img");
+    image.alt = "";
+    image.src = url;
+    try {
+      await image.decode();
+    } catch {
+      URL.revokeObjectURL(url);
+      return previewShown;
+    }
+    if (signal.aborted || !node.isConnected) {
+      URL.revokeObjectURL(url);
+      return false;
+    }
+    const previous = coverUrls.get(node);
+    if (previous) URL.revokeObjectURL(previous);
+    coverUrls.set(node, url);
+    const current = node.querySelector("img");
+    if (previewShown && current) {
+      current.src = url;
+      return true;
+    }
+    for (const animation of node.getAnimations({ subtree: true }))
+      animation.cancel();
+    node.replaceChildren(image);
+    if (
+      reveal !== "none" &&
+      !matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      image.animate(
+        { filter: ["blur(4px)", reveal === "preview" ? "blur(1px)" : "blur(0)"] },
+        {
+          duration: 200,
+          easing: "ease-in-out",
+          fill: reveal === "preview" ? "forwards" : "none",
+        },
+      );
+    }
+    return true;
+  } finally {
+    if (original && (await preview) && !signal.aborted && node.isConnected)
+      finishCoverReveal(node);
+  }
 }
 
 function releaseCovers() {

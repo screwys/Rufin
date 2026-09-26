@@ -179,7 +179,6 @@ fn present_playlist_picker(
     let (dialog, update) = gtk_media_menus::playlist_picker::playlist_picker_dialog(
         shell.products.source.clone(),
         Rc::clone(&shell.artwork),
-        Rc::clone(&shell.settings),
         Rc::new(move |name, tracks| {
             if let Some(shell) = create_shell.upgrade() {
                 shell.new_playlist_dialog_with(name, tracks);

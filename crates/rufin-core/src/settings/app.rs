@@ -216,8 +216,6 @@ pub struct Settings {
     pub external_metadata_enabled: bool,
     #[serde(default)]
     pub external_site_links: ExternalSiteLinkSettings,
-    #[serde(default)]
-    pub prefer_server_playlist_covers: bool,
     #[serde(default = "default_true")]
     pub new_playlist_current: bool,
     #[serde(default)]
@@ -311,7 +309,6 @@ impl Default for Settings {
             lyrics: LyricsSettings::default(),
             external_metadata_enabled: true,
             external_site_links: ExternalSiteLinkSettings::default(),
-            prefer_server_playlist_covers: false,
             new_playlist_current: true,
             prefer_distinct_track_covers: false,
             show_downloaded_badges: true,

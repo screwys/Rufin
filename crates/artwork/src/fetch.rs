@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use sources::{SourceError, SourceImageRequest};
+use sources::{ImageSize, SourceError, SourceImageRequest};
 use tokio::runtime::Handle;
 
 use crate::selection::Candidate;
@@ -36,7 +36,7 @@ impl FetchContext {
         &self,
         runtime: &Handle,
         candidate: &Candidate,
-        size: u32,
+        size: ImageSize,
         policy: &ExternalPolicy,
     ) -> Result<FetchOutcome, String> {
         match candidate {
@@ -84,7 +84,10 @@ impl FetchContext {
             }
             Candidate::Album(album) => metadata_lookup::lookup_album_cover(
                 album,
-                size,
+                match size {
+                    ImageSize::Original => None,
+                    ImageSize::Thumbnail(size) => Some(size),
+                },
                 &metadata_lookup::AlbumCoverPolicy::new(
                     policy.lastfm_api_key.clone(),
                     policy.allow_musicbrainz,

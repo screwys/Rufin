@@ -11,7 +11,7 @@ impl Shell {
         let tile = ArtworkTile::new_sized(size, size);
         let cover = tile.widget();
         self.artwork
-            .bind_artwork_tile(&tile, candidates, size, fetch_size);
+            .bind_playback_artwork_tile(&tile, candidates, size, fetch_size);
         cover.add_css_class("full-artwork-cover");
         cover.set_halign(gtk::Align::Center);
         cover.set_valign(gtk::Align::Center);

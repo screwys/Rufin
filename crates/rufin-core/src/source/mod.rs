@@ -255,7 +255,7 @@ struct ArtworkPreparationKey {
 struct ActiveArtworkPreparation {
     key: ArtworkPreparationKey,
     token: u64,
-    cancelled: Arc<AtomicBool>,
+    cancelled: tokio_util::sync::CancellationToken,
     abort: Option<tokio::task::AbortHandle>,
 }
 
@@ -267,7 +267,10 @@ struct ArtworkPreparationOwner {
 }
 
 impl ArtworkPreparationOwner {
-    fn admit(&mut self, key: ArtworkPreparationKey) -> Option<(u64, Arc<AtomicBool>)> {
+    fn admit(
+        &mut self,
+        key: ArtworkPreparationKey,
+    ) -> Option<(u64, tokio_util::sync::CancellationToken)> {
         if self.completed == Some(key)
             || self.active.as_ref().is_some_and(|active| active.key == key)
         {
@@ -275,11 +278,11 @@ impl ArtworkPreparationOwner {
         }
         self.cancel_active();
         self.next_token = self.next_token.wrapping_add(1).max(1);
-        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancelled = tokio_util::sync::CancellationToken::new();
         self.active = Some(ActiveArtworkPreparation {
             key,
             token: self.next_token,
-            cancelled: Arc::clone(&cancelled),
+            cancelled: cancelled.clone(),
             abort: None,
         });
         Some((self.next_token, cancelled))
@@ -295,7 +298,7 @@ impl ArtworkPreparationOwner {
 
     fn is_current(&self, key: ArtworkPreparationKey, token: u64) -> bool {
         self.active.as_ref().is_some_and(|active| {
-            active.key == key && active.token == token && !active.cancelled.load(Ordering::Acquire)
+            active.key == key && active.token == token && !active.cancelled.is_cancelled()
         })
     }
 
@@ -318,7 +321,7 @@ impl ArtworkPreparationOwner {
 
     fn cancel_active(&mut self) {
         if let Some(active) = self.active.take() {
-            active.cancelled.store(true, Ordering::Release);
+            active.cancelled.cancel();
             if let Some(abort) = active.abort {
                 abort.abort();
             }
@@ -3277,18 +3280,15 @@ impl SourceOwner {
                     progress: Some(artwork_preparation_progress(completed)),
                 });
             };
-            let result = async {
-                crate::artwork::prepare_database_source(
-                    &progress_owner.shared.artwork,
-                    &selected.database,
-                    selected.source_key,
-                    selected.source_id(),
-                    selected.artwork_digest,
-                    &progress,
-                    Arc::clone(&cancelled),
-                )
-                .await
-            }
+            let result = crate::artwork::prepare_database_source(
+                &progress_owner.shared.artwork,
+                &selected.database,
+                selected.source_key,
+                selected.source_id(),
+                selected.artwork_digest,
+                &progress,
+                cancelled,
+            )
             .await;
             let revision = current_revision.load(Ordering::Acquire);
             let completed = match result {
@@ -4897,8 +4897,8 @@ mod artwork_preparation_tests {
         let mut owner = ArtworkPreparationOwner::default();
         let (stale_token, stale_cancelled) = owner.admit(key(1)).expect("first revision");
         let (current_token, current_cancelled) = owner.admit(key(2)).expect("replacement");
-        assert!(stale_cancelled.load(Ordering::Acquire));
-        assert!(!current_cancelled.load(Ordering::Acquire));
+        assert!(stale_cancelled.is_cancelled());
+        assert!(!current_cancelled.is_cancelled());
         assert_eq!(
             owner.active.as_ref().map(|active| active.token),
             Some(current_token)
@@ -4912,7 +4912,7 @@ mod artwork_preparation_tests {
         let mut owner = ArtworkPreparationOwner::default();
         let (_, cancelled) = owner.admit(key(1)).expect("active revision");
         owner.cancel_active();
-        assert!(cancelled.load(Ordering::Acquire));
+        assert!(cancelled.is_cancelled());
         assert!(owner.active.is_none());
     }
 

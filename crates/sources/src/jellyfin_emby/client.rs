@@ -620,7 +620,7 @@ impl JellyfinEmbySource {
     pub(crate) async fn image_bytes(
         &self,
         image_ref: &ImageRef,
-        size: u32,
+        size: crate::ImageSize,
     ) -> SourceResult<ImageBytes> {
         let image_kind = if image_ref
             .item_id
@@ -638,14 +638,33 @@ impl JellyfinEmbySource {
                 image_kind
             ),
         )?;
-        url.query_pairs_mut()
-            .append_pair("fillWidth", &size.max(1).to_string())
-            .append_pair("fillHeight", &size.max(1).to_string())
-            .append_pair("quality", "90");
+        match size {
+            crate::ImageSize::Original => {
+                if self.kind == ServerKind::Emby {
+                    url.query_pairs_mut()
+                        .append_pair("format", "Original")
+                        .append_pair("keepAnimation", "true");
+                }
+            }
+            crate::ImageSize::Thumbnail(size) => {
+                url.query_pairs_mut()
+                    .append_pair("fillWidth", &size.max(1).to_string())
+                    .append_pair("fillHeight", &size.max(1).to_string())
+                    .append_pair("quality", "90");
+            }
+        }
         if let Some(tag) = image_ref.tag.as_deref().filter(|tag| !tag.is_empty()) {
             url.query_pairs_mut().append_pair("tag", tag);
         }
-        send_bytes(self.kind, self.authenticated(self.client.get(url)).await?).await
+        let mut request = self.client.get(url);
+        if size == crate::ImageSize::Original && self.kind == ServerKind::Jellyfin {
+            // Jellyfin preserves unscaled originals when it knows the client accepts their format.
+            request = request.header(
+                "Accept",
+                "image/jpeg, image/png, image/webp, image/gif, image/apng, image/jxl, image/tiff, image/bmp",
+            );
+        }
+        send_bytes(self.kind, self.authenticated(request).await?).await
     }
 }
 

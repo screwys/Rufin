@@ -154,7 +154,7 @@
     "GET /api/lyrics": "Lyrics for the current track, with line and word timings when available.",
     "POST /api/lyrics": "Load lyrics for the current track using your lyrics settings.",
     "GET /api/lyrics/events": "Follow lyrics updates. The id matches the current queue track ID.",
-    "GET /api/artwork?uri=...": "Cover image for a track or album. Returns PNG, or 404 when no cover is available.",
+    "GET /api/artwork?uri=...": "Track or album cover as PNG. Add original=true for the original format, including animation. Returns 404 if unavailable.",
     "POST /api/queue/reorder": {
       "ids": ["queue track ID"],
       "before": "queue track ID, or null for the end"

@@ -80,7 +80,7 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
                     continue;
                 };
                 database.genre_rows(source, &[key], None, &cancellation).await.map_err(internal)?.pop()
-                    .map(|row| json!({"kind":"genre","id":row.genre_key,"object_id":row.object_id,"source":source_id,"name":row.name,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_revision":artwork_revision(row.artwork_binding.as_ref().or_else(|| row.representative_artwork.first()))}))
+                    .map(|row| json!({"kind":"genre","id":row.genre_key,"object_id":row.object_id,"source":source_id,"name":row.name,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_binding.as_ref().map_or(row.representative_artwork.len(), |_| 1),"artwork_revision":artwork_revision(row.artwork_binding.as_ref().map(std::slice::from_ref).unwrap_or(&row.representative_artwork))}))
             }
             SidebarPin::Playlist {
                 source_id,
@@ -95,7 +95,7 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
                 };
                 database.playlist_rows(&[key], &cancellation).await.map_err(internal)?.pop()
                     .map(|row| {
-                        let artwork = rufin_core::playlists::playlist_artwork_bindings(&row, settings.prefer_server_playlist_covers);
+                        let artwork = rufin_core::playlists::playlist_artwork_bindings(&row);
                         json!({"kind":"playlist","id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":artwork.len(),"artwork_revision":artwork_revision(artwork)})
                     })
             }

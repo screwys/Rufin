@@ -12,7 +12,12 @@ publish.workspace = true
 
 [dependencies]
 metadata-lookup.workspace = true
+futures-util.workspace = true
+tokio-util = { workspace = true, features = ["rt"] }
 image.workspace = true
+jxl.workspace = true
+jxl-image-rs-integration.workspace = true
+gif.workspace = true
 fast_image_resize.workspace = true
 md5.workspace = true
 serde_json.workspace = true

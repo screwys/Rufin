@@ -1,22 +1,22 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::Path;
-use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::thread;
-use std::time::Duration;
 
-use sources::SourceId;
+use futures_util::{StreamExt, stream::FuturesUnordered};
+use sources::{ImageSize, SourceId};
 use tokio::runtime::Handle;
 use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use crate::cache::FilesystemCache;
-use crate::decode::{decode_cached, decode_normalized, normalize_for_cache};
+use crate::decode::{decode_cached, decode_normalized, decode_original, normalize_for_cache};
 use crate::fetch::{FetchContext, FetchOutcome};
 use crate::selection::Candidate;
 use crate::{
-    ArtworkBinding, ArtworkError, ArtworkKey, ArtworkLoad, ArtworkOutcome, ArtworkPreparation,
-    ArtworkRequest, DecodedImage, ExternalPolicy, PendingArtwork, RequestId, SourceResolver,
+    ArtworkBinding, ArtworkError, ArtworkKey, ArtworkLoad, ArtworkPreparation, ArtworkRequest,
+    DecodedImage, ExternalPolicy, LoadedArtwork, PendingArtwork, RequestId, SourceResolver,
 };
 
 pub(crate) const WORKERS: usize = 4;
@@ -42,30 +42,28 @@ struct Shared {
 #[derive(Default)]
 struct State {
     next_request: u64,
-    next_preparation: u64,
     external_epoch: u64,
     source_epochs: HashMap<SourceId, u64>,
     foreground: VecDeque<ArtworkKey>,
     preparations: VecDeque<ArtworkKey>,
     jobs: HashMap<ArtworkKey, JobRecord>,
-    projections: HashMap<RequestId, ProjectionRecord>,
     decoded_index: DecodedIndex,
 }
 
 struct JobRecord {
-    request: CandidateRequest,
-    subscribers: HashSet<RequestId>,
-    foreground_subscribers: HashSet<RequestId>,
-    preparations: Vec<PreparationSubscriber>,
+    request: Arc<CandidateRequest>,
+    subscribers: HashMap<RequestId, Subscriber>,
     active: bool,
-    source_epoch: u64,
-    external_epoch: u64,
 }
 
-#[derive(Clone)]
+struct Subscriber {
+    priority: JobPriority,
+    completion: oneshot::Sender<Resolution>,
+}
+
 struct Work {
     key: ArtworkKey,
-    request: CandidateRequest,
+    request: Arc<CandidateRequest>,
     source_epoch: u64,
     external_epoch: u64,
     decode: bool,
@@ -74,36 +72,16 @@ struct Work {
 #[derive(Clone)]
 struct CandidateRequest {
     candidate: Candidate,
-    fetch_size: u32,
+    fetch_size: ImageSize,
     render_size: u32,
     external: ExternalPolicy,
     allow_fetch: bool,
-}
-
-struct PreparationSubscriber {
-    id: u64,
-    completion: mpsc::Sender<BackgroundResult>,
-}
-
-#[derive(Clone, Copy)]
-enum BackgroundResult {
-    Ready,
-    Cached,
-    Missing,
-    Failed,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum JobPriority {
     Preparation,
     Foreground,
-}
-
-struct ProjectionRecord {
-    request: CandidateRequest,
-    priority: JobPriority,
-    job: ArtworkKey,
-    completion: oneshot::Sender<ArtworkOutcome>,
 }
 
 #[derive(Default)]
@@ -126,18 +104,19 @@ struct DecodedAccess {
     key: ArtworkKey,
 }
 
-enum Resolution {
+#[derive(Clone)]
+pub(crate) enum Resolution {
     Ready {
         image: Arc<DecodedImage>,
+        original: Option<Arc<[u8]>>,
         cached: bool,
     },
     Cached,
     Fetched,
     Missing,
     Failed(Arc<str>),
+    Invalidated,
 }
-
-type LeaseCompletion = (oneshot::Sender<ArtworkOutcome>, ArtworkOutcome);
 
 impl Pipeline {
     pub(crate) fn begin_source_manifest(
@@ -188,7 +167,6 @@ impl Pipeline {
             cache_commit: Mutex::new(()),
             state: Mutex::new(State {
                 next_request: 1,
-                next_preparation: 1,
                 ..State::default()
             }),
             wake: Condvar::new(),
@@ -203,50 +181,42 @@ impl Pipeline {
         Ok(Self { shared })
     }
 
-    pub(crate) fn request(
-        self: &Arc<Self>,
-        request: ArtworkRequest,
-        allow_fetch: bool,
-    ) -> Result<ArtworkLoad, ArtworkError> {
-        self.request_with_priority(request, allow_fetch, JobPriority::Foreground)
+    pub(crate) fn load(self: &Arc<Self>, request: ArtworkRequest) -> ArtworkLoad {
+        self.submit(request, JobPriority::Foreground)
     }
 
-    fn request_with_priority(
-        self: &Arc<Self>,
-        request: ArtworkRequest,
-        allow_fetch: bool,
-        priority: JobPriority,
-    ) -> Result<ArtworkLoad, ArtworkError> {
+    fn submit(self: &Arc<Self>, request: ArtworkRequest, priority: JobPriority) -> ArtworkLoad {
         let mut state = lock_state(&self.shared);
-        let request_id = RequestId(state.next_request);
-        state.next_request = state.next_request.wrapping_add(1).max(1);
-        let key = request_key(&state, &request, allow_fetch);
-        let ready = decoded_from_memory(&mut state, &request, &key);
-        if let Some(image) = ready {
-            return Ok(ArtworkLoad::Ready(image));
+        let key = request_key(&state, &request);
+        if let Some(image) = decoded_from_memory(&mut state, &request, &key) {
+            return ArtworkLoad::Ready(LoadedArtwork {
+                image,
+                original: None,
+            });
         }
         let Some(candidate) = request.binding.candidate().cloned() else {
-            return Ok(ArtworkLoad::Missing);
+            return ArtworkLoad::Missing;
         };
-        let request = candidate_request(&request, candidate, allow_fetch);
+        let request_id = RequestId(state.next_request);
+        state.next_request = state.next_request.wrapping_add(1).max(1);
         let (completion, receiver) = oneshot::channel();
-        let job = enqueue_projection(&mut state, request.clone(), request_id, priority);
-        state.projections.insert(
+        let job = enqueue(
+            &mut state,
+            candidate_request(&request, candidate),
             request_id,
-            ProjectionRecord {
-                request,
+            Subscriber {
                 priority,
-                job,
                 completion,
             },
         );
         drop(state);
-        self.shared.wake.notify_one();
-        Ok(ArtworkLoad::Pending(PendingArtwork {
+        self.shared.wake.notify_all();
+        ArtworkLoad::Pending(PendingArtwork {
+            job,
             request_id,
             completion: Some(receiver),
             pipeline: Arc::clone(self),
-        }))
+        })
     }
 
     pub(crate) fn source_preparation_complete(
@@ -260,111 +230,79 @@ impl Pipeline {
             .map_err(ArtworkError::Cache)
     }
 
-    pub(crate) fn prefetch_source_artwork(
-        &self,
-        artwork: Arc<[Vec<u8>]>,
-        progress: &(dyn Fn(usize, usize) + Send + Sync),
-        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    pub(crate) async fn prefetch_source_artwork(
+        self: &Arc<Self>,
+        artwork: &[Vec<u8>],
+        cancelled: &CancellationToken,
     ) -> Result<ArtworkPreparation, ArtworkError> {
-        self.prepare_source_artwork_jobs(artwork, progress, cancelled)
-    }
-
-    fn prepare_source_artwork_jobs(
-        &self,
-        artwork: Arc<[Vec<u8>]>,
-        progress: &(dyn Fn(usize, usize) + Send + Sync),
-        cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> Result<ArtworkPreparation, ArtworkError> {
-        let total = artwork.len();
-        if total == 0 {
-            return Ok(ArtworkPreparation::default());
-        }
-        if cancelled() {
-            return Err(ArtworkError::Cancelled);
-        }
-        let (completion, completed) = mpsc::channel();
-        let preparation_id = {
-            let mut state = lock_state(&self.shared);
-            let id = state.next_preparation;
-            state.next_preparation = state.next_preparation.wrapping_add(1).max(1);
-            id
-        };
-
-        let mut summary = ArtworkPreparation {
-            total,
-            ..ArtworkPreparation::default()
-        };
-        let mut admitted = 0;
-        let mut completed_count = 0;
-        while completed_count < total {
-            if cancelled() {
-                cancel_preparation(&self.shared, preparation_id);
-                return Err(ArtworkError::Cancelled);
-            }
-
-            let in_flight = admitted - completed_count;
-            let end = total.min(admitted + PREPARATION_WINDOW.saturating_sub(in_flight));
-            if admitted < end {
-                let mut state = lock_state(&self.shared);
-                for source_artwork in &artwork[admitted..end] {
+        let prepare = async {
+            let mut bindings = artwork.iter();
+            let mut pending = FuturesUnordered::new();
+            let mut summary = ArtworkPreparation {
+                total: artwork.len(),
+                ..ArtworkPreparation::default()
+            };
+            loop {
+                while pending.len() < PREPARATION_WINDOW {
+                    let Some(binding) = bindings.next() else {
+                        break;
+                    };
                     let request = ArtworkRequest::new(
-                        ArtworkBinding::opaque(source_artwork),
+                        ArtworkBinding::opaque(binding),
                         SOURCE_ARTWORK_SIZE,
                         SOURCE_ARTWORK_SIZE,
                     );
-                    if request.binding.candidate().is_none() {
-                        let _ = completion.send(BackgroundResult::Missing);
-                        continue;
-                    }
-                    let key = request_key(&state, &request, true);
-                    if decoded_from_memory(&mut state, &request, &key).is_some() {
-                        let _ = completion.send(BackgroundResult::Cached);
-                        continue;
-                    }
-                    enqueue_background(
-                        &mut state,
-                        request,
-                        PreparationSubscriber {
-                            id: preparation_id,
-                            completion: completion.clone(),
-                        },
-                    );
+                    let load = self.submit(request, JobPriority::Preparation);
+                    pending.push(async move {
+                        match load {
+                            ArtworkLoad::Ready(loaded) => Resolution::Ready {
+                                image: loaded.image,
+                                original: loaded.original,
+                                cached: true,
+                            },
+                            ArtworkLoad::Missing => Resolution::Missing,
+                            ArtworkLoad::Pending(pending) => pending.finish_resolution().await,
+                        }
+                    });
                 }
-                admitted = end;
-                drop(state);
-                self.shared.wake.notify_all();
-            }
-
-            match completed.recv_timeout(Duration::from_millis(25)) {
-                Ok(BackgroundResult::Ready) => summary.ready += 1,
-                Ok(BackgroundResult::Cached) => {
-                    summary.ready += 1;
-                    summary.cached += 1;
-                }
-                Ok(BackgroundResult::Missing) => summary.missing += 1,
-                Ok(BackgroundResult::Failed) => summary.failed += 1,
-                Err(RecvTimeoutError::Timeout) => continue,
-                Err(RecvTimeoutError::Disconnected) => {
-                    cancel_preparation(&self.shared, preparation_id);
-                    return Err(ArtworkError::Cancelled);
+                let Some(result) = pending.next().await else {
+                    break;
+                };
+                match result {
+                    Resolution::Ready { cached: true, .. } | Resolution::Cached => {
+                        summary.ready += 1;
+                        summary.cached += 1;
+                    }
+                    Resolution::Ready { cached: false, .. } | Resolution::Fetched => {
+                        summary.ready += 1
+                    }
+                    Resolution::Missing => summary.missing += 1,
+                    Resolution::Failed(error) => {
+                        warn!(%error, "could not prepare one source artwork image");
+                        summary.failed += 1;
+                    }
+                    Resolution::Invalidated => return Err(ArtworkError::Cancelled),
                 }
             }
-            completed_count += 1;
-            progress(completed_count, total);
-        }
-        Ok(summary)
+            Ok(summary)
+        };
+        cancelled
+            .run_until_cancelled(prepare)
+            .await
+            .ok_or(ArtworkError::Cancelled)?
     }
 
-    pub(crate) fn cancel(&self, request_id: RequestId) {
+    pub(crate) fn cancel(&self, key: &ArtworkKey, request_id: RequestId) {
         let mut state = lock_state(&self.shared);
-        let Some(projection) = state.projections.remove(&request_id) else {
+        if state
+            .jobs
+            .get_mut(key)
+            .and_then(|record| record.subscribers.remove(&request_id))
+            .is_none()
+        {
             return;
-        };
-        if let Some(record) = state.jobs.get_mut(&projection.job) {
-            record.subscribers.remove(&request_id);
-            record.foreground_subscribers.remove(&request_id);
         }
-        reschedule_or_remove(&mut state, &projection.job, false);
+        reschedule_or_remove(&mut state, key, false);
         drop(state);
         self.shared.wake.notify_all();
     }
@@ -380,15 +318,8 @@ impl Pipeline {
             .map(|entry| entry.path)
     }
 
-    pub(crate) fn key_and_image(
-        &self,
-        request: &ArtworkRequest,
-        allow_fetch: bool,
-    ) -> (ArtworkKey, Option<Arc<DecodedImage>>) {
-        let mut state = lock_state(&self.shared);
-        let key = request_key(&state, request, allow_fetch);
-        let ready = decoded_from_memory(&mut state, request, &key);
-        (key, ready)
+    pub(crate) fn key(&self, request: &ArtworkRequest) -> ArtworkKey {
+        request_key(&lock_state(&self.shared), request)
     }
 
     pub(crate) fn retry_external(&self) -> Result<(), ArtworkError> {
@@ -396,7 +327,6 @@ impl Pipeline {
         self.shared.cache.retry_external()?;
         let mut state = lock_state(&self.shared);
         state.external_epoch = state.external_epoch.wrapping_add(1);
-        reconcile_inactive_external_jobs(&mut state);
         drop(state);
         drop(commit);
         self.shared.wake.notify_all();
@@ -414,48 +344,32 @@ impl Pipeline {
             .unwrap_or_default()
             .wrapping_add(1);
         state.decoded_index.invalidate_source(source_id);
-        let invalidated = state
-            .projections
-            .iter()
-            .filter(|(_, record)| candidate_belongs_to_source(&record.request.candidate, source_id))
-            .map(|(request_id, _)| *request_id)
-            .collect::<HashSet<_>>();
-        let completions = invalidated
-            .iter()
-            .filter_map(|request_id| state.projections.remove(request_id))
-            .map(|record| record.completion)
-            .collect::<Vec<_>>();
-        for record in state.jobs.values_mut() {
-            if candidate_belongs_to_source(&record.request.candidate, source_id) {
-                record
-                    .subscribers
-                    .retain(|request_id| !invalidated.contains(request_id));
-                record
-                    .foreground_subscribers
-                    .retain(|request_id| !invalidated.contains(request_id));
-            }
-        }
-        let removable = state
+        let keys = state
             .jobs
             .iter()
-            .filter(|(_, record)| {
-                candidate_belongs_to_source(&record.request.candidate, source_id) && !record.active
-            })
+            .filter(|(_, record)| candidate_belongs_to_source(&record.request.candidate, source_id))
             .map(|(key, _)| key.clone())
             .collect::<Vec<_>>();
-        for key in &removable {
-            remove_job(&mut state, key);
-        }
+        let completions = keys
+            .iter()
+            .filter_map(|key| remove_job(&mut state, key))
+            .flat_map(|record| {
+                record
+                    .subscribers
+                    .into_values()
+                    .map(|subscriber| subscriber.completion)
+            })
+            .collect::<Vec<_>>();
         drop(state);
         drop(commit);
         for completion in completions {
-            let _ = completion.send(ArtworkOutcome::Invalidated);
+            let _ = completion.send(Resolution::Invalidated);
         }
         Ok(())
     }
 }
 
-fn request_key(state: &State, request: &ArtworkRequest, allow_fetch: bool) -> ArtworkKey {
+fn request_key(state: &State, request: &ArtworkRequest) -> ArtworkKey {
     let source_epoch = request
         .binding
         .candidate()
@@ -465,7 +379,7 @@ fn request_key(state: &State, request: &ArtworkRequest, allow_fetch: bool) -> Ar
         request.binding.candidate(),
         (request.fetch_size, request.render_size),
         request.binding.has_external().then_some(&request.external),
-        allow_fetch,
+        !request.cache_only,
         (source_epoch, state.external_epoch),
     )
 }
@@ -476,6 +390,9 @@ fn decoded_from_memory(
     key: &ArtworkKey,
 ) -> Option<Arc<DecodedImage>> {
     let candidate = request.binding.candidate()?;
+    if request.fetch_size == ImageSize::Original {
+        return None;
+    }
     if candidate.is_external() && !request.external.allow_cached {
         return None;
     }
@@ -602,149 +519,40 @@ impl DecodedIndex {
     }
 }
 
-fn reconcile_inactive_external_jobs(state: &mut State) {
-    let stale = state
-        .jobs
-        .iter()
-        .filter(|(_, record)| {
-            !record.active
-                && record.request.candidate.is_external()
-                && record.external_epoch != state.external_epoch
-        })
-        .map(|(key, _)| key.clone())
-        .collect::<Vec<_>>();
-    let stale = stale
-        .iter()
-        .filter_map(|key| remove_job(state, key))
-        .collect::<Vec<_>>();
-
-    for record in stale {
-        for request_id in record.subscribers {
-            restart_projection(state, request_id);
-        }
-        for subscriber in record.preparations {
-            enqueue_background_candidate(state, record.request.clone(), subscriber);
-        }
-    }
-}
-
 impl JobRecord {
     fn has_interest(&self) -> bool {
-        !self.subscribers.is_empty() || !self.preparations.is_empty()
+        !self.subscribers.is_empty()
     }
 
     fn priority(&self) -> JobPriority {
-        if !self.foreground_subscribers.is_empty() {
-            JobPriority::Foreground
-        } else {
-            JobPriority::Preparation
-        }
+        self.subscribers
+            .values()
+            .map(|subscriber| subscriber.priority)
+            .max()
+            .unwrap_or(JobPriority::Preparation)
     }
 }
 
-fn enqueue_projection(
+fn enqueue(
     state: &mut State,
     request: CandidateRequest,
-    subscriber: RequestId,
-    priority: JobPriority,
+    request_id: RequestId,
+    subscriber: Subscriber,
 ) -> ArtworkKey {
-    let source_epoch = source_epoch(state, &request.candidate);
-    let external_epoch = request
-        .candidate
-        .is_external()
-        .then_some(state.external_epoch)
-        .unwrap_or_default();
-    let key = job_key(&request, source_epoch, external_epoch);
-    if let Some(record) = state.jobs.get_mut(&key) {
-        record.subscribers.insert(subscriber);
-        if matches!(priority, JobPriority::Foreground) {
-            record.foreground_subscribers.insert(subscriber);
-        }
-        let active = record.active;
-        if !active && matches!(priority, JobPriority::Foreground) {
-            queue(state, key.clone(), true);
-        }
-        return key;
+    // The job identity stays stable across retries; each worker snapshots the current epochs.
+    let key = job_key(&request, 0, 0);
+    let foreground = subscriber.priority == JobPriority::Foreground;
+    let record = state.jobs.entry(key.clone()).or_insert_with(|| JobRecord {
+        request: Arc::new(request),
+        subscribers: HashMap::new(),
+        active: false,
+    });
+    let existing = record.has_interest();
+    record.subscribers.insert(request_id, subscriber);
+    if !record.active {
+        queue(state, key.clone(), existing && foreground);
     }
-    let subscribers = HashSet::from([subscriber]);
-    let foreground_subscribers = matches!(priority, JobPriority::Foreground)
-        .then(|| HashSet::from([subscriber]))
-        .unwrap_or_default();
-    state.jobs.insert(
-        key.clone(),
-        JobRecord {
-            request,
-            subscribers,
-            foreground_subscribers,
-            preparations: Vec::new(),
-            active: false,
-            source_epoch,
-            external_epoch,
-        },
-    );
-    queue(state, key.clone(), false);
     key
-}
-
-fn enqueue_background(
-    state: &mut State,
-    request: ArtworkRequest,
-    subscriber: PreparationSubscriber,
-) -> Option<ArtworkKey> {
-    let candidate = request.binding.candidate()?.clone();
-    Some(enqueue_background_candidate(
-        state,
-        candidate_request(&request, candidate, true),
-        subscriber,
-    ))
-}
-
-fn enqueue_background_candidate(
-    state: &mut State,
-    request: CandidateRequest,
-    subscriber: PreparationSubscriber,
-) -> ArtworkKey {
-    let source_epoch = source_epoch(state, &request.candidate);
-    let external_epoch = request
-        .candidate
-        .is_external()
-        .then_some(state.external_epoch)
-        .unwrap_or_default();
-    let key = job_key(&request, source_epoch, external_epoch);
-    if let Some(record) = state.jobs.get_mut(&key) {
-        record.preparations.push(subscriber);
-        if !record.active {
-            queue(state, key.clone(), false);
-        }
-        return key;
-    }
-    state.jobs.insert(
-        key.clone(),
-        JobRecord {
-            request,
-            subscribers: HashSet::new(),
-            foreground_subscribers: HashSet::new(),
-            preparations: vec![subscriber],
-            active: false,
-            source_epoch,
-            external_epoch,
-        },
-    );
-    queue(state, key.clone(), false);
-    key
-}
-
-fn cancel_preparation(shared: &Shared, id: u64) {
-    let mut state = lock_state(shared);
-    let keys = state.jobs.keys().cloned().collect::<Vec<_>>();
-    for key in keys {
-        if let Some(record) = state.jobs.get_mut(&key) {
-            record.preparations.retain(|subscriber| subscriber.id != id);
-        }
-        reschedule_or_remove(&mut state, &key, false);
-    }
-    drop(state);
-    shared.wake.notify_all();
 }
 
 fn reschedule_or_remove(state: &mut State, key: &ArtworkKey, front: bool) {
@@ -801,17 +609,13 @@ fn job_key(request: &CandidateRequest, source_epoch: u64, external_epoch: u64) -
     )
 }
 
-fn candidate_request(
-    request: &ArtworkRequest,
-    candidate: Candidate,
-    allow_fetch: bool,
-) -> CandidateRequest {
+fn candidate_request(request: &ArtworkRequest, candidate: Candidate) -> CandidateRequest {
     CandidateRequest {
         candidate,
         fetch_size: request.fetch_size,
         render_size: request.render_size,
         external: request.external.clone(),
-        allow_fetch,
+        allow_fetch: !request.cache_only,
     }
 }
 
@@ -862,14 +666,15 @@ fn next_work(shared: &Shared, foreground_reserved: bool) -> Work {
             }
             let record = state.jobs.get_mut(&key).expect("eligible artwork job");
             record.active = true;
-            let work = Work {
+            let request = Arc::clone(&record.request);
+            let decode = record.priority() == JobPriority::Foreground;
+            return Work {
                 key,
-                request: record.request.clone(),
-                source_epoch: record.source_epoch,
-                external_epoch: record.external_epoch,
-                decode: !record.subscribers.is_empty(),
+                source_epoch: source_epoch(&state, &request.candidate),
+                external_epoch: state.external_epoch,
+                request,
+                decode,
             };
-            return work;
         }
         state = shared
             .wake
@@ -879,107 +684,144 @@ fn next_work(shared: &Shared, foreground_reserved: bool) -> Work {
 }
 
 fn resolve(shared: &Shared, work: &Work) -> Resolution {
-    resolve_candidate(shared, work)
+    let result =
+        resolve_request(shared, work).unwrap_or_else(|error| Resolution::Failed(error.into()));
+    let request = &work.request;
+    if request.fetch_size == ImageSize::Original
+        && matches!(result, Resolution::Missing | Resolution::Failed(_))
+        && (!request.candidate.is_external() || request.external.allow_cached)
+        && let Some(entry) = [512, 256, 96].into_iter().find_map(|size| {
+            shared
+                .cache
+                .ready_entry(&request.candidate, ImageSize::Thumbnail(size))
+        })
+        && let Ok(image) = decode_cached(
+            &entry.path,
+            job_key(request, work.source_epoch, work.external_epoch),
+            request.render_size,
+        )
+    {
+        return Resolution::Ready {
+            image: Arc::new(image),
+            original: None,
+            cached: true,
+        };
+    }
+    result
 }
 
-fn resolve_candidate(shared: &Shared, work: &Work) -> Resolution {
+fn resolve_request(shared: &Shared, work: &Work) -> Result<Resolution, String> {
     let request = &work.request;
     let candidate = &request.candidate;
-    let mut failures = Vec::new();
-    let external = candidate.is_external();
-    let artwork_key = work.key.clone();
-    let may_read_cache = !external || request.external.allow_cached;
+    let artwork_key = job_key(request, work.source_epoch, work.external_epoch);
+    let may_read_cache = !candidate.is_external() || request.external.allow_cached;
     if may_read_cache {
         if let Some(entry) = shared.cache.ready_entry(candidate, request.fetch_size) {
             if !work.decode {
-                return Resolution::Cached;
+                return Ok(Resolution::Cached);
             }
-            match decode_cached(entry.path.clone(), artwork_key.clone(), request.render_size) {
-                Ok(image) => {
-                    return Resolution::Ready {
+            let loaded = if request.fetch_size == ImageSize::Original {
+                std::fs::read(&entry.path)
+                    .map_err(ArtworkError::Cache)
+                    .and_then(|bytes| {
+                        decode_original(&bytes, artwork_key.clone(), request.render_size)
+                            .map(|image| (image, Some(Arc::from(bytes))))
+                    })
+            } else {
+                decode_cached(&entry.path, artwork_key.clone(), request.render_size)
+                    .map(|image| (image, None))
+            };
+            match loaded {
+                Ok((image, original)) => {
+                    return Ok(Resolution::Ready {
                         image: Arc::new(image),
+                        original,
                         cached: true,
-                    };
+                    });
                 }
-                Err(error) => {
-                    shared.cache.remove_ready(&entry.path);
-                    failures.push(error.to_string());
+                Err(_) => shared.cache.remove_ready(&entry.path),
+            }
+        }
+        if let ImageSize::Thumbnail(_) = request.fetch_size
+            && let Some(entry) = shared.cache.ready_entry(candidate, ImageSize::Original)
+        {
+            if let Ok(bytes) = std::fs::read(&entry.path) {
+                match store_image(shared, work, bytes, true) {
+                    Ok(resolved) => return Ok(resolved),
+                    Err(ArtworkError::Decode(_)) => {}
+                    Err(error) => return Err(error.to_string()),
                 }
             }
+            shared.cache.remove_ready(&entry.path);
         }
         if shared.cache.is_missing(candidate, request.fetch_size) {
-            return Resolution::Missing;
+            return Ok(Resolution::Missing);
         }
     }
-    if !request.allow_fetch || (external && !request.external.allow_network) {
-        return Resolution::Missing;
+    if !request.allow_fetch || (candidate.is_external() && !request.external.allow_network) {
+        return Ok(Resolution::Missing);
     }
     match shared.fetch.fetch(
         &shared.runtime,
         candidate,
         request.fetch_size,
         &request.external,
-    ) {
-        Ok(FetchOutcome::Ready(bytes)) => {
-            let normalized = match normalize_for_cache(bytes, request.fetch_size) {
-                Ok(normalized) => normalized,
-                Err(error) => return Resolution::Failed(error.to_string().into()),
-            };
-            match write_ready(shared, work, normalized.bytes()) {
-                Ok(Some(_path)) if !work.decode => Resolution::Fetched,
-                Ok(Some(path)) => match decode_normalized(
-                    normalized,
-                    path.clone(),
-                    artwork_key,
-                    request.render_size,
-                ) {
-                    Ok(image) => Resolution::Ready {
-                        image: Arc::new(image),
-                        cached: false,
-                    },
-                    Err(error) => {
-                        shared.cache.remove_ready(&path);
-                        failures.push(error.to_string());
-                        Resolution::Failed(failures.join("; ").into())
-                    }
-                },
-                Ok(None) => Resolution::Missing,
-                Err(error) => {
-                    failures.push(error.to_string());
-                    Resolution::Failed(failures.join("; ").into())
-                }
-            }
+    )? {
+        FetchOutcome::Ready(bytes) => {
+            store_image(shared, work, bytes, false).map_err(|error| error.to_string())
         }
-        Ok(FetchOutcome::Missing) => match mark_missing(shared, work) {
-            Ok(true) => Resolution::Missing,
-            Ok(false) => Resolution::Missing,
-            Err(error) => {
-                failures.push(error.to_string());
-                Resolution::Failed(failures.join("; ").into())
-            }
-        },
-        Err(error) => {
-            failures.push(error);
-            Resolution::Failed(failures.join("; ").into())
+        FetchOutcome::Missing => {
+            mark_missing(shared, work).map_err(|error| error.to_string())?;
+            Ok(Resolution::Missing)
         }
     }
 }
 
-fn write_ready(
+fn store_image(
     shared: &Shared,
     work: &Work,
-    bytes: &[u8],
-) -> std::io::Result<Option<std::path::PathBuf>> {
-    let _commit = lock_cache_commit(shared);
-    let state = lock_state(shared);
-    if !work_is_current(&state, work) {
-        return Ok(None);
+    bytes: Vec<u8>,
+    cached: bool,
+) -> Result<Resolution, ArtworkError> {
+    let request = &work.request;
+    let thumbnail_size = match request.fetch_size {
+        ImageSize::Original => request.render_size.max(SOURCE_ARTWORK_SIZE),
+        ImageSize::Thumbnail(size) => size,
+    };
+    let thumbnail = normalize_for_cache(&bytes, thumbnail_size)?;
+    {
+        let _commit = lock_cache_commit(shared);
+        if !work_is_current(&lock_state(shared), work) {
+            return Ok(Resolution::Invalidated);
+        }
+        shared.cache.write_ready(
+            &request.candidate,
+            ImageSize::Thumbnail(thumbnail_size),
+            thumbnail.bytes(),
+        )?;
+        if request.fetch_size == ImageSize::Original {
+            shared
+                .cache
+                .write_ready(&request.candidate, ImageSize::Original, &bytes)?;
+        }
     }
-    drop(state);
-    shared
-        .cache
-        .write_ready(&work.request.candidate, work.request.fetch_size, bytes)
-        .map(Some)
+    if !work.decode {
+        return Ok(if cached {
+            Resolution::Cached
+        } else {
+            Resolution::Fetched
+        });
+    }
+    let image = decode_normalized(
+        thumbnail,
+        job_key(request, work.source_epoch, work.external_epoch),
+        request.render_size,
+    )?;
+    Ok(Resolution::Ready {
+        image: Arc::new(image),
+        original: (request.fetch_size == ImageSize::Original).then(|| Arc::from(bytes)),
+        cached,
+    })
 }
 
 fn mark_missing(shared: &Shared, work: &Work) -> std::io::Result<bool> {
@@ -1002,28 +844,18 @@ fn work_is_current(state: &State, work: &Work) -> bool {
 
 fn finish(shared: &Shared, work: Work, resolution: Resolution) {
     let mut state = lock_state(shared);
-    let Some(record) = remove_job(&mut state, &work.key) else {
-        drop(state);
-        shared.wake.notify_all();
-        return;
-    };
-    if source_epoch(&state, &work.request.candidate) != work.source_epoch {
-        drop(state);
-        shared.wake.notify_all();
+    // An invalidated job can have a replacement under the same key.
+    if !state
+        .jobs
+        .get(&work.key)
+        .is_some_and(|record| Arc::ptr_eq(&record.request, &work.request))
+    {
         return;
     }
-    if work.request.candidate.is_external() && state.external_epoch != work.external_epoch {
-        for request_id in record.subscribers {
-            restart_projection(&mut state, request_id);
-        }
-        for subscriber in record.preparations {
-            enqueue_background_candidate(&mut state, record.request.clone(), subscriber);
-        }
-        drop(state);
-        shared.wake.notify_all();
-        return;
-    }
-    if record.has_interest()
+    let mut record = remove_job(&mut state, &work.key).expect("active artwork job");
+    let retry = !work_is_current(&state, &work);
+    if !retry
+        && record.has_interest()
         && let Resolution::Ready { image, .. } = &resolution
     {
         state.decoded_index.insert(
@@ -1032,63 +864,26 @@ fn finish(shared: &Shared, work: Work, resolution: Resolution) {
             Arc::clone(image),
         );
     }
-    let mut completions = Vec::new();
-    for request_id in record.subscribers {
-        if matches!(&resolution, Resolution::Cached | Resolution::Fetched) {
-            restart_projection(&mut state, request_id);
-            continue;
-        }
-        let Some(projection) = state.projections.remove(&request_id) else {
-            continue;
-        };
-        let outcome = match &resolution {
-            Resolution::Ready { image, .. } => ArtworkOutcome::Ready(Arc::clone(image)),
-            Resolution::Missing => ArtworkOutcome::Missing,
-            Resolution::Failed(error) => ArtworkOutcome::Failed(Arc::clone(error)),
-            Resolution::Cached | Resolution::Fetched => unreachable!(),
-        };
-        completions.push((projection.completion, outcome));
-    }
-    let background_result = match &resolution {
-        Resolution::Ready { cached: true, .. } | Resolution::Cached => BackgroundResult::Cached,
-        Resolution::Ready { cached: false, .. } | Resolution::Fetched => BackgroundResult::Ready,
-        Resolution::Missing => BackgroundResult::Missing,
-        Resolution::Failed(_) => BackgroundResult::Failed,
-    };
-    let mut background_completions = Vec::new();
-    for subscriber in record.preparations {
-        background_completions.push(subscriber.completion);
-    }
-    if !background_completions.is_empty()
-        && let Resolution::Failed(error) = &resolution
-    {
-        warn!(
-            source_id = ?candidate_source(&work.request.candidate),
-            %error,
-            "could not prepare one source artwork image"
-        );
+    let completions = record
+        .subscribers
+        .extract_if(|_, subscriber| {
+            !retry
+                && !(subscriber.priority == JobPriority::Foreground
+                    && matches!(resolution, Resolution::Cached | Resolution::Fetched))
+        })
+        .map(|(_, subscriber)| subscriber.completion)
+        .collect::<Vec<_>>();
+    if record.has_interest() {
+        // Foreground callers joining a preparation may still need a disk decode.
+        record.active = false;
+        state.jobs.insert(work.key.clone(), record);
+        queue(&mut state, work.key, true);
     }
     drop(state);
-    for completion in background_completions {
-        let _ = completion.send(background_result);
+    for completion in completions {
+        let _ = completion.send(resolution.clone());
     }
-    drop(resolution);
-    send_completions(completions);
     shared.wake.notify_all();
-}
-
-fn restart_projection(state: &mut State, request_id: RequestId) {
-    let Some((request, priority)) = state
-        .projections
-        .get(&request_id)
-        .map(|projection| (projection.request.clone(), projection.priority))
-    else {
-        return;
-    };
-    let job = enqueue_projection(state, request, request_id, priority);
-    if let Some(projection) = state.projections.get_mut(&request_id) {
-        projection.job = job;
-    }
 }
 
 fn lock_state(shared: &Shared) -> MutexGuard<'_, State> {
@@ -1119,7 +914,7 @@ mod tests {
                 source_id: SourceId::new("source"),
                 image: NativeImageRef::new("album", None),
             }),
-            fetch_size: 256,
+            fetch_size: ImageSize::Thumbnail(256),
             render_size: 144,
             external: ExternalPolicy::default(),
             allow_fetch: true,
@@ -1133,32 +928,30 @@ mod tests {
         .write_to(&mut png, image::ImageFormat::Png)
         .unwrap();
         cache
-            .write_ready(&request.candidate, 256, png.get_ref())
+            .write_ready(&request.candidate, ImageSize::Thumbnail(256), png.get_ref())
             .unwrap();
         // Drive one shared job explicitly so worker scheduling cannot separate its subscribers.
         let mut state = State::default();
         let request_id = RequestId(1);
-        let key = enqueue_projection(
+        let (completion, foreground) = oneshot::channel();
+        enqueue(
             &mut state,
             request.clone(),
             request_id,
-            JobPriority::Foreground,
-        );
-        let (completion, foreground) = oneshot::channel();
-        state.projections.insert(
-            request_id,
-            ProjectionRecord {
-                request: request.clone(),
+            Subscriber {
                 priority: JobPriority::Foreground,
-                job: key,
                 completion,
             },
         );
-        let (completion, background) = mpsc::channel();
-        enqueue_background_candidate(
+        let (completion, background) = oneshot::channel();
+        enqueue(
             &mut state,
             request,
-            PreparationSubscriber { id: 1, completion },
+            RequestId(2),
+            Subscriber {
+                priority: JobPriority::Preparation,
+                completion,
+            },
         );
         assert_eq!(state.jobs.len(), 1);
         let shared = Shared {
@@ -1174,32 +967,28 @@ mod tests {
         finish(&shared, work, resolution);
         assert!(matches!(
             foreground.await.unwrap(),
-            ArtworkOutcome::Ready(_)
+            Resolution::Ready { .. }
         ));
         assert!(matches!(
-            background.try_recv().unwrap(),
-            BackgroundResult::Cached
+            background.await.unwrap(),
+            Resolution::Ready { cached: true, .. }
         ));
     }
 
-    #[test]
-    fn durable_no_art_binding_completes_as_missing() {
+    #[tokio::test]
+    async fn durable_no_art_binding_completes_as_missing() {
         let directory = tempfile::tempdir().expect("cache");
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .expect("runtime");
-        let pipeline = Pipeline::new(
-            directory.path(),
-            runtime.handle().clone(),
-            Arc::new(Mutex::new(None)),
-        )
-        .expect("pipeline");
-        let summary = pipeline
-            .prefetch_source_artwork(
-                Arc::from([br#"{"no_art":true}"#.to_vec()]),
-                &|_, _| {},
-                &|| false,
+        let pipeline = Arc::new(
+            Pipeline::new(
+                directory.path(),
+                Handle::current(),
+                Arc::new(Mutex::new(None)),
             )
+            .expect("pipeline"),
+        );
+        let summary = pipeline
+            .prefetch_source_artwork(&[br#"{"no_art":true}"#.to_vec()], &CancellationToken::new())
+            .await
             .expect("prepare no-art");
         assert_eq!(summary.missing, 1);
         assert_eq!(summary.failed, 0);
@@ -1213,30 +1002,35 @@ mod tests {
                 source_id: SourceId::new("source"),
                 image: NativeImageRef::new("album", Some("tag".to_string())),
             }),
-            fetch_size: 256,
+            fetch_size: ImageSize::Thumbnail(256),
             render_size: 144,
             external: ExternalPolicy::default(),
             allow_fetch: true,
         };
-        let first = enqueue_projection(
+        let first = enqueue(
             &mut state,
             request.clone(),
             RequestId(1),
-            JobPriority::Foreground,
+            Subscriber {
+                priority: JobPriority::Foreground,
+                completion: oneshot::channel().0,
+            },
         );
-        let second = enqueue_projection(&mut state, request, RequestId(2), JobPriority::Foreground);
+        let second = enqueue(
+            &mut state,
+            request,
+            RequestId(2),
+            Subscriber {
+                priority: JobPriority::Foreground,
+                completion: oneshot::channel().0,
+            },
+        );
 
         assert_eq!(first, second);
         assert_eq!(state.jobs.len(), 1);
         assert_eq!(state.foreground.len(), 1);
         let job = state.jobs.get(&first).expect("shared job");
         assert_eq!(job.subscribers.len(), 2);
-        assert_eq!(job.foreground_subscribers.len(), 2);
-    }
-}
-
-fn send_completions(completions: Vec<LeaseCompletion>) {
-    for (completion, outcome) in completions {
-        let _ = completion.send(outcome);
+        assert_eq!(job.priority(), JobPriority::Foreground);
     }
 }

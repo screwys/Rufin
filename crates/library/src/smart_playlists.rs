@@ -587,8 +587,11 @@ async fn load_smart_playlist_rows(
         .fetch_all(&mut *connection)
         .await?;
     let requested = serde_json::to_string(&keys.iter().map(|key| key.raw()).collect::<Vec<_>>())?;
+    let artwork = crate::artwork::collection_artwork_sql(
+        "SELECT media_uri FROM selected WHERE definition_key=definition.definition_key",
+    );
     let facts_sql = format!(
-        "{}\n, smart_stats AS (SELECT definition_key,count(*) track_count,COALESCE(sum(duration_millis),0) duration_millis,count(CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=selected.media_uri AND access.origin='download') THEN 1 END) downloaded_count FROM selected GROUP BY definition_key) SELECT definition.definition_key,COALESCE(stats.track_count,0),COALESCE(stats.duration_millis,0),COALESCE(stats.downloaded_count,0),cover.artwork_binding FROM definitions definition LEFT JOIN smart_stats stats USING(definition_key) LEFT JOIN json_each((SELECT json_group_array(track_key) FROM (SELECT track.track_key FROM selected CROSS JOIN tracks track USING(media_uri) WHERE selected.definition_key=definition.definition_key AND track.artwork_binding IS NOT NULL ORDER BY {SMART_RESULT_ORDER} LIMIT 4))) artwork LEFT JOIN tracks cover ON cover.track_key=artwork.value ORDER BY definition.position,definition.definition_key,artwork.key",
+        "{}\n, smart_stats AS (SELECT definition_key,count(*) track_count,COALESCE(sum(duration_millis),0) duration_millis,count(CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=selected.media_uri AND access.origin='download') THEN 1 END) downloaded_count FROM selected GROUP BY definition_key) SELECT definition.definition_key,COALESCE(stats.track_count,0),COALESCE(stats.duration_millis,0),COALESCE(stats.downloaded_count,0),COALESCE(album.artwork_binding,cover.artwork_binding) FROM definitions definition LEFT JOIN smart_stats stats USING(definition_key) LEFT JOIN json_each((SELECT json_group_array(track_key) FROM ({artwork}))) artwork LEFT JOIN tracks cover ON cover.track_key=artwork.value LEFT JOIN albums album ON album.album_key=cover.album_key ORDER BY definition.position,definition.definition_key,artwork.key",
         smart_policy_sql(connection, now, Some(keys), false).await?
     );
     let facts = sqlx::query_as::<_, (SmartPlaylistKey, i64, i64, i64, Option<Vec<u8>>)>(
@@ -719,7 +722,12 @@ impl Database {
             let sql = format!(
                 "{} {}",
                 smart_policy_sql(&mut transaction, now, None, false).await?,
-                SMART_LIST_PAGE_SELECT.replace("{result_order}", SMART_RESULT_ORDER)
+                SMART_LIST_PAGE_SELECT.replace(
+                    "{artwork}",
+                    &crate::artwork::collection_artwork_sql(
+                        "SELECT media_uri FROM selected WHERE definition_key=seed.definition_key",
+                    ),
+                )
             );
             let mut records = sqlx::query(AssertSqlSafe(sql))
                 .persistent(false)
@@ -1964,16 +1972,15 @@ WHERE (current_scope=0 OR ?3 IS NULL OR track_count>0) AND instr(normalized_name
 
 SELECT ordered.definition_key,playlist.smart_playlist_key,playlist.object_id,playlist.name,
   playlist.definition_json,playlist.position,seed.track_count,seed.duration_millis,
-  COALESCE(downloads.downloaded_count,0) downloaded_count,cover.artwork_binding
+  COALESCE(downloads.downloaded_count,0) downloaded_count,COALESCE(album.artwork_binding,cover.artwork_binding) artwork_binding
 FROM seed ordered JOIN seed USING(definition_key)
 LEFT JOIN smart_playlists playlist ON playlist.smart_playlist_key=seed.definition_key
 LEFT JOIN seed_downloads downloads ON downloads.definition_key=seed.definition_key
 LEFT JOIN json_each((SELECT json_group_array(track_key) FROM (
-  SELECT track.track_key FROM selected CROSS JOIN tracks track USING(media_uri)
-  WHERE selected.definition_key=seed.definition_key AND track.artwork_binding IS NOT NULL
-  ORDER BY {result_order} LIMIT 4
+  {artwork}
 ))) artwork
 LEFT JOIN tracks cover ON cover.track_key=artwork.value
+LEFT JOIN albums album ON album.album_key=cover.album_key
 ORDER BY ordered.row_position,artwork.key
 "#;
 

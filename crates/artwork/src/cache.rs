@@ -6,14 +6,14 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use sources::SourceId;
+use sources::{ImageSize, SourceId};
 
 use crate::selection::Candidate;
 
 static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 const CACHE_LAYOUT: &str = "v1";
-const MAX_EXTERNAL_CACHE_BYTES: u64 = 512 * 1024 * 1024;
-const MAX_EXTERNAL_CACHE_FILES: usize = 50_000;
+const MAX_DISCRETIONARY_CACHE_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_DISCRETIONARY_CACHE_FILES: usize = 50_000;
 const PRUNE_TARGET_PERCENT: u64 = 90;
 
 pub(crate) fn current_layout(root: &Path) -> io::Result<PathBuf> {
@@ -93,7 +93,7 @@ struct CacheMaintenance {
 #[derive(Clone, Debug)]
 pub(crate) struct FilesystemCache {
     root: PathBuf,
-    external_maintenance: Arc<CacheMaintenance>,
+    maintenance: Arc<CacheMaintenance>,
 }
 
 impl FilesystemCache {
@@ -144,6 +144,18 @@ impl FilesystemCache {
             staging,
             false,
         )?;
+        {
+            let mut usage = lock(&self.maintenance.state)?;
+            reconcile_source_directory_marked(
+                &self
+                    .root
+                    .join("originals/native")
+                    .join(digest(source_id.as_str())),
+                staging,
+                false,
+            )?;
+            *usage = None;
+        }
         atomic_write(
             &self.source_manifest_path(source_id),
             revision.to_string().as_bytes(),
@@ -154,11 +166,11 @@ impl FilesystemCache {
         fs::create_dir_all(&root)?;
         let cache = Self {
             root,
-            external_maintenance: Arc::new(CacheMaintenance {
+            maintenance: Arc::new(CacheMaintenance {
                 state: Mutex::new(None),
                 limits: CacheLimits {
-                    bytes: MAX_EXTERNAL_CACHE_BYTES,
-                    files: MAX_EXTERNAL_CACHE_FILES,
+                    bytes: MAX_DISCRETIONARY_CACHE_BYTES,
+                    files: MAX_DISCRETIONARY_CACHE_FILES,
                 },
             }),
         };
@@ -180,10 +192,28 @@ impl FilesystemCache {
     pub(crate) fn ready_entry(
         &self,
         candidate: &Candidate,
-        requested_size: u32,
+        requested_size: ImageSize,
     ) -> Option<CacheEntry> {
-        for size in reusable_sizes(requested_size) {
-            let path = self.ready_path(candidate, size);
+        let paths = match requested_size {
+            ImageSize::Original => self
+                .candidate_directory("originals", candidate)
+                .read_dir()
+                .ok()?
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| path.file_stem().is_some_and(|name| name == "original"))
+                .collect::<Vec<_>>(),
+            ImageSize::Thumbnail(size) => reusable_sizes(size)
+                .into_iter()
+                .flat_map(|size| {
+                    ["png", "img"].map(|extension| {
+                        self.candidate_directory("ready", candidate)
+                            .join(format!("{size}.{extension}"))
+                    })
+                })
+                .collect(),
+        };
+        for path in paths {
             let Ok(metadata) = fs::metadata(&path) else {
                 continue;
             };
@@ -198,7 +228,7 @@ impl FilesystemCache {
     pub(crate) fn write_ready(
         &self,
         candidate: &Candidate,
-        size: u32,
+        size: ImageSize,
         bytes: &[u8],
     ) -> io::Result<PathBuf> {
         if bytes.is_empty() {
@@ -207,10 +237,20 @@ impl FilesystemCache {
                 "artwork response was empty",
             ));
         }
-        let path = self.ready_path(candidate, size);
-        if candidate.is_external() {
-            self.write_external_tracked(&path, bytes)?;
-            self.remove_file_external_tracked(&self.missing_path(candidate, size));
+        let path = match size {
+            ImageSize::Original => {
+                let extension = crate::decode::original_extension(bytes)
+                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+                self.candidate_directory("originals", candidate)
+                    .join(format!("original.{extension}"))
+            }
+            ImageSize::Thumbnail(size) => self
+                .candidate_directory("ready", candidate)
+                .join(format!("{size}.png")),
+        };
+        if candidate.is_external() || size == ImageSize::Original {
+            self.write_tracked(&path, bytes)?;
+            self.remove_file_tracked(&self.missing_path(candidate, size));
         } else {
             atomic_write(&path, bytes)?;
             remove_file_if_present(&self.missing_path(candidate, size))?;
@@ -222,29 +262,34 @@ impl FilesystemCache {
         self.remove_file_tracked(path);
     }
 
-    pub(crate) fn is_missing(&self, candidate: &Candidate, size: u32) -> bool {
-        reusable_sizes(size)
-            .into_iter()
-            .any(|size| self.missing_path(candidate, size).is_file())
+    pub(crate) fn is_missing(&self, candidate: &Candidate, size: ImageSize) -> bool {
+        match size {
+            ImageSize::Original => self.missing_path(candidate, size).is_file(),
+            ImageSize::Thumbnail(size) => reusable_sizes(size).into_iter().any(|size| {
+                self.missing_path(candidate, ImageSize::Thumbnail(size))
+                    .is_file()
+            }),
+        }
     }
 
-    pub(crate) fn mark_missing(&self, candidate: &Candidate, size: u32) -> io::Result<()> {
+    pub(crate) fn mark_missing(&self, candidate: &Candidate, size: ImageSize) -> io::Result<()> {
         let path = self.missing_path(candidate, size);
         if candidate.is_external() {
-            self.write_external_tracked(&path, b"missing\n")
+            self.write_tracked(&path, b"missing\n")
         } else {
             atomic_write(&path, b"missing\n")
         }
     }
 
     pub(crate) fn retry_external(&self) -> io::Result<()> {
-        self.remove_dir_external_tracked(&self.root.join("missing/external"))
+        self.remove_dir_budgeted(&self.root.join("missing/external"))
     }
 
     pub(crate) fn invalidate_source(&self, source_id: &SourceId) -> io::Result<()> {
         let source = digest(source_id.as_str());
         remove_dir_if_present(&self.root.join("ready/native").join(&source))?;
-        remove_dir_if_present(&self.root.join("missing/native").join(source))
+        remove_dir_if_present(&self.root.join("missing/native").join(&source))?;
+        self.remove_dir_budgeted(&self.root.join("originals/native").join(source))
     }
 
     pub(crate) fn source_manifest_complete(
@@ -260,12 +305,13 @@ impl FilesystemCache {
         }
     }
 
-    fn ready_path(&self, candidate: &Candidate, size: u32) -> PathBuf {
-        self.candidate_path("ready", candidate, size, "img")
-    }
-
-    fn missing_path(&self, candidate: &Candidate, size: u32) -> PathBuf {
-        self.candidate_path("missing", candidate, size, "missing")
+    fn missing_path(&self, candidate: &Candidate, size: ImageSize) -> PathBuf {
+        let name = match size {
+            ImageSize::Original => "original".to_string(),
+            ImageSize::Thumbnail(size) => size.to_string(),
+        };
+        self.candidate_directory("missing", candidate)
+            .join(format!("{name}.missing"))
     }
 
     fn source_manifest_path(&self, source_id: &SourceId) -> PathBuf {
@@ -275,13 +321,7 @@ impl FilesystemCache {
             .join(".manifest")
     }
 
-    fn candidate_path(
-        &self,
-        state: &str,
-        candidate: &Candidate,
-        size: u32,
-        extension: &str,
-    ) -> PathBuf {
+    fn candidate_directory(&self, state: &str, candidate: &Candidate) -> PathBuf {
         let identity = crate::ArtworkKey::binding_digest(&candidate.stable_identity());
         let root = match candidate {
             Candidate::Native(binding) => self
@@ -296,23 +336,23 @@ impl FilesystemCache {
                 .join(digest(binding.source_id().as_str())),
             Candidate::Album(_) => self.root.join(state).join("external"),
         };
-        root.join(identity).join(format!("{size}.{extension}"))
+        root.join(identity)
     }
 
     fn initialize_usage(&self) -> io::Result<()> {
-        let mut state = lock(&self.external_maintenance.state)?;
-        let usage = prune_external_cache(
+        let mut state = lock(&self.maintenance.state)?;
+        let usage = prune_cache(
             &self.root,
-            self.external_maintenance.limits,
-            self.external_maintenance.limits,
+            self.maintenance.limits,
+            self.maintenance.limits,
             None,
         )?;
         *state = Some(usage);
         Ok(())
     }
 
-    fn write_external_tracked(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
-        let mut state = lock(&self.external_maintenance.state)?;
+    fn write_tracked(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+        let mut state = lock(&self.maintenance.state)?;
         let previous = file_usage(path);
         atomic_write(path, bytes)?;
         let current = file_usage(path);
@@ -325,21 +365,21 @@ impl FilesystemCache {
                 .files
                 .saturating_sub(previous.files)
                 .saturating_add(current.files);
-            if usage.exceeds(self.external_maintenance.limits) {
-                prune_external_cache(
+            if usage.exceeds(self.maintenance.limits) {
+                prune_cache(
                     &self.root,
-                    self.external_maintenance.limits,
-                    self.external_maintenance.limits.prune_target(),
+                    self.maintenance.limits,
+                    self.maintenance.limits.prune_target(),
                     Some(path),
                 )?
             } else {
                 usage
             }
         } else {
-            prune_external_cache(
+            prune_cache(
                 &self.root,
-                self.external_maintenance.limits,
-                self.external_maintenance.limits,
+                self.maintenance.limits,
+                self.maintenance.limits,
                 Some(path),
             )?
         };
@@ -348,15 +388,15 @@ impl FilesystemCache {
     }
 
     fn remove_file_tracked(&self, path: &Path) {
-        if is_external_path(&self.root, path) {
-            self.remove_file_external_tracked(path);
+        if is_budgeted_path(&self.root, path) {
+            self.remove_file_budgeted(path);
         } else {
             let _ = fs::remove_file(path);
         }
     }
 
-    fn remove_file_external_tracked(&self, path: &Path) {
-        let Ok(mut state) = lock(&self.external_maintenance.state) else {
+    fn remove_file_budgeted(&self, path: &Path) {
+        let Ok(mut state) = lock(&self.maintenance.state) else {
             return;
         };
         let previous = file_usage(path);
@@ -368,8 +408,8 @@ impl FilesystemCache {
         }
     }
 
-    fn remove_dir_external_tracked(&self, path: &Path) -> io::Result<()> {
-        let mut state = lock(&self.external_maintenance.state)?;
+    fn remove_dir_budgeted(&self, path: &Path) -> io::Result<()> {
+        let mut state = lock(&self.maintenance.state)?;
         let previous = path_usage(path)?;
         remove_dir_if_present(path)?;
         if let Some(usage) = state.as_mut() {
@@ -386,14 +426,14 @@ struct CacheFile {
     modified: SystemTime,
 }
 
-fn prune_external_cache(
+fn prune_cache(
     root: &Path,
     trigger: CacheLimits,
     target: CacheLimits,
     preserve: Option<&Path>,
 ) -> io::Result<CacheUsage> {
     let mut files = Vec::new();
-    collect_external_cache_files(root, &mut files)?;
+    collect_discretionary_files(root, &mut files)?;
     let mut bytes = files.iter().map(|file| file.bytes).sum::<u64>();
     if bytes <= trigger.bytes && files.len() <= trigger.files {
         return Ok(CacheUsage {
@@ -421,8 +461,12 @@ fn prune_external_cache(
     })
 }
 
-fn collect_external_cache_files(root: &Path, files: &mut Vec<CacheFile>) -> io::Result<()> {
-    for path in [root.join("ready/external"), root.join("missing/external")] {
+fn collect_discretionary_files(root: &Path, files: &mut Vec<CacheFile>) -> io::Result<()> {
+    for path in [
+        root.join("ready/external"),
+        root.join("missing/external"),
+        root.join("originals"),
+    ] {
         if path.is_dir() {
             collect_cache_files(&path, files)?;
         }
@@ -470,8 +514,10 @@ fn path_usage(path: &Path) -> io::Result<CacheUsage> {
     })
 }
 
-fn is_external_path(root: &Path, path: &Path) -> bool {
-    path.starts_with(root.join("ready/external")) || path.starts_with(root.join("missing/external"))
+fn is_budgeted_path(root: &Path, path: &Path) -> bool {
+    path.starts_with(root.join("ready/external"))
+        || path.starts_with(root.join("missing/external"))
+        || path.starts_with(root.join("originals"))
 }
 
 fn reconcile_source_directory_marked(
@@ -573,11 +619,19 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary artwork cache");
         let cache = FilesystemCache::new(directory.path().to_path_buf()).expect("open cache");
         cache
-            .write_ready(&native(), 256, b"normalized")
+            .write_ready(&native(), ImageSize::Thumbnail(256), b"normalized")
             .expect("cache cover");
 
-        assert!(cache.ready_entry(&native(), 96).is_some());
-        assert!(cache.ready_entry(&native(), 512).is_none());
+        assert!(
+            cache
+                .ready_entry(&native(), ImageSize::Thumbnail(96))
+                .is_some()
+        );
+        assert!(
+            cache
+                .ready_entry(&native(), ImageSize::Thumbnail(512))
+                .is_none()
+        );
     }
 
     #[test]
@@ -590,15 +644,23 @@ mod tests {
             image: NativeImageRef::new("album", Some("tag".to_string())),
         });
         cache
-            .write_ready(&native(), 256, b"source")
+            .write_ready(&native(), ImageSize::Thumbnail(256), b"source")
             .expect("cache source cover");
         cache
-            .write_ready(&other, 256, b"other")
+            .write_ready(&other, ImageSize::Thumbnail(256), b"other")
             .expect("cache other cover");
 
         cache.invalidate_source(&source).expect("invalidate source");
-        assert!(cache.ready_entry(&native(), 256).is_none());
-        assert!(cache.ready_entry(&other, 256).is_some());
+        assert!(
+            cache
+                .ready_entry(&native(), ImageSize::Thumbnail(256))
+                .is_none()
+        );
+        assert!(
+            cache
+                .ready_entry(&other, ImageSize::Thumbnail(256))
+                .is_some()
+        );
     }
 
     #[test]
@@ -624,8 +686,12 @@ mod tests {
         });
         assert_ne!(current.stable_identity(), other.stable_identity());
         for candidate in [&current, &obsolete, &other] {
-            cache.write_ready(candidate, 256, b"cached image").unwrap();
-            cache.mark_missing(candidate, 512).unwrap();
+            cache
+                .write_ready(candidate, ImageSize::Thumbnail(256), b"cached image")
+                .unwrap();
+            cache
+                .mark_missing(candidate, ImageSize::Thumbnail(512))
+                .unwrap();
         }
         let staging = cache.begin_source_manifest(&source, 2).unwrap();
         cache
@@ -634,12 +700,24 @@ mod tests {
         cache
             .complete_source_manifest_staging(&source, 2, &staging)
             .unwrap();
-        assert!(cache.ready_entry(&current, 256).is_some());
-        assert!(cache.is_missing(&current, 512));
-        assert!(cache.ready_entry(&obsolete, 256).is_none());
-        assert!(!cache.is_missing(&obsolete, 512));
-        assert!(cache.ready_entry(&other, 256).is_some());
-        assert!(cache.is_missing(&other, 512));
+        assert!(
+            cache
+                .ready_entry(&current, ImageSize::Thumbnail(256))
+                .is_some()
+        );
+        assert!(cache.is_missing(&current, ImageSize::Thumbnail(512)));
+        assert!(
+            cache
+                .ready_entry(&obsolete, ImageSize::Thumbnail(256))
+                .is_none()
+        );
+        assert!(!cache.is_missing(&obsolete, ImageSize::Thumbnail(512)));
+        assert!(
+            cache
+                .ready_entry(&other, ImageSize::Thumbnail(256))
+                .is_some()
+        );
+        assert!(cache.is_missing(&other, ImageSize::Thumbnail(512)));
     }
 }
 

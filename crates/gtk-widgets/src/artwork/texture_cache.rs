@@ -106,7 +106,7 @@ impl TextureCache {
         }
     }
 
-    fn get_or_revive(&mut self, key: &ArtworkKey) -> Option<gdk::Texture> {
+    pub(super) fn cached_texture(&mut self, key: &ArtworkKey) -> Option<gdk::Texture> {
         if let Some(texture) = self.get(key) {
             return Some(texture);
         }
@@ -171,13 +171,9 @@ impl Default for TextureCache {
 }
 
 impl TextureCache {
-    pub fn prepared_texture(&mut self, key: &ArtworkKey) -> Option<gdk::Texture> {
-        self.get_or_revive(key)
-    }
-
     pub fn texture(&mut self, image: Arc<DecodedImage>) -> Option<gdk::Texture> {
         let identity = image.key().clone();
-        if let Some(texture) = self.get_or_revive(&identity) {
+        if let Some(texture) = self.cached_texture(&identity) {
             return Some(texture);
         }
         let bytes = image.rgba().len();
@@ -226,13 +222,10 @@ mod tests {
                 &sources::NativeImageRef::new(index.to_string(), None),
             )
             .unwrap();
-            artwork
-                .prepare_cache_only(artwork::ArtworkRequest::new(
-                    artwork::ArtworkBinding::opaque(&binding),
-                    32,
-                    32,
-                ))
-                .key
+            artwork.key(
+                &artwork::ArtworkRequest::new(artwork::ArtworkBinding::opaque(&binding), 32, 32)
+                    .cache_only(),
+            )
         })
     }
 
@@ -261,7 +254,7 @@ mod tests {
             "the older strong entry is evicted"
         );
         let revived = cache
-            .get_or_revive(&keys[2])
+            .cached_texture(&keys[2])
             .expect("a mounted texture remains interned after LRU eviction");
         assert_eq!(revived.as_ptr(), second.as_ptr());
         assert_eq!(cache.bytes, 8);
@@ -298,7 +291,7 @@ mod tests {
                         cache.get(&key);
                     }
                     _ => {
-                        cache.get_or_revive(&key);
+                        cache.cached_texture(&key);
                     }
                 }
                 cache.assert_consistent();
