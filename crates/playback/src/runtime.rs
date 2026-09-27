@@ -574,9 +574,10 @@ fn run_playback(
             }
             Err(RecvTimeoutError::Disconnected) => {
                 let sample = clock();
-                if let Ok(update) = runtime.shutdown(&sample) {
+                if let Ok(update) = runtime.retire(&sample) {
                     let _ = publish_update(&outputs, update);
                 }
+                let _ = runtime.shutdown_backend();
                 let _ = outputs.send(PlaybackOutput::Shutdown);
                 break;
             }
@@ -801,8 +802,10 @@ fn apply_runtime_command(
         }
         RuntimeCommand::Shutdown { reply } => {
             let mut value = runtime
-                .shutdown(&sample)
+                .retire(&sample)
                 .and_then(|update| publish_update(outputs, update));
+            let stopped = runtime.shutdown_backend();
+            value = value.and(stopped);
             if outputs.send(PlaybackOutput::Shutdown).is_err() && value.is_ok() {
                 value = Err(PlaybackError::Unavailable);
             }
@@ -1424,12 +1427,6 @@ impl PlaybackRuntime {
         self.backend
             .shutdown()
             .map_err(|error| PlaybackError::BackendShutdown(error.to_string()))
-    }
-
-    fn shutdown(&mut self, sample: &ClockSample) -> PlaybackResult<PlaybackUpdate> {
-        let update = self.retire(sample)?;
-        self.shutdown_backend()?;
-        Ok(update)
     }
 
     fn finish(

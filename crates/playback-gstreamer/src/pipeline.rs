@@ -1,7 +1,10 @@
 use super::audio::{AudioGraph, SharedQueuedStream};
-use super::engine::{PipelineId, PreparedRun, SharedBackendState, Slot, handle_about_to_finish};
+use super::engine::{
+    GaplessPlayback, PipelineId, PreparedRun, SharedBackendState, Slot, handle_about_to_finish,
+};
 use super::visualizer::VisualizerTap;
 use super::*;
+use std::cell::Cell;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) struct SourceClock {
@@ -73,8 +76,12 @@ struct PipelineSession {
     visualizer_probe: Option<gst::PadProbeId>,
     current_stream: PreparedStream,
     queued_stream: SharedQueuedStream,
+    gapless: Arc<Mutex<GaplessPlayback>>,
     playback_rate: f64,
     segment: Arc<Mutex<SegmentPlayback>>,
+    requested_state: Cell<gst::State>,
+    buffering_percent: Cell<Option<u8>>,
+    live: Cell<bool>,
 }
 
 #[derive(Default)]
@@ -84,6 +91,20 @@ struct SegmentPlayback {
     starts_stream: bool,
 }
 impl PlayerPipeline {
+    pub(super) fn gapless(&self) -> Option<&Arc<Mutex<GaplessPlayback>>> {
+        self.session.as_ref().map(|session| &session.gapless)
+    }
+
+    pub(super) fn has_pending_gapless(&self) -> bool {
+        self.gapless().is_some_and(|gapless| {
+            gapless
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .pending
+                .is_some()
+        })
+    }
+
     pub(super) fn new(name: &str, shared: Arc<Mutex<SharedBackendState>>) -> Self {
         Self {
             name: name.to_string(),
@@ -187,6 +208,50 @@ impl PlayerPipeline {
             return Err(format!("GStreamer session {} is not active", self.name));
         };
         session.set_state(state)
+    }
+
+    pub(super) fn buffering_percent(&self) -> Option<u8> {
+        self.session.as_ref()?.buffering_percent.get()
+    }
+
+    pub(super) fn is_buffering(&self) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(PipelineSession::is_buffering)
+    }
+
+    pub(super) fn is_playing(&self) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|session| session.pipeline.current_state() == gst::State::Playing)
+    }
+
+    pub(super) fn set_buffering(
+        &self,
+        percent: u8,
+        mode: gst::BufferingMode,
+    ) -> Result<(), String> {
+        let Some(session) = self.session.as_ref() else {
+            return Ok(());
+        };
+        let was_buffering = session.is_buffering();
+        session.buffering_percent.set(Some(percent));
+        if mode == gst::BufferingMode::Live {
+            session.live.set(true);
+        }
+        if was_buffering != session.is_buffering()
+            && session.requested_state.get() == gst::State::Playing
+        {
+            session.apply_requested_state()?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn owns_audio_output(&self, name: &str) -> bool {
+        self.session.as_ref().is_some_and(|session| {
+            let prefix = format!("{}-audio-output", session.pipeline.name());
+            name == prefix || name.starts_with(&format!("{prefix}-"))
+        })
     }
 
     pub(super) fn segment_done(&self, seqnum: gst::Seqnum) {
@@ -355,9 +420,18 @@ impl PlayerPipeline {
     }
 
     pub(super) fn pop_bus_message(&self) -> Option<(PipelineId, gst::Message)> {
-        self.session
-            .as_ref()
-            .and_then(|session| session.bus.pop().map(|message| (session.id, message)))
+        let session = self.session.as_ref()?;
+        let mut message = session.bus.pop()?;
+        // A refill may finish before the worker reads its first update. Use the
+        // latest consecutive update from that queue to avoid an unnecessary pause.
+        if message.type_() == gst::MessageType::Buffering {
+            while session.bus.peek().is_some_and(|next| {
+                next.type_() == gst::MessageType::Buffering && next.src() == message.src()
+            }) {
+                message = session.bus.pop()?;
+            }
+        }
+        Some((session.id, message))
     }
 
     pub(super) fn message_source_is_pipeline(&self, message: &gst::Message) -> bool {
@@ -415,6 +489,8 @@ impl PipelineSession {
         let shared_for_signal = Arc::clone(&shared);
         let queued_stream = Arc::new(Mutex::new(stream.clone()));
         let queued_stream_for_signal = Arc::clone(&queued_stream);
+        let gapless = Arc::new(Mutex::new(GaplessPlayback::default()));
+        let gapless_for_signal = Arc::clone(&gapless);
         let certificate_policy_for_signal = Arc::clone(&trust_invalid_certificate);
         let module_for_signal = Arc::clone(&module_decoder);
         let about_to_finish_id = pipeline.connect("about-to-finish", false, move |_| {
@@ -424,6 +500,7 @@ impl PipelineSession {
             handle_about_to_finish(
                 &pipeline_for_signal,
                 &shared_for_signal,
+                &gapless_for_signal,
                 &queued_stream_for_signal,
                 &certificate_policy_for_signal,
                 slot,
@@ -444,8 +521,12 @@ impl PipelineSession {
             visualizer_probe: None,
             current_stream: stream.clone(),
             queued_stream,
+            gapless,
             playback_rate: sanitize_playback_rate(playback_rate),
             segment: Arc::new(Mutex::new(SegmentPlayback::default())),
+            requested_state: Cell::new(gst::State::Null),
+            buffering_percent: Cell::new(None),
+            live: Cell::new(false),
         })
     }
 
@@ -465,6 +546,9 @@ impl PipelineSession {
             self.current_stream.loudness.clone(),
             Arc::clone(&self.queued_stream),
         )?;
+        graph
+            .output()
+            .set_property("name", format!("{}-audio-output", self.pipeline.name()));
         let segment = Arc::clone(&self.segment);
         graph
             .root()
@@ -558,7 +642,27 @@ impl PipelineSession {
     }
 
     pub(super) fn set_state(&self, state: gst::State) -> Result<gst::StateChangeSuccess, String> {
-        self.pipeline.set_state(state).map_err(|error| {
+        self.requested_state.set(state);
+        self.apply_requested_state()
+    }
+
+    fn is_buffering(&self) -> bool {
+        !self.live.get()
+            && self
+                .buffering_percent
+                .get()
+                .is_some_and(|percent| percent < 100)
+    }
+
+    fn apply_requested_state(&self) -> Result<gst::StateChangeSuccess, String> {
+        let requested = self.requested_state.get();
+        let waiting = requested == gst::State::Playing && self.is_buffering();
+        let state = if waiting {
+            gst::State::Paused
+        } else {
+            requested
+        };
+        let result = self.pipeline.set_state(state).map_err(|error| {
             self.bus
                 .pop_filtered(&[gst::MessageType::Error])
                 .and_then(|message| {
@@ -577,7 +681,20 @@ impl PipelineSession {
                         "GStreamer state change to {state:?} failed; audio_sink={output}; error={error}"
                     )
                 })
-        })
+        })?;
+        if result == gst::StateChangeSuccess::NoPreroll {
+            self.live.set(true);
+            if waiting {
+                return self.apply_requested_state();
+            }
+        }
+        // A prepared handoff must wait for Playing, even if pausing to refill
+        // completed synchronously.
+        if waiting && !self.live.get() {
+            Ok(gst::StateChangeSuccess::Async)
+        } else {
+            Ok(result)
+        }
     }
 
     pub(super) fn stop(&mut self) {
@@ -647,16 +764,23 @@ impl PipelineSession {
         seek_current_position: bool,
         settings: &BackendAudioSettings,
     ) -> Result<bool, String> {
+        let previous_rate = self.playback_rate;
         self.playback_rate = sanitize_playback_rate(rate);
-        self.configure_audio(settings)?;
-        if !seek_current_position {
-            return Ok(false);
+        let result = (|| {
+            self.configure_audio(settings)?;
+            let position = seek_current_position.then(|| self.position()).flatten();
+            match position {
+                Some(position) => self
+                    .seek_physical_millis(position.mseconds())
+                    .map(|()| true),
+                None => Ok(false),
+            }
+        })();
+        if result.is_err() {
+            self.playback_rate = previous_rate;
+            let _ = self.configure_audio(settings);
         }
-        let Some(position) = self.position() else {
-            return Ok(false);
-        };
-        self.seek_physical_millis(position.mseconds())
-            .map(|()| true)
+        result
     }
 
     fn needs_initial_rate_seek(&self) -> bool {

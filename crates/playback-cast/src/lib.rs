@@ -300,6 +300,13 @@ enum Controller {
 }
 
 impl Controller {
+    fn current_run(&self) -> Option<playback::RunId> {
+        match self {
+            Self::Upnp(controller) => controller.current_run(),
+            Self::GoogleCast(controller) => controller.current_run(),
+        }
+    }
+
     fn poll_interval(&self) -> Duration {
         match self {
             Self::Upnp(_) => UPNP_STATUS_INTERVAL,
@@ -347,29 +354,35 @@ fn run_controller(
     events: Arc<Mutex<Vec<BackendEvent>>>,
 ) {
     publish(&events, controller.initial_events());
-    let mut active_run = None;
     let mut last_poll = Instant::now();
     loop {
         match commands.recv_timeout(Duration::from_millis(100)) {
             Ok(WorkerCommand::Backend(command)) => {
-                let run = command.run();
-                if matches!(*command, BackendCommand::Start { .. }) {
-                    active_run = run;
-                } else if matches!(*command, BackendCommand::Stop { .. }) {
-                    active_run = None;
-                }
+                let run = command.run().or_else(|| controller.current_run());
+                let requested_playing = match command.as_ref() {
+                    BackendCommand::Play { .. } => Some(true),
+                    BackendCommand::Pause { .. } => Some(false),
+                    _ => None,
+                };
                 match controller.handle(*command, &relay) {
                     Ok(update) => publish(&events, update),
-                    Err(error) => publish_error(&events, active_run.or(run), error),
+                    Err(error) => publish_error(
+                        &events,
+                        run,
+                        controller.current_run(),
+                        requested_playing,
+                        error,
+                    ),
                 }
             }
             Ok(WorkerCommand::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
             Err(RecvTimeoutError::Timeout) => {}
         }
         if last_poll.elapsed() >= controller.poll_interval() {
+            let run = controller.current_run();
             match controller.poll(&relay) {
                 Ok(update) => publish(&events, update),
-                Err(error) => publish_error(&events, active_run, error),
+                Err(error) => publish_error(&events, run, controller.current_run(), None, error),
             }
             last_poll = Instant::now();
         }
@@ -385,16 +398,24 @@ fn publish(events: &Mutex<Vec<BackendEvent>>, mut update: Vec<BackendEvent>) {
         .append(&mut update);
 }
 
-fn publish_error(events: &Mutex<Vec<BackendEvent>>, run: Option<playback::RunId>, error: String) {
-    if let Some(run) = run {
-        publish(
-            events,
-            vec![BackendEvent::Error {
-                run,
-                error: BackendFailure::new(error),
-            }],
-        );
+fn publish_error(
+    events: &Mutex<Vec<BackendEvent>>,
+    run: Option<playback::RunId>,
+    current_run: Option<playback::RunId>,
+    requested_playing: Option<bool>,
+    error: String,
+) {
+    let error = BackendFailure::new(error);
+    let event = if let Some(run) = run.filter(|run| Some(*run) != current_run) {
+        BackendEvent::Error { run, error }
+    } else if let (Some(run), Some(requested_playing)) = (run, requested_playing) {
+        BackendEvent::TransportRejected {
+            run,
+            requested_playing,
+            error,
+        }
     } else {
-        tracing::warn!(%error, "network output command failed");
-    }
+        BackendEvent::OperationFailed { run, error }
+    };
+    publish(events, vec![event]);
 }
