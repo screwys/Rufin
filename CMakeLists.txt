@@ -89,7 +89,7 @@ endif()
 # This minimum covers documented formats and the factories Rufin uses directly.
 set(RUFIN_REQUIRED_GSTREAMER_PLUGINS
   coreelements playback typefindfunctions
-  app audiobuffersplit audioconvert audioresample audiofx equalizer level volume
+  app audiobuffersplit audioconvert audioresample audiofx equalizer insertbin level volume
   lame debugutilsbad
   soup hls mpegtsdemux rtp rtpmanager rtsp srtp udp
   aiff alaw apetag asf audioparsers autodetect fdkaac flac gme id3demux
@@ -177,6 +177,7 @@ if(RUFIN_VALIDATE_DEVELOPMENT_RUNTIME)
     audioresample
     "${RUFIN_AUDIO_SINK}"
     equalizer-nbands
+    insertbin
     scaletempo
     souphttpsrc
   )

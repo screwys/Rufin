@@ -292,10 +292,10 @@ impl UpnpController {
                         run,
                         millis: position_millis,
                     }]),
-                    Err(error) => {
-                        tracing::debug!(%error, target_millis = target, "UPnP seek was rejected");
-                        Ok(Vec::new())
-                    }
+                    Err(error) => Ok(vec![BackendEvent::OperationFailed {
+                        run: Some(run),
+                        error: playback::BackendFailure::new(error),
+                    }]),
                 }
             }
             BackendCommand::PrepareNext { current_run, next }
@@ -370,10 +370,8 @@ impl UpnpController {
                 .as_ref()
                 .is_some_and(|current| track_uri != current.published.uri)
         {
-            self.started = false;
-            self.renderer_owned = false;
-            let _ = self.restore_startup_output();
-            return Ok(vec![BackendEvent::State {
+            self.finish_current(relay);
+            return Ok(vec![BackendEvent::TransportObserved {
                 run,
                 state: BackendState::Stopped,
             }]);
@@ -445,12 +443,12 @@ impl UpnpController {
                 self.finish_current(relay);
                 return Ok(vec![BackendEvent::Ended { run }]);
             }
-            self.started = false;
+            self.finish_current(relay);
         }
         if publish_position {
             self.last_position_millis = position_millis;
         }
-        let mut events = vec![BackendEvent::State { run, state }];
+        let mut events = vec![BackendEvent::TransportObserved { run, state }];
         if seekability_changed {
             events.push(BackendEvent::Seekable {
                 run,
@@ -665,7 +663,7 @@ impl UpnpController {
                 run: new_run,
                 millis: position_millis,
             },
-            BackendEvent::State {
+            BackendEvent::TransportObserved {
                 run: new_run,
                 state,
             },
@@ -717,7 +715,7 @@ impl UpnpController {
         self.seekable = false;
     }
 
-    fn current_run(&self) -> Option<RunId> {
+    pub(super) fn current_run(&self) -> Option<RunId> {
         self.current.as_ref().map(|media| media.run)
     }
 
@@ -1919,7 +1917,7 @@ mod tests {
         )));
         assert!(recovered.iter().any(|event| matches!(
             event,
-            BackendEvent::State {
+            BackendEvent::TransportObserved {
                 run,
                 state: BackendState::Playing,
             } if *run == RunId::new(1)
