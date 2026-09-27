@@ -10,7 +10,7 @@ use fcast_sender_sdk::device::{
     MediaTrackType, Metadata, PlaybackState as FutoPlaybackState, QueueState, ReceiverError,
     Source, TrackList,
 };
-use playback::{BackendCommand, BackendEvent, BackendState, PreparedStream, RunId};
+use playback::{BackendCommand, BackendEvent, BackendFailure, BackendState, PreparedStream, RunId};
 
 use crate::relay::{PublishedResource, RelayServer};
 
@@ -31,6 +31,7 @@ enum SdkEvent {
     State(FutoPlaybackState),
     Stopped,
     Error(String),
+    OperationFailed(String),
 }
 
 struct FutoEventHandler {
@@ -89,7 +90,7 @@ impl DeviceEventHandler for FutoEventHandler {
     fn queue_changed(&self, _queue: QueueState) {}
 
     fn command_error(&self, error: ReceiverError) {
-        self.publish(SdkEvent::Error(format!(
+        self.publish(SdkEvent::OperationFailed(format!(
             "Google Cast receiver rejected a command: {error:?}"
         )));
     }
@@ -399,13 +400,20 @@ impl GoogleCastController {
                 let Some(run) = self.current_run() else {
                     return Ok(());
                 };
-                match cast_state_outcome(state, self.playback_observed)? {
+                let outcome = match cast_state_outcome(state, self.playback_observed) {
+                    Ok(outcome) => outcome,
+                    Err(error) => {
+                        self.finish_current(relay);
+                        return Err(error);
+                    }
+                };
+                match outcome {
                     CastStateOutcome::Ignore => {}
                     CastStateOutcome::State(state) => {
                         if matches!(state, BackendState::Playing | BackendState::Paused) {
                             self.playback_observed = true;
                         }
-                        update.push(BackendEvent::State { run, state });
+                        update.push(BackendEvent::TransportObserved { run, state });
                     }
                     CastStateOutcome::Ended => {
                         self.finish_current(relay);
@@ -416,7 +424,7 @@ impl GoogleCastController {
             SdkEvent::Stopped => {
                 if let Some(run) = self.current_run() {
                     self.finish_current(relay);
-                    update.push(BackendEvent::State {
+                    update.push(BackendEvent::TransportObserved {
                         run,
                         state: BackendState::Stopped,
                     });
@@ -427,6 +435,12 @@ impl GoogleCastController {
                     self.finish_current(relay);
                     return Err(error);
                 }
+            }
+            SdkEvent::OperationFailed(error) => {
+                update.push(BackendEvent::OperationFailed {
+                    run: self.current_run(),
+                    error: BackendFailure::new(error),
+                });
             }
         }
         Ok(())
@@ -444,7 +458,7 @@ impl GoogleCastController {
         self.playback_observed = false;
     }
 
-    fn current_run(&self) -> Option<RunId> {
+    pub(super) fn current_run(&self) -> Option<RunId> {
         self.current.as_ref().map(|current| current.run)
     }
 }

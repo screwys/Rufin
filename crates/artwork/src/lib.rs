@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
+use md5_digest::{Digest, Md5};
 use sources::{Source, SourceId};
 use thiserror::Error;
 use tokio::runtime::Handle;
@@ -135,7 +136,7 @@ impl ArtworkKey {
     }
 
     fn binding_digest(identity: &str) -> String {
-        format!("{:x}", md5::compute(identity.as_bytes()))
+        format!("{:x}", Md5::digest(identity.as_bytes()))
     }
 
     fn reuse_group(&self) -> (String, String) {
