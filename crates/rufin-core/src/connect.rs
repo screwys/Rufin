@@ -685,10 +685,17 @@ impl ConnectOwner {
             std::fs::create_dir_all(&self.directory).map_err(error)?;
             let credentials = self.credentials().await?;
             let settings = self.status().settings;
+            // Discard the preview's duplicate audio cache. Missing media uses
+            // the normal download path; existing library files remain usable.
+            match tokio::fs::remove_dir_all(self.directory.join("blobs")).await {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(cause) => return Err(error(cause)),
+            }
             let (network, mut events) = ConnectNetwork::spawn(
                 NetworkConfig {
                     database: self.directory.join("network.sqlite"),
-                    media_directory: self.directory.join("blobs"),
+                    media_directory: self.directory.join("transfers"),
                     name: settings.name,
                     nearby: settings.nearby,
                     relay: settings.relay,
@@ -2119,7 +2126,7 @@ impl ConnectOwner {
                 let snapshot = self.export_session(&session, setup).await?;
                 let hash = network
                     .media()
-                    .publish(snapshot.path(), "profile-snapshot")
+                    .publish_snapshot(snapshot, peer)
                     .await
                     .map_err(error)?;
                 serde_json::json!({"hash":hash})
