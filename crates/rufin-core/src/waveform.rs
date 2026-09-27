@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex, Weak};
 use crate::runtime::WaveformProjection;
 use async_channel::Sender;
 use audio_processing::generate_waveform_peaks_cancellable;
+use md5_digest::{Digest, Md5};
 use playback::{CurrentMedia, CurrentMediaId, StreamRequest};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
@@ -47,11 +48,11 @@ impl WaveformKey {
         );
         let source = self.source_id.as_ref().map_or_else(
             || "direct".to_string(),
-            |source| format!("{:x}", md5::compute(source.as_str())),
+            |source| format!("{:x}", Md5::digest(source.as_str())),
         );
         root.join(CACHE_DIRECTORY)
             .join(source)
-            .join(format!("{:x}.json", md5::compute(identity)))
+            .join(format!("{:x}.json", Md5::digest(identity)))
     }
 }
 
@@ -193,7 +194,7 @@ impl WaveformOwner {
         let directory = self
             .cache_root
             .join(CACHE_DIRECTORY)
-            .join(format!("{:x}", md5::compute(source.as_str())));
+            .join(format!("{:x}", Md5::digest(source.as_str())));
         match fs::remove_dir_all(directory) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -484,11 +485,11 @@ mod tests {
         let first = directory
             .path()
             .join(CACHE_DIRECTORY)
-            .join(format!("{:x}", md5::compute(first_source.as_str())));
+            .join(format!("{:x}", Md5::digest(first_source.as_str())));
         let second = directory
             .path()
             .join(CACHE_DIRECTORY)
-            .join(format!("{:x}", md5::compute(second_source.as_str())));
+            .join(format!("{:x}", Md5::digest(second_source.as_str())));
         fs::create_dir_all(&first).expect("first source cache");
         fs::create_dir_all(&second).expect("second source cache");
         fs::write(first.join("track.json"), b"waveform").expect("first waveform");

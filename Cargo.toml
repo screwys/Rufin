@@ -68,7 +68,6 @@ digest_auth = "0.3.1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "service"] }
-csv = "1.4.0"
 directories = "6.0.0"
 ebur128 = "0.1.10"
 fcast-sender-sdk = { version = "0.3.0", default-features = false, features = ["chromecast"] }
@@ -96,7 +95,6 @@ mdns-sd = { version = "0.21.0", default-features = false }
 ksni = "0.3.4"
 keyring-core = "1.0.0"
 lofty = "0.25.1"
-md5 = "0.8.0"
 md5_digest = { package = "md-5", version = "0.10" }
 mediaplayer = "0.4.3"
 mpris-server = "0.10.0"
@@ -131,7 +129,6 @@ tray-icon = { version = "0.25.0", default-features = false }
 tokio = "1.52.3"
 tokio-rustls = { version = "0.26.4", default-features = false }
 tokio-tungstenite = { version = "0.30.0", default-features = false }
-tiny_http = "0.12.0"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.23"
 url = "2.5.7"

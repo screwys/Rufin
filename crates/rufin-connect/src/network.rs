@@ -214,6 +214,7 @@ pub struct ConnectNetwork {
     pub(crate) enrollment_data: RwLock<Vec<u8>>,
     pub(crate) approvals: Mutex<HashMap<String, watch::Sender<Option<bool>>>>,
     pub(crate) events: mpsc::Sender<NetworkEvent>,
+    pub(crate) membership_changed: watch::Sender<()>,
     database: Mutex<SqliteConnection>,
     addresses: MemoryLookup,
     media: MediaStore,
@@ -326,6 +327,7 @@ impl ConnectNetwork {
             enrollment_data: RwLock::new(Vec::new()),
             approvals: Mutex::new(HashMap::new()),
             events,
+            membership_changed: watch::channel(()).0,
             database: Mutex::new(database),
             addresses,
             media,
@@ -344,7 +346,7 @@ impl ConnectNetwork {
                 iroh_blobs::ALPN,
                 MemberBlobs {
                     network: weak.clone(),
-                    store: network.media.store.clone(),
+                    media: network.media.clone(),
                 },
             )
             .spawn();
@@ -527,6 +529,7 @@ impl ConnectNetwork {
             documents: RwLock::new(None),
             stop: CancellationToken::new(),
         }));
+        self.membership_changed.send_replace(());
         Ok(())
     }
     pub async fn attach_documents(&self, documents: Arc<ProfileStore>) -> Result<()> {
@@ -601,6 +604,7 @@ impl ConnectNetwork {
         );
         doc.get_map("devices").insert(&peer.to_string(), true)?;
         save_roster(&mut db, &profile, &doc).await?;
+        self.membership_changed.send_replace(());
         drop(db);
         if let Some(profile) = self.profile.read().await.as_ref()
             && let Some(documents) = profile.documents.read().await.as_ref()
@@ -637,6 +641,7 @@ impl ConnectNetwork {
         devices.insert(&self.identity(), true)?;
         devices.insert(&host.to_string(), true)?;
         save_roster(&mut db, profile, &doc).await?;
+        self.membership_changed.send_replace(());
         Ok(())
     }
     pub async fn remove_member(&self, peer: &str) -> Result<()> {
@@ -650,6 +655,7 @@ impl ConnectNetwork {
         );
         doc.get_map("devices").insert(&peer.to_string(), false)?;
         save_roster(&mut db, &profile, &doc).await?;
+        self.membership_changed.send_replace(());
         drop(db);
         let _ = self.events.send(NetworkEvent::MembershipChanged).await;
         Ok(())
@@ -669,6 +675,7 @@ impl ConnectNetwork {
         let member = trusted(&doc, self.endpoint.id());
         if before != doc.oplog_vv() {
             save_roster(&mut db, profile, &doc).await?;
+            self.membership_changed.send_replace(());
             drop(db);
             let _ = self.events.send(NetworkEvent::MembershipChanged).await;
         }
@@ -991,13 +998,14 @@ impl ConnectNetwork {
         if let Some(router) = self.router.lock().await.take() {
             router.shutdown().await?;
         }
-        self.media.store.shutdown().await?;
+        self.media.shutdown().await?;
         Ok(())
     }
     pub async fn close_profile(&self) -> Result<()> {
         if let Some(profile) = self.profile.write().await.take() {
             profile.stop.cancel();
         }
+        self.membership_changed.send_replace(());
         Ok(())
     }
 }

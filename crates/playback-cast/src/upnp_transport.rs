@@ -230,7 +230,7 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
 
-    use tiny_http::{Response, Server};
+    use axum::{Router, extract::ConnectInfo, http::Uri};
 
     use super::*;
 
@@ -261,30 +261,31 @@ mod tests {
                 _ => None,
             })
             .expect("IPv4 loopback interface");
-        let server = Server::http(SocketAddr::new(selected, 0)).expect("fake renderer");
-        let port = server
-            .server_addr()
-            .to_ip()
-            .expect("renderer address")
-            .port();
+        let listener = TcpListener::bind(SocketAddr::new(selected, 0)).expect("fake renderer");
+        let port = listener.local_addr().unwrap().port();
+        listener.set_nonblocking(true).unwrap();
         let (sent, received) = mpsc::channel();
+        let (shutdown, stopped) = tokio::sync::oneshot::channel();
         let renderer = thread::spawn(move || {
-            let description = server.recv().expect("description request");
-            sent.send(*description.remote_addr().expect("description peer"))
-                .expect("record description peer");
-            description
-                .respond(Response::from_string(
-                    r#"<root xmlns="urn:schemas-upnp-org:device-1-0"><device><deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType><friendlyName>Test Renderer</friendlyName><serviceList><service><serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType><serviceId>urn:upnp-org:serviceId:AVTransport</serviceId><SCPDURL>/transport.xml</SCPDURL><controlURL>/transport</controlURL><eventSubURL>/events</eventSubURL></service></serviceList></device></root>"#,
-                ))
-                .expect("description response");
-            let action = server.recv().expect("SOAP request");
-            sent.send(*action.remote_addr().expect("SOAP peer"))
-                .expect("record SOAP peer");
-            action
-                .respond(Response::from_string(
-                    r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetTransportInfoResponse xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><CurrentTransportState>STOPPED</CurrentTransportState></u:GetTransportInfoResponse></s:Body></s:Envelope>"#,
-                ))
-                .expect("SOAP response");
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async move {
+                let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+                let app = Router::new().fallback(move |ConnectInfo(peer): ConnectInfo<SocketAddr>, uri: Uri| {
+                    sent.send(peer).expect("record request peer");
+                    async move {
+                        if uri.path() == "/device.xml" {
+                            r#"<root xmlns="urn:schemas-upnp-org:device-1-0"><device><deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType><friendlyName>Test Renderer</friendlyName><serviceList><service><serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType><serviceId>urn:upnp-org:serviceId:AVTransport</serviceId><SCPDURL>/transport.xml</SCPDURL><controlURL>/transport</controlURL><eventSubURL>/events</eventSubURL></service></serviceList></device></root>"#
+                        } else {
+                            r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetTransportInfoResponse xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><CurrentTransportState>STOPPED</CurrentTransportState></u:GetTransportInfoResponse></s:Body></s:Envelope>"#
+                        }
+                    }
+                });
+                axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+                    .with_graceful_shutdown(async { let _ = stopped.await; }).await.unwrap();
+            });
         });
         let device = UpnpDevice::from_url(
             &format!("http://{selected}:{port}/device.xml"),
@@ -312,7 +313,8 @@ mod tests {
             state.get("CurrentTransportState").map(String::as_str),
             Some("STOPPED")
         );
-        assert!(received.iter().all(|peer| peer.ip() == selected));
+        shutdown.send(()).unwrap();
         renderer.join().expect("renderer thread");
+        assert!(received.iter().all(|peer| peer.ip() == selected));
     }
 }

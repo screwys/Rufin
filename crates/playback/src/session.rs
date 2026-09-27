@@ -285,6 +285,12 @@ struct AutoDjKey {
 }
 
 #[derive(Clone, Debug)]
+struct FailedRun {
+    occurrence: OccurrenceId,
+    desired_playing: bool,
+}
+
+#[derive(Clone, Debug)]
 enum QueueCompletion {
     Replace {
         seed: Option<u64>,
@@ -308,6 +314,7 @@ pub(crate) struct PlaybackSession {
     deferred_queue: VecDeque<SessionCommand>,
     play_id_prefix: Arc<str>,
     current_run: Option<RunContext>,
+    failed_run: Option<FailedRun>,
     next_plan: Option<NextPlan>,
     restored_paused: bool,
     next_run_number: u64,
@@ -350,6 +357,7 @@ impl PlaybackSession {
             deferred_queue: VecDeque::new(),
             play_id_prefix: play_id_prefix.into(),
             current_run: None,
+            failed_run: None,
             next_plan: None,
             restored_paused,
             next_run_number: 1,
@@ -569,6 +577,7 @@ impl PlaybackSession {
         self.playback_output = output;
         self.external = Some(observation);
         self.last_error = None;
+        self.failed_run = None;
         update.effects.retain(|effect| {
             !matches!(
                 effect,
@@ -622,6 +631,7 @@ impl PlaybackSession {
         self.output_volume = self.settings.volume;
         self.output_muted = self.settings.muted;
         self.current_run = None;
+        self.failed_run = None;
         self.next_plan = None;
         self.auto_dj_in_flight = None;
         self.auto_dj_waiting_for_continuation = false;
@@ -755,7 +765,18 @@ impl PlaybackSession {
             self.output_muted = self.settings.muted;
         }
         let Some(current) = self.current_run.as_mut() else {
-            return SessionUpdate::changed();
+            let mut update = SessionUpdate::changed();
+            if let Some(failed) = self.failed_run.take()
+                && self.sequence.selected().map(|entry| &entry.occurrence)
+                    == Some(&failed.occurrence)
+            {
+                if failed.desired_playing {
+                    self.begin_selected_run(&mut update.effects);
+                } else {
+                    self.restored_paused = true;
+                }
+            }
+            return update;
         };
         let Some(stream) = current.resolved_stream.clone() else {
             return SessionUpdate::changed();
@@ -1031,6 +1052,32 @@ impl PlaybackSession {
         match event {
             BackendEvent::Started { run } => self.accept_started(run, sample),
             BackendEvent::State { run, state } => self.accept_state(run, state, sample),
+            BackendEvent::TransportObserved { run, state } => {
+                let Some(current) = self
+                    .current_run
+                    .as_mut()
+                    .filter(|current| current.id == run)
+                else {
+                    return SessionUpdate::default();
+                };
+                if state == BackendState::Stopped {
+                    let mut update = SessionUpdate::changed();
+                    self.finish_current(RunEndReason::Stopped, sample, &mut update.effects);
+                    update.effects.push(SessionEffect::FlushPersistence);
+                    return update;
+                }
+                let desired_playing = match state {
+                    BackendState::Playing => true,
+                    BackendState::Paused => false,
+                    BackendState::Buffering => current.desired_playing,
+                    BackendState::Stopped => unreachable!(),
+                };
+                let intent_changed = current.desired_playing != desired_playing;
+                current.desired_playing = desired_playing;
+                let mut update = self.accept_state(run, state, sample);
+                update.view_changed |= intent_changed;
+                update
+            }
             BackendEvent::Position { run, millis } => self.accept_position(run, millis, sample),
             BackendEvent::Duration { run, millis } => self.accept_duration(run, millis),
             BackendEvent::Seekable { run, seekable } => self.accept_seekable(run, seekable),
@@ -1118,22 +1165,59 @@ impl PlaybackSession {
             BackendEvent::Error { run, error } => {
                 let Some(current) = self
                     .current_run
+                    .as_ref()
+                    .filter(|current| current.id == run)
+                else {
+                    return SessionUpdate::default();
+                };
+                let failed = FailedRun {
+                    occurrence: current.occurrence.clone(),
+                    desired_playing: current.desired_playing,
+                };
+                let mut update = SessionUpdate::changed();
+                self.finish_current(RunEndReason::Failed, sample, &mut update.effects);
+                self.failed_run = Some(failed);
+                self.last_error = Some(error.message().to_string());
+                update
+                    .effects
+                    .push(SessionEffect::FatalError(error.message().to_string()));
+                update.effects.push(SessionEffect::FlushPersistence);
+                update
+            }
+            BackendEvent::OperationFailed { run, error } => {
+                if run.is_some() && run != self.current_run() {
+                    return SessionUpdate::default();
+                }
+                SessionUpdate {
+                    effects: vec![SessionEffect::NonfatalError(error.message().to_string())],
+                    ..SessionUpdate::default()
+                }
+            }
+            BackendEvent::TransportRejected {
+                run,
+                requested_playing,
+                error,
+            } => {
+                let Some(current) = self
+                    .current_run
                     .as_mut()
                     .filter(|current| current.id == run)
                 else {
                     return SessionUpdate::default();
                 };
-                current.advance_clock(sample.monotonic_millis);
-                current.status = TransportStatus::Failed;
-                current.backend_loaded = false;
-                self.last_error = Some(error.message().to_string());
-                self.buffering_percent = None;
+                let observed_playing = matches!(
+                    current.status,
+                    TransportStatus::Playing | TransportStatus::Buffering
+                );
+                let view_changed = current.desired_playing == requested_playing
+                    && current.desired_playing != observed_playing;
+                if view_changed {
+                    current.desired_playing = observed_playing;
+                }
                 SessionUpdate {
-                    effects: vec![
-                        SessionEffect::FatalError(error.message().to_string()),
-                        SessionEffect::FlushPersistence,
-                    ],
-                    ..SessionUpdate::changed()
+                    effects: vec![SessionEffect::NonfatalError(error.message().to_string())],
+                    view_changed,
+                    ..SessionUpdate::default()
                 }
             }
         }
@@ -1589,6 +1673,9 @@ impl PlaybackSession {
         }
         let Some(run) = self.current_run.as_mut() else {
             if !desired_playing {
+                if let Some(failed) = self.failed_run.as_mut() {
+                    failed.desired_playing = false;
+                }
                 return SessionUpdate::default();
             }
             self.restored_paused = false;
@@ -1665,6 +1752,7 @@ impl PlaybackSession {
     }
 
     fn stop(&mut self, sample: &ClockSample, reset_position: bool) -> SessionUpdate {
+        self.failed_run = None;
         if self.pending_queue.is_some() {
             self.queue_transport = Some(TransportStatus::Stopped);
         }
@@ -2287,6 +2375,7 @@ impl PlaybackSession {
         let mut current = RunContext::resolving(run, self.play_id(run), &entry);
         current.desired_playing = desired_playing;
         self.current_run = Some(current);
+        self.failed_run = None;
         effects.push(SessionEffect::CurrentMediaChanged);
         self.next_plan = None;
         self.buffering_percent = None;
@@ -2296,6 +2385,7 @@ impl PlaybackSession {
     }
 
     fn begin_selected_run(&mut self, effects: &mut Vec<SessionEffect>) {
+        self.failed_run = None;
         let Some(entry) = self.sequence.selected().cloned() else {
             self.sequence.need_metadata();
             self.current_run = None;
@@ -2529,6 +2619,7 @@ impl PlaybackSession {
         sample: &ClockSample,
         effects: &mut Vec<SessionEffect>,
     ) {
+        self.failed_run = None;
         let Some(current) = self.current_run.as_mut() else {
             self.next_plan = None;
             return;
@@ -2578,6 +2669,9 @@ impl PlaybackSession {
                     skipped: true,
                 })));
             }
+        }
+        if reason == RunEndReason::Completed {
+            self.sequence.set_progress_millis(0);
         }
         effects.push(self.progress_effect());
         self.next_plan = None;

@@ -1,6 +1,7 @@
 use std::thread;
 use std::time::{Duration, Instant};
 
+use md5_digest::{Digest, Md5};
 use reqwest::blocking::Client;
 use serde_json::Value;
 use tracing::debug;
@@ -351,7 +352,7 @@ fn api_signature(params: &[(String, String)], secret: &str) -> String {
         input.push_str(value);
     }
     input.push_str(secret);
-    format!("{:x}", md5::compute(input))
+    format!("{:x}", Md5::digest(input))
 }
 
 #[cfg(test)]

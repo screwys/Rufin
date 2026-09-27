@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use md5_digest::{Digest, Md5};
 use sources::{ImageSize, SourceId};
 
 use crate::selection::Candidate;
@@ -581,7 +582,7 @@ fn reusable_sizes(requested: u32) -> Vec<u32> {
 }
 
 fn digest(value: &str) -> String {
-    format!("{:x}", md5::compute(value.as_bytes()))
+    format!("{:x}", Md5::digest(value.as_bytes()))
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {

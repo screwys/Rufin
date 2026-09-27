@@ -397,6 +397,11 @@ pub enum BackendEvent {
         run: RunId,
         state: BackendState,
     },
+    /// Transport observed on a receiver, including changes made on the receiver.
+    TransportObserved {
+        run: RunId,
+        state: BackendState,
+    },
     Position {
         run: RunId,
         millis: u64,
@@ -437,8 +442,20 @@ pub enum BackendEvent {
         run: RunId,
         levels: Vec<f64>,
     },
+    /// The backend can no longer play this run.
     Error {
         run: RunId,
+        error: BackendFailure,
+    },
+    /// A command failed while the current playback remains usable.
+    OperationFailed {
+        run: Option<RunId>,
+        error: BackendFailure,
+    },
+    /// Play or Pause was rejected while the current playback remains usable.
+    TransportRejected {
+        run: RunId,
+        requested_playing: bool,
         error: BackendFailure,
     },
 }
