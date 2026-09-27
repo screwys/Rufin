@@ -341,7 +341,7 @@ impl ContextMenuSurface {
         let target = self.target.clone();
         let action_activated = self.action_activated;
         self.popover.connect_closed(move |popover| {
-            popdown_nested_native_menus_from(popover.upcast_ref());
+            popdown_nested_native_menus_from(popover.upcast_ref(), None);
             let popover = popover.clone();
             let target = target.clone();
             let unmap_handler = Rc::clone(&unmap_handler);
@@ -602,7 +602,7 @@ pub fn keep_parent_grab_for_dropdown(dropdown: &gtk::DropDown) {
 }
 
 pub fn popdown_native_menu(popover: &gtk::PopoverMenu) {
-    popdown_nested_native_menus_from(popover.upcast_ref());
+    popdown_nested_native_menus_from(popover.upcast_ref(), None);
     popover.popdown();
 }
 
@@ -681,30 +681,41 @@ fn install_submenu_actions(
         {
             let actions = actions.clone();
             let action = *action;
-            let click = gtk::GestureClick::new();
-            click.set_button(1);
-            click.set_propagation_phase(gtk::PropagationPhase::Capture);
-            click.connect_pressed(move |gesture, _, x, y| {
-                let Some(owner) = gesture.widget() else {
-                    return;
-                };
-                let mut child = owner.first_child();
-                while let Some(widget) = child {
-                    child = widget.next_sibling();
-                    if widget.css_name() == "arrow"
-                        && widget.compute_bounds(&owner).is_some_and(|bounds| {
-                            bounds.contains_point(&gtk::graphene::Point::new(x as f32, y as f32))
-                        })
-                    {
-                        gesture.set_state(gtk::EventSequenceState::Claimed);
-                        owner.grab_focus();
-                        owner.child_focus(gtk::DirectionType::Right);
-                        return;
+            let click = owner
+                .observe_controllers()
+                .iter::<glib::Object>()
+                .find_map(|controller| controller.unwrap().downcast::<gtk::GestureClick>().ok())
+                .expect("native menu button has no click gesture")
+                .downgrade();
+            owner.connect_local("clicked", false, move |values| {
+                // GTK already opens the submenu. Only the row body runs its default action.
+                if let Some(click) = click.upgrade()
+                    && let Some((x, y)) = click.current_event().and_then(|event| event.position())
+                {
+                    let owner = values[0].get::<gtk::Widget>().unwrap();
+                    let native = owner.native().unwrap();
+                    let (native_x, native_y) = native.surface_transform();
+                    let point = native
+                        .compute_point(
+                            &owner,
+                            &gtk::graphene::Point::new(
+                                (x - native_x) as f32,
+                                (y - native_y) as f32,
+                            ),
+                        )
+                        .unwrap();
+                    let mut child = owner.first_child();
+                    while let Some(widget) = child {
+                        child = widget.next_sibling();
+                        if widget.css_name() == "arrow"
+                            && widget
+                                .compute_bounds(&owner)
+                                .is_some_and(|bounds| bounds.contains_point(&point))
+                        {
+                            return None;
+                        }
                     }
                 }
-            });
-            owner.add_controller(click);
-            owner.connect_local("clicked", false, move |_| {
                 actions.activate_action(action, None);
                 None
             });
@@ -733,7 +744,7 @@ fn popdown_popover(popover: &gtk::Popover) {
     }
 }
 
-fn popdown_nested_native_menus_from(container: &gtk::Widget) {
+fn popdown_nested_native_menus_from(container: &gtk::Widget, keep_open: Option<&gtk::PopoverMenu>) {
     let mut child = container.first_child();
     while let Some(widget) = child {
         child = widget.next_sibling();
@@ -743,9 +754,12 @@ fn popdown_nested_native_menus_from(container: &gtk::Widget) {
                 .property::<Option<gtk::Popover>>("popover")
                 .and_then(|popover| popover.downcast::<gtk::PopoverMenu>().ok())
         {
+            if Some(&nested_popover) == keep_open {
+                continue;
+            }
             popdown_native_menu(&nested_popover);
         }
-        popdown_nested_native_menus_from(&widget);
+        popdown_nested_native_menus_from(&widget, keep_open);
     }
 }
 
@@ -764,6 +778,15 @@ fn keep_parent_grab_for_nested_native_menus_from(container: &gtk::Widget) {
             nested_popover.set_width_request(CONTEXT_MENU_MAX_WIDTH);
             if !widget.has_css_class(NATIVE_MENU_PARENT_GRAB_CLASS) {
                 widget.add_css_class(NATIVE_MENU_PARENT_GRAB_CLASS);
+                nested_popover.connect_map(|popover| {
+                    // Non-modal submenus must still close the previous sibling on arrow navigation.
+                    if let Some(parent) = popover
+                        .parent()
+                        .and_then(|owner| owner.ancestor(gtk::PopoverMenu::static_type()))
+                    {
+                        popdown_nested_native_menus_from(&parent, Some(popover));
+                    }
+                });
                 let nested_popover = nested_popover.downgrade();
                 widget.connect_unmap(move |_| {
                     if let Some(nested_popover) = nested_popover.upgrade() {
