@@ -2,6 +2,7 @@ use super::*;
 
 use crate::remote_http::{self, BodyLimit, RemoteHttpPolicy, RemoteTimeouts};
 use crate::remote_json as json;
+use md5_digest::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
@@ -856,7 +857,7 @@ impl fmt::Debug for SubsonicCredential {
 impl SubsonicCredential {
     pub(super) fn from_password(password: &str) -> Self {
         let salt = random_salt();
-        let token = format!("{:x}", md5::compute(format!("{password}{salt}")));
+        let token = format!("{:x}", Md5::digest(format!("{password}{salt}")));
         Self::Token {
             salt,
             token,

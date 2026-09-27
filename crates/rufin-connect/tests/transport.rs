@@ -345,7 +345,7 @@ async fn enrollment_delivery_media_and_removal() {
         assert_eq!(answer.await.unwrap().unwrap(), b"queue and position");
         let original = a_dir.path().join("track.flac");
         tokio::fs::write(&original, b"original media bytes").await.unwrap();
-        let hash = a.media().publish(&original, "track/original/1").await.unwrap();
+        let hash = a.media().publish(&original).await.unwrap();
         let destination = b_dir.path().join("Music/track.flac");
         let (progress, _) = watch::channel(0);
         b.media().fetch(&a.identity(), &hash, &destination, CancellationToken::new(), progress).await.unwrap();
@@ -368,7 +368,7 @@ async fn enrollment_delivery_media_and_removal() {
         assert!(b.members().await.unwrap().contains(&c.identity()));
         let third = c_dir.path().join("third.flac");
         tokio::fs::write(&third, b"third device media").await.unwrap();
-        let third_hash = c.media().publish(&third, "track/original/3").await.unwrap();
+        let third_hash = c.media().publish(&third).await.unwrap();
         let destination = b_dir.path().join("third.flac");
         let (progress, _) = watch::channel(0);
         // B has never received C's invitation. Its address and trust arrived
@@ -378,14 +378,14 @@ async fn enrollment_delivery_media_and_removal() {
         a.remove_member(&b.identity()).await.unwrap();
         let second = a_dir.path().join("second.flac");
         tokio::fs::write(&second, b"not authorized after removal").await.unwrap();
-        let hash = a.media().publish(&second, "track/original/2").await.unwrap();
+        let hash = a.media().publish(&second).await.unwrap();
         let (progress, _) = watch::channel(0);
         assert!(b.media().fetch(&a.identity(), &hash, &b_dir.path().join("denied.flac"), CancellationToken::new(), progress).await.is_err());
         while c.members().await.unwrap().contains(&b.identity()) {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         tokio::fs::write(&third, b"third device private media after removal").await.unwrap();
-        let third_hash = c.media().publish(&third, "track/original/4").await.unwrap();
+        let third_hash = c.media().publish(&third).await.unwrap();
         let (progress, _) = watch::channel(0);
         assert!(b.media().fetch(&c.identity(), &third_hash, &b_dir.path().join("denied-third.flac"), CancellationToken::new(), progress).await.is_err());
         // The removed device learns that it is no longer enrolled, while its

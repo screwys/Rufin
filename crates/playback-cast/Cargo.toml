@@ -11,6 +11,7 @@ readme.workspace = true
 publish.workspace = true
 
 [dependencies]
+axum.workspace = true
 getrandom.workspace = true
 futures-util.workspace = true
 sources.workspace = true
@@ -19,18 +20,19 @@ if-addrs.workspace = true
 mdns-sd.workspace = true
 playback.workspace = true
 audio-processing.workspace = true
-reqwest = { workspace = true, features = ["blocking", "query"] }
+reqwest = { workspace = true, features = ["blocking", "query", "stream"] }
 roxmltree.workspace = true
 rustls.workspace = true
 socket2.workspace = true
-tiny_http.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt", "net", "fs", "io-util", "sync", "macros", "time"] }
+tokio-util.workspace = true
 tracing.workspace = true
 url.workspace = true
 
 [dev-dependencies]
 library.workspace = true
-tempfile.workspace = true
-tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }
+wiremock.workspace = true
 
 [lints]
 workspace = true

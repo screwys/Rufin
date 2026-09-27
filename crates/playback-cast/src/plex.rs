@@ -524,49 +524,52 @@ pub fn parse_gdm(bytes: &[u8], sender: SocketAddr) -> Option<PlexPlayer> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, mpsc};
     use std::thread;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     type Request = (Url, String, String);
 
-    fn server(bodies: Vec<&'static str>) -> (String, thread::JoinHandle<Vec<Request>>) {
-        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
-        let address = format!("http://{}", server.server_addr());
-        let base = address.clone();
-        let worker = thread::spawn(move || {
-            bodies
-                .into_iter()
-                .map(|body| {
-                    let request = server
-                        .recv_timeout(Duration::from_secs(5))
-                        .unwrap()
-                        .expect("receiver request");
-                    let header = |name| {
+    fn server(bodies: Vec<&'static str>) -> (String, MockServer, mpsc::Receiver<Request>) {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let server = runtime.block_on(MockServer::start());
+        let address = server.uri();
+        let (sent, received) = mpsc::channel();
+        let count = bodies.len();
+        let bodies = Mutex::new(bodies.into_iter());
+        runtime.block_on(
+            Mock::given(wiremock::matchers::any())
+                .respond_with(move |request: &wiremock::Request| {
+                    let header = |name: &str| {
                         request
-                            .headers()
-                            .iter()
-                            .find(|header| header.field.equiv(name))
+                            .headers
+                            .get(name)
                             .unwrap()
-                            .value
+                            .to_str()
+                            .unwrap()
                             .to_string()
                     };
                     let observed = (
-                        Url::parse(&base).unwrap().join(request.url()).unwrap(),
+                        request.url.clone(),
                         header("X-Plex-Client-Identifier"),
                         header("X-Plex-Target-Client-Identifier"),
                     );
-                    request
-                        .respond(tiny_http::Response::from_string(body))
-                        .unwrap();
-                    observed
+                    sent.send(observed).unwrap();
+                    ResponseTemplate::new(200)
+                        .set_body_string(bodies.lock().unwrap().next().expect("response body"))
                 })
-                .collect()
-        });
-        (address, worker)
+                .expect(count as u64)
+                .mount(&server),
+        );
+        (address, server, received)
     }
 
     #[test]
     fn commands_preserve_occurrences_and_paused_handoff_with_shared_command_ids() {
-        let (address, worker) = server(vec![
+        let (address, server, received) = server(vec![
             "OK", "", "OK", "OK", "OK", "OK", "OK", "OK", "OK", "OK", "OK", "OK",
         ]);
         let client = PlexClient::new(&address, "player", "controller").unwrap();
@@ -595,7 +598,8 @@ mod tests {
         assert!(!format!("{transfer:?}").contains("delegation-only"));
         let recreated = PlexClient::new(&address, "player", "controller").unwrap();
         recreated.play_media(&transfer).unwrap();
-        let requests = worker.join().unwrap();
+        drop(server);
+        let requests = received.try_iter().collect::<Vec<_>>();
         let mut previous = 0;
         for (url, controller, target) in &requests {
             assert_eq!(controller, "controller");
@@ -634,7 +638,7 @@ mod tests {
     #[test]
     fn waiting_polls_do_not_replace_the_command_clients_subscription() {
         let xml = r#"<MediaContainer><Timeline type="music" state="paused"/></MediaContainer>"#;
-        let (address, worker) = server(vec![xml; 4]);
+        let (address, server, received) = server(vec![xml; 4]);
         let client = PlexClient::new(&address, "player", "controller").unwrap();
         client.timeline(true).unwrap();
         client.timeline(false).unwrap();
@@ -646,7 +650,8 @@ mod tests {
             client.timeline_async(true).await.unwrap();
             client.timeline_async(false).await.unwrap();
         });
-        let requests = worker.join().unwrap();
+        drop(server);
+        let requests = received.try_iter().collect::<Vec<_>>();
         assert_eq!(
             requests
                 .iter()
@@ -664,7 +669,7 @@ mod tests {
     #[test]
     fn music_timeline_keeps_server_queue_occurrence_and_external_state() {
         let xml = r#"<MediaContainer><Timeline type="video" state="playing"/><Timeline type="music" state="paused" time="12000" duration="180000" machineIdentifier="pms" playQueueID="99" playQueueVersion="8" playQueueItemID="502" ratingKey="42" key="/library/metadata/42" volume="80" repeat="2" shuffle="1" unrelated="ignored"/></MediaContainer>"#;
-        let (address, worker) = server(vec![xml]);
+        let (address, server, received) = server(vec![xml]);
         let client = PlexClient::new(&address, "player", "controller").unwrap();
         let timeline = client.timeline(false).unwrap().unwrap();
         assert_eq!(timeline.state, "paused");
@@ -679,7 +684,8 @@ mod tests {
         assert_eq!(timeline.play_queue_version, Some(8));
         assert_eq!(timeline.repeat, Some(2));
         assert_eq!(timeline.shuffle, Some(true));
-        let requests = worker.join().unwrap();
+        drop(server);
+        let requests = received.try_iter().collect::<Vec<_>>();
         assert_eq!(param(&requests[0].0, "wait"), "0");
         assert_eq!(param(&requests[0].0, "includeMetadata"), "1");
         let changed = parse_timeline(r#"<MediaContainer><Timeline type="music" state="playing" playQueueID="100" playQueueVersion="1" playQueueItemID="700" volume="broken" time="bad"/></MediaContainer>"#).unwrap().unwrap();
@@ -710,7 +716,7 @@ mod tests {
             assert!(!receiver.supports_music_control());
         }
         assert!(parse_gdm(b"HTTP/1.0 200 OK\r\nContent-Type: plex/media-server\r\nResource-Identifier: pms\r\nPort: 32400\r\n","127.0.0.1:32414".parse().unwrap()).is_none());
-        let (address, worker) = server(vec![xml]);
+        let (address, server, _received) = server(vec![xml]);
         assert!(
             PlexClient::new(&address, "player", "controller")
                 .unwrap()
@@ -718,19 +724,20 @@ mod tests {
                 .unwrap()
                 .supports_music_control()
         );
-        worker.join().unwrap();
+        drop(server);
     }
 
     #[test]
     fn receiver_xml_errors_do_not_expose_delegation_tokens() {
-        let (address, worker) = server(vec![r#"<Response code="500" status="Failure"/>"#]);
+        let (address, server, _received) =
+            server(vec![r#"<Response code="500" status="Failure"/>"#]);
         let client = PlexClient::new(&address, "player", "controller").unwrap();
         let error = client
             .command("playMedia", &[("token", "secret-delegation".into())])
             .unwrap_err();
         assert!(!error.contains("secret-delegation"));
         assert!(error.contains("500"));
-        worker.join().unwrap();
+        drop(server);
     }
 
     #[test]

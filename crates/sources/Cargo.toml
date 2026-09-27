@@ -29,7 +29,6 @@ image.workspace = true
 jxl-image-rs-integration.workspace = true
 library.workspace = true
 lofty.workspace = true
-md5.workspace = true
 md5_digest.workspace = true
 notify.workspace = true
 playback.workspace = true

@@ -7,6 +7,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use library::ListenWrite;
 use library::QueueItem;
 use library::{Database, ListenDeliveryTarget, PendingListenDelivery, ReadCancellation};
+use md5_digest::{Digest, Md5};
 use reqwest::blocking::Client;
 use tracing::warn;
 
@@ -743,7 +744,7 @@ fn opaque_account_id(service: DeliveryService, identity: &str) -> String {
         DeliveryService::ListenBrainz => "listenbrainz",
     };
     let value = format!("rufin-scrobbling-account\0{service}\0{}", identity.trim());
-    format!("{:x}", md5::compute(value))
+    format!("{:x}", Md5::digest(value))
 }
 
 fn retry_delay(attempts: u32) -> i64 {
