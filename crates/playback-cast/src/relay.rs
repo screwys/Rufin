@@ -1,16 +1,22 @@
 use std::collections::{BTreeMap, HashMap};
-use std::fs::File;
-use std::io::{Cursor, Read, Seek, SeekFrom};
+use std::io::{Read, SeekFrom};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
 
+use axum::Router;
+use axum::body::{Body, HttpBody};
+use axum::extract::State;
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, Version};
+use axum::response::{IntoResponse, Response};
+use futures_util::TryStreamExt;
 use playback::{CastNetwork, PreparedStream};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-use tiny_http::{Header, Method, Request, Response, ResponseBox, Server, StatusCode};
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::sync::{mpsc, oneshot};
+use tokio_util::io::{ReaderStream, StreamReader};
 use url::Url;
 
 const PREFERRED_RELAY_PORT: u16 = 9_876;
@@ -58,7 +64,7 @@ pub(crate) struct RelayServer {
     proxy_media: Arc<AtomicBool>,
     resources: Arc<Mutex<HashMap<String, RelayResource>>>,
     artwork_resolver: Option<ArtworkResolver>,
-    running: Arc<AtomicBool>,
+    shutdown: Option<oneshot::Sender<()>>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -74,19 +80,40 @@ impl RelayServer {
         } else {
             IpAddr::V6(Ipv6Addr::UNSPECIFIED)
         };
-        let server = relay_server(bind_ip, PREFERRED_RELAY_PORT, bound_interface)
-            .or_else(|_| relay_server(bind_ip, 0, bound_interface))?;
-        let address = server
-            .server_addr()
-            .to_ip()
-            .ok_or_else(|| "the cast relay did not bind an IP socket".to_string())?;
+        let listener = relay_listener(bind_ip, PREFERRED_RELAY_PORT, bound_interface)
+            .or_else(|_| relay_listener(bind_ip, 0, bound_interface))?;
+        let address = listener.local_addr().map_err(|error| error.to_string())?;
+        listener
+            .set_nonblocking(true)
+            .map_err(|error| error.to_string())?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| error.to_string())?;
+        let listener = {
+            let _guard = runtime.enter();
+            tokio::net::TcpListener::from_std(listener).map_err(|error| error.to_string())?
+        };
         let resources = Arc::new(Mutex::new(HashMap::new()));
-        let running = Arc::new(AtomicBool::new(true));
-        let thread_resources = Arc::clone(&resources);
-        let thread_running = Arc::clone(&running);
+        let app = Router::new()
+            .fallback(respond)
+            .with_state(Arc::clone(&resources));
+        let (shutdown, stopped) = oneshot::channel();
         let thread = thread::Builder::new()
             .name("rufin-cast-relay".to_string())
-            .spawn(move || serve(server, thread_resources, thread_running))
+            .spawn(move || {
+                runtime.block_on(async {
+                    tokio::select! {
+                        result = async { axum::serve(listener, app).await } => {
+                            if let Err(error) = result {
+                                tracing::debug!(%error, "cast relay stopped receiving requests");
+                            }
+                        }
+                        _ = stopped => {}
+                    }
+                });
+                runtime.shutdown_background();
+            })
             .map_err(|error| error.to_string())?;
         let host = match local_ip {
             IpAddr::V4(ip) => ip.to_string(),
@@ -98,7 +125,7 @@ impl RelayServer {
             proxy_media,
             resources,
             artwork_resolver: None,
-            running,
+            shutdown: Some(shutdown),
             thread: Some(thread),
         })
     }
@@ -237,7 +264,9 @@ impl RelayServer {
     }
 
     pub(crate) fn shutdown(&mut self) {
-        self.running.store(false, Ordering::Release);
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -246,15 +275,6 @@ impl RelayServer {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clear();
     }
-}
-
-fn relay_server(
-    bind_ip: IpAddr,
-    port: u16,
-    network_interface: Option<&str>,
-) -> Result<Server, String> {
-    let listener = relay_listener(bind_ip, port, network_interface)?;
-    Server::from_listener(listener, None).map_err(|error| error.to_string())
 }
 
 fn relay_listener(
@@ -459,34 +479,14 @@ fn selected_interface_address<'a>(
         .or_else(|| addresses.first().copied())
 }
 
-fn serve(
-    server: Server,
-    resources: Arc<Mutex<HashMap<String, RelayResource>>>,
-    running: Arc<AtomicBool>,
-) {
-    while running.load(Ordering::Acquire) {
-        let request = match server.recv_timeout(Duration::from_millis(100)) {
-            Ok(Some(request)) => request,
-            Ok(None) => continue,
-            Err(error) => {
-                tracing::debug!(%error, "cast relay stopped receiving requests");
-                break;
-            }
-        };
-        let request_resources = Arc::clone(&resources);
-        let _ = thread::Builder::new()
-            .name("rufin-cast-request".to_string())
-            .spawn(move || respond(request, &request_resources));
-    }
-}
-
-fn respond(request: Request, resources: &Mutex<HashMap<String, RelayResource>>) {
-    let path = request
-        .url()
-        .split('?')
-        .next()
-        .unwrap_or_default()
-        .trim_start_matches('/');
+async fn respond(
+    State(resources): State<Arc<Mutex<HashMap<String, RelayResource>>>>,
+    method: Method,
+    uri: Uri,
+    version: Version,
+    headers: HeaderMap,
+) -> Response {
+    let path = uri.path().trim_start_matches('/');
     let mut segments = path.split('/');
     let token = segments.next().unwrap_or_default();
     let artwork = segments.next() == Some("artwork");
@@ -496,149 +496,170 @@ fn respond(request: Request, resources: &Mutex<HashMap<String, RelayResource>>) 
         .get(token)
         .cloned();
     tracing::debug!(
-        method = ?request.method(),
+        ?method,
         artwork,
-        range = request.headers().iter().any(|header| header.field.equiv("Range")),
+        range = headers.contains_key("range"),
         active = resource.is_some(),
         "received cast relay request"
     );
-    let response = match resource {
-        Some(resource) => resource_response(&request, resource, artwork),
-        None => Ok(empty_response(StatusCode(404))),
+    match resource {
+        Some(resource) => resource_response(&method, version, &headers, resource, artwork).await,
+        None => Ok(StatusCode::NOT_FOUND.into_response()),
     }
     .unwrap_or_else(|error| {
         tracing::debug!(%error, "cast relay request failed");
-        empty_response(StatusCode(502))
-    });
-    let _ = request.respond(response);
+        StatusCode::BAD_GATEWAY.into_response()
+    })
 }
 
-fn resource_response(
-    request: &Request,
+async fn resource_response(
+    method: &Method,
+    version: Version,
+    headers: &HeaderMap,
     resource: RelayResource,
     artwork: bool,
-) -> Result<ResponseBox, String> {
-    if !matches!(request.method(), Method::Get | Method::Head) {
-        return Ok(empty_response(StatusCode(405)));
+) -> Result<Response, String> {
+    if !matches!(*method, Method::GET | Method::HEAD) {
+        return Ok(StatusCode::METHOD_NOT_ALLOWED.into_response());
     }
-    let range = request
-        .headers()
-        .iter()
-        .find(|header| header.field.equiv("Range"))
-        .map(|header| header.value.as_str().to_string());
-    if artwork {
-        artwork_response(request.method(), range.as_deref(), resource)
+    let range = headers.get("range").and_then(|value| value.to_str().ok());
+    let response = if artwork {
+        let path = resource
+            .artwork_path
+            .ok_or_else(|| "cast artwork is unavailable".to_string())?;
+        let content_type = artwork_content_type(&path).await?;
+        file_response(method, range, path, content_type).await
     } else if resource.transcode {
-        transcoded_response(request.method(), range.as_deref(), resource)
+        transcoded_response(method, range, resource).await
     } else if resource.stream.uri().starts_with("file:") {
-        local_response(request.method(), range.as_deref(), resource)
+        let path = Url::parse(resource.stream.uri())
+            .map_err(|error| error.to_string())?
+            .to_file_path()
+            .map_err(|()| "the local cast URL is not a file path".to_string())?;
+        file_response(method, range, path, &resource.content_type).await
     } else {
-        remote_response(request.method(), range.as_deref(), resource)
+        remote_response(method, range, resource).await
+    }?;
+    if version == Version::HTTP_10
+        && !response.headers().contains_key("content-length")
+        && response.body().size_hint().exact().is_none()
+    {
+        // HTTP/1.0 receivers previously received a length even for transcoded media.
+        let file = tokio::task::spawn_blocking(tempfile::tempfile)
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|error| error.to_string())?;
+        let mut file = tokio::fs::File::from_std(file);
+        let (mut parts, body) = response.into_parts();
+        let mut reader = StreamReader::new(body.into_data_stream().map_err(std::io::Error::other));
+        let length = tokio::io::copy(&mut reader, &mut file)
+            .await
+            .map_err(|error| error.to_string())?;
+        file.seek(SeekFrom::Start(0))
+            .await
+            .map_err(|error| error.to_string())?;
+        parts
+            .headers
+            .insert("content-length", HeaderValue::from(length));
+        return Ok(Response::from_parts(
+            parts,
+            Body::from_stream(ReaderStream::new(file)),
+        ));
     }
+    Ok(response)
 }
 
-fn transcoded_response(
+async fn transcoded_response(
     method: &Method,
     range: Option<&str>,
     resource: RelayResource,
-) -> Result<ResponseBox, String> {
+) -> Result<Response, String> {
     if range.is_some() {
-        return Ok(empty_response(StatusCode(416)));
+        return Ok(StatusCode::RANGE_NOT_SATISFIABLE.into_response());
     }
-    let headers = vec![
-        header("Content-Type", "audio/mpeg")?,
-        header("Access-Control-Allow-Origin", "*")?,
-        header("transferMode.dlna.org", "Streaming")?,
-        header(
-            "contentFeatures.dlna.org",
-            "DLNA.ORG_PN=MP3;DLNA.ORG_OP=00;DLNA.ORG_CI=1;DLNA.ORG_FLAGS=01500000000000000000000000000000",
-        )?,
-    ];
-    if matches!(method, Method::Head) {
-        return Ok(Response::new(
-            StatusCode(200),
-            headers,
-            Cursor::new(Vec::new()),
-            None,
-            None,
-        )
-        .boxed());
-    }
-    let reader = audio_processing::TranscodedAudioReader::mp3(&resource.stream.stream)?;
-    Ok(Response::new(StatusCode(200), headers, reader, None, None).boxed())
+    let response = Response::builder()
+        .header("Content-Type", "audio/mpeg")
+        .header("Access-Control-Allow-Origin", "*")
+        .header("transferMode.dlna.org", "Streaming")
+        .header("contentFeatures.dlna.org", "DLNA.ORG_PN=MP3;DLNA.ORG_OP=00;DLNA.ORG_CI=1;DLNA.ORG_FLAGS=01500000000000000000000000000000");
+    let body = if *method == Method::HEAD {
+        Body::from_stream(futures_util::stream::empty::<
+            Result<axum::body::Bytes, std::io::Error>,
+        >())
+    } else {
+        let mut reader = tokio::task::spawn_blocking(move || {
+            audio_processing::TranscodedAudioReader::mp3(&resource.stream.stream)
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+        let (sender, receiver) = mpsc::channel(2);
+        tokio::task::spawn_blocking(move || {
+            let mut buffer = [0; 32 * 1024];
+            loop {
+                let chunk = match reader.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(length) => Ok(axum::body::Bytes::copy_from_slice(&buffer[..length])),
+                    Err(error) => Err(error),
+                };
+                let failed = chunk.is_err();
+                if sender.blocking_send(chunk).is_err() || failed {
+                    break;
+                }
+            }
+        });
+        Body::from_stream(futures_util::stream::unfold(
+            receiver,
+            |mut receiver| async { receiver.recv().await.map(|chunk| (chunk, receiver)) },
+        ))
+    };
+    response.body(body).map_err(|error| error.to_string())
 }
 
-fn local_response(
-    method: &Method,
-    range: Option<&str>,
-    resource: RelayResource,
-) -> Result<ResponseBox, String> {
-    let url = Url::parse(resource.stream.uri()).map_err(|error| error.to_string())?;
-    let path = url
-        .to_file_path()
-        .map_err(|()| "the local cast URL is not a file path".to_string())?;
-    file_response(method, range, path, &resource.content_type)
-}
-
-fn artwork_response(
-    method: &Method,
-    range: Option<&str>,
-    resource: RelayResource,
-) -> Result<ResponseBox, String> {
-    let path = resource
-        .artwork_path
-        .ok_or_else(|| "cast artwork is unavailable".to_string())?;
-    let content_type = artwork_content_type(&path)?;
-    file_response(method, range, path, content_type)
-}
-
-fn file_response(
+async fn file_response(
     method: &Method,
     range: Option<&str>,
     path: PathBuf,
     content_type: &str,
-) -> Result<ResponseBox, String> {
-    let mut file = File::open(path).map_err(|error| error.to_string())?;
-    let total = file.metadata().map_err(|error| error.to_string())?.len();
+) -> Result<Response, String> {
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|error| error.to_string())?;
+    let total = file
+        .metadata()
+        .await
+        .map_err(|error| error.to_string())?
+        .len();
     let selected = match parse_range(range, total) {
         Ok(selected) => selected,
-        Err(_) => return Ok(empty_response(StatusCode(416))),
+        Err(_) => return Ok(StatusCode::RANGE_NOT_SATISFIABLE.into_response()),
     };
-    let (status, start, length) = selected.map_or((StatusCode(200), 0, total), |(start, end)| {
-        (StatusCode(206), start, end - start + 1)
+    let (status, start, length) = selected.map_or((StatusCode::OK, 0, total), |(start, end)| {
+        (StatusCode::PARTIAL_CONTENT, start, end - start + 1)
     });
     file.seek(SeekFrom::Start(start))
+        .await
         .map_err(|error| error.to_string())?;
-    let headers = relay_headers(
+    let mut headers = relay_headers(
         content_type,
         selected.map(|(start, end)| (start, end, total)),
     )?;
-    if matches!(method, Method::Head) {
-        let length =
-            usize::try_from(length).map_err(|_| "cast resource is too large".to_string())?;
-        return Ok(
-            Response::new(status, headers, Cursor::new(Vec::new()), Some(length), None)
-                .with_chunked_threshold(usize::MAX)
-                .boxed(),
-        );
-    }
-    let length = usize::try_from(length).map_err(|_| "cast resource is too large".to_string())?;
-    Ok(Response::new(
-        status,
-        headers,
-        file.take(length as u64),
-        Some(length),
-        None,
-    )
-    .with_chunked_threshold(usize::MAX)
-    .boxed())
+    headers.insert("content-length", HeaderValue::from(length));
+    let body = if *method == Method::HEAD {
+        Body::empty()
+    } else {
+        Body::from_stream(ReaderStream::new(file.take(length)))
+    };
+    Ok((status, headers, body).into_response())
 }
 
-fn artwork_content_type(path: &Path) -> Result<&'static str, String> {
-    let mut file = File::open(path).map_err(|error| error.to_string())?;
+async fn artwork_content_type(path: &Path) -> Result<&'static str, String> {
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|error| error.to_string())?;
     let mut signature = [0_u8; 12];
     let length = file
         .read(&mut signature)
+        .await
         .map_err(|error| error.to_string())?;
     if length >= 8 && signature[..8] == *b"\x89PNG\r\n\x1a\n" {
         Ok("image/png")
@@ -653,29 +674,23 @@ fn artwork_content_type(path: &Path) -> Result<&'static str, String> {
     }
 }
 
-fn remote_response(
+async fn remote_response(
     method: &Method,
     range: Option<&str>,
     resource: RelayResource,
-) -> Result<ResponseBox, String> {
-    if matches!(method, Method::Head)
+) -> Result<Response, String> {
+    if *method == Method::HEAD
         && let Some(length) = resource.content_length
     {
-        let headers = relay_headers(&resource.content_type, None)?;
-        let length =
-            usize::try_from(length).map_err(|_| "cast resource is too large".to_string())?;
-        return Ok(Response::new(
-            StatusCode(200),
-            headers,
-            Cursor::new(Vec::new()),
-            Some(length),
-            None,
-        )
-        .with_chunked_threshold(usize::MAX)
-        .boxed());
+        let mut headers = relay_headers(&resource.content_type, None)?;
+        headers.insert("content-length", HeaderValue::from(length));
+        return Ok((headers, Body::empty()).into_response());
     }
-    let client = upstream_client(&resource.stream)?;
-    let mut upstream = if matches!(method, Method::Head) {
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(resource.stream.trust_invalid_certificate())
+        .build()
+        .map_err(|error| error.to_string())?;
+    let mut upstream = if *method == Method::HEAD {
         client.head(resource.stream.uri())
     } else {
         client.get(resource.stream.uri())
@@ -683,7 +698,7 @@ fn remote_response(
     if let Some(range) = range {
         upstream = upstream.header(reqwest::header::RANGE, range);
     }
-    let response = upstream.send().map_err(crate::private_http_error)?;
+    let response = upstream.send().await.map_err(crate::private_http_error)?;
     tracing::debug!(
         method = ?method,
         range = range.is_some(),
@@ -691,40 +706,23 @@ fn remote_response(
         content_length = response.content_length(),
         "received cast relay upstream response"
     );
-    let status = StatusCode(response.status().as_u16());
+    let status = response.status();
     let length = response
         .headers()
         .get(reqwest::header::CONTENT_LENGTH)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<usize>().ok())
-        .or_else(|| {
-            response
-                .content_length()
-                .and_then(|length| usize::try_from(length).ok())
-        })
-        .or_else(|| {
-            range
-                .is_none()
-                .then_some(resource.content_length)
-                .flatten()
-                .and_then(|length| usize::try_from(length).ok())
-        });
+        .and_then(|value| value.parse::<u64>().ok())
+        .or_else(|| response.content_length())
+        .or_else(|| range.is_none().then_some(resource.content_length).flatten());
     let mut headers = relay_headers(&resource.content_type, None)?;
-    if let Some(content_range) = response.headers().get(reqwest::header::CONTENT_RANGE)
-        && let Ok(content_range) = content_range.to_str()
-    {
-        headers.push(header("Content-Range", content_range)?);
+    if let Some(content_range) = response.headers().get(reqwest::header::CONTENT_RANGE) {
+        headers.insert("content-range", content_range.clone());
     }
-    if matches!(method, Method::Head) {
-        return Ok(
-            Response::new(status, headers, Cursor::new(Vec::new()), length, None)
-                .with_chunked_threshold(usize::MAX)
-                .boxed(),
-        );
+    if let Some(length) = length {
+        headers.insert("content-length", HeaderValue::from(length));
     }
-    Ok(Response::new(status, headers, response, length, None)
-        .with_chunked_threshold(usize::MAX)
-        .boxed())
+    let body = Body::from_stream(response.bytes_stream());
+    Ok((status, headers, body).into_response())
 }
 
 fn parse_range(value: Option<&str>, total: u64) -> Result<Option<(u64, u64)>, String> {
@@ -771,7 +769,7 @@ fn parse_range(value: Option<&str>, total: u64) -> Result<Option<(u64, u64)>, St
 fn relay_headers(
     content_type: &str,
     content_range: Option<(u64, u64, u64)>,
-) -> Result<Vec<Header>, String> {
+) -> Result<HeaderMap, String> {
     let profile = match content_type
         .split(';')
         .next()
@@ -783,7 +781,7 @@ fn relay_headers(
         "audio/mpeg" | "audio/mp3" => "DLNA.ORG_PN=MP3;",
         _ => "",
     };
-    let mut headers = vec![
+    let mut headers: HeaderMap = [
         header("Content-Type", content_type)?,
         header("Accept-Ranges", "bytes")?,
         header("Access-Control-Allow-Origin", "*")?,
@@ -794,12 +792,14 @@ fn relay_headers(
                 "{profile}DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01500000000000000000000000000000"
             ),
         )?,
-    ];
+    ].into_iter().collect();
     if let Some((start, end, total)) = content_range {
-        headers.push(header(
-            "Content-Range",
-            &format!("bytes {start}-{end}/{total}"),
-        )?);
+        headers.insert(
+            "content-range",
+            format!("bytes {start}-{end}/{total}")
+                .parse()
+                .map_err(|_| "invalid cast content range".to_string())?,
+        );
     }
     Ok(headers)
 }
@@ -852,13 +852,14 @@ fn upstream_client(stream: &PreparedStream) -> Result<reqwest::blocking::Client,
         .map_err(|error| error.to_string())
 }
 
-fn empty_response(status: StatusCode) -> ResponseBox {
-    Response::new(status, Vec::new(), Cursor::new(Vec::new()), Some(0), None).boxed()
-}
-
-fn header(name: &str, value: &str) -> Result<Header, String> {
-    Header::from_bytes(name.as_bytes(), value.as_bytes())
-        .map_err(|()| format!("invalid cast relay header {name}"))
+fn header(name: &str, value: &str) -> Result<(HeaderName, HeaderValue), String> {
+    Ok((
+        name.parse()
+            .map_err(|_| format!("invalid cast relay header {name}"))?,
+        value
+            .parse()
+            .map_err(|_| format!("invalid cast relay header {name}"))?,
+    ))
 }
 
 fn random_token() -> Result<String, String> {
@@ -947,9 +948,10 @@ fn directly_supported(content_type: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
     use std::io::Write;
     use std::sync::atomic::AtomicUsize;
-    use std::sync::mpsc;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
 
@@ -967,9 +969,8 @@ mod tests {
     fn flac_is_not_advertised_as_a_nonstandard_dlna_profile() {
         let headers = relay_headers("audio/flac", None).expect("FLAC relay headers");
         let features = headers
-            .iter()
-            .find(|header| header.field.equiv("contentFeatures.dlna.org"))
-            .map(|header| header.value.as_str())
+            .get("contentfeatures.dlna.org")
+            .and_then(|header| header.to_str().ok())
             .expect("DLNA content features");
 
         assert!(!features.contains("DLNA.ORG_PN"));
@@ -1237,19 +1238,20 @@ mod tests {
 
     #[test]
     fn remote_http_media_uses_the_provider_url_directly() {
-        let upstream = Server::http("127.0.0.1:0").expect("upstream server");
-        let upstream_address = upstream.server_addr().to_ip().expect("upstream address");
-        let (sent, received) = mpsc::channel();
-        let upstream_thread = thread::spawn(move || {
-            for _ in 0..3 {
-                let request = upstream.recv().expect("upstream request");
-                sent.send(request.url().to_string())
-                    .expect("record upstream URL");
-                request
-                    .respond(Response::from_string("remote audio"))
-                    .expect("upstream response");
-            }
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let upstream = runtime.block_on(async {
+            let server = MockServer::start().await;
+            Mock::given(wiremock::matchers::any())
+                .respond_with(ResponseTemplate::new(200).set_body_string("remote audio"))
+                .expect(3)
+                .mount(&server)
+                .await;
+            server
         });
+        let upstream_address = *upstream.address();
         let stream = PreparedStream::from(playback::ResolvedStream::new(format!(
             "http://{upstream_address}/audio.mp3?api_key=secret"
         )));
@@ -1276,14 +1278,14 @@ mod tests {
             .text()
             .expect("relay body");
         assert_eq!(body, "remote audio");
-        let upstream_urls = received.try_iter().collect::<Vec<_>>();
+        let upstream_urls = runtime.block_on(upstream.received_requests()).unwrap();
         assert_eq!(upstream_urls.len(), 3);
         assert!(
             upstream_urls
                 .iter()
-                .all(|url| url == "/audio.mp3?api_key=secret")
+                .all(|request| request.url.path() == "/audio.mp3"
+                    && request.url.query() == Some("api_key=secret"))
         );
-        upstream_thread.join().expect("upstream thread");
         relay.shutdown();
     }
 

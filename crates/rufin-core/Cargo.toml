@@ -30,7 +30,7 @@ downloads.workspace = true
 getrandom.workspace = true
 glib.workspace = true
 gio.workspace = true
-md5.workspace = true
+md5_digest.workspace = true
 playback.workspace = true
 playback-cast.workspace = true
 reqwest = { workspace = true, features = ["blocking", "json"] }

@@ -1156,11 +1156,10 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
     use std::sync::atomic::AtomicBool;
-    use std::sync::{Arc, mpsc};
-    use std::thread;
+    use std::sync::{Arc, Mutex, mpsc};
 
-    use tiny_http::{Response, Server};
     use url::Url;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
     use crate::upnp_transport::service_type_matches;
@@ -1190,49 +1189,39 @@ mod tests {
     fn test_renderer(
         description: &'static str,
         action_count: usize,
-        mut respond: impl FnMut(&str, &str) -> Result<String, String> + Send + 'static,
+        respond: impl FnMut(&str, &str) -> Result<String, String> + Send + 'static,
     ) -> (
         std::net::SocketAddr,
         mpsc::Receiver<(String, String)>,
-        thread::JoinHandle<()>,
+        MockServer,
     ) {
-        let server = Server::http("127.0.0.1:0").expect("fake renderer");
-        let address = server.server_addr().to_ip().expect("renderer address");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let server = runtime.block_on(MockServer::start());
+        let address = *server.address();
         let (sent, received) = mpsc::channel();
-        let renderer = thread::spawn(move || {
-            server
-                .recv()
-                .expect("description request")
-                .respond(Response::from_string(description))
-                .expect("device description response");
-            for _ in 0..action_count {
-                let mut request = server.recv().expect("renderer request");
-                let action = request
-                    .headers()
-                    .iter()
-                    .find(|header| header.field.equiv("SOAPAction"))
-                    .map(|header| header.value.as_str().to_string())
-                    .expect("SOAP action");
-                let mut body = String::new();
-                request
-                    .as_reader()
-                    .read_to_string(&mut body)
-                    .expect("SOAP body");
+        let respond = Mutex::new(respond);
+        runtime.block_on(async {
+            Mock::given(wiremock::matchers::method("GET"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(description))
+                .expect(1).mount(&server).await;
+            Mock::given(wiremock::matchers::method("POST"))
+                .respond_with(move |request: &wiremock::Request| {
+                let action = request.headers.get("SOAPAction").unwrap().to_str().unwrap().to_string();
+                let body = String::from_utf8(request.body.clone()).expect("SOAP body");
                 sent.send((action.clone(), body.clone()))
                     .expect("record SOAP request");
-                match respond(&action, &body) {
-                    Ok(values) => request
-                        .respond(Response::from_string(format!(
+                match respond.lock().unwrap()(&action, &body) {
+                    Ok(values) => ResponseTemplate::new(200).set_body_string(format!(
                             r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:Response xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">{values}</u:Response></s:Body></s:Envelope>"#,
-                        )))
-                        .expect("renderer response"),
-                    Err(error) => request
-                        .respond(Response::from_string(error).with_status_code(500))
-                        .expect("renderer failure response"),
+                        )),
+                    Err(error) => ResponseTemplate::new(500).set_body_string(error),
                 }
-            }
+            }).expect(action_count as u64).mount(&server).await;
         });
-        (address, received, renderer)
+        (address, received, server)
     }
 
     #[test]
@@ -1349,22 +1338,13 @@ mod tests {
                 .map(|current| current.published.logical_offset_millis),
             Some(42_000)
         );
-        renderer.join().expect("renderer thread");
+        drop(renderer);
     }
 
     #[test]
     fn connection_probe_rejects_an_unusable_control_service() {
-        let server = Server::http("127.0.0.1:0").expect("fake renderer");
-        let address = server.server_addr().to_ip().expect("renderer address");
-        let renderer = thread::spawn(move || {
-            let description = server.recv().expect("description request");
-            description
-                .respond(Response::from_string(TEST_DEVICE_DESCRIPTION))
-                .expect("device description response");
-            let probe = server.recv().expect("connection probe");
-            probe
-                .respond(Response::from_string("renderer unavailable").with_status_code(500))
-                .expect("connection failure response");
+        let (address, _received, renderer) = test_renderer(TEST_DEVICE_DESCRIPTION, 1, |_, _| {
+            Err("renderer unavailable".to_string())
         });
         let device = test_device(address);
         let mut controller = UpnpController::new(device).expect("controller");
@@ -1374,7 +1354,7 @@ mod tests {
             .expect_err("unusable control service");
 
         assert!(error.contains("GetTransportInfo"), "error={error}");
-        renderer.join().expect("renderer thread");
+        drop(renderer);
     }
 
     #[test]
@@ -1391,7 +1371,7 @@ mod tests {
         assert_eq!(actions.len(), 1);
         assert!(actions[0].0.contains("GetTransportInfo"));
         assert!(!actions[0].0.contains("#Play"));
-        renderer.join().expect("renderer thread");
+        drop(renderer);
     }
 
     #[test]
@@ -1418,7 +1398,7 @@ mod tests {
         let actions = received.try_iter().collect::<Vec<_>>();
         assert_eq!(actions.len(), 3);
         assert!(!actions.iter().any(|(action, _)| action.contains("#Play")));
-        renderer.join().expect("renderer thread");
+        drop(renderer);
     }
 
     #[test]
@@ -1470,7 +1450,7 @@ mod tests {
         assert!(actions[5].0.contains("GetCurrentTransportActions"));
         assert!(actions[6].0.contains("GetTransportInfo"));
         assert!(actions[7].0.contains("#Play"));
-        renderer.join().expect("renderer thread");
+        drop(renderer);
     }
 
     #[test]
@@ -1511,7 +1491,7 @@ mod tests {
         assert!(actions[6].0.contains("#Play"));
         assert!(actions[7].0.contains("GetCurrentTransportActions"));
         assert!(actions[8].0.contains("#Stop"));
-        renderer.join().expect("renderer thread");
+        drop(renderer);
     }
 
     #[test]
@@ -1546,63 +1526,31 @@ mod tests {
 
     #[test]
     fn cue_start_uses_a_bounded_representation_and_prepares_next() {
-        let server = Server::http("127.0.0.1:0").expect("fake renderer");
-        let address = server.server_addr().to_ip().expect("renderer address");
-        let (sent, received) = mpsc::channel();
-        let renderer = thread::spawn(move || {
-            let mut current_uri = String::new();
-            let mut seeked = false;
-            let mut playing = false;
-            for index in 0..12 {
-                let mut request = server.recv().expect("renderer request");
-                if index == 0 {
-                    request
-                        .respond(Response::from_string(TEST_DEVICE_DESCRIPTION))
-                        .expect("device description response");
-                    continue;
-                }
-                let action = request
-                    .headers()
-                    .iter()
-                    .find(|header| header.field.equiv("SOAPAction"))
-                    .map(|header| header.value.as_str().to_string())
-                    .expect("SOAP action");
-                let mut body = String::new();
-                request
-                    .as_reader()
-                    .read_to_string(&mut body)
-                    .expect("SOAP body");
+        let mut current_uri = String::new();
+        let mut seeked = false;
+        let mut playing = false;
+        let (address, received, renderer) = test_renderer(
+            TEST_DEVICE_DESCRIPTION,
+            11,
+            move |action, body| {
                 if action.contains("SetAVTransportURI") {
-                    current_uri = xml_element(&body, "CurrentURI").unwrap_or_default();
+                    current_uri = xml_element(body, "CurrentURI").unwrap_or_default();
                 } else if action.contains("SetNextAVTransportURI") {
-                    current_uri = xml_element(&body, "NextURI").unwrap_or_default();
+                    current_uri = xml_element(body, "NextURI").unwrap_or_default();
                 } else if action.contains("#Play") {
                     playing = true;
                 } else if action.contains("#Seek") {
                     seeked = true;
                 }
-                sent.send((action, body)).expect("record SOAP request");
-                let values = if request
-                    .headers()
-                    .iter()
-                    .any(|header| header.value.as_str().contains("GetTransportInfo"))
-                {
+                let values = if action.contains("GetTransportInfo") {
                     if playing {
                         "<CurrentTransportState>PLAYING</CurrentTransportState>".to_string()
                     } else {
                         "<CurrentTransportState>STOPPED</CurrentTransportState>".to_string()
                     }
-                } else if request
-                    .headers()
-                    .iter()
-                    .any(|header| header.value.as_str().contains("GetCurrentTransportActions"))
-                {
+                } else if action.contains("GetCurrentTransportActions") {
                     "<Actions>Play,Pause,Stop,Seek</Actions>".to_string()
-                } else if request
-                    .headers()
-                    .iter()
-                    .any(|header| header.value.as_str().contains("GetPositionInfo"))
-                {
+                } else if action.contains("GetPositionInfo") {
                     if seeked {
                         format!(
                             "<TrackDuration>00:04:19</TrackDuration><TrackURI>{current_uri}</TrackURI><RelTime>00:00:12</RelTime>"
@@ -1615,13 +1563,9 @@ mod tests {
                 } else {
                     String::new()
                 };
-                request
-                    .respond(Response::from_string(format!(
-                        r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:Response xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">{values}</u:Response></s:Body></s:Envelope>"#,
-                    )))
-                    .expect("SOAP response");
-            }
-        });
+                Ok(values)
+            },
+        );
 
         let device = test_device(address);
         let directory = tempfile::tempdir().expect("track directory");
@@ -1685,79 +1629,48 @@ mod tests {
             }),
             "transition={transition:?} actions={actions:?}"
         );
-        renderer.join().expect("renderer thread");
+        drop(renderer);
     }
 
     #[test]
     fn output_switch_stays_silent_until_one_startup_seek_is_confirmed() {
-        let server = Server::http("127.0.0.1:0").expect("fake renderer");
-        let address = server.server_addr().to_ip().expect("renderer address");
-        let (sent, received) = mpsc::channel();
-        let renderer = thread::spawn(move || {
-            let mut current_uri = String::new();
-            let mut seek_attempts = 0;
-            let mut playing = false;
-            for index in 0..24 {
-                let mut request = server.recv().expect("renderer request");
-                if index == 0 {
-                    let description = format!(
-                        r#"<root xmlns="urn:schemas-upnp-org:device-1-0"><device><deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType><friendlyName>Test Renderer</friendlyName><serviceList><service><serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType><serviceId>urn:upnp-org:serviceId:AVTransport</serviceId><SCPDURL>/transport.xml</SCPDURL><controlURL>/transport</controlURL><eventSubURL>/events</eventSubURL></service><service><serviceType>urn:schemas-upnp-org:service:RenderingControl:1</serviceType><serviceId>urn:upnp-org:serviceId:RenderingControl</serviceId><SCPDURL>/rendering.xml</SCPDURL><controlURL>/rendering</controlURL><eventSubURL>/rendering-events</eventSubURL></service></serviceList></device></root>"#
-                    );
-                    request
-                        .respond(Response::from_string(description))
-                        .expect("device description response");
-                    continue;
-                }
-                let action = request
-                    .headers()
-                    .iter()
-                    .find(|header| header.field.equiv("SOAPAction"))
-                    .map(|header| header.value.as_str().to_string())
-                    .expect("SOAP action");
-                let mut body = String::new();
-                request
-                    .as_reader()
-                    .read_to_string(&mut body)
-                    .expect("SOAP body");
-                if action.contains("SetAVTransportURI") {
-                    current_uri = xml_element(&body, "CurrentURI").unwrap_or_default();
-                } else if action.contains("#Play") {
-                    playing = true;
-                } else if action.contains("#Seek") {
-                    seek_attempts += 1;
-                }
-                sent.send((action.clone(), body))
-                    .expect("record SOAP request");
-                let values = if action.contains("GetTransportInfo") {
-                    if playing {
-                        "<CurrentTransportState>PLAYING</CurrentTransportState>".to_string()
-                    } else {
-                        "<CurrentTransportState>STOPPED</CurrentTransportState>".to_string()
-                    }
-                } else if action.contains("GetVolume") {
-                    "<CurrentVolume>40</CurrentVolume>".to_string()
-                } else if action.contains("GetMute") {
-                    "<CurrentMute>0</CurrentMute>".to_string()
-                } else if action.contains("GetPositionInfo") {
-                    format!(
-                        "<TrackDuration>00:04:19</TrackDuration><TrackURI>{current_uri}</TrackURI><RelTime>{}</RelTime>",
-                        if seek_attempts >= 2 {
-                            "00:00:42"
-                        } else {
-                            "00:00:00"
-                        }
-                    )
-                } else if action.contains("GetCurrentTransportActions") {
-                    "<Actions>Play,Pause,Stop,Seek</Actions>".to_string()
-                } else {
-                    String::new()
-                };
-                request
-                    .respond(Response::from_string(format!(
-                        r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:Response xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">{values}</u:Response></s:Body></s:Envelope>"#,
-                    )))
-                    .expect("SOAP response");
+        let mut current_uri = String::new();
+        let mut seek_attempts = 0;
+        let mut playing = false;
+        let description = r#"<root xmlns="urn:schemas-upnp-org:device-1-0"><device><deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType><friendlyName>Test Renderer</friendlyName><serviceList><service><serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType><serviceId>urn:upnp-org:serviceId:AVTransport</serviceId><SCPDURL>/transport.xml</SCPDURL><controlURL>/transport</controlURL><eventSubURL>/events</eventSubURL></service><service><serviceType>urn:schemas-upnp-org:service:RenderingControl:1</serviceType><serviceId>urn:upnp-org:serviceId:RenderingControl</serviceId><SCPDURL>/rendering.xml</SCPDURL><controlURL>/rendering</controlURL><eventSubURL>/rendering-events</eventSubURL></service></serviceList></device></root>"#;
+        let (address, received, renderer) = test_renderer(description, 23, move |action, body| {
+            if action.contains("SetAVTransportURI") {
+                current_uri = xml_element(body, "CurrentURI").unwrap_or_default();
+            } else if action.contains("#Play") {
+                playing = true;
+            } else if action.contains("#Seek") {
+                seek_attempts += 1;
             }
+            let values = if action.contains("GetTransportInfo") {
+                if playing {
+                    "<CurrentTransportState>PLAYING</CurrentTransportState>".to_string()
+                } else {
+                    "<CurrentTransportState>STOPPED</CurrentTransportState>".to_string()
+                }
+            } else if action.contains("GetVolume") {
+                "<CurrentVolume>40</CurrentVolume>".to_string()
+            } else if action.contains("GetMute") {
+                "<CurrentMute>0</CurrentMute>".to_string()
+            } else if action.contains("GetPositionInfo") {
+                format!(
+                    "<TrackDuration>00:04:19</TrackDuration><TrackURI>{current_uri}</TrackURI><RelTime>{}</RelTime>",
+                    if seek_attempts >= 2 {
+                        "00:00:42"
+                    } else {
+                        "00:00:00"
+                    }
+                )
+            } else if action.contains("GetCurrentTransportActions") {
+                "<Actions>Play,Pause,Stop,Seek</Actions>".to_string()
+            } else {
+                String::new()
+            };
+            Ok(values)
         });
 
         let device = test_device(address);
@@ -1833,48 +1746,27 @@ mod tests {
         assert!(actions[21].1.contains("<DesiredVolume>40</DesiredVolume>"));
         assert!(actions[22].0.contains("SetMute"));
         assert!(actions[22].1.contains("<DesiredMute>0</DesiredMute>"));
-        renderer.join().expect("renderer thread");
+        drop(renderer);
         relay.shutdown();
     }
 
     #[test]
     fn transient_status_failure_does_not_fail_upnp_playback() {
-        let server = Server::http("127.0.0.1:0").expect("fake renderer");
-        let address = server.server_addr().to_ip().expect("renderer address");
-        let renderer = thread::spawn(move || {
-            let mut current_uri = String::new();
-            let mut playing = false;
-            let mut failed_status = false;
-            for index in 0..12 {
-                let mut request = server.recv().expect("renderer request");
-                if index == 0 {
-                    request
-                        .respond(Response::from_string(TEST_DEVICE_DESCRIPTION))
-                        .expect("device description response");
-                    continue;
-                }
-                let action = request
-                    .headers()
-                    .iter()
-                    .find(|header| header.field.equiv("SOAPAction"))
-                    .map(|header| header.value.as_str().to_string())
-                    .expect("SOAP action");
-                let mut body = String::new();
-                request
-                    .as_reader()
-                    .read_to_string(&mut body)
-                    .expect("SOAP body");
+        let mut current_uri = String::new();
+        let mut playing = false;
+        let mut failed_status = false;
+        let (address, _received, renderer) = test_renderer(
+            TEST_DEVICE_DESCRIPTION,
+            11,
+            move |action, body| {
                 if action.contains("SetAVTransportURI") {
-                    current_uri = xml_element(&body, "CurrentURI").unwrap_or_default();
+                    current_uri = xml_element(body, "CurrentURI").unwrap_or_default();
                 } else if action.contains("#Play") {
                     playing = true;
                 }
                 if action.contains("GetTransportInfo") && playing && !failed_status {
                     failed_status = true;
-                    request
-                        .respond(Response::from_string("renderer busy").with_status_code(500))
-                        .expect("temporary failure response");
-                    continue;
+                    return Err("renderer busy".to_string());
                 }
                 let values = if action.contains("GetTransportInfo") {
                     if playing {
@@ -1891,13 +1783,9 @@ mod tests {
                 } else {
                     String::new()
                 };
-                request
-                    .respond(Response::from_string(format!(
-                        r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:Response xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">{values}</u:Response></s:Body></s:Envelope>"#,
-                    )))
-                    .expect("SOAP response");
-            }
-        });
+                Ok(values)
+            },
+        );
 
         let device = test_device(address);
         let (_directory, stream) = test_stream();
@@ -1922,7 +1810,7 @@ mod tests {
                 state: BackendState::Playing,
             } if *run == RunId::new(1)
         )));
-        renderer.join().expect("renderer thread");
+        drop(renderer);
     }
 
     #[test]
