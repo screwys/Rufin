@@ -8192,19 +8192,6 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/redb/redb-4.3.0.crate",
-        "sha256": "fb338a6c67830a61bed824b78c2bb034ab1ff401a20616bd7957524f4fdc2f22",
-        "dest": "cargo/vendor/redb-4.3.0"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"fb338a6c67830a61bed824b78c2bb034ab1ff401a20616bd7957524f4fdc2f22\", \"files\": {}}",
-        "dest": "cargo/vendor/redb-4.3.0",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/redox_syscall/redox_syscall-0.5.18.crate",
         "sha256": "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d",
         "dest": "cargo/vendor/redox_syscall-0.5.18"
@@ -8252,19 +8239,6 @@
         "type": "inline",
         "contents": "{\"package\": \"92ecd8964f8453721699a1ed72037b0db49ce2f5a5138486ee89bed6f67cdf3a\", \"files\": {}}",
         "dest": "cargo/vendor/ref-cast-impl-1.0.27",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/reflink-copy/reflink-copy-0.1.30.crate",
-        "sha256": "d9dd7ab4af0363d5ccfd2838d782a28196cf32a5cc2e4fe3c5dc83f2be588b8b",
-        "dest": "cargo/vendor/reflink-copy-0.1.30"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"d9dd7ab4af0363d5ccfd2838d782a28196cf32a5cc2e4fe3c5dc83f2be588b8b\", \"files\": {}}",
-        "dest": "cargo/vendor/reflink-copy-0.1.30",
         "dest-filename": ".cargo-checksum.json"
     },
     {

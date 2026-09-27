@@ -230,6 +230,13 @@ impl ConnectOwner {
         }
         let remove_source = source != target && source_managed;
         file.path = file_uri(&target)?;
+        if !reused && let Some(network) = self.network.lock().await.as_ref() {
+            network
+                .media()
+                .relocate(&source, &target)
+                .await
+                .map_err(error)?;
+        }
         self.database
             .connect_save_media_file(&file)
             .await
@@ -298,18 +305,9 @@ impl ConnectOwner {
             removed = 1;
         }
         if let (Some(network), Some(hash)) = (self.network.lock().await.as_ref(), &file.hash) {
-            let encoding = if file.encoding == "mp3" {
-                Encoding::Mp3
-            } else {
-                Encoding::Original
-            };
             network
                 .media()
-                .forget(
-                    hash,
-                    &media_key(&file.media_uri, &file.revision, encoding),
-                    blob_used,
-                )
+                .forget(hash, blob_used)
                 .await
                 .map_err(error)?;
         }
@@ -329,6 +327,49 @@ impl ConnectOwner {
         {
             cancel.cancel();
         }
+    }
+
+    async fn offer_saved_media(
+        &self,
+        uri: &str,
+        encoding: Encoding,
+        revision: Option<&str>,
+    ) -> Result<Option<serde_json::Value>, String> {
+        let _files = self.media_files.lock().await;
+        let Some(mut saved) = self
+            .database
+            .connect_media_file(uri, encoding.name())
+            .await
+            .map_err(error)?
+            .filter(|saved| revision.is_none_or(|revision| saved.revision == revision))
+        else {
+            return Ok(None);
+        };
+        let Some(path) = file_path(&saved) else {
+            return Ok(None);
+        };
+        let hash = self
+            .connected_network()
+            .await?
+            .media()
+            .publish(&path)
+            .await
+            .map_err(error)?;
+        if saved.hash.as_ref() != Some(&hash) {
+            saved.hash = Some(hash.clone());
+            self.database
+                .connect_save_media_file(&saved)
+                .await
+                .map_err(error)?;
+        }
+        serde_json::to_value(OfferedMedia {
+            hash: Some(hash),
+            revision: saved.revision,
+            encoding,
+            size: tokio::fs::metadata(path).await.map_err(error)?.len(),
+        })
+        .map(Some)
+        .map_err(error)
     }
 
     pub(super) async fn serve_media(
@@ -370,22 +411,8 @@ impl ConnectOwner {
                 .connect_received_occurrence(&current)
                 .await
                 .map_err(error)?;
-            if received
-                && let Some(saved) = self
-                    .database
-                    .connect_media_file(uri, encoding.name())
-                    .await
-                    .map_err(error)?
-                && let Some(path) = file_path(&saved)
-                && let Some(hash) = saved.hash
-            {
-                return serde_json::to_value(OfferedMedia {
-                    hash: Some(hash),
-                    revision: saved.revision,
-                    encoding,
-                    size: tokio::fs::metadata(path).await.map_err(error)?.len(),
-                })
-                .map_err(error);
+            if received && let Some(offer) = self.offer_saved_media(uri, encoding, None).await? {
+                return Ok(offer);
             }
             let path = (!received)
                 .then(|| library::file_media_path(uri))
@@ -413,22 +440,11 @@ impl ConnectOwner {
             .or_else(|| direct.as_ref().map(|(_, reference)| reference.clone()))
             .ok_or("The track is unavailable")?;
         let revision = revision(&reference);
-        let saved = self
-            .database
-            .connect_media_file(uri, encoding.name())
-            .await
-            .map_err(error)?;
-        if let Some(saved) = saved.as_ref().filter(|saved| saved.revision == revision)
-            && let Some(path) = file_path(saved)
-            && let Some(hash) = &saved.hash
+        if let Some(offer) = self
+            .offer_saved_media(uri, encoding, Some(&revision))
+            .await?
         {
-            return serde_json::to_value(OfferedMedia {
-                hash: Some(hash.clone()),
-                revision,
-                encoding,
-                size: tokio::fs::metadata(path).await.map_err(error)?.len(),
-            })
-            .map_err(error);
+            return Ok(offer);
         }
         let original_receipt = self
             .database
@@ -501,13 +517,7 @@ impl ConnectOwner {
             }
             let _files = self.media_files.lock().await;
             let hash = match self.network.lock().await.clone() {
-                Some(network) => Some(
-                    network
-                        .media()
-                        .publish(&path, &format!("media/{key}"))
-                        .await
-                        .map_err(error)?,
-                ),
+                Some(network) => Some(network.media().publish(&path).await.map_err(error)?),
                 None => None,
             };
             self.database

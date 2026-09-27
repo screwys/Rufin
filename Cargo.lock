@@ -4156,9 +4156,7 @@ dependencies = [
  "postcard",
  "rand 0.10.2",
  "range-collections",
- "redb",
  "ref-cast",
- "reflink-copy",
  "self_cell",
  "serde",
  "smallvec",
@@ -7409,15 +7407,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "redb"
-version = "4.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb338a6c67830a61bed824b78c2bb034ab1ff401a20616bd7957524f4fdc2f22"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7455,18 +7444,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.3",
-]
-
-[[package]]
-name = "reflink-copy"
-version = "0.1.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9dd7ab4af0363d5ccfd2838d782a28196cf32a5cc2e4fe3c5dc83f2be588b8b"
-dependencies = [
- "cfg-if",
- "libc",
- "rustix",
- "windows",
 ]
 
 [[package]]
@@ -7694,11 +7671,13 @@ name = "rufin-connect"
 version = "0.16.0"
 dependencies = [
  "anyhow",
+ "bao-tree",
  "blake3",
  "flate2",
  "futures-util",
  "iroh",
  "iroh-blobs",
+ "iroh-io",
  "iroh-mdns-address-lookup",
  "library",
  "loro",
@@ -7709,6 +7688,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "url",
  "vodozemac",
 ]
 
