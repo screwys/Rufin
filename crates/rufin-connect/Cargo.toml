@@ -11,11 +11,12 @@ anyhow = "1"
 blake3.workspace = true
 futures-util.workspace = true
 flate2.workspace = true
-iroh = { version = "1.0.3", default-features = false, features = ["tls-ring"] }
-iroh-blobs = "0.103.0"
+iroh = { version = "1.0.3", default-features = false, features = ["tls-aws-lc-rs"] }
+iroh-blobs = { version = "0.103.0", default-features = false, features = ["fs-store"] }
 iroh-mdns-address-lookup = "0.5.0"
 library.workspace = true
 loro = "=1.16.0"
+rustls = { workspace = true, features = ["prefer-post-quantum"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 sqlx.workspace = true
