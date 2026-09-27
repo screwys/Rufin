@@ -3421,14 +3421,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/glib/glib-0.22.9.crate",
-        "sha256": "18b9b8d350db41f690ec1b87109f202782748bbd8ab2f2ede17cb40d29e2838c",
-        "dest": "cargo/vendor/glib-0.22.9"
+        "url": "https://static.crates.io/crates/glib/glib-0.22.10.crate",
+        "sha256": "e4cf9e5bd8713f1990a92c422998826e0fb34824277b46bc59757373483c6694",
+        "dest": "cargo/vendor/glib-0.22.10"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"18b9b8d350db41f690ec1b87109f202782748bbd8ab2f2ede17cb40d29e2838c\", \"files\": {}}",
-        "dest": "cargo/vendor/glib-0.22.9",
+        "contents": "{\"package\": \"e4cf9e5bd8713f1990a92c422998826e0fb34824277b46bc59757373483c6694\", \"files\": {}}",
+        "dest": "cargo/vendor/glib-0.22.10",
         "dest-filename": ".cargo-checksum.json"
     },
     {
