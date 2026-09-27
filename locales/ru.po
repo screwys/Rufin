@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-24 06:59+0000\n"
+"PO-Revision-Date: 2026-09-26 23:13+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
 "Language: ru\n"
@@ -105,6 +105,10 @@ msgstr ""
 "загрузки останутся"
 
 msgid ""
+"Only imports the tracks as a playlist, does not watch the folder for changes."
+msgstr ""
+
+msgid ""
 "Open Rufin Connect on another device, connect via Join button or by copying "
 "invitation code"
 msgstr ""
@@ -182,13 +186,6 @@ msgid ""
 msgstr ""
 "Папка привязана к выбранной учётной записи. Применение этих настроек изменит "
 "хранилище на всех устройствах."
-
-msgid ""
-"These folders are combined into the Local source and shown through folder "
-"browsing"
-msgstr ""
-"Эти папки объединены в локальный источник и отображаются при просмотре "
-"содержимого папок"
 
 msgid ""
 "This is a fallback artwork Rufin uses, do you want to set this as the item "
@@ -349,6 +346,11 @@ msgstr "Добавить папку"
 msgid "Add image"
 msgstr "Добавить название"
 
+#, fuzzy
+#| msgid "My music"
+msgid "Add music"
+msgstr "Моя музыка"
+
 msgid "Add to Favorites"
 msgstr "Добавить в избранное"
 
@@ -357,6 +359,11 @@ msgstr "Добавить в закрепленные"
 
 msgid "Add to Playlist"
 msgstr "Добавить в плейлист"
+
+#, fuzzy
+#| msgid "Add music library"
+msgid "Add to library"
+msgstr "Добавить музыкальную библиотеку"
 
 msgid "Add tracks when fewer than this many remain"
 msgstr ""
@@ -472,7 +479,7 @@ msgid "Applying..."
 msgstr "Применяется..."
 
 msgid "Approve sign-in in your browser"
-msgstr "Подтвердите вход в системе в вашем браузере"
+msgstr "Подтвердить вход в системе в вашем браузере"
 
 msgid "April {year}"
 msgstr "Апрель {year}"
@@ -799,6 +806,9 @@ msgstr ""
 msgid "Configure another"
 msgstr "Настроить другие"
 
+msgid "Configured items: {count}"
+msgstr ""
+
 msgid "Confirm"
 msgstr "Подтвердить"
 
@@ -905,7 +915,7 @@ msgid "Copy link"
 msgstr "Копировать ссылку"
 
 msgid "Copy preset"
-msgstr "Скопировать пресет"
+msgstr "Скопировать предустановку"
 
 msgid "Copy the current appearance to the clipboard"
 msgstr "Скопировать текущий внешний вид в буфер обмена"
@@ -962,6 +972,11 @@ msgstr ""
 
 msgid "Create a playlist from queue"
 msgstr "Создать плейлист из очереди"
+
+#, fuzzy
+#| msgid "Export playlist"
+msgid "Create playlist"
+msgstr "Экспортировать плейлист"
 
 msgid "Create"
 msgstr "Создать"
@@ -1569,6 +1584,9 @@ msgstr "Импортировать плейлист"
 msgid "Import"
 msgstr "Импорт"
 
+msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr "Включить подробную диагностику Rufin в текущей сессии"
 
@@ -1767,6 +1785,11 @@ msgstr[2] ""
 "Локальное сопоставление файлов: {matched} совпад из {total} с путями на "
 "сервере"
 
+#, fuzzy
+#| msgid "Local music folders"
+msgid "Local files and folders"
+msgstr "Локальный источник, папки с музыкой"
+
 msgid "Local folder"
 msgstr "Локальная папка"
 
@@ -1873,7 +1896,7 @@ msgid "Minimum year"
 msgstr "Минимальный год"
 
 msgid "Mirrored bars"
-msgstr "Отражённые панели"
+msgstr "Отражённые полосы"
 
 msgid "Monday"
 msgstr "Понедельник"
@@ -2012,7 +2035,7 @@ msgid "Nearby devices"
 msgstr "Ближайшие устройства"
 
 msgid "Nearby discovery"
-msgstr "Обнаружено поблизости"
+msgstr "Обнаружение поблизости"
 
 msgid "Needs attention"
 msgstr "Требуется внимание"
@@ -2099,7 +2122,9 @@ msgstr "Нет активности прослушивания в этот пе�
 msgid "No local file mapping"
 msgstr "Нет сопоставлений для локального файла"
 
-msgid "No local folders configured"
+#, fuzzy
+#| msgid "No local folders configured"
+msgid "No local files or folders configured"
 msgstr "Не настроено ни одной локальной папки"
 
 msgid "No lyrics available."
@@ -2314,7 +2339,7 @@ msgid "Other releases"
 msgstr "Другие выпуски"
 
 msgid "Outline bars"
-msgstr "Отображать панели"
+msgstr "Обводка полос"
 
 msgid "Overview"
 msgstr "Обзор"
@@ -2729,9 +2754,6 @@ msgstr "Удалить загрузку"
 msgid "Remove Downloads"
 msgstr "Удалить загрузки"
 
-msgid "Remove Local Folder"
-msgstr "Удалить Локальную Папку"
-
 msgid "Remove Rule and Delete Downloads"
 msgstr "Убрать правило и удалить загрузки"
 
@@ -2770,6 +2792,11 @@ msgstr "Удалить правило"
 
 msgid "Remove search"
 msgstr "Удалить из поиска"
+
+#, fuzzy
+#| msgid "Album unavailable"
+msgid "Remove unavailable tracks"
+msgstr "Альбом недоступен"
 
 msgid "Remove"
 msgstr "Удалить"
@@ -2829,7 +2856,8 @@ msgid "Restore User State"
 msgstr "Восстановить состояние пользователя"
 
 msgid "Restore defaults without deleting saved presets"
-msgstr "Восстановить настройки по умолчанию, не удаляя сохраненные пресеты"
+msgstr ""
+"Восстановить настройки по умолчанию, не удаляя сохраненные предустановки"
 
 msgid "Restore player layout"
 msgstr "Восстановить макет плеера"
@@ -2859,7 +2887,7 @@ msgid "Romaji"
 msgstr "Ромадзи"
 
 msgid "Rounded bars"
-msgstr "Закруглённые панели"
+msgstr "Закруглённые полосы"
 
 msgid "Rows"
 msgstr "Строки"
@@ -2931,7 +2959,7 @@ msgstr[2] ""
 "Сопоставление сохранено. {matched} совпадений из {total} с путями на сервере"
 
 msgid "Saved preset"
-msgstr "Сохраненный пресет"
+msgstr "Сохраненная предустановка"
 
 msgid "Saved to"
 msgstr "Сохранено в"
@@ -3044,7 +3072,7 @@ msgid "Seekbar"
 msgstr "Индикатор прогресса"
 
 msgid "Segmented bars"
-msgstr "Сегментированные панели"
+msgstr "Сегментированные полосы"
 
 msgid "Select All"
 msgstr "Выбрать всё"
@@ -3066,6 +3094,9 @@ msgstr "Выбрать {title}"
 
 msgid "Selected folders"
 msgstr "Выбранные папки"
+
+msgid "Selected items: {count}"
+msgstr ""
 
 msgid "Selection"
 msgstr "Выбор"
@@ -3092,7 +3123,7 @@ msgid "Server Prefix"
 msgstr "Префикс Сервера"
 
 msgid "Server Sample"
-msgstr "Пример Сервера"
+msgstr "Пример сервера"
 
 msgid "Server Settings"
 msgstr "Настройки Сервера"
@@ -3272,7 +3303,7 @@ msgid "Smart playlists"
 msgstr "Умные плейлисты"
 
 msgid "Solid bars"
-msgstr "Сплошные панели"
+msgstr "Сплошные полосы"
 
 msgid "Some playlist entries could not be imported"
 msgstr "Некоторые элементы плейлиста не удалось импортировать"
@@ -3311,7 +3342,7 @@ msgid "Spectrum line"
 msgstr "Линия спектра"
 
 msgid "Sponsor"
-msgstr "Спонсор"
+msgstr "Поддержать"
 
 msgid "Start minimized"
 msgstr "Запускать в свернутом виде"
@@ -3520,10 +3551,10 @@ msgid "Turn on private mode"
 msgstr "Включить приватный режим"
 
 msgid "Type to search or create a new playlist"
-msgstr "Введите текст для поиска или создания нового плейлиста"
+msgstr "Ввести текст для поиска или создания нового плейлиста"
 
 msgid "Type to search"
-msgstr "Введите текст для поиска"
+msgstr "Ввести текст для поиска"
 
 msgid "Typography"
 msgstr "Оформление"
@@ -3706,7 +3737,7 @@ msgid "Waveform seekbar"
 msgstr "Индикатор прогресса воспроизведения в виде волновой формы"
 
 msgid "WebDAV / Nextcloud"
-msgstr "WebDAV / Следующий"
+msgstr "WebDAV / Nextcloud"
 
 msgid "WebDAV"
 msgstr "WebDAV"
@@ -3948,6 +3979,16 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
 
+#~ msgid ""
+#~ "These folders are combined into the Local source and shown through folder "
+#~ "browsing"
+#~ msgstr ""
+#~ "Эти папки объединены в локальный источник и отображаются при просмотре "
+#~ "содержимого папок"
+
+#~ msgid "Remove Local Folder"
+#~ msgstr "Удалить Локальную Папку"
+
 #~ msgid "Played"
 #~ msgstr "Воспроизведено"
 
@@ -4160,9 +4201,6 @@ msgstr "Добро пожаловать в программу установки
 
 #~ msgid "Add local folder access"
 #~ msgstr "Предоставить доступ к локальной папке"
-
-#~ msgid "Add music library"
-#~ msgstr "Добавить музыкальную библиотеку"
 
 #~ msgid "Add to queue"
 #~ msgstr "Добавить в очередь воспроизведения"

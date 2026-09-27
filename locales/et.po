@@ -104,6 +104,10 @@ msgstr ""
 "käsitsi allalaaditud failid jäävad alles"
 
 msgid ""
+"Only imports the tracks as a playlist, does not watch the folder for changes."
+msgstr ""
+
+msgid ""
 "Open Rufin Connect on another device, connect via Join button or by copying "
 "invitation code"
 msgstr ""
@@ -180,13 +184,6 @@ msgid ""
 msgstr ""
 "Kaust on valitud kasutajakonto suhtes suhteline. Selle rakendamine muudab "
 "andmeruumi kõikides seadmetes."
-
-msgid ""
-"These folders are combined into the Local source and shown through folder "
-"browsing"
-msgstr ""
-"Need kaustad on koondatud kohalikku andmekogusse ja neid saad näha kaustade "
-"sirvimise vaatest"
 
 msgid ""
 "This is a fallback artwork Rufin uses, do you want to set this as the item "
@@ -343,6 +340,11 @@ msgstr "Lisa kaust"
 msgid "Add image"
 msgstr "Lisa pealkiri"
 
+#, fuzzy
+#| msgid "My music"
+msgid "Add music"
+msgstr "Minu muusika"
+
 msgid "Add to Favorites"
 msgstr "Lisa lemmikuks"
 
@@ -351,6 +353,11 @@ msgstr "Lisa esiletõstetuks"
 
 msgid "Add to Playlist"
 msgstr "Lisa esitusloendisse"
+
+#, fuzzy
+#| msgid "Add music library"
+msgid "Add to library"
+msgstr "Lisa muusikakogu"
 
 msgid "Add tracks when fewer than this many remain"
 msgstr "Kui jäänud alla antud piiri lugusid, siis lisa neid juurde"
@@ -789,6 +796,9 @@ msgstr ""
 msgid "Configure another"
 msgstr "Seadista veel üks"
 
+msgid "Configured items: {count}"
+msgstr ""
+
 msgid "Confirm"
 msgstr "Kinnita"
 
@@ -952,6 +962,11 @@ msgstr ""
 
 msgid "Create a playlist from queue"
 msgstr "Koosta esitusloend esitusjärjekorrast"
+
+#, fuzzy
+#| msgid "Export playlist"
+msgid "Create playlist"
+msgstr "Ekspordi esitusloend"
 
 msgid "Create"
 msgstr "Loo"
@@ -1557,6 +1572,9 @@ msgstr "Impordi esitusloend"
 msgid "Import"
 msgstr "Import"
 
+msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr "Kaasa sellest sessioonist Rufini üksikasjalik statistika"
 
@@ -1748,6 +1766,11 @@ msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] "Kohalik failivastendus: {matched} / {total} serveriasukoht vastab"
 msgstr[1] ""
 "Kohalik failivastendus: {matched} / {total} serveriasukohta vastavad"
+
+#, fuzzy
+#| msgid "Local music folders"
+msgid "Local files and folders"
+msgstr "Kohalikud muusikakaustad"
 
 msgid "Local folder"
 msgstr "Kohalik kaust"
@@ -2081,7 +2104,9 @@ msgstr "Selles ajavahemikus pole kuulamisaktiivsust"
 msgid "No local file mapping"
 msgstr "Kohalike failide vastendust pole"
 
-msgid "No local folders configured"
+#, fuzzy
+#| msgid "No local folders configured"
+msgid "No local files or folders configured"
 msgstr "Ühtegi kohalikku kausta pole seadistatud"
 
 msgid "No lyrics available."
@@ -2707,9 +2732,6 @@ msgstr "Eemalda allalaadimine"
 msgid "Remove Downloads"
 msgstr "Eemalda allalaadimised"
 
-msgid "Remove Local Folder"
-msgstr "Eemalda ligipääs kohalikult kaustalt"
-
 msgid "Remove Rule and Delete Downloads"
 msgstr "Eemalda reegel ja kustuta allalaaditu"
 
@@ -2748,6 +2770,11 @@ msgstr "Eemalda reegel"
 
 msgid "Remove search"
 msgstr "Eemalda otsing"
+
+#, fuzzy
+#| msgid "Album unavailable"
+msgid "Remove unavailable tracks"
+msgstr "Album pole saadaval"
 
 msgid "Remove"
 msgstr "Eemalda"
@@ -3039,6 +3066,9 @@ msgstr "Vali {title}"
 
 msgid "Selected folders"
 msgstr "Valitud muusikakaustad"
+
+msgid "Selected items: {count}"
+msgstr ""
 
 msgid "Selection"
 msgstr "Valik"
@@ -3910,6 +3940,16 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
+#~ msgid ""
+#~ "These folders are combined into the Local source and shown through folder "
+#~ "browsing"
+#~ msgstr ""
+#~ "Need kaustad on koondatud kohalikku andmekogusse ja neid saad näha "
+#~ "kaustade sirvimise vaatest"
+
+#~ msgid "Remove Local Folder"
+#~ msgstr "Eemalda ligipääs kohalikult kaustalt"
+
 #~ msgid "Played"
 #~ msgstr "Esitatud"
 
@@ -4102,9 +4142,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
 #~ msgid "Add folders to use the Local source."
 #~ msgstr "Kohaliku andmeallika kasutamiseks lisa kaustad."
-
-#~ msgid "Add music library"
-#~ msgstr "Lisa muusikakogu"
 
 #~ msgid "Cached entries will appear here after sync finishes"
 #~ msgstr "Puhverdatud kirjed on siin nähtavad pärast sünkroonimise lõppu"
