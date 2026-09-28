@@ -1246,7 +1246,10 @@ fn karaoke_surface(
     cues: &[(&LyricsCue, Option<u64>)],
     highlights: &mut Vec<KaraokeText>,
 ) -> KaraokeText {
-    let surface = reading_surface_label(&text[range.clone()]);
+    let surface = reading_surface_label(
+        text.get(range.clone())
+            .expect("reading segment belongs to its lyric line"),
+    );
     surface.add_css_class("lyrics-cue");
     let mut boundaries = vec![range.start, range.end];
     for (cue, _) in cues {
