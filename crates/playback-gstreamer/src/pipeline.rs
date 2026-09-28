@@ -815,6 +815,19 @@ mod tests {
             .unwrap()
             .0
             .state(gst::ClockTime::from_seconds(30));
+        if state.0 != Ok(gst::StateChangeSuccess::Success) {
+            let (pipeline, bus) = player.native.as_ref().unwrap();
+            for message in bus.iter() {
+                eprintln!("{message:?}");
+            }
+            eprintln!(
+                "{}",
+                pipeline
+                    .downcast_ref::<gst::Bin>()
+                    .unwrap()
+                    .debug_to_dot_data(gst::DebugGraphDetails::ALL)
+            );
+        }
         assert_eq!(
             state,
             (
