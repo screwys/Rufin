@@ -24,6 +24,72 @@ pub const DOWNLOAD_ICON: &str = "rufin-download-symbolic";
 pub const GO_TO_ICON: &str = "rufin-external-link-compact-symbolic";
 pub const RADIO_ICON: &str = "rufin-audio-only-symbolic";
 
+#[derive(Default)]
+struct ButtonRepeat(RefCell<Option<glib::JoinHandle<()>>>);
+
+impl ButtonRepeat {
+    fn stop(&self) {
+        if let Some(task) = self.0.borrow_mut().take() {
+            task.abort();
+        }
+    }
+}
+
+impl Drop for ButtonRepeat {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+pub fn connect_repeating_button(button: &gtk::Button, activate: impl Fn() + 'static) {
+    let activate: Rc<dyn Fn()> = Rc::new(activate);
+    let clicked = Rc::clone(&activate);
+    button.connect_clicked(move |_| clicked());
+
+    let repeat = Rc::new(ButtonRepeat::default());
+    let press = gtk::GestureLongPress::new();
+    press.set_button(1);
+    press.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let pressed_repeat = Rc::clone(&repeat);
+    let weak_button = button.downgrade();
+    press.connect_pressed(move |gesture, _, _| {
+        pressed_repeat.stop();
+        // Claim the hold so releasing it does not also produce a normal click.
+        gesture.set_state(gtk::EventSequenceState::Claimed);
+        let button = weak_button.clone();
+        let activate = Rc::clone(&activate);
+        pressed_repeat
+            .0
+            .replace(Some(glib::spawn_future_local(async move {
+                loop {
+                    {
+                        let Some(button) = button.upgrade() else {
+                            break;
+                        };
+                        if !button.is_mapped() || !button.is_sensitive() {
+                            break;
+                        }
+                        activate();
+                    }
+                    glib::timeout_future(std::time::Duration::from_millis(100)).await;
+                }
+            })));
+    });
+    let ended = Rc::clone(&repeat);
+    press.connect_end(move |_, _| ended.stop());
+    let cancelled = Rc::clone(&repeat);
+    press.connect_cancel(move |_, _| cancelled.stop());
+    let cancelled = Rc::clone(&repeat);
+    press.connect_cancelled(move |_| cancelled.stop());
+    button.add_controller(press);
+
+    let motion = gtk::EventControllerMotion::new();
+    let left = Rc::clone(&repeat);
+    motion.connect_leave(move |_| left.stop());
+    button.add_controller(motion);
+    button.connect_unmap(move |_| repeat.stop());
+}
+
 pub type ContextMenuOpen = Rc<dyn Fn(&gtk::Widget, Option<(f64, f64)>)>;
 
 pub struct ContextMenuSurface {
@@ -491,8 +557,11 @@ mod context_menu_tests {
     #[test]
     fn side_submenus_require_one_complete_contiguous_side() {
         assert!(context_menu_has_submenu_side(988, 494.0, 276, 301));
-        assert!(context_menu_has_submenu_side(600, 50.0, 276, 301));
+        assert!(context_menu_has_submenu_side(600, 15.0, 276, 301));
+        assert!(!context_menu_has_submenu_side(600, 16.0, 276, 301));
+        assert!(!context_menu_has_submenu_side(600, 50.0, 276, 301));
         assert!(!context_menu_has_submenu_side(600, 300.0, 276, 301));
+        assert!(context_menu_has_submenu_side(600, 590.0, 276, 301));
         assert!(!context_menu_has_submenu_side(490, 245.0, 276, 230));
     }
 
@@ -900,6 +969,74 @@ fn show_native_menu_button_icon(button: &gtk::Widget) {
     }
 }
 
+pub fn align_popup_in_window(popover: &impl IsA<gtk::Popover>) {
+    let popover = popover.as_ref();
+    let Some(parent) = popover.parent() else {
+        return;
+    };
+    let Some(root) = parent.root() else { return };
+    let Some(bounds) = parent.compute_bounds(&root) else {
+        return;
+    };
+    let (has_anchor, anchor) = popover.pointing_to();
+    let anchor = if has_anchor {
+        anchor
+    } else {
+        gtk::gdk::Rectangle::new(0, 0, parent.width(), parent.height())
+    };
+    let width = popover.measure(gtk::Orientation::Horizontal, -1).1;
+    let height = popover.measure(gtk::Orientation::Vertical, width).1;
+    let x = bounds.x() as i32 + anchor.x();
+    let top = bounds.y() as i32 + anchor.y();
+    let bottom = top + anchor.height();
+    let left = if popover.direction() == gtk::TextDirection::Rtl {
+        x + anchor.width() - width
+    } else {
+        x
+    };
+    let y = if bottom + height > root.height() && top > root.height() - bottom {
+        popover.set_position(gtk::PositionType::Top);
+        top - height
+    } else {
+        popover.set_position(gtk::PositionType::Bottom);
+        bottom
+    };
+    popover.set_halign(gtk::Align::Start);
+    let max_left = (root.width() - width).max(0);
+    let popup_left = left.clamp(0, max_left);
+    popover.set_offset(
+        popup_left - left,
+        y.clamp(0, (root.height() - height).max(0)) - y,
+    );
+}
+
+pub fn align_topbar_popup(popover: &impl IsA<gtk::Popover>) {
+    let popover = popover.as_ref();
+    let Some(parent) = popover.parent() else {
+        return;
+    };
+    let Some(root) = parent.root() else { return };
+    let Some(bounds) = parent.compute_bounds(&root) else {
+        return;
+    };
+    let right = bounds.x() + bounds.width() / 2.0 >= root.width() as f32 / 2.0;
+    let rtl = popover.direction() == gtk::TextDirection::Rtl;
+    popover.set_halign(if right != rtl {
+        gtk::Align::End
+    } else {
+        gtk::Align::Start
+    });
+    // Keep the arrow aimed at the button while aligning the body to the window edge.
+    popover.set_pointing_to(None);
+    popover.set_position(gtk::PositionType::Bottom);
+    let offset = if right {
+        root.width() - (bounds.x() + bounds.width()).round() as i32
+    } else {
+        -(bounds.x().round() as i32)
+    };
+    popover.set_offset(offset, 0);
+}
+
 fn context_popover(
     target: &gtk::Widget,
     position: Option<(f64, f64)>,
@@ -909,6 +1046,8 @@ fn context_popover(
     popover.set_autohide(true);
     popover.set_has_arrow(false);
     popover.set_position(gtk::PositionType::Bottom);
+    popover.set_halign(gtk::Align::Start);
+    popover.connect_show(align_popup_in_window);
     popover.set_width_request(CONTEXT_MENU_MAX_WIDTH);
     popover.set_parent(target);
     if let Some((x, y)) = position {
@@ -930,6 +1069,11 @@ fn context_menu_needs_sliding_submenus(
         .1
         .max(CONTEXT_MENU_MAX_WIDTH);
     let submenu_width = widest_nested_menu_width(popover.upcast_ref());
+    let anchor_x = if popover.direction() == gtk::TextDirection::Rtl {
+        anchor_x - root_width as f32
+    } else {
+        anchor_x
+    };
     submenu_width > 0
         && !context_menu_has_submenu_side(
             window_width,
@@ -977,8 +1121,7 @@ fn context_menu_has_submenu_side(
     if window_width <= 0 || root_width <= 0 || submenu_width <= 0 {
         return false;
     }
-    let root_x =
-        (anchor_x.round() as i32 - root_width / 2).clamp(0, (window_width - root_width).max(0));
+    let root_x = (anchor_x.round() as i32).clamp(0, (window_width - root_width).max(0));
     let left = root_x;
     let right = (window_width - root_x - root_width).max(0);
     left.max(right) >= submenu_width + CONTEXT_MENU_CASCADE_GAP

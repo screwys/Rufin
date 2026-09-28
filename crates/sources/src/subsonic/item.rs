@@ -132,6 +132,7 @@ pub(super) async fn stage_track(
             track.last_played,
             track.source_path.as_deref(),
             *hash.finalize().as_bytes(),
+            &track.audio_properties,
         )
         .await?;
     if track.replay_gain_track_db.is_some() {
@@ -459,6 +460,12 @@ pub(super) fn track_from_json(source: &SubsonicSource, song: &Value) -> Option<T
         source_format_from_song(suffix.as_deref(), content_type.as_deref(), path.as_deref());
     let replay_gain = &song["replayGain"];
     Some(Track {
+        audio_properties: library::AudioProperties {
+            bitrate_kbps: json::field(song, "bitRate"),
+            sample_rate_hz: json::field(song, "samplingRate"),
+            bit_depth: json::field(song, "bitDepth"),
+            channels: json::field(song, "channelCount"),
+        },
         sort_name: clean_optional(json::field(song, "sortName")),
         id: String::from(source.id("track", &raw_id)),
         album_id: json::id(&song["albumId"]).map(|id| String::from(source.id("album", &id))),

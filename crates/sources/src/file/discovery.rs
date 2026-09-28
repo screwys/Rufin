@@ -50,6 +50,8 @@ const WAVE_FORMAT_WMA_PRO: u16 = 0x0162;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Metadata {
+    #[serde(default)]
+    pub(crate) audio_properties: library::AudioProperties,
     pub(crate) title: Option<String>,
     pub(crate) album: Option<String>,
     pub(crate) artist: Option<String>,
@@ -197,6 +199,12 @@ fn metadata_from_info(info: &DiscovererInfo) -> Option<Metadata> {
         .min(u64::from(u32::MAX)) as u32;
     let mut metadata = metadata_from_tags(&tags, duration_seconds, container_is_asf(info));
     metadata.source_format = synthetic_audio_format(&audio);
+    metadata.audio_properties = library::AudioProperties {
+        bitrate_kbps: (audio.bitrate() > 0).then(|| audio.bitrate() / 1000),
+        sample_rate_hz: (audio.sample_rate() > 0).then(|| audio.sample_rate()),
+        bit_depth: (audio.depth() > 0).then(|| audio.depth()),
+        channels: (audio.channels() > 0).then(|| audio.channels()),
+    };
     Some(metadata)
 }
 
@@ -400,6 +408,7 @@ fn metadata_from_tags(tags: &ScopedTags, duration_seconds: u32, is_asf: bool) ->
             .then_some(true)
     });
     Metadata {
+        audio_properties: library::AudioProperties::default(),
         title: tags.string::<gst::tags::Title>(),
         sort_title: tags.string::<gst::tags::TitleSortname>(),
         sort_album: tags.string::<gst::tags::AlbumSortname>(),

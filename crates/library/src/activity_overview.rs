@@ -196,6 +196,9 @@ impl Database {
 
 fn history_from_track(row: crate::TrackRow) -> HistoryRow {
     HistoryRow {
+        audio_properties: row.audio_properties,
+        source_path: row.source_path,
+        source_name: Some(row.source_name),
         media_uri: row.media_uri,
         title: row.title,
         artist: row.artist,

@@ -22,8 +22,8 @@ use playback::RadioPlayRequest;
 use super::collections::library_route_inset;
 use super::detail_showcase::{
     DetailShowcaseView, MediaShowcase, album_external_links, detail_genre_pill_button,
-    detail_playback_controls, detail_radio_button, detail_showcase_frame, fit_detail_text,
-    media_cover_projection, media_showcase,
+    detail_playback_controls, detail_radio_button, detail_showcase_frame, media_cover_projection,
+    media_showcase,
 };
 use crate::release_kind::album_release_kind_label;
 use crate::route_layout::{
@@ -108,19 +108,16 @@ impl CatalogUi {
         showcase_view.append_kind_control(&radio);
         self.append_album_genre_buttons(&showcase_view, &album.genres);
 
-        let artist = gtk::Label::new(Some(&album.display_artist));
+        let (scroll, artist) = gtk_widgets::text_slide::new_label();
+        artist.set_text(&album.display_artist);
         artist.add_css_class("detail-artist");
         artist.set_xalign(0.0);
         artist.set_halign(gtk::Align::Start);
-        artist.set_wrap(true);
-        artist.set_wrap_mode(gtk::pango::WrapMode::WordChar);
         artist.set_width_request(1);
         artist.set_width_chars(1);
-        artist.set_max_width_chars(32);
-        fit_detail_text(&artist, &album.display_artist);
         let artist_links = DetailLinkBinding::new(&artist, self.route_navigation());
         artist_links.bind(album_artist_links(&album));
-        showcase_view.append_detail(&artist);
+        showcase_view.append_detail(&scroll);
 
         let actions = showcase_view.actions();
         actions.add_css_class("album-detail-actions");

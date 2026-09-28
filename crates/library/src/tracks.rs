@@ -156,8 +156,33 @@ pub struct TrackGenreLink {
     pub name: String,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct AudioProperties {
+    pub bitrate_kbps: Option<u32>,
+    pub sample_rate_hz: Option<u32>,
+    pub bit_depth: Option<u32>,
+    pub channels: Option<u32>,
+}
+
+impl sqlx::Type<Sqlite> for AudioProperties {
+    fn type_info() -> sqlx::sqlite::SqliteTypeInfo {
+        <String as sqlx::Type<Sqlite>>::type_info()
+    }
+}
+
+impl<'row> sqlx::Decode<'row, Sqlite> for AudioProperties {
+    fn decode(value: sqlx::sqlite::SqliteValueRef<'row>) -> Result<Self, sqlx::error::BoxDynError> {
+        let text = <&str as sqlx::Decode<Sqlite>>::decode(value)?;
+        Ok(serde_json::from_str(text)?)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct TrackRow {
+    pub audio_properties: AudioProperties,
+    pub source_path: Option<String>,
+    pub source_name: String,
     pub track_key: TrackKey,
     pub source_key: SourceKey,
     pub source_id: String,
@@ -208,6 +233,10 @@ impl<'row> FromRow<'row, SqliteRow> for TrackRow {
                 sqlx::Error::Decode("Track loudness analysis key is not 32 bytes".into())
             })?;
         Ok(Self {
+            audio_properties: serde_json::from_str(row.try_get("audio_properties")?)
+                .map_err(|error| sqlx::Error::Decode(Box::new(error)))?,
+            source_path: row.try_get("source_path")?,
+            source_name: row.try_get("source_name")?,
             track_key: row.try_get("track_key")?,
             source_key: row.try_get("source_key")?,
             source_id: row.try_get("source_id")?,
@@ -908,7 +937,7 @@ pub(crate) async fn load_track_rows(
                         album.display_artist album_display_artist,
                         track.duration_millis,track.disc_number,track.track_number,
                         track.year,track.release_date,track.date_added,track.media_uri,
-                        track.source_format,track.comment,track.bpm,
+                        track.audio_properties,track.source_format,track.source_path,source.display_name source_name,track.comment,track.bpm,
                         track.musicbrainz_recording_id,track.musicbrainz_release_track_id,
                         track.cue_path,track.cue_start_millis,track.cue_end_millis,
                         track.loudness_analysis_key,track.artwork_binding,

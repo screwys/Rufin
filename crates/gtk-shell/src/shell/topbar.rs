@@ -106,6 +106,7 @@ impl Topbar {
             if let Some(shell) = weak.upgrade() {
                 let (_, _, model) = crate::preferences::source::selector::source_submenu(&shell);
                 let popover = gtk::PopoverMenu::from_model(Some(&model));
+                popover.connect_show(gtk_widgets::interactions::align_topbar_popup);
                 button.set_popover(Some(&popover));
                 gtk_widgets::interactions::show_native_menu_icons(&popover);
                 gtk_widgets::interactions::replace_native_menu_checkmarks(&popover);

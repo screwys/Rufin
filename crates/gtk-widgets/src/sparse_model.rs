@@ -718,12 +718,17 @@ impl SparseObjectModel {
         let old_len = self.n_items();
         let sections_changed = *self.imp().sections.borrow() != sections;
         self.imp().sections.replace(sections);
-        let (same_order, updates) = self.with_typed_mut::<K, R, _>(|state| {
-            let same_order = matches!((&state.sparse.order, &order),
-                (SparseSource::Keys(previous), SparseSource::Keys(next)) if previous == next);
+        let (preserve_items, updates) = self.with_typed_mut::<K, R, _>(|state| {
+            let preserve_items = match (&state.sparse.order, &order) {
+                (SparseSource::Keys(previous), SparseSource::Keys(next)) => previous == next,
+                (SparseSource::Query { count: previous }, SparseSource::Query { count: next }) => {
+                    previous == next
+                }
+                _ => false,
+            };
             state.sparse.replace_order(order);
             state.sparse.seed_at(first, rows);
-            if !same_order {
+            if !preserve_items {
                 state.objects.clear();
                 return (false, Vec::new());
             }
@@ -742,7 +747,7 @@ impl SparseObjectModel {
                 .collect::<Vec<_>>();
             (true, updates)
         });
-        if !same_order {
+        if !preserve_items {
             self.items_changed(0, old_len, self.n_items());
             return;
         }
@@ -1009,6 +1014,16 @@ where
 
     pub fn peek_ready(&self, position: usize) -> Option<Arc<R>> {
         self.model.peek_ready::<K, R>(position)
+    }
+
+    pub fn first_live_position(&self) -> Option<usize> {
+        self.model.with_typed_mut::<K, R, _>(|state| {
+            state
+                .objects
+                .iter()
+                .filter_map(|(position, item)| item.upgrade().map(|_| *position))
+                .min()
+        })
     }
 
     pub fn ready_position(&self, matches: impl Fn(&R) -> bool) -> Option<u32> {

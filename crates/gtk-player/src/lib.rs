@@ -26,7 +26,7 @@ pub struct PlayerUi {
     refresh_current_controls: Rc<dyn Fn()>,
     open_queue_menu: QueueMenu,
     set_track_favorite: TrackFavorite,
-    related_tracks_view: Rc<dyn Fn(Vec<library::TrackRow>) -> gtk::Widget>,
+    related_tracks_view: Rc<dyn Fn(Vec<library::TrackRow>) -> (gtk::Widget, Rc<dyn Fn()>)>,
     present_full_artwork: Rc<dyn Fn(artwork::ArtworkBinding)>,
     content_stack: gtk::glib::WeakRef<gtk::Stack>,
     pub settings: Rc<gtk_widgets::settings::SettingsState>,
@@ -63,7 +63,7 @@ impl PlayerUi {
         refresh_current_controls: Rc<dyn Fn()>,
         open_queue_menu: QueueMenu,
         set_track_favorite: TrackFavorite,
-        related_tracks_view: Rc<dyn Fn(Vec<library::TrackRow>) -> gtk::Widget>,
+        related_tracks_view: Rc<dyn Fn(Vec<library::TrackRow>) -> (gtk::Widget, Rc<dyn Fn()>)>,
         present_full_artwork: Rc<dyn Fn(artwork::ArtworkBinding)>,
         content_stack: &gtk::Stack,
     ) -> Self {

@@ -249,6 +249,7 @@ mod collection_grid_card_inset_imp {
     #[derive(Default)]
     pub struct CollectionGridCardInset {
         pub minimum_content_width: Cell<i32>,
+        pub inset: Cell<i32>,
         pub cell: RefCell<Option<Box<dyn Any>>>,
     }
 
@@ -280,10 +281,11 @@ mod collection_grid_card_inset_imp {
             let Some(child) = self.obj().first_child() else {
                 return (0, 0, -1, -1);
             };
-            let total_inset = super::COLLECTION_GRID_CARD_MARGIN * 2;
+            let total_inset = self.inset.get() * 2;
             if orientation == gtk::Orientation::Horizontal {
                 return super::collection_grid_card_horizontal_measure(
                     self.minimum_content_width.get(),
+                    self.inset.get(),
                 );
             }
             let child_for_size = if for_size < 0 {
@@ -298,7 +300,7 @@ mod collection_grid_card_inset_imp {
                 if baseline < 0 {
                     -1
                 } else {
-                    baseline.saturating_add(super::COLLECTION_GRID_CARD_MARGIN)
+                    baseline.saturating_add(self.inset.get())
                 }
             };
             (
@@ -313,8 +315,10 @@ mod collection_grid_card_inset_imp {
             let Some(child) = self.obj().first_child() else {
                 return;
             };
-            let (x, child_width) = super::collection_grid_card_inner_extent(width);
-            let (y, child_height) = super::collection_grid_card_inner_extent(height);
+            let (x, child_width) =
+                super::collection_grid_card_inner_extent(width, self.inset.get());
+            let (y, child_height) =
+                super::collection_grid_card_inner_extent(height, self.inset.get());
             let child_baseline = if baseline < 0 {
                 -1
             } else {
@@ -333,10 +337,13 @@ mod collection_grid_card_inset_imp {
     }
 }
 
-fn collection_grid_card_horizontal_measure(minimum_content_width: i32) -> (i32, i32, i32, i32) {
+fn collection_grid_card_horizontal_measure(
+    minimum_content_width: i32,
+    inset: i32,
+) -> (i32, i32, i32, i32) {
     let slot_width = minimum_content_width
         .max(1)
-        .saturating_add(COLLECTION_GRID_CARD_MARGIN.saturating_mul(2));
+        .saturating_add(inset.saturating_mul(2));
     (slot_width, slot_width, -1, -1)
 }
 
@@ -347,6 +354,12 @@ gtk::glib::wrapper! {
 }
 
 impl CollectionGridCardInset {
+    pub fn apply_display(&self, settings: &rufin_core::settings::layout::DisplaySettings) {
+        let (minimum, _, inset) = super::grid_cells::grid_dimensions(settings);
+        self.imp().minimum_content_width.set(minimum);
+        self.imp().inset.set(inset);
+        self.queue_resize();
+    }
     pub fn set_cell<T: 'static>(&self, cell: T) {
         self.imp().cell.replace(Some(Box::new(cell)));
     }
@@ -361,9 +374,9 @@ impl CollectionGridCardInset {
     }
 }
 
-fn collection_grid_card_inner_extent(allocation: i32) -> (i32, i32) {
+fn collection_grid_card_inner_extent(allocation: i32, inset: i32) -> (i32, i32) {
     let allocation = allocation.max(0);
-    let leading = COLLECTION_GRID_CARD_MARGIN.min(allocation / 2);
+    let leading = inset.min(allocation / 2);
     (leading, allocation.saturating_sub(leading * 2))
 }
 
@@ -374,7 +387,8 @@ mod collection_grid_card_inset_tests {
     #[test]
     fn preliminary_allocations_never_produce_a_negative_card_extent() {
         for allocation in 0..=COLLECTION_GRID_CARD_MARGIN * 2 {
-            let (leading, inner) = collection_grid_card_inner_extent(allocation);
+            let (leading, inner) =
+                collection_grid_card_inner_extent(allocation, COLLECTION_GRID_CARD_MARGIN);
             assert!(leading >= 0);
             assert!(leading <= COLLECTION_GRID_CARD_MARGIN);
             assert!(inner >= 0);
@@ -386,7 +400,10 @@ mod collection_grid_card_inset_tests {
     fn grid_slot_width_uses_the_configured_card_width() {
         let expected = COLLECTION_GRID_MIN_CARD_WIDTH + COLLECTION_GRID_CARD_MARGIN * 2;
         assert_eq!(
-            collection_grid_card_horizontal_measure(COLLECTION_GRID_MIN_CARD_WIDTH),
+            collection_grid_card_horizontal_measure(
+                COLLECTION_GRID_MIN_CARD_WIDTH,
+                COLLECTION_GRID_CARD_MARGIN
+            ),
             (expected, expected, -1, -1)
         );
     }
@@ -416,6 +433,7 @@ pub fn collection_grid_card_inset(
     let minimum_content_width = minimum_content_width.max(1);
     let inset: CollectionGridCardInset = gtk::glib::Object::new();
     inset.imp().minimum_content_width.set(minimum_content_width);
+    inset.imp().inset.set(COLLECTION_GRID_CARD_MARGIN);
     inset.set_hexpand(true);
     inset.set_halign(gtk::Align::Fill);
     inset.set_valign(gtk::Align::Start);

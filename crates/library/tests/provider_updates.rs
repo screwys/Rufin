@@ -33,6 +33,7 @@ async fn track(scan: &mut Scan, favorite: Option<bool>, play_count: Option<i64>)
         None,
         None,
         [1; 32],
+        &library::AudioProperties::default(),
     )
     .await
     .unwrap();

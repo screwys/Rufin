@@ -35,17 +35,36 @@
         <property name="valign">center</property>
         <style><class name="player-title-row"/></style>
         <child>
-          <object class="GtkLabel" id="title">
-            <property name="xalign">0</property>
-            <property name="ellipsize">end</property>
-            <property name="single-line-mode">true</property>
-            <property name="lines">1</property>
-            <property name="width-chars">1</property>
-            <property name="halign">fill</property>
-            <property name="valign">center</property>
+          <object class="RufinTextFade" id="title_fade">
             <property name="hexpand">false</property>
-            <property name="yalign">0.5</property>
-            <style><class name="player-link"/><class name="player-title"/></style>
+            <child>
+              <object class="GtkScrolledWindow" id="title_slide">
+                <property name="propagate-natural-width">true</property>
+                <property name="hscrollbar-policy">external</property>
+                <property name="vscrollbar-policy">never</property>
+                <property name="propagate-natural-height">true</property>
+                <property name="hexpand">false</property>
+                <property name="width-request">1</property>
+                <property name="child">
+                  <object class="GtkViewport" id="title_viewport">
+                    <property name="child">
+                      <object class="GtkLabel" id="title">
+                        <property name="xalign">0</property>
+                        <property name="ellipsize">end</property>
+                        <property name="single-line-mode">true</property>
+                        <property name="lines">1</property>
+                        <property name="width-chars">1</property>
+                        <property name="halign">fill</property>
+                        <property name="valign">center</property>
+                        <property name="hexpand">false</property>
+                        <property name="yalign">0.5</property>
+                        <style><class name="player-link"/><class name="player-title"/></style>
+                      </object>
+                    </property>
+                  </object>
+                </property>
+              </object>
+            </child>
           </object>
         </child>
         <child>
@@ -59,31 +78,67 @@
       </object>
     </child>
     <child>
-      <object class="GtkLabel" id="artist">
-        <property name="xalign">0</property>
-        <property name="ellipsize">end</property>
-        <property name="single-line-mode">true</property>
-        <property name="lines">1</property>
-        <property name="width-chars">1</property>
-        <property name="halign">fill</property>
-        <property name="valign">center</property>
+      <object class="RufinTextFade" id="artist_fade">
         <property name="hexpand">true</property>
-        <property name="yalign">0.5</property>
-        <style><class name="player-link"/><class name="player-primary"/></style>
+        <child>
+          <object class="GtkScrolledWindow" id="artist_slide">
+            <property name="hscrollbar-policy">external</property>
+            <property name="vscrollbar-policy">never</property>
+            <property name="propagate-natural-height">true</property>
+            <property name="hexpand">true</property>
+            <property name="width-request">1</property>
+            <property name="child">
+              <object class="GtkViewport" id="artist_viewport">
+                <property name="child">
+                  <object class="GtkLabel" id="artist">
+                    <property name="xalign">0</property>
+                    <property name="ellipsize">end</property>
+                    <property name="single-line-mode">true</property>
+                    <property name="lines">1</property>
+                    <property name="width-chars">1</property>
+                    <property name="halign">fill</property>
+                    <property name="valign">center</property>
+                    <property name="hexpand">true</property>
+                    <property name="yalign">0.5</property>
+                    <style><class name="player-link"/><class name="player-primary"/></style>
+                  </object>
+                </property>
+              </object>
+            </property>
+          </object>
+        </child>
       </object>
     </child>
     <child>
-      <object class="GtkLabel" id="album">
-        <property name="xalign">0</property>
-        <property name="ellipsize">end</property>
-        <property name="single-line-mode">true</property>
-        <property name="lines">1</property>
-        <property name="width-chars">1</property>
-        <property name="halign">fill</property>
-        <property name="valign">center</property>
+      <object class="RufinTextFade" id="album_fade">
         <property name="hexpand">true</property>
-        <property name="yalign">0.5</property>
-        <style><class name="player-link"/><class name="player-primary"/></style>
+        <child>
+          <object class="GtkScrolledWindow" id="album_slide">
+            <property name="hscrollbar-policy">external</property>
+            <property name="vscrollbar-policy">never</property>
+            <property name="propagate-natural-height">true</property>
+            <property name="hexpand">true</property>
+            <property name="width-request">1</property>
+            <property name="child">
+              <object class="GtkViewport" id="album_viewport">
+                <property name="child">
+                  <object class="GtkLabel" id="album">
+                    <property name="xalign">0</property>
+                    <property name="ellipsize">end</property>
+                    <property name="single-line-mode">true</property>
+                    <property name="lines">1</property>
+                    <property name="width-chars">1</property>
+                    <property name="halign">fill</property>
+                    <property name="valign">center</property>
+                    <property name="hexpand">true</property>
+                    <property name="yalign">0.5</property>
+                    <style><class name="player-link"/><class name="player-primary"/></style>
+                  </object>
+                </property>
+              </object>
+            </property>
+          </object>
+        </child>
       </object>
     </child>
   </object>

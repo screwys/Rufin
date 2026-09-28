@@ -10,7 +10,7 @@ pub(crate) fn connect_lyrics_settings_controls(shell: &Rc<Shell>) {
         .visualizer_settings
         .connect_clicked(move |_| {
             if let Some(shell) = settings_shell.upgrade() {
-                present_lyrics_settings_dialog(&shell, MediaSettingsPages::Visualizer);
+                present_lyrics_settings_dialog(&shell, MediaSettingsPages::Visualizer, false);
             }
         });
     let Some(lyrics) = shell.player_ui.selected_lyrics() else {
@@ -39,12 +39,12 @@ pub(crate) fn connect_lyrics_settings_controls(shell: &Rc<Shell>) {
                     (false, true) => MediaSettingsPages::Visualizer,
                     _ => MediaSettingsPages::Lyrics,
                 };
-                present_lyrics_settings_dialog(&shell, pages);
+                present_lyrics_settings_dialog(&shell, pages, fullscreen);
             }
         });
     }
 }
-fn present_lyrics_settings_dialog(shell: &Rc<Shell>, pages: MediaSettingsPages) {
+fn present_lyrics_settings_dialog(shell: &Rc<Shell>, pages: MediaSettingsPages, fullscreen: bool) {
     let weak = Rc::downgrade(shell);
     let uses_local_storage: Rc<dyn Fn() -> bool> = Rc::new(move || {
         weak.upgrade()
@@ -60,6 +60,7 @@ fn present_lyrics_settings_dialog(shell: &Rc<Shell>, pages: MediaSettingsPages) 
         &shell.player_ui,
         &shell.chrome.window,
         pages,
+        fullscreen,
         uses_local_storage,
         appearance_changed,
     );

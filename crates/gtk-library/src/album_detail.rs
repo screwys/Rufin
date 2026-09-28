@@ -23,6 +23,24 @@ use gtk_widgets::library_fields::{opaque_artwork, track_field};
 use gtk_widgets::sparse_model::{SparseObjectModel, SparseRouteModel, SparseSource};
 
 const ALBUM_TRACK_HEIGHT: i32 = 36;
+
+fn display_track_height(display: &rufin_core::settings::layout::DisplaySettings) -> i32 {
+    use rufin_core::settings::layout::DisplaySize;
+    match display.size {
+        DisplaySize::Compact => 32,
+        DisplaySize::Default => ALBUM_TRACK_HEIGHT,
+        DisplaySize::Large => 48,
+    }
+}
+
+fn detail_display(shell: &CatalogUi) -> rufin_core::settings::layout::DisplaySettings {
+    shell
+        .settings
+        .current
+        .borrow()
+        .library_list(LibraryListKey::Albums)
+        .display
+}
 const ALBUM_DETAIL_INLINE_TRACK_ROWS: usize = 8;
 const ALBUM_DETAIL_TRACK_COLUMN_GAP: i32 = 8;
 const ALBUM_DETAIL_TRACK_HEADER_HEIGHT: i32 = 26;
@@ -346,6 +364,7 @@ pub struct AlbumDetailVirtualList {
 }
 
 struct AlbumDetailVirtualListInner {
+    display: RefCell<rufin_core::settings::layout::DisplaySettings>,
     shell: Weak<CatalogUi>,
     model: AlbumDetailModel,
     fields: Vec<LibraryField>,
@@ -355,6 +374,7 @@ struct AlbumDetailVirtualListInner {
     bottom_spacer: gtk::Box,
     layout: RefCell<AlbumDetailLayout>,
     rendered: RefCell<Option<Range<usize>>>,
+    demanded_items: RefCell<Vec<glib::Object>>,
     keyboard_position: Cell<Option<usize>>,
     selection: AlbumDetailTrackSelection,
     width: Cell<i32>,
@@ -372,6 +392,7 @@ struct AlbumDetailAdjustmentHandlers {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct AlbumDetailSpan {
+    track_height: i32,
     album_position: usize,
     first_track_position: usize,
     first_visual_row: usize,
@@ -390,7 +411,7 @@ impl AlbumDetailSpan {
                         .saturating_sub(ALBUM_DETAIL_INLINE_TRACK_ROWS),
                 )
                 .unwrap_or(i32::MAX)
-                .saturating_mul(ALBUM_TRACK_HEIGHT),
+                .saturating_mul(self.track_height),
             )
             .saturating_add(if self.track_count > ALBUM_DETAIL_INLINE_TRACK_ROWS {
                 16
@@ -442,7 +463,11 @@ struct AlbumDetailLayout {
 }
 
 impl AlbumDetailLayout {
-    fn build(model: &AlbumDetailModel, width: i32) -> Self {
+    fn build(
+        model: &AlbumDetailModel,
+        width: i32,
+        display: &rufin_core::settings::layout::DisplaySettings,
+    ) -> Self {
         let order = model
             .sparse
             .as_ref()
@@ -453,6 +478,7 @@ impl AlbumDetailLayout {
             &model.albums.borrow(),
             &model.albums_with_genres.borrow(),
             width,
+            display,
         )
     }
 
@@ -461,6 +487,7 @@ impl AlbumDetailLayout {
         albums: &BTreeSet<String>,
         albums_with_genres: &BTreeSet<String>,
         width: i32,
+        display: &rufin_core::settings::layout::DisplaySettings,
     ) -> Self {
         let cover_size = album_detail_row_metrics_for_width(width).cover_size;
         let mut position = 0_usize;
@@ -485,6 +512,7 @@ impl AlbumDetailLayout {
                 cover_size,
                 3 + usize::from(has_genres),
                 inline_count,
+                display,
             )
             .saturating_add(12)
             .saturating_add(if track_count <= ALBUM_DETAIL_INLINE_TRACK_ROWS {
@@ -493,6 +521,7 @@ impl AlbumDetailLayout {
                 0
             });
             let span = AlbumDetailSpan {
+                track_height: display_track_height(display),
                 album_position,
                 first_track_position,
                 first_visual_row,
@@ -554,9 +583,11 @@ impl AlbumDetailLayout {
             top: span.top.saturating_add(span.lead_height).saturating_add(
                 i32::try_from(continuation)
                     .unwrap_or(i32::MAX)
-                    .saturating_mul(ALBUM_TRACK_HEIGHT),
+                    .saturating_mul(span.track_height),
             ),
-            height: ALBUM_TRACK_HEIGHT.saturating_add(if last_in_album { 16 } else { 0 }),
+            height: span
+                .track_height
+                .saturating_add(if last_in_album { 16 } else { 0 }),
         })
     }
 
@@ -576,7 +607,7 @@ impl AlbumDetailLayout {
         {
             return Some(span.first_visual_row);
         }
-        let continuation = ((within - f64::from(span.lead_height)) / f64::from(ALBUM_TRACK_HEIGHT))
+        let continuation = ((within - f64::from(span.lead_height)) / f64::from(span.track_height))
             .floor()
             .max(0.0) as usize;
         Some(
@@ -711,6 +742,7 @@ impl AlbumDetailVirtualList {
         let width = Cell::new((shell.route_width)().max(1));
         let selection = AlbumDetailTrackSelection::default();
         let inner = Rc::new(AlbumDetailVirtualListInner {
+            display: RefCell::new(detail_display(shell)),
             shell: Rc::downgrade(shell),
             model: model.clone(),
             fields,
@@ -718,8 +750,13 @@ impl AlbumDetailVirtualList {
             top_spacer,
             rows_widget,
             bottom_spacer,
-            layout: RefCell::new(AlbumDetailLayout::build(&model, width.get())),
+            layout: RefCell::new(AlbumDetailLayout::build(
+                &model,
+                width.get(),
+                &detail_display(shell),
+            )),
             rendered: RefCell::new(None),
+            demanded_items: RefCell::new(Vec::new()),
             keyboard_position: Cell::new(None),
             selection: selection.clone(),
             width,
@@ -782,6 +819,15 @@ impl AlbumDetailVirtualList {
 
     pub fn widget(&self) -> gtk::Widget {
         self.inner.widget.clone().upcast()
+    }
+
+    pub fn apply_display(&self, display: &rufin_core::settings::layout::DisplaySettings) {
+        if *self.inner.display.borrow() == *display {
+            return;
+        }
+        self.inner.display.replace(display.clone());
+        self.inner.rebuild_layout();
+        self.inner.render();
     }
 
     pub fn attach_scroller(&self, scroller: &gtk::ScrolledWindow) {
@@ -912,8 +958,11 @@ impl AlbumDetailVirtualListInner {
     }
 
     fn rebuild_layout(&self) {
-        self.layout
-            .replace(AlbumDetailLayout::build(&self.model, self.width.get()));
+        self.layout.replace(AlbumDetailLayout::build(
+            &self.model,
+            self.width.get(),
+            &self.display.borrow(),
+        ));
         self.rendered.borrow_mut().take();
         self.apply_extent();
     }
@@ -997,7 +1046,14 @@ impl AlbumDetailVirtualListInner {
         let Some(sparse) = self.model.sparse.as_ref() else {
             return;
         };
-        sparse.demand_positions(demand);
+        // Retain visible items so page completion can find the remaining demand.
+        let model = sparse.list_model();
+        self.demanded_items.replace(
+            demand
+                .into_iter()
+                .filter_map(|position| model.item(position as u32))
+                .collect(),
+        );
         self.selection.prune_visible();
         let mut retained = self.rows_widget.first_child();
         let mut preceding: Option<gtk::Widget> = None;
@@ -1018,7 +1074,7 @@ impl AlbumDetailVirtualListInner {
                 } => {
                     let album =
                         sparse
-                            .peek_ready(*album_position)
+                            .ready(*album_position as u32)
                             .and_then(|row| match row.as_ref() {
                                 AlbumDetailRouteRow::Album(album) => Some(album.clone()),
                                 AlbumDetailRouteRow::Track(_) => None,
@@ -1027,7 +1083,7 @@ impl AlbumDetailVirtualListInner {
                         .clone()
                         .map(|position| {
                             sparse
-                                .peek_ready(position)
+                                .ready(position as u32)
                                 .and_then(|row| match row.as_ref() {
                                     AlbumDetailRouteRow::Track(track) => Some(track.clone()),
                                     AlbumDetailRouteRow::Album(_) => None,
@@ -1044,14 +1100,16 @@ impl AlbumDetailVirtualListInner {
                             &self.selection,
                             &self.fields,
                         ),
-                        _ => album_detail_placeholder(row.height),
+                        _ => {
+                            album_detail_placeholder(&row, self.width.get(), &self.display.borrow())
+                        }
                     }
                 }
                 AlbumDetailVisualItem::Track {
                     track_position,
                     index,
                     last_in_album,
-                } => match sparse.peek_ready(*track_position).as_deref() {
+                } => match sparse.ready(*track_position as u32).as_deref() {
                     Some(AlbumDetailRouteRow::Track(track)) => album_continuation_row(
                         &shell,
                         track,
@@ -1061,7 +1119,7 @@ impl AlbumDetailVirtualListInner {
                         &self.selection,
                         &self.fields,
                     ),
-                    _ => album_detail_placeholder(row.height),
+                    _ => album_detail_placeholder(&row, self.width.get(), &self.display.borrow()),
                 },
             };
             let host = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -1104,14 +1162,68 @@ fn album_detail_virtual_overscan_height() -> i32 {
     ALBUM_TRACK_HEIGHT * 8
 }
 
-fn album_detail_placeholder(height: i32) -> gtk::Widget {
-    let placeholder = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    placeholder.add_css_class("track-skeleton");
-    placeholder.set_height_request(height.max(1));
+fn album_detail_placeholder(
+    row: &PositionedAlbumDetailItem,
+    width: i32,
+    display: &rufin_core::settings::layout::DisplaySettings,
+) -> gtk::Widget {
+    let metrics = album_detail_row_metrics_for_width(width);
+    let (lead, track_count, last_in_album) = match &row.item {
+        AlbumDetailVisualItem::Lead {
+            inline_tracks,
+            last_in_album,
+            ..
+        } => (true, inline_tracks.len(), *last_in_album),
+        AlbumDetailVisualItem::Track { last_in_album, .. } => (false, 1, *last_in_album),
+    };
+    let placeholder = gtk::Box::new(gtk::Orientation::Horizontal, metrics.spacing);
+    placeholder.set_margin_start(4);
+    placeholder.set_margin_end(4);
+    placeholder.set_margin_top(if lead { 12 } else { 0 });
+    placeholder.set_margin_bottom(if last_in_album { 16 } else { 0 });
     placeholder.set_hexpand(true);
     placeholder.set_halign(gtk::Align::Fill);
     placeholder.set_sensitive(false);
     placeholder.set_can_target(false);
+
+    let meta = gtk::Box::new(gtk::Orientation::Vertical, ALBUM_DETAIL_META_SPACING);
+    meta.set_width_request(metrics.meta_width);
+    if lead {
+        let cover = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        cover.set_size_request(metrics.cover_size, metrics.cover_size);
+        cover.add_css_class("collection-grid-cover-skeleton");
+        meta.append(&cover);
+        for fraction in [3, 2] {
+            let bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            bar.set_size_request(
+                metrics.meta_width * fraction / 4,
+                ALBUM_DETAIL_META_LABEL_HEIGHT,
+            );
+            bar.set_halign(gtk::Align::Start);
+            bar.add_css_class("track-skeleton");
+            meta.append(&bar);
+        }
+    }
+    placeholder.append(&meta);
+    // Match the separator and gaps without drawing a loading divider.
+    let separator = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    separator.set_width_request(ALBUM_DETAIL_SEPARATOR_WIDTH);
+    placeholder.append(&separator);
+    let tracks = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    tracks.set_hexpand(true);
+    tracks.set_valign(gtk::Align::Start);
+    if lead && display.show_header && track_count > 0 {
+        tracks.set_margin_top(ALBUM_DETAIL_TRACK_HEADER_HEIGHT);
+    }
+    let track_width = album_track_area_width(width, metrics);
+    for _ in 0..track_count {
+        let bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        bar.set_size_request(track_width * 2 / 3, display_track_height(display));
+        bar.set_halign(gtk::Align::Start);
+        bar.add_css_class("track-skeleton");
+        tracks.append(&bar);
+    }
+    placeholder.append(&tracks);
     placeholder.upcast()
 }
 
@@ -1159,8 +1271,12 @@ fn album_lead_row(
     let metrics = album_detail_row_metrics_for_width(width);
     let track_width = album_track_area_width(width, metrics);
     let field_widths = album_track_field_widths(fields, track_width);
-    let content_height =
-        album_detail_ready_height(width, !album.genres.is_empty(), inline_tracks.len());
+    let content_height = album_detail_ready_height(
+        width,
+        !album.genres.is_empty(),
+        inline_tracks.len(),
+        &detail_display(shell),
+    );
     let row = gtk::Box::new(gtk::Orientation::Horizontal, metrics.spacing);
     row.add_css_class("album-detail-row");
     row.set_hexpand(true);
@@ -1177,7 +1293,9 @@ fn album_lead_row(
     track_area.set_width_request(track_width);
     if !inline_tracks.is_empty() {
         row.append(&album_detail_separator(content_height));
-        track_area.append(&album_track_header(&field_widths));
+        if detail_display(shell).show_header {
+            track_area.append(&album_track_header(&field_widths));
+        }
         for (index, track) in inline_tracks.iter().enumerate() {
             track_area.append(&album_track_cells(
                 shell,
@@ -1196,6 +1314,7 @@ fn album_detail_lead_content_height(
     cover_size: i32,
     meta_label_count: usize,
     inline_count: usize,
+    display: &rufin_core::settings::layout::DisplaySettings,
 ) -> i32 {
     let labels = i32::try_from(meta_label_count).unwrap_or(i32::MAX);
     let meta_height = cover_size
@@ -1206,20 +1325,31 @@ fn album_detail_lead_content_height(
     let track_height = if inline_count == 0 {
         0
     } else {
-        ALBUM_DETAIL_TRACK_HEADER_HEIGHT.saturating_add(
+        (if display.show_header {
+            ALBUM_DETAIL_TRACK_HEADER_HEIGHT
+        } else {
+            0
+        })
+        .saturating_add(
             i32::try_from(inline_count.min(ALBUM_DETAIL_INLINE_TRACK_ROWS))
                 .unwrap_or(i32::MAX)
-                .saturating_mul(ALBUM_TRACK_HEIGHT),
+                .saturating_mul(display_track_height(display)),
         )
     };
     meta_height.max(track_height)
 }
 
-fn album_detail_ready_height(width: i32, has_genres: bool, inline_count: usize) -> i32 {
+fn album_detail_ready_height(
+    width: i32,
+    has_genres: bool,
+    inline_count: usize,
+    display: &rufin_core::settings::layout::DisplaySettings,
+) -> i32 {
     album_detail_lead_content_height(
         album_detail_row_metrics_for_width(width).cover_size,
         3 + usize::from(has_genres),
         inline_count,
+        display,
     )
 }
 
@@ -1241,11 +1371,13 @@ fn album_continuation_row(
     row.set_margin_bottom(if last_in_album { 16 } else { 0 });
     row.set_margin_start(4);
     row.set_margin_end(4);
-    row.set_height_request(ALBUM_TRACK_HEIGHT);
+    row.set_height_request(display_track_height(&detail_display(shell)));
     let spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
     spacer.set_width_request(metrics.meta_width);
     row.append(&spacer);
-    row.append(&album_detail_separator(ALBUM_TRACK_HEIGHT));
+    row.append(&album_detail_separator(display_track_height(
+        &detail_display(shell),
+    )));
     row.append(&album_track_cells(
         shell,
         track,
@@ -1371,7 +1503,10 @@ fn album_track_cells(
 ) -> gtk::Widget {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, ALBUM_DETAIL_TRACK_COLUMN_GAP);
     row.add_css_class("album-detail-track-row");
-    row.set_height_request(ALBUM_TRACK_HEIGHT);
+    if index % 2 == 1 {
+        row.add_css_class("display-even");
+    }
+    row.set_height_request(display_track_height(&detail_display(shell)));
     row.set_hexpand(true);
     for (field, width) in field_widths {
         row.append(&album_track_cell(
@@ -1414,6 +1549,7 @@ fn album_track_cell(
     width: i32,
     selection: &AlbumDetailTrackSelection,
 ) -> gtk::Widget {
+    let height = display_track_height(&detail_display(shell));
     match field {
         LibraryField::Tools => {
             let button = row_favorite_icon_button("Favorite track");
@@ -1440,7 +1576,7 @@ fn album_track_cell(
                     Some(button),
                 );
             });
-            fixed_album_track_cell(width, ALBUM_TRACK_HEIGHT, actions.upcast())
+            fixed_album_track_cell(width, height, actions.upcast())
         }
         LibraryField::Image => {
             let cover = ArtworkTile::new(32);
@@ -1450,7 +1586,7 @@ fn album_track_cell(
                 32,
                 THUMB_COVER_SIZE,
             );
-            fixed_album_track_cell(width, ALBUM_TRACK_HEIGHT, cover.widget())
+            fixed_album_track_cell(width, height, cover.widget())
         }
         LibraryField::RowIndex => {
             let shell = Rc::clone(shell);
@@ -1461,12 +1597,12 @@ fn album_track_cell(
                 play_album_track(&shell, album, &play_uri);
             });
             selection.bind(cell.upcast_ref(), &uri);
-            fixed_album_track_cell(width, ALBUM_TRACK_HEIGHT, cell.upcast())
+            fixed_album_track_cell(width, height, cell.upcast())
         }
         LibraryField::Title | LibraryField::TitleMerged => {
             let label = album_track_label(&track.title, field, 1);
             label.set_hexpand(true);
-            let cell = fixed_album_track_cell(width, ALBUM_TRACK_HEIGHT, label.clone().upcast())
+            let cell = fixed_album_track_cell(width, height, label.clone().upcast())
                 .downcast::<gtk::Box>()
                 .expect("album track cell");
             cell.set_spacing(5);
@@ -1475,7 +1611,7 @@ fn album_track_cell(
         }
         _ => fixed_album_track_cell(
             width,
-            ALBUM_TRACK_HEIGHT,
+            height,
             album_track_label(&album_detail_track_text(track, index, field), field, width).upcast(),
         ),
     }
@@ -1568,6 +1704,13 @@ fn album_track_field_widths(
 
 fn album_track_column_width(field: LibraryField) -> i32 {
     match field {
+        LibraryField::Bitrate
+        | LibraryField::SampleRate
+        | LibraryField::BitDepth
+        | LibraryField::Channels
+        | LibraryField::Format
+        | LibraryField::FilePath
+        | LibraryField::Source => gtk_widgets::library_fields::column_width(field),
         LibraryField::RowIndex => 40,
         LibraryField::TrackNumber => 52,
         LibraryField::DiscNumber => 44,
@@ -1707,7 +1850,13 @@ mod tests {
     #[test]
     fn album_detail_layout_keeps_full_order_and_one_compact_span_per_album() {
         let (order, albums, albums_with_genres) = two_album_order(240, 3);
-        let layout = AlbumDetailLayout::from_order(&order, &albums, &albums_with_genres, 720);
+        let layout = AlbumDetailLayout::from_order(
+            &order,
+            &albums,
+            &albums_with_genres,
+            720,
+            &Default::default(),
+        );
         assert_eq!(order.len(), 245);
         assert_eq!(layout.spans.len(), 2);
         assert_eq!(layout.spans[0].album_position, 0);
@@ -1725,11 +1874,11 @@ mod tests {
             + 4 * (ALBUM_DETAIL_META_LABEL_HEIGHT + ALBUM_DETAIL_META_SPACING)
             + ALBUM_DETAIL_META_LABEL_HEIGHT;
         let expected_tracks = ALBUM_DETAIL_TRACK_HEADER_HEIGHT + 3 * ALBUM_TRACK_HEIGHT;
-        let ready_with_genres = album_detail_ready_height(width, true, 3);
+        let ready_with_genres = album_detail_ready_height(width, true, 3, &Default::default());
         assert_eq!(ready_with_genres, expected_meta.max(expected_tracks));
         assert_eq!(
-            album_detail_ready_height(width, false, 3),
-            album_detail_ready_height(width, false, 3)
+            album_detail_ready_height(width, false, 3, &Default::default()),
+            album_detail_ready_height(width, false, 3, &Default::default())
         );
     }
 
@@ -1737,7 +1886,13 @@ mod tests {
     fn album_detail_layout_preserves_exact_extent_with_arithmetic_continuations() {
         let (order, albums, albums_with_genres) = two_album_order(10, 2);
         let width = 720;
-        let layout = AlbumDetailLayout::from_order(&order, &albums, &albums_with_genres, width);
+        let layout = AlbumDetailLayout::from_order(
+            &order,
+            &albums,
+            &albums_with_genres,
+            width,
+            &Default::default(),
+        );
         assert_eq!(layout.spans.len(), 2);
         assert_eq!(layout.visual_row_count, 4);
         assert_eq!(layout.total_height, layout.spans[1].bottom());
@@ -1759,7 +1914,13 @@ mod tests {
     #[test]
     fn album_detail_visible_range_is_bounded_and_tracks_scroll_height() {
         let (order, albums, albums_with_genres) = two_album_order(256, 3);
-        let layout = AlbumDetailLayout::from_order(&order, &albums, &albums_with_genres, 720);
+        let layout = AlbumDetailLayout::from_order(
+            &order,
+            &albums,
+            &albums_with_genres,
+            720,
+            &Default::default(),
+        );
         let range = layout.visible_range(100.0, 100_000.0);
         assert_eq!(range.len(), ALBUM_DETAIL_MAX_RENDERED_ROWS);
         assert!(range.end <= layout.visual_row_count);
@@ -1774,7 +1935,13 @@ mod tests {
     #[test]
     fn album_detail_two_window_demand_is_exact_and_each_page_is_at_most_64() {
         let (order, albums, albums_with_genres) = two_album_order(130, 1);
-        let layout = AlbumDetailLayout::from_order(&order, &albums, &albums_with_genres, 720);
+        let layout = AlbumDetailLayout::from_order(
+            &order,
+            &albums,
+            &albums_with_genres,
+            720,
+            &Default::default(),
+        );
         let demanded = layout.demand_positions(54..66);
         let windows = demanded
             .iter()
@@ -1800,8 +1967,20 @@ mod tests {
     #[test]
     fn album_detail_layout_uses_current_width_and_same_width_is_settled() {
         let (order, albums, albums_with_genres) = two_album_order(8, 2);
-        let narrow = AlbumDetailLayout::from_order(&order, &albums, &albums_with_genres, 420);
-        let wide = AlbumDetailLayout::from_order(&order, &albums, &albums_with_genres, 1_200);
+        let narrow = AlbumDetailLayout::from_order(
+            &order,
+            &albums,
+            &albums_with_genres,
+            420,
+            &Default::default(),
+        );
+        let wide = AlbumDetailLayout::from_order(
+            &order,
+            &albums,
+            &albums_with_genres,
+            1_200,
+            &Default::default(),
+        );
         assert_ne!(narrow.total_height, wide.total_height);
         assert!(!album_detail_window_changed(Some(&(0..2)), &(0..2)));
         assert!(!album_detail_geometry_changes(720, 800));

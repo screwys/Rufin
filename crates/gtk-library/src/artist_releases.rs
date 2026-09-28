@@ -15,7 +15,7 @@ use gtk_widgets::mounted_route::MountedRouteSearchTarget;
 use super::cards;
 use super::collections::library_route_inset;
 use super::columns::AlbumTableCell;
-use super::grid_cells::{AlbumGridCell, ReusableCollectionGridCell, collection_grid_column_count};
+use super::grid_cells::{AlbumGridCell, ReusableCollectionGridCell, grid_column_count};
 use super::route_shell::LibraryToolbarProjection;
 use crate::route_layout::{
     PRIMARY_ROUTE_HORIZONTAL_INSET, ROUTE_TOP_MARGIN, detail_route_scroller,
@@ -520,7 +520,7 @@ impl ArtistAlbumProjection {
         let count = if self.source_is_empty() {
             1
         } else if self.layout.get() == LibraryLayout::Row {
-            2 + self.count.get()
+            1 + usize::from(self.applied_settings.borrow().display.show_header) + self.count.get()
         } else {
             1 + self.count.get().div_ceil(self.columns.get().max(1))
         };
@@ -535,15 +535,16 @@ impl ArtistAlbumProjection {
         }
         let local = position as usize - 1;
         if self.layout.get() == LibraryLayout::Row {
-            if local == 0 {
+            let header = usize::from(self.applied_settings.borrow().display.show_header);
+            if local == 0 && header != 0 {
                 return ArtistRouteRow::TableHeader {
                     section: Rc::downgrade(self),
                 };
             }
             return ArtistRouteRow::AlbumTable {
                 section: Rc::downgrade(self),
-                position: self.start.get() + local - 1,
-                last: local == self.count.get(),
+                position: self.start.get() + local - header,
+                last: local + 1 - header == self.count.get(),
             };
         }
         let columns = self.columns.get().max(1);
@@ -702,8 +703,11 @@ impl ArtistReleaseProjections {
             if resize_layout.get() == LibraryLayout::Row {
                 return;
             }
-            let next =
-                collection_grid_column_count(width.saturating_sub(PRIMARY_ROUTE_HORIZONTAL_INSET));
+            let display = resize_sections[0].applied_settings.borrow().display.clone();
+            let next = grid_column_count(
+                width.saturating_sub(PRIMARY_ROUTE_HORIZONTAL_INSET),
+                &display,
+            );
             if resize_columns.replace(next) != next {
                 for section in resize_sections.iter() {
                     section.refresh_body();
@@ -851,7 +855,14 @@ impl ArtistReleaseProjections {
         let next_layout = normalized_artist_layout(settings.layout);
         let previous_fields = self.grid_fields.borrow().clone();
         self.layout.set(next_layout);
+        let next_columns = grid_column_count(
+            self.surface
+                .width()
+                .saturating_sub(PRIMARY_ROUTE_HORIZONTAL_INSET),
+            &settings.display,
+        );
         for section in self.sections.iter() {
+            section.columns.set(next_columns);
             section.apply_settings(settings);
         }
         if previous_fields != settings.grid_fields {
@@ -975,6 +986,7 @@ fn artist_route_list(
                     &section.applied_settings.borrow().row_fields,
                     true,
                 );
+                gtk_widgets::display::apply(&state, &section.applied_settings.borrow().display);
                 state.set_margin_bottom(0);
             }
             ArtistRouteRow::AlbumTable {
@@ -990,6 +1002,12 @@ fn artist_route_list(
                     &section.applied_settings.borrow().row_fields,
                     false,
                 );
+                gtk_widgets::display::apply(&state, &section.applied_settings.borrow().display);
+                if position % 2 == 1 {
+                    state.add_css_class("display-even");
+                } else {
+                    state.remove_css_class("display-even");
+                }
                 state.set_margin_bottom(if last { ARTIST_RELEASE_SECTION_GAP } else { 0 });
                 let value = section
                     .sparse
@@ -1007,6 +1025,7 @@ fn artist_route_list(
                 state.imp().bound_items.borrow_mut().extend(value);
             }
             ArtistRouteRow::Static { widget } => {
+                gtk_widgets::display::apply(&state, &Default::default());
                 state.clear_content(true);
                 state.set_orientation(gtk::Orientation::Vertical);
                 state.set_homogeneous(false);
@@ -1029,6 +1048,7 @@ fn artist_route_list(
                     return;
                 };
                 let imp = state.imp();
+                gtk_widgets::display::apply(&state, &section.applied_settings.borrow().display);
                 if imp.kind.get() != ArtistCellKind::Grid || imp.grid_columns.get() != columns {
                     state.clear_content(true);
                     state.set_orientation(gtk::Orientation::Horizontal);
@@ -1042,6 +1062,7 @@ fn artist_route_list(
                             &widget,
                             COLLECTION_GRID_MIN_CARD_WIDTH,
                         );
+                        wrapper.apply_display(&section.applied_settings.borrow().display);
                         state.append(&wrapper);
                         imp.grid_cells
                             .borrow_mut()
@@ -1053,6 +1074,13 @@ fn artist_route_list(
                 state.set_margin_bottom(margin_bottom);
                 let model = section.sparse.list_model();
                 for (offset, slot) in imp.grid_cells.borrow().iter().enumerate() {
+                    if let Some(wrapper) = slot
+                        .widget
+                        .parent()
+                        .and_downcast::<cards::CollectionGridCardInset>()
+                    {
+                        wrapper.apply_display(&section.applied_settings.borrow().display);
+                    }
                     if offset >= len {
                         slot.cell.clear();
                         slot.widget.set_visible(false);

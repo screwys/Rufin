@@ -3712,6 +3712,7 @@ mod refresh_laws {
                 None,
                 Some(path),
                 [0; 32],
+                &library::AudioProperties::default(),
             )
             .await
             .unwrap();

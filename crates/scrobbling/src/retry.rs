@@ -861,6 +861,7 @@ mod tests {
             None,
             None,
             [1; 32],
+            &library::AudioProperties::default(),
         )
         .await
         .expect("stage Track");

@@ -2025,6 +2025,7 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
             None,
             None,
             [0; 32],
+            &library::AudioProperties::default(),
         )
         .await
         .unwrap();

@@ -32,19 +32,20 @@
                 </style>
               </object>
             </child>
+
             <child>
-              <object class="GtkMenuButton" id="customize_button">
-                <property name="icon-name">rufin-sliders-2-symbolic</property>
-                <property name="tooltip-text" translatable="yes">Customize display</property>
+              <object class="GtkButton" id="pane_button">
+                <property name="icon-name">rufin-view-dual-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Switch pane</property>
                 <style>
                   <class name="flat" />
                 </style>
               </object>
             </child>
             <child>
-              <object class="GtkButton" id="pane_button">
-                <property name="icon-name">rufin-view-dual-symbolic</property>
-                <property name="tooltip-text" translatable="yes">Switch pane</property>
+              <object class="GtkButton" id="customize_button">
+                <property name="icon-name">rufin-sliders-2-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Customize display</property>
                 <style>
                   <class name="flat" />
                 </style>
@@ -274,51 +275,105 @@
                                   <class name="fullscreen-player-details" />
                                 </style>
                                 <child>
-                                  <object class="GtkLabel" id="title">
-                                    <property name="xalign">0</property>
-                                    <property name="justify">left</property>
-                                    <property name="wrap">true</property>
-                                    <property name="wrap-mode">word-char</property>
-                                    <property name="lines">4</property>
-                                    <property name="ellipsize">end</property>
-                                    <property name="width-chars">1</property>
-                                    <property name="width-request">1</property>
-                                    <property name="halign">fill</property>
-                                    <style>
-                                      <class name="fullscreen-player-title" />
-                                    </style>
+                                  <object class="RufinTextFade" id="title_fade">
+                                    <property name="hexpand">true</property>
+                                    <child>
+                                      <object class="GtkScrolledWindow" id="title_slide">
+                                        <property name="hscrollbar-policy">external</property>
+                                        <property name="vscrollbar-policy">never</property>
+                                        <property name="propagate-natural-height">true</property>
+                                        <property name="hexpand">true</property>
+                                        <property name="width-request">1</property>
+                                        <property name="child">
+                                          <object class="GtkViewport" id="title_viewport">
+                                            <property name="child">
+                                              <object class="GtkLabel" id="title">
+                                                <property name="single-line-mode">true</property>
+                                                <property name="xalign">0</property>
+                                                <property name="justify">left</property>
+                                                <property name="wrap">false</property>
+                                                <property name="lines">1</property>
+                                                <property name="ellipsize">end</property>
+                                                <property name="width-chars">1</property>
+                                                <property name="width-request">1</property>
+                                                <property name="halign">fill</property>
+                                                <style>
+                                                  <class name="fullscreen-player-title" />
+                                                </style>
+                                              </object>
+                                            </property>
+                                          </object>
+                                        </property>
+                                      </object>
+                                    </child>
                                   </object>
                                 </child>
                                 <child>
-                                  <object class="GtkLabel" id="artist">
-                                    <property name="xalign">0</property>
-                                    <property name="justify">left</property>
-                                    <property name="wrap">true</property>
-                                    <property name="wrap-mode">word-char</property>
-                                    <property name="lines">2</property>
-                                    <property name="ellipsize">end</property>
-                                    <property name="width-chars">1</property>
-                                    <property name="width-request">1</property>
-                                    <property name="halign">fill</property>
-                                    <style>
-                                      <class name="fullscreen-player-artist" />
-                                    </style>
+                                  <object class="RufinTextFade" id="artist_fade">
+                                    <property name="hexpand">true</property>
+                                    <child>
+                                      <object class="GtkScrolledWindow" id="artist_slide">
+                                        <property name="hscrollbar-policy">external</property>
+                                        <property name="vscrollbar-policy">never</property>
+                                        <property name="propagate-natural-height">true</property>
+                                        <property name="hexpand">true</property>
+                                        <property name="width-request">1</property>
+                                        <property name="child">
+                                          <object class="GtkViewport" id="artist_viewport">
+                                            <property name="child">
+                                              <object class="GtkLabel" id="artist">
+                                                <property name="single-line-mode">true</property>
+                                                <property name="xalign">0</property>
+                                                <property name="justify">left</property>
+                                                <property name="wrap">false</property>
+                                                <property name="lines">1</property>
+                                                <property name="ellipsize">end</property>
+                                                <property name="width-chars">1</property>
+                                                <property name="width-request">1</property>
+                                                <property name="halign">fill</property>
+                                                <style>
+                                                  <class name="fullscreen-player-artist" />
+                                                </style>
+                                              </object>
+                                            </property>
+                                          </object>
+                                        </property>
+                                      </object>
+                                    </child>
                                   </object>
                                 </child>
                                 <child>
-                                  <object class="GtkLabel" id="album">
-                                    <property name="xalign">0</property>
-                                    <property name="justify">left</property>
-                                    <property name="wrap">true</property>
-                                    <property name="wrap-mode">word-char</property>
-                                    <property name="lines">2</property>
-                                    <property name="ellipsize">end</property>
-                                    <property name="width-chars">1</property>
-                                    <property name="width-request">1</property>
-                                    <property name="halign">fill</property>
-                                    <style>
-                                      <class name="fullscreen-player-album" />
-                                    </style>
+                                  <object class="RufinTextFade" id="album_fade">
+                                    <property name="hexpand">true</property>
+                                    <child>
+                                      <object class="GtkScrolledWindow" id="album_slide">
+                                        <property name="hscrollbar-policy">external</property>
+                                        <property name="vscrollbar-policy">never</property>
+                                        <property name="propagate-natural-height">true</property>
+                                        <property name="hexpand">true</property>
+                                        <property name="width-request">1</property>
+                                        <property name="child">
+                                          <object class="GtkViewport" id="album_viewport">
+                                            <property name="child">
+                                              <object class="GtkLabel" id="album">
+                                                <property name="single-line-mode">true</property>
+                                                <property name="xalign">0</property>
+                                                <property name="justify">left</property>
+                                                <property name="wrap">false</property>
+                                                <property name="lines">1</property>
+                                                <property name="ellipsize">end</property>
+                                                <property name="width-chars">1</property>
+                                                <property name="width-request">1</property>
+                                                <property name="halign">fill</property>
+                                                <style>
+                                                  <class name="fullscreen-player-album" />
+                                                </style>
+                                              </object>
+                                            </property>
+                                          </object>
+                                        </property>
+                                      </object>
+                                    </child>
                                   </object>
                                 </child>
                                 <child>

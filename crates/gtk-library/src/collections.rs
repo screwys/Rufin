@@ -147,10 +147,14 @@ impl LibraryPresentationProjection {
     }
 
     fn apply_fields(&self, settings: &crate::LibraryListSettings) {
+        gtk_widgets::display::apply(&self.widget(), &settings.display);
+        if let Self::Grid(grid) = self {
+            grid.apply_display(&settings.display);
+        }
         match self {
             Self::Row(table) => table.apply_fields(&settings.row_fields),
             Self::Grid(grid) => grid.apply_fields(&settings.grid_fields),
-            Self::AlbumDetail(_) => {}
+            Self::AlbumDetail(detail) => detail.apply_display(&settings.display),
         }
     }
 
@@ -835,8 +839,8 @@ pub fn collection_column_width(field: LibraryField) -> i32 {
 }
 
 pub fn dynamic_collection_table<T, M>(
-    _shell: &Rc<CatalogUi>,
-    _key: LibraryListKey,
+    shell: &Rc<CatalogUi>,
+    key: LibraryListKey,
     model: M,
     fields: &[LibraryField],
     fixed_columns: Vec<(gtk::ColumnViewColumn, i32)>,
@@ -866,6 +870,10 @@ where
     );
     let (table, width_fit, navigation) =
         collection_table_with_width(model, active, initial_width, false, activate, selection);
+    gtk_widgets::display::apply(
+        &table,
+        &shell.settings.current.borrow().library_list(key).display,
+    );
     CollectionTableProjection {
         table,
         navigation,
@@ -957,8 +965,11 @@ where
 }
 
 impl CatalogUi {
-    pub fn related_tracks_view(self: &Rc<Self>, rows: Vec<TrackRow>) -> gtk::Widget {
-        let key = LibraryListKey::Tracks;
+    pub fn related_tracks_view(
+        self: &Rc<Self>,
+        rows: Vec<TrackRow>,
+    ) -> (gtk::Widget, Rc<dyn Fn()>) {
+        let key = LibraryListKey::FullscreenTracks;
         let settings = self.settings.current.borrow().library_list(key);
         let order = rows
             .iter()
@@ -992,12 +1003,7 @@ impl CatalogUi {
                 detail: false,
                 context_id: "related".into(),
                 content_inset: 0,
-                fields: Some(vec![
-                    LibraryField::RowIndex,
-                    LibraryField::TitleMerged,
-                    LibraryField::Duration,
-                    LibraryField::Tools,
-                ]),
+                fields: None,
             },
             selection,
         );
@@ -1011,6 +1017,13 @@ impl CatalogUi {
         scroller.add_css_class("sidebar-scroller");
         scroller.add_css_class("right-panel-scroller");
         gtk_widgets::layout::configure_fill_width_clip(&scroller, gtk::PolicyType::Automatic);
+        let settings = Rc::clone(&self.settings);
+        let update_table = table.clone();
+        let changed: Rc<dyn Fn()> = Rc::new(move || {
+            let config = settings.current.borrow().library_list(key);
+            gtk_widgets::display::apply(&update_table.widget(), &config.display);
+            update_table.apply_fields(&config.row_fields);
+        });
         let weak = scroller.downgrade();
         let root = allocation_owner(&scroller, move |width, _| {
             if let Some(scroller) = weak.upgrade() {
@@ -1018,7 +1031,7 @@ impl CatalogUi {
             }
         });
         model.resume_initial_demand();
-        root.upcast()
+        (root.upcast(), changed)
     }
 }
 
@@ -1290,23 +1303,10 @@ fn install_playlist_order_drop(
         gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE,
     );
     drop.connect_drop(move |_, value, _, _| {
-        use gtk_widgets::media_drag::MediaDragSource;
         let Some(source) = gtk_widgets::media_drag::media_drag_source(value) else {
             return false;
         };
-        let target = match &source {
-            MediaDragSource::Target { target, .. } => target,
-            MediaDragSource::Targets {
-                targets: gtk_widgets::media_drag::CollectionTargets::Ready(targets),
-                ..
-            } if targets.len() == 1 => &targets[0],
-            _ => return drop_media(source),
-        };
-        let target = match target {
-            PlaybackTarget::Contextual { target, .. } => target.as_ref(),
-            target => target,
-        };
-        let Some(dragged) = key(target) else {
+        let Some(dragged) = playlist_order_key(&source, key) else {
             return drop_media(source);
         };
         let Some(current) = current() else {
@@ -1318,9 +1318,34 @@ fn install_playlist_order_drop(
         reorder(dragged, current);
         true
     });
-    gtk_widgets::media_drag::style_media_drop_target(widget);
+    gtk_widgets::media_drag::style_order_drop_target(&drop, false, move |drop| {
+        drop.value()
+            .as_ref()
+            .and_then(gtk_widgets::media_drag::media_drag_source)
+            .and_then(|source| playlist_order_key(&source, key))
+            .is_some()
+    });
     widget.add_controller(drop);
 }
+fn playlist_order_key(
+    source: &gtk_widgets::media_drag::MediaDragSource,
+    key: fn(&PlaybackTarget) -> Option<i64>,
+) -> Option<i64> {
+    use gtk_widgets::media_drag::{CollectionTargets, MediaDragSource};
+    let target = match source {
+        MediaDragSource::Target { target, .. } => target,
+        MediaDragSource::Targets {
+            targets: CollectionTargets::Ready(targets),
+            ..
+        } if targets.len() == 1 => &targets[0],
+        _ => return None,
+    };
+    key(match target {
+        PlaybackTarget::Contextual { target, .. } => target.as_ref(),
+        target => target,
+    })
+}
+
 fn collection_grid_field_class(field: LibraryField) -> &'static str {
     match field {
         LibraryField::Artist | LibraryField::AlbumArtist => "artist-label",

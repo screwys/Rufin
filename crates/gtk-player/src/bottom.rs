@@ -560,6 +560,9 @@ pub fn build_now_playing_controls(builder: &gtk::Builder, resource: &str) -> Now
         now_playing: gtk::Box,
         identity: gtk::Box,
         title_row: gtk::Box,
+        title_slide: gtk::ScrolledWindow, title_viewport: gtk::Viewport,
+        artist_slide: gtk::ScrolledWindow, artist_viewport: gtk::Viewport,
+        album_slide: gtk::ScrolledWindow, album_viewport: gtk::Viewport,
         title: gtk::Label,
         menu_button: gtk::Button,
         artist: gtk::Label,
@@ -584,6 +587,9 @@ pub fn build_now_playing_controls(builder: &gtk::Builder, resource: &str) -> Now
         BOTTOM_PLAYER_TITLE_MENU_BUTTON_SIZE,
     );
     title_row.set_height_request(BOTTOM_PLAYER_TITLE_ROW_HEIGHT);
+    gtk_widgets::text_slide::install(&title_slide, &title_viewport, &title);
+    gtk_widgets::text_slide::install(&artist_slide, &artist_viewport, &artist);
+    gtk_widgets::text_slide::install(&album_slide, &album_viewport, &album);
     title.set_height_request(BOTTOM_PLAYER_TITLE_ROW_HEIGHT);
     artist.set_height_request(BOTTOM_PLAYER_META_ROW_HEIGHT);
     album.set_height_request(BOTTOM_PLAYER_META_ROW_HEIGHT);
@@ -1392,6 +1398,7 @@ pub fn present_output_popover(anchor: &gtk::Button, shell: &Rc<crate::PlayerUi>)
     let selected = shell.playback_handles.transport.playback_output();
     let popover = gtk::Popover::new();
     popover.add_css_class("playback-output-popover");
+    popover.connect_show(gtk_widgets::interactions::align_topbar_popup);
     popover.set_autohide(true);
     popover.set_position(gtk::PositionType::Bottom);
     popover.set_parent(anchor);

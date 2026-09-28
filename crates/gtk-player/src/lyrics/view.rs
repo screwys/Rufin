@@ -596,13 +596,11 @@ impl LyricsPane {
     }
 
     pub fn connect_offset_decrease_clicked(&self, decrease: impl Fn() + 'static) {
-        self.offset_decrease_button
-            .connect_clicked(move |_| decrease());
+        gtk_widgets::interactions::connect_repeating_button(&self.offset_decrease_button, decrease);
     }
 
     pub fn connect_offset_increase_clicked(&self, increase: impl Fn() + 'static) {
-        self.offset_increase_button
-            .connect_clicked(move |_| increase());
+        gtk_widgets::interactions::connect_repeating_button(&self.offset_increase_button, increase);
     }
 
     pub fn set_search_action(&self, label: &str, enabled: bool) {
@@ -1378,7 +1376,11 @@ fn scroll_row_into_view_after_layout(
             animate_lyrics_scroll(
                 adjustment,
                 target,
-                duration_millis,
+                if scroller.settings().is_gtk_enable_animations() {
+                    duration_millis
+                } else {
+                    0
+                },
                 Rc::clone(&scroll_generation),
                 generation,
             );

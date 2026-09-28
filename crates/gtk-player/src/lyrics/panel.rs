@@ -332,11 +332,11 @@ impl PlayerUi {
             (&offset_increase_50, 50),
             (&offset_increase_100, 100),
         ] {
-            button.connect_clicked({
+            gtk_widgets::interactions::connect_repeating_button(button, {
                 let offset = Rc::clone(&offset);
                 let apply_offset = Rc::clone(&apply_offset);
                 let commit_offset = Rc::clone(&commit_offset);
-                move |_| {
+                move || {
                     commit_offset();
                     apply_offset(offset.get().saturating_add(delta));
                 }

@@ -38,8 +38,9 @@ impl PaneLayout {
         }
     }
 
-    fn icon_name(self) -> &'static str {
+    fn icon_name(self, collapsed: bool) -> &'static str {
         match self {
+            Self::Both if collapsed => "rufin-pane-left-focus-symbolic",
             Self::Both => "rufin-view-dual-symbolic",
             Self::First => "rufin-pane-left-focus-symbolic",
             Self::Second => "rufin-pane-right-focus-symbolic",
@@ -71,7 +72,7 @@ pub struct FullscreenPlayerParts {
     collapsed: Cell<bool>,
     pane_layout: Cell<PaneLayout>,
     pub pane_button: gtk::Button,
-    customize_button: gtk::MenuButton,
+    customize_button: gtk::Button,
     visualizer_panel: gtk::Box,
     pub cover: ArtworkTile,
     pub title: gtk::Label,
@@ -93,6 +94,8 @@ pub struct FullscreenPlayerParts {
     related_error: gtk::Label,
     related_loading: adw::Spinner,
     related_seed: RefCell<Option<String>>,
+    related_display_changed: RefCell<Option<Rc<dyn Fn()>>>,
+    pub(super) queue_width_fit: RefCell<Option<gtk_widgets::table_sizing::ColumnViewWidthFit>>,
     related_task: RefCell<Option<(library::ReadCancellation, tokio::task::AbortHandle)>>,
 }
 
@@ -160,11 +163,11 @@ impl FullscreenPlayerParts {
         } else {
             self.hero_content
                 .set_orientation(gtk::Orientation::Vertical);
-            self.hero_content.set_halign(gtk::Align::Center);
+            self.hero_content.set_halign(gtk::Align::Fill);
             self.hero_content.set_valign(gtk::Align::Center);
             self.cover_button.set_halign(gtk::Align::Center);
             self.cover_button.set_valign(gtk::Align::Center);
-            self.details.set_halign(gtk::Align::Center);
+            self.details.set_halign(gtk::Align::Fill);
             self.details.set_valign(gtk::Align::Center);
             self.details_scroll.set_vexpand(false);
             self.details_scroll.set_valign(gtk::Align::Center);
@@ -194,12 +197,15 @@ pub fn build_fullscreen_player(
         body: gtk::Box,
         cover_button: gtk::Button,
         pane_button: gtk::Button,
-        customize_button: gtk::MenuButton,
+        customize_button: gtk::Button,
         experience: gtk::Overlay,
         hero: gtk::Box,
         hero_content: gtk::Box,
         details: gtk::Box,
         details_scroll: gtk::ScrolledWindow,
+        title_slide: gtk::ScrolledWindow, title_viewport: gtk::Viewport,
+        artist_slide: gtk::ScrolledWindow, artist_viewport: gtk::Viewport,
+        album_slide: gtk::ScrolledWindow, album_viewport: gtk::Viewport,
         title: gtk::Label,
         artist: gtk::Label,
         album: gtk::Label,
@@ -255,6 +261,9 @@ pub fn build_fullscreen_player(
             (equalizer_tab, "equalizer"),
         ],
     );
+    gtk_widgets::text_slide::install(&title_slide, &title_viewport, &title);
+    gtk_widgets::text_slide::install(&artist_slide, &artist_viewport, &artist);
+    gtk_widgets::text_slide::install(&album_slide, &album_viewport, &album);
     let parts = FullscreenPlayerParts {
         root,
         visible: Cell::new(false),
@@ -301,6 +310,8 @@ pub fn build_fullscreen_player(
         related_error,
         related_loading,
         related_seed: RefCell::new(None),
+        related_display_changed: RefCell::new(None),
+        queue_width_fit: RefCell::new(None),
         related_task: RefCell::new(None),
     };
     parts.apply_mode();
@@ -334,16 +345,41 @@ use crate::{bottom::BOTTOM_PLAYER_HEIGHT, state::NowPlayingPresentation};
 use gtk::glib;
 use gtk_widgets::artwork::cover_fetch_size_for_display;
 
-fn fullscreen_settings_popover(shell: &Rc<crate::PlayerUi>) -> gtk::Popover {
+fn present_fullscreen_settings(shell: &Rc<crate::PlayerUi>) {
+    let Some(window) = shell.window.upgrade() else {
+        return;
+    };
+    let key = rufin_core::settings::LibraryListKey::FullscreenTracks;
     let resource = crate::ui_resource::FULLSCREEN_SETTINGS_RESOURCE;
     let builder = gtk_widgets::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
-        popover: gtk::Popover,
+        dialog: adw::PreferencesDialog,
+        page: adw::PreferencesPage,
+        fields_group: adw::PreferencesGroup,
         lyrics: adw::SwitchRow,
         visualizer: adw::SwitchRow,
         dynamic_background: adw::SwitchRow,
         background_image: adw::SwitchRow,
     });
+    dialog.set_content_width(gtk_widgets::layout::large_popup_content_width(560));
+    dialog.set_content_height(gtk_widgets::layout::large_popup_content_height(
+        window.height(),
+        640,
+    ));
+    let rows = Rc::new(RefCell::new(Vec::new()));
+    let weak = Rc::downgrade(shell);
+    let changed: Rc<dyn Fn()> = Rc::new(move || {
+        if let Some(shell) = weak.upgrade() {
+            shell.refresh_fullscreen_columns();
+        }
+    });
+    gtk_widgets::library_field_editor::populate_library_field_rows(
+        &shell.settings,
+        changed,
+        key,
+        &fields_group,
+        &rows,
+    );
     let settings = shell.settings.current.borrow();
     let active = [
         settings.fullscreen_lyrics_visible,
@@ -352,6 +388,26 @@ fn fullscreen_settings_popover(shell: &Rc<crate::PlayerUi>) -> gtk::Popover {
         settings.fullscreen_background_image,
     ];
     drop(settings);
+    let weak = Rc::downgrade(shell);
+    let display = gtk_widgets::display::DisplayEditor::new(
+        &shell.settings.current.borrow().library_list(key).display,
+        move |display| {
+            if let Some(shell) = weak.upgrade() {
+                shell
+                    .settings
+                    .update_library_list_settings(key, |settings| {
+                        settings.display = display.clone()
+                    });
+                shell.apply_fullscreen_display_settings();
+                shell.refresh_fullscreen_columns();
+            }
+        },
+    );
+    display.set_layout(Some(rufin_core::settings::LibraryLayout::Row));
+    display.prepend_rows(&[&lyrics, &visualizer, &dynamic_background, &background_image]);
+    page.remove(&fields_group);
+    page.add(&display.group);
+    page.add(&fields_group);
     background_image.set_sensitive(active[2]);
     let image_row = background_image.downgrade();
     dynamic_background.connect_active_notify(move |row| {
@@ -387,7 +443,7 @@ fn fullscreen_settings_popover(shell: &Rc<crate::PlayerUi>) -> gtk::Popover {
             shell.apply_fullscreen_display_settings();
         });
     }
-    popover
+    gtk_widgets::popup::present_light_dismiss_dialog(&dialog, &window);
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FullscreenPlaybackRefresh {
@@ -452,9 +508,9 @@ pub fn connect_fullscreen_player_controls(shell: &Rc<crate::PlayerUi>) {
         .views
         .fullscreen_player
         .customize_button
-        .set_create_popup_func(move |button| {
+        .connect_clicked(move |_| {
             if let Some(shell) = weak.upgrade() {
-                button.set_popover(Some(&fullscreen_settings_popover(&shell)));
+                present_fullscreen_settings(&shell);
             }
         });
     let weak = Rc::downgrade(shell);
@@ -599,6 +655,7 @@ impl crate::PlayerUi {
             task.abort();
         }
         *parts.related_seed.borrow_mut() = seed.clone();
+        parts.related_display_changed.borrow_mut().take();
         while let Some(child) = parts.related_list.first_child() {
             parts.related_list.remove(&child);
         }
@@ -649,7 +706,8 @@ impl crate::PlayerUi {
                     parts.related_status.set_text(&parts.related_empty.text());
                     parts.related_status.set_visible(items.is_empty());
                     if !items.is_empty() {
-                        let view = (shell.related_tracks_view)(items);
+                        let (view, changed) = (shell.related_tracks_view)(items);
+                        parts.related_display_changed.replace(Some(changed));
                         parts.related_list.append(&view);
                     }
                 }
@@ -662,9 +720,28 @@ impl crate::PlayerUi {
         });
     }
 
+    fn refresh_fullscreen_columns(self: &Rc<Self>) {
+        self.apply_fullscreen_queue_display();
+        if let Some(changed) = self
+            .views
+            .fullscreen_player
+            .related_display_changed
+            .borrow()
+            .as_ref()
+        {
+            changed();
+        }
+    }
+
     fn apply_fullscreen_display_settings(self: &Rc<Self>) {
         let settings = self.settings.current.borrow();
         let parts = &self.views.fullscreen_player;
+        gtk_widgets::display::apply(
+            &parts.root,
+            &settings
+                .library_list(rufin_core::settings::LibraryListKey::FullscreenTracks)
+                .display,
+        );
         parts.lyrics_enabled.set(settings.fullscreen_lyrics_visible);
         parts
             .visualizer_enabled
@@ -793,7 +870,7 @@ impl crate::PlayerUi {
         let focused = parts.focus_button.is_active() && has_experience;
         parts
             .pane_button
-            .set_icon_name(parts.pane_layout.get().icon_name());
+            .set_icon_name(parts.pane_layout.get().icon_name(collapsed));
         parts.left_pane.set_visible(focused || first);
         parts.right_pane.set_visible(!focused && second);
         parts.hero.set_visible(!focused);
@@ -968,7 +1045,11 @@ impl crate::PlayerUi {
                 now
             });
             let elapsed = now.saturating_sub(start);
-            let progress = (elapsed as f64 / duration_us as f64).clamp(0.0, 1.0);
+            let progress = if root.settings().is_gtk_enable_animations() {
+                (elapsed as f64 / duration_us as f64).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
             let eased = 1.0 - (1.0 - progress).powi(3);
             let offset = if opening {
                 (1.0 - eased) * f64::from(height)

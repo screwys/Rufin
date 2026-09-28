@@ -60,11 +60,33 @@
 
     <child>
       <object class="AdwPreferencesGroup" id="language_and_readings">
-        <property name="title" translatable="yes">Language and readings</property>
-        <child><object class="AdwSwitchRow" id="translations"><property name="title" translatable="yes">Prefer translations</property></object></child>
-        <child><object class="AdwComboRow" id="language_row"><property name="title" translatable="yes">Translation language</property></object></child>
-        <child><object class="AdwSwitchRow" id="furigana"><property name="title" translatable="yes">Furigana</property><property name="subtitle" translatable="yes">Increases memory usage</property></object></child>
-        <child><object class="AdwSwitchRow" id="romanization"><property name="title" translatable="yes">Romaji</property><property name="subtitle" translatable="yes">Increases memory usage</property></object></child>
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">12</property>
+            <child>
+              <object class="GtkBox">
+                <property name="spacing">6</property>
+                <child><object class="GtkLabel">
+                  <property name="label" translatable="yes">Language and readings</property>
+                  <style><class name="heading"/></style>
+                </object></child>
+                <child><object class="GtkImage">
+                  <property name="icon-name">rufin-help-about-symbolic</property>
+                  <property name="tooltip-text" translatable="yes">A Japanese dictionary is downloaded for furigana and romaji readings. This setting also increases resource usage.</property>
+                </object></child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwPreferencesGroup">
+                <child><object class="AdwSwitchRow" id="translations"><property name="title" translatable="yes">Prefer translations</property></object></child>
+                <child><object class="AdwComboRow" id="language_row"><property name="title" translatable="yes">Translation language</property></object></child>
+                <child><object class="AdwSwitchRow" id="furigana"><property name="title" translatable="yes">Furigana</property></object></child>
+                <child><object class="AdwSwitchRow" id="romanization"><property name="title" translatable="yes">Romaji</property></object></child>
+              </object>
+            </child>
+          </object>
+        </child>
       </object>
     </child>
 
@@ -106,24 +128,46 @@
 
     <child>
       <object class="AdwPreferencesGroup" id="typography">
-        <property name="title" translatable="yes">Typography</property>
         <child>
-          <object class="AdwComboRow" id="font">
-            <property name="title" translatable="yes">Font family</property>
-            <property name="enable-search">true</property>
-          </object>
-        </child>
-        <child>
-          <object class="AdwSpinRow" id="size">
-            <property name="title" translatable="yes">Font size (px)</property>
-            <property name="digits">0</property>
-            <property name="adjustment">
-              <object class="GtkAdjustment" id="size_adjustment">
-                <property name="lower">12</property>
-                <property name="upper">28</property>
-                <property name="step-increment">1</property>
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">12</property>
+            <child>
+              <object class="GtkBox">
+                <property name="spacing">6</property>
+                <child><object class="GtkLabel">
+                  <property name="label" translatable="yes">Typography</property>
+                  <style><class name="heading"/></style>
+                </object></child>
+                <child><object class="GtkImage" id="typography_help">
+                  <property name="icon-name">rufin-help-about-symbolic</property>
+                  <property name="tooltip-text" translatable="yes">Applies to sidebar and fullscreen separately</property>
+                </object></child>
               </object>
-            </property>
+            </child>
+            <child>
+              <object class="AdwPreferencesGroup">
+                <child>
+                  <object class="AdwComboRow" id="font">
+                    <property name="title" translatable="yes">Font family</property>
+                    <property name="enable-search">true</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwSpinRow" id="size">
+                    <property name="title" translatable="yes">Font size (px)</property>
+                    <property name="digits">0</property>
+                    <property name="adjustment">
+                      <object class="GtkAdjustment" id="size_adjustment">
+                        <property name="lower">12</property>
+                        <property name="upper">28</property>
+                        <property name="step-increment">1</property>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+              </object>
+            </child>
           </object>
         </child>
       </object>

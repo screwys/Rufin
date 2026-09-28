@@ -24,7 +24,7 @@ use rufin_core::settings::{HomeBlockKind, HomeSectionKind};
 use super::collections::library_route_inset;
 use super::detail_showcase::{
     DetailShowcaseView, MediaShowcase, detail_playback_controls, detail_radio_button,
-    fit_detail_text, home_album_cover_projection, media_showcase,
+    home_album_cover_projection, media_showcase,
 };
 use super::grid_cells::{
     AlbumGridCell, FixedPageCollectionRow, ReusableCollectionGridCell, TrackGridCell,
@@ -725,18 +725,15 @@ impl CatalogUi {
             );
         });
 
-        let artist = gtk::Label::new(Some(&album.display_artist));
+        let (artist_scroll, artist) = gtk_widgets::text_slide::new_label();
+        artist.set_text(&album.display_artist);
         artist.add_css_class("detail-artist");
         artist.set_xalign(0.0);
         artist.set_halign(gtk::Align::Start);
-        artist.set_wrap(true);
-        artist.set_wrap_mode(gtk::pango::WrapMode::WordChar);
         artist.set_width_request(1);
         artist.set_width_chars(1);
-        artist.set_max_width_chars(32);
-        fit_detail_text(&artist, &album.display_artist);
         DetailLinkBinding::new(&artist, self.route_navigation()).bind(album_artist_links(&album));
-        showcase_view.append_detail(&artist);
+        showcase_view.append_detail(&artist_scroll);
         showcase_view.replace_summary(&[
             (
                 "rufin-x-office-calendar-symbolic",

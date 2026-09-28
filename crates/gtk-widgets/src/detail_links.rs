@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use ::library::{AlbumArtistLink, AlbumRow, TrackArtistLink, TrackRow};
 use gtk::glib;
-use gtk::prelude::ObjectExt;
+use gtk::prelude::*;
 
 use crate::route::Route;
 
@@ -184,6 +184,16 @@ pub struct DetailLinkBinding {
 impl DetailLinkBinding {
     pub fn new(label: &gtk::Label, navigate: Rc<dyn Fn(Route)>) -> Self {
         let links = Rc::new(RefCell::new(DetailLinks::default()));
+
+        label.connect_state_flags_changed(|label, previous| {
+            let link_states = gtk::StateFlags::PRELIGHT
+                | gtk::StateFlags::FOCUSED
+                | gtk::StateFlags::FOCUS_VISIBLE;
+            if (previous ^ label.state_flags()).intersects(link_states) {
+                // Refresh cached link attributes when hover or keyboard focus changes.
+                label.set_attributes(Some(&label.attributes().unwrap_or_default()));
+            }
+        });
 
         let activate_links = Rc::clone(&links);
         label.connect_activate_link(move |_, link| {
@@ -520,6 +530,9 @@ mod tests {
 
     fn track(display_artist: &str) -> TrackRow {
         TrackRow {
+            audio_properties: Default::default(),
+            source_name: String::new(),
+            source_path: None,
             track_key: TrackKey::from_raw(1),
             source_key: SourceKey::from_raw(1),
             source_id: "source".to_string(),
