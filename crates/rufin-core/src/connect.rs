@@ -1204,6 +1204,9 @@ impl ConnectOwner {
             Action::Refresh => {
                 if self.session.read().await.is_some() {
                     self.synchronize().await?;
+                    if let Some(network) = self.network.lock().await.as_ref() {
+                        network.refresh();
+                    }
                     self.exchange().await?;
                     if self.status().settings.enabled {
                         self.refresh_devices().await?;
