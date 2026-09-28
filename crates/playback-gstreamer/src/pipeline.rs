@@ -426,14 +426,29 @@ impl PlayerPipeline {
             .output()
             .set_property("name", format!("{}-audio-output", self.native()?.0.name()));
         let segment = Arc::clone(&self.segment);
+        let shared = Arc::clone(&self.shared);
+        let gapless = Arc::clone(&self.gapless);
         graph
             .root()
             .static_pad("sink")
             .expect("audio graph input")
             .add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, move |pad, info| {
-                let Some(event) = info.event() else {
+                let Some(event) = info.event_mut() else {
                     return gst::PadProbeReturn::Ok;
                 };
+                if matches!(event.view(), gst::EventView::StreamStart(_)) {
+                    let shared = lock_recover(&shared);
+                    let gapless = lock_recover(&gapless);
+                    if gapless
+                        .pending
+                        .as_ref()
+                        .is_some_and(|pending| shared.next.as_ref() != Some(pending))
+                    {
+                        // Let the current song finish, then end output before a
+                        // removed preload can send any audio to the sink.
+                        *event = gst::event::Eos::new();
+                    }
+                }
                 if matches!(event.view(), gst::EventView::Segment(_)) {
                     let starts_stream = {
                         let mut segment = segment.lock().unwrap_or_else(|p| p.into_inner());
