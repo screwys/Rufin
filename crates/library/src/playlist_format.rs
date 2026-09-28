@@ -79,9 +79,17 @@ fn display_title(entry: &mut PlaylistFileEntry, title: &str) {
 }
 
 impl PlaylistFile {
-    pub fn read(mut input: impl BufRead, file: &Path) -> LibraryResult<Self> {
+    pub fn read(input: impl BufRead, file: &Path) -> LibraryResult<Self> {
         let format = PlaylistFormat::from_path(file)
             .ok_or_else(|| invalid("Unsupported playlist format"))?;
+        Self::read_as(input, file, format)
+    }
+
+    pub fn read_as(
+        mut input: impl BufRead,
+        file: &Path,
+        format: PlaylistFormat,
+    ) -> LibraryResult<Self> {
         let mut bytes = Vec::new();
         input.read_to_end(&mut bytes)?;
         if bytes.contains(&0) {

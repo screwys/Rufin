@@ -45,8 +45,13 @@ pub(crate) struct DesktopState {
 
 impl DesktopState {
     pub(crate) fn new(application: &adw::Application, transport: TransportHandle) -> Self {
+        let weak = application.downgrade();
         Self {
-            media_controls: desktop_integration::MediaControls::start(transport),
+            media_controls: desktop_integration::MediaControls::start(transport, move |uri| {
+                if let Some(application) = weak.upgrade() {
+                    application.open(&[gtk::gio::File::for_uri(uri)], "");
+                }
+            }),
             notifications: desktop_integration::Notifications::new(application.clone().upcast()),
             tray: RefCell::new(None),
             tray_command_source: RefCell::new(None),

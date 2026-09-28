@@ -38,6 +38,7 @@ pub use config::{
     PlexSetupInput, SourceConfiguration, SourceSettingsInput, SourceSetupInput,
 };
 pub use file::discovery::run_worker as run_discovery_worker;
+pub use file::local::media::read_local_queue_item;
 pub use file::metadata::read_embedded_lyrics;
 pub use file::playlist::{playlist_file_is_non_audio, playlist_file_revision};
 pub use file::remote::smb::list_smb_shares;

@@ -6,6 +6,34 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+pub fn read_local_queue_item(path: &Path) -> Option<library::QueueItem> {
+    let MediaRead::Accepted(track) = read_media(&mut Worker::default(), path.to_owned(), None)
+    else {
+        return None;
+    };
+    let mut item = library::QueueItem::direct(
+        track.local_uri?,
+        track.title,
+        track.artist,
+        track.album,
+        i64::from(track.duration_seconds) * 1000,
+    );
+    item.album_display_artist = Some(track.album_artist);
+    item.disc_number = (track.disc_number > 0).then_some(i64::from(track.disc_number));
+    item.track_number = (track.track_number > 0).then_some(i64::from(track.track_number));
+    item.year = (track.year > 0).then_some(i64::from(track.year));
+    item.source_format = track.source_format;
+    item.musicbrainz_recording_id = track.musicbrainz_recording_id;
+    item.musicbrainz_release_track_id = track.musicbrainz_release_track_id;
+    item.musicbrainz_album_id = track.musicbrainz_album_id;
+    item.musicbrainz_release_group_id = track.musicbrainz_release_group_id;
+    item.primary_artist_musicbrainz_id = track
+        .artists
+        .first()
+        .and_then(|artist| artist.musicbrainz_artist_id.clone());
+    Some(item)
+}
+
 pub(crate) fn read_media(
     worker: &mut Worker,
     path: PathBuf,

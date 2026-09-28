@@ -182,11 +182,11 @@ mod freedesktop {
     }
 
     impl MediaControls {
-        pub fn start(transport: TransportHandle) -> Rc<Self> {
+        pub fn start(transport: TransportHandle, open_uri: impl Fn(&str) + 'static) -> Rc<Self> {
             let mpris = Rc::new(Self::new(transport));
             let setup = Rc::clone(&mpris);
             glib::spawn_future_local(async move {
-                setup.install().await;
+                setup.install(open_uri).await;
             });
             mpris
         }
@@ -248,7 +248,7 @@ mod freedesktop {
             }
         }
 
-        async fn install(self: Rc<Self>) {
+        async fn install(self: Rc<Self>, open_uri: impl Fn(&str) + 'static) {
             let player = match MprisPlayer::builder(APP_ID)
                 .identity(DISPLAY_NAME)
                 .desktop_entry(APP_ID)
@@ -272,6 +272,7 @@ mod freedesktop {
 
             let transport = self.transport.clone();
             player.connect_play_pause(move |_| transport.play_pause());
+            player.connect_open_uri(move |_, uri| open_uri(uri));
             let transport = self.transport.clone();
             player.connect_play(move |_| transport.play());
             let transport = self.transport.clone();
@@ -554,7 +555,7 @@ mod windows {
     }
 
     impl MediaControls {
-        pub fn start(transport: TransportHandle) -> Rc<Self> {
+        pub fn start(transport: TransportHandle, _open_uri: impl Fn(&str) + 'static) -> Rc<Self> {
             let manager = match WindowsMediaManager::new() {
                 Ok(manager) => Some(manager),
                 Err(error) => {
@@ -1053,7 +1054,7 @@ mod macos {
     }
 
     impl MediaControls {
-        pub fn start(transport: TransportHandle) -> Rc<Self> {
+        pub fn start(transport: TransportHandle, _open_uri: impl Fn(&str) + 'static) -> Rc<Self> {
             Rc::new(Self {
                 center: NowPlayingInfoCenter::default_center(),
                 state: RefCell::new(MediaState::default()),
@@ -1329,7 +1330,7 @@ mod unsupported {
     pub struct MediaControls;
 
     impl MediaControls {
-        pub fn start(_transport: TransportHandle) -> Rc<Self> {
+        pub fn start(_transport: TransportHandle, _open_uri: impl Fn(&str) + 'static) -> Rc<Self> {
             Rc::new(Self)
         }
 
