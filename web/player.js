@@ -119,8 +119,20 @@ function showPlayback(value) {
       });
     }
   }
-  for (const notice of value?.notices || [])
-    if (notice.type === "operation_failed") noticeError(notice.error);
+  for (const notice of value?.notices || []) {
+    if (notice.type !== "operation_failed") continue;
+    const message = [
+      "Not Found",
+      "File not found",
+      "Resource not found",
+      "Resource not found.",
+      "the configured source no longer exists",
+      "Could not play this track",
+    ].includes(notice.error)
+      ? tr("Could not play this track")
+      : notice.error;
+    noticeError(message);
+  }
   markCurrent();
   updatePosition();
 }

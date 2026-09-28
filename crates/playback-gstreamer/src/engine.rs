@@ -1584,7 +1584,7 @@ impl GstEngine {
             match message.view() {
                 MessageView::Error(error) => {
                     let output = self.pipeline_for_slot(slot).audio_output_factory();
-                    let details = gstreamer_error_details(
+                    let details = gstreamer_playback_error(
                         message,
                         "prepared playback handoff",
                         output.as_deref(),
@@ -1615,7 +1615,7 @@ impl GstEngine {
             MessageView::Error(error) if self.incoming_matches(slot, id) => {
                 let output = self.pipeline_for_slot(slot).audio_output_factory();
                 let details =
-                    gstreamer_error_details(message, "prepared playback", output.as_deref())
+                    gstreamer_playback_error(message, "prepared playback", output.as_deref())
                         .unwrap_or_else(|| error.error().to_string());
                 self.fail_incoming(slot, id, details);
                 return;
@@ -1686,7 +1686,7 @@ impl GstEngine {
             MessageView::Eos(_) => self.handle_end(slot),
             MessageView::Error(error_message) => {
                 let output = self.pipeline_for_slot(slot).audio_output_factory();
-                let error = gstreamer_error_details(message, "playback", output.as_deref())
+                let error = gstreamer_playback_error(message, "playback", output.as_deref())
                     .unwrap_or_else(|| error_message.error().to_string());
                 let source = message
                     .src()

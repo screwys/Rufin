@@ -891,6 +891,9 @@ msgstr ""
 msgid "Could not open folder: {error}"
 msgstr ""
 
+msgid "Could not play this track"
+msgstr ""
+
 msgid "Could not receive live updates"
 msgstr ""
 
@@ -2771,9 +2774,6 @@ msgid "Reset to defaults"
 msgstr ""
 
 msgid "Reset"
-msgstr ""
-
-msgid "Resource not found"
 msgstr ""
 
 msgid "Restart now"
