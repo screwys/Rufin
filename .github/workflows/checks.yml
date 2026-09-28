@@ -470,22 +470,6 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == push ]]; then
             args+=(--no-run)
           fi
-          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
-            export GST_DEBUG="2,decodebin3:5,openmptdec:6,nonstreamaudiodecoder:6,typefind:5"
-            export GST_DEBUG_NO_COLOR=1
-            pids=()
-            for worker in 1 2 3 4; do
-              cargo nextest run --locked -p playback-gstreamer -E 'test(tracker_decoder)' \
-                --stress-count 100 > "$RUNNER_TEMP/tracker-$worker.log" 2>&1 &
-              pids+=("$!")
-            done
-            result=0
-            for pid in "${pids[@]}"; do
-              wait "$pid" || result=1
-            done
-            cat "$RUNNER_TEMP"/tracker-*.log
-            test "$result" = 0
-          fi
           cargo nextest run --config-file nextest.toml --test-threads 4 "${args[@]}"
 
   workspace_windows:

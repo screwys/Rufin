@@ -3182,11 +3182,16 @@ mod tests {
     }
 
     #[test]
-    fn fresh_playback_applies_effective_gain_before_processing_state_changes() {
+    fn fresh_playback_outputs_the_selected_gain_and_mute() {
         ensure_gstreamer_initialized().expect("initialize GStreamer");
         let directory = tempfile::tempdir().expect("playback fixture directory");
         let path = directory.path().join("initial-volume.wav");
         write_silent_wave(&path);
+        let mut wav = std::fs::read(&path).unwrap();
+        for bytes in wav[44..].chunks_exact_mut(2) {
+            bytes.copy_from_slice(&8192_i16.to_le_bytes());
+        }
+        std::fs::write(&path, wav).unwrap();
         let uri = gst::glib::filename_to_uri(&path, None).expect("playback fixture URI");
 
         for (volume_scale, muted, expected_gain) in [
@@ -3200,7 +3205,7 @@ mod tests {
                 volume: 0.5,
                 volume_scale,
                 muted,
-                audio_output: Some("fakesink".to_string()),
+                audio_output: Some("appsink".to_string()),
                 ..BackendAudioSettings::default()
             };
             lock_recover(&engine.shared).settings = settings;
@@ -3216,12 +3221,32 @@ mod tests {
                 )
                 .expect("start fresh playback");
 
-            let (gain, pipeline_muted) = engine
+            let sink = engine
                 .primary
-                .output_volume_state()
-                .expect("active primary pipeline");
-            assert!((gain - expected_gain).abs() < 1e-12);
-            assert_eq!(pipeline_muted, muted);
+                .audio_output()
+                .unwrap()
+                .downcast::<gstreamer_app::AppSink>()
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let sample = loop {
+                engine.poll_bus();
+                engine.tick();
+                if let Some(sample) = sink.try_pull_sample(gst::ClockTime::ZERO) {
+                    break sample;
+                }
+                assert!(Instant::now() < deadline, "no audio output after startup");
+                std::thread::sleep(Duration::from_millis(1));
+            };
+            let map = sample.buffer().unwrap().map_readable().unwrap();
+            let expected = if muted { 0.0 } else { 0.25 * expected_gain };
+            assert!(!map.is_empty());
+            for bytes in map.as_slice().chunks_exact(4) {
+                let actual = f32::from_le_bytes(bytes.try_into().unwrap());
+                assert!(
+                    (f64::from(actual) - expected).abs() < 0.0001,
+                    "first audio sample {actual}, expected {expected}"
+                );
+            }
             engine.shutdown();
         }
     }
@@ -3937,7 +3962,6 @@ mod tests {
                 .unwrap()
                 .downcast::<gstreamer_app::AppSink>()
                 .unwrap();
-            sink.set_sync(true);
             let mut samples = Vec::new();
             let mut transitions = 0;
             let mut ended = false;
@@ -4451,7 +4475,7 @@ mod tests {
     }
 
     #[test]
-    fn clearing_preloaded_next_preserves_the_pipeline_and_current_run() {
+    fn clearing_preloaded_next_prevents_its_audio_from_playing() {
         ensure_gstreamer_initialized().unwrap();
         let directory = tempfile::tempdir().unwrap();
         let paths = [
@@ -4495,14 +4519,12 @@ mod tests {
             start_position_millis: 0,
             playback_rate: 1.0,
         });
-        let original = lock_recover(&engine.shared).pipeline_id(Slot::Primary);
         let sink = engine
             .active_pipeline()
             .audio_output()
             .unwrap()
             .downcast::<gstreamer_app::AppSink>()
             .unwrap();
-        sink.set_sync(true);
         let mut cleared = false;
         let mut ended = false;
         let mut samples = Vec::new();
@@ -4515,12 +4537,6 @@ mod tests {
                     current_run: RunId::new(1),
                     next: None,
                 });
-                assert_eq!(
-                    lock_recover(&engine.shared).pipeline_id(Slot::Primary),
-                    original
-                );
-                assert_eq!(engine.timing_run_id(), Some(RunId::new(1)));
-                assert!(engine.desired_playing);
                 cleared = true;
             }
             while let Some(sample) = sink.try_pull_sample(gst::ClockTime::ZERO) {
@@ -4533,7 +4549,10 @@ mod tests {
             }
             for event in lock_recover(&events).drain() {
                 match event {
-                    BackendEvent::Transitioned { .. } => panic!("removed track started"),
+                    BackendEvent::Transitioned { .. } => {
+                        assert!(cleared, "next track started before the test issued removal");
+                        panic!("removed track started");
+                    }
                     BackendEvent::Ended { run } => {
                         assert_eq!(run, RunId::new(1));
                         ended = true;

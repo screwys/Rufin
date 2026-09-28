@@ -194,15 +194,6 @@ impl PlayerPipeline {
     }
 
     #[cfg(test)]
-    pub(super) fn output_volume_state(&self) -> Option<(f64, bool)> {
-        let (pipeline, _) = self.native.as_ref()?;
-        Some((
-            pipeline.property::<f64>("volume"),
-            pipeline.property::<bool>("mute"),
-        ))
-    }
-
-    #[cfg(test)]
     pub(super) fn has_or_targets_state(&self, state: gst::State) -> bool {
         self.native.as_ref().is_some_and(|(pipeline, _)| {
             let (result, current, pending) = pipeline.state(gst::ClockTime::ZERO);
