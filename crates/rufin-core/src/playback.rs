@@ -576,6 +576,7 @@ impl PlaybackOwner {
         let database = Arc::clone(&self.database);
         let source_owner = self.source_owner();
         let playback = active.playback;
+        let local = self.settings.local_configuration();
         let connect = self
             .connect
             .lock()
@@ -593,6 +594,7 @@ impl PlaybackOwner {
             let result = prepare_stream(
                 &database,
                 request,
+                local.as_ref(),
                 connect
                     .as_deref()
                     .map(|connect| (connect, occurrence.as_ref())),
@@ -1086,6 +1088,7 @@ impl TransportCommandPort for PlaybackOwner {
 pub(crate) async fn prepare_stream<F>(
     database: &Database,
     request: StreamRequest,
+    local: Option<&sources::SourceConfiguration>,
     file_transfer: Option<(&crate::connect::ConnectOwner, &playback::QueueOccurrence)>,
     source: impl FnOnce(sources::SourceId) -> F + Send,
 ) -> Result<playback::ResolvedStream, String>
@@ -1101,6 +1104,18 @@ where
     let file_uri = cue
         .as_ref()
         .map_or(request.media_uri.as_str(), |(_, uri, _, _)| uri);
+    let granted_uri = |uri: &str| {
+        let path = library::file_media_path(uri)?;
+        let (_, access) = local?.local_file_location(&path)?;
+        url::Url::from_file_path(access).ok().map(String::from)
+    };
+    if let Some((uri, _)) = access.as_mut()
+        && let Some(granted) = granted_uri(uri)
+    {
+        *uri = granted;
+    }
+    let granted_file = granted_uri(file_uri);
+    let file_uri = granted_file.as_deref().unwrap_or(file_uri);
     if let Some((connect, occurrence)) = file_transfer
         && let Some(path) = library::file_media_path(file_uri)
     {
@@ -1136,19 +1151,17 @@ where
                 .and_then(audio_mime)
         });
     let access_uri = access.map(|(uri, _)| uri);
-    if let Some((_, file_uri, start, end)) = cue {
-        return Ok(
-            playback::ResolvedStream::new(access_uri.unwrap_or(file_uri))
-                .with_content_type(content_type)
-                .with_window(
-                    u64::try_from(start).map_err(string_error)?,
-                    u64::try_from(end).map_err(string_error)?,
-                ),
-        );
+    if let Some((_, _, start, end)) = cue.as_ref() {
+        return Ok(playback::ResolvedStream::new(
+            access_uri.unwrap_or_else(|| file_uri.to_owned()),
+        )
+        .with_content_type(content_type)
+        .with_window(
+            u64::try_from(*start).map_err(string_error)?,
+            u64::try_from(*end).map_err(string_error)?,
+        ));
     }
-    if let Some(uri) =
-        access_uri.or_else(|| library::normalize_direct_media_uri(&request.media_uri))
-    {
+    if let Some(uri) = access_uri.or_else(|| library::normalize_direct_media_uri(file_uri)) {
         return Ok(playback::ResolvedStream::new(uri).with_content_type(content_type));
     }
     let (source_id, kind, _) = library::source_entity_parts(&request.media_uri)
@@ -1355,6 +1368,7 @@ mod tests {
                 occurrence.media_uri.clone(),
                 playback::StreamQuality::Original,
             ),
+            None,
             None,
             |_| async { panic!("a completed download must resolve without contacting its source") },
         )

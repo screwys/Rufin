@@ -170,12 +170,14 @@ impl Database {
     pub async fn connect_original_file(
         &self,
         uri: &str,
+        resolve: impl Fn(std::path::PathBuf) -> std::path::PathBuf,
     ) -> LibraryResult<Option<std::path::PathBuf>> {
         let mut reader = self.acquire_reader().await?;
         let access: Option<String> = sqlx::query_scalar("SELECT access_uri FROM local_locators WHERE media_uri=?1 AND origin IN ('local','import') LIMIT 1")
             .bind(uri).fetch_optional(&mut *reader).await?;
         if let Some(path) = access
             .and_then(|uri| crate::file_media_path(&uri))
+            .map(&resolve)
             .filter(|path| path.is_file())
         {
             return Ok(Some(path));
@@ -194,6 +196,7 @@ impl Database {
         .await?;
         Ok(path
             .map(std::path::PathBuf::from)
+            .map(resolve)
             .filter(|path| path.is_file()))
     }
 

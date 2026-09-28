@@ -472,7 +472,7 @@ pub(crate) fn local_location(
     path: &Path,
 ) -> (Option<SourceId>, String, PathBuf) {
     for configured in &owner.shared.settings.load().sources.configured {
-        if let Some((location, access)) = configured.configuration.local_playlist_location(path) {
+        if let Some((location, access)) = configured.configuration.local_file_location(path) {
             return (
                 Some(configured.configuration.source_id.clone()),
                 location,
@@ -491,7 +491,7 @@ pub(crate) fn source_location(
     let client = owner.client(source)?;
     Ok(client
         .local_playlist_path(path)
-        .and_then(|path| owner.configuration(source)?.local_playlist_location(&path))
+        .and_then(|path| owner.configuration(source)?.local_file_location(&path))
         .map_or_else(|| path.to_owned(), |(location, _)| location))
 }
 
@@ -841,7 +841,7 @@ pub(crate) async fn discover(
         after = page.last().map(|file| file.local_file_key);
         for file in page {
             let path = if configuration.is_local() {
-                let Some((path, _)) = configuration.local_playlist_location(Path::new(&file.path))
+                let Some((path, _)) = configuration.local_file_location(Path::new(&file.path))
                 else {
                     continue;
                 };

@@ -1505,9 +1505,15 @@ impl PlaybackOwner {
             request.session_identifier =
                 Some(plex.playback.handoff_snapshot().map_err(string_error)?.2);
             let source = plex.connection().0.clone();
-            let stream =
-                prepare_stream(&self.database, request, None, move |_| async { Ok(source) })
-                    .await?;
+            let local = self.settings.local_configuration();
+            let stream = prepare_stream(
+                &self.database,
+                request,
+                local.as_ref(),
+                None,
+                move |_| async { Ok(source) },
+            )
+            .await?;
             let (track, album) = self
                 .database
                 .playback_loudness(&occurrence.media_uri, &ReadCancellation::new())

@@ -369,6 +369,17 @@ impl SettingsFile {
             .stream_quality
     }
 
+    pub(crate) fn local_configuration(&self) -> Option<SourceConfiguration> {
+        self.value
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .sources
+            .configured
+            .iter()
+            .find(|source| source.configuration.is_local())
+            .map(|source| source.configuration.clone())
+    }
+
     pub(crate) fn update<T>(
         &self,
         operation: impl FnOnce(&mut StoredSettings) -> Result<T, String>,

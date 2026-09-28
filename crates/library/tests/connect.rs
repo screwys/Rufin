@@ -58,7 +58,11 @@ async fn connect_uses_scanned_originals_and_repairs_existing_folder_references()
         .bind(fixture.source).bind(original.to_str().unwrap()).bind(root.to_str().unwrap())
         .execute(&mut connection).await.unwrap();
     assert_eq!(
-        fixture.database.connect_original_file(uri).await.unwrap(),
+        fixture
+            .database
+            .connect_original_file(uri, |path| path)
+            .await
+            .unwrap(),
         Some(original.clone())
     );
     assert!(

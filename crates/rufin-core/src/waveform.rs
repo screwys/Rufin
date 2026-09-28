@@ -225,7 +225,8 @@ impl WaveformOwner {
                 }
                 return;
             }
-            let stream = match prepare_stream(&input.database, input.request, None, move |source_id| async move {
+            let local = input.source.upgrade().and_then(|source| source.shared.settings.local_configuration());
+            let stream = match prepare_stream(&input.database, input.request, local.as_ref(), None, move |source_id| async move {
                 tokio::task::spawn_blocking(move || {
                     input.source.upgrade().ok_or_else(crate::source::source_access_unavailable)?.client(&source_id)
                 }).await.map_err(|error| error.to_string())?
