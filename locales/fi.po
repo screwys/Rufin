@@ -1212,6 +1212,9 @@ msgstr ""
 msgid "Don't duplicate"
 msgstr "Älä kahdenna"
 
+msgid "Donate"
+msgstr ""
+
 msgid "Download Folder"
 msgstr "Latauskansio"
 
@@ -3582,9 +3585,6 @@ msgid "Sources"
 msgstr "Lähteet"
 
 msgid "Spectrum line"
-msgstr ""
-
-msgid "Sponsor"
 msgstr ""
 
 msgid "Start minimized"

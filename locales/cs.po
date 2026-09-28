@@ -1284,6 +1284,9 @@ msgstr ""
 msgid "Don't duplicate"
 msgstr "Neduplikujte"
 
+msgid "Donate"
+msgstr ""
+
 msgid "Download Folder"
 msgstr "Stáhnout složku"
 
@@ -3811,9 +3814,6 @@ msgid "Sources"
 msgstr "Zdroje"
 
 msgid "Spectrum line"
-msgstr ""
-
-msgid "Sponsor"
 msgstr ""
 
 msgid "Start minimized"

@@ -1192,6 +1192,9 @@ msgstr "Вы хотите использовать существующую ко
 msgid "Don't duplicate"
 msgstr "Не дублировать"
 
+msgid "Donate"
+msgstr ""
+
 msgid "Download Folder"
 msgstr "Локальная папка"
 
@@ -3433,9 +3436,6 @@ msgstr "Источники"
 msgid "Spectrum line"
 msgstr "Линия спектра"
 
-msgid "Sponsor"
-msgstr "Поддержать"
-
 msgid "Start minimized"
 msgstr "Запускать в свернутом виде"
 
@@ -4076,6 +4076,9 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Sponsor"
+#~ msgstr "Поддержать"
 
 #~ msgid "Resource not found"
 #~ msgstr "Ресурс не найден"

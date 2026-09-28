@@ -1247,6 +1247,9 @@ msgstr ""
 msgid "Don't duplicate"
 msgstr ""
 
+msgid "Donate"
+msgstr ""
+
 msgid "Download Folder"
 msgstr "下載資料夾"
 
@@ -3723,9 +3726,6 @@ msgid "Sources"
 msgstr ""
 
 msgid "Spectrum line"
-msgstr ""
-
-msgid "Sponsor"
 msgstr ""
 
 msgid "Start minimized"

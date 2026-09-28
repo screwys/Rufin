@@ -1182,6 +1182,9 @@ msgstr "Kas soovid kasutada olemasolevat seadistust?"
 msgid "Don't duplicate"
 msgstr "Ära tee koopiat"
 
+msgid "Donate"
+msgstr ""
+
 msgid "Download Folder"
 msgstr "Allalaadimiste kaust"
 
@@ -3404,9 +3407,6 @@ msgstr "Allikad"
 msgid "Spectrum line"
 msgstr "Spektrijoon"
 
-msgid "Sponsor"
-msgstr "Sponsor"
-
 msgid "Start minimized"
 msgstr "Käivita minimeerituna"
 
@@ -4037,6 +4037,9 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#~ msgid "Sponsor"
+#~ msgstr "Sponsor"
 
 #~ msgid "Resource not found"
 #~ msgstr "Ressurssi ei leidu"

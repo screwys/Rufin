@@ -1221,6 +1221,9 @@ msgstr ""
 msgid "Don't duplicate"
 msgstr "Nedublēt"
 
+msgid "Donate"
+msgstr ""
+
 msgid "Download Folder"
 msgstr "Lejupielādes mape"
 
@@ -3532,9 +3535,6 @@ msgstr "Avoti"
 msgid "Spectrum line"
 msgstr "Spektra līnija"
 
-msgid "Sponsor"
-msgstr "Sponsoris"
-
 msgid "Start minimized"
 msgstr "Sākt minimizētu"
 
@@ -4206,6 +4206,9 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "Sponsor"
+#~ msgstr "Sponsoris"
 
 #~ msgid "Resource not found"
 #~ msgstr "Resurss nav atrasts"
