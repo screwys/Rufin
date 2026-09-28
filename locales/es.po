@@ -1153,6 +1153,9 @@ msgstr ""
 msgid "Don't duplicate"
 msgstr ""
 
+msgid "Donate"
+msgstr ""
+
 msgid "Download Folder"
 msgstr ""
 
@@ -2162,6 +2165,9 @@ msgid "No network address available"
 msgstr ""
 
 msgid "No network devices found"
+msgstr ""
+
+msgid "No playable entries were found"
 msgstr ""
 
 msgid "No related tracks found"
@@ -3377,9 +3383,6 @@ msgid "Sources"
 msgstr ""
 
 msgid "Spectrum line"
-msgstr ""
-
-msgid "Sponsor"
 msgstr ""
 
 msgid "Start minimized"

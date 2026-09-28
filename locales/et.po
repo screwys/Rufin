@@ -1182,6 +1182,9 @@ msgstr "Kas soovid kasutada olemasolevat seadistust?"
 msgid "Don't duplicate"
 msgstr "Ära tee koopiat"
 
+msgid "Donate"
+msgstr ""
+
 msgid "Download Folder"
 msgstr "Allalaadimiste kaust"
 
@@ -2197,6 +2200,11 @@ msgstr "Ühtegi võrguaadressi ei leidu"
 
 msgid "No network devices found"
 msgstr "Ühtegi võrguseadet ei leidu"
+
+#, fuzzy
+#| msgid "No linked servers found"
+msgid "No playable entries were found"
+msgstr "Ühtegi seotud serverit ei leidu"
 
 msgid "No related tracks found"
 msgstr "Ühtegi seotud lugu ei leidu"
@@ -3399,9 +3407,6 @@ msgstr "Allikad"
 msgid "Spectrum line"
 msgstr "Spektrijoon"
 
-msgid "Sponsor"
-msgstr "Sponsor"
-
 msgid "Start minimized"
 msgstr "Käivita minimeerituna"
 
@@ -4032,6 +4037,9 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#~ msgid "Sponsor"
+#~ msgstr "Sponsor"
 
 #~ msgid "Resource not found"
 #~ msgstr "Ressurssi ei leidu"

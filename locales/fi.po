@@ -1212,6 +1212,9 @@ msgstr ""
 msgid "Don't duplicate"
 msgstr "Älä kahdenna"
 
+msgid "Donate"
+msgstr ""
+
 msgid "Download Folder"
 msgstr "Latauskansio"
 
@@ -2276,6 +2279,11 @@ msgstr "Verkkolaitteita ei löytynyt"
 
 msgid "No network devices found"
 msgstr "Verkkolaitteita ei löytynyt"
+
+#, fuzzy
+#| msgid "No Servers Found"
+msgid "No playable entries were found"
+msgstr "Palvelimia ei löytynyt"
 
 #, fuzzy
 #| msgid "Nothing in this folder"
@@ -3577,9 +3585,6 @@ msgid "Sources"
 msgstr "Lähteet"
 
 msgid "Spectrum line"
-msgstr ""
-
-msgid "Sponsor"
 msgstr ""
 
 msgid "Start minimized"

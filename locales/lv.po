@@ -1221,6 +1221,9 @@ msgstr ""
 msgid "Don't duplicate"
 msgstr "Nedublēt"
 
+msgid "Donate"
+msgstr ""
+
 msgid "Download Folder"
 msgstr "Lejupielādes mape"
 
@@ -2282,6 +2285,11 @@ msgstr "Nav pieejama neviena tīkla adrese"
 
 msgid "No network devices found"
 msgstr "Tīkla ierīces nav atrastas"
+
+#, fuzzy
+#| msgid "No linked servers found"
+msgid "No playable entries were found"
+msgstr "Nav atrasts neviens saistīts serveris"
 
 msgid "No related tracks found"
 msgstr "Nav atrasts neviens saistīts celiņš"
@@ -3527,9 +3535,6 @@ msgstr "Avoti"
 msgid "Spectrum line"
 msgstr "Spektra līnija"
 
-msgid "Sponsor"
-msgstr "Sponsoris"
-
 msgid "Start minimized"
 msgstr "Sākt minimizētu"
 
@@ -4201,6 +4206,9 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "Sponsor"
+#~ msgstr "Sponsoris"
 
 #~ msgid "Resource not found"
 #~ msgstr "Resurss nav atrasts"

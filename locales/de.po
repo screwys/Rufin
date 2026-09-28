@@ -1169,6 +1169,9 @@ msgstr "Möchtest du die vorhandene Konfiguration verwenden?"
 msgid "Don't duplicate"
 msgstr "Duplikate vermeiden"
 
+msgid "Donate"
+msgstr ""
+
 msgid "Download Folder"
 msgstr "Download-Ordner"
 
@@ -2169,6 +2172,11 @@ msgstr "Keine Netzwerkadresse verfügbar"
 
 msgid "No network devices found"
 msgstr "Keine Netzwerkgeräte gefunden"
+
+#, fuzzy
+#| msgid "No linked servers found"
+msgid "No playable entries were found"
+msgstr "Keine verbundenen Server gefunden"
 
 msgid "No related tracks found"
 msgstr "Keine verwandten Titel gefunden"
@@ -3363,9 +3371,6 @@ msgstr "Quellen"
 msgid "Spectrum line"
 msgstr "Spektrumlinie"
 
-msgid "Sponsor"
-msgstr "Sponsor"
-
 msgid "Start minimized"
 msgstr "Minimiert starten"
 
@@ -3985,6 +3990,9 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#~ msgid "Sponsor"
+#~ msgstr "Sponsor"
 
 #~ msgid "Resource not found"
 #~ msgstr "Ressource nicht gefunden"

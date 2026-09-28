@@ -1284,6 +1284,9 @@ msgstr ""
 msgid "Don't duplicate"
 msgstr "Neduplikujte"
 
+msgid "Donate"
+msgstr ""
+
 msgid "Download Folder"
 msgstr "Stáhnout složku"
 
@@ -2419,6 +2422,11 @@ msgstr "Nebyly nalezeny žádné sítové zařízení"
 
 msgid "No network devices found"
 msgstr "Nebyly nalezeny žádné sítové zařízení"
+
+#, fuzzy
+#| msgid "No Servers Found"
+msgid "No playable entries were found"
+msgstr "Nebyly nalezeny žádné servery"
 
 #, fuzzy
 #| msgid "No matching tracks"
@@ -3806,9 +3814,6 @@ msgid "Sources"
 msgstr "Zdroje"
 
 msgid "Spectrum line"
-msgstr ""
-
-msgid "Sponsor"
 msgstr ""
 
 msgid "Start minimized"
