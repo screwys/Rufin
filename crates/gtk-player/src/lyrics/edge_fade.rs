@@ -23,20 +23,14 @@ mod imp {
             if height <= 0.0 {
                 return;
             }
-            let edge = (24.0 / height).min(0.5);
-            snapshot.push_mask(gtk::gsk::MaskMode::Alpha);
-            snapshot.append_linear_gradient(
-                &gtk::graphene::Rect::new(0.0, 0.0, widget.width() as f32, height),
-                &gtk::graphene::Point::new(0.0, 0.0),
-                &gtk::graphene::Point::new(0.0, height),
-                &[
-                    gtk::gsk::ColorStop::new(0.0, gtk::gdk::RGBA::TRANSPARENT),
-                    gtk::gsk::ColorStop::new(edge, gtk::gdk::RGBA::WHITE),
-                    gtk::gsk::ColorStop::new(1.0 - edge, gtk::gdk::RGBA::WHITE),
-                    gtk::gsk::ColorStop::new(1.0, gtk::gdk::RGBA::TRANSPARENT),
-                ],
+            gtk_widgets::edge_fade::push_mask(
+                snapshot,
+                widget.width() as f32,
+                height,
+                true,
+                24.0,
+                24.0,
             );
-            snapshot.pop();
             self.parent_snapshot(snapshot);
             snapshot.pop();
         }

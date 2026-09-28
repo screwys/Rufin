@@ -37,6 +37,22 @@ impl ApplicationAppearance {
             override_provider,
             gtk::STYLE_PROVIDER_PRIORITY_USER + 1,
         );
+        let motion_provider = gtk::CssProvider::new();
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &motion_provider,
+            gtk::STYLE_PROVIDER_PRIORITY_USER + 2,
+        );
+        let gtk_settings = gtk::Settings::for_display(&display);
+        let apply_motion = move |settings: &gtk::Settings| {
+            motion_provider.load_from_string(if settings.is_gtk_enable_animations() {
+                ""
+            } else {
+                "* { transition: none; animation: none; }"
+            });
+        };
+        apply_motion(&gtk_settings);
+        gtk_settings.connect_gtk_enable_animations_notify(apply_motion);
 
         appearance
     }
@@ -88,6 +104,13 @@ impl ApplicationAppearance {
     }
 
     pub fn apply(&self, settings: &Settings) {
+        if let Some(gtk_settings) = gtk::Settings::default() {
+            if settings.reduce_motion {
+                gtk_settings.set_gtk_enable_animations(false);
+            } else {
+                gtk_settings.reset_property("gtk-enable-animations");
+            }
+        }
         let themes = self.themes.borrow();
         adw::StyleManager::default()
             .set_color_scheme(color_scheme(&settings.theme_preference, &themes));
@@ -190,19 +213,39 @@ fn appearance_override_css(settings: &Settings, themes: &[Theme]) -> String {
         css.push_str(";\n");
     }
     css.push_str("}\n");
-    let selectors = ".lyrics-line, .lyrics-instrumental, .lyrics-furigana, .lyrics-romanization, .lyrics-reading-surface, .lyrics-cue";
-    if let Some(family) = lyrics.lyrics_font_family.as_deref() {
-        css.push_str(selectors);
-        css.push_str(" {\n");
-        css.push_str("  font-family: '");
-        css.push_str(&family.replace('\\', "\\\\").replace('\'', "\\'"));
-        css.push_str("', sans-serif;\n");
-        css.push_str("}\n");
-    }
-    if let Some(size) = lyrics.lyrics_font_size {
-        css.push_str(&format!(
-            ".lyrics-line, .lyrics-instrumental {{ font-size: {size}px; }}\n"
-        ));
+    for (scope, family, size) in [
+        (
+            ".lyrics-sidebar",
+            &lyrics.lyrics_font_family,
+            lyrics.lyrics_font_size,
+        ),
+        (
+            ".lyrics-fullscreen",
+            &lyrics.fullscreen_lyrics_font_family,
+            lyrics.fullscreen_lyrics_font_size,
+        ),
+    ] {
+        let selectors = [
+            ".lyrics-line",
+            ".lyrics-instrumental",
+            ".lyrics-furigana",
+            ".lyrics-romanization",
+            ".lyrics-reading-surface",
+            ".lyrics-cue",
+        ]
+        .map(|class| format!("{scope} {class}"))
+        .join(", ");
+        if let Some(family) = family.as_deref() {
+            css.push_str(&selectors);
+            css.push_str(" { font-family: '");
+            css.push_str(&family.replace('\\', "\\\\").replace('\'', "\\'"));
+            css.push_str("', sans-serif; }\n");
+        }
+        if let Some(size) = size {
+            css.push_str(&format!(
+                "{scope} .lyrics-line, {scope} .lyrics-instrumental {{ font-size: {size}px; }}\n"
+            ));
+        }
     }
     css
 }

@@ -53,6 +53,10 @@ mod showcase_imp {
         #[template_child]
         pub title: TemplateChild<gtk::Label>,
         #[template_child]
+        pub title_slide: TemplateChild<gtk::ScrolledWindow>,
+        #[template_child]
+        pub title_viewport: TemplateChild<gtk::Viewport>,
+        #[template_child]
         pub details: TemplateChild<gtk::Box>,
         #[template_child]
         pub summary: TemplateChild<gtk::Box>,
@@ -122,6 +126,11 @@ impl DetailShowcaseView {
         title: &str,
     ) -> Self {
         let view: Self = glib::Object::new();
+        gtk_widgets::text_slide::install(
+            &view.imp().title_slide,
+            &view.imp().title_viewport,
+            &view.imp().title,
+        );
         view.add_css_class("detail-showcase");
         view.add_css_class(route_class);
         add_album_seed_gradient_class(&view, seed);
@@ -135,9 +144,6 @@ impl DetailShowcaseView {
 
     pub fn set_title(&self, text: &str) {
         self.imp().title.set_text(text);
-        self.imp().title.remove_css_class("detail-text-long");
-        self.imp().title.remove_css_class("detail-text-very-long");
-        fit_detail_text(&self.imp().title, text);
     }
 
     pub fn append_kind_control(&self, child: &impl IsA<gtk::Widget>) {

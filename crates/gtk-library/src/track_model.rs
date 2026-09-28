@@ -354,6 +354,9 @@ mod tests {
     fn pending_projection_survives_presentation_changes_and_refreshes_metadata() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let row = library::HistoryRow {
+            audio_properties: Default::default(),
+            source_name: None,
+            source_path: None,
             media_uri: "test:track".into(),
             title: "Before".into(),
             artist: String::new(),

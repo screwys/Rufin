@@ -86,18 +86,13 @@ listview.artist-release-list row:selected .artist-album-table-row {
     inset 0 1px color-mix(in srgb, white 14%, transparent);
 }
 
-.media-drop-target:drop(active),
-.media-drop-row {
+.media-drop-target:drop(active) {
   outline: 2px solid var(--accent-color);
   outline-offset: -2px;
   border-radius: 9px;
   box-shadow: none;
 }
 
-.media-drop-cell:drop(active) {
-  outline: none;
-  box-shadow: none;
-}
 
 toastoverlay toast {
   background: color-mix(in srgb, var(--window-bg-color) 88%, var(--card-bg-color) 12%);
@@ -469,6 +464,44 @@ scrolledwindow.sidebar-scroller overshoot,
 .track-table {
   background: transparent;
 }
+
+.display-compact:not(.fullscreen-player) { font-size: 90%; }
+.display-large:not(.fullscreen-player) { font-size: 115%; }
+
+columnview.display-compact > listview > row > cell { padding-top: 2px; padding-bottom: 2px; }
+columnview.display-large > listview > row > cell { padding-top: 12px; padding-bottom: 12px; }
+.display-compact.artist-album-table-row > * { padding-top: 3px; padding-bottom: 3px; }
+.display-large.artist-album-table-row > * { padding-top: 12px; padding-bottom: 12px; }
+
+columnview.display-striped > listview > row:nth-child(even):not(:selected):not(:hover),
+.display-striped .album-detail-track-row.display-even:not(:hover),
+listview.artist-release-list row:not(:selected) .display-striped.artist-album-table-row.display-even:not(:hover) {
+  background-color: color-mix(in srgb, currentColor 4%, transparent);
+}
+
+columnview.display-striped:not(.display-no-hover) > listview > row:hover:not(:selected),
+.display-striped:not(.display-no-hover) .album-detail-track-row:hover,
+listview.artist-release-list row:not(:selected) .display-striped:not(.display-no-hover).artist-album-table-row:hover {
+  background-color: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.display-row-borders .album-detail-track-row,
+.display-row-borders.artist-album-table-row { box-shadow: inset 0 -1px var(--border-color); }
+.display-column-borders .album-detail-track-row > *:not(:first-child),
+.display-column-borders.artist-album-table-row > *:not(:first-child) {
+  box-shadow: inset 1px 0 var(--border-color);
+}
+
+columnview.display-no-hover > listview > row:hover:not(:selected),
+.display-no-hover .album-detail-track-row:hover,
+listview.artist-release-list row:not(:selected) .display-no-hover.artist-album-table-row:hover { background-color: transparent; }
+
+columnview.display-no-hover.display-striped > listview > row:nth-child(even):hover:not(:selected),
+.display-no-hover.display-striped .album-detail-track-row.display-even:hover,
+listview.artist-release-list row:not(:selected) .display-no-hover.display-striped.artist-album-table-row.display-even:hover {
+  background-color: color-mix(in srgb, currentColor 4%, transparent);
+}
+
 
 .album-track-table > listview > header {
   padding: 6px 0;
@@ -1369,15 +1402,11 @@ dialog.alert.playlist-delete-dialog .message-area {
   transform: scale(1);
   transition:
     background 120ms ease-out,
-    box-shadow 120ms ease-out,
     transform 120ms ease-out;
 }
 
 .cover-hover-button:hover {
   background: #f7f7f7;
-  box-shadow:
-    0 10px 26px rgba(0, 0, 0, 0.34),
-    inset 0 0 0 1px rgba(0, 0, 0, 0.12);
   transform: scale(1.08);
 }
 
@@ -1404,7 +1433,7 @@ dialog.alert.playlist-delete-dialog .message-area {
 .action-button-shadow {
   border-radius: 999px;
   background: transparent;
-  transition: box-shadow 120ms ease-out;
+  transition: none;
 }
 
 .cover-hover-button.cover-hover-animated .action-button-shadow {
@@ -1424,12 +1453,6 @@ dialog.alert.playlist-delete-dialog .message-area {
   transform: scale(1.08);
 }
 
-.cover-hover-button.cover-hover-animated:hover .action-button-shadow {
-  box-shadow:
-    0 10px 26px rgba(0, 0, 0, 0.34),
-    inset 0 0 0 1px rgba(0, 0, 0, 0.12);
-}
-
 .cover-hover-button.cover-hover-animated:active {
   box-shadow: none;
   transform: none;
@@ -1437,12 +1460,6 @@ dialog.alert.playlist-delete-dialog .message-area {
 
 .cover-hover-button.cover-hover-animated:active .cover-hover-face {
   transform: scale(0.96);
-}
-
-.cover-hover-button.cover-hover-animated:active .action-button-shadow {
-  box-shadow:
-    0 6px 18px rgba(0, 0, 0, 0.3),
-    inset 0 0 0 1px rgba(0, 0, 0, 0.14);
 }
 
 .cover-side-button .cover-hover-face,
@@ -2082,7 +2099,6 @@ button.download-queue-pause image {
 .detail-showcase-action-button .action-button-shadow {
   min-width: 48px;
   min-height: 48px;
-  transition: none;
   box-shadow:
     0 8px 24px rgba(0, 0, 0, 0.18),
     inset 0 0 0 1px rgba(0, 0, 0, 0.08);
@@ -2539,6 +2555,14 @@ entry.lyrics-offset-value.flat:focus-within {
   font-size: 12px;
 }
 
+.fullscreen-player.display-compact .fullscreen-player-title { font-size: 19px; }
+.fullscreen-player.display-compact .fullscreen-player-artist { font-size: 14px; }
+.fullscreen-player.display-compact .fullscreen-player-album { font-size: 12px; }
+.fullscreen-player.display-large .fullscreen-player-title { font-size: 28px; }
+.fullscreen-player.display-large .fullscreen-player-artist { font-size: 20px; }
+.fullscreen-player.display-large .fullscreen-player-album { font-size: 18px; }
+.fullscreen-player.display-large .fullscreen-player-meta-pill { font-size: 15px; }
+
 .fullscreen-player-pane {
   margin: 0 0 12px 12px;
 }
@@ -2744,6 +2768,7 @@ button.connect-relay-link, button.connect-relay-link:visited { color: inherit; }
 .connect-device-offline .subtitle { color: var(--error-color); }
 /* The report shares the fullscreen player's artwork background and library cells. */
 .activity-overview, .activity-report { background-color: var(--window-bg-color); }
+.activity-export-background { color: var(--window-bg-color); }
 .activity-title { font-size: 2.4em; font-weight: 800; }
 .activity-total { font-size: 2em; font-weight: 750; }
 .activity-stat {
@@ -2776,3 +2801,39 @@ button.connect-relay-link, button.connect-relay-link:visited { color: inherit; }
 .theme-accent > button { min-width: 0; min-height: 26px; padding: 2px 4px; }
 .theme-edit { min-width: 20px; min-height: 26px; padding: 2px; }
 .theme-swatch { min-width: 10px; min-height: 10px; border-radius: 50%; }
+
+/* A drop belongs to the whole item, including when a table cell receives it. */
+.drop-feedback:drop(active),
+.drop-feedback :drop(active) {
+  outline: none;
+  box-shadow: none;
+}
+.drop-feedback.media-drop-row,
+.drop-feedback.media-drop-row:selected,
+.drop-feedback.media-drop-row:focus {
+  outline: 2px solid var(--accent-color);
+  outline-offset: -2px;
+  box-shadow: none;
+}
+.drop-feedback.order-drop-before,
+.drop-feedback.order-drop-before:selected,
+.drop-feedback.order-drop-before:focus {
+  box-shadow: inset 0 2px var(--accent-color);
+}
+.drop-feedback.order-drop-after,
+.drop-feedback.order-drop-after:selected,
+.drop-feedback.order-drop-after:focus {
+  box-shadow: inset 0 -2px var(--accent-color);
+}
+.drop-feedback.order-drop-left,
+.drop-feedback.order-drop-left:selected,
+.drop-feedback.order-drop-left:focus {
+  border-radius: 0;
+  box-shadow: -2px 0 var(--accent-color);
+}
+.drop-feedback.order-drop-right,
+.drop-feedback.order-drop-right:selected,
+.drop-feedback.order-drop-right:focus {
+  border-radius: 0;
+  box-shadow: 2px 0 var(--accent-color);
+}

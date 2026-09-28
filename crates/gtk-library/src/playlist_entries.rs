@@ -6,8 +6,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use library::{PlaylistEntryKey, PlaylistEntryRow, PlaylistKey};
+use gtk::glib;
+use library::{PlaylistEntryRow, PlaylistKey};
 use localization::msgid;
+use std::sync::Arc;
 
 use crate::CatalogUi;
 use crate::{LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings};
@@ -104,9 +106,14 @@ impl PlaylistEntriesView {
         self.model.projection_request()
     }
 
-    pub fn replace_count(&self, request: PlaylistEntryProjectionRequest, count: usize) {
+    pub fn replace_prepared(
+        &self,
+        request: PlaylistEntryProjectionRequest,
+        count: usize,
+        rows: Vec<PlaylistEntryRow>,
+    ) {
         let empty = count == 0;
-        self.model.replace_count(count, request);
+        self.model.replace_prepared(count, request, rows);
         self.toolbar_widget.set_visible(!empty);
         self.stack
             .set_visible_child_name(if empty { "empty" } else { "content" });
@@ -707,52 +714,90 @@ fn install_playlist_entry_drag(
                     .current_playlist_entry_selection_owner()
                     .map(|selection| selection.single_entry(entry.playlist_entry_key))
             })?;
-        let mut providers = Vec::new();
-        if selection.writable && selection.count == 1 {
-            providers.push(gtk::gdk::ContentProvider::for_value(
-                &entry.playlist_entry_key.raw().to_value(),
-            ));
-        }
-        providers.push(media_drag_content_provider(
-            MediaDragSource::playlist_entries(selection),
-        ));
         drag_preview.prepare_cache_only(&shell.artwork, title, artwork);
-        match providers.as_slice() {
-            [] => None,
-            [provider] => Some(provider.clone()),
-            providers => Some(gtk::gdk::ContentProvider::new_union(providers)),
-        }
+        Some(media_drag_content_provider(
+            MediaDragSource::playlist_entries(selection),
+        ))
     });
     target.as_ref().add_controller(drag_source);
 
-    let move_shell = Rc::clone(shell);
-    let drop_target = gtk::DropTarget::new(i64::static_type(), gtk::gdk::DragAction::MOVE);
-    drop_target.connect_drop(move |_, value, _, _| {
-        let Ok(entry) = value.get::<i64>() else {
+    let move_shell = Rc::downgrade(shell);
+    let drop_target = gtk::DropTarget::new(
+        glib::BoxedAnyObject::static_type(),
+        gtk::gdk::DragAction::MOVE,
+    );
+    drop_target.set_preload(true);
+    drop_target.connect_notify_local(Some("value"), move |drop, _| {
+        let Some(value) = drop.value() else { return };
+        if !matches!(gtk_widgets::media_drag::media_drag_source(&value), Some(MediaDragSource::PlaylistEntries(selection)) if selection.playlist == playlist && selection.writable && selection.count == 1) {
+            drop.reject();
+        }
+    });
+    drop_target.connect_drop(move |drop, value, x, y| {
+        let Some(MediaDragSource::PlaylistEntries(selection)) =
+            gtk_widgets::media_drag::media_drag_source(value)
+        else {
+            return false;
+        };
+        if selection.playlist != playlist || !selection.writable || selection.count != 1 {
+            return false;
+        }
+        let library::QueueInput::PlaylistEntries { order, .. } = &selection.input else {
+            return false;
+        };
+        let Some(entry) = order.first().copied() else {
             return false;
         };
         let Some(target) = current() else {
             return false;
         };
-        if !move_shell
-            .current_playlist_entry_selection_owner()
-            .is_some_and(|selection| selection.single_entry(target.playlist_entry_key).writable)
-        {
-            return false;
-        }
-        let entry = PlaylistEntryKey::from_raw(entry);
         if entry == target.playlist_entry_key {
             return false;
         }
-        rufin_core::playlists::move_playlist_entry(
-            &move_shell.source,
-            playlist,
-            entry,
-            playlist_entry_drop_position(target.position),
-        );
+        let Some(shell) = move_shell.upgrade() else {
+            return false;
+        };
+        let Some(selected) = shell.selected_library().as_deref().cloned() else {
+            return false;
+        };
+        let after = drop
+            .widget()
+            .is_some_and(|widget| gtk_widgets::media_drag::order_drop_after(&widget, x, y));
+        let settings = shell
+            .settings
+            .current
+            .borrow()
+            .library_list(LibraryListKey::PlaylistTracks);
+        let after = after
+            != (settings.descending
+                && settings.sort_key.playlist_entry_sort() == library::PlaylistEntrySort::Position);
+        let database = Arc::clone(&selected.database);
+        let task = selected.runtime.spawn(async move {
+            database
+                .playlist_entry_rows(&[entry], &library::ReadCancellation::new())
+                .await
+        });
+        let weak = Rc::downgrade(&shell);
+        glib::spawn_future_local(async move {
+            let (Ok(Ok(rows)), Some(shell)) = (task.await, weak.upgrade()) else {
+                return;
+            };
+            let Some(moved) = rows.first() else { return };
+            let position = target.position + i64::from(after)
+                - i64::from(moved.position < target.position + i64::from(after));
+            if position == moved.position {
+                return;
+            }
+            rufin_core::playlists::move_playlist_entry(
+                &shell.source,
+                playlist,
+                entry,
+                position.max(0) as usize,
+            );
+        });
         true
     });
-    gtk_widgets::media_drag::style_media_drop_target(target);
+    gtk_widgets::media_drag::style_order_drop_target(&drop_target, true, |_| true);
     target.as_ref().add_controller(drop_target);
 }
 
@@ -894,6 +939,15 @@ fn playlist_entry_grid(
 
 fn playlist_entry_field(entry: &PlaylistEntryRow, field: LibraryField) -> String {
     match field {
+        LibraryField::Bitrate
+        | LibraryField::SampleRate
+        | LibraryField::BitDepth
+        | LibraryField::Channels => {
+            gtk_widgets::library_fields::audio_property_field(&entry.audio_properties, field)
+        }
+        LibraryField::Format => entry.source_format.clone().unwrap_or_default(),
+        LibraryField::FilePath => entry.source_path.clone().unwrap_or_default(),
+        LibraryField::Source => entry.source_name.clone().unwrap_or_default(),
         LibraryField::Title | LibraryField::TitleMerged => entry.title.clone(),
         LibraryField::Artist => entry.artist.clone(),
         LibraryField::AlbumArtist => entry
@@ -938,10 +992,6 @@ fn playlist_entry_number(position: u32, ready: bool) -> String {
         .unwrap_or_default()
 }
 
-fn playlist_entry_drop_position(target_position: i64) -> usize {
-    usize::try_from(target_position.max(0)).unwrap_or_default()
-}
-
 fn playlist_entry_column_width(field: LibraryField) -> i32 {
     match field {
         LibraryField::Image => 36,
@@ -959,11 +1009,5 @@ mod tests {
     fn playlist_placeholder_keeps_number_and_actions_inert_until_ready() {
         assert_eq!(playlist_entry_number(7, false), "");
         assert_eq!(playlist_entry_number(7, true), "8");
-    }
-
-    #[test]
-    fn playlist_drop_uses_the_crossed_target_position() {
-        assert_eq!(playlist_entry_drop_position(3), 3);
-        assert_eq!(playlist_entry_drop_position(-1), 0);
     }
 }

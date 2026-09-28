@@ -434,7 +434,7 @@ pub async fn build(
                 let weak = weak.clone();
                 Rc::new(move |rows| {
                     let Some(shell) = weak.upgrade() else {
-                        return gtk::Box::default().upcast();
+                        return (gtk::Box::default().upcast(), Rc::new(|| {}));
                     };
                     let route = shell.navigation.routes.borrow().current().clone();
                     let catalog = shell.build_catalog(&route, None);
@@ -554,6 +554,16 @@ pub async fn build(
     install_product_event_receivers(&shell, receivers);
     crate::preferences::connect::install(&shell.preferences);
     let weak_shell = Rc::downgrade(&shell);
+    #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
+    {
+        let body: gtk::Label = gtk_widgets::ui_resource::object(
+            &shell_root_builder,
+            shell_root_resource,
+            "secret_storage_portal_body",
+        );
+        secret_storage_fallback_dialog.set_body_use_markup(true);
+        secret_storage_fallback_dialog.set_body(&body.label());
+    }
     gtk::glib::spawn_future_local(async move {
         while let Ok(storage) = secret_storage_fallbacks.recv().await {
             let Some(shell) = weak_shell.upgrade() else {

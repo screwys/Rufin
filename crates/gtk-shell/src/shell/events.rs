@@ -996,20 +996,14 @@ fn apply_lyrics_event(shell: &Rc<Shell>, event: rufin_core::lyrics::LyricsEvent)
 }
 
 fn playback_error_toast(error: &str) -> String {
-    // Backend diagnostics remain intact in the log. Only present the message
-    // field from GStreamer's diagnostic envelope, never its pipeline or URL.
-    let message = error
-        .strip_prefix("GStreamer ")
-        .and_then(|details| details.split_once("; error="))
-        .and_then(|(_, message)| message.split_once("; debug="))
-        .map_or(error, |(message, _)| message);
-    match message {
+    match error {
         "Not Found"
         | "File not found"
         | "Resource not found"
         | "Resource not found."
-        | "the configured source no longer exists" => tr("Resource not found"),
-        _ => message.to_owned(),
+        | "the configured source no longer exists"
+        | "Could not play this track" => tr("Could not play this track"),
+        _ => error.to_owned(),
     }
 }
 
@@ -1033,18 +1027,15 @@ mod tests {
     fn playback_toasts_omit_backend_diagnostics() {
         assert_eq!(
             super::playback_error_toast("the configured source no longer exists"),
-            localization::tr("Resource not found")
-        );
-        let diagnostic = "GStreamer prepared playback failed; element=/GstPlayBin/player/GstSoupHTTPSrc/source; audio_sink=autoaudiosink; error=Not Found; debug=Not Found (404), URL: http://server/Audio/track/stream";
-        assert_eq!(
-            super::playback_error_toast(diagnostic),
-            localization::tr("Resource not found")
+            localization::tr("Could not play this track")
         );
         assert_eq!(
-            super::playback_error_toast(
-                &diagnostic.replace("error=Not Found;", "error=Internal data stream error.;")
-            ),
-            "Internal data stream error."
+            super::playback_error_toast("Resource not found"),
+            localization::tr("Could not play this track")
+        );
+        assert_eq!(
+            super::playback_error_toast("Could not play this track"),
+            localization::tr("Could not play this track")
         );
         let rejected =
             "Plex Companion queues require Plex music from one configured server and profile";

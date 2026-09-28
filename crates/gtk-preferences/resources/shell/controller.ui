@@ -5,6 +5,7 @@
   <object class="GtkPopover" id="popover">
     <property name="autohide">true</property>
     <property name="position">bottom</property>
+    <property name="halign">start</property>
     <property name="child"><object class="GtkBox">
       <property name="orientation">vertical</property>
       <property name="width-request">340</property>

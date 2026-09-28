@@ -865,7 +865,9 @@ impl Scan {
         baseline_last_played: Option<i64>,
         source_path: Option<&str>,
         loudness_analysis_key: [u8; 32],
+        audio_properties: &crate::AudioProperties,
     ) -> LibraryResult<bool> {
+        let audio_properties = serde_json::to_string(audio_properties)?;
         self.require_id("track", object_id)?;
         let direct_uri = media_uri.and_then(normalize_direct_media_uri);
         let media_uri = match (direct_uri, cue_start_millis, cue_end_millis) {
@@ -903,6 +905,7 @@ impl Scan {
             media_uri.as_bytes(),
             source_path.unwrap_or_default().as_bytes(),
             source_format.unwrap_or_default().as_bytes(),
+            audio_properties.as_bytes(),
             comment.unwrap_or_default().as_bytes(),
             musicbrainz_recording_id.unwrap_or_default().as_bytes(),
             musicbrainz_release_track_id.unwrap_or_default().as_bytes(),
@@ -922,12 +925,12 @@ impl Scan {
                     cue_path, cue_start_millis, cue_end_millis, artwork_binding,
                     favorite, rating, first_seen_at, baseline_play_count,
                     baseline_skip_count, baseline_last_played,
-                    source_loudness_analysis_key
+                    source_loudness_analysis_key,audio_properties
                  ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
                 ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
                 ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
-                ?28, ?29, ?30, ?31
+                ?28, ?29, ?30, ?31, ?32
              ) ON CONFLICT(object_id) DO NOTHING",
                 )
                 .bind(object_id)
@@ -960,7 +963,8 @@ impl Scan {
                 .bind(baseline_play_count)
                 .bind(baseline_skip_count)
                 .bind(baseline_last_played)
-                .bind(loudness_analysis_key.as_slice()),
+                .bind(loudness_analysis_key.as_slice())
+                .bind(audio_properties),
             )
             .await?
             .rows_affected()
@@ -1629,7 +1633,7 @@ impl Scan {
             // Copy relations before inserting tracks: the predicate may exclude tracks
             // that were already staged by a fresh parse.
             format!(
-                "INSERT OR IGNORE INTO temp.scan_tracks(object_id,album_object_id,title,normalized_search,display_album,display_artist,sort_text,duration_millis,disc_number,track_number,year,release_date,date_added,media_uri,source_path,source_format,comment,bpm,musicbrainz_recording_id,musicbrainz_release_track_id,cue_path,cue_start_millis,cue_end_millis,artwork_binding,favorite,rating,first_seen_at,baseline_play_count,baseline_skip_count,baseline_last_played,source_loudness_analysis_key) SELECT track.object_id,album.object_id,track.title,track.normalized_search,track.display_album,track.display_artist,track.sort_text,track.duration_millis,track.disc_number,track.track_number,track.year,track.release_date,track.date_added,track.media_uri,track.source_path,track.source_format,track.comment,track.bpm,track.musicbrainz_recording_id,track.musicbrainz_release_track_id,track.cue_path,track.cue_start_millis,track.cue_end_millis,track.artwork_binding,track.source_favorite,track.source_rating,track.first_seen_at,baseline.play_count,baseline.skip_count,baseline.last_played_at,track.source_loudness_analysis_key FROM tracks track LEFT JOIN albums album USING(album_key) LEFT JOIN activity_baseline baseline ON baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track' WHERE track.source_key=?1 AND {predicate}"
+                "INSERT OR IGNORE INTO temp.scan_tracks(object_id,album_object_id,title,normalized_search,display_album,display_artist,sort_text,duration_millis,disc_number,track_number,year,release_date,date_added,media_uri,source_path,source_format,audio_properties,comment,bpm,musicbrainz_recording_id,musicbrainz_release_track_id,cue_path,cue_start_millis,cue_end_millis,artwork_binding,favorite,rating,first_seen_at,baseline_play_count,baseline_skip_count,baseline_last_played,source_loudness_analysis_key) SELECT track.object_id,album.object_id,track.title,track.normalized_search,track.display_album,track.display_artist,track.sort_text,track.duration_millis,track.disc_number,track.track_number,track.year,track.release_date,track.date_added,track.media_uri,track.source_path,track.source_format,track.audio_properties,track.comment,track.bpm,track.musicbrainz_recording_id,track.musicbrainz_release_track_id,track.cue_path,track.cue_start_millis,track.cue_end_millis,track.artwork_binding,track.source_favorite,track.source_rating,track.first_seen_at,baseline.play_count,baseline.skip_count,baseline.last_played_at,track.source_loudness_analysis_key FROM tracks track LEFT JOIN albums album USING(album_key) LEFT JOIN activity_baseline baseline ON baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track' WHERE track.source_key=?1 AND {predicate}"
             ),
         ];
         for statement in statements {
@@ -2935,7 +2939,7 @@ async fn create_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResul
              sort_text TEXT NOT NULL, duration_millis INTEGER NOT NULL,
              disc_number INTEGER NOT NULL, track_number INTEGER NOT NULL,
              year INTEGER, release_date TEXT, date_added TEXT, media_uri TEXT NOT NULL UNIQUE,
-             source_path TEXT, source_format TEXT, comment TEXT, bpm INTEGER,
+             source_path TEXT, source_format TEXT, audio_properties TEXT NOT NULL DEFAULT '{}', comment TEXT, bpm INTEGER,
              musicbrainz_recording_id TEXT, musicbrainz_release_track_id TEXT,
              cue_path TEXT, cue_start_millis INTEGER, cue_end_millis INTEGER,
              artwork_binding BLOB, favorite INTEGER,
@@ -3254,8 +3258,8 @@ async fn publish_entities(
              normalized_name=excluded.normalized_name,
              sort_text=excluded.sort_text
          WHERE (folders.name,folders.normalized_name,folders.sort_text) IS NOT (excluded.name,excluded.normalized_name,excluded.sort_text)",
-        "INSERT INTO tracks(source_key, object_id, album_key, title, normalized_search, display_album, display_artist, sort_text, duration_millis, disc_number, track_number, year, release_date, date_added, media_uri, source_path, source_format, comment, bpm, musicbrainz_recording_id, musicbrainz_release_track_id, cue_path, cue_start_millis, cue_end_millis, first_seen_at, source_loudness_analysis_key, loudness_analysis_key) SELECT incoming.* FROM (
-           SELECT ?1 AS source_key, item.object_id, album.album_key, item.title, item.normalized_search, item.display_album, item.display_artist, item.sort_text, item.duration_millis, item.disc_number, item.track_number, item.year, item.release_date, item.date_added, item.media_uri, item.source_path, item.source_format, item.comment, item.bpm, item.musicbrainz_recording_id, item.musicbrainz_release_track_id, item.cue_path, item.cue_start_millis, item.cue_end_millis, item.first_seen_at, item.source_loudness_analysis_key, COALESCE((SELECT access.loudness_analysis_key
+        "INSERT INTO tracks(source_key, object_id, album_key, title, normalized_search, display_album, display_artist, sort_text, duration_millis, disc_number, track_number, year, release_date, date_added, media_uri, source_path, source_format, audio_properties, comment, bpm, musicbrainz_recording_id, musicbrainz_release_track_id, cue_path, cue_start_millis, cue_end_millis, first_seen_at, source_loudness_analysis_key, loudness_analysis_key) SELECT incoming.* FROM (
+           SELECT ?1 AS source_key, item.object_id, album.album_key, item.title, item.normalized_search, item.display_album, item.display_artist, item.sort_text, item.duration_millis, item.disc_number, item.track_number, item.year, item.release_date, item.date_added, item.media_uri, item.source_path, item.source_format, item.audio_properties, item.comment, item.bpm, item.musicbrainz_recording_id, item.musicbrainz_release_track_id, item.cue_path, item.cue_start_millis, item.cue_end_millis, item.first_seen_at, item.source_loudness_analysis_key, COALESCE((SELECT access.loudness_analysis_key
                             FROM local_access_files AS access
                             WHERE access.media_uri=item.media_uri
                             ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,
@@ -3266,7 +3270,7 @@ async fn publish_entities(
              ON album.source_key = ?1 AND album.object_id = item.album_object_id
            ) AS incoming
            LEFT JOIN tracks ON tracks.source_key=incoming.source_key AND tracks.object_id=incoming.object_id
-           WHERE tracks.track_key IS NULL OR (tracks.album_key,tracks.title,tracks.normalized_search,tracks.display_album,tracks.display_artist,tracks.sort_text,tracks.duration_millis,tracks.disc_number,tracks.track_number,tracks.year,tracks.release_date,tracks.date_added,tracks.media_uri,tracks.source_path,tracks.source_format,tracks.comment,tracks.bpm,tracks.musicbrainz_recording_id,tracks.musicbrainz_release_track_id,tracks.cue_path,tracks.cue_start_millis,tracks.cue_end_millis,tracks.first_seen_at,tracks.source_loudness_analysis_key,tracks.loudness_analysis_key) IS NOT (incoming.album_key,incoming.title,incoming.normalized_search,incoming.display_album,incoming.display_artist,incoming.sort_text,incoming.duration_millis,incoming.disc_number,incoming.track_number,incoming.year,incoming.release_date,incoming.date_added,incoming.media_uri,incoming.source_path,incoming.source_format,incoming.comment,incoming.bpm,incoming.musicbrainz_recording_id,incoming.musicbrainz_release_track_id,incoming.cue_path,incoming.cue_start_millis,incoming.cue_end_millis,COALESCE(tracks.first_seen_at, incoming.first_seen_at),incoming.source_loudness_analysis_key,incoming.loudness_analysis_key)
+           WHERE tracks.track_key IS NULL OR (tracks.album_key,tracks.title,tracks.normalized_search,tracks.display_album,tracks.display_artist,tracks.sort_text,tracks.duration_millis,tracks.disc_number,tracks.track_number,tracks.year,tracks.release_date,tracks.date_added,tracks.media_uri,tracks.source_path,tracks.source_format,tracks.audio_properties,tracks.comment,tracks.bpm,tracks.musicbrainz_recording_id,tracks.musicbrainz_release_track_id,tracks.cue_path,tracks.cue_start_millis,tracks.cue_end_millis,tracks.first_seen_at,tracks.source_loudness_analysis_key,tracks.loudness_analysis_key) IS NOT (incoming.album_key,incoming.title,incoming.normalized_search,incoming.display_album,incoming.display_artist,incoming.sort_text,incoming.duration_millis,incoming.disc_number,incoming.track_number,incoming.year,incoming.release_date,incoming.date_added,incoming.media_uri,incoming.source_path,incoming.source_format,incoming.audio_properties,incoming.comment,incoming.bpm,incoming.musicbrainz_recording_id,incoming.musicbrainz_release_track_id,incoming.cue_path,incoming.cue_start_millis,incoming.cue_end_millis,COALESCE(tracks.first_seen_at, incoming.first_seen_at),incoming.source_loudness_analysis_key,incoming.loudness_analysis_key)
          ON CONFLICT(source_key, object_id) DO UPDATE SET
              album_key=excluded.album_key,
              title=excluded.title,
@@ -3283,6 +3287,7 @@ async fn publish_entities(
              media_uri=excluded.media_uri,
              source_path=excluded.source_path,
              source_format=excluded.source_format,
+             audio_properties=excluded.audio_properties,
              comment=excluded.comment,
              bpm=excluded.bpm,
              musicbrainz_recording_id=excluded.musicbrainz_recording_id,

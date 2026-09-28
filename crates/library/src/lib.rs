@@ -29,6 +29,7 @@ mod search;
 mod smart_playlists;
 mod source_window;
 mod tracks;
+pub use tracks::AudioProperties;
 
 pub use activity::{
     ActivityAlbumRow, ActivityArtistRow, ActivityCsvFormat, ActivityGenreRow, ActivityImportReport,

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <object class="RufinTextFade" id="fade">
+    <property name="hexpand">true</property>
+    <child>
+      <object class="GtkScrolledWindow" id="scroll">
+        <property name="hscrollbar-policy">external</property>
+        <property name="vscrollbar-policy">never</property>
+        <property name="propagate-natural-height">true</property>
+        <property name="hexpand">true</property>
+        <property name="width-request">1</property>
+        <property name="child">
+          <object class="GtkViewport" id="viewport">
+            <property name="child">
+              <object class="GtkLabel" id="label">
+                <property name="xalign">0</property>
+                <property name="single-line-mode">true</property>
+                <property name="ellipsize">end</property>
+                <property name="width-chars">1</property>
+              </object>
+            </property>
+          </object>
+        </property>
+      </object>
+    </child>
+  </object>
+</interface>

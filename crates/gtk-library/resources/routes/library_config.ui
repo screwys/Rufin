@@ -51,6 +51,7 @@
                     </child>
                   </object>
                 </child>
+                <child><object class="GtkBox" id="display_host"><property name="orientation">vertical</property></object></child>
                 <child><object class="AdwPreferencesGroup" id="fields_group"/></child>
               </object>
             </property>

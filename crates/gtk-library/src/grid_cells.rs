@@ -166,6 +166,8 @@ pub trait ReusableCollectionGridCell<T>: 'static {
 
 #[derive(Clone)]
 pub struct CollectionGridProjection {
+    display: Rc<RefCell<rufin_core::settings::layout::DisplaySettings>>,
+    apply_display: Rc<dyn Fn(&rufin_core::settings::layout::DisplaySettings)>,
     surface: gtk::Widget,
     navigation: MountedRouteItemNavigation,
     fields: Rc<RefCell<Vec<LibraryField>>>,
@@ -176,6 +178,7 @@ pub struct CollectionGridProjection {
 #[derive(Clone)]
 struct CollectionGridCacheBound {
     grid: glib::WeakRef<gtk::GridView>,
+    display: Rc<RefCell<rufin_core::settings::layout::DisplaySettings>>,
 }
 
 impl CollectionGridCacheBound {
@@ -183,8 +186,12 @@ impl CollectionGridCacheBound {
         let Some(grid) = self.grid.upgrade() else {
             return;
         };
-        let maximum_columns =
-            collection_grid_column_limit(allocation_width, grid.margin_start(), grid.margin_end());
+        let maximum_columns = collection_grid_column_limit(
+            allocation_width,
+            grid.margin_start(),
+            grid.margin_end(),
+            &self.display.borrow(),
+        );
         if grid.max_columns() == maximum_columns {
             return;
         }
@@ -192,22 +199,53 @@ impl CollectionGridCacheBound {
     }
 }
 
-fn collection_grid_column_limit(allocation_width: i32, margin_start: i32, margin_end: i32) -> u32 {
+fn collection_grid_column_limit(
+    allocation_width: i32,
+    margin_start: i32,
+    margin_end: i32,
+    display: &rufin_core::settings::layout::DisplaySettings,
+) -> u32 {
     let available_width = allocation_width
         .saturating_sub(margin_start)
         .saturating_sub(margin_end)
         .max(1);
-    collection_grid_column_count(available_width).min(u32::MAX as usize) as u32
+    grid_column_count(available_width, display).min(u32::MAX as usize) as u32
 }
 
 pub fn collection_grid_column_count(available_width: i32) -> usize {
-    let minimum_slot_width = COLLECTION_GRID_MIN_CARD_WIDTH
+    grid_column_count(available_width, &Default::default())
+}
+
+pub fn grid_dimensions(
+    settings: &rufin_core::settings::layout::DisplaySettings,
+) -> (i32, i32, i32) {
+    use rufin_core::settings::layout::DisplaySize;
+    let (minimum, maximum) = match settings.size {
+        DisplaySize::Compact => (96, 152),
+        DisplaySize::Default => (
+            COLLECTION_GRID_MIN_CARD_WIDTH,
+            COLLECTION_GRID_MAX_CARD_WIDTH,
+        ),
+        DisplaySize::Large => (168, 264),
+    };
+    let inset = match settings.grid_spacing {
+        DisplaySize::Compact => 2,
+        DisplaySize::Default => COLLECTION_GRID_CARD_MARGIN,
+        DisplaySize::Large => 12,
+    };
+    (minimum, maximum, inset)
+}
+
+pub fn grid_column_count(
+    available_width: i32,
+    settings: &rufin_core::settings::layout::DisplaySettings,
+) -> usize {
+    let (minimum, maximum, inset) = grid_dimensions(settings);
+    let minimum_slot_width = minimum.max(1).saturating_add(inset.saturating_mul(2));
+    let maximum_slot_width = maximum
+        .max(minimum)
         .max(1)
-        .saturating_add(COLLECTION_GRID_CARD_MARGIN.saturating_mul(2));
-    let maximum_slot_width = COLLECTION_GRID_MAX_CARD_WIDTH
-        .max(COLLECTION_GRID_MIN_CARD_WIDTH)
-        .max(1)
-        .saturating_add(COLLECTION_GRID_CARD_MARGIN.saturating_mul(2));
+        .saturating_add(inset.saturating_mul(2));
     let available_width = available_width.max(1);
     let maximum_fitting_columns = (available_width / minimum_slot_width).max(1);
     let minimum_needed_columns =
@@ -337,6 +375,14 @@ where
 }
 
 impl CollectionGridProjection {
+    pub fn apply_display(&self, settings: &rufin_core::settings::layout::DisplaySettings) {
+        if *self.display.borrow() == *settings {
+            return;
+        }
+        self.display.replace(settings.clone());
+        (self.apply_display)(settings);
+        self.fit_allocation(self.surface.width());
+    }
     pub fn widget(&self) -> gtk::Widget {
         self.surface.clone()
     }
@@ -425,6 +471,10 @@ where
     let fields = Rc::new(RefCell::new(fields.to_vec()));
     let setup_cells = Rc::clone(&cells);
     let setup_fields = Rc::clone(&fields);
+    let display = Rc::new(RefCell::new(
+        rufin_core::settings::layout::DisplaySettings::default(),
+    ));
+    let setup_display = Rc::clone(&display);
     factory.connect_setup(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
@@ -434,6 +484,7 @@ where
         cell.set_ready(false);
         let child =
             cards::collection_grid_card_inset(&cell.widget(), COLLECTION_GRID_MIN_CARD_WIDTH);
+        child.apply_display(&setup_display.borrow());
         child.set_sensitive(false);
         child.set_can_target(false);
         child.set_cell(cell);
@@ -546,9 +597,19 @@ where
     }) as MountedRouteItemNavigation;
     let cache_bound = CollectionGridCacheBound {
         grid: grid.downgrade(),
+        display: Rc::clone(&display),
     };
     let apply_cells = Rc::clone(&cells);
     CollectionGridProjection {
+        display,
+        apply_display: Rc::new(move |settings| {
+            cells.borrow_mut().retain(|cell| {
+                cell.upgrade().is_some_and(|cell| {
+                    cell.apply_display(settings);
+                    true
+                })
+            });
+        }),
         surface: grid.upcast(),
         navigation,
         fields,
@@ -1323,7 +1384,10 @@ mod tests {
         assert_eq!(collection_grid_column_count(496), 3);
         assert_eq!(collection_grid_column_count(minimum_slot * 3 - 1), 2);
         assert_eq!(collection_grid_column_count(maximum_slot * 2 + 1), 3);
-        assert_eq!(collection_grid_column_limit(600, 0, 0), 3);
+        assert_eq!(
+            collection_grid_column_limit(600, 0, 0, &Default::default()),
+            3
+        );
         assert_eq!(collection_grid_column_count(1_600), 8);
         assert_eq!(collection_grid_column_count(3_200), 16);
     }

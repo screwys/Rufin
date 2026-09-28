@@ -14,6 +14,10 @@
     </responses>
   </object>
 
+  <object class="GtkLabel" id="secret_storage_portal_body">
+    <property name="label" translatable="yes">No secret service found. You might have a secret service but the portal can be broken, you can check &lt;a href="https://github.com/screwys/Rufin/issues/1055#issuecomment-5637922622"&gt;this issue&lt;/a&gt; to fix it, otherwise Rufin will use a file to store its credentials. Cancelling will not save credentials at all.</property>
+  </object>
+
   <object class="GtkStack" id="root_stack">
     <property name="hhomogeneous">false</property>
     <property name="vhomogeneous">false</property>

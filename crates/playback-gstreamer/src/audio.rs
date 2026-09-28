@@ -469,7 +469,7 @@ fn configure_test_output(output: &gst::Element) {
     sink.set_caps(Some(&caps));
     sink.set_max_buffers(8);
     sink.set_drop(false);
-    sink.set_sync(false);
+    sink.set_sync(true);
 }
 
 pub fn available_audio_outputs() -> Vec<AudioOutput> {

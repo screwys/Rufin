@@ -502,6 +502,7 @@ impl CatalogUi {
             reset: gtk::Button,
             layout_box: gtk::Box,
             fields_group: adw::PreferencesGroup,
+            display_host: gtk::Box,
         });
         title.set_subtitle(&tr(gtk_widgets::settings::library_list_title(key)));
         configure_fill_width_clip(&scroller, gtk::PolicyType::Automatic);
@@ -536,8 +537,25 @@ impl CatalogUi {
             layout_buttons.borrow_mut().push((layout, button));
         }
         let rows = Rc::new(RefCell::new(Vec::<adw::ActionRow>::new()));
+        let display = {
+            let settings = Rc::clone(&self.settings);
+            let changed = self.library_settings_changed();
+            gtk_widgets::display::DisplayEditor::new(
+                &self.settings.current.borrow().library_list(key).display,
+                move |display| {
+                    if settings.update_library_list_settings(key, |settings| {
+                        settings.display = display.clone()
+                    }) {
+                        changed();
+                    }
+                },
+            )
+        };
+        display.set_layout(Some(current_layout));
+        display_host.append(&display.group);
 
         for (layout, button) in layout_buttons.borrow().iter() {
+            let display = display.clone();
             let settings = Rc::clone(&self.settings);
             let changed = self.library_settings_changed();
             let fields_group = fields_group.clone();
@@ -558,6 +576,7 @@ impl CatalogUi {
                 if let Some(layout_buttons) = layout_buttons.upgrade() {
                     sync_layout_buttons(&layout_buttons, layout);
                 }
+                display.set_layout(Some(layout));
                 populate_library_field_rows(
                     &settings,
                     Rc::clone(&changed),
@@ -576,6 +595,11 @@ impl CatalogUi {
             let layout_buttons = Rc::clone(&layout_buttons);
             reset.connect_clicked(move |_| {
                 let default_settings = LibraryListSettings::for_key(key);
+                display.sync(&default_settings.display);
+                display.set_layout(Some(toolbar_layout(
+                    default_settings.layout,
+                    include_detail,
+                )));
                 if settings.update_library_list_settings(key, |settings| {
                     *settings = default_settings.clone();
                 }) {

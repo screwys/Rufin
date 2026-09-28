@@ -70,19 +70,36 @@
               </object>
             </child>
             <child>
-              <object class="GtkLabel" id="title">
-                <property name="xalign">0</property>
-                <property name="justify">left</property>
-                <property name="wrap">true</property>
-                <property name="wrap-mode">word-char</property>
+              <object class="RufinTextFade" id="title_fade">
                 <property name="hexpand">true</property>
-                <property name="halign">fill</property>
-                <property name="width-request">1</property>
-                <property name="width-chars">1</property>
-                <property name="max-width-chars">32</property>
-                <style>
-                  <class name="detail-title"/>
-                </style>
+                <child>
+                  <object class="GtkScrolledWindow" id="title_slide">
+                    <property name="hscrollbar-policy">external</property>
+                    <property name="vscrollbar-policy">never</property>
+                    <property name="propagate-natural-height">true</property>
+                    <property name="hexpand">true</property>
+                    <property name="width-request">1</property>
+                    <property name="child">
+                      <object class="GtkViewport" id="title_viewport">
+                        <property name="child">
+                          <object class="GtkLabel" id="title">
+                            <property name="single-line-mode">true</property>
+                            <property name="xalign">0</property>
+                            <property name="justify">left</property>
+                            <property name="wrap">false</property>
+                            <property name="hexpand">true</property>
+                            <property name="halign">fill</property>
+                            <property name="width-request">1</property>
+                            <property name="width-chars">1</property>
+                            <style>
+                              <class name="detail-title"/>
+                            </style>
+                          </object>
+                        </property>
+                      </object>
+                    </property>
+                  </object>
+                </child>
               </object>
             </child>
             <child>

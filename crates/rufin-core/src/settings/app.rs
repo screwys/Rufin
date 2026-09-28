@@ -275,6 +275,8 @@ pub struct Settings {
     #[serde(default = "default_lyrics_panel_visible")]
     pub fullscreen_background_image: bool,
     #[serde(default)]
+    pub reduce_motion: bool,
+    #[serde(default)]
     pub activity_overview: ActivityOverviewSettings,
     #[serde(default)]
     pub queue_lyrics_height: Option<i32>,
@@ -339,6 +341,7 @@ impl Default for Settings {
             fullscreen_visualizer_visible: false,
             fullscreen_dynamic_background: false,
             fullscreen_background_image: true,
+            reduce_motion: false,
             activity_overview: ActivityOverviewSettings::default(),
             queue_lyrics_height: None,
             right_panel: super::right_panel::RightPanelSettings::default(),

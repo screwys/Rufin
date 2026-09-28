@@ -47,7 +47,11 @@ mod imp {
             let t = if let Some(start) = self.start_time.get() {
                 let elapsed = start.elapsed().as_secs_f32();
                 let duration = 0.7; // 700ms smooth transition
-                let p = (elapsed / duration).clamp(0.0, 1.0);
+                let p = if obj.settings().is_gtk_enable_animations() {
+                    (elapsed / duration).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
                 if p >= 1.0 {
                     self.start_time.set(None);
                     self.previous_texture.borrow_mut().take();

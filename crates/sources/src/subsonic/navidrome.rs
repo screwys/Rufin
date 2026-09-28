@@ -534,6 +534,12 @@ fn track_from_navidrome(source: &SubsonicSource, raw_id: &str, track: &Value) ->
     }
     let album_id = id(&track["albumId"]).map(|id| String::from(source.id("album", &id)));
     Track {
+        audio_properties: library::AudioProperties {
+            bitrate_kbps: field(track, "bitRate"),
+            sample_rate_hz: field(track, "sampleRate"),
+            bit_depth: field(track, "bitDepth"),
+            channels: field(track, "channels"),
+        },
         sort_name: clean_optional(field(track, "sortTitle")),
         id: String::from(source.id("track", raw_id)),
         album_id,

@@ -438,6 +438,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
             None,
             None,
             [index as u8 + 10; 32],
+            &library::AudioProperties::default(),
         )
         .await
         .expect("stage Track");

@@ -194,15 +194,6 @@ impl PlayerPipeline {
     }
 
     #[cfg(test)]
-    pub(super) fn output_volume_state(&self) -> Option<(f64, bool)> {
-        let (pipeline, _) = self.native.as_ref()?;
-        Some((
-            pipeline.property::<f64>("volume"),
-            pipeline.property::<bool>("mute"),
-        ))
-    }
-
-    #[cfg(test)]
     pub(super) fn has_or_targets_state(&self, state: gst::State) -> bool {
         self.native.as_ref().is_some_and(|(pipeline, _)| {
             let (result, current, pending) = pipeline.state(gst::ClockTime::ZERO);
@@ -349,6 +340,27 @@ impl PlayerPipeline {
         pipeline.set_property("video-sink", &fakesink);
         let certificate_policy = Arc::clone(&self.trust_invalid_certificate);
         configure_sources(&pipeline, move || certificate_policy.load(Ordering::SeqCst));
+
+        pipeline.connect("source-setup", false, |values| {
+            let pipeline = values[0].get::<gst::Bin>().expect("playbin source owner");
+            if let Some(decoder) = pipeline.iterate_recurse().find(|element| {
+                element
+                    .factory()
+                    .is_some_and(|factory| factory.name() == "decodebin3")
+            }) && decoder.current_state() < gst::State::Paused
+            {
+                // A fast source can send startup events before decodebin's pads
+                // are active. Prepare the decoder before the source starts.
+                if let Err(error) = decoder.set_state(gst::State::Paused) {
+                    gst::element_error!(
+                        pipeline,
+                        gst::CoreError::StateChange,
+                        ("Could not prepare the audio decoder: {error}")
+                    );
+                }
+            }
+            None
+        });
 
         let module_for_setup = Arc::clone(&self.module_decoder);
         pipeline.connect("element-setup", false, move |values| {
@@ -561,11 +573,10 @@ impl PlayerPipeline {
         };
         let (pipeline, bus) = self.native()?;
         let result = pipeline.set_state(state).map_err(|error| {
-            bus
-                .pop_filtered(&[gst::MessageType::Error])
+            bus.pop_filtered(&[gst::MessageType::Error])
                 .and_then(|message| {
                     let output = self.audio_output_factory();
-                    gstreamer_error_details(
+                    gstreamer_playback_error(
                         &message,
                         &format!("state change to {state:?}"),
                         output.as_deref(),
@@ -575,9 +586,8 @@ impl PlayerPipeline {
                     let output = self
                         .audio_output_factory()
                         .unwrap_or_else(|| "unconfigured".to_string());
-                    format!(
-                        "GStreamer state change to {state:?} failed; audio_sink={output}; error={error}"
-                    )
+                    error!(?state, audio_sink = %output, %error, "GStreamer state change failed");
+                    "Could not play this track".to_string()
                 })
         })?;
         if result == gst::StateChangeSuccess::NoPreroll {
@@ -815,19 +825,6 @@ mod tests {
             .unwrap()
             .0
             .state(gst::ClockTime::from_seconds(30));
-        if state.0 != Ok(gst::StateChangeSuccess::Success) {
-            let (pipeline, bus) = player.native.as_ref().unwrap();
-            for message in bus.iter() {
-                eprintln!("{message:?}");
-            }
-            eprintln!(
-                "{}",
-                pipeline
-                    .downcast_ref::<gst::Bin>()
-                    .unwrap()
-                    .debug_to_dot_data(gst::DebugGraphDetails::ALL)
-            );
-        }
         assert_eq!(
             state,
             (

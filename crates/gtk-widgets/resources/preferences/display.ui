@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <object class="AdwPreferencesGroup" id="display_group">
+    <property name="title" translatable="yes">Display</property>
+    <child><object class="AdwActionRow" id="size_row">
+      <property name="title" translatable="yes">Size</property>
+      <child type="suffix"><object class="AdwToggleGroup" id="size">
+        <property name="valign">center</property>
+        <property name="can-shrink">true</property>
+        <child><object class="AdwToggle"><property name="label" translatable="yes">Compact</property></object></child>
+        <child><object class="AdwToggle"><property name="label" translatable="yes">Default</property></object></child>
+        <child><object class="AdwToggle"><property name="label" translatable="yes">Large</property></object></child>
+      </object></child>
+    </object></child>
+    <child><object class="AdwActionRow" id="spacing_row">
+      <property name="title" translatable="yes">Grid spacing</property>
+      <child type="suffix"><object class="AdwToggleGroup" id="spacing">
+        <property name="valign">center</property>
+        <property name="can-shrink">true</property>
+        <child><object class="AdwToggle"><property name="label" translatable="yes">Small</property></object></child>
+        <child><object class="AdwToggle"><property name="label" translatable="yes">Default</property></object></child>
+        <child><object class="AdwToggle"><property name="label" translatable="yes">Wide</property></object></child>
+      </object></child>
+    </object></child>
+    <child><object class="AdwSwitchRow" id="show_header"><property name="title" translatable="yes">Show header</property></object></child>
+    <child><object class="AdwSwitchRow" id="hover_highlight"><property name="title" translatable="yes">Highlight hovered row</property></object></child>
+    <child><object class="AdwSwitchRow" id="alternate_rows"><property name="title" translatable="yes">Alternate row colors</property></object></child>
+    <child><object class="AdwSwitchRow" id="row_borders"><property name="title" translatable="yes">Row borders</property></object></child>
+    <child><object class="AdwSwitchRow" id="column_borders"><property name="title" translatable="yes">Column borders</property></object></child>
+  </object>
+</interface>

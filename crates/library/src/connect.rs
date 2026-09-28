@@ -1335,6 +1335,7 @@ mod tests {
             None,
             None,
             [1; 32],
+            &crate::AudioProperties::default(),
         )
         .await
         .unwrap();

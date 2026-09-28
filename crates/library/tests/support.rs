@@ -164,6 +164,7 @@ pub async fn fixture() -> Fixture {
             None,
             None,
             [index as u8 + 1; 32],
+            &library::AudioProperties::default(),
         )
         .await
         .expect("stage Track");

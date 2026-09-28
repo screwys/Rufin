@@ -347,9 +347,10 @@ pub enum LibraryListKey {
     PlaylistTracks,
     SmartPlaylistTracks,
     Queue,
+    FullscreenTracks,
 }
 impl LibraryListKey {
-    pub fn all() -> [Self; 19] {
+    pub fn all() -> [Self; 20] {
         [
             Self::Albums,
             Self::Artists,
@@ -370,15 +371,17 @@ impl LibraryListKey {
             Self::PlaylistTracks,
             Self::SmartPlaylistTracks,
             Self::Queue,
+            Self::FullscreenTracks,
         ]
     }
 
     pub fn supports_layout(self, layout: LibraryLayout) -> bool {
         match layout {
             LibraryLayout::Detail => matches!(self, Self::Albums),
-            LibraryLayout::Grid => {
-                !matches!(self, Self::AlbumDetailTracks | Self::Queue | Self::Folders)
-            }
+            LibraryLayout::Grid => !matches!(
+                self,
+                Self::AlbumDetailTracks | Self::Queue | Self::FullscreenTracks | Self::Folders
+            ),
             LibraryLayout::Row => true,
         }
     }
@@ -387,6 +390,7 @@ impl LibraryListKey {
         match self {
             Self::Albums => LibraryLayout::Grid,
             Self::Queue
+            | Self::FullscreenTracks
             | Self::Tracks
             | Self::Folders
             | Self::FavoriteTracks
@@ -424,6 +428,13 @@ pub enum LibraryField {
     UserRating,
     Genre,
     Bpm,
+    Bitrate,
+    SampleRate,
+    BitDepth,
+    Channels,
+    Format,
+    FilePath,
+    Source,
     TrackNumber,
     DiscNumber,
     SongCount,
@@ -457,6 +468,13 @@ impl LibraryField {
             | Self::SongCount
             | Self::AlbumCount
             | Self::Tools => library::TrackSort::Title,
+            Self::Bitrate
+            | Self::SampleRate
+            | Self::BitDepth
+            | Self::Channels
+            | Self::Format
+            | Self::FilePath
+            | Self::Source => library::TrackSort::Title,
         }
     }
 
@@ -531,8 +549,44 @@ impl LibraryField {
         }
     }
 }
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum DisplaySize {
+    Compact,
+    #[default]
+    Default,
+    Large,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct DisplaySettings {
+    pub size: DisplaySize,
+    pub grid_spacing: DisplaySize,
+    pub show_header: bool,
+    pub hover_highlight: bool,
+    pub alternate_rows: bool,
+    pub row_borders: bool,
+    pub column_borders: bool,
+}
+
+impl Default for DisplaySettings {
+    fn default() -> Self {
+        Self {
+            size: DisplaySize::Default,
+            grid_spacing: DisplaySize::Default,
+            show_header: true,
+            hover_highlight: true,
+            alternate_rows: false,
+            row_borders: false,
+            column_borders: false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LibraryListSettings {
+    #[serde(default)]
+    pub display: DisplaySettings,
     pub layout: LibraryLayout,
     pub row_fields: Vec<LibraryField>,
     pub grid_fields: Vec<LibraryField>,
@@ -550,6 +604,7 @@ pub struct LibraryListSettingsEntry {
 impl LibraryListSettings {
     pub fn for_key(key: LibraryListKey) -> Self {
         Self {
+            display: DisplaySettings::default(),
             layout: key.default_layout(),
             row_fields: default_row_fields(key),
             grid_fields: default_grid_fields(key),
@@ -656,6 +711,7 @@ impl LibraryListSettings {
                     }
                 }
                 LibraryListKey::Queue
+                | LibraryListKey::FullscreenTracks
                 | LibraryListKey::Artists
                 | LibraryListKey::AlbumArtists
                 | LibraryListKey::Tracks
@@ -699,6 +755,7 @@ impl LibraryListSettings {
                     }
                 }
                 LibraryListKey::Queue
+                | LibraryListKey::FullscreenTracks
                 | LibraryListKey::Artists
                 | LibraryListKey::AlbumArtists
                 | LibraryListKey::Tracks
@@ -776,7 +833,10 @@ impl LibraryListSettings {
                         *field = LibraryField::Tools;
                     }
                 }
-                if key == LibraryListKey::Queue {
+                if matches!(
+                    key,
+                    LibraryListKey::Queue | LibraryListKey::FullscreenTracks
+                ) {
                     fields.retain(|field| *field != LibraryField::Tools);
                 } else if !fields.contains(&LibraryField::Tools) {
                     fields.push(LibraryField::Tools);
@@ -869,8 +929,19 @@ pub fn default_library_list_settings() -> Vec<LibraryListSettingsEntry> {
 }
 pub fn available_row_fields(key: LibraryListKey) -> &'static [LibraryField] {
     match key {
-        LibraryListKey::Queue => &[
+        LibraryListKey::Queue | LibraryListKey::FullscreenTracks => &[
             LibraryField::RowIndex,
+            LibraryField::AlbumArtist,
+            LibraryField::DiscNumber,
+            LibraryField::TrackNumber,
+            LibraryField::ReleaseDate,
+            LibraryField::Bitrate,
+            LibraryField::SampleRate,
+            LibraryField::BitDepth,
+            LibraryField::Channels,
+            LibraryField::Format,
+            LibraryField::FilePath,
+            LibraryField::Source,
             LibraryField::TitleMerged,
             LibraryField::Title,
             LibraryField::Artist,
@@ -954,6 +1025,13 @@ pub fn available_row_fields(key: LibraryListKey) -> &'static [LibraryField] {
             LibraryField::UserRating,
             LibraryField::Genre,
             LibraryField::Bpm,
+            LibraryField::Bitrate,
+            LibraryField::SampleRate,
+            LibraryField::BitDepth,
+            LibraryField::Channels,
+            LibraryField::Format,
+            LibraryField::FilePath,
+            LibraryField::Source,
             LibraryField::DiscNumber,
             LibraryField::TrackNumber,
             LibraryField::Duration,
@@ -963,7 +1041,7 @@ pub fn available_row_fields(key: LibraryListKey) -> &'static [LibraryField] {
 }
 pub fn available_grid_fields(key: LibraryListKey) -> &'static [LibraryField] {
     match key {
-        LibraryListKey::Queue | LibraryListKey::Folders => &[],
+        LibraryListKey::Queue | LibraryListKey::FullscreenTracks | LibraryListKey::Folders => &[],
         LibraryListKey::Albums | LibraryListKey::ArtistAlbums => &[
             LibraryField::AlbumArtist,
             LibraryField::Year,
@@ -1014,7 +1092,7 @@ pub fn available_grid_fields(key: LibraryListKey) -> &'static [LibraryField] {
 
 pub fn available_sort_fields(key: LibraryListKey) -> &'static [LibraryField] {
     match key {
-        LibraryListKey::Queue => &[LibraryField::RowIndex],
+        LibraryListKey::Queue | LibraryListKey::FullscreenTracks => &[LibraryField::RowIndex],
         LibraryListKey::Albums | LibraryListKey::ArtistAlbums => &[
             LibraryField::Title,
             LibraryField::AlbumArtist,
@@ -1095,6 +1173,12 @@ pub fn available_sort_fields(key: LibraryListKey) -> &'static [LibraryField] {
 fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
     match key {
         LibraryListKey::Queue => vec![LibraryField::TitleMerged, LibraryField::Year],
+        LibraryListKey::FullscreenTracks => vec![
+            LibraryField::RowIndex,
+            LibraryField::TitleMerged,
+            LibraryField::Duration,
+            LibraryField::Tools,
+        ],
         LibraryListKey::Albums | LibraryListKey::ArtistAlbums => vec![
             LibraryField::RowIndex,
             LibraryField::TitleMerged,
@@ -1172,7 +1256,9 @@ fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
 }
 fn default_grid_fields(key: LibraryListKey) -> Vec<LibraryField> {
     match key {
-        LibraryListKey::Queue | LibraryListKey::Folders => Vec::new(),
+        LibraryListKey::Queue | LibraryListKey::FullscreenTracks | LibraryListKey::Folders => {
+            Vec::new()
+        }
         LibraryListKey::Albums | LibraryListKey::ArtistAlbums => {
             vec![LibraryField::AlbumArtist, LibraryField::Year]
         }
@@ -1204,6 +1290,16 @@ fn default_grid_fields(key: LibraryListKey) -> Vec<LibraryField> {
 }
 pub fn available_detail_track_fields() -> &'static [LibraryField] {
     &[
+        LibraryField::AlbumArtist,
+        LibraryField::DiscNumber,
+        LibraryField::ReleaseDate,
+        LibraryField::Bitrate,
+        LibraryField::SampleRate,
+        LibraryField::BitDepth,
+        LibraryField::Channels,
+        LibraryField::Format,
+        LibraryField::FilePath,
+        LibraryField::Source,
         LibraryField::RowIndex,
         LibraryField::TrackNumber,
         LibraryField::Title,
@@ -1232,6 +1328,7 @@ fn default_sort_key(key: LibraryListKey) -> LibraryField {
         | LibraryListKey::FavoriteTracks => LibraryField::Title,
         LibraryListKey::History => LibraryField::LastPlayed,
         LibraryListKey::Queue
+        | LibraryListKey::FullscreenTracks
         | LibraryListKey::Playlists
         | LibraryListKey::SmartPlaylists
         | LibraryListKey::PlaylistTracks => LibraryField::RowIndex,

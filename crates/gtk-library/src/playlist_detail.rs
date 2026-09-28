@@ -40,7 +40,7 @@ pub struct SmartPlaylistDetailData {
     projection: PreparedTrackProjection<library::SmartPlaylistTrackRow>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 enum PlaylistDetailOwner {
     Saved {
         key: PlaylistKey,
@@ -320,21 +320,38 @@ impl CatalogUi {
                   cancellation: ReadCancellation| {
                 let database = Arc::clone(&database);
                 Box::pin(async move {
-                    database
+                    let count = database
                         .playlist_entries_count(key, None, &request.query, &cancellation)
                         .await
-                        .map_err(|error| error.to_string())
+                        .map_err(|error| error.to_string())?
+                        .max(0) as usize;
+                    let rows = database
+                        .playlist_entries_page(
+                            key,
+                            None,
+                            request.settings.sort_key.playlist_entry_sort(),
+                            request.settings.descending,
+                            &request.query,
+                            request.first_row_position.min(count),
+                            64,
+                            &cancellation,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    Ok((count, rows))
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
             },
         );
         let apply_entries = Rc::downgrade(&entries);
-        let apply = Rc::new(move |request, result: Result<i64, String>| {
-            if let Ok(count) = result
-                && let Some(entries) = apply_entries.upgrade()
-            {
-                entries.replace_count(request, count.max(0) as usize);
-            }
-        });
+        let apply = Rc::new(
+            move |request, result: Result<(usize, Vec<library::PlaylistEntryRow>), String>| {
+                if let Ok((count, rows)) = result
+                    && let Some(entries) = apply_entries.upgrade()
+                {
+                    entries.replace_prepared(request, count, rows);
+                }
+            },
+        );
         let read = LatestMountedRouteRead::new_with_request(
             runtime,
             apply,
@@ -468,6 +485,14 @@ impl CatalogUi {
                 gtk::gdk::DragAction::COPY,
             );
             let drop_owner = Rc::clone(&owner_state);
+            let playlist = summary.playlist_key;
+            drop.set_preload(true);
+            drop.connect_notify_local(Some("value"), move |drop, _| {
+                let Some(value) = drop.value() else { return };
+                if matches!(gtk_widgets::media_drag::media_drag_source(&value), Some(gtk_widgets::media_drag::MediaDragSource::PlaylistEntries(selection)) if selection.playlist == playlist && selection.writable && selection.count == 1) {
+                    drop.reject();
+                }
+            });
             let drop_menus = Rc::downgrade(&self.media_menus);
             drop.connect_drop(move |_, value, _, _| {
                 let Some(menus) = drop_menus.upgrade() else {
@@ -538,6 +563,9 @@ impl CatalogUi {
                     let Ok(next) = result else { return };
                     let Some(shell) = shell.upgrade() else { return };
                     refresh_tracks();
+                    if *apply_owner.borrow() == next {
+                        return;
+                    }
                     showcase.set_title(next.name());
                     showcase.replace_summary(&[
                         (

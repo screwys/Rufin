@@ -148,24 +148,14 @@ fn present_catalog_track_menu(
             EDIT_ICON,
         );
     }
-    let artists = if track.artists.is_empty() {
-        &track.album_artists
-    } else {
-        &track.artists
-    };
-    let artist_names = artists
-        .iter()
-        .map(|artist| artist.name.clone())
-        .collect::<Vec<_>>();
-
-    if !artist_names.is_empty() || track.album_media_uri.is_some() {
-        surface.append_configurable_submenu(
-            ContextMenuItem::GoTo,
-            msgid("Go to"),
-            &go_to_context_submenu(action_group, &artist_names, track.album_media_uri.is_some()),
-            GO_TO_ICON,
-        );
-    }
+    install_track_navigation(
+        &surface,
+        menus,
+        action_group,
+        &track.artists,
+        &track.album_artists,
+        track.album_media_uri.as_deref(),
+    );
     let playback = PlaybackTarget::Track(track.media_uri.clone());
     install_download_actions(&surface, menus, &playback, track.is_downloaded);
     if let Some(media) = playback_media {
@@ -187,23 +177,6 @@ fn present_catalog_track_menu(
             (metadata_menus.edit_metadata)(MetadataItemId::Track(media_uri.clone()));
         });
     }
-    let album_artist = track.artists.is_empty();
-    for (index, artist) in artists.iter().enumerate() {
-        let action = if artists.len() == 1 {
-            "go-artist".to_string()
-        } else {
-            format!("go-artist-{index}")
-        };
-        let menus = Rc::clone(menus);
-        let key = artist.media_uri.clone();
-        surface.add_action(&action, move || {
-            (menus.navigate)(if album_artist {
-                Route::AlbumArtistDetail(key.clone())
-            } else {
-                Route::ArtistDetail(key.clone())
-            })
-        });
-    }
     if context_menu_rating_visible(menus) {
         let menus = Rc::clone(menus);
         let media_uri = track.media_uri.clone();
@@ -220,12 +193,6 @@ fn present_catalog_track_menu(
                 },
             ),
         );
-    }
-    if let Some(album) = track.album_media_uri.clone() {
-        let menus = Rc::clone(menus);
-        surface.add_action("go-album", move || {
-            (menus.navigate)(Route::AlbumDetail(album.clone()))
-        });
     }
     if let Some(position) = popover_position {
         surface.popover().set_position(position);
@@ -414,6 +381,57 @@ fn present_direct_playback_media_menu(
     surface.popup(&menus.settings.current.borrow().context_menu);
 }
 
+fn install_track_navigation(
+    surface: &ContextMenuSurface,
+    menus: &Rc<MediaMenus>,
+    action_group: &str,
+    track_artists: &[library::TrackArtistLink],
+    album_artists: &[library::TrackArtistLink],
+    album_media_uri: Option<&str>,
+) {
+    let artists = if track_artists.is_empty() {
+        album_artists
+    } else {
+        track_artists
+    };
+    let artist_names = artists
+        .iter()
+        .map(|artist| artist.name.clone())
+        .collect::<Vec<_>>();
+
+    if !artist_names.is_empty() || album_media_uri.is_some() {
+        surface.append_configurable_submenu(
+            ContextMenuItem::GoTo,
+            msgid("Go to"),
+            &go_to_context_submenu(action_group, &artist_names, album_media_uri.is_some()),
+            GO_TO_ICON,
+        );
+    }
+    let album_artist = track_artists.is_empty();
+    for (index, artist) in artists.iter().enumerate() {
+        let action = if artists.len() == 1 {
+            "go-artist".to_string()
+        } else {
+            format!("go-artist-{index}")
+        };
+        let menus = Rc::clone(menus);
+        let key = artist.media_uri.clone();
+        surface.add_action(&action, move || {
+            (menus.navigate)(if album_artist {
+                Route::AlbumArtistDetail(key.clone())
+            } else {
+                Route::ArtistDetail(key.clone())
+            })
+        });
+    }
+    if let Some(album) = album_media_uri.map(str::to_owned) {
+        let menus = Rc::clone(menus);
+        surface.add_action("go-album", move || {
+            (menus.navigate)(Route::AlbumDetail(album.clone()))
+        });
+    }
+}
+
 pub fn present_playlist_entry_menu(
     target: &gtk::Widget,
     menus: &Rc<MediaMenus>,
@@ -431,6 +449,14 @@ pub fn present_playlist_entry_menu(
             REMOVE_ICON,
         );
     }
+    install_track_navigation(
+        &surface,
+        menus,
+        "playlist-entry",
+        &row.artists,
+        &row.album_artists,
+        row.album_media_uri.as_deref(),
+    );
     let favorite = menus.projected_track_favorite(&row.media_uri, row.favorite);
     append_favorite_action(&surface, favorite);
     install_download_actions(

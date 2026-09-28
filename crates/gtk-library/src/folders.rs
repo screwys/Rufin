@@ -563,6 +563,7 @@ fn folder_page(
             let name_changed = folder_name_field(&previous.borrow().settings.row_fields)
                 != folder_name_field(&request.settings.row_fields);
             table.apply_fields(&request.settings.row_fields);
+            gtk_widgets::display::apply(&table.widget(), &request.settings.display);
             if name_changed {
                 folder_sparse.update_matching(|_| true, |_| {});
             }

@@ -383,7 +383,7 @@ fn install_queue_row_interactions(
         let queue_target = queue_row_drop_target(occurrence, y, root.height());
         enqueue_media_drop(&media_shell, value, queue_target)
     });
-    gtk_widgets::media_drag::style_media_drop_target(root);
+    gtk_widgets::media_drag::style_order_drop_target(&media_drop, true, |_| true);
     root.add_controller(media_drop);
 
     let context_shell = Rc::downgrade(shell);
@@ -766,36 +766,16 @@ fn build_queue_table(
     table.set_hexpand(true);
     table.set_vexpand(true);
 
-    let width_fit = if fullscreen {
-        use gtk_widgets::library_fields::column_width;
-        let index = queue_index_column(shell);
-        let title = queue_title_column(shell);
-        let duration = queue_duration_column(shell);
-        let tools = queue_favorite_column(shell);
-        let columns = vec![
-            (index.clone(), column_width(LibraryField::RowIndex)),
-            (
-                title.clone(),
-                column_width(LibraryField::TitleMerged).saturating_add(72),
-            ),
-            (duration.clone(), column_width(LibraryField::Duration)),
-            (
-                tools.clone(),
-                gtk_widgets::recycled_cells::ROW_ACTIONS_WIDTH,
-            ),
-        ];
-        table.append_column(&index);
-        table.append_column(&title);
-        table.append_column(&duration);
-        table.append_column(&tools);
-        gtk_widgets::table_sizing::install_column_view_width_fit(&table, columns, 1)
+    let key = if fullscreen {
+        LibraryListKey::FullscreenTracks
     } else {
-        gtk_widgets::table_sizing::install_column_view_width_fit(
-            &table,
-            configure_queue_columns(shell, &table),
-            1,
-        )
+        LibraryListKey::Queue
     };
+    let width_fit = gtk_widgets::table_sizing::install_column_view_width_fit(
+        &table,
+        configure_queue_columns(shell, &table, key),
+        1,
+    );
 
     let activate = shell.playback_handles.queue.clone();
     let activate_model = model.clone();
@@ -828,10 +808,15 @@ fn build_queue_table(
     (table, width_fit)
 }
 
-fn configure_queue_columns(
+pub(super) fn configure_queue_columns(
     shell: &Rc<crate::PlayerUi>,
     table: &gtk::ColumnView,
+    key: LibraryListKey,
 ) -> Vec<(gtk::ColumnViewColumn, i32)> {
+    gtk_widgets::display::apply(
+        table,
+        &shell.settings.current.borrow().library_list(key).display,
+    );
     while let Some(column) = table
         .columns()
         .item(0)
@@ -843,7 +828,7 @@ fn configure_queue_columns(
         .settings
         .current
         .borrow()
-        .library_list(LibraryListKey::Queue)
+        .library_list(key)
         .row_fields
         .iter()
         .map(|field| {
@@ -917,6 +902,7 @@ impl crate::PlayerUi {
         let builder = gtk_widgets::ui_resource::builder(resource);
         gtk_widgets::objects!(builder, resource, {
             dialog: adw::PreferencesDialog,
+            page: adw::PreferencesPage,
             fields_group: adw::PreferencesGroup,
             reset: gtk::Button,
         });
@@ -937,7 +923,7 @@ impl crate::PlayerUi {
             else {
                 return;
             };
-            let columns = configure_queue_columns(&shell, &table);
+            let columns = configure_queue_columns(&shell, &table, LibraryListKey::Queue);
             if let Some(fit) = shell.right_panel.queue_width_fit.borrow().as_ref() {
                 fit.replace(columns);
             }
@@ -950,8 +936,32 @@ impl crate::PlayerUi {
             &rows,
         );
         let settings = Rc::clone(&self.settings);
+        let display_settings = Rc::clone(&self.settings);
+        let display_changed = Rc::clone(&changed);
+        let display = gtk_widgets::display::DisplayEditor::new(
+            &self
+                .settings
+                .current
+                .borrow()
+                .library_list(LibraryListKey::Queue)
+                .display,
+            move |display| {
+                if display_settings
+                    .update_library_list_settings(LibraryListKey::Queue, |settings| {
+                        settings.display = display.clone()
+                    })
+                {
+                    display_changed();
+                }
+            },
+        );
+        display.set_layout(Some(rufin_core::settings::LibraryLayout::Row));
+        page.remove(&fields_group);
+        page.add(&display.group);
+        page.add(&fields_group);
         let fields_group = fields_group.downgrade();
         reset.connect_clicked(move |_| {
+            display.sync(&Default::default());
             let Some(fields_group) = fields_group.upgrade() else {
                 return;
             };
@@ -969,6 +979,24 @@ impl crate::PlayerUi {
             );
         });
         gtk_widgets::popup::present_light_dismiss_dialog(&dialog, &window);
+    }
+
+    pub(super) fn apply_fullscreen_queue_display(self: &Rc<Self>) {
+        if let Some(table) = queue_panel_scroller(&self.views.fullscreen_player.queue_panel)
+            .and_then(|scroller| scroller.child())
+            .and_downcast::<gtk::ColumnView>()
+        {
+            let columns = configure_queue_columns(self, &table, LibraryListKey::FullscreenTracks);
+            if let Some(fit) = self
+                .views
+                .fullscreen_player
+                .queue_width_fit
+                .borrow()
+                .as_ref()
+            {
+                fit.replace(columns);
+            }
+        }
     }
 }
 
@@ -1217,6 +1245,13 @@ fn render_panel(
         table
     } else {
         let (table, width_fit) = build_queue_table(shell, model, selection, fullscreen);
+        if fullscreen {
+            shell
+                .views
+                .fullscreen_player
+                .queue_width_fit
+                .replace(Some(width_fit.clone()));
+        }
         if !fullscreen {
             shell
                 .right_panel
@@ -1409,6 +1444,9 @@ mod tests {
                 playlist_entry_id: None,
                 provenance: library::QueueProvenance::Manual,
             }),
+            audio_properties: Default::default(),
+            source_path: None,
+            source_name: None,
             primary_artist_media_uri: None,
             favorite: false,
         }

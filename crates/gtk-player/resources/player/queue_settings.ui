@@ -5,7 +5,7 @@
   <object class="AdwPreferencesDialog" id="dialog">
     <property name="title" translatable="yes">Customize display</property>
     <property name="search-enabled">false</property>
-    <child><object class="AdwPreferencesPage">
+    <child><object class="AdwPreferencesPage" id="page">
       <property name="title" translatable="yes">Queue</property>
       <child><object class="AdwPreferencesGroup" id="fields_group">
         <property name="title" translatable="yes">Columns</property>

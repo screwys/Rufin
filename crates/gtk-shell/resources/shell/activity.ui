@@ -3,8 +3,10 @@
   <object class="GtkFileDialog" id="export_dialog">
     <property name="title" translatable="yes">Export PNG</property>
   </object>
-  <object class="GtkPopover" id="settings_popover">
-    <property name="child">
+  <object class="AdwPreferencesDialog" id="settings_dialog">
+    <property name="title" translatable="yes">Customize display</property>
+    <property name="search-enabled">false</property>
+    <child><object class="AdwPreferencesPage"><child>
       <object class="AdwPreferencesGroup">
         <property name="title" translatable="yes">Customize</property>
         <child>
@@ -73,9 +75,16 @@
           </object>
         </child>
       </object>
-    </property>
+    </child></object></child>
   </object>
   <object class="GtkBox" id="root">
+    <child>
+      <!-- Resolve the report background through the active application theme. -->
+      <object class="GtkBox" id="export_background_color">
+        <property name="visible">false</property>
+        <style><class name="activity-export-background"/></style>
+      </object>
+    </child>
     <property name="orientation">vertical</property>
     <property name="hexpand">true</property>
     <property name="vexpand">true</property>
@@ -100,10 +109,9 @@
           </object>
         </child>
         <child>
-          <object class="GtkMenuButton" id="customize">
+          <object class="GtkButton" id="customize">
             <property name="icon-name">rufin-sliders-2-symbolic</property>
-            <property name="tooltip-text" translatable="yes">Customize</property>
-            <property name="popover">settings_popover</property>
+            <property name="tooltip-text" translatable="yes">Customize display</property>
             <style>
               <class name="flat"/>
             </style>
@@ -254,7 +262,7 @@
                               <object class="GtkBox">
                                 <property name="spacing">8</property>
                                 <child>
-                                  <object class="GtkImage">
+                                  <object class="GtkImage" id="hours_icon">
                                     <property name="icon-name">rufin-history-symbolic</property>
                                     <style>
                                       <class name="activity-stat-icon"/>
