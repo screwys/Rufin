@@ -31,13 +31,13 @@
 
 - <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.jellyfin.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Jellyfin</strong>: Supports library separation, Jellyfin WebSocket for incremental scans, metadata editing over API and Instant Mix.
 
-- <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.navidrome.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Navidrome</strong> / <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.opensubsonic.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>OpenSubsonic</strong>: Supports API key authorization, normal/legacy passwords, Navidrome's own API and OpenSubsonic v2 APIs. Metadata editing is available if library can be matched to local files.
+- <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.navidrome.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Navidrome</strong> / <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.opensubsonic.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>OpenSubsonic</strong>: Supports API key authorization, normal/legacy passwords, Navidrome's own API and OpenSubsonic v2 APIs. Metadata editing is available if the library can be matched to local files.
 
 - <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.emby.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Emby</strong>: Supports library separation, incremental scans, metadata editing, and Instant Mix. Ratings are saved locally.
 
 - <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.plex.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Plex</strong>: Supports password and browser sign-in, shared libraries and Plex Home profiles, library separation, incremental scans, server playlists and ratings, and locally stored favorites. Includes Plex recommendations for Auto DJ, downloads where permitted, Plex Companion controls and queue handoff.
 
-- <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.webdav.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>WebDAV</strong>: Direct read/write access to WebDAV and Nextcloud libraries without filesystem mounts, including downloads, tags/ lyrics editing. Supports HTTPS, custom certificates and headers, password or bearer-token authentication, Nextcloud browser sign-in, and alternate addresses for LAN, VPN, or Tailscale connections.
+- <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.webdav.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>WebDAV</strong>: Direct read/write access to WebDAV and Nextcloud libraries without filesystem mounts, including downloads, tag/lyrics editing. Supports HTTPS, custom certificates and headers, password or bearer-token authentication, Nextcloud browser sign-in, and alternate addresses for LAN, VPN, or Tailscale connections.
 
 - <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.smb.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>SMB / Samba</strong>: Direct read/write access to Windows, Samba, and NAS shares without filesystem mounts, including downloads, tags/lyrics editing. Supports share discovery, guest and domain-qualified logins, signing and encryption, and alternate addresses for LAN, VPN, or Tailscale connections.
 
@@ -59,17 +59,19 @@
 
 - Drag songs from your queue or lists to playlists, or select multiple of them with your keyboard batch operations
 - Combine all your music from different sources in a single listening session with global playlists
-- Import/export your playlists as .m3u8, as long as `media_uri` is accessible Rufin can play them
+- Import/export your playlists as .m3u/.m3u8/PLS/XSPF; as long as `media_uri` is accessible Rufin can play them
 - Download tracks manually or through automatic rules, then keep using the same remote library while offline
+- Can be set as default audio player to open any audio file, or via CLI with `rufin track.mp4`
+- Drag folders, audio files or playlists to Rufin window to import them 
 - Path matching between music servers and local folders, allowing local playback while keeping server activity and history
-- Metadata editing for supported servers and local formats; bulk editing and `Identify` available with auto-fill
-- Automatic metadata, artwork and lyrics caching
-- Easy rating support, with an option to enable visual-only partial stars for OpenSubsonic
+- Metadata and artwork editing, including bulk editing and Musicbrainz metadata autofill 
+- Automatic metadata, artwork and lyrics caching; and in-app lyrics/artwork search functionality
+- Rating support, with an option to enable visual-only partial stars for OpenSubsonic
 - Virtualized, smooth to scroll pages
-- EBU R128 tag writing option for local folders
+- Can write EBU R128 tags to tracks
 - Furigana and Romaji lyrics overlays, translation preference and karaoke mode support
 - Extensive lyrics organization settings; you can automatically save fetched lyrics to your source as embeds or separate .lrc files
-- Granular import/export backup options including credentials, automatic backups with password protection available
+- Granular import/export backup options including credentials, automatic backups with password protection are available
 - Listening activity can be exported as Last.fm/ListenBrainz compatible `.csv` files
 
 ## ✨ Rufin Connect
@@ -111,14 +113,12 @@ rufin --headless --listen
 
 ## 🖥️ Interface
 
-- Fast GTK 4/libadwaita interface with light/dark themes and accent customization
-- Fully usable across different window sizes, including a separate compact layout
-- Adjustable sidebars with separate presets for different window sizes
-- Configurable layouts, context menus and GTK menus
+- Fast, responsive and broadly customizable
+- Theme support including custom themes
 - Extensive keyboard shortcuts catalog
 - Automatic updates for Windows and macOS builds
 - Easy built-in log viewing and exporting (privacy-conscious)
-- Type to search for routes
+- Type to search
 - Can run in the background or set to launch minimized, which uses the GNOME portal when available
 - System tray integration
 
@@ -186,8 +186,6 @@ You can also run `main` or an older release directly.
 nix run github:screwys/Rufin/main
 nix run github:screwys/Rufin/vX.Y.Z
 ```
-You might want to use github repo for profile as well, since it takes more than a week for an update to get merged into nixpkgs repository.
-
 
 ## Windows
 
@@ -301,15 +299,6 @@ Testing, Nix, and container controls are documented in
 
 # Troubleshooting
 
-> [!WARNING]
-> If you are using native Discord with Flatpak Rufin, you should add the `xdg-run/discord-ipc-0` filesystem override via Flatseal, or from the terminal:
->
-> ```bash
-> flatpak override --user --filesystem=xdg-run/discord-ipc-0 io.github.screwys.Rufin
-> ```
->
-> This override is only for this combination, else it works out of the box.
-
 Open **Troubleshooting** from the main menu, enable **Debug logging**, reproduce the problem, then click `Save`. Crash logs also appear here on
 the next launch. Logs have secrets and absolute folder paths redacted, but you may still want to review the logs before sharing them.
 
@@ -332,12 +321,12 @@ just debug  # for local build
 You can remove Rufin with your package manager, use the uninstaller included with the Windows
 `.exe` (which can also delete the cache), or delete `Rufin.app` from Applications if you installed the macOS `.dmg`.
 
-To delete Rufin's cache as well, delete its cache folder based on your operating system:
+To delete all of Rufin’s local data, remove its directories for your operating system:
 
-- Linux and FreeBSD: `~/.cache/rufin`
-- Flatpak: `~/.var/app/io.github.screwys.Rufin/cache/rufin`
-- macOS: `~/Library/Caches/io.github.screwys.Rufin`
-- Windows: `%LOCALAPPDATA%\screwys\Rufin\cache`
+- Linux and FreeBSD [(planned):](https://github.com/screwys/Rufin/issues/811#issuecomment-5471657038) `~/.cache/rufin` and `~/.local/share/rufin`
+- Flatpak: `~/.var/app/io.github.screwys.Rufin/`
+- macOS: `~/Library/Caches/io.github.screwys.Rufin` and `~/Library/Application Support/io.github.screwys.Rufin`
+- Windows: `%LOCALAPPDATA%\screwys\Rufin` 
 
 # Contributing
 
@@ -368,11 +357,11 @@ Icon is designed by [Commenter25](https://commenter.cc) and it is licensed under
 - Chinese (Traditional) translation by [Tsung-Ying Yu](https://github.com/an920107)
 - Finnish translation by Jiri Grönroos
 - French translation by Arnaud Constantin
-- Italian translation by Patrick Canal
+- Italian translation by [Patrick Canal](https://github.com/Superredstone)
 
 ## Donations
 
-If you would like to contribute financially, you can do so on [Github](https://github.com/sponsors/screwys) or via bitcoin: `bc1q4hmfnc64xsk2zprlw6d088kxkhv5xek8hmv87t`
+If you would like to contribute financially, you can do so on [Github](https://github.com/sponsors/screwys), [buymeacoffee](https://buymeacoffee.com/screwy) or via bitcoin: `bc1q4hmfnc64xsk2zprlw6d088kxkhv5xek8hmv87t`
 
 I would like to thank everyone who has made a donation:
 
