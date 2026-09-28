@@ -1,6 +1,6 @@
 %global debug_package %{nil}
 Name:           rufin
-Version:        0.16.0
+Version:        0.16.5
 Release:        1%{?dist}
 Summary:        Native GTK4/libadwaita music player written in Rust
 
