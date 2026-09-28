@@ -108,9 +108,14 @@ fn run_inner(arguments: impl Iterator<Item = std::ffi::OsString>) -> Result<(), 
         drop(inputs.receivers);
         let result = runtime.block_on(async {
             if !files.is_empty() {
-                rufin_core::open::arguments(&inputs.products.playback.queue, files)
-                    .await
-                    .map_err(io::Error::other)?;
+                let local = inputs.products.settings.local_configuration();
+                rufin_core::open::arguments(
+                    &inputs.products.playback.queue,
+                    local.as_ref(),
+                    files,
+                )
+                .await
+                .map_err(io::Error::other)?;
             }
             if let Some(address) = address {
                 let listener = tokio::net::TcpListener::bind(address).await?;

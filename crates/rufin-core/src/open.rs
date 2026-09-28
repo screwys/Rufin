@@ -7,10 +7,12 @@ use library::{PlaylistFile, PlaylistFormat, QueueInput, QueueItem, QueueProvenan
 
 pub async fn arguments(
     queue: &playback::QueueHandle,
+    local: Option<&sources::SourceConfiguration>,
     arguments: Vec<std::ffi::OsString>,
 ) -> Result<(), String> {
     files(
         queue,
+        local,
         arguments
             .into_iter()
             .map(gio::File::for_commandline_arg)
@@ -19,12 +21,18 @@ pub async fn arguments(
     .await
 }
 
-pub async fn files(queue: &playback::QueueHandle, files: Vec<gio::File>) -> Result<(), String> {
+pub async fn files(
+    queue: &playback::QueueHandle,
+    local: Option<&sources::SourceConfiguration>,
+    files: Vec<gio::File>,
+) -> Result<(), String> {
+    let local = local.cloned();
     let items = tokio::task::spawn_blocking(move || {
         let client = reqwest::blocking::Client::new();
         let entries = files
             .into_iter()
             .map(|file| {
+                let file = canonical_local_file(local.as_ref(), file);
                 let item = QueueItem::direct(file.uri(), display_name(&file), "", "", 0);
                 (file, item)
             })
@@ -64,8 +72,9 @@ pub async fn files(queue: &playback::QueueHandle, files: Vec<gio::File>) -> Resu
                                 .map(String::from)
                         }?;
                         let file = gio::File::for_uri(&location);
+                        let file = canonical_local_file(local.as_ref(), file);
                         let item = QueueItem::direct(
-                            location,
+                            file.uri(),
                             entry.title.unwrap_or_else(|| display_name(&file)),
                             entry.artist.unwrap_or_default(),
                             entry.album.unwrap_or_default(),
@@ -213,4 +222,18 @@ fn display_name(file: &gio::File) -> String {
     file.basename()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| file.uri().to_string())
+}
+
+fn canonical_local_file(
+    local: Option<&sources::SourceConfiguration>,
+    file: gio::File,
+) -> gio::File {
+    if let Some(path) = file.path()
+        && let Some((_, access)) = local.and_then(|local| local.local_file_location(&path))
+        && (access.is_file() || !path.is_file())
+    {
+        gio::File::for_path(access)
+    } else {
+        file
+    }
 }

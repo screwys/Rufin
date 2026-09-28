@@ -314,12 +314,12 @@ setup-macos-signing:
         | grep -F "$signing_identity" >/dev/null
     echo "Created $signing_identity."
 
+[positional-arguments]
 debug *args:
     @if [[ "${RUFIN_CONTAINER:-0}" == "1" ]]; then \
         echo "Run 'just debug' on the host." >&2; \
         exit 1; \
-    fi
-    @set -- {{ args }}; \
+    fi; \
     if [[ "${1:-}" == "flatpak" ]]; then \
         shift; \
         flatpak run --env=RUST_LOG="${RUST_LOG:-debug}" io.github.screwys.Rufin "$@" 2>&1; \

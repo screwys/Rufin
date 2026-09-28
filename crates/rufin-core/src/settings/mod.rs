@@ -445,6 +445,10 @@ pub struct SettingsOwner {
 }
 
 impl SettingsOwner {
+    pub fn local_configuration(&self) -> Option<sources::SourceConfiguration> {
+        self.file.local_configuration()
+    }
+
     pub(crate) fn revision(&self) -> u64 {
         self.file
             .revision
