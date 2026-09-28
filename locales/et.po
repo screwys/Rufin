@@ -18,6 +18,11 @@ msgstr ""
 "X-Generator: Weblate 2026.10.dev0\n"
 
 msgid ""
+"A Japanese dictionary is downloaded for furigana and romaji readings. This "
+"setting also increases resource usage."
+msgstr ""
+
+msgid ""
 "Approving gives this device access to your profile and saved source logins."
 msgstr ""
 "Nõustumisel annad sellele seadmele ligipääsu oma profiilile ja salvestatud "
@@ -95,6 +100,14 @@ msgid ""
 msgstr ""
 "Salasõna tasku tüüpi teenust ei leidu. Rufin salvestab autentimiseks "
 "vajalikud andmed faili. Katkestamisel ei salvestata mitte midagi."
+
+msgid ""
+"No secret service found. You might have a secret service but the portal can "
+"be broken, you can check <a href=\"https://github.com/screwys/Rufin/issues/"
+"1055#issuecomment-5637922622\">this issue</a> to fix it, otherwise Rufin "
+"will use a file to store its credentials. Cancelling will not save "
+"credentials at all."
+msgstr ""
 
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
@@ -299,6 +312,9 @@ msgstr "Aktsentvärv"
 msgid "Access token"
 msgstr "Ligipääsu tunnusluba"
 
+msgid "Accessibility"
+msgstr ""
+
 msgid "Action required"
 msgstr "Tegevus on vajalik"
 
@@ -432,6 +448,11 @@ msgstr "Liba kasutada kaugühendusi"
 msgid "Alternate addresses"
 msgstr "Alternatiivsed aadressid"
 
+#, fuzzy
+#| msgid "Accent color"
+msgid "Alternate row colors"
+msgstr "Aktsentvärv"
+
 msgid "Anonymous (WebDAV / SMB)"
 msgstr "Anonüümne (WebDAV / SMB)"
 
@@ -461,6 +482,9 @@ msgstr "Rakenduse nimi"
 
 msgid "Applied"
 msgstr "Rakendatud"
+
+msgid "Applies to sidebar and fullscreen separately"
+msgstr ""
 
 msgid "Apply Template"
 msgstr "Rakenda mall"
@@ -599,6 +623,12 @@ msgstr "Esitaja tunnusluba (Bearer token - WebDAV)"
 msgid "Bearer token"
 msgstr "Esitaja tunnusluba (Bearer token)"
 
+msgid "Bit depth"
+msgstr ""
+
+msgid "Bitrate"
+msgstr ""
+
 msgid "Blue"
 msgstr "Sinine"
 
@@ -657,6 +687,11 @@ msgstr "Muudan allikat"
 
 msgid "Changing this will redownload all local files."
 msgstr "Selle muutmisel laaditakse kohalikud failid uuesti alla."
+
+#, fuzzy
+#| msgid "Change"
+msgid "Channels"
+msgstr "Muuda"
 
 msgid "Check for updates every"
 msgstr "Uuenduse kontrollimise välp"
@@ -760,6 +795,11 @@ msgstr "Kogud"
 
 msgid "Color for the active word during playback"
 msgstr "Taasesituse ajal värvi aktiivsed sõnad"
+
+#, fuzzy
+#| msgid "Columns"
+msgid "Column borders"
+msgstr "Veerud"
 
 msgid "Columns"
 msgstr "Veerud"
@@ -1123,6 +1163,11 @@ msgstr "Ligipääs Discordile Flatpaki paigalduse puhul"
 msgid "Discord"
 msgstr "Discord"
 
+#, fuzzy
+#| msgid "Reset display"
+msgid "Display"
+msgstr "Lähtesta ekraan"
+
 msgid "Do not encrypt"
 msgstr "Ära krüpti"
 
@@ -1358,6 +1403,11 @@ msgstr "Failiühendus"
 msgid "File connections"
 msgstr "Failiühendused"
 
+#, fuzzy
+#| msgid "Folder"
+msgid "File path"
+msgstr "Kaust"
+
 msgid "Filename"
 msgstr "Failinimi"
 
@@ -1442,6 +1492,11 @@ msgstr "Täiskõrged"
 msgid "Full"
 msgstr "Täisvaates"
 
+#, fuzzy
+#| msgid "Open fullscreen player"
+msgid "Fullscreen player"
+msgstr "Ava muusikaesitaja täisekraanivaates"
+
 msgid "Fullscreen"
 msgstr "Täisekraanivaade"
 
@@ -1502,6 +1557,11 @@ msgstr "Roheline"
 msgid "Grid labels"
 msgstr "Ruudustikuvaate sildid"
 
+#, fuzzy
+#| msgid "Bar spacing (px)"
+msgid "Grid spacing"
+msgstr "Ruum riba ümber (pikslites)"
+
 msgid "Grid"
 msgstr "Ruudustikuvaade"
 
@@ -1519,6 +1579,9 @@ msgstr "Peidetud"
 
 msgid "Hide sidebar"
 msgstr "Peida külgriba"
+
+msgid "Highlight hovered row"
+msgstr ""
 
 msgid "History"
 msgstr "Ajalugu"
@@ -1580,9 +1643,6 @@ msgstr "Kaasa sellest sessioonist Rufini üksikasjalik statistika"
 
 msgid "Increase"
 msgstr "Suurenda"
-
-msgid "Increases memory usage"
-msgstr "Suurendab mälukasutust"
 
 msgid "Install available updates when Rufin starts"
 msgstr "Rufini käivitamisel paigalda saadaolevad uuendused"
@@ -1657,6 +1717,9 @@ msgstr "Keel"
 
 msgid "Laptop/Headphones"
 msgstr "Sülearvuti/kõrvaklapid"
+
+msgid "Large"
+msgstr ""
 
 #, fuzzy
 #| msgid "Last played"
@@ -2658,6 +2721,11 @@ msgstr "Punane"
 msgid "Redo"
 msgstr "Korda tegevust"
 
+#, fuzzy
+#| msgid "Rule actions"
+msgid "Reduce motion"
+msgstr "Toiminguid reeglite alusel"
+
 msgid "Refresh automatically"
 msgstr "Laadi automaatselt uuesti"
 
@@ -2866,6 +2934,9 @@ msgstr "Rōmaji (jaapani keele romaniseerimine)"
 msgid "Rounded bars"
 msgstr "Ümarad ribad"
 
+msgid "Row borders"
+msgstr ""
+
 msgid "Rows"
 msgstr "Read"
 
@@ -2886,6 +2957,9 @@ msgstr "SMB / Samba"
 
 msgid "SMB Domain"
 msgstr "SMB domeen"
+
+msgid "Sample rate"
+msgstr ""
 
 msgid "Saturday"
 msgstr "Laupäev"
@@ -3157,6 +3231,11 @@ msgstr "Kuva väliste teenuste ikoonid albumi ja esitaja lehtedel"
 msgid "Show external site links"
 msgstr "Kuva välised veebisaidilingid"
 
+#, fuzzy
+#| msgid "Show sidebar"
+msgid "Show header"
+msgstr "Näita külgriba"
+
 msgid "Show lyrics in the right panel"
 msgstr "Näita laulusõnu paremal külgribal"
 
@@ -3252,6 +3331,9 @@ msgstr "Singel"
 msgid "Singles"
 msgstr "Singlid"
 
+msgid "Size"
+msgstr ""
+
 msgid "Skip count"
 msgstr "Vahelejätmiste arv"
 
@@ -3260,6 +3342,9 @@ msgstr "Ära kasuta risthajutamist sama albumi lugude vahel"
 
 msgid "Slate"
 msgstr "Paekarva"
+
+msgid "Small"
+msgstr ""
 
 msgid "Smart Playlist"
 msgstr "Nutikas esitusloend"
@@ -3724,6 +3809,9 @@ msgstr "Nädalapäev"
 msgid "Weekly"
 msgstr "Iganädalaselt"
 
+msgid "Wide"
+msgstr ""
+
 msgid "Window"
 msgstr "Aken"
 
@@ -3942,6 +4030,9 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#~ msgid "Increases memory usage"
+#~ msgstr "Suurendab mälukasutust"
 
 #~ msgid ""
 #~ "These folders are combined into the Local source and shown through folder "
@@ -4261,9 +4352,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
 #~ msgid "No track playing"
 #~ msgstr "Ühtegi lugu pole esitamisel"
-
-#~ msgid "Reset display"
-#~ msgstr "Lähtesta ekraan"
 
 #~ msgid "Restore selected preset to default bands."
 #~ msgstr "Taasta sagedusalade vaikeseadistused."

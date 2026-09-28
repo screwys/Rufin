@@ -18,6 +18,11 @@ msgstr ""
 "X-Generator: Weblate 2026.10.dev0\n"
 
 msgid ""
+"A Japanese dictionary is downloaded for furigana and romaji readings. This "
+"setting also increases resource usage."
+msgstr ""
+
+msgid ""
 "Approving gives this device access to your profile and saved source logins."
 msgstr ""
 
@@ -82,6 +87,14 @@ msgid ""
 msgstr ""
 "Nessun servizio per i segreti trovato. Rufin utilizzerà un file per salvare "
 "le credenziali. Annullare l'operazione non salverà le credeneziali."
+
+msgid ""
+"No secret service found. You might have a secret service but the portal can "
+"be broken, you can check <a href=\"https://github.com/screwys/Rufin/issues/"
+"1055#issuecomment-5637922622\">this issue</a> to fix it, otherwise Rufin "
+"will use a file to store its credentials. Cancelling will not save "
+"credentials at all."
+msgstr ""
 
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
@@ -277,6 +290,9 @@ msgstr "Colore d'accento"
 msgid "Access token"
 msgstr "Token di accesso"
 
+msgid "Accessibility"
+msgstr ""
+
 msgid "Action required"
 msgstr ""
 
@@ -411,6 +427,11 @@ msgstr "Consenti connessioni remote"
 msgid "Alternate addresses"
 msgstr "Indirizzi alternativi"
 
+#, fuzzy
+#| msgid "Accent color"
+msgid "Alternate row colors"
+msgstr "Colore d'accento"
+
 msgid "Anonymous (WebDAV / SMB)"
 msgstr "Anonimo (WebDAV / SMB)"
 
@@ -439,6 +460,9 @@ msgid "Application name"
 msgstr "Nome dell'applicazione"
 
 msgid "Applied"
+msgstr ""
+
+msgid "Applies to sidebar and fullscreen separately"
 msgstr ""
 
 msgid "Apply Template"
@@ -576,6 +600,12 @@ msgstr "Token Bearer (WebDAV)"
 msgid "Bearer token"
 msgstr "Token Bearer"
 
+msgid "Bit depth"
+msgstr ""
+
+msgid "Bitrate"
+msgstr ""
+
 msgid "Blue"
 msgstr "Blu"
 
@@ -634,6 +664,11 @@ msgstr "Cambiando sorgente"
 
 msgid "Changing this will redownload all local files."
 msgstr ""
+
+#, fuzzy
+#| msgid "Change"
+msgid "Channels"
+msgstr "Modifica"
 
 msgid "Check for updates every"
 msgstr "Controllo aggiornamenti ogni"
@@ -743,6 +778,11 @@ msgstr "Collezioni"
 
 msgid "Color for the active word during playback"
 msgstr "Colore per la parola attiva durante il playback"
+
+#, fuzzy
+#| msgid "Columns"
+msgid "Column borders"
+msgstr "Colonne"
 
 msgid "Columns"
 msgstr "Colonne"
@@ -1140,6 +1180,9 @@ msgstr ""
 msgid "Discord"
 msgstr "Discord"
 
+msgid "Display"
+msgstr ""
+
 msgid "Do not encrypt"
 msgstr "Non cifrare"
 
@@ -1379,6 +1422,9 @@ msgstr "Connessione"
 msgid "File connections"
 msgstr "Consenti connessioni remote"
 
+msgid "File path"
+msgstr ""
+
 msgid "Filename"
 msgstr ""
 
@@ -1457,6 +1503,11 @@ msgstr ""
 msgid "Full"
 msgstr ""
 
+#, fuzzy
+#| msgid "Close fullscreen player"
+msgid "Fullscreen player"
+msgstr "Chiudi player a schermo intero"
+
 msgid "Fullscreen"
 msgstr ""
 
@@ -1517,6 +1568,9 @@ msgstr ""
 msgid "Grid labels"
 msgstr ""
 
+msgid "Grid spacing"
+msgstr ""
+
 msgid "Grid"
 msgstr ""
 
@@ -1533,6 +1587,9 @@ msgid "Hidden"
 msgstr ""
 
 msgid "Hide sidebar"
+msgstr ""
+
+msgid "Highlight hovered row"
 msgstr ""
 
 msgid "History"
@@ -1594,9 +1651,6 @@ msgid "Include detailed Rufin diagnostics in this session"
 msgstr ""
 
 msgid "Increase"
-msgstr ""
-
-msgid "Increases memory usage"
 msgstr ""
 
 msgid "Install available updates when Rufin starts"
@@ -1671,6 +1725,9 @@ msgid "Language"
 msgstr ""
 
 msgid "Laptop/Headphones"
+msgstr ""
+
+msgid "Large"
 msgstr ""
 
 msgid "Last 30 days"
@@ -2674,6 +2731,11 @@ msgstr ""
 msgid "Redo"
 msgstr ""
 
+#, fuzzy
+#| msgid "Collection"
+msgid "Reduce motion"
+msgstr "Collezione"
+
 msgid "Refresh automatically"
 msgstr ""
 
@@ -2884,6 +2946,9 @@ msgstr ""
 msgid "Rounded bars"
 msgstr ""
 
+msgid "Row borders"
+msgstr ""
+
 msgid "Rows"
 msgstr ""
 
@@ -2905,6 +2970,9 @@ msgid "SMB / Samba"
 msgstr ""
 
 msgid "SMB Domain"
+msgstr ""
+
+msgid "Sample rate"
 msgstr ""
 
 msgid "Saturday"
@@ -3179,6 +3247,9 @@ msgstr ""
 msgid "Show external site links"
 msgstr ""
 
+msgid "Show header"
+msgstr ""
+
 msgid "Show lyrics in the right panel"
 msgstr ""
 
@@ -3276,6 +3347,9 @@ msgstr ""
 msgid "Singles"
 msgstr ""
 
+msgid "Size"
+msgstr ""
+
 msgid "Skip count"
 msgstr ""
 
@@ -3283,6 +3357,9 @@ msgid "Skip same-album crossfade"
 msgstr ""
 
 msgid "Slate"
+msgstr ""
+
+msgid "Small"
 msgstr ""
 
 msgid "Smart Playlist"
@@ -3751,6 +3828,9 @@ msgid "Weekday"
 msgstr ""
 
 msgid "Weekly"
+msgstr ""
+
+msgid "Wide"
 msgstr ""
 
 msgid "Window"

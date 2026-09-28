@@ -18,6 +18,11 @@ msgstr ""
 "X-Generator: Weblate 2026.10.dev0\n"
 
 msgid ""
+"A Japanese dictionary is downloaded for furigana and romaji readings. This "
+"setting also increases resource usage."
+msgstr ""
+
+msgid ""
 "Approving gives this device access to your profile and saved source logins."
 msgstr ""
 "Durch die Bestätigung erhält dieses Gerät Zugriff auf dein Profil und die "
@@ -97,6 +102,14 @@ msgstr ""
 "Kein Schlüsselbunddienst gefunden. Rufin wird eine Datei verwenden, um seine "
 "Anmeldedaten zu speichern. Bei Abbruch werden die Anmeldedaten überhaupt "
 "nicht gespeichert."
+
+msgid ""
+"No secret service found. You might have a secret service but the portal can "
+"be broken, you can check <a href=\"https://github.com/screwys/Rufin/issues/"
+"1055#issuecomment-5637922622\">this issue</a> to fix it, otherwise Rufin "
+"will use a file to store its credentials. Cancelling will not save "
+"credentials at all."
+msgstr ""
 
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
@@ -313,6 +326,9 @@ msgstr "Akzentfarbe"
 msgid "Access token"
 msgstr "Zugriffstoken"
 
+msgid "Accessibility"
+msgstr ""
+
 msgid "Action required"
 msgstr "Aktion erforderlich"
 
@@ -436,6 +452,11 @@ msgstr "Remote-Verbindungen erlauben"
 msgid "Alternate addresses"
 msgstr "Alternative Adressen"
 
+#, fuzzy
+#| msgid "Accent color"
+msgid "Alternate row colors"
+msgstr "Akzentfarbe"
+
 msgid "Anonymous (WebDAV / SMB)"
 msgstr "Anonym (WebDAV / SMB)"
 
@@ -465,6 +486,9 @@ msgstr "Anwendungsname"
 
 msgid "Applied"
 msgstr "Angewendet"
+
+msgid "Applies to sidebar and fullscreen separately"
+msgstr ""
 
 msgid "Apply Template"
 msgstr "Vorlage anwenden"
@@ -595,6 +619,12 @@ msgstr "Bearer-Token (WebDAV)"
 msgid "Bearer token"
 msgstr "Bearer-Token"
 
+msgid "Bit depth"
+msgstr ""
+
+msgid "Bitrate"
+msgstr ""
+
 msgid "Blue"
 msgstr "Blau"
 
@@ -654,6 +684,11 @@ msgstr "Quelle wird geändert"
 msgid "Changing this will redownload all local files."
 msgstr ""
 "Wenn du dies änderst, werden alle lokalen Dateien erneut heruntergeladen."
+
+#, fuzzy
+#| msgid "Change"
+msgid "Channels"
+msgstr "Ändern"
 
 msgid "Check for updates every"
 msgstr "Nach Updates suchen: alle"
@@ -755,6 +790,11 @@ msgstr "Sammlungen"
 
 msgid "Color for the active word during playback"
 msgstr "Farbe des aktuellen Wortes während der Wiedergabe"
+
+#, fuzzy
+#| msgid "Columns"
+msgid "Column borders"
+msgstr "Spalten"
 
 msgid "Columns"
 msgstr "Spalten"
@@ -1110,6 +1150,11 @@ msgstr "Discord-Zugriff in Flatpak"
 msgid "Discord"
 msgstr "Discord"
 
+#, fuzzy
+#| msgid "Reset display"
+msgid "Display"
+msgstr "Ansicht zurücksetzen"
+
 msgid "Do not encrypt"
 msgstr "Nicht verschlüsseln"
 
@@ -1346,6 +1391,11 @@ msgstr "Dateiverbindung"
 msgid "File connections"
 msgstr "Dateiverbindungen"
 
+#, fuzzy
+#| msgid "Folder path"
+msgid "File path"
+msgstr "Ordnerpfad"
+
 msgid "Filename"
 msgstr "Dateiname"
 
@@ -1428,6 +1478,11 @@ msgstr "Höhen-Anhebung"
 msgid "Full"
 msgstr "Vollständig"
 
+#, fuzzy
+#| msgid "Open fullscreen player"
+msgid "Fullscreen player"
+msgstr "Vollbildmodus aktivieren"
+
 msgid "Fullscreen"
 msgstr "Vollbild"
 
@@ -1488,6 +1543,11 @@ msgstr "Grün"
 msgid "Grid labels"
 msgstr "Rasterbeschriftung"
 
+#, fuzzy
+#| msgid "Bar spacing (px)"
+msgid "Grid spacing"
+msgstr "Leistenabstand (px)"
+
 msgid "Grid"
 msgstr "Raster"
 
@@ -1505,6 +1565,9 @@ msgstr "Versteckt"
 
 msgid "Hide sidebar"
 msgstr "Seitenleiste ausblenden"
+
+msgid "Highlight hovered row"
+msgstr ""
 
 msgid "History"
 msgstr "Verlauf"
@@ -1565,9 +1628,6 @@ msgstr "Detaillierte Rufin-Diagnosedaten in dieser Sitzung einschließen"
 
 msgid "Increase"
 msgstr "Erhöhen"
-
-msgid "Increases memory usage"
-msgstr "Erhöht den Speicherverbrauch"
 
 msgid "Install available updates when Rufin starts"
 msgstr "Verfügbare Updates beim Start von Rufin installieren"
@@ -1642,6 +1702,9 @@ msgstr "Sprache"
 
 msgid "Laptop/Headphones"
 msgstr "Laptop/Kopfhörer"
+
+msgid "Large"
+msgstr ""
 
 msgid "Last 30 days"
 msgstr "Letzte 30 Tage"
@@ -2630,6 +2693,11 @@ msgstr "Rot"
 msgid "Redo"
 msgstr "Wiederholen"
 
+#, fuzzy
+#| msgid "Rule actions"
+msgid "Reduce motion"
+msgstr "Regelaktionen"
+
 msgid "Refresh automatically"
 msgstr "Automatisch aktualisieren"
 
@@ -2835,6 +2903,9 @@ msgstr "Romaji"
 msgid "Rounded bars"
 msgstr "Abgerundete Balken"
 
+msgid "Row borders"
+msgstr ""
+
 msgid "Rows"
 msgstr "Reihen"
 
@@ -2855,6 +2926,9 @@ msgstr "SMB / Samba"
 
 msgid "SMB Domain"
 msgstr "SMB-Domain"
+
+msgid "Sample rate"
+msgstr ""
 
 msgid "Saturday"
 msgstr "Samstag"
@@ -3123,6 +3197,11 @@ msgstr "Symbole externer Dienste auf Album- und Künstlerseiten anzeigen"
 msgid "Show external site links"
 msgstr "Externe Website-Links anzeigen"
 
+#, fuzzy
+#| msgid "Show sidebar"
+msgid "Show header"
+msgstr "Seitenleiste einblenden"
+
 msgid "Show lyrics in the right panel"
 msgstr "Liedtexte im rechten Bereich anzeigen"
 
@@ -3216,6 +3295,9 @@ msgstr "Single"
 msgid "Singles"
 msgstr "Singles"
 
+msgid "Size"
+msgstr ""
+
 msgid "Skip count"
 msgstr "Überspringungszähler"
 
@@ -3224,6 +3306,9 @@ msgstr "Überblendung bei gleichem Album überspringen"
 
 msgid "Slate"
 msgstr "Schiefergrau"
+
+msgid "Small"
+msgstr ""
 
 msgid "Smart Playlist"
 msgstr "Smart-Playlist"
@@ -3676,6 +3761,9 @@ msgstr "Wochentag"
 msgid "Weekly"
 msgstr "Wöchentlich"
 
+msgid "Wide"
+msgstr ""
+
 msgid "Window"
 msgstr "Fenster"
 
@@ -3895,6 +3983,9 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#~ msgid "Increases memory usage"
+#~ msgstr "Erhöht den Speicherverbrauch"
 
 #~ msgid ""
 #~ "These folders are combined into the Local source and shown through folder "
@@ -4218,9 +4309,6 @@ msgstr "Willkommen beim Rufin-Setup"
 
 #~ msgid "No track playing"
 #~ msgstr "Kein Titel wird abgespielt"
-
-#~ msgid "Reset display"
-#~ msgstr "Ansicht zurücksetzen"
 
 #~ msgid "Restore selected preset to default bands."
 #~ msgstr "Ausgewählte Voreinstellung auf Standardbänder zurücksetzen."

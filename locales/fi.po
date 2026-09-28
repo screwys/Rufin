@@ -18,6 +18,11 @@ msgstr ""
 "X-Generator: Weblate 2026.10.dev0\n"
 
 msgid ""
+"A Japanese dictionary is downloaded for furigana and romaji readings. This "
+"setting also increases resource usage."
+msgstr ""
+
+msgid ""
 "Approving gives this device access to your profile and saved source logins."
 msgstr ""
 
@@ -73,6 +78,14 @@ msgstr "Ei tuloksia ¯\\_(°╭╮°)_/¯"
 msgid ""
 "No secret service found. Rufin will use a file to store its credentials. "
 "Cancelling will not save credentials at all."
+msgstr ""
+
+msgid ""
+"No secret service found. You might have a secret service but the portal can "
+"be broken, you can check <a href=\"https://github.com/screwys/Rufin/issues/"
+"1055#issuecomment-5637922622\">this issue</a> to fix it, otherwise Rufin "
+"will use a file to store its credentials. Cancelling will not save "
+"credentials at all."
 msgstr ""
 
 msgid ""
@@ -245,6 +258,9 @@ msgstr "Korostusväri"
 msgid "Access token"
 msgstr "Pääsypoletti"
 
+msgid "Accessibility"
+msgstr ""
+
 msgid "Action required"
 msgstr ""
 
@@ -382,6 +398,11 @@ msgstr "Salli etäyhteydet"
 msgid "Alternate addresses"
 msgstr "Vaihtoehtoiset osoitteet"
 
+#, fuzzy
+#| msgid "Accent color"
+msgid "Alternate row colors"
+msgstr "Korostusväri"
+
 msgid "Anonymous (WebDAV / SMB)"
 msgstr "Anonyymi (WebDAV / SMB)"
 
@@ -413,6 +434,9 @@ msgstr "Sovelluksen nimi"
 
 msgid "Applied"
 msgstr "Toteutettu"
+
+msgid "Applies to sidebar and fullscreen separately"
+msgstr ""
 
 msgid "Apply Template"
 msgstr "Toteuta mallipohja"
@@ -557,6 +581,12 @@ msgstr "Bearer-poletti (WebDAV)"
 msgid "Bearer token"
 msgstr "Bearer-poletti"
 
+msgid "Bit depth"
+msgstr ""
+
+msgid "Bitrate"
+msgstr ""
+
 msgid "Blue"
 msgstr "Sininen"
 
@@ -619,6 +649,11 @@ msgstr "Vaihda lähdettä"
 
 msgid "Changing this will redownload all local files."
 msgstr ""
+
+#, fuzzy
+#| msgid "Change"
+msgid "Channels"
+msgstr "Vaihda"
 
 msgid "Check for updates every"
 msgstr "Päivitysten tarkistusväli"
@@ -730,6 +765,11 @@ msgstr "Kokoelmat"
 
 msgid "Color for the active word during playback"
 msgstr ""
+
+#, fuzzy
+#| msgid "Columns"
+msgid "Column borders"
+msgstr "Sarakkeet"
 
 msgid "Columns"
 msgstr "Sarakkeet"
@@ -1155,6 +1195,9 @@ msgstr ""
 msgid "Discord"
 msgstr "Discord"
 
+msgid "Display"
+msgstr ""
+
 msgid "Do not encrypt"
 msgstr "Älä salaa"
 
@@ -1409,6 +1452,11 @@ msgid "File connections"
 msgstr "Yhteys"
 
 #, fuzzy
+#| msgid "Folder"
+msgid "File path"
+msgstr "Kansio"
+
+#, fuzzy
 #| msgid "Rename"
 msgid "Filename"
 msgstr "Nimeä uudelleen"
@@ -1494,6 +1542,11 @@ msgstr ""
 msgid "Full"
 msgstr "Täysi"
 
+#, fuzzy
+#| msgid "Open fullscreen player"
+msgid "Fullscreen player"
+msgstr "Avaa koko näytön soitin"
+
 msgid "Fullscreen"
 msgstr "Koko näyttö"
 
@@ -1554,6 +1607,9 @@ msgstr "Vihreä"
 msgid "Grid labels"
 msgstr ""
 
+msgid "Grid spacing"
+msgstr ""
+
 msgid "Grid"
 msgstr "Ruudukko"
 
@@ -1571,6 +1627,9 @@ msgstr "Piilotettu"
 
 msgid "Hide sidebar"
 msgstr "Piilota sivupalkki"
+
+msgid "Highlight hovered row"
+msgstr ""
 
 msgid "History"
 msgstr "Historia"
@@ -1633,9 +1692,6 @@ msgid "Include detailed Rufin diagnostics in this session"
 msgstr ""
 
 msgid "Increase"
-msgstr ""
-
-msgid "Increases memory usage"
 msgstr ""
 
 msgid "Install available updates when Rufin starts"
@@ -1710,6 +1766,9 @@ msgid "Language"
 msgstr "Kieli"
 
 msgid "Laptop/Headphones"
+msgstr ""
+
+msgid "Large"
 msgstr ""
 
 #, fuzzy
@@ -2777,6 +2836,11 @@ msgid "Redo"
 msgstr "Tee uudelleen"
 
 #, fuzzy
+#| msgid "Rule actions"
+msgid "Reduce motion"
+msgstr "Säännön toiminnot"
+
+#, fuzzy
 #| msgid "Save lyrics automatically"
 msgid "Refresh automatically"
 msgstr "Tallenna sanoitukset automaattisesti"
@@ -3010,6 +3074,9 @@ msgstr ""
 msgid "Rounded bars"
 msgstr ""
 
+msgid "Row borders"
+msgstr ""
+
 msgid "Rows"
 msgstr "Rivit"
 
@@ -3032,6 +3099,9 @@ msgstr "SMB / Samba"
 
 msgid "SMB Domain"
 msgstr "SMB-toimialue"
+
+msgid "Sample rate"
+msgstr ""
 
 msgid "Saturday"
 msgstr "Lauantai"
@@ -3329,6 +3399,11 @@ msgstr "Näytä ulkoisen palvelun kuvakkeet albumi- ja esittäjäsivuilla"
 msgid "Show external site links"
 msgstr "Näytä ulkoisten sivujen linkit"
 
+#, fuzzy
+#| msgid "Show sidebar"
+msgid "Show header"
+msgstr "Näytä sivupalkki"
+
 msgid "Show lyrics in the right panel"
 msgstr "Näytä sanoitukset oikeassa paneelissa"
 
@@ -3432,6 +3507,9 @@ msgstr "Single"
 msgid "Singles"
 msgstr "Singlet"
 
+msgid "Size"
+msgstr ""
+
 msgid "Skip count"
 msgstr "Ohituskerrat"
 
@@ -3439,6 +3517,9 @@ msgid "Skip same-album crossfade"
 msgstr "Ohita saman albumin ristihäivytys"
 
 msgid "Slate"
+msgstr ""
+
+msgid "Small"
 msgstr ""
 
 msgid "Smart Playlist"
@@ -3946,6 +4027,9 @@ msgstr "Viikonpäivä"
 
 msgid "Weekly"
 msgstr "Viikottain"
+
+msgid "Wide"
+msgstr ""
 
 msgid "Window"
 msgstr "Ikkuna"

@@ -19,6 +19,11 @@ msgstr ""
 "X-Generator: Weblate 2026.9.dev0\n"
 
 msgid ""
+"A Japanese dictionary is downloaded for furigana and romaji readings. This "
+"setting also increases resource usage."
+msgstr ""
+
+msgid ""
 "Approving gives this device access to your profile and saved source logins."
 msgstr ""
 
@@ -73,6 +78,14 @@ msgstr "沒有結果 302257\\_(302260342225255342225256302260)_/302257"
 msgid ""
 "No secret service found. Rufin will use a file to store its credentials. "
 "Cancelling will not save credentials at all."
+msgstr ""
+
+msgid ""
+"No secret service found. You might have a secret service but the portal can "
+"be broken, you can check <a href=\"https://github.com/screwys/Rufin/issues/"
+"1055#issuecomment-5637922622\">this issue</a> to fix it, otherwise Rufin "
+"will use a file to store its credentials. Cancelling will not save "
+"credentials at all."
 msgstr ""
 
 msgid ""
@@ -241,6 +254,9 @@ msgstr "強調色"
 msgid "Access token"
 msgstr "取得登入授權"
 
+msgid "Accessibility"
+msgstr ""
+
 msgid "Action required"
 msgstr ""
 
@@ -384,6 +400,11 @@ msgstr ""
 msgid "Alternate addresses"
 msgstr ""
 
+#, fuzzy
+#| msgid "Accent color"
+msgid "Alternate row colors"
+msgstr "強調色"
+
 msgid "Anonymous (WebDAV / SMB)"
 msgstr ""
 
@@ -414,6 +435,9 @@ msgid "Application name"
 msgstr "應用程式名稱"
 
 msgid "Applied"
+msgstr ""
+
+msgid "Applies to sidebar and fullscreen separately"
 msgstr ""
 
 msgid "Apply Template"
@@ -573,6 +597,12 @@ msgstr "取得登入授權"
 msgid "Bearer token"
 msgstr "取得登入授權"
 
+msgid "Bit depth"
+msgstr ""
+
+msgid "Bitrate"
+msgstr ""
+
 msgid "Blue"
 msgstr "藍色"
 
@@ -638,6 +668,11 @@ msgstr "變更敏感存儲空間"
 
 msgid "Changing this will redownload all local files."
 msgstr ""
+
+#, fuzzy
+#| msgid "Change"
+msgid "Channels"
+msgstr "變更"
 
 msgid "Check for updates every"
 msgstr ""
@@ -756,6 +791,9 @@ msgid "Collections"
 msgstr "收藏"
 
 msgid "Color for the active word during playback"
+msgstr ""
+
+msgid "Column borders"
 msgstr ""
 
 msgid "Columns"
@@ -1190,6 +1228,9 @@ msgstr ""
 msgid "Discord"
 msgstr "Discord"
 
+msgid "Display"
+msgstr ""
+
 #, fuzzy
 #| msgid "is not empty"
 msgid "Do not encrypt"
@@ -1464,6 +1505,11 @@ msgid "File connections"
 msgstr "連接"
 
 #, fuzzy
+#| msgid "Folder"
+msgid "File path"
+msgstr "資料夾"
+
+#, fuzzy
 #| msgid "Rename"
 msgid "Filename"
 msgstr "重新命名"
@@ -1552,6 +1598,11 @@ msgid "Full"
 msgstr "完整"
 
 #, fuzzy
+#| msgid "Open fullscreen player"
+msgid "Fullscreen player"
+msgstr "開啟全螢幕播放器"
+
+#, fuzzy
 #| msgid "Toggle Fullscreen"
 msgid "Fullscreen"
 msgstr "切換全螢幕"
@@ -1615,6 +1666,9 @@ msgstr "綠色"
 msgid "Grid labels"
 msgstr ""
 
+msgid "Grid spacing"
+msgstr ""
+
 msgid "Grid"
 msgstr "網格"
 
@@ -1632,6 +1686,9 @@ msgstr "隱藏"
 
 msgid "Hide sidebar"
 msgstr "隱藏側邊欄"
+
+msgid "Highlight hovered row"
+msgstr ""
 
 msgid "History"
 msgstr "歷史"
@@ -1693,9 +1750,6 @@ msgstr ""
 
 msgid "Increase"
 msgstr "增加"
-
-msgid "Increases memory usage"
-msgstr "增加記憶體使用量"
 
 msgid "Install available updates when Rufin starts"
 msgstr "在 Rufin 啟動時安裝可用的更新"
@@ -1771,6 +1825,9 @@ msgid "Language"
 msgstr "語言"
 
 msgid "Laptop/Headphones"
+msgstr ""
+
+msgid "Large"
 msgstr ""
 
 #, fuzzy
@@ -2904,6 +2961,11 @@ msgstr "紅色"
 msgid "Redo"
 msgstr "重做"
 
+#, fuzzy
+#| msgid "Selection"
+msgid "Reduce motion"
+msgstr "選擇"
+
 msgid "Refresh automatically"
 msgstr ""
 
@@ -3136,6 +3198,9 @@ msgstr "羅馬拼音"
 msgid "Rounded bars"
 msgstr ""
 
+msgid "Row borders"
+msgstr ""
+
 msgid "Rows"
 msgstr "列表"
 
@@ -3157,6 +3222,9 @@ msgid "SMB / Samba"
 msgstr ""
 
 msgid "SMB Domain"
+msgstr ""
+
+msgid "Sample rate"
 msgstr ""
 
 msgid "Saturday"
@@ -3468,6 +3536,11 @@ msgstr "在專輯與藝人頁面上顯示外部服務的圖示"
 msgid "Show external site links"
 msgstr "顯示外部連結"
 
+#, fuzzy
+#| msgid "Show sidebar"
+msgid "Show header"
+msgstr "顯示側邊欄"
+
 msgid "Show lyrics in the right panel"
 msgstr "顯示歌詞在右側邊欄"
 
@@ -3571,6 +3644,9 @@ msgstr ""
 msgid "Singles"
 msgstr "單曲"
 
+msgid "Size"
+msgstr ""
+
 msgid "Skip count"
 msgstr "跳過次數"
 
@@ -3578,6 +3654,9 @@ msgid "Skip same-album crossfade"
 msgstr ""
 
 msgid "Slate"
+msgstr ""
+
+msgid "Small"
 msgstr ""
 
 msgid "Smart Playlist"
@@ -4084,6 +4163,9 @@ msgstr ""
 msgid "Weekly"
 msgstr ""
 
+msgid "Wide"
+msgstr ""
+
 msgid "Window"
 msgstr "視窗"
 
@@ -4287,6 +4369,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Increases memory usage"
+#~ msgstr "增加記憶體使用量"
 
 #~ msgid "Remove Local Folder"
 #~ msgstr "移除本地資料夾"
