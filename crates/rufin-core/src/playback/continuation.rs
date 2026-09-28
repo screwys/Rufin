@@ -125,9 +125,11 @@ impl PlaybackOwner {
             .unwrap_or_else(|p| p.into_inner())
             .upgrade();
         let source = self.source_owner();
+        let local = self.settings.local_configuration();
         let stream = prepare_stream(
             &self.database,
             request,
+            local.as_ref(),
             connect
                 .as_deref()
                 .map(|connect| (connect, occurrence.as_ref())),

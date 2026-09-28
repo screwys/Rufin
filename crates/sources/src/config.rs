@@ -173,7 +173,7 @@ pub enum EditableSource {
 
 impl SourceConfiguration {
     /// Identify a selected file inside one of the configured local folder grants.
-    pub fn local_playlist_location(&self, path: &std::path::Path) -> Option<(String, PathBuf)> {
+    pub fn local_file_location(&self, path: &std::path::Path) -> Option<(String, PathBuf)> {
         if !self.is_local() {
             return None;
         }

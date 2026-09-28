@@ -88,7 +88,7 @@ fn cue_backing_file_reuse_and_removal() {
                     let file = owner.database.connect_media_file(uri, encoding.name()).await.unwrap().unwrap();
                     assert_eq!(file.managed, !original_exists);
                     stored.push(file.path);
-                    let stream = crate::playback::prepare_stream(&owner.database, playback::StreamRequest::original(uri), None, |_| async { panic!("CUE uses its backing file") }).await.unwrap();
+                    let stream = crate::playback::prepare_stream(&owner.database, playback::StreamRequest::original(uri), None, None, |_| async { panic!("CUE uses its backing file") }).await.unwrap();
                     assert_eq!(stream.window().unwrap().start_millis, index as u64 * 1000);
                     assert_eq!(stream.window().unwrap().end_millis, (index as u64 + 1) * 1000);
                 }
@@ -250,6 +250,7 @@ fn cue_direct_continuation_transfers_one_file_without_enrollment() {
                 let stream = crate::playback::prepare_stream(
                     &b.database,
                     playback::StreamRequest::original(&uri),
+                    None,
                     None,
                     |_| async { panic!("downloaded file") },
                 )

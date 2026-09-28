@@ -88,6 +88,21 @@ fn mapped_root<'a>(
 }
 
 impl ConnectOwner {
+    fn local_file_path(&self, path: PathBuf) -> PathBuf {
+        self.source
+            .shared
+            .settings
+            .local_configuration()
+            .and_then(|local| local.local_file_location(&path))
+            .map_or(path, |(_, access)| access)
+    }
+
+    async fn original_media_file(&self, uri: &str) -> library::LibraryResult<Option<PathBuf>> {
+        self.database
+            .connect_original_file(uri, |path| self.local_file_path(path))
+            .await
+    }
+
     fn media_path(
         &self,
         uri: &str,
@@ -122,7 +137,7 @@ impl ConnectOwner {
         let Some(relative) = reference["relative_path"].as_str() else {
             return Ok(None);
         };
-        let mut path = corresponding_path(root, relative)?;
+        let mut path = self.local_file_path(corresponding_path(root, relative)?);
         if encoding == Encoding::Mp3 {
             let key = file_key(uri, &revision(reference), encoding);
             path.set_extension(format!("{key:.12}.mp3"));
@@ -426,6 +441,7 @@ impl ConnectOwner {
                         })
                         .flatten()
                 })
+                .map(|path| self.local_file_path(path))
                 .filter(|path| path.is_file())
                 .or(self.database.connect_local_file(uri).await.map_err(error)?)
                 .ok_or("The current item is not a local file")?;
@@ -454,12 +470,7 @@ impl ConnectOwner {
             .map_err(error)?;
         let original = if let Some((path, _)) = direct {
             path
-        } else if let Some(path) = self
-            .database
-            .connect_original_file(uri)
-            .await
-            .map_err(error)?
-        {
+        } else if let Some(path) = self.original_media_file(uri).await.map_err(error)? {
             path
         } else if let Some(path) = original_receipt
             .as_ref()
@@ -556,11 +567,7 @@ impl ConnectOwner {
     ) -> Result<Option<PathBuf>, String> {
         let revision = revision(reference);
         if encoding == Encoding::Original
-            && let Some(path) = self
-                .database
-                .connect_original_file(uri)
-                .await
-                .map_err(error)?
+            && let Some(path) = self.original_media_file(uri).await.map_err(error)?
         {
             return Ok(Some(path));
         }
@@ -623,7 +630,7 @@ impl ConnectOwner {
         let config = self.status().settings;
         let mapped = mapped_root(&config.folders, reference);
         if let (Some(root), Some(relative)) = (mapped, reference["relative_path"].as_str()) {
-            let expected = corresponding_path(root, relative)?;
+            let expected = self.local_file_path(corresponding_path(root, relative)?);
             if expected.is_file() {
                 self.database
                     .connect_set_local_file(uri, &expected, false)
@@ -699,8 +706,7 @@ impl ConnectOwner {
         if reusable.is_none()
             && encoding == Encoding::Mp3
             && self
-                .database
-                .connect_original_file(uri)
+                .original_media_file(uri)
                 .await
                 .map_err(error)?
                 .is_some()
@@ -955,8 +961,7 @@ impl ConnectOwner {
         let session = self.active().await?;
         if encoding == Encoding::Mp3
             && self
-                .database
-                .connect_original_file(uri)
+                .original_media_file(uri)
                 .await
                 .map_err(error)?
                 .is_some()
@@ -1014,8 +1019,7 @@ impl downloads::ConnectDownload for ConnectOwner {
     {
         Box::pin(async move {
             if self
-                .database
-                .connect_original_file(uri)
+                .original_media_file(uri)
                 .await
                 .map_err(error)?
                 .is_some()
@@ -1148,7 +1152,7 @@ impl ConnectOwner {
             .map_err(SourceError::Other)?;
         if reusable.is_none()
             && encoding == Encoding::Mp3
-            && self.database.connect_original_file(uri).await?.is_some()
+            && self.original_media_file(uri).await?.is_some()
         {
             let identity = self
                 .active()

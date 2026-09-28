@@ -704,13 +704,9 @@ fn finish_playback_projection(
     queue_window_changed: bool,
 ) {
     let unavailable_folder = unavailable_local_folder_for_failed_playback(
-        previous_player.as_ref(),
         &next_player,
+        &notices,
         &shell.source.configured.borrow(),
-        shell
-            .selected_library()
-            .as_deref()
-            .map(|selected| &selected.source_id),
     );
     if let Some(folder) = unavailable_folder.as_ref() {
         show_local_folder_recovery(shell, folder.clone());
@@ -855,24 +851,22 @@ fn finish_playback_projection(
 }
 
 fn unavailable_local_folder_for_failed_playback(
-    previous: Option<&playback::PlaybackView>,
     next: &playback::PlaybackView,
+    notices: &[playback::PlaybackNotice],
     configured: &ConfiguredSources,
-    selected_source_id: Option<&sources::SourceId>,
 ) -> Option<String> {
-    let error = next.transport.error.as_ref()?;
-    if previous.and_then(|player| player.transport.error.as_ref()) == Some(error) {
-        return None;
-    }
-    let source_id = selected_source_id?;
-    if !configured
-        .sources
+    next.transport.error.as_ref()?;
+    if !notices
         .iter()
-        .any(|source| &source.id == source_id && source.kind == "local")
+        .any(|notice| matches!(notice, playback::PlaybackNotice::OperationFailed(_)))
     {
         return None;
     }
     let media_uri = &next.transport.current.as_ref()?.media_uri;
+    let cue = library::cue_media_parts(media_uri);
+    let media_uri = cue
+        .as_ref()
+        .map_or(media_uri.as_str(), |(_, uri, _, _)| uri);
     let file = gio::File::for_uri(media_uri);
     let source_path = file.path()?;
     let source_path = source_path.to_str()?;

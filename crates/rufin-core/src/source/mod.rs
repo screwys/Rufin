@@ -4515,6 +4515,7 @@ mod artwork_preparation_tests {
                     &database,
                     playback::StreamRequest::new(&local_uri, playback::StreamQuality::Original),
                     None,
+                    None,
                     |_| session.initialized_source(),
                 ),
             )

@@ -429,13 +429,19 @@ async fn analyze_uri(
     cancelled: &Arc<AtomicBool>,
 ) -> Result<LoudnessAnalysis, String> {
     let request = StreamRequest::new(media_uri, StreamQuality::Original);
-    let stream = prepare_stream(&state.database, request, None, move |_| async move {
-        selected
-            .upgrade()
-            .ok_or_else(crate::source::source_access_unavailable)?
-            .initialized_source()
-            .await
-    })
+    let stream = prepare_stream(
+        &state.database,
+        request,
+        Some(&state.configuration),
+        None,
+        move |_| async move {
+            selected
+                .upgrade()
+                .ok_or_else(crate::source::source_access_unavailable)?
+                .initialized_source()
+                .await
+        },
+    )
     .await?;
     let cancelled = Arc::clone(cancelled);
     tokio::task::spawn_blocking(move || {
