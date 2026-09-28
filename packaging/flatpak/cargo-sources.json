@@ -5761,14 +5761,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/mdns-sd/mdns-sd-0.21.3.crate",
-        "sha256": "a63c9b854b5ad0812ac5969f8db92a59f28b45d0a5ae599b9a45b84c5c8a08e8",
-        "dest": "cargo/vendor/mdns-sd-0.21.3"
+        "url": "https://static.crates.io/crates/mdns-sd/mdns-sd-0.21.4.crate",
+        "sha256": "1067efe2aadc6967f84c95977dca910e98f3edfd6403efc8fa8508d289ce012d",
+        "dest": "cargo/vendor/mdns-sd-0.21.4"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"a63c9b854b5ad0812ac5969f8db92a59f28b45d0a5ae599b9a45b84c5c8a08e8\", \"files\": {}}",
-        "dest": "cargo/vendor/mdns-sd-0.21.3",
+        "contents": "{\"package\": \"1067efe2aadc6967f84c95977dca910e98f3edfd6403efc8fa8508d289ce012d\", \"files\": {}}",
+        "dest": "cargo/vendor/mdns-sd-0.21.4",
         "dest-filename": ".cargo-checksum.json"
     },
     {
