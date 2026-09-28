@@ -1,9 +1,70 @@
 //! Owns Favorite and Rating overrides plus bounded remote Favorite delivery.
 //! Source clients perform network delivery and retry scheduling decisions.
 
-use sqlx::{Connection, Sqlite, Transaction, sqlite::SqliteConnection};
+use sqlx::{Connection, QueryBuilder, Sqlite, Transaction, sqlite::SqliteConnection};
 
 use crate::{Database, LibraryError, LibraryResult, ReadCancellation};
+
+/// Sparse source facts. An absent field leaves the stored value alone.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct SourceUserData {
+    pub favorite: Option<bool>,
+    /// Outer None means absent; Some(None) clears the source rating (0..100).
+    pub rating: Option<Option<i64>>,
+    pub play_count: Option<i64>,
+    pub last_played: Option<i64>,
+}
+
+impl SourceUserData {
+    pub fn merge(&mut self, incoming: Self) {
+        self.favorite = incoming.favorite.or(self.favorite);
+        self.rating = incoming.rating.or(self.rating);
+        self.play_count = incoming.play_count.or(self.play_count);
+        self.last_played = incoming.last_played.or(self.last_played);
+    }
+}
+
+/// Publishes source facts without changing local overrides or pending actions.
+/// The input stays a SQL relation so catalog scans never materialize it in Rust.
+pub(crate) async fn publish_source_user_data(
+    connection: &mut SqliteConnection,
+    kind: &str,
+    input: impl Fn(&mut QueryBuilder<Sqlite>),
+) -> LibraryResult<bool> {
+    let incoming = "WITH incoming(source_key,object_id,favorite,rating_set,rating,play_count,skip_count,last_played) AS (";
+    let mut query = QueryBuilder::new(incoming);
+    input(&mut query);
+    query.push(format!(
+        ") UPDATE {kind}s AS current SET
+         source_favorite=COALESCE(incoming.favorite,current.source_favorite),
+         source_rating=CASE WHEN incoming.rating_set THEN incoming.rating ELSE current.source_rating END
+         FROM incoming WHERE current.source_key=incoming.source_key AND current.object_id=incoming.object_id
+         AND ((incoming.favorite IS NOT NULL AND current.source_favorite IS NOT incoming.favorite)
+           OR (incoming.rating_set AND current.source_rating IS NOT incoming.rating))"
+    ));
+    let mut changed = query
+        .build()
+        .execute(&mut *connection)
+        .await?
+        .rows_affected()
+        > 0;
+    if kind == "track" {
+        let mut query = QueryBuilder::new(incoming);
+        input(&mut query);
+        query.push(
+            ") INSERT INTO catalog.activity_baseline(source_key,track_object_id,play_count,skip_count,last_played_at)
+             SELECT incoming.source_key,incoming.object_id,COALESCE(incoming.play_count,0),
+                    COALESCE(incoming.skip_count,0),incoming.last_played
+             FROM incoming
+             WHERE (incoming.play_count IS NOT NULL OR incoming.skip_count IS NOT NULL OR incoming.last_played IS NOT NULL)
+             AND NOT EXISTS(SELECT 1 FROM activity_baseline current
+                 WHERE current.source_key=incoming.source_key AND current.track_object_id=incoming.object_id
+                   AND current.period='lifetime' AND current.item_kind='track')",
+        );
+        changed |= query.build().execute(connection).await?.rows_affected() > 0;
+    }
+    Ok(changed)
+}
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum FavoriteTarget {
@@ -146,23 +207,30 @@ impl Database {
             transaction.commit().await?;
             return Ok(false);
         }
-        let sql = match target {
-            FavoriteTarget::Track(_) => "UPDATE tracks SET source_favorite=?2 WHERE media_uri=?1",
-            FavoriteTarget::Album(_) => "UPDATE albums SET source_favorite=?2 WHERE media_uri=?1",
-            FavoriteTarget::Artist(_) => "UPDATE artists SET source_favorite=?2 WHERE media_uri=?1",
-        };
-        let changed = sqlx::query(sql)
+        let sql = format!(
+            "SELECT EXISTS(SELECT 1 FROM {}s WHERE media_uri=?1)",
+            target.kind()
+        );
+        let known = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(sql))
             .bind(target.media_uri())
-            .bind(favorite)
-            .execute(&mut *transaction)
-            .await?
-            .rows_affected()
-            == 1;
-        if changed {
+            .fetch_one(&mut *transaction)
+            .await?;
+        if known {
+            publish_source_user_data(&mut transaction, target.kind(), |query| {
+                query
+                    .push("SELECT source_key,object_id,")
+                    .push_bind(favorite)
+                    .push(format!(
+                        ",0,NULL,NULL,NULL,NULL FROM {}s WHERE media_uri=",
+                        target.kind()
+                    ))
+                    .push_bind(target.media_uri());
+            })
+            .await?;
             update_favorite(&mut transaction, target, None).await?;
         }
         transaction.commit().await?;
-        Ok(changed)
+        Ok(known)
     }
 
     pub async fn defer_remote_favorite(

@@ -222,6 +222,43 @@ pub(crate) async fn initialize(connection: &mut SqliteConnection) -> LibraryResu
         CREATE TABLE IF NOT EXISTS connect_native_playlist_seed(singleton INTEGER PRIMARY KEY CHECK(singleton=1),playlist INTEGER NOT NULL,position INTEGER NOT NULL) STRICT;
         INSERT OR IGNORE INTO connect_native_playlist_seed VALUES(1,0,-1);")
         .execute(&mut *connection).await?;
+    for kind in PROJECTIONS
+        .iter()
+        .map(|projection| projection.kind)
+        .chain(LINKS.iter().map(|(_, _, table)| *table))
+    {
+        sqlx::query("INSERT OR IGNORE INTO connect_seed(kind) VALUES(?1)")
+            .bind(kind)
+            .execute(&mut *connection)
+            .await?;
+    }
+    let mut transaction = connection.begin().await?;
+    let has_artwork_seed: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('connect_seed') WHERE name='artwork_only')",
+    )
+    .fetch_one(&mut *transaction)
+    .await?;
+    if !has_artwork_seed {
+        sqlx::raw_sql("ALTER TABLE connect_seed ADD COLUMN artwork_only INTEGER NOT NULL DEFAULT 0;
+            UPDATE connect_seed SET artwork_only=CASE WHEN complete=1 THEN 1 ELSE 0 END,cursor=0,complete=0 WHERE kind IN ('track','album','artist','genre','folder');")
+            .execute(&mut *transaction).await?;
+    }
+    // Older Connect profiles omitted references held by the normal local scan index.
+    sqlx::query("INSERT OR IGNORE INTO connect_seed(kind,cursor,complete,artwork_only) VALUES('local_reference',0,0,0)")
+        .execute(&mut *transaction).await?;
+    sqlx::query("UPDATE catalog.sources SET catalog_revision=1 WHERE catalog_revision=0 AND (EXISTS(SELECT 1 FROM catalog.tracks WHERE source_key=sources.source_key) OR EXISTS(SELECT 1 FROM catalog.albums WHERE source_key=sources.source_key) OR EXISTS(SELECT 1 FROM catalog.artists WHERE source_key=sources.source_key) OR EXISTS(SELECT 1 FROM catalog.genres WHERE source_key=sources.source_key) OR EXISTS(SELECT 1 FROM catalog.moods WHERE source_key=sources.source_key) OR EXISTS(SELECT 1 FROM catalog.folders WHERE source_key=sources.source_key))")
+        .execute(&mut *transaction).await?;
+    transaction.commit().await?;
+    if sqlx::query_scalar::<_, bool>("SELECT enabled FROM connect_capture WHERE singleton=1")
+        .fetch_one(&mut *connection)
+        .await?
+    {
+        install_capture(connection).await?;
+    }
+    Ok(())
+}
+
+async fn install_capture(connection: &mut SqliteConnection) -> LibraryResult<()> {
     for projection in PROJECTIONS {
         for (operation, row) in [("INSERT", "NEW"), ("UPDATE", "NEW"), ("DELETE", "OLD")] {
             let key = projection.key.replace("r.", &format!("{row}."));
@@ -271,10 +308,6 @@ pub(crate) async fn initialize(connection: &mut SqliteConnection) -> LibraryResu
                 .execute(&mut *connection)
                 .await?;
         }
-        sqlx::query("INSERT OR IGNORE INTO connect_seed(kind) VALUES(?1)")
-            .bind(projection.kind)
-            .execute(&mut *connection)
-            .await?;
     }
     for (left, right, table) in LINKS {
         for (operation, row) in [("INSERT", "NEW"), ("UPDATE", "NEW"), ("DELETE", "OLD")] {
@@ -303,10 +336,6 @@ pub(crate) async fn initialize(connection: &mut SqliteConnection) -> LibraryResu
                 .execute(&mut *connection)
                 .await?;
         }
-        sqlx::query("INSERT OR IGNORE INTO connect_seed(kind) VALUES(?1)")
-            .bind(table)
-            .execute(&mut *connection)
-            .await?;
     }
     // Capture identities before a source/metadata cascade removes the lookup rows.
     let mut deletions = String::new();
@@ -351,23 +380,6 @@ pub(crate) async fn initialize(connection: &mut SqliteConnection) -> LibraryResu
             .execute(&mut *connection)
             .await?;
     }
-    let mut transaction = connection.begin().await?;
-    let has_artwork_seed: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('connect_seed') WHERE name='artwork_only')",
-    )
-    .fetch_one(&mut *transaction)
-    .await?;
-    if !has_artwork_seed {
-        sqlx::raw_sql("ALTER TABLE connect_seed ADD COLUMN artwork_only INTEGER NOT NULL DEFAULT 0;
-            UPDATE connect_seed SET artwork_only=CASE WHEN complete=1 THEN 1 ELSE 0 END,cursor=0,complete=0 WHERE kind IN ('track','album','artist','genre','folder');")
-            .execute(&mut *transaction).await?;
-    }
-    // Older Connect profiles omitted references held by the normal local scan index.
-    sqlx::query("INSERT OR IGNORE INTO connect_seed(kind,cursor,complete,artwork_only) VALUES('local_reference',0,0,0)")
-        .execute(&mut *transaction).await?;
-    sqlx::query("UPDATE catalog.sources SET catalog_revision=1 WHERE catalog_revision=0 AND (EXISTS(SELECT 1 FROM catalog.tracks WHERE source_key=sources.source_key) OR EXISTS(SELECT 1 FROM catalog.albums WHERE source_key=sources.source_key) OR EXISTS(SELECT 1 FROM catalog.artists WHERE source_key=sources.source_key) OR EXISTS(SELECT 1 FROM catalog.genres WHERE source_key=sources.source_key) OR EXISTS(SELECT 1 FROM catalog.moods WHERE source_key=sources.source_key) OR EXISTS(SELECT 1 FROM catalog.folders WHERE source_key=sources.source_key))")
-        .execute(&mut *transaction).await?;
-    transaction.commit().await?;
     Ok(())
 }
 
@@ -380,6 +392,7 @@ impl Database {
             .begin()
             .await?;
         sqlx::raw_sql("DELETE FROM connect_changes; UPDATE connect_seed SET cursor=0,complete=0,artwork_only=0; UPDATE connect_playlist_seed SET playlist=0,position=-1; UPDATE connect_native_playlist_seed SET playlist=0,position=-1; UPDATE connect_capture SET enabled=1,applying=0;").execute(&mut *transaction).await?;
+        install_capture(&mut transaction).await?;
         transaction.commit().await?;
         Ok(())
     }
@@ -432,10 +445,34 @@ impl Database {
 
     pub async fn connect_capture_enabled(&self, enabled: bool) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let current: bool =
+            sqlx::query_scalar("SELECT enabled FROM connect_capture WHERE singleton=1")
+                .fetch_one(&mut *connection)
+                .await?;
+        if current == enabled {
+            return Ok(());
+        }
+        let mut transaction = connection.begin().await?;
+        if enabled {
+            install_capture(&mut transaction).await?;
+        } else {
+            let triggers: Vec<String> = sqlx::query_scalar("SELECT name FROM sqlite_temp_master WHERE type='trigger' AND name GLOB 'connect_*'")
+                .fetch_all(&mut *transaction).await?;
+            for trigger in triggers {
+                sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+                    "DROP TRIGGER temp.\"{}\"",
+                    trigger.replace('"', "\"\"")
+                )))
+                .execute(&mut *transaction)
+                .await?;
+            }
+        }
         sqlx::query("UPDATE connect_capture SET enabled=?1 WHERE singleton=1")
             .bind(enabled)
-            .execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
+            .execute(&mut *transaction)
             .await?;
+        transaction.commit().await?;
         Ok(())
     }
 

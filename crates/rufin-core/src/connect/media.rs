@@ -380,6 +380,7 @@ impl ConnectOwner {
         encoding: Encoding,
         occurrence: Option<&library::OccurrenceId>,
     ) -> Result<serde_json::Value, String> {
+        let session = self.active().await?;
         let reference = self
             .database
             .connect_track_reference(uri)
@@ -487,7 +488,7 @@ impl ConnectOwner {
         }
         let key = media_key(uri, &revision, encoding);
         let job = serving_key(peer, id);
-        let cancel = CancellationToken::new();
+        let cancel = session.stop.child_token();
         self.media_jobs
             .lock()
             .unwrap_or_else(|p| p.into_inner())

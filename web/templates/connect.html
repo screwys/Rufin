@@ -68,3 +68,13 @@
     
   </div>
 </dialog>
+<dialog id="connect-disable-dialog" aria-labelledby="connect-disable-title" aria-describedby="connect-disable-help">
+  <form method="dialog">
+    <h2 id="connect-disable-title">{{ localization::tr("Rufin Connect") }}</h2>
+    <p id="connect-disable-help">{{ localization::tr("This will remove all configured state. Do you want to continue?") }}</p>
+    <div class="connect-actions">
+      <button value="cancel">{{ localization::tr("Cancel") }}</button>
+      <button value="disable">{{ localization::tr("Continue") }}</button>
+    </div>
+  </form>
+</dialog>

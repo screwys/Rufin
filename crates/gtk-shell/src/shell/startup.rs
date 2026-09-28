@@ -136,7 +136,6 @@ impl Shell {
         }
 
         self.render_current_route_content();
-        self.player_ui.render_queue_panel();
         self.player_ui.render_lyrics_panel();
         self.player_ui.update_bottom_player();
     }

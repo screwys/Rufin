@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - .cargo/**
+      - nextest.toml
       - Cargo.lock
       - Cargo.toml
       - CMakeLists.txt
@@ -130,6 +131,12 @@ jobs:
                   ;;
                 .github/workflows/container-image.yml|scripts/container|justfile)
                   add_jobs container
+                  ;;
+                nextest.toml)
+                  add_jobs container "${workspace_jobs[@]}"
+                  ;;
+                .github/workflows/checks.yml)
+                  add_jobs "${workspace_jobs[@]}"
                   ;;
                 .cargo/*|crates/*)
                   add_jobs "${workspace_jobs[@]}"
@@ -385,7 +392,7 @@ jobs:
         if: github.event_name != 'push'
         run: >-
           nix --accept-flake-config develop "${{ steps.nix-environment.outputs.target }}" --command
-          cargo nextest run --workspace --exclude 'gtk-*' --exclude rufin --all-targets --locked
+          cargo nextest run --config-file nextest.toml --workspace --exclude 'gtk-*' --exclude rufin --all-targets --locked
           --features app-identity/development --test-threads 4
 
       - name: Warm Rust build cache
@@ -417,7 +424,7 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          brew install adwaita-icon-theme cmake gettext game-music-emu gstreamer \
+          brew install adwaita-icon-theme cargo-nextest cmake gettext game-music-emu gstreamer \
             gtk4 libadwaita libnice-gstreamer libopenmpt libsoup librsvg meson ninja openssl@3 \
             pkgconf shared-mime-info wavpack
           gettext_prefix="$(brew --prefix gettext)"
@@ -463,7 +470,7 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == push ]]; then
             args+=(--no-run)
           fi
-          cargo test "${args[@]}"
+          cargo nextest run --config-file nextest.toml --test-threads 4 "${args[@]}"
 
   workspace_windows:
     name: Workspace (Windows)
@@ -518,6 +525,13 @@ jobs:
           echo "CARGO_HOME=$(cygpath -m "$GITHUB_WORKSPACE/.local/cargo")" >> "$GITHUB_ENV"
           echo "CARGO_TARGET_DIR=$(cygpath -m "$GITHUB_WORKSPACE/.local/target")" >> "$GITHUB_ENV"
 
+      - name: Install nextest
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          curl -LsSf https://get.nexte.st/0.9.133/windows-tar | tar zxf - -C "$MINGW_PREFIX/bin"
+          cargo nextest --version
+
       - name: Prepare playback runtime
         shell: msys2 {0}
         run: |
@@ -543,7 +557,7 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == push ]]; then
             args+=(--no-run)
           fi
-          cargo test "${args[@]}"
+          cargo nextest run --config-file nextest.toml --test-threads 4 "${args[@]}"
 
   cargo-deny:
     name: cargo-deny

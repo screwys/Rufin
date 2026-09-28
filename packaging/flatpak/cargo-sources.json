@@ -3785,14 +3785,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/gtk4-sys/gtk4-sys-0.11.4.crate",
-        "sha256": "82b8f954786af0b1984425c4446b77f5ff6594346181316be3f850caab1c6f01",
-        "dest": "cargo/vendor/gtk4-sys-0.11.4"
+        "url": "https://static.crates.io/crates/gtk4-sys/gtk4-sys-0.11.5.crate",
+        "sha256": "bd14af0137f269bdecee73404157d2a852f9651af7d68bd1023d3b8b914a14c3",
+        "dest": "cargo/vendor/gtk4-sys-0.11.5"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"82b8f954786af0b1984425c4446b77f5ff6594346181316be3f850caab1c6f01\", \"files\": {}}",
-        "dest": "cargo/vendor/gtk4-sys-0.11.4",
+        "contents": "{\"package\": \"bd14af0137f269bdecee73404157d2a852f9651af7d68bd1023d3b8b914a14c3\", \"files\": {}}",
+        "dest": "cargo/vendor/gtk4-sys-0.11.5",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -6926,32 +6926,6 @@
         "type": "inline",
         "contents": "{\"package\": \"bbd111a20ca90fedf03e09c59783c679c00900f1d8491cca5399f5e33609d5d6\", \"files\": {}}",
         "dest": "cargo/vendor/pango-sys-0.22.0",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/pangocairo/pangocairo-0.22.9.crate",
-        "sha256": "bd199a0fef965b3ebda91a929a1ab5e7729538882c68e8de38e1904d2e094757",
-        "dest": "cargo/vendor/pangocairo-0.22.9"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"bd199a0fef965b3ebda91a929a1ab5e7729538882c68e8de38e1904d2e094757\", \"files\": {}}",
-        "dest": "cargo/vendor/pangocairo-0.22.9",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/pangocairo-sys/pangocairo-sys-0.22.9.crate",
-        "sha256": "a649a616d67ae68539bc85f00fb45d36fba742ed20fc20e6712a15d8ee52bd3f",
-        "dest": "cargo/vendor/pangocairo-sys-0.22.9"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"a649a616d67ae68539bc85f00fb45d36fba742ed20fc20e6712a15d8ee52bd3f\", \"files\": {}}",
-        "dest": "cargo/vendor/pangocairo-sys-0.22.9",
         "dest-filename": ".cargo-checksum.json"
     },
     {

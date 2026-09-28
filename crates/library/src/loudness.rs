@@ -374,7 +374,7 @@ pub(crate) async fn recompute_album_loudness_key(
     transaction: &mut Transaction<'_, Sqlite>,
     album: AlbumKey,
 ) -> LibraryResult<[u8; 32]> {
-    let keys=sqlx::query_scalar::<_,Vec<u8>>("SELECT loudness_analysis_key FROM tracks WHERE source_key=(SELECT source_key FROM albums WHERE album_key=?1) AND album_key=?1 ORDER BY disc_number,track_number,sort_text,track_key")
+    let keys=sqlx::query_scalar::<_,Vec<u8>>("SELECT loudness_analysis_key FROM tracks WHERE source_key=(SELECT source_key FROM albums WHERE album_key=?1) AND album_key=?1 ORDER BY disc_number,track_number,sort_text,object_id")
         .bind(album).fetch_all(&mut **transaction).await?;
     let mut hasher = Hasher::new();
     hasher.update(b"rufin-album-loudness-v1\0");
@@ -394,7 +394,7 @@ pub(crate) async fn recompute_album_source_and_current_keys(
     transaction: &mut Transaction<'_, Sqlite>,
     album: AlbumKey,
 ) -> LibraryResult<()> {
-    let keys=sqlx::query_as::<_,(Vec<u8>,Vec<u8>)>("SELECT source_loudness_analysis_key,loudness_analysis_key FROM tracks WHERE source_key=(SELECT source_key FROM albums WHERE album_key=?1) AND album_key=?1 ORDER BY disc_number,track_number,sort_text,track_key")
+    let keys=sqlx::query_as::<_,(Vec<u8>,Vec<u8>)>("SELECT source_loudness_analysis_key,loudness_analysis_key FROM tracks WHERE source_key=(SELECT source_key FROM albums WHERE album_key=?1) AND album_key=?1 ORDER BY disc_number,track_number,sort_text,object_id")
         .bind(album).fetch_all(&mut **transaction).await?;
     let mut source = Hasher::new();
     source.update(b"rufin-album-loudness-v1\0");

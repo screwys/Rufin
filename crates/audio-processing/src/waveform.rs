@@ -27,7 +27,7 @@ pub fn generate_waveform_peaks_cancellable(
         .by_name("decoder")
         .ok_or_else(|| "waveform pipeline is missing decoder".to_string())?;
     let trust_invalid_certificate = stream.trust_invalid_certificate();
-    super::connect_server_certificate_policy(&decoder, move || trust_invalid_certificate);
+    super::configure_sources(&decoder, move || trust_invalid_certificate);
     decoder.set_property("uri", stream.uri());
 
     let sink = bin

@@ -250,7 +250,7 @@ jobs:
           done
           test -n "$x86_rpm_path"
           dnf -y --setopt=install_weak_deps=False install "$x86_rpm_path"
-          gst-inspect-1.0 --exists playbin
+          gst-inspect-1.0 --exists playbin3
           gst-inspect-1.0 --exists audiobuffersplit
 
       - name: Upload RPM artifacts

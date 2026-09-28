@@ -450,6 +450,15 @@ fn queue_index_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
             return;
         };
         let cell = track_list_row_index_cell(item);
+        item.connect_position_notify(|item| {
+            if let Some(cell) = item.child().and_downcast::<gtk::Overlay>() {
+                let text = item
+                    .position()
+                    .checked_add(1)
+                    .map(|position| position.to_string());
+                set_track_row_index_text(&cell, text.as_deref().unwrap_or_default());
+            }
+        });
         if let Some(shell) = setup_shell.upgrade() {
             install_queue_row_interactions(cell.upcast_ref(), &shell, item, None);
         }
@@ -550,7 +559,6 @@ fn queue_title_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
             .is_some_and(|p| !p.transport.desired_playing);
         gtk_widgets::recycled_cells::set_track_playing(title.upcast_ref(), is_current, paused);
         let subtitle = cell.subtitle();
-        subtitle.set_text(&row.artist);
         subtitle.set_visible(!row.artist.is_empty());
         cell.bind_subtitle(row.links(LibraryField::Artist));
         let cover = cell.cover();
@@ -1019,6 +1027,9 @@ impl crate::PlayerUi {
     }
 
     pub fn render_queue_panel(self: &Rc<Self>) {
+        if !self.queue_is_mapped() {
+            return;
+        }
         let current = self
             .selected_playback()
             .as_deref()
@@ -1028,11 +1039,6 @@ impl crate::PlayerUi {
             clear_queue_panel_children(&self.views.fullscreen_player.queue_panel);
             return;
         };
-        if queue.generation.get() == 0 {
-            drop(queue);
-            self.refresh_queue_window();
-            return;
-        }
         let loading = self
             .selected_playback()
             .is_some_and(|player| player.queue_loading)
@@ -1074,6 +1080,9 @@ impl crate::PlayerUi {
             return;
         };
         let generation = queue.begin();
+        if !self.queue_is_mapped() {
+            return;
+        }
         let loading = self.selected_playback().is_some_and(|player| {
             player.queue_loading || (player.queue.total > 0 && !self.queue_has_current())
         });
@@ -1126,6 +1135,11 @@ impl crate::PlayerUi {
         } else {
             &self.right_panel.queue_loading
         }
+    }
+
+    fn queue_is_mapped(&self) -> bool {
+        self.right_panel.queue_panel.is_mapped()
+            || self.views.fullscreen_player.queue_panel.is_mapped()
     }
 
     fn set_queue_loading(&self, fullscreen: bool, loading: bool) {
@@ -1193,6 +1207,9 @@ fn render_panel(
     fullscreen: bool,
     reorderable: bool,
 ) {
+    if !panel.is_mapped() {
+        return;
+    }
     let Some(scroller) = queue_panel_scroller(panel) else {
         return;
     };
@@ -1324,6 +1341,17 @@ pub fn clear_queue_panel_children(panel: &gtk::Box) {
 }
 
 pub fn connect_queue_panel_controls(shell: &Rc<crate::PlayerUi>) {
+    for panel in [
+        &shell.right_panel.queue_panel,
+        &shell.views.fullscreen_player.queue_panel,
+    ] {
+        let weak = Rc::downgrade(shell);
+        panel.connect_map(move |_| {
+            if let Some(shell) = weak.upgrade() {
+                shell.refresh_queue_window();
+            }
+        });
+    }
     let weak = Rc::downgrade(shell);
     shell
         .right_panel
@@ -1367,16 +1395,21 @@ mod tests {
 
     fn row(id: &str, title: &str) -> QueuePageRow {
         QueuePageRow {
-            occurrence: OccurrenceId::new(id),
-            position: 0,
+            entry: Arc::new(library::QueueOccurrence {
+                occurrence: OccurrenceId::new(id),
+                item: library::QueueItem::direct(
+                    format!("https://example.test/{id}"),
+                    title,
+                    "",
+                    "",
+                    0,
+                ),
+                canonical_position: 0,
+                source_index: None,
+                playlist_entry_id: None,
+                provenance: library::QueueProvenance::Manual,
+            }),
             primary_artist_media_uri: None,
-            media_uri: format!("https://example.test/{id}"),
-            title: title.to_string(),
-            artist: String::new(),
-            album: String::new(),
-            artwork_binding: None,
-            duration_millis: 0,
-            year: None,
             favorite: false,
         }
     }
@@ -1385,11 +1418,11 @@ mod tests {
     fn queue_search_filters_the_retained_window_and_keeps_duplicate_entries() {
         let state = QueueState::new();
         let mut first = row("one", "Été [live]");
-        first.artist = "Artist".to_string();
+        Arc::make_mut(&mut first.entry).item.artist = "Artist".to_string();
         let mut second = first.clone();
-        second.occurrence = OccurrenceId::new("two");
+        Arc::make_mut(&mut second.entry).occurrence = OccurrenceId::new("two");
         let mut third = row("three", "Other");
-        third.album = "Summer".to_string();
+        Arc::make_mut(&mut third.entry).item.album = "Summer".to_string();
         let generation = state.begin();
         assert!(state.accept(
             generation,

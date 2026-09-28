@@ -187,7 +187,7 @@ impl TrackPresentation for QueuePageRow {
     }
     fn set_downloaded(&mut self, _value: bool) {}
     fn track_number(&self) -> Option<i64> {
-        Some(self.position + 1)
+        self.entry.track_number
     }
     fn links(&self, field: LibraryField) -> crate::detail_links::DetailLinks {
         match field {

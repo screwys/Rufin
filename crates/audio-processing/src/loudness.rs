@@ -1,6 +1,6 @@
 //! Cancellable EBU R128 analysis for one prepared audio stream.
 
-use super::{connect_server_certificate_policy, ensure_gstreamer_initialized};
+use super::{configure_sources, ensure_gstreamer_initialized};
 use ebur128::{Channel, EbuR128, Mode};
 use gst::prelude::*;
 use gstreamer as gst;
@@ -47,7 +47,7 @@ pub fn analyze_loudness_cancellable(
         .by_name("decoder")
         .ok_or_else(|| "loudness pipeline is missing its decoder".to_string())?;
     let trust_invalid_certificate = stream.trust_invalid_certificate();
-    connect_server_certificate_policy(&decoder, move || trust_invalid_certificate);
+    configure_sources(&decoder, move || trust_invalid_certificate);
     decoder.set_property("uri", stream.uri());
     let sink = bin
         .by_name("sink")

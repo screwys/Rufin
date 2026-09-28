@@ -27,13 +27,8 @@ async fn roots(
 
 async fn continuation(
     State(products): State<ProductHandles>,
-) -> Result<axum::Json<Option<rufin_core::connect::Device>>, Error> {
-    products
-        .connect
-        .continuation_offer()
-        .await
-        .map(axum::Json)
-        .map_err(|error| (StatusCode::BAD_REQUEST, axum::Json(json!({"error":error}))))
+) -> axum::Json<Option<rufin_core::connect::Device>> {
+    axum::Json(products.connect.status().continuation_device().cloned())
 }
 
 async fn status(State(products): State<ProductHandles>) -> axum::Json<rufin_core::connect::Status> {

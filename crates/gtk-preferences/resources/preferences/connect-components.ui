@@ -36,6 +36,16 @@
       </object>
     </child>
   </object>
+  <object class="AdwAlertDialog" id="disable_confirmation">
+    <property name="heading" translatable="yes">Rufin Connect</property>
+    <property name="body" translatable="yes">This will remove all configured state. Do you want to continue?</property>
+    <property name="default-response">cancel</property>
+    <property name="close-response">cancel</property>
+    <responses>
+      <response id="cancel" translatable="yes">Cancel</response>
+      <response id="disable" translatable="yes">Continue</response>
+    </responses>
+  </object>
   <object class="AdwAlertDialog" id="disconnect_confirmation">
     <property name="heading" translatable="yes">Disconnect this device?</property>
     <property name="default-response">cancel</property>

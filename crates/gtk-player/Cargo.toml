@@ -23,7 +23,6 @@ localization.workspace = true
 gtk = { workspace = true, features = ["v4_20"] }
 adw = { workspace = true, features = ["v1_9", "gtk_v4_20"] }
 regex.workspace = true
-pangocairo.workspace = true
 tokio.workspace = true
 
 [build-dependencies]

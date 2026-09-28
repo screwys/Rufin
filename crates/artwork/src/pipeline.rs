@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::thread;
@@ -11,19 +11,20 @@ use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use crate::cache::FilesystemCache;
-use crate::decode::{decode_cached, decode_normalized, decode_original, normalize_for_cache};
+use crate::decode::{
+    cached_poster, decode_cached, decode_normalized, decode_original, normalize_for_cache,
+};
 use crate::fetch::{FetchContext, FetchOutcome};
 use crate::selection::Candidate;
 use crate::{
     ArtworkBinding, ArtworkError, ArtworkKey, ArtworkLoad, ArtworkPreparation, ArtworkRequest,
-    DecodedImage, ExternalPolicy, LoadedArtwork, PendingArtwork, RequestId, SourceResolver,
+    DecodedImage, ExternalPolicy, PendingArtwork, RequestId, SourceResolver,
 };
 
 pub(crate) const WORKERS: usize = 4;
 pub(crate) const PREPARATION_WORKERS: usize = WORKERS - 1;
 // Keep every worker fed without mirroring the selected source in the job table.
 pub(crate) const PREPARATION_WINDOW: usize = PREPARATION_WORKERS * 4;
-const MAX_DECODED_INDEX_ENTRIES: usize = 4_096;
 const SOURCE_ARTWORK_SIZE: u32 = 256;
 pub(crate) const CACHED_IMAGE_SIZES: &[ImageSize] = &[
     ImageSize::Original,
@@ -84,28 +85,17 @@ enum JobPriority {
 #[derive(Default)]
 struct DecodedIndex {
     entries: HashMap<ArtworkKey, DecodedEntry>,
-    sizes: HashMap<(String, String), BTreeMap<u32, HashSet<ArtworkKey>>>,
-    eviction_order: BTreeSet<DecodedAccess>,
-    next_access: u64,
 }
 
 struct DecodedEntry {
     source_id: Option<SourceId>,
     image: Weak<DecodedImage>,
-    last_used: u64,
-}
-
-#[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
-struct DecodedAccess {
-    last_used: u64,
-    key: ArtworkKey,
 }
 
 #[derive(Clone)]
 pub(crate) enum Resolution {
     Ready {
         image: Arc<DecodedImage>,
-        original: Option<Arc<[u8]>>,
         cached: bool,
     },
     Cached,
@@ -190,10 +180,7 @@ impl Pipeline {
         let mut state = lock_state(&self.shared);
         let key = request_key(&state, &request);
         if let Some(image) = decoded_from_memory(&mut state, &request, &key) {
-            return ArtworkLoad::Ready(LoadedArtwork {
-                image,
-                original: None,
-            });
+            return ArtworkLoad::Ready(image);
         }
         if request.binding.candidates.is_empty() {
             return ArtworkLoad::Missing;
@@ -256,9 +243,8 @@ impl Pipeline {
                     let load = self.submit(request, JobPriority::Preparation);
                     pending.push(async move {
                         match load {
-                            ArtworkLoad::Ready(loaded) => Resolution::Ready {
-                                image: loaded.image,
-                                original: loaded.original,
+                            ArtworkLoad::Ready(image) => Resolution::Ready {
+                                image,
                                 cached: true,
                             },
                             ArtworkLoad::Missing => Resolution::Missing,
@@ -404,9 +390,6 @@ fn decoded_from_memory(
     request: &ArtworkRequest,
     key: &ArtworkKey,
 ) -> Option<Arc<DecodedImage>> {
-    if request.fetch_size == ImageSize::Original {
-        return None;
-    }
     if request.binding.has_external() && !request.external.allow_cached {
         return None;
     }
@@ -414,122 +397,41 @@ fn decoded_from_memory(
 }
 
 impl DecodedIndex {
-    fn get(&mut self, key: &ArtworkKey) -> Option<Arc<DecodedImage>> {
-        let image = self.entries.get(key)?.image.upgrade();
-        let Some(image) = image else {
-            self.remove_entry(key);
-            return None;
-        };
-        let last_used = self.next_access();
-        let previous_access = {
-            let entry = self.entries.get_mut(key)?;
-            let previous_access = DecodedAccess {
-                last_used: entry.last_used,
-                key: key.clone(),
-            };
-            entry.last_used = last_used;
-            previous_access
-        };
-        self.eviction_order.remove(&previous_access);
-        self.eviction_order.insert(DecodedAccess {
-            last_used,
-            key: key.clone(),
-        });
-        Some(image)
-    }
-
     fn get_for_request(&mut self, exact_key: &ArtworkKey) -> Option<Arc<DecodedImage>> {
-        if let Some(image) = self.get(exact_key) {
+        if let Some(image) = self
+            .entries
+            .get(exact_key)
+            .and_then(|entry| entry.image.upgrade())
+        {
             return Some(image);
         }
-        let reusable = self
-            .sizes
-            .get(&exact_key.reuse_group())
-            .into_iter()
-            .flat_map(|sizes| sizes.range(exact_key.render_size..))
-            .flat_map(|(_, keys)| keys.iter().cloned())
-            .collect::<Vec<_>>();
-        reusable
-            .into_iter()
-            .find_map(|reusable| self.get(&reusable))
+        self.entries
+            .retain(|_, entry| entry.image.strong_count() > 0);
+        self.entries
+            .iter()
+            .filter(|(key, _)| {
+                key.same_image(exact_key) && key.render_size >= exact_key.render_size
+            })
+            .filter_map(|(key, entry)| entry.image.upgrade().map(|image| (key.render_size, image)))
+            .min_by_key(|(size, _)| *size)
+            .map(|(_, image)| image)
     }
 
     fn insert(&mut self, key: ArtworkKey, source_id: Option<SourceId>, image: Arc<DecodedImage>) {
-        self.insert_with_limit(key, source_id, image, MAX_DECODED_INDEX_ENTRIES);
-    }
-
-    fn insert_with_limit(
-        &mut self,
-        key: ArtworkKey,
-        source_id: Option<SourceId>,
-        image: Arc<DecodedImage>,
-        max_entries: usize,
-    ) {
-        self.remove_entry(&key);
-        let last_used = self.next_access();
-        self.sizes
-            .entry(key.reuse_group())
-            .or_default()
-            .entry(key.render_size)
-            .or_default()
-            .insert(key.clone());
+        self.entries
+            .retain(|_, entry| entry.image.strong_count() > 0);
         self.entries.insert(
-            key.clone(),
+            key,
             DecodedEntry {
                 source_id,
                 image: Arc::downgrade(&image),
-                last_used,
             },
         );
-        self.eviction_order.insert(DecodedAccess { last_used, key });
-        self.evict_to_limit(max_entries);
     }
 
     fn invalidate_source(&mut self, source_id: &SourceId) {
-        let stale = self
-            .entries
-            .iter()
-            .filter(|(_, entry)| entry.source_id.as_ref() == Some(source_id))
-            .map(|(key, _)| key.clone())
-            .collect::<Vec<_>>();
-        for key in stale {
-            self.remove_entry(&key);
-        }
-    }
-
-    fn remove_entry(&mut self, key: &ArtworkKey) -> Option<DecodedEntry> {
-        let removed = self.entries.remove(key)?;
-        self.eviction_order.remove(&DecodedAccess {
-            last_used: removed.last_used,
-            key: key.clone(),
-        });
-        let remove_family = self.sizes.get_mut(&key.reuse_group()).is_some_and(|sizes| {
-            if let Some(keys) = sizes.get_mut(&key.render_size) {
-                keys.remove(key);
-                if keys.is_empty() {
-                    sizes.remove(&key.render_size);
-                }
-            }
-            sizes.is_empty()
-        });
-        if remove_family {
-            self.sizes.remove(&key.reuse_group());
-        }
-        Some(removed)
-    }
-
-    fn next_access(&mut self) -> u64 {
-        self.next_access = self.next_access.wrapping_add(1).max(1);
-        self.next_access
-    }
-
-    fn evict_to_limit(&mut self, max_entries: usize) {
-        while self.entries.len() > max_entries {
-            let Some(access) = self.eviction_order.first().cloned() else {
-                break;
-            };
-            self.remove_entry(&access.key);
-        }
+        self.entries
+            .retain(|_, entry| entry.source_id.as_ref() != Some(source_id));
     }
 }
 
@@ -720,14 +622,13 @@ fn resolve_candidate(shared: &Shared, work: &Work, candidate: &Candidate) -> Res
         )
         && let Ok(bytes) = std::fs::read(path)
         && let Ok(image) = decode_original(
-            &bytes,
+            Arc::from(bytes),
             job_key(request, work.source_epoch, work.external_epoch),
             request.render_size,
         )
     {
         return Resolution::Ready {
             image: Arc::new(image),
-            original: Some(Arc::from(bytes)),
             cached: true,
         };
     }
@@ -747,26 +648,24 @@ fn resolve_request(
             if !work.decode {
                 return Ok(Resolution::Cached);
             }
-            let loaded = if request.fetch_size == ImageSize::Original {
-                std::fs::read(&entry.path)
+            if request.fetch_size == ImageSize::Original {
+                let result = std::fs::read(&entry.path)
                     .map_err(ArtworkError::Cache)
-                    .and_then(|bytes| {
-                        decode_original(&bytes, artwork_key.clone(), request.render_size)
-                            .map(|image| (image, Some(Arc::from(bytes))))
-                    })
-            } else {
-                decode_cached(&entry.path, artwork_key.clone(), request.render_size)
-                    .map(|image| (image, None))
-            };
-            match loaded {
-                Ok((image, original)) => {
-                    return Ok(Resolution::Ready {
-                        image: Arc::new(image),
-                        original,
-                        cached: true,
-                    });
+                    .and_then(|bytes| store_image(shared, work, candidate, bytes, true));
+                match result {
+                    Ok(resolved) => return Ok(resolved),
+                    Err(_) => shared.cache.remove_ready(&entry.path),
                 }
-                Err(_) => shared.cache.remove_ready(&entry.path),
+            } else {
+                match decode_cached(&entry.path, artwork_key.clone(), request.render_size) {
+                    Ok(image) => {
+                        return Ok(Resolution::Ready {
+                            image: Arc::new(image),
+                            cached: true,
+                        });
+                    }
+                    Err(_) => shared.cache.remove_ready(&entry.path),
+                }
             }
         }
         if let ImageSize::Thumbnail(_) = request.fetch_size
@@ -816,18 +715,41 @@ fn store_image(
         ImageSize::Original => request.render_size.max(SOURCE_ARTWORK_SIZE),
         ImageSize::Thumbnail(size) => size,
     };
-    let thumbnail = normalize_for_cache(&bytes, thumbnail_size)?;
+    let poster_size =
+        (work.decode && request.fetch_size == ImageSize::Original).then_some(request.render_size);
+    let poster = poster_size
+        .filter(|_| !candidate.is_external() || request.external.allow_cached)
+        .and_then(|size| {
+            shared
+                .cache
+                .ready_entries(candidate, ImageSize::Thumbnail(size))
+                .find_map(|entry| cached_poster(&entry.path, size).ok().flatten())
+        });
+    if cached && request.fetch_size == ImageSize::Original && poster.is_none() {
+        return Ok(Resolution::Ready {
+            image: Arc::new(decode_original(
+                Arc::from(bytes),
+                job_key(request, work.source_epoch, work.external_epoch),
+                request.render_size,
+            )?),
+            cached,
+        });
+    }
+    let thumbnail = match poster {
+        Some(poster) => poster,
+        None => normalize_for_cache(&bytes, thumbnail_size, poster_size)?,
+    };
     {
         let _commit = lock_cache_commit(shared);
         if !work_is_current(&lock_state(shared), work) {
             return Ok(Resolution::Invalidated);
         }
-        shared.cache.write_ready(
-            candidate,
-            ImageSize::Thumbnail(thumbnail_size),
-            thumbnail.bytes(),
-        )?;
-        if request.fetch_size == ImageSize::Original {
+        if let Some(bytes) = thumbnail.bytes() {
+            shared
+                .cache
+                .write_ready(candidate, ImageSize::Thumbnail(thumbnail_size), bytes)?;
+        }
+        if request.fetch_size == ImageSize::Original && !cached {
             shared
                 .cache
                 .write_ready(candidate, ImageSize::Original, &bytes)?;
@@ -845,9 +767,13 @@ fn store_image(
         job_key(request, work.source_epoch, work.external_epoch),
         request.render_size,
     )?;
+    let image = if request.fetch_size == ImageSize::Original {
+        image.with_original(Arc::from(bytes))
+    } else {
+        image
+    };
     Ok(Resolution::Ready {
         image: Arc::new(image),
-        original: (request.fetch_size == ImageSize::Original).then(|| Arc::from(bytes)),
         cached,
     })
 }

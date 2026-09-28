@@ -73,13 +73,8 @@ impl DiagnosticState {
         while output.pending_bytes + bytes > BUFFER_MAX_BYTES && !output.closed {
             output = self.space.wait(output).unwrap_or_else(|p| p.into_inner());
         }
-        output.push_bounded(text);
+        let record = output.push_bounded(text);
         if !output.closed {
-            let record = output
-                .entries
-                .back()
-                .expect("appended diagnostic record")
-                .clone();
             output.pending_bytes += record.len();
             output.pending.push_back(record);
             self.ready.notify_one();
@@ -327,8 +322,9 @@ fn profile_filter(debug_enabled: bool) -> EnvFilter {
 
 #[derive(Default)]
 struct DiagnosticOutput {
-    entries: VecDeque<String>,
-    bytes: usize,
+    entries: VecDeque<usize>,
+    // Keep history together instead of retaining allocations from playback and decode workers.
+    bytes: VecDeque<u8>,
     revision: u64,
     pending: VecDeque<String>,
     pending_bytes: usize,
@@ -369,7 +365,7 @@ impl DiagnosticOutput {
         clippy::string_slice,
         reason = "the buffer boundary is advanced to a UTF-8 character boundary before slicing"
     )]
-    fn push_bounded(&mut self, mut text: String) {
+    fn push_bounded(&mut self, mut text: String) -> String {
         if text.len() > BUFFER_MAX_BYTES {
             let mut start = text.len() - BUFFER_MAX_BYTES;
             while !text.is_char_boundary(start) {
@@ -377,18 +373,20 @@ impl DiagnosticOutput {
             }
             text = text[start..].to_string();
         }
-        while self.bytes + text.len() > BUFFER_MAX_BYTES {
+        while self.bytes.len() + text.len() > BUFFER_MAX_BYTES {
             let Some(removed) = self.entries.pop_front() else {
                 break;
             };
-            self.bytes = self.bytes.saturating_sub(removed.len());
+            self.bytes.drain(..removed);
         }
-        self.bytes += text.len();
-        self.entries.push_back(text);
+        self.bytes.extend(text.bytes());
+        self.entries.push_back(text.len());
+        text
     }
 
     fn snapshot(&self) -> String {
-        self.entries.iter().cloned().collect()
+        String::from_utf8(self.bytes.iter().copied().collect())
+            .expect("diagnostic records contain valid UTF-8")
     }
 }
 

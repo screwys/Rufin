@@ -376,28 +376,28 @@ pub(super) const TRACK_FIELDS: &str = "SortName,Path,Overview,Container,Genres,D
 pub(super) const PLAYLIST_FIELDS: &str = "RunTimeTicks,ImageTags,ChildCount";
 pub(super) const MIXED_ITEM_FIELDS: &str = "SortName,Path,Overview,Container,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,ParentId,AlbumId,AlbumPrimaryImageTag,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,ChildCount,AlbumCount,SongCount,NormalizationGain,AlbumNormalizationGain";
 
-pub(super) fn album_from_item(server: ServerKind, item: Value) -> Option<Album> {
+pub(super) fn album_from_item(server: ServerKind, item: &Value) -> Option<Album> {
     let item_id = id(&item["Id"])?;
 
     let image_ref = primary_image_ref(server, "album", &item_id, &item["ImageTags"])
-        .or_else(|| alternate_primary_image_ref(server, &item))
-        .or_else(|| backdrop_image_ref(server, &item));
+        .or_else(|| alternate_primary_image_ref(server, item))
+        .or_else(|| backdrop_image_ref(server, item));
     let album_artist_credits = artist_credits_from_pairs(server, &item["AlbumArtists"]);
     let artist_credits = artist_credits_from_pairs(server, &item["ArtistItems"]);
     let genres = genre_credits_from_pairs(server, &item["GenreItems"]);
-    let artist = field::<String>(&item, "AlbumArtist")
+    let artist = field::<String>(item, "AlbumArtist")
         .filter(|artist| !artist.trim().is_empty())
         .or_else(|| joined_credit_names(&album_artist_credits))
         .or_else(|| joined_artist_names(Some(&strings(&item["Artists"]))))
         .unwrap_or_else(|| "Unknown Artist".to_string());
     Some(Album {
         id: String::from(server.object_id("album", &item_id)),
-        title: field(&item, "Name").unwrap_or_else(|| "Untitled Album".to_string()),
-        sort_name: sort_name(&item),
+        title: field(item, "Name").unwrap_or_else(|| "Untitled Album".to_string()),
+        sort_name: sort_name(item),
         artist,
-        year: u16_from_option(field(&item, "ProductionYear")),
-        release_date: normalized_date(field(&item, "PremiereDate")),
-        date_added: normalized_date(field(&item, "DateCreated")),
+        year: u16_from_option(field(item, "ProductionYear")),
+        release_date: normalized_date(field(item, "PremiereDate")),
+        date_added: normalized_date(field(item, "DateCreated")),
         last_played: normalized_timestamp(field(&item["UserData"], "LastPlayedDate")),
         play_count: play_count(&item["UserData"]),
         user_rating: user_rating(&item["UserData"]),
@@ -417,12 +417,12 @@ pub(super) fn album_from_item(server: ServerKind, item: Value) -> Option<Album> 
     })
 }
 
-pub(super) fn track_from_item(server: ServerKind, item: Value) -> Option<Track> {
+pub(super) fn track_from_item(server: ServerKind, item: &Value) -> Option<Track> {
     let item_id = id(&item["Id"])?;
-    let image_ref = album_image_ref(server, &item)
+    let image_ref = album_image_ref(server, item)
         .or_else(|| primary_image_ref(server, "track", &item_id, &item["ImageTags"]))
-        .or_else(|| alternate_primary_image_ref(server, &item))
-        .or_else(|| backdrop_image_ref(server, &item));
+        .or_else(|| alternate_primary_image_ref(server, item))
+        .or_else(|| backdrop_image_ref(server, item));
     let artist_credits = artist_credits_from_pairs(server, &item["ArtistItems"]);
     let album_artist_credits = artist_credits_from_pairs(server, &item["AlbumArtists"]);
     let genres = genre_credits_from_pairs(server, &item["GenreItems"]);
@@ -431,44 +431,44 @@ pub(super) fn track_from_item(server: ServerKind, item: Value) -> Option<Track> 
         .filter(|id| !id.trim().is_empty())
         .map(|id| String::from(server.object_id("album", id)));
     let source_format = source_format_from_item(
-        field::<String>(&item, "Container").as_deref(),
-        field::<String>(&item, "Path").as_deref(),
+        field::<String>(item, "Container").as_deref(),
+        field::<String>(item, "Path").as_deref(),
     );
     Some(Track {
         id: String::from(server.object_id("track", &item_id)),
         album_id,
-        title: field(&item, "Name").unwrap_or_else(|| "Untitled Track".to_string()),
-        sort_name: sort_name(&item),
+        title: field(item, "Name").unwrap_or_else(|| "Untitled Track".to_string()),
+        sort_name: sort_name(item),
         artist: joined_artist_names(Some(&strings(&item["Artists"])))
             .or_else(|| joined_credit_names(&artist_credits))
             .unwrap_or_else(|| {
-                field(&item, "AlbumArtist").unwrap_or_else(|| "Unknown Artist".to_string())
+                field(item, "AlbumArtist").unwrap_or_else(|| "Unknown Artist".to_string())
             }),
-        album: field(&item, "Album").unwrap_or_else(|| "Unknown Album".to_string()),
+        album: field(item, "Album").unwrap_or_else(|| "Unknown Album".to_string()),
         album_artwork: None,
-        year: u16_from_option(field(&item, "ProductionYear")),
-        release_date: normalized_date(field(&item, "PremiereDate")),
-        date_added: normalized_date(field(&item, "DateCreated")),
+        year: u16_from_option(field(item, "ProductionYear")),
+        release_date: normalized_date(field(item, "PremiereDate")),
+        date_added: normalized_date(field(item, "DateCreated")),
         last_played: crate::policy::unix_seconds(field(&item["UserData"], "LastPlayedDate")),
         play_count: play_count(&item["UserData"]),
         user_rating: user_rating(&item["UserData"]),
-        duration_seconds: duration_seconds(field(&item, "RunTimeTicks")),
+        duration_seconds: duration_seconds(field(item, "RunTimeTicks")),
         favorite: favorite(&item["UserData"]),
-        disc_number: u16_from_option(field(&item, "ParentIndexNumber")),
-        track_number: u16_from_option(field(&item, "IndexNumber")),
+        disc_number: u16_from_option(field(item, "ParentIndexNumber")),
+        track_number: u16_from_option(field(item, "IndexNumber")),
         image_ref,
         local_artwork: None,
         musicbrainz_recording_id: source_id(&item["ProviderIds"], "MusicBrainzRecording"),
         musicbrainz_release_track_id: source_id(&item["ProviderIds"], "MusicBrainzTrack"),
-        source_path: field::<String>(&item, "Path"),
+        source_path: field::<String>(item, "Path"),
         cue: None,
         source_format,
-        comment: field::<String>(&item, "Overview").filter(|value| !value.trim().is_empty()),
+        comment: field::<String>(item, "Overview").filter(|value| !value.trim().is_empty()),
         skip_count: None,
         bpm: None,
-        replay_gain_track_db: field::<f64>(&item, "NormalizationGain")
+        replay_gain_track_db: field::<f64>(item, "NormalizationGain")
             .filter(|value| value.is_finite()),
-        replay_gain_album_db: field::<f64>(&item, "AlbumNormalizationGain")
+        replay_gain_album_db: field::<f64>(item, "AlbumNormalizationGain")
             .filter(|value| value.is_finite()),
         relations: TrackRelations {
             artists: artist_credits,
@@ -503,12 +503,12 @@ pub(super) fn is_audio_item(item: &Value) -> bool {
         .is_some_and(|kind| kind.eq_ignore_ascii_case("Audio"))
 }
 
-pub(super) fn artist_from_item(server: ServerKind, item: Value) -> Option<Artist> {
+pub(super) fn artist_from_item(server: ServerKind, item: &Value) -> Option<Artist> {
     let item_id = id(&item["Id"])?;
     Some(Artist {
         id: String::from(server.object_id("artist", &item_id)),
-        name: field(&item, "Name").unwrap_or_else(|| "Unknown Artist".to_string()),
-        sort_name: sort_name(&item),
+        name: field(item, "Name").unwrap_or_else(|| "Unknown Artist".to_string()),
+        sort_name: sort_name(item),
         favorite: favorite(&item["UserData"]),
         last_played: normalized_timestamp(field(&item["UserData"], "LastPlayedDate")),
         play_count: play_count(&item["UserData"]),
@@ -519,24 +519,24 @@ pub(super) fn artist_from_item(server: ServerKind, item: Value) -> Option<Artist
     })
 }
 
-pub(super) fn genre_from_item(server: ServerKind, item: Value) -> Option<Genre> {
+pub(super) fn genre_from_item(server: ServerKind, item: &Value) -> Option<Genre> {
     let item_id = id(&item["Id"])?;
     Some(Genre {
         id: String::from(server.object_id("genre", &item_id)),
-        name: field(&item, "Name").unwrap_or_else(|| "Unknown Genre".to_string()),
+        name: field(item, "Name").unwrap_or_else(|| "Unknown Genre".to_string()),
         image_ref: primary_image_ref(server, "genre", &item_id, &item["ImageTags"]),
         local_artwork: None,
     })
 }
 
-pub(super) fn playlist_from_item(server: ServerKind, item: Value) -> Option<Playlist> {
+pub(super) fn playlist_from_item(server: ServerKind, item: &Value) -> Option<Playlist> {
     let item_id = id(&item["Id"])?;
     Some(Playlist {
         id: String::from(server.object_id("playlist", &item_id)),
-        name: field(&item, "Name").unwrap_or_else(|| "Untitled Playlist".to_string()),
+        name: field(item, "Name").unwrap_or_else(|| "Untitled Playlist".to_string()),
         image_ref: primary_image_ref(server, "playlist", &item_id, &item["ImageTags"]),
-        duration_seconds: duration_seconds(field(&item, "RunTimeTicks")),
-        track_count: field::<i32>(&item, "ChildCount")
+        duration_seconds: duration_seconds(field(item, "RunTimeTicks")),
+        track_count: field::<i32>(item, "ChildCount")
             .and_then(|count| usize::try_from(count).ok())
             .unwrap_or_default(),
     })
@@ -606,7 +606,7 @@ fn duration_seconds(ticks: Option<i64>) -> u32 {
 pub(super) fn favorite(data: &Value) -> bool {
     boolean(&data["IsFavorite"]).unwrap_or(false)
 }
-fn play_count(data: &Value) -> Option<u32> {
+pub(super) fn play_count(data: &Value) -> Option<u32> {
     field::<i32>(data, "PlayCount").map(|v| v.max(0) as u32)
 }
 pub(super) fn user_rating(data: &Value) -> Option<u8> {
@@ -693,7 +693,7 @@ mod tests {
         let albums: Vec<Value> =
             serde_json::from_str(include_str!("fixtures/alternate-album-covers.json")).unwrap();
         for album in &albums {
-            let mut mapped = album_from_item(ServerKind::Emby, album.clone()).unwrap();
+            let mut mapped = album_from_item(ServerKind::Emby, &album).unwrap();
             mapped.image_ref = Some(ImageRef::new(
                 "emby:backdrop:3259",
                 Some("c9c414f53f4439cf148b7d4bca58e300".into()),
@@ -705,7 +705,7 @@ mod tests {
         for album in &albums {
             stage_album(
                 &mut scan,
-                album_from_item(ServerKind::Emby, album.clone()).unwrap(),
+                album_from_item(ServerKind::Emby, &album).unwrap(),
             )
             .await
             .unwrap();
@@ -741,39 +741,36 @@ mod tests {
         for server in [ServerKind::Jellyfin, ServerKind::Emby] {
             let item = json!({"Id":"1", "Name":"The Name", "SortName":"effective override", "ForcedSortName":"Raw override"});
             assert_eq!(
-                album_from_item(server, item.clone())
+                album_from_item(server, &item).unwrap().sort_name.as_deref(),
+                Some("effective override")
+            );
+            assert_eq!(
+                artist_from_item(server, &item)
                     .unwrap()
                     .sort_name
                     .as_deref(),
                 Some("effective override")
             );
             assert_eq!(
-                artist_from_item(server, item.clone())
-                    .unwrap()
-                    .sort_name
-                    .as_deref(),
-                Some("effective override")
-            );
-            assert_eq!(
-                track_from_item(server, item).unwrap().sort_name.as_deref(),
+                track_from_item(server, &item).unwrap().sort_name.as_deref(),
                 Some("effective override")
             );
             let forced = album_from_item(
                 server,
-                json!({"Id":"1", "Name":"Name", "ForcedSortName":"Override"}),
+                &json!({"Id":"1", "Name":"Name", "ForcedSortName":"Override"}),
             )
             .unwrap();
             assert_eq!(forced.sort_name.as_deref(), Some("Override"));
             let plain = album_from_item(
                 server,
-                json!({"Id":"1", "Name":"Name", "SortName":"", "ForcedSortName":null}),
+                &json!({"Id":"1", "Name":"Name", "SortName":"", "ForcedSortName":null}),
             )
             .unwrap();
             assert_eq!(plain.sort_name, None);
             assert_eq!(plain.title, "Name");
             let item = json!({"Id":"1", "ImageTags":{"Primary":"own"}, "PrimaryImageItemId":"2", "PrimaryImageTag":"alternate", "AlbumId":"3", "AlbumPrimaryImageTag":"album"});
             assert_eq!(
-                album_from_item(server, item.clone())
+                album_from_item(server, &item)
                     .unwrap()
                     .image_ref
                     .unwrap()
@@ -781,7 +778,7 @@ mod tests {
                 server.object_id("album", "1")
             );
             assert_eq!(
-                track_from_item(server, item)
+                track_from_item(server, &item)
                     .unwrap()
                     .image_ref
                     .unwrap()
