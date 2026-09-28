@@ -3627,6 +3627,9 @@ msgstr ""
 msgid "This source cannot edit this field"
 msgstr "Lähde ei voi muokata tätä kenttää"
 
+msgid "This will remove all configured state. Do you want to continue?"
+msgstr ""
+
 msgid "Thursday"
 msgstr "Torstai"
 
