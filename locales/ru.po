@@ -19,6 +19,11 @@ msgstr ""
 "X-Generator: Weblate 2026.10.dev0\n"
 
 msgid ""
+"A Japanese dictionary is downloaded for furigana and romaji readings. This "
+"setting also increases resource usage."
+msgstr ""
+
+msgid ""
 "Approving gives this device access to your profile and saved source logins."
 msgstr ""
 "Подтверждение предоставляет этому устройству доступ к вашему профилю и "
@@ -96,6 +101,14 @@ msgid ""
 msgstr ""
 "Служба секретных ключей не найдена. Rufin будет использовать файл для "
 "хранения учетных данных. Отмена не сохранит учетные данные."
+
+msgid ""
+"No secret service found. You might have a secret service but the portal can "
+"be broken, you can check <a href=\"https://github.com/screwys/Rufin/issues/"
+"1055#issuecomment-5637922622\">this issue</a> to fix it, otherwise Rufin "
+"will use a file to store its credentials. Cancelling will not save "
+"credentials at all."
+msgstr ""
 
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
@@ -305,6 +318,9 @@ msgstr "Акцентный цвет"
 msgid "Access token"
 msgstr "Токен доступа"
 
+msgid "Accessibility"
+msgstr ""
+
 msgid "Action required"
 msgstr "Требуется действие"
 
@@ -439,6 +455,11 @@ msgstr "Разрешить удалённые подключения"
 msgid "Alternate addresses"
 msgstr "Альтернативные адреса"
 
+#, fuzzy
+#| msgid "Accent color"
+msgid "Alternate row colors"
+msgstr "Акцентный цвет"
+
 msgid "Anonymous (WebDAV / SMB)"
 msgstr "Анонимный (WebDAV / SMB)"
 
@@ -468,6 +489,9 @@ msgstr "Название приложения"
 
 msgid "Applied"
 msgstr "Применено"
+
+msgid "Applies to sidebar and fullscreen separately"
+msgstr ""
 
 msgid "Apply Template"
 msgstr "Применить шаблон"
@@ -606,6 +630,12 @@ msgstr "Токен аутентификации (WebDAV)"
 msgid "Bearer token"
 msgstr "Токен-носитель"
 
+msgid "Bit depth"
+msgstr ""
+
+msgid "Bitrate"
+msgstr ""
+
 msgid "Blue"
 msgstr "Синий"
 
@@ -667,6 +697,11 @@ msgid "Changing this will redownload all local files."
 msgstr ""
 "Изменение этого параметра приведет к повторной загрузке всех локальных "
 "файлов."
+
+#, fuzzy
+#| msgid "Change"
+msgid "Channels"
+msgstr "Изменить"
 
 msgid "Check for updates every"
 msgstr "Проверять обновления каждые"
@@ -770,6 +805,11 @@ msgstr "Коллекции"
 
 msgid "Color for the active word during playback"
 msgstr "Цвет для активного слова во время воспроизведения"
+
+#, fuzzy
+#| msgid "Columns"
+msgid "Column borders"
+msgstr "Столбцы"
 
 msgid "Columns"
 msgstr "Столбцы"
@@ -942,6 +982,11 @@ msgstr "Не удалось открыть файл: {error}"
 
 msgid "Could not open folder: {error}"
 msgstr "Не удалось открыть папку: {error}"
+
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Could not play this track"
+msgstr "Не удалось загрузить эту страницу"
 
 msgid "Could not receive live updates"
 msgstr "Не удалось получить обновления в режиме реального времени"
@@ -1132,6 +1177,11 @@ msgstr "Доступ к Discord в Flatpak"
 
 msgid "Discord"
 msgstr "Discord"
+
+#, fuzzy
+#| msgid "Reset display"
+msgid "Display"
+msgstr "Сбросить настройки отображения"
 
 msgid "Do not encrypt"
 msgstr "Не шифровать"
@@ -1370,6 +1420,11 @@ msgstr "Подключение к файлу"
 msgid "File connections"
 msgstr "Файловые подключения"
 
+#, fuzzy
+#| msgid "Folder"
+msgid "File path"
+msgstr "Папка"
+
 msgid "Filename"
 msgstr "Имя файла"
 
@@ -1454,6 +1509,11 @@ msgstr "Максимальные высокие частоты"
 msgid "Full"
 msgstr "Полный"
 
+#, fuzzy
+#| msgid "Open fullscreen player"
+msgid "Fullscreen player"
+msgstr "Открыть полноэкранный плеер"
+
 msgid "Fullscreen"
 msgstr "Полноэкранный режим"
 
@@ -1514,6 +1574,11 @@ msgstr "Зелёный"
 msgid "Grid labels"
 msgstr "Метки сетки"
 
+#, fuzzy
+#| msgid "Bar spacing (px)"
+msgid "Grid spacing"
+msgstr "Интервал между панелями (в пикселях)"
+
 msgid "Grid"
 msgstr "Сетка"
 
@@ -1531,6 +1596,9 @@ msgstr "Скрыт"
 
 msgid "Hide sidebar"
 msgstr "Скрыть боковую панель"
+
+msgid "Highlight hovered row"
+msgstr ""
 
 msgid "History"
 msgstr "История"
@@ -1592,9 +1660,6 @@ msgstr "Включить подробную диагностику Rufin в те
 
 msgid "Increase"
 msgstr "Увеличить"
-
-msgid "Increases memory usage"
-msgstr "Увеличивает использование памяти"
 
 msgid "Install available updates when Rufin starts"
 msgstr "Устанавливать доступные обновления при запуске Rufin"
@@ -1669,6 +1734,9 @@ msgstr "Язык"
 
 msgid "Laptop/Headphones"
 msgstr "Ноутбук/Наушники"
+
+msgid "Large"
+msgstr ""
 
 #, fuzzy
 #| msgid "Last played"
@@ -2680,6 +2748,11 @@ msgstr "Красный"
 msgid "Redo"
 msgstr "Повторить"
 
+#, fuzzy
+#| msgid "Rule actions"
+msgid "Reduce motion"
+msgstr "Действия с правилами"
+
 msgid "Refresh automatically"
 msgstr "Автоматическое обновление"
 
@@ -2846,9 +2919,6 @@ msgstr "Восстановить настройки по умолчанию"
 msgid "Reset"
 msgstr "Сбросить"
 
-msgid "Resource not found"
-msgstr "Ресурс не найден"
-
 msgid "Restart now"
 msgstr "Перезапустить сейчас"
 
@@ -2889,6 +2959,9 @@ msgstr "Ромадзи"
 msgid "Rounded bars"
 msgstr "Закруглённые полосы"
 
+msgid "Row borders"
+msgstr ""
+
 msgid "Rows"
 msgstr "Строки"
 
@@ -2909,6 +2982,9 @@ msgstr "SMB / Samba"
 
 msgid "SMB Domain"
 msgstr "SMB-домен"
+
+msgid "Sample rate"
+msgstr ""
 
 msgid "Saturday"
 msgstr "Суббота"
@@ -3186,6 +3262,11 @@ msgstr ""
 msgid "Show external site links"
 msgstr "Показывать ссылки на внешние сайты"
 
+#, fuzzy
+#| msgid "Show sidebar"
+msgid "Show header"
+msgstr "Показать боковую панель"
+
 msgid "Show lyrics in the right panel"
 msgstr "Показать текст песни в правой панели"
 
@@ -3281,6 +3362,9 @@ msgstr "Сингл"
 msgid "Singles"
 msgstr "Синглы"
 
+msgid "Size"
+msgstr ""
+
 msgid "Skip count"
 msgstr "Количество пропусков"
 
@@ -3289,6 +3373,9 @@ msgstr "Пропускать плавный переход между трека
 
 msgid "Slate"
 msgstr "Серый"
+
+msgid "Small"
+msgstr ""
 
 msgid "Smart Playlist"
 msgstr "Умный плейлист"
@@ -3754,6 +3841,9 @@ msgstr "День недели"
 msgid "Weekly"
 msgstr "Еженедельно"
 
+msgid "Wide"
+msgstr ""
+
 msgid "Window"
 msgstr "Окно"
 
@@ -3981,6 +4071,12 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Resource not found"
+#~ msgstr "Ресурс не найден"
+
+#~ msgid "Increases memory usage"
+#~ msgstr "Увеличивает использование памяти"
 
 #~ msgid ""
 #~ "These folders are combined into the Local source and shown through folder "
@@ -4448,9 +4544,6 @@ msgstr "Добро пожаловать в программу установки
 
 #~ msgid "Remove from queue"
 #~ msgstr "Удалить из очереди"
-
-#~ msgid "Reset display"
-#~ msgstr "Сбросить настройки отображения"
 
 #~ msgid "Restore neutral bands and disable equalizer."
 #~ msgstr "Восстановить нейтральные полосы и отключить эквалайзер."

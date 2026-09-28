@@ -18,6 +18,11 @@ msgstr ""
 "X-Generator: Weblate 2026.10.dev0\n"
 
 msgid ""
+"A Japanese dictionary is downloaded for furigana and romaji readings. This "
+"setting also increases resource usage."
+msgstr ""
+
+msgid ""
 "Approving gives this device access to your profile and saved source logins."
 msgstr ""
 
@@ -76,6 +81,14 @@ msgstr "Žádné výsledky ¯\\_(°╭╮°)_/¯"
 msgid ""
 "No secret service found. Rufin will use a file to store its credentials. "
 "Cancelling will not save credentials at all."
+msgstr ""
+
+msgid ""
+"No secret service found. You might have a secret service but the portal can "
+"be broken, you can check <a href=\"https://github.com/screwys/Rufin/issues/"
+"1055#issuecomment-5637922622\">this issue</a> to fix it, otherwise Rufin "
+"will use a file to store its credentials. Cancelling will not save "
+"credentials at all."
 msgstr ""
 
 msgid ""
@@ -256,6 +269,9 @@ msgstr "Barva zvýraznění"
 msgid "Access token"
 msgstr "Získat token"
 
+msgid "Accessibility"
+msgstr ""
+
 msgid "Action required"
 msgstr ""
 
@@ -401,6 +417,11 @@ msgstr ""
 msgid "Alternate addresses"
 msgstr "Adresa serveru"
 
+#, fuzzy
+#| msgid "Accent color"
+msgid "Alternate row colors"
+msgstr "Barva zvýraznění"
+
 msgid "Anonymous (WebDAV / SMB)"
 msgstr ""
 
@@ -431,6 +452,9 @@ msgid "Application name"
 msgstr "Název aplikace"
 
 msgid "Applied"
+msgstr ""
+
+msgid "Applies to sidebar and fullscreen separately"
 msgstr ""
 
 #, fuzzy
@@ -596,6 +620,12 @@ msgstr "Uživatelský token"
 msgid "Bearer token"
 msgstr "Uživatelský token"
 
+msgid "Bit depth"
+msgstr ""
+
+msgid "Bitrate"
+msgstr ""
+
 msgid "Blue"
 msgstr "Modrá"
 
@@ -665,6 +695,11 @@ msgstr "Uložené zdroje"
 
 msgid "Changing this will redownload all local files."
 msgstr ""
+
+#, fuzzy
+#| msgid "Change"
+msgid "Channels"
+msgstr "Změnit"
 
 msgid "Check for updates every"
 msgstr ""
@@ -786,6 +821,11 @@ msgstr "Sbírky"
 
 msgid "Color for the active word during playback"
 msgstr ""
+
+#, fuzzy
+#| msgid "Columns"
+msgid "Column borders"
+msgstr "Sloupce"
 
 msgid "Columns"
 msgstr "Sloupce"
@@ -1010,6 +1050,11 @@ msgid "Could not open folder: {error}"
 msgstr "Nelze aktualizovat oblíbené"
 
 #, fuzzy
+#| msgid "Couldn't load this folder"
+msgid "Could not play this track"
+msgstr "Nelze načíst tuto složku"
+
+#, fuzzy
 #| msgid "Could not update favorites"
 msgid "Could not receive live updates"
 msgstr "Nelze aktualizovat oblíbené"
@@ -1224,6 +1269,9 @@ msgstr ""
 
 msgid "Discord"
 msgstr "Discord"
+
+msgid "Display"
+msgstr ""
 
 #, fuzzy
 #| msgid "is not empty"
@@ -1501,6 +1549,11 @@ msgid "File connections"
 msgstr "Spojení"
 
 #, fuzzy
+#| msgid "Folder"
+msgid "File path"
+msgstr "Složka"
+
+#, fuzzy
 #| msgid "Rename"
 msgid "Filename"
 msgstr "Přejmenovat"
@@ -1591,6 +1644,11 @@ msgid "Full"
 msgstr "Úplné zobrazení"
 
 #, fuzzy
+#| msgid "Open fullscreen player"
+msgid "Fullscreen player"
+msgstr "Otevřít přehrávač na celou obrazovku"
+
+#, fuzzy
 #| msgid "Toggle Fullscreen"
 msgid "Fullscreen"
 msgstr "Přepnout do režimu celé obrazovky"
@@ -1654,6 +1712,9 @@ msgstr "Zelená"
 msgid "Grid labels"
 msgstr "Popisky mřížky"
 
+msgid "Grid spacing"
+msgstr ""
+
 msgid "Grid"
 msgstr "Mřížka"
 
@@ -1671,6 +1732,9 @@ msgstr "Skryté"
 
 msgid "Hide sidebar"
 msgstr "Skrýt postranní panel"
+
+msgid "Highlight hovered row"
+msgstr ""
 
 msgid "History"
 msgstr "Historie"
@@ -1736,9 +1800,6 @@ msgstr "Do této relace zahrňte podrobnou diagnostiku aplikace Rufin"
 
 msgid "Increase"
 msgstr "Zvýšit"
-
-msgid "Increases memory usage"
-msgstr "Zvyšuje využití paměti"
 
 msgid "Install available updates when Rufin starts"
 msgstr "Při spuštění aplikace Rufin nainstalovat dostupné aktualizace"
@@ -1817,6 +1878,9 @@ msgstr "Jazyk"
 
 msgid "Laptop/Headphones"
 msgstr "Laptop/sluchátka"
+
+msgid "Large"
+msgstr ""
 
 #, fuzzy
 #| msgid "Last played"
@@ -2971,6 +3035,11 @@ msgid "Redo"
 msgstr "Opakovat"
 
 #, fuzzy
+#| msgid "Rule actions"
+msgid "Reduce motion"
+msgstr "Akce založené na pravidlech"
+
+#, fuzzy
 #| msgid "Searching will start automatically"
 msgid "Refresh automatically"
 msgstr "Vyhledávání se spustí automaticky"
@@ -3166,9 +3235,6 @@ msgstr "Obnovit výchozí nastavení"
 msgid "Reset"
 msgstr "Obnovit"
 
-msgid "Resource not found"
-msgstr ""
-
 msgid "Restart now"
 msgstr ""
 
@@ -3210,6 +3276,9 @@ msgstr "Rómadži (romanizace japonštiny)"
 msgid "Rounded bars"
 msgstr ""
 
+msgid "Row borders"
+msgstr ""
+
 msgid "Rows"
 msgstr "Řádky"
 
@@ -3231,6 +3300,9 @@ msgid "SMB / Samba"
 msgstr ""
 
 msgid "SMB Domain"
+msgstr ""
+
+msgid "Sample rate"
 msgstr ""
 
 msgid "Saturday"
@@ -3554,6 +3626,11 @@ msgstr "Zobrazit ikony externích služeb na stránkách alb a interpretů"
 msgid "Show external site links"
 msgstr "Zobrazit odkazy na externí stránky"
 
+#, fuzzy
+#| msgid "Show sidebar"
+msgid "Show header"
+msgstr "Zobrazit postranní panel"
+
 msgid "Show lyrics in the right panel"
 msgstr "Zobrazit text skladby v pravém panelu"
 
@@ -3657,6 +3734,9 @@ msgstr "Singl"
 msgid "Singles"
 msgstr "Singly"
 
+msgid "Size"
+msgstr ""
+
 msgid "Skip count"
 msgstr "Počet přeskočení"
 
@@ -3665,6 +3745,9 @@ msgstr "Přeskočení prolínání mezi skladbami na stejném albu"
 
 msgid "Slate"
 msgstr "Šedá"
+
+msgid "Small"
+msgstr ""
 
 msgid "Smart Playlist"
 msgstr "Chytrý Playlist"
@@ -4188,6 +4271,9 @@ msgstr ""
 msgid "Weekly"
 msgstr ""
 
+msgid "Wide"
+msgstr ""
+
 msgid "Window"
 msgstr "Okno"
 
@@ -4409,6 +4495,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Increases memory usage"
+#~ msgstr "Zvyšuje využití paměti"
 
 #~ msgid ""
 #~ "These folders are combined into the Local source and shown through folder "

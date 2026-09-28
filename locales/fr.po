@@ -18,6 +18,11 @@ msgstr ""
 "X-Generator: Weblate 2026.10.dev0\n"
 
 msgid ""
+"A Japanese dictionary is downloaded for furigana and romaji readings. This "
+"setting also increases resource usage."
+msgstr ""
+
+msgid ""
 "Approving gives this device access to your profile and saved source logins."
 msgstr ""
 "L'approbation donne à cet appareil l'accès à votre profil et aux "
@@ -97,6 +102,14 @@ msgid ""
 msgstr ""
 "Pas de service secret trouvé. Rufin utilisera un fichier pour stocker ses "
 "identifiants. Annuler ne sauvegardera pas les identifiants du tout."
+
+msgid ""
+"No secret service found. You might have a secret service but the portal can "
+"be broken, you can check <a href=\"https://github.com/screwys/Rufin/issues/"
+"1055#issuecomment-5637922622\">this issue</a> to fix it, otherwise Rufin "
+"will use a file to store its credentials. Cancelling will not save "
+"credentials at all."
+msgstr ""
 
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
@@ -309,6 +322,9 @@ msgstr "Couleur de contraste"
 msgid "Access token"
 msgstr "Jeton d'accès"
 
+msgid "Accessibility"
+msgstr ""
+
 msgid "Action required"
 msgstr "Action requise"
 
@@ -432,6 +448,11 @@ msgstr "Autoriser les connections à distance"
 msgid "Alternate addresses"
 msgstr "Adresses alternatives"
 
+#, fuzzy
+#| msgid "Accent color"
+msgid "Alternate row colors"
+msgstr "Couleur de contraste"
+
 msgid "Anonymous (WebDAV / SMB)"
 msgstr "Anonyme (WebDAV / SMB)"
 
@@ -461,6 +482,9 @@ msgstr "Nom de l'application"
 
 msgid "Applied"
 msgstr "Appliqué"
+
+msgid "Applies to sidebar and fullscreen separately"
+msgstr ""
 
 msgid "Apply Template"
 msgstr "Appliquer le modèle"
@@ -591,6 +615,12 @@ msgstr "Bearer token (WebDAV)"
 msgid "Bearer token"
 msgstr "Bearer token"
 
+msgid "Bit depth"
+msgstr ""
+
+msgid "Bitrate"
+msgstr ""
+
 msgid "Blue"
 msgstr "Bleu"
 
@@ -649,6 +679,11 @@ msgstr "Changement de source"
 
 msgid "Changing this will redownload all local files."
 msgstr "Changer cela retéléchargera tous les fichiers locaux."
+
+#, fuzzy
+#| msgid "Change"
+msgid "Channels"
+msgstr "Changer"
 
 msgid "Check for updates every"
 msgstr "Rechercher les mises à jour tous les"
@@ -750,6 +785,11 @@ msgstr "Collections"
 
 msgid "Color for the active word during playback"
 msgstr "Couleur pour le mot actif pendant la lecture"
+
+#, fuzzy
+#| msgid "Columns"
+msgid "Column borders"
+msgstr "Colonnes"
 
 msgid "Columns"
 msgstr "Colonnes"
@@ -918,6 +958,11 @@ msgstr "Impossible d'ouvrir le fichier : {error}"
 
 msgid "Could not open folder: {error}"
 msgstr "Impossible d'ouvrir le dossier : {error}"
+
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Could not play this track"
+msgstr "Impossible de charger cette page"
 
 msgid "Could not receive live updates"
 msgstr "Impossible de recevoir les mises à jour en direct"
@@ -1104,6 +1149,9 @@ msgstr "Accès à Discord dans Flatpak"
 
 msgid "Discord"
 msgstr "Discord"
+
+msgid "Display"
+msgstr ""
 
 msgid "Do not encrypt"
 msgstr "Ne pas chiffrer"
@@ -1338,6 +1386,11 @@ msgstr "Fichier de connexion"
 msgid "File connections"
 msgstr "Fichiers de connexion"
 
+#, fuzzy
+#| msgid "Folder path"
+msgid "File path"
+msgstr "Chemin du dossier"
+
 msgid "Filename"
 msgstr "Nom du fichier"
 
@@ -1421,6 +1474,11 @@ msgstr "Aigus au maximum"
 msgid "Full"
 msgstr "Complète"
 
+#, fuzzy
+#| msgid "Open fullscreen player"
+msgid "Fullscreen player"
+msgstr "Ouvrir le lecteur en plein écran"
+
 msgid "Fullscreen"
 msgstr "Plein écran"
 
@@ -1481,6 +1539,11 @@ msgstr "Vert"
 msgid "Grid labels"
 msgstr "Libellés de la grille"
 
+#, fuzzy
+#| msgid "Bar spacing (px)"
+msgid "Grid spacing"
+msgstr "Espacement des barres (px)"
+
 msgid "Grid"
 msgstr "Grille"
 
@@ -1498,6 +1561,9 @@ msgstr "Cachée"
 
 msgid "Hide sidebar"
 msgstr "Cacher la barre latérale"
+
+msgid "Highlight hovered row"
+msgstr ""
 
 msgid "History"
 msgstr "Historique"
@@ -1557,9 +1623,6 @@ msgstr "Inclure des diagnostics détaillés dans cette session"
 
 msgid "Increase"
 msgstr "Augmenter"
-
-msgid "Increases memory usage"
-msgstr "Augmente l'utilisation de la mémoire"
 
 msgid "Install available updates when Rufin starts"
 msgstr "Installez les mises à jour disponibles lors du démarrage de Rufin"
@@ -1634,6 +1697,9 @@ msgstr "Langue"
 
 msgid "Laptop/Headphones"
 msgstr "Ordinateur portable / Casques"
+
+msgid "Large"
+msgstr ""
 
 msgid "Last 30 days"
 msgstr "30 derniers jours"
@@ -2625,6 +2691,11 @@ msgstr "Rouge"
 msgid "Redo"
 msgstr "Rétablir"
 
+#, fuzzy
+#| msgid "Rule actions"
+msgid "Reduce motion"
+msgstr "Actions des règles"
+
 msgid "Refresh automatically"
 msgstr "Rafraîchir automatiquement"
 
@@ -2787,9 +2858,6 @@ msgstr "Rétablir les valeurs par défaut"
 msgid "Reset"
 msgstr "Réinitialiser"
 
-msgid "Resource not found"
-msgstr "Ressource non trouvée"
-
 msgid "Restart now"
 msgstr "Redémarrer maintenant"
 
@@ -2830,6 +2898,9 @@ msgstr "Rōmaji"
 msgid "Rounded bars"
 msgstr "Barres arrondies"
 
+msgid "Row borders"
+msgstr ""
+
 msgid "Rows"
 msgstr "Lignes"
 
@@ -2850,6 +2921,9 @@ msgstr "SMB / Samba"
 
 msgid "SMB Domain"
 msgstr "Domaine SMB"
+
+msgid "Sample rate"
+msgstr ""
 
 msgid "Saturday"
 msgstr "Samedi"
@@ -3121,6 +3195,11 @@ msgstr ""
 msgid "Show external site links"
 msgstr "Afficher les liens vers les sites externes"
 
+#, fuzzy
+#| msgid "Show sidebar"
+msgid "Show header"
+msgstr "Afficher la barre latérale"
+
 msgid "Show lyrics in the right panel"
 msgstr "Afficher les paroles dans le panneau de droite"
 
@@ -3214,6 +3293,9 @@ msgstr "Single"
 msgid "Singles"
 msgstr "Singles"
 
+msgid "Size"
+msgstr ""
+
 msgid "Skip count"
 msgstr "Nombre de passages"
 
@@ -3222,6 +3304,9 @@ msgstr "Ignorer le fondu enchaîné au sein du même album"
 
 msgid "Slate"
 msgstr "Ardoise"
+
+msgid "Small"
+msgstr ""
 
 msgid "Smart Playlist"
 msgstr "Playlist intelligente"
@@ -3676,6 +3761,9 @@ msgstr "Jours de la semaine"
 msgid "Weekly"
 msgstr "Hebdomadaire"
 
+msgid "Wide"
+msgstr ""
+
 msgid "Window"
 msgstr "Fenêtre"
 
@@ -3894,6 +3982,12 @@ msgstr "L'option de mise à jour automatique de {app_name} est invalide."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenue sur l'installateur de Rufin"
+
+#~ msgid "Resource not found"
+#~ msgstr "Ressource non trouvée"
+
+#~ msgid "Increases memory usage"
+#~ msgstr "Augmente l'utilisation de la mémoire"
 
 #~ msgid ""
 #~ "These folders are combined into the Local source and shown through folder "
