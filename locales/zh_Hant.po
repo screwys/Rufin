@@ -2362,6 +2362,11 @@ msgid "No network devices found"
 msgstr "找不到網路裝置"
 
 #, fuzzy
+#| msgid "No Servers Found"
+msgid "No playable entries were found"
+msgstr "未找到伺服器"
+
+#, fuzzy
 #| msgid "No matching tracks"
 msgid "No related tracks found"
 msgstr "無匹配的曲目"

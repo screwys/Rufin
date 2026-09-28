@@ -2421,6 +2421,11 @@ msgid "No network devices found"
 msgstr "Nebyly nalezeny žádné sítové zařízení"
 
 #, fuzzy
+#| msgid "No Servers Found"
+msgid "No playable entries were found"
+msgstr "Nebyly nalezeny žádné servery"
+
+#, fuzzy
 #| msgid "No matching tracks"
 msgid "No related tracks found"
 msgstr "Žádné odpovídající skladby"

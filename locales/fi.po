@@ -2278,6 +2278,11 @@ msgid "No network devices found"
 msgstr "Verkkolaitteita ei löytynyt"
 
 #, fuzzy
+#| msgid "No Servers Found"
+msgid "No playable entries were found"
+msgstr "Palvelimia ei löytynyt"
+
+#, fuzzy
 #| msgid "Nothing in this folder"
 msgid "No related tracks found"
 msgstr "Tässä kansiossa ei ole mitään"

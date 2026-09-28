@@ -2198,6 +2198,11 @@ msgstr "Ühtegi võrguaadressi ei leidu"
 msgid "No network devices found"
 msgstr "Ühtegi võrguseadet ei leidu"
 
+#, fuzzy
+#| msgid "No linked servers found"
+msgid "No playable entries were found"
+msgstr "Ühtegi seotud serverit ei leidu"
+
 msgid "No related tracks found"
 msgstr "Ühtegi seotud lugu ei leidu"
 

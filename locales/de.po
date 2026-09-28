@@ -2170,6 +2170,11 @@ msgstr "Keine Netzwerkadresse verfügbar"
 msgid "No network devices found"
 msgstr "Keine Netzwerkgeräte gefunden"
 
+#, fuzzy
+#| msgid "No linked servers found"
+msgid "No playable entries were found"
+msgstr "Keine verbundenen Server gefunden"
+
 msgid "No related tracks found"
 msgstr "Keine verwandten Titel gefunden"
 

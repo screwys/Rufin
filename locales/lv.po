@@ -2283,6 +2283,11 @@ msgstr "Nav pieejama neviena tīkla adrese"
 msgid "No network devices found"
 msgstr "Tīkla ierīces nav atrastas"
 
+#, fuzzy
+#| msgid "No linked servers found"
+msgid "No playable entries were found"
+msgstr "Nav atrasts neviens saistīts serveris"
+
 msgid "No related tracks found"
 msgstr "Nav atrasts neviens saistīts celiņš"
 

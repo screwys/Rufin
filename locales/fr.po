@@ -2163,6 +2163,11 @@ msgstr "Aucune adresse réseau disponible"
 msgid "No network devices found"
 msgstr "Aucun périphérique réseau trouvé"
 
+#, fuzzy
+#| msgid "No linked servers found"
+msgid "No playable entries were found"
+msgstr "Aucun serveur lié trouvé"
+
 msgid "No related tracks found"
 msgstr "Aucun morceau associé trouvé"
 

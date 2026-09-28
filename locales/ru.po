@@ -2216,6 +2216,11 @@ msgstr "Сетевой адрес недоступен"
 msgid "No network devices found"
 msgstr "Устройства в сети не найдены"
 
+#, fuzzy
+#| msgid "No linked servers found"
+msgid "No playable entries were found"
+msgstr "Не найдено связанных серверов"
+
 msgid "No related tracks found"
 msgstr "Не найдено похожих треков"
 
