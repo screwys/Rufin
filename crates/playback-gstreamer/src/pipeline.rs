@@ -573,11 +573,10 @@ impl PlayerPipeline {
         };
         let (pipeline, bus) = self.native()?;
         let result = pipeline.set_state(state).map_err(|error| {
-            bus
-                .pop_filtered(&[gst::MessageType::Error])
+            bus.pop_filtered(&[gst::MessageType::Error])
                 .and_then(|message| {
                     let output = self.audio_output_factory();
-                    gstreamer_error_details(
+                    gstreamer_playback_error(
                         &message,
                         &format!("state change to {state:?}"),
                         output.as_deref(),
@@ -587,9 +586,8 @@ impl PlayerPipeline {
                     let output = self
                         .audio_output_factory()
                         .unwrap_or_else(|| "unconfigured".to_string());
-                    format!(
-                        "GStreamer state change to {state:?} failed; audio_sink={output}; error={error}"
-                    )
+                    error!(?state, audio_sink = %output, %error, "GStreamer state change failed");
+                    "Could not play this track".to_string()
                 })
         })?;
         if result == gst::StateChangeSuccess::NoPreroll {

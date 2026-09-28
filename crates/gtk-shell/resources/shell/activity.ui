@@ -78,6 +78,13 @@
     </child></object></child>
   </object>
   <object class="GtkBox" id="root">
+    <child>
+      <!-- Resolve the report background through the active application theme. -->
+      <object class="GtkBox" id="export_background_color">
+        <property name="visible">false</property>
+        <style><class name="activity-export-background"/></style>
+      </object>
+    </child>
     <property name="orientation">vertical</property>
     <property name="hexpand">true</property>
     <property name="vexpand">true</property>
@@ -255,7 +262,7 @@
                               <object class="GtkBox">
                                 <property name="spacing">8</property>
                                 <child>
-                                  <object class="GtkImage">
+                                  <object class="GtkImage" id="hours_icon">
                                     <property name="icon-name">rufin-history-symbolic</property>
                                     <style>
                                       <class name="activity-stat-icon"/>

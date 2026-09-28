@@ -109,6 +109,7 @@ smb-msg = "=0.12.1"
 tokio-util = { version = "0.7", features = ["io"] }
 reqwest = { version = "0.13.3", default-features = false, features = ["http2", "rustls", "system-proxy"] }
 roxmltree = "0.21.0"
+resvg = { version = "0.48.1", default-features = false, features = ["text", "system-fonts", "memmap-fonts", "raster-images"] }
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "logging", "tls12"] }
 rustls-native-certs = "0.8.4"
 rustix = { version = "1.1.4", features = ["fs"] }

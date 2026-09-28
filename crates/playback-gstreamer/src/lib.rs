@@ -25,7 +25,7 @@ pub use engine::GStreamerPlaybackBackend;
 #[cfg(unix)]
 pub use process::restart_with_http1;
 
-fn gstreamer_error_details(
+fn gstreamer_playback_error(
     message: &gst::Message,
     stage: &str,
     audio_sink: Option<&str>,
@@ -37,15 +37,14 @@ fn gstreamer_error_details(
         .src()
         .map(|source| source.path_string().to_string())
         .unwrap_or_else(|| "unknown".to_string());
-    let debug = error
+    let details = error
         .debug()
         .map(|debug| debug.to_string())
         .unwrap_or_else(|| "unavailable".to_string());
     let audio_sink = audio_sink.unwrap_or("unconfigured");
-    Some(format!(
-        "GStreamer {stage} failed; element={source}; audio_sink={audio_sink}; error={}; debug={debug}",
-        error.error()
-    ))
+    let cause = error.error();
+    error!(stage, element = %source, audio_sink, error = %cause, debug = %details, "GStreamer playback failed");
+    Some("Could not play this track".to_string())
 }
 
 const SEEK_SETTLE_WINDOW: Duration = Duration::from_millis(1_000);
