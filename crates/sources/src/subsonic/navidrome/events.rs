@@ -1,5 +1,5 @@
 use super::*;
-use crate::source::{LIVE_CHANGE_LIMIT, RemoteItemChange};
+use crate::source::RemoteItemChange;
 use futures_util::TryStreamExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::time::{Duration, sleep};
@@ -141,18 +141,7 @@ fn event_change(event: &str, data: &str) -> Option<RemoteItemChange> {
                 .map(|id| format!("{resource}:{id}")),
         );
     }
-    upserts.sort();
-    upserts.dedup();
-    if upserts.len() > LIVE_CHANGE_LIMIT {
-        Some(RemoteItemChange::BoundaryLost)
-    } else if upserts.is_empty() {
-        None
-    } else {
-        Some(RemoteItemChange::Items {
-            upserts,
-            removals: Vec::new(),
-        })
-    }
+    (!upserts.is_empty()).then(|| RemoteItemChange::items(upserts, Vec::new()))
 }
 
 #[cfg(test)]
@@ -334,8 +323,8 @@ mod tests {
         provider
             .listen_navidrome_changes(|change| match change {
                 RemoteItemChange::BoundaryLost => true,
-                RemoteItemChange::Items { upserts: items, .. } => {
-                    upserts = items;
+                RemoteItemChange::Items(items) => {
+                    upserts = items.into_keys().collect();
                     false
                 }
             })

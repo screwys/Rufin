@@ -1,4 +1,4 @@
-use super::audio::{SharedQueuedStream, audio_output_is_available};
+use super::audio::{SharedQueuedLoudness, audio_output_is_available};
 use super::pipeline::{AboutToFinishAction, PlayerPipeline, SourceClock};
 #[cfg(test)]
 use super::visualizer::visualizer_pipeline_is_live;
@@ -2900,7 +2900,7 @@ pub(super) fn handle_about_to_finish(
     pipeline: &gst::Element,
     shared: &Arc<Mutex<SharedBackendState>>,
     gapless: &Arc<Mutex<GaplessPlayback>>,
-    queued_stream: &SharedQueuedStream,
+    queued_loudness: &SharedQueuedLoudness,
     trust_invalid_certificate: &AtomicBool,
     slot: Slot,
     id: PipelineId,
@@ -2927,9 +2927,9 @@ pub(super) fn handle_about_to_finish(
                 uri = %next.stream.redacted_uri(),
                 "preloading gapless next stream"
             );
-            *queued_stream
+            *queued_loudness
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()) = next.stream.clone();
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = next.stream.loudness.clone();
             trust_invalid_certificate
                 .store(next.stream.trust_invalid_certificate(), Ordering::SeqCst);
             pipeline.set_property("uri", next.stream.uri());

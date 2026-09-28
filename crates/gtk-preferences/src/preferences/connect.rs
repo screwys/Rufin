@@ -30,14 +30,12 @@ pub fn install(shell: &Rc<Preferences>) {
     });
     shell.window.connect_destroy(move |_| pairing.abort());
 
-    let inactive = Rc::new(std::cell::Cell::new(None::<std::time::Instant>));
     let offered = Rc::new(std::cell::Cell::new(false));
     let offer_task = Rc::new(RefCell::new(None::<gtk::glib::JoinHandle<()>>));
     let running = offer_task.clone();
     let weak = Rc::downgrade(shell);
     shell.window.connect_is_active_notify(move |window| {
         if !window.is_active() {
-            inactive.set(Some(std::time::Instant::now()));
             if let Some(task) = running.borrow_mut().take() {
                 task.abort();
             }
@@ -46,25 +44,22 @@ pub fn install(shell: &Rc<Preferences>) {
         if offered.get() {
             return;
         }
-        if inactive
-            .take()
-            .is_some_and(|time| time.elapsed() < std::time::Duration::from_secs(300))
-        {
-            return;
-        }
         let Some(shell) = weak.upgrade() else { return };
         let owner = shell.products.connect.clone();
+        let settings = owner.status().settings;
+        if !settings.enabled || settings.profile.is_none() {
+            return;
+        }
         let mut updates = owner.subscribe();
-        let result = shell
-            .products
-            .runtime
-            .spawn(async move { owner.continuation_offer().await });
         let weak = Rc::downgrade(&shell);
         let offered = offered.clone();
         *running.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
-            let _ = result.await;
             let device = loop {
-                let device = updates.borrow_and_update().continuation_device().cloned();
+                let status = updates.borrow_and_update().clone();
+                if !status.settings.enabled || status.settings.profile.is_none() {
+                    return;
+                }
+                let device = status.continuation_device().cloned();
                 if let Some(device) = device {
                     break device;
                 }
@@ -223,6 +218,26 @@ fn run_with_feedback(shell: &Rc<Preferences>, action: Action, button: Option<&gt
     });
 }
 
+fn show_disable_confirmation(shell: &Rc<Preferences>) {
+    let resource = crate::ui_resource::CONNECT_COMPONENTS_RESOURCE;
+    let builder = gtk_widgets::ui_resource::builder(resource);
+    gtk_widgets::objects!(builder, resource, {
+        disable_confirmation: adw::AlertDialog,
+    });
+    let shell = shell.clone();
+    let parent = shell
+        .state
+        .connect_dialog
+        .upgrade()
+        .map(|dialog| dialog.upcast::<gtk::Widget>())
+        .unwrap_or_else(|| shell.window.clone().upcast());
+    gtk::glib::spawn_future_local(async move {
+        if disable_confirmation.choose_future(Some(&parent)).await == "disable" {
+            run(&shell, Action::Enable { enabled: false });
+        }
+    });
+}
+
 pub fn bind_controller(
     shell: &Rc<Preferences>,
     popover: &gtk::Popover,
@@ -240,12 +255,15 @@ pub fn bind_controller(
         if let Some(shell) = weak.upgrade() {
             let enabled = row.is_active();
             if shell.products.connect.status().settings.enabled != enabled {
-                run(&shell, Action::Enable { enabled });
+                if let Some(popup) = popup.upgrade() {
+                    popup.popdown();
+                }
                 if enabled {
-                    if let Some(popup) = popup.upgrade() {
-                        popup.popdown();
-                    }
+                    run(&shell, Action::Enable { enabled });
                     present(&shell);
+                } else {
+                    row.set_active(true);
+                    show_disable_confirmation(&shell);
                 }
             }
         }
@@ -283,7 +301,6 @@ pub fn bind_controller(
     let row = connect_enabled.downgrade();
     let task = Rc::new(RefCell::new(None::<gtk::glib::JoinHandle<()>>));
     let running = task.clone();
-    let weak = Rc::downgrade(shell);
     let continue_button = continue_connect.downgrade();
     popover.connect_map(move |_| {
         let mut updates = updates.clone();
@@ -293,17 +310,10 @@ pub fn bind_controller(
         }
         let button = continue_button.clone();
         let offered = offered_device.clone();
-        let Some(shell) = weak.upgrade() else { return };
         if let Some(button) = button.upgrade() {
             button.set_visible(false);
         }
-        let owner = shell.products.connect.clone();
-        let offer = shell
-            .products
-            .runtime
-            .spawn(async move { owner.continuation_offer().await });
         *running.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
-            let _ = offer.await;
             loop {
                 let state = updates.borrow_and_update().clone();
                 let device = state.continuation_device().cloned();

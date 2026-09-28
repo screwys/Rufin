@@ -43,7 +43,6 @@ impl JellyfinEmbySource {
             .await?;
         Ok(items(&page["Items"])
             .iter()
-            .cloned()
             .enumerate()
             .filter_map(|(position, item)| {
                 let (entity_object_id, title, subtitle) = match kind {
@@ -92,7 +91,10 @@ impl JellyfinEmbySource {
             }
             let item_type = field::<String>(&item, "Type").unwrap_or_default();
             if item_type.eq_ignore_ascii_case("Audio") {
-                if let Some(album_id) = id(&item["AlbumId"]) {
+                let album_id = id(&item["AlbumId"]);
+                let track = track_from_item(self.kind, &item);
+                drop(item);
+                if let Some(album_id) = album_id {
                     let mut album_url = self.item_url(&album_id)?;
                     album_url
                         .query_pairs_mut()
@@ -100,7 +102,9 @@ impl JellyfinEmbySource {
                         .append_pair("Fields", ALBUM_FIELDS);
                     match self.get_json::<Value>(album_url).await {
                         Ok(album) => {
-                            if let Some(mapped) = album_from_item(self.kind, album) {
+                            let mapped = album_from_item(self.kind, &album);
+                            drop(album);
+                            if let Some(mapped) = mapped {
                                 stage_album(scan, mapped).await?;
                             }
                         }
@@ -108,7 +112,7 @@ impl JellyfinEmbySource {
                     }
                 }
                 scan.begin_batch().await?;
-                if let Some(mapped) = track_from_item(self.kind, item) {
+                if let Some(mapped) = track {
                     stage_track(scan, mapped).await?;
                 }
                 scan.finish_batch().await?;
@@ -124,7 +128,9 @@ impl JellyfinEmbySource {
                     .await?;
                 }
             } else if item_type.eq_ignore_ascii_case("MusicAlbum") {
-                if let Some(album) = album_from_item(self.kind, item) {
+                let album = album_from_item(self.kind, &item);
+                drop(item);
+                if let Some(album) = album {
                     stage_album(scan, album).await?;
                 }
                 self.stage_collection_contents(
@@ -133,21 +139,26 @@ impl JellyfinEmbySource {
                 )
                 .await?;
             } else if item_type.eq_ignore_ascii_case("MusicArtist") {
+                let artist = artist_from_item(self.kind, &item);
+                drop(item);
                 scan.begin_batch().await?;
-                if let Some(mapped) = artist_from_item(self.kind, item) {
+                if let Some(mapped) = artist {
                     stage_artist(scan, mapped).await?;
                 }
                 scan.finish_batch().await?;
             } else if item_type.eq_ignore_ascii_case("MusicGenre") {
+                let genre = genre_from_item(self.kind, &item);
+                drop(item);
                 scan.begin_batch().await?;
-                if let Some(mapped) = genre_from_item(self.kind, item) {
+                if let Some(mapped) = genre {
                     stage_genre(scan, mapped).await?;
                 }
                 scan.finish_batch().await?;
             } else if item_type.eq_ignore_ascii_case("Playlist") {
-                let Some(playlist) = playlist_from_item(self.kind, item) else {
+                let Some(playlist) = playlist_from_item(self.kind, &item) else {
                     continue;
                 };
+                drop(item);
                 let artwork = playlist
                     .image_ref
                     .as_ref()
@@ -253,7 +264,7 @@ impl JellyfinEmbySource {
             let count = items(&page["Items"]).len();
             let finished = pages.advance(count, field(&page, "TotalRecordCount"))?;
             scan.begin_batch().await?;
-            for item in items(&page["Items"]).iter().cloned() {
+            for item in items(&page["Items"]) {
                 if let Some(mapped) = album_from_item(self.kind, item) {
                     stage_album(scan, mapped).await?;
                 }
@@ -284,7 +295,7 @@ impl JellyfinEmbySource {
             let count = items(&page["Items"]).len();
             let finished = pages.advance(count, field(&page, "TotalRecordCount"))?;
             scan.begin_batch().await?;
-            for item in items(&page["Items"]).iter().cloned() {
+            for item in items(&page["Items"]) {
                 if let Some(mapped) = track_from_item(self.kind, item) {
                     stage_track(scan, mapped).await?;
                 }
@@ -310,7 +321,7 @@ impl JellyfinEmbySource {
                 let count = items(&page["Items"]).len();
                 let finished = pages.advance(count, field(&page, "TotalRecordCount"))?;
                 scan.begin_batch().await?;
-                for item in items(&page["Items"]).iter().cloned() {
+                for item in items(&page["Items"]) {
                     if let Some(mapped) = artist_from_item(self.kind, item) {
                         stage_artist(scan, mapped).await?;
                     }
@@ -347,7 +358,7 @@ impl JellyfinEmbySource {
                         artist = serde_json::json!({"Id":raw_item_id(&id)});
                     }
                 }
-                if let Some(mapped) = artist_from_item(self.kind, artist) {
+                if let Some(mapped) = artist_from_item(self.kind, &artist) {
                     stage_artist(scan, mapped).await?;
                 }
             }
@@ -377,7 +388,7 @@ impl JellyfinEmbySource {
                 }
             };
             scan.begin_batch().await?;
-            for item in items(&page["Items"]).iter().cloned() {
+            for item in items(&page["Items"]) {
                 if let Some(mapped) = genre_from_item(self.kind, item) {
                     stage_genre(scan, mapped).await?;
                 }
@@ -502,7 +513,7 @@ impl JellyfinEmbySource {
                 .await?;
             let count = items(&page["Items"]).len();
             let finished = pages.advance(count, field(&page, "TotalRecordCount"))?;
-            for item in items(&page["Items"]).iter().cloned() {
+            for item in items(&page["Items"]) {
                 let Some(playlist) = playlist_from_item(self.kind, item) else {
                     continue;
                 };
@@ -824,7 +835,7 @@ mod tests {
             &mut previous,
             super::album_from_item(
                 crate::ServerKind::Jellyfin,
-                serde_json::from_value(
+                &serde_json::from_value(
                     serde_json::json!({"Id":"album","Name":"Album","Type":"MusicAlbum"}),
                 )
                 .unwrap(),
@@ -833,7 +844,7 @@ mod tests {
         )
         .await
         .unwrap();
-        super::stage_track(&mut previous, super::track_from_item(crate::ServerKind::Jellyfin, serde_json::from_value(serde_json::json!({"Id":"removed","Name":"Removed","Type":"Audio","AlbumId":"album"})).unwrap()).unwrap()).await.unwrap();
+        super::stage_track(&mut previous, super::track_from_item(crate::ServerKind::Jellyfin, &serde_json::from_value(serde_json::json!({"Id":"removed","Name":"Removed","Type":"Audio","AlbumId":"album"})).unwrap()).unwrap()).await.unwrap();
         previous
             .write_genre("cached-genre", "Cached", "cached", Some("cached"), None)
             .await

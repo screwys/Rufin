@@ -1,17 +1,20 @@
 use super::Shell;
 use adw::prelude::*;
 use artwork::ArtworkBinding;
-use gtk_widgets::artwork::{ArtworkTile, cover_fetch_size_for_display};
+use gtk_widgets::artwork::{ArtworkTile, LARGE_COVER_SIZE};
 use gtk_widgets::interactions::add_widget_click;
 use std::rc::Rc;
 impl Shell {
     pub(crate) fn present_full_artwork(self: &Rc<Self>, candidates: ArtworkBinding) {
         let size = full_artwork_size(self.chrome.window.width(), self.chrome.window.height());
-        let fetch_size = cover_fetch_size_for_display(size);
         let tile = ArtworkTile::new_sized(size, size);
         let cover = tile.widget();
-        self.artwork
-            .bind_playback_artwork_tile(&tile, candidates, size, fetch_size);
+        self.artwork.bind_playback_artwork_tile(
+            &tile,
+            candidates,
+            LARGE_COVER_SIZE as i32,
+            LARGE_COVER_SIZE,
+        );
         let tile = tile.downgrade();
         let artwork = Rc::downgrade(&self.artwork);
         self.present_artwork_overlay(&cover, move || {

@@ -45,7 +45,7 @@ pub use collections::{
 };
 pub use connect::{CONNECT_PAGE_SIZE, ConnectChange, ConnectRecord, ConnectRoot};
 pub use db::{Database, ReadCancellation};
-pub use favorites::{FavoriteTarget, UserMediaStateWrite};
+pub use favorites::{FavoriteTarget, SourceUserData, UserMediaStateWrite};
 pub use home::{
     HomeAlbumRow, HomeBlockKind, HomeEntryInput, HomeEntryKind, HomeGenreRow, HomePage,
     HomeProviderSection, HomeSectionKind, HomeSectionRows, HomeTrackRow,

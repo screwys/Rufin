@@ -278,7 +278,7 @@ fn cue_direct_continuation_transfers_one_file_without_enrollment() {
             );
             assert!(source.is_file());
             for inputs in [guest, host] {
-                inputs.products.connect.close_network().await.unwrap();
+                inputs.products.connect.leave_profile().await.unwrap();
                 inputs.receivers.visualizer.close();
                 let playback = inputs.products.playback.transport.clone();
                 tokio::task::spawn_blocking(move || playback.shutdown())
@@ -337,7 +337,7 @@ fn relay_changes_preserve_the_open_profile_and_device_identity() {
                 assert!(Arc::ptr_eq(&session, &owner.active().await.unwrap()));
                 assert_eq!(owner.status().identity, identity);
             }
-            owner.close_network().await.unwrap();
+            owner.leave_profile().await.unwrap();
             inputs.receivers.visualizer.close();
             let playback = inputs.products.playback.transport.clone();
             tokio::task::spawn_blocking(move || playback.shutdown())
@@ -381,10 +381,13 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                     .iter()
                     .any(|device| device.id == peer && device.reachable)
             );
-            execute(b, Action::Leave).await.unwrap();
-            // Discovery may be enabled again before joining a profile. The
-            // transport can accept a connection, but Rufin must reject the test.
-            execute(b, Action::Discover).await.unwrap();
+            // Keep the same transport reachable after closing its profile.
+            b.connected_network()
+                .await
+                .unwrap()
+                .close_profile()
+                .await
+                .unwrap();
             assert_eq!(b.status().identity.as_deref(), Some(peer.as_str()));
             a.connected_network()
                 .await
@@ -404,7 +407,7 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                     .any(|device| device.id == peer && !device.reachable)
             );
             for inputs in [guest, host] {
-                inputs.products.connect.close_network().await.unwrap();
+                inputs.products.connect.leave_profile().await.unwrap();
                 inputs.receivers.visualizer.close();
                 let playback = inputs.products.playback.transport.clone();
                 tokio::task::spawn_blocking(move || playback.shutdown())
@@ -440,8 +443,22 @@ fn folder_exchange_preserves_disconnected_edits_without_rewriting_peer_files() {
             let b = &guest.products.connect;
             execute(a, Action::Create).await.unwrap();
             pair(a, b).await;
-            a.close_network().await.unwrap();
-            b.close_network().await.unwrap();
+            a.network
+                .lock()
+                .await
+                .take()
+                .unwrap()
+                .shutdown()
+                .await
+                .unwrap();
+            b.network
+                .lock()
+                .await
+                .take()
+                .unwrap()
+                .shutdown()
+                .await
+                .unwrap();
             let folders = [root.path().join("sync-a"), root.path().join("sync-b")];
             for (owner, folder) in [(a, &folders[0]), (b, &folders[1])] {
                 execute(
@@ -486,11 +503,10 @@ fn folder_exchange_preserves_disconnected_edits_without_rewriting_peer_files() {
                 let own = folders[index].join(&names[index]);
                 let bytes = std::fs::read(&own).unwrap();
                 owner.exchange().await.unwrap();
-                *owner.active().await.unwrap().file_exchange.lock().await = None;
                 owner.exchange().await.unwrap();
                 assert!(
                     std::fs::read(&own).unwrap() == bytes,
-                    "no rewrite after a no-op or reopening"
+                    "unchanged exchange leaves the file intact"
                 );
                 assert_eq!(
                     std::fs::read(folders[index].join(&names[1 - index])).unwrap(),
@@ -527,7 +543,6 @@ fn folder_exchange_preserves_disconnected_edits_without_rewriting_peer_files() {
                 .unwrap()
                 > 0
             {}
-            *session.file_exchange.lock().await = None;
             a.exchange().await.unwrap();
             let after = a
                 .exchange_import(&session, folders[0].join(&names[0]))
@@ -680,7 +695,7 @@ fn webdav_exchange_leaves_an_unchanged_profile_file_untouched() {
             assert_eq!(file.lock().unwrap().1, uploads + 1, "local edits must reach the file");
             owner.exchange().await.unwrap();
             assert_eq!(file.lock().unwrap().1, uploads + 1);
-            owner.close_network().await.unwrap();
+            owner.leave_profile().await.unwrap();
             inputs.receivers.visualizer.close();
             let playback = inputs.products.playback.transport.clone();
             tokio::task::spawn_blocking(move || playback.shutdown())

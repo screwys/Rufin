@@ -40,7 +40,7 @@ mod imp {
             if children.is_empty() {
                 return (0, 0, -1, -1);
             }
-            let widths = child_widths(&children);
+            let mut widths = child_widths(&children);
             if orientation == gtk::Orientation::Horizontal {
                 let minimum = children
                     .iter()
@@ -56,6 +56,9 @@ mod imp {
             } else {
                 for_size.max(1)
             };
+            for width in &mut widths {
+                *width = (*width).min(available_width);
+            }
             let mut minimum = 0_i32;
             let mut natural = 0_i32;
             for (row_index, range) in wrapped_row_ranges(&widths, available_width)

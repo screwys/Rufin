@@ -139,8 +139,9 @@ impl ArtworkKey {
         format!("{:x}", Md5::digest(identity.as_bytes()))
     }
 
-    fn reuse_group(&self) -> (String, String) {
-        (self.binding.clone(), self.variant.clone())
+    /// The same revision and source policy, independent of display size.
+    pub fn same_image(&self, other: &Self) -> bool {
+        self.binding == other.binding && self.variant == other.variant
     }
 
     /// Whether an existing image can stay visible while this request refreshes it.
@@ -152,21 +153,15 @@ impl ArtworkKey {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct RequestId(u64);
 
-#[derive(Clone, Debug)]
-pub struct LoadedArtwork {
-    pub image: Arc<DecodedImage>,
-    pub original: Option<Arc<[u8]>>,
-}
-
 pub enum ArtworkLoad {
-    Ready(LoadedArtwork),
+    Ready(Arc<DecodedImage>),
     Missing,
     Pending(PendingArtwork),
 }
 
 #[derive(Clone, Debug)]
 pub enum ArtworkOutcome {
-    Ready(LoadedArtwork),
+    Ready(Arc<DecodedImage>),
     Missing,
     Failed(Arc<str>),
     Invalidated,
@@ -182,9 +177,7 @@ pub struct PendingArtwork {
 impl PendingArtwork {
     pub async fn finish(self) -> ArtworkOutcome {
         match self.finish_resolution().await {
-            pipeline::Resolution::Ready {
-                image, original, ..
-            } => ArtworkOutcome::Ready(LoadedArtwork { image, original }),
+            pipeline::Resolution::Ready { image, .. } => ArtworkOutcome::Ready(image),
             pipeline::Resolution::Missing => ArtworkOutcome::Missing,
             pipeline::Resolution::Failed(error) => ArtworkOutcome::Failed(error),
             pipeline::Resolution::Invalidated => ArtworkOutcome::Invalidated,
@@ -356,7 +349,7 @@ impl Artwork {
                 ArtworkOutcome::Failed(error) => return Err(error.to_string()),
             },
         };
-        Ok(loaded.original.map(|bytes| bytes.to_vec()))
+        Ok(loaded.original().map(|bytes| bytes.to_vec()))
     }
 
     pub fn retry_external(&self) -> Result<(), ArtworkError> {
@@ -507,13 +500,13 @@ mod preparation_tests {
         let ArtworkOutcome::Ready(image) = pending.finish().await else {
             panic!("cached image must decode");
         };
-        assert_eq!(image.image.key(), &key);
+        assert_eq!(image.key(), &key);
         let ArtworkLoad::Ready(smaller) =
             artwork.load(ArtworkRequest::new(binding.clone(), 96, 64))
         else {
             panic!("live pixels must be reused");
         };
-        assert!(Arc::ptr_eq(&smaller.image, &image.image));
+        assert!(Arc::ptr_eq(&smaller, &image));
         assert_eq!(resolutions.load(Ordering::Relaxed), 0);
 
         artwork.invalidate_source(&SourceId::new("source")).unwrap();
@@ -601,7 +594,7 @@ mod preparation_tests {
         let ArtworkLoad::Ready(reused) = artwork.load(request.clone()) else {
             panic!("live pixels must be reused");
         };
-        assert!(Arc::ptr_eq(&reused.image, &decoded.image));
+        assert!(Arc::ptr_eq(&reused, &decoded));
         let cached = artwork.cache_only_file(&request).unwrap();
         assert!(cached.is_file());
         let manifest = artwork

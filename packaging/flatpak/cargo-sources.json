@@ -6931,32 +6931,6 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/pangocairo/pangocairo-0.22.9.crate",
-        "sha256": "bd199a0fef965b3ebda91a929a1ab5e7729538882c68e8de38e1904d2e094757",
-        "dest": "cargo/vendor/pangocairo-0.22.9"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"bd199a0fef965b3ebda91a929a1ab5e7729538882c68e8de38e1904d2e094757\", \"files\": {}}",
-        "dest": "cargo/vendor/pangocairo-0.22.9",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/pangocairo-sys/pangocairo-sys-0.22.9.crate",
-        "sha256": "a649a616d67ae68539bc85f00fb45d36fba742ed20fc20e6712a15d8ee52bd3f",
-        "dest": "cargo/vendor/pangocairo-sys-0.22.9"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"a649a616d67ae68539bc85f00fb45d36fba742ed20fc20e6712a15d8ee52bd3f\", \"files\": {}}",
-        "dest": "cargo/vendor/pangocairo-sys-0.22.9",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/papaya/papaya-0.2.5.crate",
         "sha256": "da2442474a9404698c42509b8967f437249dbc7b50493e83020333d3943ec0ae",
         "dest": "cargo/vendor/papaya-0.2.5"
@@ -9786,19 +9760,6 @@
         "type": "inline",
         "contents": "{\"package\": \"396a35feb67335377e0251fcbc1092fc85c484bd4e3a7a54319399da127796e7\", \"files\": {}}",
         "dest": "cargo/vendor/system-deps-7.0.8",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/system-deps/system-deps-9.0.0.crate",
-        "sha256": "8a0dae2cbca1f0ff93795713cfe0a4c02f760e3c0b8ae2ab4ec4045808ff429f",
-        "dest": "cargo/vendor/system-deps-9.0.0"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"8a0dae2cbca1f0ff93795713cfe0a4c02f760e3c0b8ae2ab4ec4045808ff429f\", \"files\": {}}",
-        "dest": "cargo/vendor/system-deps-9.0.0",
         "dest-filename": ".cargo-checksum.json"
     },
     {

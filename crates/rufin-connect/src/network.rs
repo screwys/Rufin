@@ -406,8 +406,9 @@ impl ConnectNetwork {
             }
         });
         let stop = network.stop.clone();
+        let mut membership = network.membership_changed.subscribe();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(1));
+            let mut interval = tokio::time::interval(Duration::from_secs(300));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             let mut syncing = HashSet::new();
             let mut tasks = tokio::task::JoinSet::new();
@@ -417,6 +418,7 @@ impl ConnectNetwork {
                     Some(completed) = tasks.join_next(), if !tasks.is_empty() => {
                         if let Ok(peer) = completed { syncing.remove(&peer); }
                     },
+                    Ok(()) = membership.changed() => interval.reset_immediately(),
                     _ = interval.tick() => {
                         let Some(network) = weak.upgrade() else { break };
                         let Some(profile) = network.profile.read().await.clone() else { continue };
@@ -541,6 +543,7 @@ impl ConnectNetwork {
             .context("No Connect profile is open")?;
         documents.register_members(&self.members().await?).await?;
         *profile.documents.write().await = Some(documents);
+        self.membership_changed.send_replace(());
         Ok(())
     }
     async fn load_roster(&self, db: &mut SqliteConnection, profile: &str) -> Result<LoroDoc> {

@@ -1,4 +1,4 @@
-use super::audio::{AudioGraph, SharedQueuedStream};
+use super::audio::{AudioGraph, SharedQueuedLoudness};
 use super::engine::{
     GaplessPlayback, PipelineId, PreparedRun, SharedBackendState, Slot, handle_about_to_finish,
 };
@@ -57,25 +57,15 @@ impl SourceClock {
 pub(super) struct PlayerPipeline {
     name: String,
     shared: Arc<Mutex<SharedBackendState>>,
-    session: Option<PipelineSession>,
-}
-#[derive(Debug, PartialEq)]
-pub(super) enum AboutToFinishAction {
-    Preload(Box<PreparedNext>),
-    Ignore,
-}
-struct PipelineSession {
-    id: PipelineId,
-    pipeline: gst::Element,
-    bus: gst::Bus,
-    clock: SourceClock,
+    native: Option<(gst::Element, gst::Bus)>,
+    id: Option<PipelineId>,
     trust_invalid_certificate: Arc<AtomicBool>,
     module_decoder: Arc<AtomicBool>,
     about_to_finish_id: Option<glib::SignalHandlerId>,
     audio_graph: Option<AudioGraph>,
     visualizer_probe: Option<gst::PadProbeId>,
-    current_stream: PreparedStream,
-    queued_stream: SharedQueuedStream,
+    current_stream: Option<PreparedStream>,
+    queued_loudness: SharedQueuedLoudness,
     gapless: Arc<Mutex<GaplessPlayback>>,
     playback_rate: f64,
     segment: Arc<Mutex<SegmentPlayback>>,
@@ -84,33 +74,53 @@ struct PipelineSession {
     live: Cell<bool>,
 }
 
+#[derive(Debug, PartialEq)]
+pub(super) enum AboutToFinishAction {
+    Preload(Box<PreparedNext>),
+    Ignore,
+}
+
 #[derive(Default)]
 struct SegmentPlayback {
     seek: Option<gst::Seqnum>,
     done: bool,
     starts_stream: bool,
 }
+
 impl PlayerPipeline {
-    pub(super) fn gapless(&self) -> Option<&Arc<Mutex<GaplessPlayback>>> {
-        self.session.as_ref().map(|session| &session.gapless)
-    }
-
-    pub(super) fn has_pending_gapless(&self) -> bool {
-        self.gapless().is_some_and(|gapless| {
-            gapless
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .pending
-                .is_some()
-        })
-    }
-
     pub(super) fn new(name: &str, shared: Arc<Mutex<SharedBackendState>>) -> Self {
         Self {
             name: name.to_string(),
             shared,
-            session: None,
+            native: None,
+            id: None,
+            trust_invalid_certificate: Arc::new(AtomicBool::new(false)),
+            module_decoder: Arc::new(AtomicBool::new(false)),
+            about_to_finish_id: None,
+            audio_graph: None,
+            visualizer_probe: None,
+            current_stream: None,
+            queued_loudness: Arc::new(Mutex::new(TrackLoudness::default())),
+            gapless: Arc::new(Mutex::new(GaplessPlayback::default())),
+            playback_rate: DEFAULT_PLAYBACK_RATE,
+            segment: Arc::new(Mutex::new(SegmentPlayback::default())),
+            requested_state: Cell::new(gst::State::Null),
+            buffering_percent: Cell::new(None),
+            live: Cell::new(false),
         }
+    }
+
+    fn native(&self) -> Result<&(gst::Element, gst::Bus), String> {
+        self.native
+            .as_ref()
+            .ok_or_else(|| format!("GStreamer player {} is not active", self.name))
+    }
+
+    fn clock(&self) -> SourceClock {
+        self.current_stream
+            .as_ref()
+            .map(|stream| SourceClock::from_stream(stream))
+            .unwrap_or_default()
     }
 
     pub(super) fn play_item(
@@ -124,106 +134,90 @@ impl PlayerPipeline {
         playback_rate: f64,
         startup_state: gst::State,
     ) -> Result<(), String> {
-        let session_name = format!("{}-{}", self.name, id.0);
-        let mut session = PipelineSession::new(
-            &session_name,
-            id,
-            slot,
-            Arc::clone(&self.shared),
-            &item.stream,
-            playback_rate,
-        )?;
-        session.configure_audio(settings)?;
-        session.set_stream(&item.stream);
-        session.set_output_volume(volume, muted);
-        if let Err(error) = session.set_state(startup_state) {
-            session.stop();
-            return Err(error);
+        if self
+            .audio_graph
+            .as_ref()
+            .is_some_and(|graph| !graph.uses_output(settings.audio_output.as_deref()))
+        {
+            // Keep the working output until its replacement has opened.
+            let mut replacement = Self::new(&self.name, Arc::clone(&self.shared));
+            replacement.play_item(
+                id,
+                slot,
+                item,
+                settings,
+                volume,
+                muted,
+                playback_rate,
+                startup_state,
+            )?;
+            *self = replacement;
+            return Ok(());
         }
-        session.set_output_volume(volume, muted);
-        self.session = Some(session);
-        Ok(())
+        self.stop();
+        self.initialize()?;
+        self.id = Some(id);
+        self.current_stream = Some(item.stream.clone());
+        self.playback_rate = sanitize_playback_rate(playback_rate);
+        self.connect_about_to_finish(id, slot, Arc::clone(&self.shared));
+        let result = (|| {
+            self.configure_audio(settings)?;
+            self.set_stream(&item.stream)?;
+            self.set_output_volume(volume, muted);
+            self.set_state(startup_state)?;
+            self.set_output_volume(volume, muted);
+            Ok(())
+        })();
+        if result.is_err() {
+            self.stop();
+        }
+        result
     }
 
-    pub(super) fn configure_audio(
-        &mut self,
-        settings: &BackendAudioSettings,
-    ) -> Result<(), String> {
-        if let Some(session) = self.session.as_mut() {
-            session.configure_audio(settings)?;
-        }
-        Ok(())
+    pub(super) fn gapless(&self) -> Option<&Arc<Mutex<GaplessPlayback>>> {
+        self.native.as_ref().map(|_| &self.gapless)
     }
 
-    pub(super) fn try_reconfigure_audio(
-        &mut self,
-        settings: &BackendAudioSettings,
-    ) -> Result<bool, String> {
-        self.session
-            .as_mut()
-            .map_or(Ok(false), |session| session.try_reconfigure_audio(settings))
-    }
-
-    pub(super) fn set_visualizer_tap(&mut self, tap: Option<VisualizerTap>) {
-        if let Some(session) = self.session.as_mut() {
-            session.set_visualizer_tap(tap);
-        }
-    }
-
-    pub(super) fn set_output_volume(&self, volume: f64, muted: bool) {
-        if let Some(session) = self.session.as_ref() {
-            session.set_output_volume(volume, muted);
-        }
+    pub(super) fn has_pending_gapless(&self) -> bool {
+        self.gapless
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .pending
+            .is_some()
     }
 
     #[cfg(test)]
     pub(super) fn audio_output(&self) -> Option<gst::Element> {
-        self.session
-            .as_ref()?
-            .audio_graph
+        self.audio_graph
             .as_ref()
             .map(|graph| graph.output().clone())
     }
 
     #[cfg(test)]
     pub(super) fn output_volume_state(&self) -> Option<(f64, bool)> {
-        self.session.as_ref().map(|session| {
-            (
-                session.pipeline.property::<f64>("volume"),
-                session.pipeline.property::<bool>("mute"),
-            )
-        })
+        let (pipeline, _) = self.native.as_ref()?;
+        Some((
+            pipeline.property::<f64>("volume"),
+            pipeline.property::<bool>("mute"),
+        ))
     }
 
     #[cfg(test)]
     pub(super) fn has_or_targets_state(&self, state: gst::State) -> bool {
-        self.session.as_ref().is_some_and(|session| {
-            let (result, current, pending) = session.pipeline.state(gst::ClockTime::ZERO);
+        self.native.as_ref().is_some_and(|(pipeline, _)| {
+            let (result, current, pending) = pipeline.state(gst::ClockTime::ZERO);
             result.is_ok() && (current == state || pending == state)
         })
     }
 
-    pub(super) fn set_state(&self, state: gst::State) -> Result<gst::StateChangeSuccess, String> {
-        let Some(session) = self.session.as_ref() else {
-            return Err(format!("GStreamer session {} is not active", self.name));
-        };
-        session.set_state(state)
-    }
-
     pub(super) fn buffering_percent(&self) -> Option<u8> {
-        self.session.as_ref()?.buffering_percent.get()
-    }
-
-    pub(super) fn is_buffering(&self) -> bool {
-        self.session
-            .as_ref()
-            .is_some_and(PipelineSession::is_buffering)
+        self.buffering_percent.get()
     }
 
     pub(super) fn is_playing(&self) -> bool {
-        self.session
+        self.native
             .as_ref()
-            .is_some_and(|session| session.pipeline.current_state() == gst::State::Playing)
+            .is_some_and(|(pipeline, _)| pipeline.current_state() == gst::State::Playing)
     }
 
     pub(super) fn set_buffering(
@@ -231,57 +225,41 @@ impl PlayerPipeline {
         percent: u8,
         mode: gst::BufferingMode,
     ) -> Result<(), String> {
-        let Some(session) = self.session.as_ref() else {
-            return Ok(());
-        };
-        let was_buffering = session.is_buffering();
-        session.buffering_percent.set(Some(percent));
+        let was_buffering = self.is_buffering();
+        self.buffering_percent.set(Some(percent));
         if mode == gst::BufferingMode::Live {
-            session.live.set(true);
+            self.live.set(true);
         }
-        if was_buffering != session.is_buffering()
-            && session.requested_state.get() == gst::State::Playing
+        if was_buffering != self.is_buffering() && self.requested_state.get() == gst::State::Playing
         {
-            session.apply_requested_state()?;
+            self.apply_requested_state()?;
         }
         Ok(())
     }
 
     pub(super) fn owns_audio_output(&self, name: &str) -> bool {
-        self.session.as_ref().is_some_and(|session| {
-            let prefix = format!("{}-audio-output", session.pipeline.name());
-            name == prefix || name.starts_with(&format!("{prefix}-"))
-        })
+        let prefix = format!("{}-audio-output", self.name);
+        name == prefix || name.starts_with(&format!("{prefix}-"))
     }
 
     pub(super) fn segment_done(&self, seqnum: gst::Seqnum) {
-        if let Some(session) = self.session.as_ref() {
-            let mut segment = session.segment.lock().unwrap_or_else(|p| p.into_inner());
-            // Some parsers post SEGMENT_DONE with a fresh sequence number. Only
-            // discard completion messages older than the latest seek.
-            if segment.seek.is_some_and(|seek| seqnum >= seek) {
-                segment.done = true;
-            }
+        let mut segment = self.segment.lock().unwrap_or_else(|p| p.into_inner());
+        // Some parsers use a fresh sequence number for SEGMENT_DONE.
+        if segment.seek.is_some_and(|seek| seqnum >= seek) {
+            segment.done = true;
         }
     }
 
     pub(super) fn take_segment_done(&self) -> bool {
-        self.session.as_ref().is_some_and(|session| {
-            let mut segment = session.segment.lock().unwrap_or_else(|p| p.into_inner());
-            std::mem::take(&mut segment.done)
-        })
+        std::mem::take(&mut self.segment.lock().unwrap_or_else(|p| p.into_inner()).done)
     }
 
     pub(super) fn continue_segment(&self, next: Option<&PreparedStream>) -> Result<(), String> {
-        let session = self
-            .session
-            .as_ref()
-            .ok_or("GStreamer session is not active")?;
         let (start, end, flags) = if let Some(next) = next {
-            *session
-                .queued_stream
+            *self
+                .queued_loudness
                 .lock()
-                .unwrap_or_else(|p| p.into_inner()) = next.clone();
+                .unwrap_or_else(|p| p.into_inner()) = next.loudness.clone();
             let flags = if next.end_millis().is_some() {
                 gst::SeekFlags::ACCURATE | gst::SeekFlags::SEGMENT
             } else {
@@ -289,168 +267,76 @@ impl PlayerPipeline {
             };
             (next.start_millis(), next.end_millis(), flags)
         } else {
-            // An empty non-segment seek drains the queued tail and delivers EOS.
-            let end = session
-                .clock
+            // An empty non-segment seek drains the tail and delivers EOS.
+            let end = self
+                .clock()
                 .end_millis()
                 .ok_or("No bounded segment to finish")?;
             (end, Some(end), gst::SeekFlags::ACCURATE)
         };
-        session.seek_segment(start, end, flags, next.is_some())
+        self.seek_segment(start, end, flags, next.is_some())
     }
 
-    pub(super) fn stop(&mut self) {
-        if let Some(mut session) = self.session.take() {
-            session.stop();
-        }
+    pub(super) fn physical_seek_target(&self, millis: u64) -> u64 {
+        self.clock().physical_seek(millis)
     }
-
-    pub(super) fn seek_millis(&self, millis: u64) -> Result<(), String> {
-        let Some(session) = self.session.as_ref() else {
-            return Err(format!("GStreamer session {} is not active", self.name));
-        };
-        session.seek_millis(millis)
+    pub(super) fn logical_position(&self, millis: u64) -> u64 {
+        self.clock().logical_position(millis)
     }
-
-    pub(super) fn seek_physical_millis(&self, millis: u64) -> Result<(), String> {
-        let Some(session) = self.session.as_ref() else {
-            return Err(format!("GStreamer session {} is not active", self.name));
-        };
-        session.seek_physical_millis(millis)
+    pub(super) fn logical_duration(&self, millis: u64) -> u64 {
+        self.clock().logical_duration(millis)
     }
-
-    pub(super) fn set_playback_rate(
-        &mut self,
-        rate: f64,
-        seek_current_position: bool,
-        settings: &BackendAudioSettings,
-    ) -> Result<bool, String> {
-        let Some(session) = self.session.as_mut() else {
-            return Ok(false);
-        };
-        session.set_playback_rate(rate, seek_current_position, settings)
+    pub(super) fn logical_remaining(&self, position: u64, duration: u64) -> u64 {
+        self.clock().remaining(position, duration)
     }
-
-    pub(super) fn needs_initial_rate_seek(&self) -> bool {
-        self.session
-            .as_ref()
-            .is_some_and(PipelineSession::needs_initial_rate_seek)
-    }
-
-    pub(super) fn physical_seek_target(&self, logical_millis: u64) -> u64 {
-        self.session.as_ref().map_or(logical_millis, |session| {
-            session.clock.physical_seek(logical_millis)
-        })
-    }
-
-    pub(super) fn logical_position(&self, physical_millis: u64) -> u64 {
-        self.session.as_ref().map_or(physical_millis, |session| {
-            session.clock.logical_position(physical_millis)
-        })
-    }
-
-    pub(super) fn logical_duration(&self, physical_millis: u64) -> u64 {
-        self.session.as_ref().map_or(physical_millis, |session| {
-            session.clock.logical_duration(physical_millis)
-        })
-    }
-
-    pub(super) fn logical_remaining(&self, physical_position: u64, physical_duration: u64) -> u64 {
-        self.session.as_ref().map_or_else(
-            || physical_duration.saturating_sub(physical_position),
-            |session| {
-                session
-                    .clock
-                    .remaining(physical_position, physical_duration)
-            },
-        )
-    }
-
     pub(super) fn fixed_duration(&self) -> Option<u64> {
-        self.session
-            .as_ref()
-            .and_then(|session| session.clock.fixed_duration())
+        self.clock().fixed_duration()
     }
 
     pub(super) fn activate_stream(&mut self, stream: &PreparedStream) {
-        if let Some(session) = self.session.as_mut() {
-            session.current_stream = stream.clone();
-            *session
-                .queued_stream
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()) = stream.clone();
-            session.clock = SourceClock::from_stream(stream);
-        }
+        self.current_stream = Some(stream.clone());
+        *self
+            .queued_loudness
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = stream.loudness.clone();
     }
 
     pub(super) fn has_session(&self) -> bool {
-        self.session.is_some()
+        self.id.is_some()
     }
 
     pub(super) fn allows_preloading(&self) -> bool {
-        self.session
-            .as_ref()
-            .is_none_or(|session| !session.module_decoder.load(Ordering::Relaxed))
-    }
-
-    pub(super) fn position(&self) -> Option<gst::ClockTime> {
-        self.session.as_ref().and_then(PipelineSession::position)
-    }
-
-    pub(super) fn duration(&self) -> Option<gst::ClockTime> {
-        self.session.as_ref().and_then(PipelineSession::duration)
-    }
-
-    pub(super) fn seekable(&self) -> Option<bool> {
-        self.session.as_ref().map(PipelineSession::seekable)
-    }
-
-    pub(super) fn audio_output_factory(&self) -> Option<String> {
-        self.session
-            .as_ref()
-            .and_then(PipelineSession::audio_output_factory)
-    }
-
-    pub(super) fn set_stream(&mut self, stream: &PreparedStream) -> Result<(), String> {
-        let Some(session) = self.session.as_mut() else {
-            return Err("GStreamer session is not active".to_string());
-        };
-        session.set_stream(stream);
-        Ok(())
+        !self.module_decoder.load(Ordering::Relaxed)
     }
 
     pub(super) fn pop_bus_message(&self) -> Option<(PipelineId, gst::Message)> {
-        let session = self.session.as_ref()?;
-        let mut message = session.bus.pop()?;
-        // A refill may finish before the worker reads its first update. Use the
-        // latest consecutive update from that queue to avoid an unnecessary pause.
+        let id = self.id?;
+        let (_, bus) = self.native.as_ref()?;
+        let mut message = bus.pop()?;
+        // Use the latest consecutive refill update to avoid an unnecessary pause.
         if message.type_() == gst::MessageType::Buffering {
-            while session.bus.peek().is_some_and(|next| {
+            while bus.peek().is_some_and(|next| {
                 next.type_() == gst::MessageType::Buffering && next.src() == message.src()
             }) {
-                message = session.bus.pop()?;
+                message = bus.pop()?;
             }
         }
-        Some((session.id, message))
+        Some((id, message))
     }
 
     pub(super) fn message_source_is_pipeline(&self, message: &gst::Message) -> bool {
-        self.session.as_ref().is_some_and(|session| {
+        self.native.as_ref().is_some_and(|(pipeline, _)| {
             message
                 .src()
-                .is_some_and(|source| source == session.pipeline.upcast_ref::<gst::Object>())
+                .is_some_and(|source| source == pipeline.upcast_ref::<gst::Object>())
         })
     }
-}
-impl PipelineSession {
-    pub(super) fn new(
-        name: &str,
-        id: PipelineId,
-        slot: Slot,
-        shared: Arc<Mutex<SharedBackendState>>,
-        stream: &PreparedStream,
-        playback_rate: f64,
-    ) -> Result<Self, String> {
+
+    fn initialize(&mut self) -> Result<(), String> {
+        if self.native.is_some() {
+            return Ok(());
+        }
+        let name = &self.name;
         let pipeline = make_playbin(name)?;
         let bus = pipeline
             .bus()
@@ -461,15 +347,10 @@ impl PipelineSession {
             .map_err(|error| error.to_string())?;
         configure_playbin_for_audio(&pipeline);
         pipeline.set_property("video-sink", &fakesink);
-        let trust_invalid_certificate =
-            Arc::new(AtomicBool::new(stream.trust_invalid_certificate()));
-        let certificate_policy = Arc::clone(&trust_invalid_certificate);
-        connect_server_certificate_policy(&pipeline, move || {
-            certificate_policy.load(Ordering::SeqCst)
-        });
+        let certificate_policy = Arc::clone(&self.trust_invalid_certificate);
+        configure_sources(&pipeline, move || certificate_policy.load(Ordering::SeqCst));
 
-        let module_decoder = Arc::new(AtomicBool::new(false));
-        let module_for_setup = Arc::clone(&module_decoder);
+        let module_for_setup = Arc::clone(&self.module_decoder);
         pipeline.connect("element-setup", false, move |values| {
             let element = values[1].get::<gst::Element>().expect("playbin element-setup element");
             if let Some(factory) = element.factory()
@@ -485,55 +366,47 @@ impl PipelineSession {
             None
         });
 
-        let pipeline_for_signal = pipeline.clone();
-        let shared_for_signal = Arc::clone(&shared);
-        let queued_stream = Arc::new(Mutex::new(stream.clone()));
-        let queued_stream_for_signal = Arc::clone(&queued_stream);
-        let gapless = Arc::new(Mutex::new(GaplessPlayback::default()));
-        let gapless_for_signal = Arc::clone(&gapless);
-        let certificate_policy_for_signal = Arc::clone(&trust_invalid_certificate);
-        let module_for_signal = Arc::clone(&module_decoder);
-        let about_to_finish_id = pipeline.connect("about-to-finish", false, move |_| {
+        self.native = Some((pipeline, bus));
+        Ok(())
+    }
+
+    fn connect_about_to_finish(
+        &mut self,
+        id: PipelineId,
+        slot: Slot,
+        shared: Arc<Mutex<SharedBackendState>>,
+    ) {
+        let element = &self.native.as_ref().expect("initialized playbin").0;
+        let pipeline = element.downgrade();
+        let queued_loudness = Arc::clone(&self.queued_loudness);
+        let gapless = Arc::clone(&self.gapless);
+        let certificate_policy = Arc::clone(&self.trust_invalid_certificate);
+        let module_for_signal = Arc::clone(&self.module_decoder);
+        self.about_to_finish_id = Some(element.connect("about-to-finish", false, move |_| {
             if module_for_signal.load(Ordering::Relaxed) {
                 return None;
             }
+            let pipeline = pipeline.upgrade()?;
             handle_about_to_finish(
-                &pipeline_for_signal,
-                &shared_for_signal,
-                &gapless_for_signal,
-                &queued_stream_for_signal,
-                &certificate_policy_for_signal,
+                &pipeline,
+                &shared,
+                &gapless,
+                &queued_loudness,
+                &certificate_policy,
                 slot,
                 id,
             );
             None
-        });
-
-        Ok(Self {
-            id,
-            pipeline,
-            bus,
-            clock: SourceClock::from_stream(stream),
-            trust_invalid_certificate,
-            module_decoder,
-            about_to_finish_id: Some(about_to_finish_id),
-            audio_graph: None,
-            visualizer_probe: None,
-            current_stream: stream.clone(),
-            queued_stream,
-            gapless,
-            playback_rate: sanitize_playback_rate(playback_rate),
-            segment: Arc::new(Mutex::new(SegmentPlayback::default())),
-            requested_state: Cell::new(gst::State::Null),
-            buffering_percent: Cell::new(None),
-            live: Cell::new(false),
-        })
+        }));
     }
 
     pub(super) fn configure_audio(
         &mut self,
         settings: &BackendAudioSettings,
     ) -> Result<(), String> {
+        if self.current_stream.is_none() {
+            return Ok(());
+        }
         if let Some(graph) = self.audio_graph.as_mut()
             && graph.reconfigure(settings, self.playback_rate)?
         {
@@ -543,12 +416,15 @@ impl PipelineSession {
         let graph = AudioGraph::new(
             settings,
             self.playback_rate,
-            self.current_stream.loudness.clone(),
-            Arc::clone(&self.queued_stream),
+            self.current_stream
+                .as_ref()
+                .map(|stream| stream.loudness.clone())
+                .unwrap_or_default(),
+            Arc::clone(&self.queued_loudness),
         )?;
         graph
             .output()
-            .set_property("name", format!("{}-audio-output", self.pipeline.name()));
+            .set_property("name", format!("{}-audio-output", self.native()?.0.name()));
         let segment = Arc::clone(&self.segment);
         graph
             .root()
@@ -589,26 +465,30 @@ impl PipelineSession {
             });
         // Keep normalization out of the sink: playbin searches it for a volume
         // control and would otherwise let track gain overwrite the user's volume.
-        self.pipeline.set_property("audio-filter", graph.root());
-        self.pipeline.set_property("audio-sink", graph.output());
+        self.native()?.0.set_property("audio-filter", graph.root());
+        self.native()?.0.set_property("audio-sink", graph.output());
         self.audio_graph = Some(graph);
         Ok(())
     }
 
-    fn try_reconfigure_audio(&mut self, settings: &BackendAudioSettings) -> Result<bool, String> {
+    pub(super) fn try_reconfigure_audio(
+        &mut self,
+        settings: &BackendAudioSettings,
+    ) -> Result<bool, String> {
         self.audio_graph.as_mut().map_or(Ok(false), |graph| {
             graph.reconfigure(settings, self.playback_rate)
         })
     }
 
-    fn set_stream(&mut self, stream: &PreparedStream) {
+    pub(super) fn set_stream(&mut self, stream: &PreparedStream) -> Result<(), String> {
         *self
-            .queued_stream
+            .queued_loudness
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = stream.clone();
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = stream.loudness.clone();
         self.trust_invalid_certificate
             .store(stream.trust_invalid_certificate(), Ordering::SeqCst);
-        self.pipeline.set_property("uri", stream.uri());
+        self.native()?.0.set_property("uri", stream.uri());
+        Ok(())
     }
 
     pub(super) fn set_visualizer_tap(&mut self, tap: Option<VisualizerTap>) {
@@ -637,8 +517,10 @@ impl PipelineSession {
     }
 
     pub(super) fn set_output_volume(&self, volume: f64, muted: bool) {
-        self.pipeline.set_property("volume", volume.clamp(0.0, 1.0));
-        self.pipeline.set_property("mute", muted);
+        if let Some((pipeline, _)) = self.native.as_ref() {
+            pipeline.set_property("volume", volume.clamp(0.0, 1.0));
+            pipeline.set_property("mute", muted);
+        }
     }
 
     pub(super) fn set_state(&self, state: gst::State) -> Result<gst::StateChangeSuccess, String> {
@@ -646,7 +528,7 @@ impl PipelineSession {
         self.apply_requested_state()
     }
 
-    fn is_buffering(&self) -> bool {
+    pub(super) fn is_buffering(&self) -> bool {
         !self.live.get()
             && self
                 .buffering_percent
@@ -662,8 +544,9 @@ impl PipelineSession {
         } else {
             requested
         };
-        let result = self.pipeline.set_state(state).map_err(|error| {
-            self.bus
+        let (pipeline, bus) = self.native()?;
+        let result = pipeline.set_state(state).map_err(|error| {
+            bus
                 .pop_filtered(&[gst::MessageType::Error])
                 .and_then(|message| {
                     let output = self.audio_output_factory();
@@ -699,14 +582,32 @@ impl PipelineSession {
 
     pub(super) fn stop(&mut self) {
         if let Some(handler_id) = self.about_to_finish_id.take() {
-            self.pipeline.disconnect(handler_id);
+            self.native
+                .as_ref()
+                .expect("connected playbin")
+                .0
+                .disconnect(handler_id);
         }
         self.clear_visualizer_tap();
-        let _ = self.pipeline.set_state(gst::State::Null);
+        if let Some((pipeline, _)) = self.native.as_ref() {
+            let _ = pipeline.set_state(gst::State::Null);
+        }
+        self.id = None;
+        self.current_stream = None;
+        *lock_recover(&self.queued_loudness) = TrackLoudness::default();
+        *lock_recover(&self.gapless) = GaplessPlayback::default();
+        *lock_recover(&self.segment) = SegmentPlayback::default();
+        self.module_decoder.store(false, Ordering::Relaxed);
+        self.buffering_percent.set(None);
+        self.requested_state.set(gst::State::Null);
+        self.live.set(false);
+        if let Some(graph) = self.audio_graph.as_mut() {
+            graph.clear_stream();
+        }
     }
 
     pub(super) fn seek_millis(&self, millis: u64) -> Result<(), String> {
-        self.seek_physical_millis(self.clock.physical_seek(millis))
+        self.seek_physical_millis(self.clock().physical_seek(millis))
     }
 
     pub(super) fn seek_physical_millis(&self, millis: u64) -> Result<(), String> {
@@ -714,10 +615,10 @@ impl PipelineSession {
             return Err("Tracker decoder does not support safe seeking".to_string());
         }
         let mut flags = gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE;
-        if self.clock.end_millis().is_some() {
+        if self.clock().end_millis().is_some() {
             flags |= gst::SeekFlags::SEGMENT;
         }
-        self.seek_segment(millis, self.clock.end_millis(), flags, false)
+        self.seek_segment(millis, self.clock().end_millis(), flags, false)
     }
 
     fn seek_segment(
@@ -752,13 +653,14 @@ impl PipelineSession {
             done: false,
             starts_stream,
         };
-        self.pipeline
+        self.native()?
+            .0
             .send_event(event)
             .then_some(())
             .ok_or_else(|| "GStreamer segment seek failed".to_string())
     }
 
-    fn set_playback_rate(
+    pub(super) fn set_playback_rate(
         &mut self,
         rate: f64,
         seek_current_position: bool,
@@ -783,32 +685,37 @@ impl PipelineSession {
         result
     }
 
-    fn needs_initial_rate_seek(&self) -> bool {
+    pub(super) fn needs_initial_rate_seek(&self) -> bool {
         (self.playback_rate - DEFAULT_PLAYBACK_RATE).abs() > f64::EPSILON
     }
 
     pub(super) fn position(&self) -> Option<gst::ClockTime> {
+        self.id?;
+        let (pipeline, _) = self.native.as_ref()?;
         if self.module_decoder.load(Ordering::Relaxed) {
-            return (self.pipeline.current_state() == gst::State::Playing)
-                .then(|| self.pipeline.current_running_time())
+            return (pipeline.current_state() == gst::State::Playing)
+                .then(|| pipeline.current_running_time())
                 .flatten();
         }
-        self.pipeline.query_position::<gst::ClockTime>()
+        pipeline.query_position::<gst::ClockTime>()
     }
 
     pub(super) fn duration(&self) -> Option<gst::ClockTime> {
+        self.id?;
+        let (pipeline, _) = self.native.as_ref()?;
         if self.module_decoder.load(Ordering::Relaxed) {
             return None;
         }
-        self.pipeline.query_duration::<gst::ClockTime>()
+        pipeline.query_duration::<gst::ClockTime>()
     }
 
-    pub(super) fn seekable(&self) -> bool {
+    pub(super) fn seekable(&self) -> Option<bool> {
+        let (pipeline, _) = self.native.as_ref()?;
         if self.module_decoder.load(Ordering::Relaxed) {
-            return false;
+            return Some(false);
         }
         let mut query = gst::query::Seeking::new(gst::Format::Time);
-        self.pipeline.query(&mut query) && query.result().0
+        Some(pipeline.query(&mut query) && query.result().0)
     }
 
     pub(super) fn audio_output_factory(&self) -> Option<String> {
@@ -817,15 +724,13 @@ impl PipelineSession {
             .and_then(AudioGraph::output_factory)
     }
 }
-impl Drop for PipelineSession {
+impl Drop for PlayerPipeline {
     fn drop(&mut self) {
         self.stop();
     }
 }
 pub(super) fn make_playbin(name: &str) -> Result<gst::Element, String> {
-    // playbin3 can deadlock on teardown while its next URI is blocked waiting
-    // for the current stream to drain. Playback must remain cancellable.
-    gst::ElementFactory::make("playbin")
+    gst::ElementFactory::make("playbin3")
         .name(name)
         .build()
         .map_err(|error| error.to_string())
@@ -890,10 +795,10 @@ mod tests {
             )
             .unwrap();
         let state = player
-            .session
+            .native
             .as_ref()
             .unwrap()
-            .pipeline
+            .0
             .state(gst::ClockTime::from_seconds(30));
         assert_eq!(
             state,
@@ -912,7 +817,7 @@ mod tests {
     }
 
     #[test]
-    fn repeated_tracks_release_retired_pipelines() {
+    fn repeated_tracks_release_streams_and_reuse_the_player() {
         ensure_gstreamer_initialized().unwrap();
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("track.wav");
@@ -947,9 +852,13 @@ mod tests {
         };
         let mut retired: Vec<(String, glib::WeakRef<gst::Object>)> = Vec::new();
         for index in 1..=100 {
+            let resource = Arc::new(());
+            let resource_ref = Arc::downgrade(&resource);
             let item = PreparedRun {
                 run: RunId::new(index),
-                stream: ResolvedStream::new(uri.as_str()).into(),
+                stream: ResolvedStream::new(uri.as_str())
+                    .with_resource(resource)
+                    .into(),
             };
             player
                 .play_item(
@@ -963,32 +872,23 @@ mod tests {
                     gst::State::Playing,
                 )
                 .unwrap();
-            let session = player.session.as_ref().unwrap();
-            session
-                .pipeline
-                .state(gst::ClockTime::from_seconds(5))
-                .0
-                .unwrap();
-            let remaining: Vec<_> = retired
-                .iter()
-                .filter_map(|(name, weak)| {
-                    weak.upgrade().map(|element| (name, element.ref_count()))
-                })
-                .collect();
-            assert!(
-                remaining.is_empty(),
-                "track {index}: retained {remaining:?}"
-            );
+            drop(item);
+            assert!(resource_ref.upgrade().is_some());
+            let (pipeline, bus) = player.native.as_ref().unwrap();
+            pipeline.state(gst::ClockTime::from_seconds(5)).0.unwrap();
+            if let Some((_, previous)) = retired.first() {
+                assert_eq!(previous.upgrade().as_ref(), Some(pipeline.upcast_ref()));
+            }
             retired.clear();
             retired.push((
-                session.pipeline.name().to_string(),
-                session.pipeline.upcast_ref::<gst::Object>().downgrade(),
+                pipeline.name().to_string(),
+                pipeline.upcast_ref::<gst::Object>().downgrade(),
             ));
             retired.push((
-                session.bus.name().to_string(),
-                session.bus.upcast_ref::<gst::Object>().downgrade(),
+                bus.name().to_string(),
+                bus.upcast_ref::<gst::Object>().downgrade(),
             ));
-            let bin = session.pipeline.clone().downcast::<gst::Bin>().unwrap();
+            let bin = pipeline.clone().downcast::<gst::Bin>().unwrap();
             for element in bin.iterate_recurse().into_iter().map(Result::unwrap) {
                 retired.push((
                     element.name().to_string(),
@@ -1001,12 +901,19 @@ mod tests {
                     ));
                 }
             }
+            player.stop();
+            assert!(!player.has_session());
+            assert_eq!(bin.current_state(), gst::State::Null);
+            assert!(resource_ref.upgrade().is_none());
         }
-        player.stop();
+        drop(player);
         let remaining: Vec<_> = retired
             .iter()
             .filter_map(|(name, weak)| weak.upgrade().map(|element| (name, element.ref_count())))
             .collect();
-        assert!(remaining.is_empty(), "after stop: retained {remaining:?}");
+        assert!(
+            remaining.is_empty(),
+            "after player shutdown: retained {remaining:?}"
+        );
     }
 }

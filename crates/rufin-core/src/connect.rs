@@ -278,12 +278,13 @@ struct Session {
     profile: String,
     documents: Arc<ProfileStore>,
     identity: String,
-    file_exchange: tokio::sync::Mutex<Option<FileExchange>>,
+    file_exchange: tokio::sync::Mutex<()>,
     stop: tokio_util::sync::CancellationToken,
     receiving: Mutex<BTreeSet<String>>,
     catalog_changed: std::sync::atomic::AtomicBool,
 }
 
+#[derive(Serialize, Deserialize)]
 struct FileExchange {
     destination: portable::Destination,
     files: BTreeMap<String, Option<String>>,
@@ -299,7 +300,6 @@ pub struct ConnectOwner {
     playback: Arc<PlaybackOwner>,
     runtime: tokio::runtime::Handle,
     status: tokio::sync::watch::Sender<Status>,
-    started: tokio::sync::watch::Sender<bool>,
     network: tokio::sync::Mutex<Option<Arc<ConnectNetwork>>>,
     session: tokio::sync::RwLock<Option<Arc<Session>>>,
     actions: tokio::sync::Mutex<()>,
@@ -364,7 +364,6 @@ impl ConnectOwner {
             .0,
             network: tokio::sync::Mutex::new(None),
             session: tokio::sync::RwLock::new(None),
-            started: tokio::sync::watch::channel(false).0,
             actions: tokio::sync::Mutex::new(()),
             sync: tokio::sync::Mutex::new(()),
             transfers: Mutex::new(BTreeMap::new()),
@@ -386,7 +385,8 @@ impl ConnectOwner {
     }
 
     pub(crate) async fn media_availability(&self, uris: &[String]) -> Result<Vec<bool>, String> {
-        if self.status().settings.profile.is_none() {
+        let settings = self.status().settings;
+        if !settings.enabled || settings.profile.is_none() {
             return Ok(vec![false; uris.len()]);
         }
         let session = self.active().await?;
@@ -430,23 +430,6 @@ impl ConnectOwner {
         self.database.connect_roots(source).await.map_err(error)
     }
 
-    /// Called when a client offers continuation after inactivity. This only reads
-    /// reachable players; accepting the offer is a separate explicit action.
-    pub async fn continuation_offer(&self) -> Result<Option<Device>, String> {
-        let mut started = self.started.subscribe();
-        if tokio::time::timeout(Duration::from_secs(10), started.wait_for(|ready| *ready))
-            .await
-            .is_err()
-        {
-            return Ok(None);
-        }
-        if !self.status().settings.enabled || self.session.read().await.is_none() {
-            return Ok(None);
-        }
-        self.refresh_devices().await?;
-        Ok(self.status().continuation_device().cloned())
-    }
-
     pub(crate) fn start(self: &Arc<Self>) {
         let owner = Arc::clone(self);
         self.runtime.spawn(async move {
@@ -455,13 +438,10 @@ impl ConnectOwner {
                 let _sync = owner.sync.lock().await;
                 if !owner.joining.load(std::sync::atomic::Ordering::Acquire)
                     && owner.session.read().await.is_none()
+                    && owner.status().settings.enabled
                 {
                     if let Some(profile) = owner.status().settings.profile {
                         if let Err(error) = owner.open(profile, false).await {
-                            owner.failed(error);
-                        }
-                    } else if owner.status().settings.enabled {
-                        if let Err(error) = owner.network().await {
                             owner.failed(error);
                         }
                     }
@@ -481,66 +461,61 @@ impl ConnectOwner {
                 {
                     owner.failed(error);
                 }
-                owner.started.send_replace(true);
-                owner.source.connect_media_changed();
+                if owner.session.read().await.is_some() {
+                    owner.source.connect_media_changed();
+                }
             }
-            let weak = Arc::downgrade(&owner);
-            drop(owner);
-            let mut last_exchange = Instant::now();
-            let mut destination = None;
-            let mut busy = false;
-            loop {
-                if busy {
-                    tokio::task::yield_now().await;
-                } else {
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                }
-                busy = false;
-                let Some(owner) = weak.upgrade() else { return };
-                if owner.session.read().await.is_none() || owner.status().settings.setup_pending {
-                    continue;
-                }
-                if !owner.joining.load(std::sync::atomic::Ordering::Acquire)
-                    && !owner.status().settings.adopting
-                {
-                    match owner.database.connect_seed_page().await {
-                        Ok(seeded) => busy |= seeded,
-                        Err(error) => owner.failed(error.to_string()),
+        });
+    }
+
+    fn start_session(self: &Arc<Self>, session: Arc<Session>) {
+        let weak = Arc::downgrade(self);
+        let stop = session.stop.clone();
+        self.runtime.spawn(async move {
+            stop.run_until_cancelled(async move {
+                loop {
+                    let Some(owner) = weak.upgrade() else { return };
+                    if let Err(error) = owner.configure_network().await {
+                        owner.failed(error);
                     }
-                }
-                match owner.synchronize().await {
-                    Ok(changed) => busy |= changed,
-                    Err(error) => owner.failed(error),
-                }
-                if let Err(error) = owner.configure_network().await {
-                    owner.failed(error);
-                }
-                if let Some(session) = owner.session.read().await.clone() {
-                    match session
-                        .documents
-                        .prune_history(&session.identity, &[], library::CONNECT_PAGE_SIZE)
-                        .await
-                    {
-                        Ok(processed) => busy |= processed > 0,
-                        Err(error) => owner.failed(error.to_string()),
+                    if let Err(error) = owner.refresh_devices().await {
+                        owner.failed(error);
                     }
-                }
-                let current_destination = owner.status().settings.destination;
-                if last_exchange.elapsed() >= Duration::from_secs(60)
-                    || destination != current_destination
-                {
-                    destination = current_destination;
-                    last_exchange = Instant::now();
+                    loop {
+                        let mut busy = false;
+                        if !owner.joining.load(std::sync::atomic::Ordering::Acquire)
+                            && !owner.status().settings.adopting
+                        {
+                            match owner.database.connect_seed_page().await {
+                                Ok(seeded) => busy |= seeded,
+                                Err(error) => owner.failed(error.to_string()),
+                            }
+                        }
+                        match owner.synchronize().await {
+                            Ok(changed) => busy |= changed,
+                            Err(error) => owner.failed(error),
+                        }
+                        match session
+                            .documents
+                            .prune_history(&session.identity, &[], library::CONNECT_PAGE_SIZE)
+                            .await
+                        {
+                            Ok(processed) => busy |= processed > 0,
+                            Err(error) => owner.failed(error.to_string()),
+                        }
+                        if !busy {
+                            break;
+                        }
+                        tokio::task::yield_now().await;
+                    }
                     if let Err(error) = owner.exchange().await {
                         owner.failed(error);
                     }
-                    if owner.status().settings.enabled {
-                        if let Err(error) = owner.refresh_devices().await {
-                            owner.failed(error);
-                        }
-                    }
+                    drop(owner);
+                    tokio::time::sleep(Duration::from_secs(300)).await;
                 }
-            }
+            })
+            .await;
         });
     }
 
@@ -774,16 +749,18 @@ impl ConnectOwner {
             blake3::hash(profile.as_bytes()).to_hex()
         ));
         let documents = Arc::new(ProfileStore::open(&path, peer).await.map_err(error)?);
-        *self.session.write().await = Some(Arc::new(Session {
+        if let Some(previous) = self.session.write().await.replace(Arc::new(Session {
             settings_revision: Mutex::new(None),
             profile: profile.clone(),
             documents: documents.clone(),
             identity,
-            file_exchange: tokio::sync::Mutex::new(None),
+            file_exchange: tokio::sync::Mutex::new(()),
             stop: tokio_util::sync::CancellationToken::new(),
             receiving: Mutex::new(BTreeSet::new()),
             catalog_changed: std::sync::atomic::AtomicBool::new(false),
-        }));
+        })) {
+            previous.stop.cancel();
+        }
         if self.status().settings.enabled {
             if let Err(error) = self
                 .network()
@@ -868,6 +845,8 @@ impl ConnectOwner {
             self.status.send_modify(|status| {
                 status.profile_status = localization::tr("Set up this device");
             });
+        } else {
+            self.start_session(self.active().await?);
         }
         Ok(())
     }
@@ -940,41 +919,34 @@ impl ConnectOwner {
         Ok(())
     }
 
-    async fn close_network(&self) -> Result<(), String> {
-        let mut current = self.network.lock().await;
-        if let Some(network) = current.take() {
-            network.shutdown().await.map_err(error)?;
-        }
-        drop(current);
-        if let Some(session) = self.session.read().await.as_ref() {
-            session
-                .receiving
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .clear();
-        }
-        Ok(())
-    }
-
     async fn leave_profile(&self) -> Result<(), String> {
-        self.database
-            .connect_capture_enabled(false)
-            .await
-            .map_err(error)?;
+        self.save(|config| *config = ConnectSettings::default())?;
         if let Some(session) = self.session.write().await.take() {
             session.stop.cancel();
         }
-        self.close_network().await?;
+        let _sync = self.sync.lock().await;
+        for (_, cancel) in
+            std::mem::take(&mut *self.media_jobs.lock().unwrap_or_else(|p| p.into_inner()))
+        {
+            cancel.cancel();
+        }
+        self.transfers
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clear();
         self.joining
             .store(false, std::sync::atomic::Ordering::Release);
-        self.save(|config| {
-            config.enabled = false;
-            config.profile = None;
-            config.adopting = false;
-            config.established = false;
-            config.setup_pending = false;
-            config.destination = None;
-        })?;
+        let capture = self
+            .database
+            .connect_capture_enabled(false)
+            .await
+            .map_err(error);
+        let network = self.network.lock().await.take();
+        let closed = if let Some(network) = network {
+            network.shutdown().await.map_err(error)
+        } else {
+            Ok(())
+        };
         self.status.send_modify(|status| {
             status.devices.clear();
             status.pairing = None;
@@ -982,9 +954,10 @@ impl ConnectOwner {
             status.receiving_collection = false;
             status.invitation = None;
             status.identity = None;
+            status.media_status = None;
             status.profile_status = localization::tr("Connect is not enabled");
         });
-        Ok(())
+        capture.and(closed)
     }
 
     fn cancel_download(&self) {
@@ -1001,7 +974,6 @@ impl ConnectOwner {
     pub(crate) async fn reset_secret_storage(&self) -> Result<(), String> {
         self.cancel_download();
         let _actions = self.actions.lock().await;
-        let _sync = self.sync.lock().await;
         self.leave_profile().await
     }
 
@@ -1034,7 +1006,7 @@ impl ConnectOwner {
     }
 
     pub async fn execute(self: &Arc<Self>, action: Action) -> Result<Status, String> {
-        if matches!(action, Action::Leave | Action::Join { replace: true, .. }) {
+        if matches!(action, Action::Join { replace: true, .. }) {
             if let Some(session) = self.session.read().await.as_ref() {
                 session.stop.cancel();
             }
@@ -1069,47 +1041,19 @@ impl ConnectOwner {
             Some(self.actions.lock().await)
         };
         match action {
-            Action::Enable { enabled } => {
-                if enabled {
-                    self.save(|config| config.enabled = true)?;
-                    if let Some(profile) = self.status().settings.profile {
-                        if self.network.lock().await.is_none() {
-                            let _sync = self.sync.lock().await;
-                            self.open(profile, false).await?;
-                        }
-                    } else {
+            Action::Enable { enabled: false } | Action::Leave => self.leave_profile().await?,
+            Action::Enable { enabled: true } => {
+                self.save(|config| config.enabled = true)?;
+                if let Some(profile) = self.status().settings.profile {
+                    if self.session.read().await.is_none() || self.network.lock().await.is_none() {
                         let _sync = self.sync.lock().await;
-                        self.create_profile().await?;
+                        self.open(profile, false).await?;
                     }
-                    self.synchronize().await?;
                 } else {
                     let _sync = self.sync.lock().await;
-                    self.save(|config| config.enabled = false)?;
-                    for cancel in self
-                        .media_jobs
-                        .lock()
-                        .unwrap_or_else(|p| p.into_inner())
-                        .values()
-                    {
-                        cancel.cancel();
-                    }
-                    self.close_network().await?;
-                    self.joining
-                        .store(false, std::sync::atomic::Ordering::Release);
-                    self.status.send_modify(|status| {
-                        status.devices.retain(|device| device.enrolled);
-                        for device in &mut status.devices {
-                            device.reachable = false;
-                            device.has_playback = false;
-                            device.connection.clear();
-                        }
-                        status.pairing = None;
-                        status.connecting = false;
-                        status.receiving_collection = false;
-                        status.invitation = None;
-                        status.profile_status = localization::tr("Connect is not enabled");
-                    });
+                    self.create_profile().await?;
                 }
+                self.synchronize().await?;
             }
             Action::Create => {
                 if self.status().settings.profile.is_some() {
@@ -1201,6 +1145,7 @@ impl ConnectOwner {
                             .map_err(error)?;
                     }
                     self.save(|config| config.setup_pending = false)?;
+                    self.start_session(session);
                     self.source.connect_changed(false).await?;
                     self.source.connect_media_changed();
                     self.status.send_modify(|status| {
@@ -1255,10 +1200,6 @@ impl ConnectOwner {
                 drop(_sync);
                 self.synchronize().await?;
                 self.refresh_devices().await?;
-            }
-            Action::Leave => {
-                let _sync = self.sync.lock().await;
-                self.leave_profile().await?;
             }
             Action::Refresh => {
                 if self.session.read().await.is_some() {
@@ -1609,7 +1550,15 @@ impl ConnectOwner {
             } => {
                 let owner = Arc::clone(self);
                 self.runtime.spawn(async move {
-                    let _ = reply.send(owner.answer(&profile, &peer, &body).await);
+                    let result = match owner.active().await {
+                        Ok(session) => session
+                            .stop
+                            .run_until_cancelled(owner.answer(&session, &profile, &peer, &body))
+                            .await
+                            .unwrap_or_else(|| Err("Transfer cancelled".into())),
+                        Err(error) => Err(error),
+                    };
+                    let _ = reply.send(result);
                 });
             }
             NetworkEvent::Syncing {
@@ -1646,6 +1595,26 @@ impl ConnectOwner {
                     status.profile_status = profile_status;
                     changed
                 });
+                if !active {
+                    let owner = Arc::clone(self);
+                    self.runtime.spawn(async move {
+                        session
+                            .stop
+                            .run_until_cancelled(async {
+                                loop {
+                                    match owner.synchronize().await {
+                                        Ok(true) => tokio::task::yield_now().await,
+                                        Ok(false) => break,
+                                        Err(error) => {
+                                            owner.failed(error);
+                                            break;
+                                        }
+                                    }
+                                }
+                            })
+                            .await;
+                    });
+                }
             }
             NetworkEvent::Unavailable { profile, peer } => {
                 if self.status().settings.profile.as_deref() == Some(&profile) {
@@ -2106,8 +2075,13 @@ impl ConnectOwner {
         serde_json::from_slice(&answer).map_err(error)
     }
 
-    async fn answer(&self, profile: &str, peer: &str, bytes: &[u8]) -> Result<Vec<u8>, String> {
-        let session = self.active().await?;
+    async fn answer(
+        &self,
+        session: &Arc<Session>,
+        profile: &str,
+        peer: &str,
+        bytes: &[u8],
+    ) -> Result<Vec<u8>, String> {
         let network = self.connected_network().await?;
         if session.profile != profile
             || self.joining.load(std::sync::atomic::Ordering::Acquire)
@@ -2123,7 +2097,7 @@ impl ConnectOwner {
         let request: Request = serde_json::from_slice(bytes).map_err(error)?;
         let answer = match request {
             Request::ProfileSnapshot { setup } => {
-                let snapshot = self.export_session(&session, setup).await?;
+                let (snapshot, _) = self.export_session(session, setup).await?;
                 let hash = network
                     .media()
                     .publish_snapshot(snapshot, peer)
@@ -2312,16 +2286,19 @@ impl ConnectOwner {
 impl ConnectOwner {
     async fn export(&self) -> Result<tempfile::NamedTempFile, String> {
         let session = self.active().await?;
-        self.export_session(&session, false).await
+        self.export_session(&session, false)
+            .await
+            .map(|(file, _)| file)
     }
 
     async fn export_session(
         &self,
         session: &Arc<Session>,
         setup: bool,
-    ) -> Result<tempfile::NamedTempFile, String> {
-        self.synchronize().await?;
-        if !setup {
+    ) -> Result<(tempfile::NamedTempFile, i64), String> {
+        if setup {
+            self.synchronize().await?;
+        } else {
             loop {
                 if !self
                     .session
@@ -2345,7 +2322,7 @@ impl ConnectOwner {
             .await?
             .ok_or("The Connect file key is unavailable")?;
         let snapshot = tempfile::tempfile_in(&self.directory).map_err(error)?;
-        if setup {
+        let revision = if setup {
             // Folder identities and labels are setup data; track rows can follow
             // after this device chooses which existing folders to reuse.
             for source in self.source.list_sources().sources.iter() {
@@ -2370,9 +2347,9 @@ impl ConnectOwner {
                 .documents
                 .export_setup_snapshot(snapshot.try_clone().map_err(error)?)
                 .await
-                .map_err(error)?;
+                .map_err(error)?
         } else {
-            session
+            let revision = session
                 .documents
                 .export_device_snapshot(snapshot.try_clone().map_err(error)?, &session.identity)
                 .await
@@ -2386,13 +2363,14 @@ impl ConnectOwner {
                 .finish_device_snapshot(snapshot.try_clone().map_err(error)?, &members)
                 .await
                 .map_err(error)?;
-        }
+            revision
+        };
         let profile = session.profile.clone();
         let directory = self.directory.clone();
         tokio::task::spawn_blocking(move || {
             let output = tempfile::NamedTempFile::new_in(directory).map_err(error)?;
             portable::encrypt(snapshot, output.path(), &profile, &key)?;
-            Ok(output)
+            Ok((output, revision))
         })
         .await
         .map_err(error)?
@@ -2504,6 +2482,7 @@ impl ConnectOwner {
                     config.destination = Some(self.local_destination(&profile));
                 }
                 config.profile = Some(profile.clone());
+                config.enabled = true;
                 config.adopting = true;
             })?;
             if let Some(network) = self.network.lock().await.as_ref() {
@@ -2653,19 +2632,21 @@ impl ConnectOwner {
         let Some(destination) = self.status().settings.destination else {
             return Ok(());
         };
-        let mut previous = session.file_exchange.lock().await;
-        let cached = previous.get_or_insert_with(|| FileExchange {
-            destination: destination.clone(),
-            files: BTreeMap::new(),
-            revision: None,
-        });
-        if cached.destination != destination {
-            *cached = FileExchange {
+        let _exchange = session.file_exchange.lock().await;
+        let mut cached = session
+            .documents
+            .file_exchange()
+            .await
+            .map_err(error)?
+            .map(|state| serde_json::from_str::<FileExchange>(&state))
+            .transpose()
+            .map_err(error)?
+            .filter(|state| state.destination == destination)
+            .unwrap_or_else(|| FileExchange {
                 destination: destination.clone(),
                 files: BTreeMap::new(),
                 revision: None,
-            };
-        }
+            });
         let source = match &destination {
             portable::Destination::Remote { source_id, .. } => Some(self.source.client(source_id)?),
             portable::Destination::Local { .. } => None,
@@ -2753,9 +2734,13 @@ impl ConnectOwner {
         }
         let revision = session.documents.revision().await.map_err(error)?;
         if own_exists && cached.revision == Some(revision) {
-            return Ok(());
+            return session
+                .documents
+                .save_file_exchange(&serde_json::to_string(&cached).map_err(error)?)
+                .await
+                .map_err(error);
         }
-        let output = self.export_session(session, false).await?;
+        let (output, revision) = self.export_session(session, false).await?;
         let version = match &destination {
             portable::Destination::Local { path } => {
                 let path = path.join(&own_path);
@@ -2788,7 +2773,11 @@ impl ConnectOwner {
         cached.revision = Some(revision);
         // This device only writes its own file; other writers' snapshots remain intact.
         cached.files.insert(own_path, version);
-        Ok(())
+        session
+            .documents
+            .save_file_exchange(&serde_json::to_string(&cached).map_err(error)?)
+            .await
+            .map_err(error)
     }
 }
 

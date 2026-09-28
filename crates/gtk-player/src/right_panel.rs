@@ -51,7 +51,7 @@ pub struct RightPanelWidgets {
 }
 
 pub fn build_right_panel(
-    visualizer_area: &gtk::DrawingArea,
+    visualizer_area: &crate::visualizer::Visualizer,
     settings: &Settings,
 ) -> RightPanelWidgets {
     let resource = crate::ui_resource::RIGHT_PANEL_RESOURCE;
@@ -124,7 +124,7 @@ impl RightPanelWidgets {
         settings: &RightPanelSettings,
         combined_height: Option<i32>,
         lyrics_visible: bool,
-        visualizer: &gtk::DrawingArea,
+        visualizer: &crate::visualizer::Visualizer,
     ) {
         let order = settings.visible_panels(lyrics_visible, self.visualizer_visible.get());
         let combined = settings.combined;

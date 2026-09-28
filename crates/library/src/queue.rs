@@ -585,17 +585,17 @@ struct QueueOccurrenceRow {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueuePageRow {
-    pub occurrence: OccurrenceId,
-    pub position: i64,
+    pub entry: Arc<QueueOccurrence>,
     pub favorite: bool,
     pub primary_artist_media_uri: Option<String>,
-    pub media_uri: String,
-    pub title: String,
-    pub artist: String,
-    pub album: String,
-    pub year: Option<i64>,
-    pub duration_millis: i64,
-    pub artwork_binding: Option<Vec<u8>>,
+}
+
+impl Deref for QueuePageRow {
+    type Target = QueueOccurrence;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entry
+    }
 }
 
 impl QueueRepeatMode {
@@ -794,33 +794,22 @@ impl Database {
         );
         query
             .push(QUEUE_PRIMARY_ARTIST_SQL)
-            .push(" FROM requested LEFT JOIN tracks track ON track.media_uri=requested.media_uri");
+            .push(" FROM requested LEFT JOIN tracks track ON track.media_uri=requested.media_uri ORDER BY ordinal");
         let mut connection = self.acquire_reader().await?;
         let facts = query
             .build_query_as::<(i64, bool, Option<String>)>()
             .fetch_all(&mut *connection)
             .await?;
-        let mut rows = facts
+        Ok(facts
             .into_iter()
-            .map(|(ordinal, favorite, primary_artist_media_uri)| {
-                let occurrence = &window[ordinal as usize];
-                QueuePageRow {
-                    occurrence: occurrence.occurrence.clone(),
-                    position: ordinal,
+            .map(
+                |(ordinal, favorite, primary_artist_media_uri)| QueuePageRow {
+                    entry: Arc::clone(&window[ordinal as usize]),
                     favorite,
                     primary_artist_media_uri,
-                    media_uri: occurrence.media_uri.clone(),
-                    title: occurrence.title.clone(),
-                    artist: occurrence.artist.clone(),
-                    album: occurrence.album.clone(),
-                    year: occurrence.year,
-                    duration_millis: occurrence.duration_millis,
-                    artwork_binding: occurrence.artwork_binding.clone(),
-                }
-            })
-            .collect::<Vec<_>>();
-        rows.sort_unstable_by_key(|row| row.position);
-        Ok(rows)
+                },
+            )
+            .collect())
     }
 }
 

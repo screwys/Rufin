@@ -3,11 +3,11 @@ use gst::prelude::*;
 use gstreamer as gst;
 #[cfg(test)]
 use gstreamer_app as gst_app;
+use playback::TrackLoudness;
 use playback::{
     AudioOutput, BackendAudioSettings, DEFAULT_PLAYBACK_RATE, EQUALIZER_BAND_COUNT,
     EqualizerSettings, LoudnessNormalization, LoudnessNormalizationScope,
 };
-use playback::{PreparedStream, TrackLoudness};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -19,7 +19,7 @@ const CLASSIC_EQUALIZER_FREQUENCIES: [f64; EQUALIZER_BAND_COUNT] = [
 const EQUALIZER_DUMMY_LOW_FREQUENCY: f64 = 20.0;
 const EQUALIZER_DUMMY_HIGH_FREQUENCY: f64 = 20_000.0;
 
-pub(super) type SharedQueuedStream = Arc<Mutex<PreparedStream>>;
+pub(super) type SharedQueuedLoudness = Arc<Mutex<TrackLoudness>>;
 
 pub(super) struct AudioGraph {
     root: gst::Element,
@@ -75,7 +75,7 @@ impl AudioGraph {
         settings: &BackendAudioSettings,
         playback_rate: f64,
         current_loudness: TrackLoudness,
-        queued_stream: SharedQueuedStream,
+        queued_loudness: SharedQueuedLoudness,
     ) -> Result<Self, String> {
         let bin = gst::Bin::new();
         let convert_in = make_element("audioconvert", "rufin-audio-convert-in")?;
@@ -130,7 +130,7 @@ impl AudioGraph {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .apply_loudness();
-        install_loudness_boundary(&convert_in, Arc::clone(&state), queued_stream)?;
+        install_loudness_boundary(&convert_in, Arc::clone(&state), queued_loudness)?;
 
         // Sample after playbin's queue so visualization follows audible output.
         let visualizer_pad = output.static_pad("sink");
@@ -177,8 +177,18 @@ impl AudioGraph {
         &self.root
     }
 
+    pub(super) fn clear_stream(&mut self) {
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        state.tags = gst::TagList::new();
+        state.current_loudness = TrackLoudness::default();
+    }
+
     pub(super) fn output(&self) -> &gst::Element {
         &self.output
+    }
+
+    pub(super) fn uses_output(&self, selected: Option<&str>) -> bool {
+        self.audio_output.as_deref() == selected
     }
 
     pub(super) fn reconfigure(
@@ -323,7 +333,7 @@ fn apply_effects(bins: &[gst::Element; 3], before: &AudioEffects, after: &AudioE
 fn install_loudness_boundary(
     input: &gst::Element,
     state: Arc<Mutex<AudioGraphState>>,
-    stream: SharedQueuedStream,
+    loudness: SharedQueuedLoudness,
 ) -> Result<(), String> {
     let input = input
         .static_pad("sink")
@@ -334,11 +344,11 @@ fn install_loudness_boundary(
         };
         match event.view() {
             gst::EventView::StreamStart(_) => {
-                let stream = stream
+                let loudness = loudness
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
                 let mut state = state.lock().unwrap_or_else(|p| p.into_inner());
-                state.current_loudness = stream.loudness.clone();
+                state.current_loudness = loudness.clone();
                 state.tags = gst::TagList::new();
                 state.apply_loudness();
             }
@@ -716,26 +726,22 @@ mod tests {
         }
     }
 
-    fn test_stream(loudness: TrackLoudness) -> SharedQueuedStream {
-        Arc::new(Mutex::new(PreparedStream::new(
-            playback::ResolvedStream::new("file:///test.flac"),
-            loudness,
-        )))
+    fn test_stream(loudness: TrackLoudness) -> SharedQueuedLoudness {
+        Arc::new(Mutex::new(loudness))
     }
 
-    fn empty_stream() -> SharedQueuedStream {
+    fn empty_stream() -> SharedQueuedLoudness {
         test_stream(TrackLoudness::default())
     }
 
     fn test_graph(
         settings: &BackendAudioSettings,
         playback_rate: f64,
-        stream: SharedQueuedStream,
+        stream: SharedQueuedLoudness,
     ) -> Result<AudioGraph, String> {
         let current_loudness = stream
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .loudness
             .clone();
         AudioGraph::new(settings, playback_rate, current_loudness, stream)
     }
@@ -1115,7 +1121,7 @@ mod tests {
         };
         let observed = observe_direct_gains(&graph, move |index| {
             if index == 0 {
-                stream.lock().expect("prepared stream").loudness = next.clone();
+                *stream.lock().expect("prepared loudness") = next.clone();
             }
         });
         assert!(observed.len() >= 2, "observed gains: {observed:?}");
@@ -1143,7 +1149,7 @@ mod tests {
         });
         let graph = test_graph(&settings, DEFAULT_PLAYBACK_RATE, Arc::clone(&stream))
             .expect("normalization graph");
-        stream.lock().expect("prepared stream").loudness = TrackLoudness {
+        *stream.lock().expect("prepared loudness") = TrackLoudness {
             track: Some(Box::new(measurement(-18.0, Some(1.0)))),
             album: None,
         };
@@ -1245,7 +1251,7 @@ mod tests {
             .add_probe(gst::PadProbeType::BUFFER, move |pad, _| {
                 let index = index.fetch_add(1, Ordering::Relaxed);
                 if index > 0 {
-                    stream.lock().unwrap().loudness = if index == 1 || index == 3 {
+                    *stream.lock().unwrap() = if index == 1 || index == 3 {
                         TrackLoudness::default()
                     } else {
                         loudness.clone()

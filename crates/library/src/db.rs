@@ -463,7 +463,7 @@ async fn open_readers(
     maximum: u32,
 ) -> LibraryResult<SqlitePool> {
     let catalog = catalog.to_path_buf();
-    Ok(SqlitePoolOptions::new()
+    let options = SqlitePoolOptions::new()
         .min_connections(minimum)
         .max_connections(maximum)
         .acquire_timeout(ACQUIRE_TIMEOUT)
@@ -487,9 +487,12 @@ async fn open_readers(
                 connection.lock_handle().await?.remove_progress_handler();
                 Ok(true)
             })
-        })
-        .connect_with(reader_options(path))
-        .await?)
+        });
+    if minimum == 0 {
+        Ok(options.connect_lazy_with(reader_options(path)))
+    } else {
+        Ok(options.connect_with(reader_options(path)).await?)
+    }
 }
 
 async fn prepare_catalog(

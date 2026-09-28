@@ -232,7 +232,7 @@ impl ArtworkState {
             artwork_external_policy(&self.settings.current.borrow())
         };
         let request = if refresh_desktop_on_ready {
-            ArtworkRequest::original(artwork, LARGE_COVER_SIZE)
+            ArtworkRequest::original(artwork, render_size)
         } else {
             ArtworkRequest::new(artwork, fetch_size, render_size)
         }
@@ -285,17 +285,11 @@ impl ArtworkState {
                 return;
             }
         }
-        if !refresh_desktop_on_ready
-            && let Some(texture) = self.textures.borrow_mut().cached_texture(&key)
-        {
-            tile.set_texture_if_current(generation, texture);
-            return;
-        }
         let preview = refresh_desktop_on_ready.then(|| {
             ArtworkRequest::new(
                 request.binding.clone(),
                 MEDIUM_COVER_SIZE,
-                MEDIUM_COVER_SIZE,
+                request.render_size.min(MEDIUM_COVER_SIZE),
             )
             .with_external(request.external.clone())
             .cache_only()
@@ -338,16 +332,16 @@ impl ArtworkState {
     ) -> bool {
         match outcome {
             artwork::ArtworkOutcome::Ready(loaded) => {
-                let key = loaded.image.key().clone();
-                if let Some(texture) = self.texture_for_decoded(loaded.image) {
+                let key = loaded.key().clone();
+                if let Some(texture) = self.texture_for_decoded(Arc::clone(&loaded)) {
                     let current = tile.set_texture_if_current(generation, texture.clone());
                     if current
                         && animate
-                        && let Some(bytes) = loaded.original
+                        && let Some(bytes) = loaded.animation_bytes()
                     {
                         let lease = self.animations.borrow_mut().attach(
                             key,
-                            bytes,
+                            Arc::clone(bytes),
                             tile,
                             generation,
                             self.artwork_scale(),
@@ -408,7 +402,7 @@ impl ArtworkState {
                     return false;
                 };
                 shell
-                    .texture_for_decoded(loaded.image)
+                    .texture_for_decoded(loaded)
                     .is_some_and(|texture| tile.set_preview_if_current(generation, texture))
             });
             if preview_shown {

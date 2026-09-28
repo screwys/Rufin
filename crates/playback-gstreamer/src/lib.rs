@@ -1,4 +1,4 @@
-use audio_processing::{connect_server_certificate_policy, ensure_gstreamer_initialized};
+use audio_processing::{configure_sources, ensure_gstreamer_initialized};
 use gst::glib;
 use gst::prelude::*;
 use gstreamer as gst;

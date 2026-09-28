@@ -77,7 +77,7 @@ impl ServerKind {
         }
     }
 
-    fn object_id(self, entity: &str, raw: &str) -> String {
+    pub(crate) fn object_id(self, entity: &str, raw: &str) -> String {
         format!("{}:{entity}:{raw}", self.source_kind())
     }
 

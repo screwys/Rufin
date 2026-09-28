@@ -4,7 +4,7 @@
 use crate::file::metadata::{
     MetadataFileTarget, album_metadata_from_targets, artist_metadata_from_targets,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -179,11 +179,9 @@ impl SelectedFeed {
             | (Implementation::Local(_), SelectedFeedChange::Local(LocalLiveChange::Rescan)) => {
                 Ok(None)
             }
-            (_, SelectedFeedChange::Remote(RemoteItemChange::Items { upserts, removals })) => self
-                .source
-                .apply_items(database, upserts, removals)
-                .await
-                .map(Some),
+            (_, SelectedFeedChange::Remote(RemoteItemChange::Items(items))) => {
+                self.source.apply_changes(database, items).await.map(Some)
+            }
             (
                 Implementation::Files(files),
                 SelectedFeedChange::Files(crate::file::remote::changes::FileChange::Inventory),
@@ -390,44 +388,68 @@ pub(crate) fn optional_collection_error(error: SourceError) -> SourceResult<()> 
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum RemoteItemUpdate {
+    Metadata,
+    UserData(library::SourceUserData),
+    Remove,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum RemoteItemChange {
-    Items {
-        upserts: Vec<String>,
-        removals: Vec<String>,
-    },
+    Items(BTreeMap<String, RemoteItemUpdate>),
     BoundaryLost,
 }
 
 impl RemoteItemChange {
-    fn merge(self, incoming: Self) -> Self {
-        match (self, incoming) {
-            (Self::BoundaryLost, _) | (_, Self::BoundaryLost) => Self::BoundaryLost,
-            (
-                Self::Items {
-                    upserts: mut current_upserts,
-                    removals: mut current_removals,
-                },
-                Self::Items { upserts, removals },
-            ) => {
-                current_upserts.extend(upserts);
-                current_upserts.sort();
-                current_upserts.dedup();
-                current_removals.extend(removals);
-                current_removals.sort();
-                current_removals.dedup();
-                if current_upserts.len().saturating_add(current_removals.len()) > LIVE_CHANGE_LIMIT
-                    || current_upserts
-                        .iter()
-                        .any(|id| current_removals.binary_search(id).is_ok())
-                {
-                    Self::BoundaryLost
-                } else {
-                    Self::Items {
-                        upserts: current_upserts,
-                        removals: current_removals,
-                    }
-                }
+    pub(crate) fn items(upserts: Vec<String>, removals: Vec<String>) -> Self {
+        let mut items: BTreeMap<_, _> = upserts
+            .into_iter()
+            .map(|id| (id, RemoteItemUpdate::Metadata))
+            .collect();
+        for id in removals {
+            if matches!(
+                items.insert(id, RemoteItemUpdate::Remove),
+                Some(RemoteItemUpdate::Metadata)
+            ) {
+                return Self::BoundaryLost;
             }
+        }
+        if items.len() > LIVE_CHANGE_LIMIT {
+            Self::BoundaryLost
+        } else {
+            Self::Items(items)
+        }
+    }
+
+    fn merge(self, incoming: Self) -> Self {
+        let (Self::Items(mut current), Self::Items(incoming)) = (self, incoming) else {
+            return Self::BoundaryLost;
+        };
+        for (id, change) in incoming {
+            if let Some(previous) = current.get_mut(&id) {
+                match (previous, change) {
+                    (
+                        RemoteItemUpdate::UserData(previous),
+                        RemoteItemUpdate::UserData(incoming),
+                    ) => previous.merge(incoming),
+                    (previous @ RemoteItemUpdate::UserData(_), RemoteItemUpdate::Metadata) => {
+                        *previous = RemoteItemUpdate::Metadata
+                    }
+                    (
+                        RemoteItemUpdate::Metadata,
+                        RemoteItemUpdate::UserData(_) | RemoteItemUpdate::Metadata,
+                    )
+                    | (RemoteItemUpdate::Remove, RemoteItemUpdate::Remove) => {}
+                    _ => return Self::BoundaryLost,
+                }
+            } else {
+                current.insert(id, change);
+            }
+        }
+        if current.len() > LIVE_CHANGE_LIMIT {
+            Self::BoundaryLost
+        } else {
+            Self::Items(current)
         }
     }
 }
@@ -2807,6 +2829,44 @@ impl Source {
         self.publish_items(scan).await
     }
 
+    pub(crate) async fn apply_changes(
+        &self,
+        database: &Database,
+        items: impl IntoIterator<Item = (String, RemoteItemUpdate)>,
+    ) -> SourceResult<ScanOutcome> {
+        let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
+        let (mut upserts, mut removals) = (Vec::new(), Vec::new());
+        for (id, change) in items {
+            match change {
+                RemoteItemUpdate::Remove => removals.push(id),
+                RemoteItemUpdate::Metadata => upserts.push(id),
+                RemoteItemUpdate::UserData(facts) => {
+                    let mut known = false;
+                    if let Implementation::JellyfinEmby(provider) = &self.implementation {
+                        for kind in ["track", "album", "artist"] {
+                            known |= scan
+                                .write_source_user_data(
+                                    kind,
+                                    provider.kind.object_id(kind, &id),
+                                    facts.clone(),
+                                )
+                                .await?;
+                        }
+                    }
+                    if !known {
+                        upserts.push(id);
+                    }
+                }
+            }
+        }
+        if upserts.is_empty() && removals.is_empty() {
+            Ok(scan.finish().await?)
+        } else {
+            self.stage_items(&mut scan, upserts, removals).await?;
+            self.publish_items(scan).await
+        }
+    }
+
     async fn stage_items(
         &self,
         scan: &mut Scan,
@@ -3857,34 +3917,40 @@ mod refresh_laws {
 
     #[test]
     fn selected_feed_accumulates_exact_jellyfin_ids_with_one_bound() {
-        let merged = SelectedFeedChange::Remote(RemoteItemChange::Items {
-            upserts: vec!["two".to_string(), "one".to_string()],
-            removals: Vec::new(),
-        })
-        .merge(SelectedFeedChange::Remote(RemoteItemChange::Items {
-            upserts: vec!["one".to_string(), "three".to_string()],
-            removals: vec!["gone".to_string()],
-        }));
-        let SelectedFeedChange::Remote(RemoteItemChange::Items { upserts, removals }) = merged
-        else {
+        let merged = SelectedFeedChange::Remote(RemoteItemChange::items(
+            vec!["two".to_string(), "one".to_string()],
+            Vec::new(),
+        ))
+        .merge(SelectedFeedChange::Remote(RemoteItemChange::items(
+            vec!["one".to_string(), "three".to_string()],
+            vec!["gone".to_string()],
+        )));
+        let SelectedFeedChange::Remote(RemoteItemChange::Items(items)) = merged else {
             panic!("exact evidence widened unexpectedly");
         };
-        assert_eq!(upserts, ["one", "three", "two"]);
-        assert_eq!(removals, ["gone"]);
+        assert_eq!(
+            items,
+            BTreeMap::from([
+                ("one".into(), RemoteItemUpdate::Metadata),
+                ("three".into(), RemoteItemUpdate::Metadata),
+                ("two".into(), RemoteItemUpdate::Metadata),
+                ("gone".into(), RemoteItemUpdate::Remove),
+            ])
+        );
     }
 
     #[test]
     fn selected_feed_overflow_coalesces_to_one_boundary_operation() {
-        let merged = SelectedFeedChange::Remote(RemoteItemChange::Items {
-            upserts: (0..LIVE_CHANGE_LIMIT)
+        let merged = SelectedFeedChange::Remote(RemoteItemChange::items(
+            (0..LIVE_CHANGE_LIMIT)
                 .map(|index| format!("item-{index}"))
                 .collect(),
-            removals: Vec::new(),
-        })
-        .merge(SelectedFeedChange::Remote(RemoteItemChange::Items {
-            upserts: vec!["overflow".to_string()],
-            removals: Vec::new(),
-        }));
+            Vec::new(),
+        ))
+        .merge(SelectedFeedChange::Remote(RemoteItemChange::items(
+            vec!["overflow".to_string()],
+            Vec::new(),
+        )));
         assert!(matches!(
             merged,
             SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost)

@@ -411,8 +411,8 @@ pub async fn build(
                         crate::shell::player_menus::present_queue_track_context_menu(
                             target,
                             &shell,
-                            row.media_uri,
-                            row.occurrence,
+                            row.media_uri.clone(),
+                            row.occurrence.clone(),
                             position,
                         );
                     }
@@ -546,7 +546,6 @@ pub async fn build(
     } else {
         shell.render_current_route();
     }
-    shell.player_ui.render_queue_panel();
     shell.player_ui.render_lyrics_panel();
     shell.player_ui.update_bottom_player();
     shell.player_ui.update_right_panel_button();
