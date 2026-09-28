@@ -445,7 +445,8 @@ impl AlbumTableCell {
                         .set_text(&album_field(&row, imp.field.get().unwrap()));
                     shell.bind_download_badge(
                         &cell.downloaded(),
-                        collection_is_downloaded(row.track_count, row.downloaded_count),
+                        imp.field.get() == Some(LibraryField::Title)
+                            && collection_is_downloaded(row.track_count, row.downloaded_count),
                     );
                 } else {
                     cell.clear();
