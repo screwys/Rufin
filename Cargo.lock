@@ -201,7 +201,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app-identity"
-version = "0.16.5"
+version = "0.16.6"
 
 [[package]]
 name = "append-only-bytes"
@@ -273,7 +273,7 @@ checksum = "2ccd462b64c3c72f1be8305905a85d85403d768e8690c9b8bd3b9009a5761679"
 
 [[package]]
 name = "artwork"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "async-trait",
  "fast_image_resize",
@@ -564,7 +564,7 @@ checksum = "21e4227379beff4205943696e6c3e0cd809bacdf3f0edd6e3dd153e2269571a4"
 
 [[package]]
 name = "audio-processing"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "base64 0.23.1",
  "ebur128",
@@ -673,7 +673,7 @@ dependencies = [
 
 [[package]]
 name = "backup"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "age",
  "blake3",
@@ -1741,7 +1741,7 @@ dependencies = [
 
 [[package]]
 name = "desktop-integration"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "app-identity",
  "apple-cf",
@@ -1896,7 +1896,7 @@ checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "downloads"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "async-channel",
  "blake3",
@@ -3212,7 +3212,7 @@ dependencies = [
 
 [[package]]
 name = "gtk-editors"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "artwork",
  "async-channel",
@@ -3228,7 +3228,7 @@ dependencies = [
 
 [[package]]
 name = "gtk-library"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "artwork",
  "downloads",
@@ -3248,7 +3248,7 @@ dependencies = [
 
 [[package]]
 name = "gtk-media-menus"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "downloads",
  "glib-build-tools",
@@ -3265,7 +3265,7 @@ dependencies = [
 
 [[package]]
 name = "gtk-player"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "app-identity",
  "artwork",
@@ -3285,7 +3285,7 @@ dependencies = [
 
 [[package]]
 name = "gtk-preferences"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "backup",
  "desktop-integration",
@@ -3311,7 +3311,7 @@ dependencies = [
 
 [[package]]
 name = "gtk-shell"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "app-identity",
  "artwork",
@@ -3345,7 +3345,7 @@ dependencies = [
 
 [[package]]
 name = "gtk-widgets"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "app-identity",
  "artwork",
@@ -4794,7 +4794,7 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "library"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "blake3",
  "chrono",
@@ -4911,7 +4911,7 @@ dependencies = [
 
 [[package]]
 name = "localization"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "gettext-rs",
  "spiritless_po",
@@ -5194,7 +5194,7 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "lyrics"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "futures-util",
  "lindera",
@@ -5366,7 +5366,7 @@ dependencies = [
 
 [[package]]
 name = "metadata-lookup"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "reqwest 0.13.5",
  "serde_json",
@@ -6743,7 +6743,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "playback"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "library",
  "serde",
@@ -6755,7 +6755,7 @@ dependencies = [
 
 [[package]]
 name = "playback-cast"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "audio-processing",
  "axum",
@@ -6781,7 +6781,7 @@ dependencies = [
 
 [[package]]
 name = "playback-gstreamer"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "audio-processing",
  "gstreamer",
@@ -6946,7 +6946,7 @@ dependencies = [
 
 [[package]]
 name = "presence"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "playback",
  "serde",
@@ -7787,7 +7787,7 @@ dependencies = [
 
 [[package]]
 name = "rufin"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "app-identity",
  "desktop-integration",
@@ -7804,7 +7804,7 @@ dependencies = [
 
 [[package]]
 name = "rufin-connect"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "anyhow",
  "bao-tree",
@@ -7830,7 +7830,7 @@ dependencies = [
 
 [[package]]
 name = "rufin-controller"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "app-identity",
  "localization",
@@ -7844,7 +7844,7 @@ dependencies = [
 
 [[package]]
 name = "rufin-core"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "age",
  "app-identity",
@@ -8145,7 +8145,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scrobbling"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "library",
  "md-5 0.10.6",
@@ -8206,7 +8206,7 @@ dependencies = [
 
 [[package]]
 name = "secrets"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "app-identity",
  "apple-native-keyring-store",
@@ -8754,7 +8754,7 @@ checksum = "ea06cc588e43c632923a55450401b8f25e628131571d4e1baea1bdfdb2b5ed06"
 
 [[package]]
 name = "sources"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "async-channel",
  "base64 0.23.1",
@@ -10119,7 +10119,7 @@ dependencies = [
 
 [[package]]
 name = "web"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "artwork",
  "askama",
@@ -10486,7 +10486,7 @@ dependencies = [
 
 [[package]]
 name = "windows-updater"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "app-identity",
  "directories",
@@ -10771,7 +10771,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.16.5"
+version = "0.16.6"
 dependencies = [
  "directories",
  "proc-macro2",

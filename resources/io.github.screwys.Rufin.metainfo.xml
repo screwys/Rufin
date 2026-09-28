@@ -38,39 +38,39 @@
   <screenshots>
     <screenshot type="default">
       <caption>Browse your music library</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.5/resources/screenshots/Rufin.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/Rufin.png</image>
     </screenshot>
     <screenshot>
       <caption>View artist details</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.5/resources/screenshots/artist_detail.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/artist_detail.png</image>
     </screenshot>
     <screenshot>
       <caption>Browse genres</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.5/resources/screenshots/genres.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/genres.png</image>
     </screenshot>
     <screenshot>
       <caption>Create smart playlists</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.5/resources/screenshots/smart_playlists.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/smart_playlists.png</image>
     </screenshot>
     <screenshot>
       <caption>Configure playback</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.5/resources/screenshots/playback_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/playback_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Use the fullscreen player</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.5/resources/screenshots/fullscreen_player.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/fullscreen_player.png</image>
     </screenshot>
     <screenshot>
       <caption>Configure the visualizer</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.5/resources/screenshots/visualizer_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/visualizer_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Configure integrations</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.5/resources/screenshots/integrations.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/integrations.png</image>
     </screenshot>
     <screenshot>
       <caption>Edit a playlist</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.5/resources/screenshots/playlist_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/playlist_settings.png</image>
     </screenshot>
   </screenshots>
   <launchable type="desktop-id">io.github.screwys.Rufin.desktop</launchable>
@@ -81,6 +81,14 @@
     <control>touch</control>
   </supports>
   <releases>
+    <release version="0.16.6" date="2026-09-28">
+      <description>
+        <p>A quick patch for flatpak.</p>
+        <ul>
+          <li>Rufin now translates absolute paths to flatpak portal adresses. This fixes discovered playlists not working in fltapak and &quot;Open with&quot; actions.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.16.5" date="2026-09-28">
       <description>
         <p>This is a mid-sized release that focuses mostly on fixes and refining existing features, but we also have several new features. I also have a buymeacoffee page now!</p>
