@@ -1,6 +1,6 @@
 use super::Shell;
 use adw::prelude::*;
-use gtk::{gdk, gio, glib, graphene};
+use gtk::{gdk, gio, glib};
 use gtk_library::activity::ActivityCollections;
 use gtk_player::fullscreen_background::FullscreenBackground;
 use gtk_widgets::{
@@ -9,7 +9,8 @@ use gtk_widgets::{
     route::Route,
 };
 use library::{ActivityOverview, CalendarActivityPeriod};
-use localization::{msgid, tr, tr_with};
+use localization::{tr, tr_with};
+use rufin_core::activity::{ReportAppearance, percentage_change, period_key, period_label};
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},
@@ -38,6 +39,8 @@ pub(super) struct ActivityView {
     next: gtk::Button,
     export: gtk::Button,
     export_dialog: gtk::FileDialog,
+    export_background_color: gtk::Box,
+    hours_icon: gtk::Image,
     months: RefCell<Vec<(i32, u8)>>,
     periods: RefCell<Vec<CalendarActivityPeriod>>,
     changing_period: Cell<bool>,
@@ -164,6 +167,7 @@ impl ActivityView {
             show_genres: adw::SwitchRow, show_comparison: adw::SwitchRow,
             show_rufin_in_headline: adw::SwitchRow,
             result_count: gtk::DropDown, export_dialog: gtk::FileDialog,
+            export_background_color: gtk::Box, hours_icon: gtk::Image,
         });
         let window = shell.chrome.window.downgrade();
         customize.connect_clicked(move |_| {
@@ -262,6 +266,8 @@ impl ActivityView {
             next,
             export,
             export_dialog,
+            export_background_color,
+            hours_icon,
             months: RefCell::new(Vec::new()),
             periods: RefCell::new(Vec::new()),
             changing_period: Cell::new(false),
@@ -739,13 +745,27 @@ impl ActivityView {
     }
 
     fn export_png(self: &Rc<Self>) {
-        self.transition.skip();
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
         let Some(period) = self.selected_period() else {
             return;
         };
+        let Some(data) = self.data.borrow().clone() else {
+            return;
+        };
+        let settings = shell.settings.current.borrow().activity_overview.clone();
+        let rgb = |color: gdk::RGBA| {
+            [color.red(), color.green(), color.blue()]
+                .map(|channel| (channel * 255.0).round() as u8)
+        };
+        let appearance = ReportAppearance {
+            dark: adw::StyleManager::default().is_dark(),
+            foreground: rgb(self.title.color()),
+            background: rgb(self.export_background_color.color()),
+            accent: rgb(self.hours_icon.color()),
+        };
+        let artwork = shell.products.artwork.clone();
         self.export_dialog
             .set_initial_name(Some(&format!("rufin-{}.png", period_key(period))));
         let view = Rc::clone(self);
@@ -757,31 +777,25 @@ impl ActivityView {
             else {
                 return;
             };
-            let Some(renderer) = shell.chrome.window.renderer() else {
-                return;
+            view.export.set_sensitive(false);
+            let task = shell
+                .products
+                .runtime
+                .spawn(rufin_core::activity::export_png(
+                    data, period, settings, appearance, artwork,
+                ));
+            let result = task
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result);
+            view.export.set_sensitive(true);
+            let bytes = match result {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    shell.control_feedback.show_feedback_toast(error);
+                    return;
+                }
             };
-            let snapshot = gtk::Snapshot::new();
-            let (width, height) = (view.report.width() as f32, view.report.height() as f32);
-            let scale = 1536.0 / width.max(1.0);
-            snapshot.scale(scale, scale);
-            gtk::WidgetPaintable::new(Some(&view.report)).snapshot(
-                &snapshot,
-                f64::from(width),
-                f64::from(height),
-            );
-            let Some(node) = snapshot.to_node() else {
-                return;
-            };
-            let texture = renderer.render_texture(
-                &node,
-                Some(&graphene::Rect::new(
-                    0.0,
-                    0.0,
-                    width * scale,
-                    height * scale,
-                )),
-            );
-            let bytes = texture.save_to_png_bytes();
             if let Err((_, error)) = file
                 .replace_contents_future(
                     bytes,
@@ -802,46 +816,4 @@ impl ActivityView {
 fn parse_month(month: &str) -> Option<(i32, u8)> {
     let (year, month) = month.split_once('-')?;
     Some((year.parse().ok()?, month.parse().ok()?))
-}
-
-fn period_key(period: CalendarActivityPeriod) -> String {
-    match period {
-        CalendarActivityPeriod::Month { year, month } => format!("{year:04}-{month:02}"),
-        CalendarActivityPeriod::Year(year) => year.to_string(),
-        CalendarActivityPeriod::Lifetime => String::new(),
-    }
-}
-
-fn period_label(period: CalendarActivityPeriod) -> String {
-    match period {
-        CalendarActivityPeriod::Month { year, month } => {
-            let message = match month {
-                1 => msgid("January {year}"),
-                2 => msgid("February {year}"),
-                3 => msgid("March {year}"),
-                4 => msgid("April {year}"),
-                5 => msgid("May {year}"),
-                6 => msgid("June {year}"),
-                7 => msgid("July {year}"),
-                8 => msgid("August {year}"),
-                9 => msgid("September {year}"),
-                10 => msgid("October {year}"),
-                11 => msgid("November {year}"),
-                12 => msgid("December {year}"),
-                _ => return period_key(period),
-            };
-            tr_with(message, &[("year", &year.to_string())])
-        }
-        _ => period_key(period),
-    }
-}
-
-fn percentage_change(current: i64, previous: i64) -> String {
-    if previous == 0 {
-        return String::new();
-    }
-    format!(
-        "({:+.0}%)",
-        (current as f64 - previous as f64) * 100.0 / previous as f64
-    )
 }

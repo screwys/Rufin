@@ -18,7 +18,7 @@ use crate::fetch::{FetchContext, FetchOutcome};
 use crate::selection::Candidate;
 use crate::{
     ArtworkBinding, ArtworkError, ArtworkKey, ArtworkLoad, ArtworkPreparation, ArtworkRequest,
-    DecodedImage, ExternalPolicy, PendingArtwork, RequestId, SourceResolver,
+    DecodedImage, PendingArtwork, RequestId, SourceResolver,
 };
 
 pub(crate) const WORKERS: usize = 4;
@@ -300,8 +300,21 @@ impl Pipeline {
         sizes: &[ImageSize],
     ) -> Option<std::path::PathBuf> {
         request.binding.candidates.iter().find_map(|candidate| {
-            cached_leaf_file(&self.shared, candidate, sizes, &request.external)
+            if candidate.is_external() && !request.external.allow_cached {
+                return None;
+            }
+            cached_leaf_file(&self.shared, candidate, sizes)
         })
+    }
+
+    pub(crate) fn cached_binding_file(
+        &self,
+        binding: &ArtworkBinding,
+    ) -> Option<std::path::PathBuf> {
+        binding
+            .candidates
+            .iter()
+            .find_map(|candidate| cached_leaf_file(&self.shared, candidate, CACHED_IMAGE_SIZES))
     }
 
     pub(crate) fn key(&self, request: &ArtworkRequest) -> ArtworkKey {
@@ -595,11 +608,7 @@ fn cached_leaf_file(
     shared: &Shared,
     candidate: &Candidate,
     sizes: &[ImageSize],
-    external: &ExternalPolicy,
 ) -> Option<std::path::PathBuf> {
-    if candidate.is_external() && !external.allow_cached {
-        return None;
-    }
     sizes.iter().find_map(|size| {
         shared
             .cache
@@ -614,12 +623,8 @@ fn resolve_candidate(shared: &Shared, work: &Work, candidate: &Candidate) -> Res
     let request = &work.request;
     if request.fetch_size == ImageSize::Original
         && matches!(result, Resolution::Missing | Resolution::Failed(_))
-        && let Some(path) = cached_leaf_file(
-            shared,
-            candidate,
-            &CACHED_IMAGE_SIZES[1..],
-            &request.external,
-        )
+        && (!candidate.is_external() || request.external.allow_cached)
+        && let Some(path) = cached_leaf_file(shared, candidate, &CACHED_IMAGE_SIZES[1..])
         && let Ok(bytes) = std::fs::read(path)
         && let Ok(image) = decode_original(
             Arc::from(bytes),
@@ -870,7 +875,7 @@ mod tests {
             ),
             fetch_size: ImageSize::Thumbnail(256),
             render_size: 144,
-            external: ExternalPolicy::default(),
+            external: crate::ExternalPolicy::default(),
             cache_only: false,
         };
         let mut png = std::io::Cursor::new(Vec::new());
@@ -965,7 +970,7 @@ mod tests {
             ),
             fetch_size: ImageSize::Thumbnail(256),
             render_size: 144,
-            external: ExternalPolicy::default(),
+            external: crate::ExternalPolicy::default(),
             cache_only: false,
         };
         let first = enqueue(

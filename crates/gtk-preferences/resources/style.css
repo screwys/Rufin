@@ -2768,6 +2768,7 @@ button.connect-relay-link, button.connect-relay-link:visited { color: inherit; }
 .connect-device-offline .subtitle { color: var(--error-color); }
 /* The report shares the fullscreen player's artwork background and library cells. */
 .activity-overview, .activity-report { background-color: var(--window-bg-color); }
+.activity-export-background { color: var(--window-bg-color); }
 .activity-title { font-size: 2.4em; font-weight: 800; }
 .activity-total { font-size: 2em; font-weight: 750; }
 .activity-stat {

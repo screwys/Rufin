@@ -320,6 +320,24 @@ impl Artwork {
             .cache_only_file(request, &[request.fetch_size])
     }
 
+    /// Read existing artwork for a binding without fetching or selecting a network policy.
+    /// Disk access and decoding are synchronous; callers should use a worker thread.
+    pub fn cached_image(
+        &self,
+        binding: &ArtworkBinding,
+        render_size: u32,
+    ) -> Result<Option<RgbaImage>, ArtworkError> {
+        self.pipeline
+            .cached_binding_file(binding)
+            .map(|path| {
+                decode_rgba(
+                    &std::fs::read(path).map_err(ArtworkError::Cache)?,
+                    render_size,
+                )
+            })
+            .transpose()
+    }
+
     /// Reuse a cached image before asking its source for the original bytes.
     pub async fn image_bytes(
         &self,
