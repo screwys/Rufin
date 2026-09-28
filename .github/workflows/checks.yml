@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - .cargo/**
+      - nextest.toml
       - Cargo.lock
       - Cargo.toml
       - CMakeLists.txt
@@ -128,7 +129,7 @@ jobs:
                   # Package builds otherwise run manually or for a draft release.
                   add_jobs "${workspace_jobs[@]}" "${package_jobs[@]}" container
                   ;;
-                .github/workflows/container-image.yml|scripts/container|justfile)
+                .github/workflows/container-image.yml|scripts/container|justfile|nextest.toml)
                   add_jobs container
                   ;;
                 .cargo/*|crates/*)
@@ -385,7 +386,7 @@ jobs:
         if: github.event_name != 'push'
         run: >-
           nix --accept-flake-config develop "${{ steps.nix-environment.outputs.target }}" --command
-          cargo nextest run --workspace --exclude 'gtk-*' --exclude rufin --all-targets --locked
+          cargo nextest run --config-file nextest.toml --workspace --exclude 'gtk-*' --exclude rufin --all-targets --locked
           --features app-identity/development --test-threads 4
 
       - name: Warm Rust build cache
