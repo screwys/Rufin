@@ -3785,14 +3785,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/gtk4-sys/gtk4-sys-0.11.4.crate",
-        "sha256": "82b8f954786af0b1984425c4446b77f5ff6594346181316be3f850caab1c6f01",
-        "dest": "cargo/vendor/gtk4-sys-0.11.4"
+        "url": "https://static.crates.io/crates/gtk4-sys/gtk4-sys-0.11.5.crate",
+        "sha256": "bd14af0137f269bdecee73404157d2a852f9651af7d68bd1023d3b8b914a14c3",
+        "dest": "cargo/vendor/gtk4-sys-0.11.5"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"82b8f954786af0b1984425c4446b77f5ff6594346181316be3f850caab1c6f01\", \"files\": {}}",
-        "dest": "cargo/vendor/gtk4-sys-0.11.4",
+        "contents": "{\"package\": \"bd14af0137f269bdecee73404157d2a852f9651af7d68bd1023d3b8b914a14c3\", \"files\": {}}",
+        "dest": "cargo/vendor/gtk4-sys-0.11.5",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -9760,6 +9760,19 @@
         "type": "inline",
         "contents": "{\"package\": \"396a35feb67335377e0251fcbc1092fc85c484bd4e3a7a54319399da127796e7\", \"files\": {}}",
         "dest": "cargo/vendor/system-deps-7.0.8",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/system-deps/system-deps-9.0.0.crate",
+        "sha256": "8a0dae2cbca1f0ff93795713cfe0a4c02f760e3c0b8ae2ab4ec4045808ff429f",
+        "dest": "cargo/vendor/system-deps-9.0.0"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"8a0dae2cbca1f0ff93795713cfe0a4c02f760e3c0b8ae2ab4ec4045808ff429f\", \"files\": {}}",
+        "dest": "cargo/vendor/system-deps-9.0.0",
         "dest-filename": ".cargo-checksum.json"
     },
     {
