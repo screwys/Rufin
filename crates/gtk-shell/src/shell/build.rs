@@ -535,7 +535,9 @@ pub async fn build(
             let Some(shell) = weak.upgrade() else {
                 break;
             };
-            if let Err(error) = rufin_core::open::files(&shell.products.playback.queue, files).await
+            let local = shell.products.settings.local_configuration();
+            if let Err(error) =
+                rufin_core::open::files(&shell.products.playback.queue, local.as_ref(), files).await
             {
                 shell.control_feedback.show_feedback_toast(error);
             }
