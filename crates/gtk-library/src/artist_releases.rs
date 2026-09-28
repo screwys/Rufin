@@ -284,6 +284,7 @@ mod artist_table_layout_imp {
             let rtl = widget.direction() == gtk::TextDirection::Rtl;
             let mut x = 0;
             for (cell, cell_width) in row.imp().table_cells.borrow().iter().zip(widths) {
+                let cell_width = cell_width.max(cell.measure(gtk::Orientation::Horizontal, -1).0);
                 let position = if rtl { width - x - cell_width } else { x };
                 cell.allocate(
                     cell_width,
