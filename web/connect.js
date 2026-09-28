@@ -68,9 +68,7 @@ function selectMethod() {
 }
 
 export async function offerContinuation() {
-  const last = Number(sessionStorage.getItem("rufin-connect-active") || 0);
-  sessionStorage.setItem("rufin-connect-active", String(Date.now()));
-  if (Date.now() - last < 300000) return;
+  if (document.hidden || sessionStorage.getItem("rufin-connect-offered")) return;
   try {
     const device = await refreshContinuation();
     const offer = element("offer");
@@ -356,6 +354,11 @@ function fileSource() {
   return storageConnection;
 }
 
+function showDisableConfirmation() {
+  element("disable-dialog").returnValue = "cancel";
+  element("disable-dialog").showModal();
+}
+
 function present(value) {
   element("name").value = value.settings.name;
   element("nearby").checked = value.settings.nearby;
@@ -374,7 +377,10 @@ function present(value) {
 
 export function watch(signal) {
   const events = new EventSource("/api/connect/events");
-  events.addEventListener("connect", (event) => show(JSON.parse(event.data)));
+  events.addEventListener("connect", (event) => {
+    show(JSON.parse(event.data));
+    void offerContinuation();
+  });
   signal.addEventListener("abort", () => events.close(), { once: true });
 }
 
@@ -416,11 +422,7 @@ export function init() {
     element("progress").hidden = true;
   });
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) {
-      sessionStorage.setItem("rufin-connect-active", String(Date.now()));
-    } else {
-      offerContinuation();
-    }
+    void offerContinuation();
   });
   document.getElementById("open-connect").addEventListener("click", () => run(async () => {
     const value = await api("/connect");
@@ -429,6 +431,11 @@ export function init() {
   }));
   element("enabled").addEventListener("change", () => run(async () => {
     const enabled = element("enabled").checked;
+    if (!enabled) {
+      element("enabled").checked = state.settings.enabled;
+      showDisableConfirmation();
+      return;
+    }
     try {
       await action({ action: "enable", enabled });
     } catch (error) {
@@ -436,6 +443,11 @@ export function init() {
       throw error;
     }
   }));
+  element("disable-dialog").addEventListener("close", () => {
+    if (element("disable-dialog").returnValue === "disable") {
+      run(() => action({ action: "enable", enabled: false }));
+    }
+  });
   click("refresh", async () => {
     await action({ action: "refresh" });
     await loadFolders();

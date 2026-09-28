@@ -100,13 +100,11 @@ impl TextureCache {
         );
         self.order.insert(TextureAccess { last_used, key });
         self.evict_to_limits();
-        if self.live_textures.len() > self.entries.len().saturating_add(self.max_textures) {
-            self.live_textures
-                .retain(|_, entry| entry.texture.upgrade().is_some());
-        }
+        self.live_textures
+            .retain(|_, entry| entry.texture.upgrade().is_some());
     }
 
-    pub(super) fn cached_texture(&mut self, key: &ArtworkKey) -> Option<gdk::Texture> {
+    fn cached_texture(&mut self, key: &ArtworkKey) -> Option<gdk::Texture> {
         if let Some(texture) = self.get(key) {
             return Some(texture);
         }
@@ -176,7 +174,7 @@ impl TextureCache {
         if let Some(texture) = self.cached_texture(&identity) {
             return Some(texture);
         }
-        let bytes = image.rgba().len();
+        let bytes = image.rgba().len() + image.original().map_or(0, |bytes| bytes.len());
         let texture = texture_from_decoded(image)?;
         self.insert(identity, texture.clone(), bytes);
         Some(texture)

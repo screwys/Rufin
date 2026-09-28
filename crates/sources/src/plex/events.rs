@@ -110,15 +110,8 @@ fn notification(text: &str) -> Option<RemoteItemChange> {
             }
         }
     }
-    upserts.sort();
-    upserts.dedup();
-    removals.sort();
-    removals.dedup();
-    if upserts.len().saturating_add(removals.len()) > crate::source::LIVE_CHANGE_LIMIT {
-        return Some(RemoteItemChange::BoundaryLost);
-    }
     (!upserts.is_empty() || !removals.is_empty())
-        .then_some(RemoteItemChange::Items { upserts, removals })
+        .then(|| RemoteItemChange::items(upserts, removals))
 }
 
 #[cfg(test)]
@@ -142,10 +135,7 @@ mod tests {
         ]);
         assert_eq!(
             notification(&input.to_string()),
-            Some(RemoteItemChange::Items {
-                upserts: vec!["1763".into()],
-                removals: vec![]
-            })
+            Some(RemoteItemChange::items(vec!["1763".into()], vec![]))
         );
     }
 
@@ -153,19 +143,22 @@ mod tests {
     fn library_hints_include_all_processing_states_and_ignore_playback() {
         let entries:Vec<_>=(0..=5).map(|state|serde_json::json!({"identifier":"com.plexapp.plugins.library","state":state,"itemID":state.to_string()})).collect();
         let input = serde_json::json!({"NotificationContainer":{"TimelineEntry":entries,"PlaySessionStateNotification":[{"ratingKey":"not-catalog","state":"stopped"}]}});
-        let Some(RemoteItemChange::Items { upserts, removals }) = notification(&input.to_string())
-        else {
+        let Some(RemoteItemChange::Items(items)) = notification(&input.to_string()) else {
             panic!("item hints");
         };
-        assert_eq!(upserts, ["0", "1", "2", "3", "4", "5"]);
-        assert!(removals.is_empty());
+        assert_eq!(
+            items.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["0", "1", "2", "3", "4", "5"]
+        );
+        assert!(
+            items
+                .values()
+                .all(|value| matches!(value, crate::RemoteItemUpdate::Metadata))
+        );
         let input = serde_json::json!({"NotificationContainer":{"_children":[{"identifier":"com.plexapp.plugins.library","state":9,"itemID":"gone"}]}});
         assert_eq!(
             notification(&input.to_string()),
-            Some(RemoteItemChange::Items {
-                upserts: vec![],
-                removals: vec!["gone".into()]
-            })
+            Some(RemoteItemChange::items(vec![], vec!["gone".into()]))
         );
     }
 }

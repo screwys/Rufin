@@ -968,7 +968,7 @@ pub fn transport_button_position(width: i32, slot: f64, size: i32) -> (f64, f64)
 
 use crate::{progress::seekbar_target_seconds, state::NowPlayingPresentation};
 use gtk_widgets::{
-    artwork::MEDIUM_COVER_SIZE, controls::set_active_class, format_duration, route::Route,
+    artwork::LARGE_COVER_SIZE, controls::set_active_class, format_duration, route::Route,
 };
 use std::{
     sync::{
@@ -1178,8 +1178,8 @@ impl crate::PlayerUi {
             self.artwork.bind_playback_artwork_tile(
                 &controls.cover,
                 presentation.artwork.clone(),
-                MEDIUM_COVER_SIZE as i32,
-                MEDIUM_COVER_SIZE,
+                BOTTOM_PLAYER_COVER_SIZE,
+                LARGE_COVER_SIZE,
             );
         } else {
             self.artwork.clear_artwork_tile(&controls.cover);
@@ -1806,6 +1806,23 @@ impl crate::PlayerUi {
 }
 
 pub fn connect_bottom_player_resize(shell: &Rc<crate::PlayerUi>) {
+    if let Some(window) = shell.window.upgrade() {
+        let weak = Rc::downgrade(shell);
+        let watch_scale = move |window: &gtk::ApplicationWindow| {
+            if let Some(surface) = window.surface() {
+                let weak = weak.clone();
+                surface.connect_scale_notify(move |_| {
+                    if let Some(shell) = weak.upgrade() {
+                        shell.update_bottom_player();
+                    }
+                });
+            }
+        };
+        if window.is_realized() {
+            watch_scale(&window);
+        }
+        window.connect_realize(watch_scale);
+    }
     let resize_shell = Rc::downgrade(shell);
     let allocated_width = Cell::new(0);
     shell

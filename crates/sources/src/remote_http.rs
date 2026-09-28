@@ -1,4 +1,6 @@
 use crate::{ImageBytes, SourceError, SourceResult};
+use bytes::Buf;
+use http_body_util::BodyExt;
 use reqwest::{Client, StatusCode, header};
 use serde::de::DeserializeOwned;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -64,9 +66,9 @@ pub async fn json<T: DeserializeOwned>(
     limit: BodyLimit,
 ) -> SourceResult<T> {
     let checked = checked_response(request, policy).await?;
-    let bytes =
-        response_bytes_bounded(checked.response, policy, limit, Some(&checked.request)).await?;
-    deserialize_json(&bytes, &checked.request)
+    let body =
+        response_body_bounded(checked.response, policy, limit, Some(&checked.request)).await?;
+    deserialize_json(body.reader(), &checked.request)
 }
 
 pub async fn json_with_header<T: DeserializeOwned>(
@@ -82,16 +84,16 @@ pub async fn json_with_header<T: DeserializeOwned>(
         .get(response_header)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
-    let bytes =
-        response_bytes_bounded(checked.response, policy, limit, Some(&checked.request)).await?;
-    Ok((deserialize_json(&bytes, &checked.request)?, value))
+    let body =
+        response_body_bounded(checked.response, policy, limit, Some(&checked.request)).await?;
+    Ok((deserialize_json(body.reader(), &checked.request)?, value))
 }
 
 fn deserialize_json<T: DeserializeOwned>(
-    bytes: &[u8],
+    body: impl std::io::Read,
     request: &RequestMetadata,
 ) -> SourceResult<T> {
-    let mut deserializer = serde_json::Deserializer::from_slice(&bytes);
+    let mut deserializer = serde_json::Deserializer::from_reader(std::io::BufReader::new(body));
     serde_path_to_error::deserialize::<_, T>(&mut deserializer).map_err(|error| {
         let field = error.path().to_string();
         warn!(
@@ -262,11 +264,23 @@ async fn response_text_or_status(
 }
 
 async fn response_bytes_bounded(
-    mut response: reqwest::Response,
+    response: reqwest::Response,
     policy: RemoteHttpPolicy,
     limit: BodyLimit,
     request: Option<&RequestMetadata>,
 ) -> SourceResult<Vec<u8>> {
+    let mut body = response_body_bounded(response, policy, limit, request).await?;
+    let mut bytes = vec![0; body.remaining()];
+    body.copy_to_slice(&mut bytes);
+    Ok(bytes)
+}
+
+async fn response_body_bounded(
+    response: reqwest::Response,
+    policy: RemoteHttpPolicy,
+    limit: BodyLimit,
+    request: Option<&RequestMetadata>,
+) -> SourceResult<impl Buf> {
     if response
         .content_length()
         .is_some_and(|length| length > limit.max_bytes as u64)
@@ -274,37 +288,25 @@ async fn response_bytes_bounded(
         return Err(size_error(limit));
     }
 
-    let mut bytes = Vec::with_capacity(
-        response
-            .content_length()
-            .unwrap_or_default()
-            .min(limit.max_bytes as u64) as usize,
-    );
-    while let Some(chunk) = response
-        .chunk()
+    let body = http_body_util::Limited::new(reqwest::Body::from(response), limit.max_bytes)
+        .collect()
         .await
-        .map_err(|error| map_reqwest_error(error, policy))?
-    {
-        if bytes
-            .len()
-            .checked_add(chunk.len())
-            .is_none_or(|length| length > limit.max_bytes)
-        {
-            return Err(size_error(limit));
-        }
-        bytes.extend_from_slice(&chunk);
-    }
+        .map_err(|error| match error.downcast::<reqwest::Error>() {
+            Ok(error) => map_reqwest_error(*error, policy),
+            Err(_) => size_error(limit),
+        })?
+        .aggregate();
     if let Some(request) = request {
         debug!(
             request = request.id,
             service = request.service,
             method = %request.method,
             endpoint = %request.endpoint,
-            bytes = bytes.len(),
+            bytes = body.remaining(),
             "read remote response body"
         );
     }
-    Ok(bytes)
+    Ok(body)
 }
 
 pub(crate) async fn bounded_response_body(

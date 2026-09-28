@@ -21,7 +21,7 @@ use loro::{ExportMode, LoroDoc, ToJson};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sqlx::{Connection as _, Row, SqliteConnection};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::{Mutex, RwLock, mpsc, oneshot, watch};
+use tokio::sync::{Mutex, Notify, RwLock, mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -215,6 +215,7 @@ pub struct ConnectNetwork {
     pub(crate) approvals: Mutex<HashMap<String, watch::Sender<Option<bool>>>>,
     pub(crate) events: mpsc::Sender<NetworkEvent>,
     pub(crate) membership_changed: watch::Sender<()>,
+    sync_requested: Arc<Notify>,
     database: Mutex<SqliteConnection>,
     addresses: MemoryLookup,
     media: MediaStore,
@@ -328,6 +329,7 @@ impl ConnectNetwork {
             approvals: Mutex::new(HashMap::new()),
             events,
             membership_changed: watch::channel(()).0,
+            sync_requested: Arc::new(Notify::new()),
             database: Mutex::new(database),
             addresses,
             media,
@@ -406,10 +408,14 @@ impl ConnectNetwork {
             }
         });
         let stop = network.stop.clone();
+        let mut membership = network.membership_changed.subscribe();
+        let sync_requested = network.sync_requested.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(1));
+            let mut interval = tokio::time::interval(Duration::from_secs(300));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             let mut syncing = HashSet::new();
+            // A refresh requested during a sync runs once that peer finishes.
+            let mut pending = HashSet::new();
             let mut tasks = tokio::task::JoinSet::new();
             loop {
                 tokio::select! {
@@ -417,22 +423,30 @@ impl ConnectNetwork {
                     Some(completed) = tasks.join_next(), if !tasks.is_empty() => {
                         if let Ok(peer) = completed { syncing.remove(&peer); }
                     },
+                    Ok(()) = membership.changed() => interval.reset_immediately(),
+                    _ = sync_requested.notified() => interval.reset_immediately(),
                     _ = interval.tick() => {
                         let Some(network) = weak.upgrade() else { break };
-                        let Some(profile) = network.profile.read().await.clone() else { continue };
-                        if profile.documents.read().await.is_none() { continue; }
-                        for peer in network.members().await.unwrap_or_default() {
-                            if peer == network.identity() || !syncing.insert(peer.clone()) { continue; }
-                            let network = network.clone();
-                            let profile = profile.clone();
-                            tasks.spawn(async move {
-                                // Each peer retries independently. sync_peer closes
-                                // its connection explicitly when its profile closes.
-                                let _ = network.sync_peer(&profile, &peer).await;
-                                peer
-                            });
-                        }
+                        pending = network.members().await.unwrap_or_default().into_iter().collect();
+                        pending.remove(&network.identity());
                     }
+                }
+                let Some(network) = weak.upgrade() else { break };
+                let Some(profile) = network.profile.read().await.clone() else {
+                    continue;
+                };
+                if profile.documents.read().await.is_none() {
+                    continue;
+                }
+                for peer in pending.extract_if(|peer| syncing.insert(peer.clone())) {
+                    let network = network.clone();
+                    let profile = profile.clone();
+                    tasks.spawn(async move {
+                        // Each peer retries independently. sync_peer closes
+                        // its connection explicitly when its profile closes.
+                        let _ = network.sync_peer(&profile, &peer).await;
+                        peer
+                    });
                 }
             }
         });
@@ -441,6 +455,9 @@ impl ConnectNetwork {
 
     pub fn identity(&self) -> String {
         self.endpoint.id().to_string()
+    }
+    pub fn refresh(&self) {
+        self.sync_requested.notify_one();
     }
     pub fn media(&self) -> &MediaStore {
         &self.media
@@ -541,6 +558,7 @@ impl ConnectNetwork {
             .context("No Connect profile is open")?;
         documents.register_members(&self.members().await?).await?;
         *profile.documents.write().await = Some(documents);
+        self.membership_changed.send_replace(());
         Ok(())
     }
     async fn load_roster(&self, db: &mut SqliteConnection, profile: &str) -> Result<LoroDoc> {

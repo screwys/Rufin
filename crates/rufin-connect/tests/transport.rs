@@ -325,11 +325,11 @@ async fn enrollment_delivery_media_and_removal() {
         assert_eq!(a_emoji, b_emoji);
         let a_docs = documents(a_dir.path(), 1).await;
         let b_docs = documents(b_dir.path(), 2).await;
-        a.attach_documents(a_docs.clone()).await.unwrap();
-        b.attach_documents(b_docs.clone()).await.unwrap();
         let records = [ConnectRecord { kind: "preference".into(), key: "display".into(),
             value: Some(serde_json::json!({"content": "x".repeat(128 * 1024)})) }];
         a_docs.write_records(&records).await.unwrap();
+        a.attach_documents(a_docs.clone()).await.unwrap();
+        b.attach_documents(b_docs.clone()).await.unwrap();
         received(&a_docs, &b_docs, &records).await;
         let requester = b.clone();
         let host = a.identity();
@@ -364,6 +364,8 @@ async fn enrollment_delivery_media_and_removal() {
         let third_record = ConnectRecord { kind: "preference".into(), key: "third-device-edit".into(),
             value: Some(serde_json::json!("made on C")) };
         c_docs.write_records(std::slice::from_ref(&third_record)).await.unwrap();
+        a.refresh();
+        b.refresh();
         received(&c_docs, &b_docs, &[third_record]).await;
         assert!(b.members().await.unwrap().contains(&c.identity()));
         let third = c_dir.path().join("third.flac");
@@ -376,6 +378,8 @@ async fn enrollment_delivery_media_and_removal() {
         b.media().fetch(&c.identity(), &third_hash, &destination, CancellationToken::new(), progress).await.unwrap();
         assert_eq!(tokio::fs::read(destination).await.unwrap(), b"third device media");
         a.remove_member(&b.identity()).await.unwrap();
+        c.refresh();
+        b.refresh();
         let second = a_dir.path().join("second.flac");
         tokio::fs::write(&second, b"not authorized after removal").await.unwrap();
         let hash = a.media().publish(&second).await.unwrap();
@@ -427,6 +431,7 @@ async fn offline_member_does_not_delay_later_edits_between_online_devices() {
         pair(&a, &mut a_events, &c, &mut c_events, &profile).await;
         c.attach_documents(c_docs.clone()).await.unwrap();
         received(&a_docs, &c_docs, &[record("initial")]).await;
+        b.refresh();
         while !b.members().await.unwrap().contains(&c.identity()) {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
@@ -437,6 +442,7 @@ async fn offline_member_does_not_delay_later_edits_between_online_devices() {
         for value in ["first edit", "edit after the first acknowledgement"] {
             while b_events.try_recv().is_ok() {}
             a_docs.write_records(&[record(value)]).await.unwrap();
+            b.refresh();
             tokio::time::timeout(Duration::from_secs(10), async {
                 received(&a_docs, &b_docs, &[record(value)]).await;
                 // A completed page has exchanged its final acknowledgement.
@@ -547,6 +553,7 @@ async fn offline_edits_catch_up_after_restarting_with_saved_trust() {
         peer.remember_peer(&network.invitation().await.unwrap())
             .await
             .unwrap();
+        peer.refresh();
         received(&local_docs, &peer_docs, &[record("edited while offline")]).await;
         network.shutdown().await.unwrap();
         peer.shutdown().await.unwrap();

@@ -397,7 +397,7 @@ _test *args:
             echo "NEXTEST_JOBS must be a positive integer." >&2; \
             exit 1; \
         fi; \
-        cargo nextest run --locked --features app-identity/development --test-threads "$nextest_jobs" {{ args }}; \
+        cargo nextest run --config-file nextest.toml --locked --features app-identity/development --test-threads "$nextest_jobs" {{ args }}; \
     else \
         cargo_args=(--locked --features app-identity/development); \
         if [[ -z "{{ args }}" ]]; then \

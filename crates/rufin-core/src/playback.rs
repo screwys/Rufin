@@ -57,7 +57,6 @@ pub(crate) struct PlaybackOwner {
     connect: Mutex<std::sync::Weak<crate::connect::ConnectOwner>>,
     active: Mutex<Option<ActivePlayback>>,
     stream_tasks: Mutex<std::collections::HashMap<RunId, tokio::task::JoinHandle<()>>>,
-    update_sender: async_channel::Sender<PlaybackWork>,
     pending_queue: Mutex<Option<playback::QueuePersistence>>,
     latest_queue_request: Mutex<(u64, u64)>,
     store_sender: async_channel::Sender<PlaybackStoreWork>,
@@ -69,12 +68,6 @@ pub(crate) struct PlaybackOwner {
     output: Mutex<OutputSelection>,
     plex_targets: Mutex<std::collections::HashMap<String, playback_cast::plex::PlexPlayer>>,
     plex: Mutex<Option<Arc<plex::PlexPlayback>>>,
-}
-
-struct PlaybackWork {
-    flush: Option<std::sync::mpsc::SyncSender<()>>,
-    instance: u64,
-    update: PlaybackUpdate,
 }
 
 enum PlaybackStoreWork {
@@ -153,7 +146,6 @@ impl PlaybackOwner {
         StartBackend: Fn() -> Result<Box<dyn PlaybackBackend>, String> + Send + Sync + 'static,
     {
         let ui = settings.load().ui;
-        let (update_sender, update_receiver) = async_channel::bounded(64);
         let (store_sender, store_receiver) = async_channel::unbounded();
         let artwork_settings = settings.clone();
         let cast_artwork = artwork.clone();
@@ -181,7 +173,6 @@ impl PlaybackOwner {
             connect: Mutex::new(std::sync::Weak::new()),
             active: Mutex::new(None),
             stream_tasks: Mutex::new(std::collections::HashMap::new()),
-            update_sender,
             pending_queue: Mutex::new(None),
             latest_queue_request: Mutex::new((0, 0)),
             store_sender,
@@ -200,17 +191,6 @@ impl PlaybackOwner {
             }),
             plex_targets: Mutex::new(std::collections::HashMap::new()),
             plex: Mutex::new(None),
-        });
-        let weak = Arc::downgrade(&owner);
-        owner.runtime.spawn(async move {
-            while let Ok(work) = update_receiver.recv().await {
-                let Some(owner) = weak.upgrade() else { break };
-                if let Some(flush) = work.flush {
-                    let _ = owner.store_sender.try_send(PlaybackStoreWork::Flush(flush));
-                } else {
-                    owner.consume_update(work.instance, work.update);
-                }
-            }
         });
         let weak = Arc::downgrade(&owner);
         owner.runtime.spawn(async move {
@@ -271,7 +251,7 @@ impl PlaybackOwner {
             }),
             move |update| {
                 if let Some(owner) = owner.upgrade() {
-                    owner.queue_update(instance, update);
+                    owner.consume_update(instance, update);
                 }
             },
         )
@@ -330,7 +310,7 @@ impl PlaybackOwner {
         active
     }
 
-    fn queue_update(self: &Arc<Self>, instance: u64, mut update: PlaybackUpdate) {
+    fn consume_update(&self, instance: u64, mut update: PlaybackUpdate) {
         for effect in &update.effects {
             if let SessionEffect::Queue { id, .. } = effect {
                 *self
@@ -352,20 +332,6 @@ impl PlaybackOwner {
         if update.is_empty() {
             return;
         }
-        if self
-            .update_sender
-            .send_blocking(PlaybackWork {
-                instance,
-                update,
-                flush: None,
-            })
-            .is_err()
-        {
-            warn!("Playback update consumer stopped");
-        }
-    }
-
-    fn consume_update(&self, instance: u64, mut update: PlaybackUpdate) {
         let Some(active) = self.active_matching(instance) else {
             return;
         };
@@ -1107,12 +1073,8 @@ impl TransportCommandPort for PlaybackOwner {
         }
         let (reply, done) = std::sync::mpsc::sync_channel(0);
         if self
-            .update_sender
-            .send_blocking(PlaybackWork {
-                instance: 0,
-                update: PlaybackUpdate::default(),
-                flush: Some(reply),
-            })
+            .store_sender
+            .try_send(PlaybackStoreWork::Flush(reply))
             .is_ok()
         {
             let _ = done.recv();

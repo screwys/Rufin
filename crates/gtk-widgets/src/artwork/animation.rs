@@ -23,7 +23,7 @@ pub(super) struct Target {
 }
 
 pub(super) struct Session {
-    bytes: RefCell<Option<Arc<[u8]>>>,
+    bytes: Arc<[u8]>,
     targets: RefCell<Vec<Rc<Target>>>,
     render_size: Cell<u32>,
     current: RefCell<gdk::Texture>,
@@ -49,11 +49,16 @@ impl Animations {
             .retain(|_, session| session.strong_count() > 0);
         let session = self
             .sessions
-            .get(&key)
-            .and_then(Weak::upgrade)
+            .iter()
+            .find_map(|(existing, session)| {
+                existing
+                    .same_image(&key)
+                    .then(|| session.upgrade())
+                    .flatten()
+            })
             .unwrap_or_else(|| {
                 let session = Rc::new(Session {
-                    bytes: RefCell::new(Some(bytes)),
+                    bytes,
                     targets: RefCell::new(Vec::new()),
                     render_size: Cell::new(0),
                     current: RefCell::new(poster),
@@ -72,7 +77,12 @@ impl Animations {
         generation: u64,
         scale: f64,
     ) -> Option<(Lease, gdk::Texture)> {
-        let session = self.sessions.get(key)?.upgrade()?;
+        let session = self.sessions.iter().find_map(|(existing, session)| {
+            existing
+                .same_image(key)
+                .then(|| session.upgrade())
+                .flatten()
+        })?;
         let texture = session.current.borrow().clone();
         Some((session.attach(tile, generation, scale), texture))
     }
@@ -135,19 +145,14 @@ impl Session {
 
         let (request_tx, request_rx) = async_channel::bounded::<u32>(1);
         let (frame_tx, frame_rx) = async_channel::bounded(1);
-        let Some(bytes) = self.bytes.borrow().clone() else {
-            return;
-        };
+        let bytes = Arc::clone(&self.bytes);
         std::thread::spawn(move || {
             let Ok(mut size) = request_rx.recv_blocking() else {
                 return;
             };
             let mut animation = match artwork::Animation::new(bytes, size) {
                 Ok(Some(animation)) => animation,
-                Ok(None) => {
-                    let _ = frame_tx.send_blocking(None);
-                    return;
-                }
+                Ok(None) => return,
                 Err(error) => {
                     tracing::warn!(%error, "cover animation could not be opened");
                     return;
@@ -157,7 +162,7 @@ impl Session {
                 animation.set_render_size(size);
                 match animation.next_frame() {
                     Ok(Some(frame)) => {
-                        if frame_tx.send_blocking(Some(frame)).is_err() {
+                        if frame_tx.send_blocking(frame).is_err() {
                             break;
                         }
                     }
@@ -180,12 +185,6 @@ impl Session {
             }
             loop {
                 let Ok(frame) = frame_rx.recv().await else {
-                    break;
-                };
-                let Some(frame) = frame else {
-                    if let Some(session) = session.upgrade() {
-                        session.bytes.borrow_mut().take();
-                    }
                     break;
                 };
                 let width = frame.pixels.width() as i32;

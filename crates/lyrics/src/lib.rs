@@ -13,8 +13,7 @@ pub use dictionary::{JapaneseDictionaryStatus, prepare_dictionary};
 pub use lyrics::{
     LocalLyricsInput, LyricsLookup, LyricsPlan, cached_lyrics_allowed, external_best_lyrics,
     local_sidecar_lyrics, lyrics_from_edited_text, lyrics_from_search_result, lyrics_to_lrc_text,
-    lyrics_with_displayable_content, save_current_lyrics, save_lyrics_search_result, search_lyrics,
-    shift_lrc_text_timestamps,
+    lyrics_with_displayable_content, save_current_lyrics, search_lyrics, shift_lrc_text_timestamps,
 };
 
 pub const LYRICS_PROVIDER_SETTINGS_VERSION: u8 = 1;

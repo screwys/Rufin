@@ -427,30 +427,8 @@ impl LyricsService {
         current.automatic_attempted = true;
         current.request = self.next_request.fetch_add(1, Ordering::AcqRel);
         current.loading = true;
-        if keep_visible {
-            let selected = current
-                .bundle
-                .as_ref()
-                .and_then(|bundle| bundle.selected_document(&selection));
-            let pronunciation = current.bundle.as_ref().and_then(|bundle| {
-                selected.and_then(|document| bundle.pronunciation_for(document))
-            });
-            current.document = selected.map(|selected| {
-                current
-                    .document
-                    .as_ref()
-                    .filter(|visible| visible.as_ref() == selected)
-                    .cloned()
-                    .unwrap_or_else(|| Arc::new(selected.clone()))
-            });
-            current.pronunciation = pronunciation.map(|pronunciation| {
-                current
-                    .pronunciation
-                    .as_ref()
-                    .filter(|visible| visible.as_ref() == pronunciation)
-                    .cloned()
-                    .unwrap_or_else(|| Arc::new(pronunciation.clone()))
-            });
+        if keep_visible && let Some(bundle) = current.bundle.clone() {
+            apply_bundle(current, &selection, bundle);
         } else {
             current.document = None;
             current.pronunciation = None;
@@ -741,33 +719,26 @@ impl LyricsService {
         if !resolution.plan.allows_external_fallback() {
             return false;
         }
-        let lookup = resolution.lookup.clone();
-        let providers = resolution.plan.external_providers().to_vec();
-        let require_word_timing = resolution.plan.requires_word_timing();
-        let prefer_translations = resolution.plan.prefers_translations();
-        let preferred_translation_language =
-            resolution.plan.preferred_translation_language().to_string();
-        let has_existing_lyrics = fallback.is_some();
-        let lookup_cancelled = Arc::clone(cancelled);
-        let document = run_external_lookup(Arc::clone(&self.search_lane), move || {
-            external_best_lyrics(
-                &lookup,
-                &providers,
-                require_word_timing,
-                prefer_translations,
-                &preferred_translation_language,
-                has_existing_lyrics,
-                &lookup_cancelled,
-            )
-        })
-        .await
-        .and_then(|result| match result {
+        let Ok(permit) = self.search_lane.acquire().await else {
+            return false;
+        };
+        let document = external_best_lyrics(
+            &resolution.lookup,
+            resolution.plan.external_providers(),
+            resolution.plan.requires_word_timing(),
+            resolution.plan.prefers_translations(),
+            resolution.plan.preferred_translation_language(),
+            fallback.is_some(),
+        )
+        .await;
+        drop(permit);
+        let document = match document {
             Ok(document) => document,
             Err(error) => {
                 debug!(%error, "external lyrics request failed");
                 None
             }
-        });
+        };
         let Some(document) = document else {
             return false;
         };
@@ -1051,13 +1022,7 @@ impl LyricsService {
             if !service.matches_search(prepared.0, &prepared.1, &query) {
                 return;
             }
-            let artist = query.artist_name.clone();
-            let track = query.track_name.clone();
-            let result =
-                tokio::task::spawn_blocking(move || search_lyrics(&prepared.3, &artist, &track))
-                    .await
-                    .map_err(|error| error.to_string())
-                    .and_then(|result| result);
+            let result = search_lyrics(&prepared.3, &query.artist_name, &query.track_name).await;
             service.finish_search(prepared.0, &prepared.1, query, result);
         });
     }
@@ -1113,15 +1078,13 @@ impl LyricsService {
         };
         let service = Arc::clone(self);
         let _task = self.runtime.spawn(async move {
-            let result =
-                tokio::task::spawn_blocking(move || lyrics_from_search_result(&result)).await;
-            match result {
-                Ok(Ok(Some(document))) => {
+            match lyrics_from_search_result(&result).await {
+                Ok(Some(document)) => {
                     service
                         .cache_and_accept(request, &key, &input, &plan, document)
                         .await;
                 }
-                Ok(Ok(None) | Err(_)) | Err(_) => service.finish_current(request, &key, None),
+                Ok(None) | Err(_) => service.finish_current(request, &key, None),
             }
         });
     }
@@ -1139,11 +1102,12 @@ impl LyricsService {
         let service = Arc::clone(self);
         let save_to_source = path.is_none();
         let _task = self.runtime.spawn(async move {
+            let Ok(Some(bundle)) = lyrics_from_search_result(&result).await else {
+                service.finish_current(request, &key, None);
+                return;
+            };
             let save_plan = plan.clone();
             let saved = tokio::task::spawn_blocking(move || {
-                let Some(bundle) = lyrics_from_search_result(&result)? else {
-                    return Ok::<_, String>(None);
-                };
                 let selection = Settings {
                     prefer_translations: save_plan.prefers_translations(),
                     preferred_translation_language: save_plan
@@ -1158,7 +1122,7 @@ impl LyricsService {
                 let path = path
                     .map(|path| save_current_lyrics(document, 0, path))
                     .transpose()?;
-                Ok(Some((path, bundle, source_content)))
+                Ok::<_, String>(Some((path, bundle, source_content)))
             })
             .await;
             match saved {
@@ -1539,9 +1503,22 @@ fn apply_bundle(current: &mut CurrentDocument, settings: &Settings, bundle: Arc<
     let selected = bundle.selected_document(settings);
     current.pronunciation = selected
         .and_then(|document| bundle.pronunciation_for(document))
-        .cloned()
-        .map(Arc::new);
-    current.document = selected.cloned().map(Arc::new);
+        .map(|pronunciation| {
+            current
+                .pronunciation
+                .as_ref()
+                .filter(|visible| visible.as_ref() == pronunciation)
+                .cloned()
+                .unwrap_or_else(|| Arc::new(pronunciation.clone()))
+        });
+    current.document = selected.map(|selected| {
+        current
+            .document
+            .as_ref()
+            .filter(|visible| visible.as_ref() == selected)
+            .cloned()
+            .unwrap_or_else(|| Arc::new(selected.clone()))
+    });
     current.bundle = Some(bundle);
 }
 
@@ -1629,19 +1606,6 @@ fn cancel_current_work(state: &mut State) {
     if let Some(task) = state.current_task.take() {
         task.abort();
     }
-}
-
-async fn run_external_lookup(
-    lane: Arc<Semaphore>,
-    lookup: impl FnOnce() -> Result<Option<LyricsBundle>, String> + Send + 'static,
-) -> Option<Result<Option<LyricsBundle>, String>> {
-    let permit = lane.acquire_owned().await.ok()?;
-    tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        lookup()
-    })
-    .await
-    .ok()
 }
 
 async fn current_resolution(

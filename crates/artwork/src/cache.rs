@@ -195,11 +195,20 @@ impl FilesystemCache {
         candidate: &Candidate,
         requested_size: ImageSize,
     ) -> Option<CacheEntry> {
+        self.ready_entries(candidate, requested_size).next()
+    }
+
+    pub(crate) fn ready_entries(
+        &self,
+        candidate: &Candidate,
+        requested_size: ImageSize,
+    ) -> impl Iterator<Item = CacheEntry> + '_ {
         let paths = match requested_size {
             ImageSize::Original => self
                 .candidate_directory("originals", candidate)
                 .read_dir()
-                .ok()?
+                .into_iter()
+                .flatten()
                 .flatten()
                 .map(|entry| entry.path())
                 .filter(|path| path.file_stem().is_some_and(|name| name == "original"))
@@ -214,16 +223,14 @@ impl FilesystemCache {
                 })
                 .collect(),
         };
-        for path in paths {
-            let Ok(metadata) = fs::metadata(&path) else {
-                continue;
-            };
+        paths.into_iter().filter_map(|path| {
+            let metadata = fs::metadata(&path).ok()?;
             if metadata.is_file() && metadata.len() > 0 {
                 return Some(CacheEntry { path });
             }
             self.remove_file_tracked(&path);
-        }
-        None
+            None
+        })
     }
 
     pub(crate) fn write_ready(

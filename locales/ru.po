@@ -3468,6 +3468,9 @@ msgstr "В этот плейлист можно добавлять только 
 msgid "This source cannot edit this field"
 msgstr "Этот источник не может редактировать это поле"
 
+msgid "This will remove all configured state. Do you want to continue?"
+msgstr ""
+
 msgid "Thursday"
 msgstr "Четверг"
 

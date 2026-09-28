@@ -178,7 +178,9 @@ impl FullscreenPlayerParts {
     }
 }
 
-pub fn build_fullscreen_player(visualizer_area: &gtk::DrawingArea) -> FullscreenPlayerParts {
+pub fn build_fullscreen_player(
+    visualizer_area: &crate::visualizer::Visualizer,
+) -> FullscreenPlayerParts {
     let resource = crate::ui_resource::FULLSCREEN_PLAYER_RESOURCE;
     let builder = gtk_widgets::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
@@ -538,15 +540,12 @@ pub fn connect_fullscreen_player_controls(shell: &Rc<crate::PlayerUi>) {
         .views
         .fullscreen_player
         .stack
-        .connect_visible_child_name_notify(move |stack| {
+        .connect_visible_child_name_notify(move |_| {
             let Some(queue_tab_shell) = queue_tab_shell.upgrade() else {
                 return;
             };
             if !queue_tab_shell.fullscreen_player_visible() {
                 return;
-            }
-            if stack.visible_child_name().as_deref() == Some("queue") {
-                queue_tab_shell.schedule_queue_panel_render();
             }
             queue_tab_shell.refresh_related_tracks();
         });
@@ -725,7 +724,6 @@ impl crate::PlayerUi {
         self.apply_fullscreen_now_playing_text(&presentation);
         self.apply_fullscreen_responsive_layout();
         self.apply_fullscreen_now_playing_cover(&presentation);
-        self.schedule_queue_panel_render();
         self.sync_fullscreen_surfaces();
         let _focused = self.views.fullscreen_player.close_button.grab_focus();
     }

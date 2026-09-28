@@ -469,16 +469,16 @@ async fn artwork(
             return Err(error(StatusCode::NOT_FOUND, "No cover image"));
         }
     };
-    if let Some(original) = loaded.original
+    if let Some(original) = loaded.original()
         && let Some(mime) = artwork::image_mime(&original)
     {
         return Ok(Response::builder()
             .header("content-type", mime)
             .header("cache-control", "private, max-age=300")
-            .body(Body::from(bytes::Bytes::from_owner(original)))
+            .body(Body::from(bytes::Bytes::from_owner(Arc::clone(original))))
             .expect("image headers"));
     }
-    let image = loaded.image;
+    let image = loaded;
     let bytes = tokio::task::spawn_blocking(move || {
         use image::ImageEncoder;
         let mut bytes = Vec::new();

@@ -1,7 +1,8 @@
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
+use gtk::subclass::prelude::*;
 use rufin_core::settings::visualizer::{VisualizerAppearance, VisualizerStyle};
 
 pub const VISUALIZER_ZERO_THRESHOLD: f64 = 0.004;
@@ -29,8 +30,8 @@ impl Peak {
 }
 
 pub struct VisualizerParts {
-    pub sidebar_area: gtk::DrawingArea,
-    pub fullscreen_area: gtk::DrawingArea,
+    pub sidebar_area: Visualizer,
+    pub fullscreen_area: Visualizer,
     pub levels: Rc<RefCell<Vec<f64>>>,
     pub targets: Rc<RefCell<Vec<f64>>>,
     pub generation: Rc<Cell<u64>>,
@@ -38,6 +39,47 @@ pub struct VisualizerParts {
     pub active: Cell<bool>,
     pub appearance: Rc<RefCell<VisualizerAppearance>>,
     peaks: Rc<RefCell<Vec<Peak>>>,
+}
+
+mod imp {
+    use super::*;
+
+    #[derive(Default)]
+    pub struct Visualizer {
+        pub(super) levels: OnceCell<Rc<RefCell<Vec<f64>>>>,
+        pub(super) appearance: OnceCell<Rc<RefCell<VisualizerAppearance>>>,
+        pub(super) peaks: OnceCell<Rc<RefCell<Vec<Peak>>>>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for Visualizer {
+        const NAME: &'static str = "RufinVisualizer";
+        type Type = super::Visualizer;
+        type ParentType = gtk::Widget;
+    }
+
+    impl ObjectImpl for Visualizer {}
+
+    impl WidgetImpl for Visualizer {
+        fn snapshot(&self, snapshot: &gtk::Snapshot) {
+            let widget = self.obj();
+            draw_visualizer(
+                snapshot,
+                widget.width(),
+                widget.height(),
+                &self.levels.get().unwrap().borrow(),
+                &self.peaks.get().unwrap().borrow(),
+                &self.appearance.get().unwrap().borrow(),
+                widget.color(),
+            );
+        }
+    }
+}
+
+glib::wrapper! {
+    pub struct Visualizer(ObjectSubclass<imp::Visualizer>)
+        @extends gtk::Widget,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 pub fn build_visualizer() -> VisualizerParts {
@@ -73,33 +115,22 @@ fn build_visualizer_area(
     levels: Rc<RefCell<Vec<f64>>>,
     appearance: Rc<RefCell<VisualizerAppearance>>,
     peaks: Rc<RefCell<Vec<Peak>>>,
-) -> gtk::DrawingArea {
-    let area = gtk::DrawingArea::new();
+) -> Visualizer {
+    let area: Visualizer = glib::Object::new();
+    area.imp().levels.set(levels).ok().unwrap();
+    area.imp().appearance.set(appearance).ok().unwrap();
+    area.imp().peaks.set(peaks).ok().unwrap();
     area.add_css_class("fullscreen-player-visualizer-area");
     area.add_css_class("visualizer-accent");
     area.set_hexpand(true);
     area.set_vexpand(true);
     area.set_halign(gtk::Align::Fill);
     area.set_valign(gtk::Align::Fill);
-    area.set_draw_func(move |area, context, width, height| {
-        let levels = levels.borrow();
-        if !levels.is_empty() {
-            draw_visualizer(
-                context,
-                width,
-                height,
-                &levels,
-                &peaks.borrow(),
-                &appearance.borrow(),
-                area.color(),
-            );
-        }
-    });
     area
 }
 
 fn draw_visualizer(
-    context: &gtk::cairo::Context,
+    snapshot: &gtk::Snapshot,
     width: i32,
     height: i32,
     levels: &[f64],
@@ -132,14 +163,30 @@ fn draw_visualizer(
         Vec::new()
     };
     let graph_height = rows as f64 * row_stride - row_gap;
-    let gradient = gtk::cairo::LinearGradient::new(0.0, bottom, 0.0, bottom - graph_height);
-    for (offset, color) in [(0.0, colors[0]), (1.0, colors[1])] {
-        gradient.add_color_stop_rgb(offset, color[0].into(), color[1].into(), color[2].into());
-    }
+    let bounds = rect(0.0, 0.0, width, height);
+    snapshot.push_clip(&bounds);
+    let gradient = |bounds: &gtk::graphene::Rect| {
+        snapshot.append_linear_gradient(
+            bounds,
+            &gtk::graphene::Point::new(0.0, bottom as f32),
+            &gtk::graphene::Point::new(0.0, (bottom - graph_height) as f32),
+            &[
+                gtk::gsk::ColorStop::new(0.0, color(colors, 0.0, 1.0)),
+                gtk::gsk::ColorStop::new(1.0, color(colors, 1.0, 1.0)),
+            ],
+        );
+    };
     if matches!(
         appearance.style,
         VisualizerStyle::Line | VisualizerStyle::Filled
     ) {
+        // These styles need one joined path. GTK also rasterizes GSK paths,
+        // but caches each new animated path, so keep this single Cairo node.
+        let context = snapshot.append_cairo(&bounds);
+        let gradient = gtk::cairo::LinearGradient::new(0.0, bottom, 0.0, bottom - graph_height);
+        for (offset, color) in [(0.0, colors[0]), (1.0, colors[1])] {
+            gradient.add_color_stop_rgb(offset, color[0].into(), color[1].into(), color[2].into());
+        }
         let _ = context.set_source(&gradient);
         for (column, level) in bars.iter().enumerate() {
             let x = left + cell / 2.0 + column as f64 * (cell + column_gap);
@@ -174,29 +221,30 @@ fn draw_visualizer(
             let angle = column as f64 / columns as f64 * std::f64::consts::TAU
                 - std::f64::consts::FRAC_PI_2;
             let (sin, cos) = angle.sin_cos();
-            set_color(context, colors, level, 1.0);
-            context.set_line_width(
-                (std::f64::consts::TAU * radius / columns as f64 - column_gap).max(1.0),
-            );
+            let color = color(colors, level, 1.0);
+            let thickness = (std::f64::consts::TAU * radius / columns as f64 - column_gap).max(1.0);
             if level > 0.0 {
-                context.move_to(center.0 + cos * radius, center.1 + sin * radius);
-                context.line_to(
-                    center.0 + cos * (radius + extent * level),
-                    center.1 + sin * (radius + extent * level),
+                snapshot.save();
+                snapshot.translate(&gtk::graphene::Point::new(center.0 as f32, center.1 as f32));
+                snapshot.rotate(angle.to_degrees() as f32);
+                snapshot.append_color(
+                    &color,
+                    &rect(radius, -thickness / 2.0, extent * level, thickness),
                 );
-                let _ = context.stroke();
+                snapshot.restore();
             }
             if appearance.peaks
                 && let Some(peak) = peak_bars.get(column).filter(|peak| **peak > 0.0)
             {
-                context.arc(
-                    center.0 + cos * (radius + extent * peak),
-                    center.1 + sin * (radius + extent * peak),
-                    1.5,
-                    0.0,
-                    std::f64::consts::TAU,
+                let bounds = rect(
+                    center.0 + cos * (radius + extent * peak) - 1.5,
+                    center.1 + sin * (radius + extent * peak) - 1.5,
+                    3.0,
+                    3.0,
                 );
-                let _ = context.fill();
+                snapshot.push_rounded_clip(&gtk::gsk::RoundedRect::from_rect(bounds, 1.5));
+                snapshot.append_color(&color, &bounds);
+                snapshot.pop();
             }
             continue;
         }
@@ -207,56 +255,35 @@ fn draw_visualizer(
             } else {
                 bottom - bar_height
             };
-            let _ = context.set_source(&gradient);
             if bar_height > 0.0 {
                 match appearance.style {
                     VisualizerStyle::Rounded => {
                         let radius = (cell / 2.0).min(bar_height / 2.0);
-                        context.new_sub_path();
-                        context.arc(
-                            x + cell - radius,
-                            y + radius,
-                            radius,
-                            -std::f64::consts::FRAC_PI_2,
-                            0.0,
-                        );
-                        context.arc(
-                            x + cell - radius,
-                            bottom - radius,
-                            radius,
-                            0.0,
-                            std::f64::consts::FRAC_PI_2,
-                        );
-                        context.arc(
-                            x + radius,
-                            bottom - radius,
-                            radius,
-                            std::f64::consts::FRAC_PI_2,
-                            std::f64::consts::PI,
-                        );
-                        context.arc(
-                            x + radius,
-                            y + radius,
-                            radius,
-                            std::f64::consts::PI,
-                            3.0 * std::f64::consts::FRAC_PI_2,
-                        );
-                        context.close_path();
-                        let _ = context.fill();
+                        let bounds = rect(x, y, cell, bar_height);
+                        snapshot.push_rounded_clip(&gtk::gsk::RoundedRect::from_rect(
+                            bounds,
+                            radius as f32,
+                        ));
+                        // Let the rounded clip antialias the edge only once.
+                        gradient(&rect(x - 1.0, y - 1.0, cell + 2.0, bar_height + 2.0));
+                        snapshot.pop();
                     }
                     VisualizerStyle::Outline => {
-                        context.set_line_width(1.0);
-                        context.rectangle(
-                            x + 0.5,
-                            y + 0.5,
-                            (cell - 1.0).max(0.0),
-                            (bar_height - 1.0).max(0.0),
-                        );
-                        let _ = context.stroke();
+                        let height = bar_height.max(1.0);
+                        gradient(&rect(x, y, cell, 1.0));
+                        if height > 1.0 {
+                            gradient(&rect(x, y + 1.0, 1.0, height - 1.0));
+                            gradient(&rect(x + cell - 1.0, y + 1.0, 1.0, height - 1.0));
+                            gradient(&rect(
+                                x + 1.0,
+                                y + (height - 1.0).max(1.0),
+                                (cell - 2.0).max(0.0),
+                                height - (height - 1.0).max(1.0),
+                            ));
+                        }
                     }
                     VisualizerStyle::Solid | VisualizerStyle::Mirrored => {
-                        context.rectangle(x, y, cell, bar_height);
-                        let _ = context.fill();
+                        gradient(&rect(x, y, cell, bar_height));
                     }
                     _ => {}
                 }
@@ -269,38 +296,44 @@ fn draw_visualizer(
                 } else {
                     0.0
                 };
-                set_color(context, colors, color_t, 0.72 + color_t * 0.24);
                 let y = bottom - row_height - row as f64 * row_stride;
-                context.rectangle(x, y, cell, row_height);
-                let _ = context.fill();
+                snapshot.append_color(
+                    &color(colors, color_t, 0.72 + color_t * 0.24),
+                    &rect(x, y, cell, row_height),
+                );
             }
 
             let cap_row = full_cells;
             let cap_alpha = scaled - scaled.floor();
             if cap_row < rows && cap_alpha >= 0.14 {
                 let color_t = cap_row as f64 / rows.saturating_sub(1).max(1) as f64;
-                set_color(context, colors, color_t, cap_alpha * 0.76);
                 let y = bottom - row_height - cap_row as f64 * row_stride;
-                context.rectangle(x, y, cell, row_height);
-                let _ = context.fill();
+                snapshot.append_color(
+                    &color(colors, color_t, cap_alpha * 0.76),
+                    &rect(x, y, cell, row_height),
+                );
             }
         }
         if appearance.peaks
             && let Some(peak) = peak_bars.get(column).filter(|peak| **peak > 0.0)
         {
-            set_color(context, colors, 1.0, 1.0);
+            let color = color(colors, 1.0, 1.0);
             let y = if appearance.style == VisualizerStyle::Mirrored {
                 height / 2.0 - peak * graph_height / 2.0
             } else {
                 bottom - peak * graph_height
             };
-            context.rectangle(x, y, cell, 2.0);
+            snapshot.append_color(&color, &rect(x, y, cell, 2.0));
             if appearance.style == VisualizerStyle::Mirrored {
-                context.rectangle(x, height - y - 2.0, cell, 2.0);
+                snapshot.append_color(&color, &rect(x, height - y - 2.0, cell, 2.0));
             }
-            let _ = context.fill();
         }
     }
+    snapshot.pop();
+}
+
+fn rect(x: f64, y: f64, width: f64, height: f64) -> gtk::graphene::Rect {
+    gtk::graphene::Rect::new(x as f32, y as f32, width as f32, height as f32)
 }
 
 pub fn visualizer_column_geometry(width: f64, level_count: usize, gap: f64) -> (usize, f64) {
@@ -327,10 +360,15 @@ pub(super) fn accent_gradient(accent: gtk::gdk::RGBA) -> [[f32; 3]; 2] {
     ]
 }
 
-fn set_color(context: &gtk::cairo::Context, colors: [[f32; 3]; 2], mix: f64, alpha: f64) {
+fn color(colors: [[f32; 3]; 2], mix: f64, alpha: f64) -> gtk::gdk::RGBA {
     let color: [f64; 3] =
         std::array::from_fn(|index| lerp(colors[0][index].into(), colors[1][index].into(), mix));
-    context.set_source_rgba(color[0], color[1], color[2], alpha);
+    gtk::gdk::RGBA::new(
+        color[0] as f32,
+        color[1] as f32,
+        color[2] as f32,
+        alpha as f32,
+    )
 }
 
 pub fn lerp(start: f64, end: f64, mix: f64) -> f64 {
