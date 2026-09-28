@@ -14,7 +14,7 @@
     <property name="comments" translatable="yes">Thank you for trying out Rufin! If you have problems or suggestions, please open an issue in Github.</property>
   </object>
   <object class="GtkLinkButton" id="sponsor">
-    <property name="label" translatable="yes">Sponsor</property>
-    <property name="uri">https://github.com/sponsors/screwys</property>
+    <property name="label" translatable="yes">Donate</property>
+    <property name="uri">https://github.com/screwys/Rufin/pull/1239</property>
   </object>
 </interface>
