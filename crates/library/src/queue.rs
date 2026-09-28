@@ -586,6 +586,9 @@ struct QueueOccurrenceRow {
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueuePageRow {
     pub entry: Arc<QueueOccurrence>,
+    pub audio_properties: crate::AudioProperties,
+    pub source_path: Option<String>,
+    pub source_name: Option<String>,
     pub favorite: bool,
     pub primary_artist_media_uri: Option<String>,
 }
@@ -794,17 +797,35 @@ impl Database {
         );
         query
             .push(QUEUE_PRIMARY_ARTIST_SQL)
+            .push(",COALESCE(track.audio_properties,'{}'),track.source_path,(SELECT display_name FROM sources WHERE source_key=track.source_key)")
             .push(" FROM requested LEFT JOIN tracks track ON track.media_uri=requested.media_uri ORDER BY ordinal");
         let mut connection = self.acquire_reader().await?;
         let facts = query
-            .build_query_as::<(i64, bool, Option<String>)>()
+            .build_query_as::<(
+                i64,
+                bool,
+                Option<String>,
+                crate::AudioProperties,
+                Option<String>,
+                Option<String>,
+            )>()
             .fetch_all(&mut *connection)
             .await?;
         Ok(facts
             .into_iter()
             .map(
-                |(ordinal, favorite, primary_artist_media_uri)| QueuePageRow {
+                |(
+                    ordinal,
+                    favorite,
+                    primary_artist_media_uri,
+                    audio_properties,
+                    source_path,
+                    source_name,
+                )| QueuePageRow {
                     entry: Arc::clone(&window[ordinal as usize]),
+                    audio_properties,
+                    source_path,
+                    source_name,
                     favorite,
                     primary_artist_media_uri,
                 },

@@ -150,6 +150,7 @@ impl ActivityView {
             root: gtk::Box, report: gtk::Overlay, content_clamp: adw::Clamp,
             outgoing_content: gtk::Picture,
             report_host: adw::Bin, heading_row: gtk::Box, artwork_row: gtk::Box, ranking_row: gtk::Box,
+            customize: gtk::Button, settings_dialog: adw::PreferencesDialog,
             minimize: gtk::Button, period_kind: gtk::DropDown, period: gtk::DropDown,
             previous: gtk::Button, next: gtk::Button, export: gtk::Button,
             title: gtk::Label, status: gtk::Label, empty_text: gtk::Label, error_text: gtk::Label,
@@ -163,6 +164,22 @@ impl ActivityView {
             show_genres: adw::SwitchRow, show_comparison: adw::SwitchRow,
             show_rufin_in_headline: adw::SwitchRow,
             result_count: gtk::DropDown, export_dialog: gtk::FileDialog,
+        });
+        let window = shell.chrome.window.downgrade();
+        customize.connect_clicked(move |_| {
+            let Some(window) = window.upgrade() else {
+                return;
+            };
+            let width = gtk_widgets::layout::large_popup_content_width(560);
+            let natural_height = settings_dialog
+                .child()
+                .expect("Preferences dialog content")
+                .measure(gtk::Orientation::Vertical, width)
+                .1;
+            let max_height = gtk_widgets::layout::large_popup_content_height(window.height(), 640);
+            settings_dialog.set_content_width(width);
+            settings_dialog.set_content_height(natural_height.min(max_height));
+            gtk_widgets::popup::present_light_dismiss_dialog(&settings_dialog, &window);
         });
         let background = FullscreenBackground::new();
         report.set_child(None::<&gtk::Widget>);

@@ -91,31 +91,105 @@ pub fn install_collection_selection<K, R, Q>(
 const PLAYLIST_DRAG_ICON_WIDTH: i32 = 180;
 const PLAYLIST_DRAG_ICON_COVER_SIZE: i32 = 36;
 
-/// Highlight the complete table row when a drop controller belongs to one of its cells.
-/// Grid cards keep the highlight on the card itself.
-pub fn style_media_drop_target(widget: &impl IsA<gtk::Widget>) {
-    widget.add_css_class("media-drop-target");
-    widget.connect_state_flags_changed(|widget, previous| {
-        let active = widget.state_flags().contains(gtk::StateFlags::DROP_ACTIVE);
-        if active == previous.contains(gtk::StateFlags::DROP_ACTIVE) {
-            return;
+fn drop_item(widget: &gtk::Widget) -> (gtk::Widget, bool) {
+    let mut item = widget.clone();
+    while let Some(parent) = item.parent() {
+        if parent.is::<gtk::GridView>() {
+            return (item, true);
         }
-        let mut parent = widget.parent();
-        while let Some(ancestor) = parent {
-            if ancestor.css_name() == "row" {
-                if active {
-                    widget.add_css_class("media-drop-cell");
-                    ancestor.add_css_class("media-drop-row");
-                } else {
-                    widget.remove_css_class("media-drop-cell");
-                    ancestor.remove_css_class("media-drop-row");
-                }
-                break;
+        if item.css_name() == "row" {
+            return (item, false);
+        }
+        item = parent;
+    }
+    (widget.clone(), false)
+}
+
+pub fn order_drop_after(widget: &gtk::Widget, x: f64, y: f64) -> bool {
+    if drop_item(widget).1 {
+        let right = x >= f64::from(widget.width()) / 2.0;
+        right != (widget.direction() == gtk::TextDirection::Rtl)
+    } else {
+        y >= f64::from(widget.height()) / 2.0
+    }
+}
+
+pub fn style_order_drop_target(
+    drop: &gtk::DropTarget,
+    split: bool,
+    is_order: impl Fn(&gtk::DropTarget) -> bool + 'static,
+) {
+    const CLASSES: &[&str] = &[
+        "drop-feedback",
+        "media-drop-row",
+        "order-drop-before",
+        "order-drop-after",
+        "order-drop-left",
+        "order-drop-right",
+    ];
+    let current = Rc::new(RefCell::new(None::<gtk::glib::WeakRef<gtk::Widget>>));
+    let motion_current = Rc::clone(&current);
+    let position = Rc::new(std::cell::Cell::new((0.0, 0.0)));
+    let motion_position = Rc::clone(&position);
+    let motion = Rc::new(move |drop: &gtk::DropTarget, x: f64, y: f64| {
+        motion_position.set((x, y));
+        if let Some(previous) = motion_current
+            .borrow_mut()
+            .take()
+            .and_then(|weak| weak.upgrade())
+        {
+            for class in CLASSES {
+                previous.remove_css_class(class);
             }
-            if ancestor.is::<gtk::GridView>() || ancestor.is::<gtk::ColumnView>() {
-                break;
+        }
+        let Some(widget) = drop.widget() else {
+            return gtk::gdk::DragAction::empty();
+        };
+        let (row, grid) = drop_item(&widget);
+        let order = is_order(drop);
+        let after = split && order_drop_after(&widget, x, y);
+        row.add_css_class("drop-feedback");
+        row.add_css_class(if !order {
+            "media-drop-row"
+        } else if grid {
+            if after != (widget.direction() == gtk::TextDirection::Rtl) {
+                "order-drop-right"
+            } else {
+                "order-drop-left"
             }
-            parent = ancestor.parent();
+        } else if after {
+            "order-drop-after"
+        } else {
+            "order-drop-before"
+        });
+        motion_current.replace(Some(row.downgrade()));
+        let actions = drop
+            .current_drop()
+            .map_or(drop.actions(), |current| current.actions() & drop.actions());
+        if order && actions.contains(gtk::gdk::DragAction::MOVE) {
+            gtk::gdk::DragAction::MOVE
+        } else {
+            gtk::gdk::DragAction::COPY
+        }
+    });
+    let enter = Rc::clone(&motion);
+    drop.connect_enter(move |drop, x, y| enter(drop, x, y));
+    let changed = Rc::clone(&motion);
+    let active = Rc::clone(&current);
+    drop.set_preload(true);
+    drop.connect_notify_local(Some("value"), move |drop, _| {
+        let entered = active.borrow().is_some();
+        if entered {
+            let (x, y) = position.get();
+            changed(drop, x, y);
+        }
+    });
+    drop.connect_motion(move |drop, x, y| motion(drop, x, y));
+    drop.connect_leave(move |_| {
+        if let Some(row) = current.borrow_mut().take().and_then(|weak| weak.upgrade()) {
+            for class in CLASSES {
+                row.remove_css_class(class);
+            }
         }
     });
 }

@@ -1129,6 +1129,9 @@ mod tests {
 
     fn track_row() -> library::TrackRow {
         library::TrackRow {
+            audio_properties: Default::default(),
+            source_name: String::new(),
+            source_path: None,
             source_id: "source".to_string(),
             track_key: library::TrackKey::from_raw(1),
             source_key: library::SourceKey::from_raw(1),

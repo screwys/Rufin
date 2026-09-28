@@ -14,6 +14,7 @@ const PLAYLIST_ENTRY_OVERSCAN: usize = 64;
 pub struct PlaylistEntryProjectionRequest {
     pub query: String,
     pub settings: LibraryListSettings,
+    pub first_row_position: usize,
 }
 
 #[derive(Clone)]
@@ -41,6 +42,7 @@ impl PlaylistEntryModel {
         let applied = Rc::new(RefCell::new(PlaylistEntryProjectionRequest {
             query: String::new(),
             settings: settings.clone(),
+            first_row_position,
         }));
         let load_request = Rc::clone(&applied);
         let loader_database = Arc::clone(&database);
@@ -82,6 +84,7 @@ impl PlaylistEntryModel {
                 request: RefCell::new(PlaylistEntryProjectionRequest {
                     query: String::new(),
                     settings,
+                    first_row_position,
                 }),
             }),
         }
@@ -122,7 +125,17 @@ impl PlaylistEntryModel {
     }
 
     pub fn projection_request(&self) -> PlaylistEntryProjectionRequest {
-        self.inner.request.borrow().clone()
+        let mut request = self.inner.request.borrow().clone();
+        let applied = self.inner.applied.borrow();
+        request.first_row_position = if request.query == applied.query
+            && request.settings.sort_key == applied.settings.sort_key
+            && request.settings.descending == applied.settings.descending
+        {
+            self.inner.sparse.first_live_position().unwrap_or(0)
+        } else {
+            0
+        };
+        request
     }
 
     pub fn set_query(&self, query: &str) -> bool {
@@ -144,11 +157,21 @@ impl PlaylistEntryModel {
         true
     }
 
-    pub fn replace_count(&self, count: usize, request: PlaylistEntryProjectionRequest) {
+    pub fn replace_prepared(
+        &self,
+        count: usize,
+        request: PlaylistEntryProjectionRequest,
+        rows: Vec<PlaylistEntryRow>,
+    ) {
+        let first = request.first_row_position.min(count);
         self.inner.applied.replace(request);
-        self.inner
-            .sparse
-            .replace_order(SparseSource::Query { count });
+        self.inner.sparse.replace_prepared_at(
+            SparseSource::Query { count },
+            first,
+            rows,
+            Vec::new(),
+            |row| row.playlist_entry_key,
+        );
     }
 
     pub fn ready(&self, position: u32) -> Option<Arc<PlaylistEntryRow>> {

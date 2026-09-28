@@ -136,6 +136,7 @@ pub(super) async fn stage_track(
         track.last_played,
         track.source_path.as_deref(),
         key,
+        &track.audio_properties,
     )
     .await?;
     if track.replay_gain_track_db.is_some() {
@@ -308,6 +309,7 @@ pub(super) struct Album {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Track {
+    pub audio_properties: library::AudioProperties,
     pub id: String,
     pub album_id: Option<String>,
     pub title: String,
@@ -372,9 +374,9 @@ pub(super) struct Playlist {
 }
 
 pub(super) const ALBUM_FIELDS: &str = "SortName,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,ChildCount";
-pub(super) const TRACK_FIELDS: &str = "SortName,Path,Overview,Container,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,AlbumId,AlbumPrimaryImageTag,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,NormalizationGain,AlbumNormalizationGain";
+pub(super) const TRACK_FIELDS: &str = "SortName,Path,Overview,Container,MediaStreams,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,AlbumId,AlbumPrimaryImageTag,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,NormalizationGain,AlbumNormalizationGain";
 pub(super) const PLAYLIST_FIELDS: &str = "RunTimeTicks,ImageTags,ChildCount";
-pub(super) const MIXED_ITEM_FIELDS: &str = "SortName,Path,Overview,Container,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,ParentId,AlbumId,AlbumPrimaryImageTag,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,ChildCount,AlbumCount,SongCount,NormalizationGain,AlbumNormalizationGain";
+pub(super) const MIXED_ITEM_FIELDS: &str = "SortName,Path,Overview,Container,MediaStreams,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,ParentId,AlbumId,AlbumPrimaryImageTag,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,ChildCount,AlbumCount,SongCount,NormalizationGain,AlbumNormalizationGain";
 
 pub(super) fn album_from_item(server: ServerKind, item: &Value) -> Option<Album> {
     let item_id = id(&item["Id"])?;
@@ -434,7 +436,18 @@ pub(super) fn track_from_item(server: ServerKind, item: &Value) -> Option<Track>
         field::<String>(item, "Container").as_deref(),
         field::<String>(item, "Path").as_deref(),
     );
+    let stream = items(&item["MediaStreams"])
+        .iter()
+        .find(|stream| stream["Type"].as_str() == Some("Audio"));
     Some(Track {
+        audio_properties: library::AudioProperties {
+            bitrate_kbps: stream
+                .and_then(|stream| field::<u32>(stream, "BitRate"))
+                .map(|value| value / 1000),
+            sample_rate_hz: stream.and_then(|stream| field(stream, "SampleRate")),
+            bit_depth: stream.and_then(|stream| field(stream, "BitDepth")),
+            channels: stream.and_then(|stream| field(stream, "Channels")),
+        },
         id: String::from(server.object_id("track", &item_id)),
         album_id,
         title: field(item, "Name").unwrap_or_else(|| "Untitled Track".to_string()),

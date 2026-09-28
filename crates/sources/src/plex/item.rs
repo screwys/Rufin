@@ -105,6 +105,16 @@ pub(super) async fn stage_item(scan: &mut Scan, item: &Value) -> SourceResult<()
             let stream = items(&part["Stream"])
                 .iter()
                 .find(|stream| field::<i64>(stream, "streamType") == Some(2));
+            let audio_properties = library::AudioProperties {
+                bitrate_kbps: stream
+                    .and_then(|stream| field(stream, "bitrate"))
+                    .or_else(|| field(media, "bitrate")),
+                sample_rate_hz: stream.and_then(|stream| field(stream, "samplingRate")),
+                bit_depth: stream.and_then(|stream| field(stream, "bitDepth")),
+                channels: stream
+                    .and_then(|stream| field(stream, "channels"))
+                    .or_else(|| field(media, "audioChannels")),
+            };
             let duration = field::<i64>(item, "duration").unwrap_or_default().max(0);
             let source_path = part["file"].as_str();
             let format = media["container"].as_str().or(media["audioCodec"].as_str());
@@ -153,6 +163,7 @@ pub(super) async fn stage_item(scan: &mut Scan, item: &Value) -> SourceResult<()
                 field::<i64>(item, "lastViewedAt").filter(|v| *v >= 0),
                 source_path,
                 *hash.finalize().as_bytes(),
+                &audio_properties,
             )
             .await?;
             if let Some(stream) = stream {

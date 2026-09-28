@@ -129,6 +129,9 @@ async fn resolve_smart_reference(
 
 #[derive(Clone, Debug, FromRow, PartialEq)]
 pub struct SmartPlaylistTrackRow {
+    pub audio_properties: crate::AudioProperties,
+    pub source_path: Option<String>,
+    pub source_name: Option<String>,
     pub media_uri: String,
     pub title: String,
     pub artist: String,
@@ -1199,7 +1202,7 @@ async fn load_smart_track_rows(
         "SELECT key,value FROM json_each(?1)",
         "SELECT media_uri,title,artist,album,album_media_uri,artists,album_artists,
                 album_display_artist,artwork_binding,duration_millis,disc_number,track_number,
-                year,release_date,date_added,source_format,musicbrainz_recording_id,
+                year,release_date,date_added,source_format,source_path,source_name,audio_properties,musicbrainz_recording_id,
                 musicbrainz_release_track_id,bpm,genre,play_count,last_played,favorite,rating,is_downloaded
          FROM smart_tracks ORDER BY position",
     );
@@ -1245,6 +1248,7 @@ fn smart_track_sql(input: &str, projection: &str) -> String {
                 COALESCE(track.source_format,{source_format}) source_format,
                 COALESCE(track.musicbrainz_recording_id,{recording_id}) musicbrainz_recording_id,
                 COALESCE(track.musicbrainz_release_track_id,{release_track_id}) musicbrainz_release_track_id,
+                COALESCE(track.audio_properties,'{{}}') audio_properties,track.source_path,(SELECT display_name FROM sources WHERE source_key=track.source_key) source_name,
                 COALESCE((SELECT group_concat(genre.name,', ') FROM track_genres credit JOIN genres genre USING(genre_key) WHERE credit.track_key=track.track_key),'') genre,
                 COALESCE(state.favorite,track.source_favorite,0) favorite,
                 COALESCE(state.rating,track.source_rating)/10 rating,

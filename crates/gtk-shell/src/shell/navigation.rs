@@ -230,16 +230,12 @@ impl Shell {
         }
     }
 
-    fn reorder_sidebar_pin(self: &Rc<Self>, moved: &SidebarPin, target: &SidebarPin) -> bool {
-        let Some(after) = self
-            .settings
-            .current
-            .borrow()
-            .sidebar
-            .pin_drop_after(moved, target)
-        else {
-            return false;
-        };
+    fn reorder_sidebar_pin(
+        self: &Rc<Self>,
+        moved: &SidebarPin,
+        target: &SidebarPin,
+        after: bool,
+    ) -> bool {
         let changed = self
             .settings
             .update_app_settings("Pins order", |settings| {
@@ -475,6 +471,7 @@ fn primary_menu_popover(shell: &Rc<Shell>) -> gtk::PopoverMenu {
     popover.set_autohide(true);
     popover.set_position(gtk::PositionType::Bottom);
     popover.set_halign(gtk::Align::Start);
+    popover.connect_show(gtk_widgets::interactions::align_topbar_popup);
     style_primary_menu(&popover);
     popover
 }
@@ -1536,16 +1533,19 @@ fn install_sidebar_pin_drag(
 
     let drop = gtk::DropTarget::new(glib::Variant::static_type(), gtk::gdk::DragAction::MOVE);
     let shell = Rc::downgrade(shell);
-    drop.connect_drop(move |_, value, _, _| {
+    drop.connect_drop(move |drop, value, _, y| {
         let Some(moved) = sidebar_pin_from_drag_value(value) else {
             return false;
         };
         let Some(shell) = shell.upgrade() else {
             return false;
         };
-        shell.reorder_sidebar_pin(&moved, &pin)
+        let after = drop
+            .widget()
+            .is_some_and(|widget| y >= f64::from(widget.height()) / 2.0);
+        shell.reorder_sidebar_pin(&moved, &pin, after)
     });
-    target.add_css_class("media-drop-target");
+    gtk_widgets::media_drag::style_order_drop_target(&drop, true, |_| true);
     target.add_controller(drop);
 }
 

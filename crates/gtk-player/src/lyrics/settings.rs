@@ -122,13 +122,14 @@ pub fn present_lyrics_settings_dialog(
     shell: &Rc<crate::PlayerUi>,
     window: &gtk::ApplicationWindow,
     pages: MediaSettingsPages,
+    fullscreen: bool,
     uses_local_storage: Rc<dyn Fn() -> bool>,
     appearance_changed: Rc<dyn Fn()>,
 ) {
     let Some(lyrics) = shell.selected_lyrics() else {
         return;
     };
-    if let Some(settings_dialog) = lyrics.settings_dialog.upgrade() {
+    if let Some(settings_dialog) = lyrics.settings_dialogs[usize::from(fullscreen)].upgrade() {
         settings_dialog.present(Some(window));
         return;
     }
@@ -150,6 +151,7 @@ pub fn present_lyrics_settings_dialog(
             &builder,
             uses_local_storage,
             appearance_changed,
+            fullscreen,
         ));
     }
     if matches!(
@@ -161,7 +163,7 @@ pub fn present_lyrics_settings_dialog(
         ));
     }
     if let Some(lyrics) = shell.selected_lyrics() {
-        lyrics.settings_dialog.set(Some(&dialog));
+        lyrics.settings_dialogs[usize::from(fullscreen)].set(Some(&dialog));
     }
     present_light_dismiss_dialog(&dialog, window);
 }
@@ -183,6 +185,7 @@ fn build_lyrics_settings(
     builder: &gtk::Builder,
     uses_local_storage: Rc<dyn Fn() -> bool>,
     appearance_changed: Rc<dyn Fn()>,
+    fullscreen: bool,
 ) -> adw::PreferencesPage {
     let settings = shell.settings.current.borrow().lyrics.clone();
     let resource = crate::ui_resource::LYRICS_SETTINGS_RESOURCE;
@@ -437,11 +440,14 @@ fn build_lyrics_settings(
     let font_title_refs = font_titles.iter().map(String::as_str).collect::<Vec<_>>();
     font.set_model(Some(&gtk::StringList::new(&font_title_refs)));
     font.set_selected(
-        settings
-            .lyrics_font_family
-            .as_ref()
-            .and_then(|selected| font_families.iter().position(|family| family == selected))
-            .map_or(0, |index| index as u32 + 1),
+        (if fullscreen {
+            &settings.fullscreen_lyrics_font_family
+        } else {
+            &settings.lyrics_font_family
+        })
+        .as_ref()
+        .and_then(|selected| font_families.iter().position(|family| family == selected))
+        .map_or(0, |index| index as u32 + 1),
     );
     let font_shell = Rc::clone(shell);
     let font_appearance = Rc::clone(&appearance_changed);
@@ -452,13 +458,24 @@ fn build_lyrics_settings(
             .checked_sub(1)
             .and_then(|index| selected_families.get(index as usize))
             .cloned();
-        if font_shell.set_lyrics_setting("lyrics font family", false, family, |settings| {
-            &mut settings.lyrics_font_family
+        if font_shell.set_lyrics_setting("lyrics font family", false, family, move |settings| {
+            if fullscreen {
+                &mut settings.fullscreen_lyrics_font_family
+            } else {
+                &mut settings.lyrics_font_family
+            }
         }) {
             font_appearance();
         }
     });
-    size_adjustment.set_value(f64::from(settings.lyrics_font_size.unwrap_or(19)));
+    size_adjustment.set_value(f64::from(
+        (if fullscreen {
+            settings.fullscreen_lyrics_font_size
+        } else {
+            settings.lyrics_font_size
+        })
+        .unwrap_or(19),
+    ));
     let size_shell = Rc::clone(shell);
     size.connect_value_notify(move |row| {
         let size = row.value().round() as u16;
@@ -466,7 +483,13 @@ fn build_lyrics_settings(
             "lyrics font size",
             false,
             (size != 19).then_some(size),
-            |settings| &mut settings.lyrics_font_size,
+            move |settings| {
+                if fullscreen {
+                    &mut settings.fullscreen_lyrics_font_size
+                } else {
+                    &mut settings.lyrics_font_size
+                }
+            },
         ) {
             appearance_changed();
         }

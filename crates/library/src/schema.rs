@@ -284,7 +284,7 @@ CREATE INDEX IF NOT EXISTS local_locators_precedence_idx ON local_locators(media
 "#;
 pub(crate) const CATALOG_SCHEMA: &str = r#"PRAGMA application_id = 1381320270;
 
-PRAGMA user_version = 50;
+PRAGMA user_version = 51;
 
 CREATE TABLE IF NOT EXISTS sources (
     source_key INTEGER PRIMARY KEY,
@@ -357,6 +357,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     media_uri TEXT NOT NULL UNIQUE CHECK (media_uri <> ''),
     source_path TEXT,
     source_format TEXT,
+    audio_properties TEXT NOT NULL DEFAULT '{}',
     comment TEXT,
     bpm INTEGER,
     musicbrainz_recording_id TEXT,

@@ -49,6 +49,14 @@
       </object>
     </child>
     <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Accessibility</property>
+        <child><object class="AdwSwitchRow" id="reduce_motion">
+          <property name="title" translatable="yes">Reduce motion</property>
+        </object></child>
+      </object>
+    </child>
+    <child>
       <object class="AdwPreferencesGroup" id="seekbar_group">
         <property name="title" translatable="yes">Seekbar</property>
         <child>

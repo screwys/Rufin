@@ -15,7 +15,7 @@ pub struct SelectedLyricsState {
     pub right_pane_dirty: Cell<bool>,
     pub fullscreen_pane_dirty: Cell<bool>,
     pub search_dialog: RefCell<Option<LyricsSearchDialog>>,
-    pub settings_dialog: gtk::glib::WeakRef<adw::PreferencesDialog>,
+    pub settings_dialogs: [gtk::glib::WeakRef<adw::PreferencesDialog>; 2],
     pub right_pane: LyricsPane,
     pub fullscreen_pane: LyricsPane,
 }
@@ -24,8 +24,10 @@ impl SelectedLyricsState {
     pub fn new() -> Self {
         let right_pane = LyricsPane::new();
         right_pane.use_right_panel_scrollbar();
+        right_pane.widget().add_css_class("lyrics-sidebar");
         let fullscreen_pane = LyricsPane::new();
         fullscreen_pane.use_right_panel_scrollbar();
+        fullscreen_pane.widget().add_css_class("lyrics-fullscreen");
         fullscreen_pane
             .widget()
             .add_css_class("fullscreen-player-pane");
@@ -37,7 +39,7 @@ impl SelectedLyricsState {
             right_pane_dirty: Cell::new(true),
             fullscreen_pane_dirty: Cell::new(true),
             search_dialog: RefCell::new(None),
-            settings_dialog: gtk::glib::WeakRef::new(),
+            settings_dialogs: std::array::from_fn(|_| gtk::glib::WeakRef::new()),
             right_pane,
             fullscreen_pane,
         }
@@ -393,8 +395,10 @@ impl Drop for SelectedLyricsState {
             }
             dialog.dialog.close();
         }
-        if let Some(dialog) = self.settings_dialog.upgrade() {
-            dialog.close();
+        for dialog in &self.settings_dialogs {
+            if let Some(dialog) = dialog.upgrade() {
+                dialog.close();
+            }
         }
     }
 }

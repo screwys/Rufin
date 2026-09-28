@@ -928,6 +928,13 @@ pub fn track_column_width(key: LibraryListKey, field: LibraryField) -> i32 {
         | LibraryField::Bpm => 62,
         LibraryField::Duration => 70,
         LibraryField::Image => column_width(LibraryField::Image),
+        LibraryField::Bitrate
+        | LibraryField::SampleRate
+        | LibraryField::BitDepth
+        | LibraryField::Channels
+        | LibraryField::Format
+        | LibraryField::FilePath
+        | LibraryField::Source => column_width(field),
         LibraryField::Favorite => FAVORITE_COLUMN_WIDTH,
         LibraryField::Tools => gtk_widgets::recycled_cells::ROW_ACTIONS_WIDTH,
     }

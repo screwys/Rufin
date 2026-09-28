@@ -16,6 +16,7 @@ pub fn home_block_title(value: HomeBlockKind) -> &'static str {
 pub fn library_list_title(value: LibraryListKey) -> &'static str {
     match value {
         LibraryListKey::Queue => msgid("Queue"),
+        LibraryListKey::FullscreenTracks => msgid("Fullscreen player"),
         LibraryListKey::Albums => msgid("Albums"),
         LibraryListKey::Artists => msgid("Artists"),
         LibraryListKey::AlbumArtists => msgid("Album artists"),
@@ -54,6 +55,13 @@ pub fn library_field_title(value: LibraryField) -> &'static str {
         LibraryField::UserRating => msgid("Rating"),
         LibraryField::Genre => msgid("Genre"),
         LibraryField::Bpm => msgid("BPM"),
+        LibraryField::Bitrate => msgid("Bitrate"),
+        LibraryField::SampleRate => msgid("Sample rate"),
+        LibraryField::BitDepth => msgid("Bit depth"),
+        LibraryField::Channels => msgid("Channels"),
+        LibraryField::Format => msgid("Format"),
+        LibraryField::FilePath => msgid("File path"),
+        LibraryField::Source => msgid("Source"),
         LibraryField::TrackNumber => msgid("Track"),
         LibraryField::DiscNumber => msgid("Disc"),
         LibraryField::SongCount => msgid("Number of songs"),

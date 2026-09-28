@@ -91,6 +91,8 @@ pub const RECYCLED_TEXT_CELL_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/routes/recycled_text_cell.ui";
 
 pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
+    TEXT_SLIDE_RESOURCE,
+    DISPLAY_SETTINGS_RESOURCE,
     "/io/github/screwys/Rufin/ui/routes/row_actions.ui",
     TRACK_ROW_INDEX_RESOURCE,
     PLAY_MENU_RESOURCE,
@@ -103,6 +105,9 @@ pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     RECYCLED_MERGED_CELL_RESOURCE,
     RECYCLED_TEXT_CELL_RESOURCE,
 ];
+
+pub const DISPLAY_SETTINGS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/preferences/display.ui";
+pub const TEXT_SLIDE_RESOURCE: &str = "/io/github/screwys/Rufin/ui/routes/text_slide.ui";
 
 pub const TRACK_ROW_INDEX_RESOURCE: &str = "/io/github/screwys/Rufin/ui/routes/track_row_index.ui";
 

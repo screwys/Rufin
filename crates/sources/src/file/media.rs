@@ -17,6 +17,7 @@ use super::lofty::{read_lofty_file, source_format};
 
 #[derive(Clone, Debug)]
 pub(crate) struct ScannedTrack {
+    pub(crate) audio_properties: library::AudioProperties,
     pub(crate) id: String,
     pub(crate) album_id: String,
     pub(crate) title: String,
@@ -97,6 +98,7 @@ struct MetadataArtist {
 }
 
 struct AudioMetadata {
+    audio_properties: library::AudioProperties,
     basic: BasicAudioMetadata,
     sort_title: Option<String>,
     sort_album: Option<String>,
@@ -274,6 +276,12 @@ fn audio_metadata_from_lofty(
     let release_types = album_release_types(tag);
     let is_compilation = album_compilation(tag, &release_types);
     AudioMetadata {
+        audio_properties: library::AudioProperties {
+            bitrate_kbps: tagged_file.properties().audio_bitrate(),
+            sample_rate_hz: tagged_file.properties().sample_rate(),
+            bit_depth: tagged_file.properties().bit_depth().map(u32::from),
+            channels: tagged_file.properties().channels().map(u32::from),
+        },
         sort_title: tag_string(tag, |tag| {
             tag.get_string(ItemKey::TrackTitleSortOrder)
                 .map(str::to_owned)
@@ -431,6 +439,9 @@ fn audio_metadata_from_discoverer(
         })
         .collect();
     AudioMetadata {
+        audio_properties: metadata
+            .map(|metadata| metadata.audio_properties.clone())
+            .unwrap_or_default(),
         sort_title: metadata.and_then(|metadata| metadata.sort_title.clone()),
         sort_album: metadata.and_then(|metadata| metadata.sort_album.clone()),
         basic,
@@ -488,6 +499,7 @@ fn audio_metadata_from_discoverer(
 
 fn scanned_track(path: &Path, metadata: AudioMetadata) -> ScannedTrack {
     let AudioMetadata {
+        audio_properties,
         basic,
         sort_title,
         sort_album,
@@ -559,6 +571,7 @@ fn scanned_track(path: &Path, metadata: AudioMetadata) -> ScannedTrack {
         None,
     );
     ScannedTrack {
+        audio_properties,
         sort_title,
         sort_album,
         id: track_id(path),

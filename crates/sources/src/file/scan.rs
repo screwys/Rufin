@@ -182,6 +182,7 @@ async fn stage_track_row(scan: &mut Scan, track: &ScannedTrack) -> SourceResult<
         None,
         Some(&track.source_path),
         audio_key(track),
+        &track.audio_properties,
     )
     .await?;
     Ok(())

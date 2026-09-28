@@ -88,6 +88,7 @@ struct Album {
 }
 #[derive(Clone, Debug, PartialEq)]
 struct Track {
+    audio_properties: library::AudioProperties,
     id: TrackId,
     album_id: Option<AlbumId>,
     title: String,

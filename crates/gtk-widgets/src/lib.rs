@@ -1,10 +1,12 @@
 //! Shared GTK presentation owners and primitives.
+pub mod edge_fade;
 pub mod field_layout;
 pub mod layout;
 pub mod localization;
 pub mod route;
 pub mod settings;
 pub mod sparse_model;
+pub mod text_slide;
 
 pub mod artwork;
 
@@ -13,6 +15,8 @@ pub mod downloads;
 pub mod ui_resource;
 
 pub fn register_resources() -> Result<(), String> {
+    use gtk::glib::types::StaticType;
+    edge_fade::TextFade::static_type();
     static REGISTERED: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
     REGISTERED
         .get_or_init(|| {
@@ -48,6 +52,7 @@ pub mod library_fields;
 pub mod table_sizing;
 pub use duration::{format_duration, format_duration_units};
 
+pub mod display;
 pub mod scale;
 
 pub mod feedback;

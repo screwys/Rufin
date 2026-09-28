@@ -720,6 +720,7 @@ pub fn appearance_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
         gtk_widgets::ui_resource::object(&builder, resource, "appearance_page");
     gtk_widgets::objects!(builder, resource, {
         waveform_row: adw::SwitchRow,
+        reduce_motion: adw::SwitchRow,
         layout_group: adw::PreferencesGroup,
         lyrics_panel_row: adw::SwitchRow,
         visualizer_panel_row: adw::SwitchRow,
@@ -733,6 +734,19 @@ pub fn appearance_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
     });
 
     super::themes::bind(shell, &builder, resource);
+    reduce_motion.set_active(shell.settings.current.borrow().reduce_motion);
+    let motion_shell = Rc::clone(shell);
+    reduce_motion.connect_active_notify(move |row| {
+        if let Some(settings) =
+            motion_shell
+                .settings
+                .set_app_setting("reduced motion", row.is_active(), |settings| {
+                    &mut settings.reduce_motion
+                })
+        {
+            motion_shell.appearance.apply(&settings);
+        }
+    });
     waveform_row.set_active(shell.settings.current.borrow().seekbar_waveform_enabled);
     let waveform_shell = Rc::clone(shell);
     waveform_row.connect_active_notify(move |row| {

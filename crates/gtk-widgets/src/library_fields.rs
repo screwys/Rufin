@@ -95,6 +95,13 @@ impl TrackPresentation for library::HistoryRow {
     }
     fn field(&self, field: LibraryField) -> String {
         match field {
+            LibraryField::Bitrate
+            | LibraryField::SampleRate
+            | LibraryField::BitDepth
+            | LibraryField::Channels => audio_property_field(&self.audio_properties, field),
+            LibraryField::Format => self.source_format.clone().unwrap_or_default(),
+            LibraryField::FilePath => self.source_path.clone().unwrap_or_default(),
+            LibraryField::Source => self.source_name.clone().unwrap_or_default(),
             LibraryField::Title | LibraryField::TitleMerged => self.title.clone(),
             LibraryField::Artist => self.artist.clone(),
             LibraryField::Album => self.album.clone(),
@@ -137,6 +144,13 @@ impl TrackPresentation for library::SmartPlaylistTrackRow {
     }
     fn field(&self, field: LibraryField) -> String {
         match field {
+            LibraryField::Bitrate
+            | LibraryField::SampleRate
+            | LibraryField::BitDepth
+            | LibraryField::Channels => audio_property_field(&self.audio_properties, field),
+            LibraryField::Format => self.source_format.clone().unwrap_or_default(),
+            LibraryField::FilePath => self.source_path.clone().unwrap_or_default(),
+            LibraryField::Source => self.source_name.clone().unwrap_or_default(),
             LibraryField::Title | LibraryField::TitleMerged => self.title.clone(),
             LibraryField::Artist => self.artist.clone(),
             LibraryField::Album => self.album.clone(),
@@ -202,6 +216,20 @@ impl TrackPresentation for QueuePageRow {
     }
     fn field(&self, field: LibraryField) -> String {
         match field {
+            LibraryField::AlbumArtist => self.album_display_artist.clone().unwrap_or_default(),
+            LibraryField::DiscNumber => self
+                .disc_number
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+            LibraryField::TrackNumber => optional_track_number(self.disc_number, self.track_number),
+            LibraryField::ReleaseDate => self.release_date.clone().unwrap_or_default(),
+            LibraryField::Bitrate
+            | LibraryField::SampleRate
+            | LibraryField::BitDepth
+            | LibraryField::Channels => audio_property_field(&self.audio_properties, field),
+            LibraryField::Format => self.source_format.clone().unwrap_or_default(),
+            LibraryField::FilePath => self.source_path.clone().unwrap_or_default(),
+            LibraryField::Source => self.source_name.clone().unwrap_or_default(),
             LibraryField::Title | LibraryField::TitleMerged => self.title.clone(),
             LibraryField::Artist => self.artist.clone(),
             LibraryField::Album => self.album.clone(),
@@ -314,6 +342,13 @@ pub fn smart_playlist_field(playlist: &SmartPlaylistRow, field: LibraryField) ->
 }
 pub fn track_field(track: &TrackRow, field: LibraryField) -> String {
     match field {
+        LibraryField::Bitrate
+        | LibraryField::SampleRate
+        | LibraryField::BitDepth
+        | LibraryField::Channels => audio_property_field(&track.audio_properties, field),
+        LibraryField::Format => track.source_format.clone().unwrap_or_default(),
+        LibraryField::FilePath => track.source_path.clone().unwrap_or_default(),
+        LibraryField::Source => track.source_name.clone(),
         LibraryField::Title | LibraryField::TitleMerged => track.title.clone(),
         LibraryField::Artist => track.artist.clone(),
         LibraryField::AlbumArtist => joined_credits(&track.album_artists),
@@ -341,6 +376,29 @@ pub fn track_field(track: &TrackRow, field: LibraryField) -> String {
         LibraryField::Favorite => favorite_text(track.favorite),
         _ => String::new(),
     }
+}
+
+pub fn audio_property_field(properties: &library::AudioProperties, field: LibraryField) -> String {
+    match field {
+        LibraryField::Bitrate => properties
+            .bitrate_kbps
+            .filter(|value| *value > 0)
+            .map(|value| format!("{value} kbps")),
+        LibraryField::SampleRate => properties
+            .sample_rate_hz
+            .filter(|value| *value > 0)
+            .map(|value| format!("{} kHz", f64::from(value) / 1000.0)),
+        LibraryField::BitDepth => properties
+            .bit_depth
+            .filter(|value| *value > 0)
+            .map(|value| value.to_string()),
+        LibraryField::Channels => properties
+            .channels
+            .filter(|value| *value > 0)
+            .map(|value| value.to_string()),
+        _ => None,
+    }
+    .unwrap_or_default()
 }
 
 pub fn optional_track_number(disc: Option<i64>, track: Option<i64>) -> String {
@@ -570,6 +628,13 @@ pub fn layout_title(layout: LibraryLayout) -> &'static str {
 }
 pub fn column_width(field: LibraryField) -> i32 {
     match field {
+        LibraryField::Bitrate
+        | LibraryField::SampleRate
+        | LibraryField::BitDepth
+        | LibraryField::Channels
+        | LibraryField::Format => 100,
+        LibraryField::FilePath => 320,
+        LibraryField::Source => 160,
         LibraryField::RowIndex => 48,
         LibraryField::Image => 56,
         LibraryField::Favorite => crate::favorites::FAVORITE_COLUMN_WIDTH,

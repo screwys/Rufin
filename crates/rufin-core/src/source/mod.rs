@@ -4608,6 +4608,7 @@ mod artwork_preparation_tests {
                 None,
                 None,
                 [0; 32],
+                &library::AudioProperties::default(),
             )
             .await
             .unwrap();

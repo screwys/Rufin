@@ -117,6 +117,9 @@ impl<'row> FromRow<'row, SqliteRow> for PlaylistRow {
 
 #[derive(Clone, Debug, FromRow, PartialEq)]
 pub struct PlaylistEntryRow {
+    pub audio_properties: crate::AudioProperties,
+    pub source_path: Option<String>,
+    pub source_name: Option<String>,
     pub playlist_entry_key: PlaylistEntryKey,
     pub position: i64,
     pub media_uri: String,
@@ -1375,7 +1378,7 @@ pub(crate) async fn load_playlist_entry_rows(
                       COALESCE(track.track_number,entry.track_number) track_number,
                       COALESCE(track.year,entry.year) year,
                       COALESCE(track.release_date,entry.release_date) release_date,
-                      track.date_added,track.bpm,
+                      COALESCE(track.audio_properties,'{}') audio_properties,track.date_added,track.bpm,track.source_path,source.display_name source_name,
                       (SELECT COALESCE(group_concat(name, ', '),'') FROM (
                          SELECT genre.name FROM track_genres credit JOIN genres genre USING(genre_key)
                          WHERE credit.track_key=track.track_key ORDER BY credit.position

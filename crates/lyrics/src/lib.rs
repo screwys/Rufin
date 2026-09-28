@@ -103,6 +103,10 @@ pub struct Settings {
     #[serde(default)]
     pub lyrics_font_size: Option<u16>,
     #[serde(default)]
+    pub fullscreen_lyrics_font_family: Option<String>,
+    #[serde(default)]
+    pub fullscreen_lyrics_font_size: Option<u16>,
+    #[serde(default)]
     pub lyrics_highlight_color: Option<String>,
 }
 
@@ -124,6 +128,8 @@ impl Default for Settings {
             karaoke_mode: false,
             lyrics_font_family: None,
             lyrics_font_size: None,
+            fullscreen_lyrics_font_family: None,
+            fullscreen_lyrics_font_size: None,
             lyrics_highlight_color: None,
         }
     }
@@ -161,12 +167,21 @@ impl Settings {
         self.preferred_translation_language =
             normalize_language_tag(&self.preferred_translation_language)
                 .unwrap_or_else(default_translation_language);
-        self.lyrics_font_family = self
-            .lyrics_font_family
-            .take()
-            .map(|family| family.trim().chars().take(128).collect::<String>())
-            .filter(|family| !family.is_empty());
-        self.lyrics_font_size = self.lyrics_font_size.map(|size| size.clamp(12, 28));
+        for family in [
+            &mut self.lyrics_font_family,
+            &mut self.fullscreen_lyrics_font_family,
+        ] {
+            *family = family
+                .take()
+                .map(|family| family.trim().chars().take(128).collect::<String>())
+                .filter(|family| !family.is_empty());
+        }
+        for size in [
+            &mut self.lyrics_font_size,
+            &mut self.fullscreen_lyrics_font_size,
+        ] {
+            *size = size.map(|size| size.clamp(12, 28));
+        }
         if self
             .lyrics_highlight_color
             .as_deref()

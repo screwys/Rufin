@@ -105,6 +105,7 @@ pub fn bind_popover(shell: &Rc<Preferences>, button: &gtk::MenuButton) {
         let resource = crate::ui_resource::CONTROLLER_POPOVER_RESOURCE;
         let builder = gtk_widgets::ui_resource::builder(resource);
         let popover: gtk::Popover = gtk_widgets::ui_resource::object(&builder, resource, "popover");
+        popover.connect_show(gtk_widgets::interactions::align_topbar_popup);
         let open_settings: gtk::Button =
             gtk_widgets::ui_resource::object(&builder, resource, "open_settings");
         let weak = Rc::downgrade(&shell);

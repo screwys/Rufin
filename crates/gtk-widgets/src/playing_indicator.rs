@@ -8,7 +8,6 @@ mod imp {
     #[derive(Default)]
     pub struct PlayingIndicator {
         pub timer: RefCell<Option<glib::SourceId>>,
-        settings_handler: RefCell<Option<glib::SignalHandlerId>>,
     }
 
     #[glib::object_subclass]
@@ -37,53 +36,35 @@ mod imp {
 
         fn map(&self) {
             self.parent_map();
-            let obj = self.obj();
-            let weak = obj.downgrade();
-            self.settings_handler.replace(Some(
-                obj.settings()
-                    .connect_gtk_enable_animations_notify(move |_| {
-                        if let Some(obj) = weak.upgrade() {
-                            obj.sync_animation();
-                        }
-                    }),
-            ));
-            obj.sync_animation();
+            self.obj().sync_animation();
         }
 
         fn unmap(&self) {
             if let Some(timer) = self.timer.take() {
                 timer.remove();
             }
-            if let Some(handler) = self.settings_handler.take() {
-                self.obj().settings().disconnect(handler);
-            }
             self.parent_unmap();
         }
 
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
             let obj = self.obj();
-            let animations = obj.settings().is_gtk_enable_animations();
-            let time = if animations {
-                obj.frame_clock()
-                    .map_or(0.0, |clock| clock.frame_time() as f64 / 1_000_000.0)
-            } else {
-                0.0
-            };
+            if !obj.settings().is_gtk_enable_animations() {
+                return;
+            }
+            let time = obj
+                .frame_clock()
+                .map_or(0.0, |clock| clock.frame_time() as f64 / 1_000_000.0);
             let color = obj.color();
             for index in 0..3 {
-                let height = if animations {
-                    let phase = ((time + f64::from(index) * 0.3) / 0.9) % 2.0;
-                    let progress = if phase <= 1.0 { phase } else { 2.0 - phase };
-                    let (start, end, progress) = if progress <= 0.5 {
-                        (4.0, 12.0, progress * 2.0)
-                    } else {
-                        (12.0, 8.0, (progress - 0.5) * 2.0)
-                    };
-                    let eased = (1.0 - (progress * std::f64::consts::PI).cos()) * 0.5;
-                    (start + (end - start) * eased) as f32
+                let phase = ((time + f64::from(index) * 0.3) / 0.9) % 2.0;
+                let progress = if phase <= 1.0 { phase } else { 2.0 - phase };
+                let (start, end, progress) = if progress <= 0.5 {
+                    (4.0, 12.0, progress * 2.0)
                 } else {
-                    6.0
+                    (12.0, 8.0, (progress - 0.5) * 2.0)
                 };
+                let eased = (1.0 - (progress * std::f64::consts::PI).cos()) * 0.5;
+                let height = (start + (end - start) * eased) as f32;
                 let column = if obj.direction() == gtk::TextDirection::Rtl {
                     2 - index
                 } else {
@@ -107,10 +88,16 @@ glib::wrapper! {
 
 impl PlayingIndicator {
     pub fn new() -> Self {
-        glib::Object::builder()
+        let indicator: Self = glib::Object::builder()
             .property("can-target", false)
             .property("valign", gtk::Align::Center)
-            .build()
+            .build();
+        indicator
+            .settings()
+            .bind_property("gtk-enable-animations", &indicator, "visible")
+            .sync_create()
+            .build();
+        indicator
     }
 
     fn sync_animation(&self) {
@@ -131,6 +118,7 @@ impl PlayingIndicator {
         } else if let Some(timer) = self.imp().timer.take() {
             timer.remove();
         }
+        self.queue_resize();
         self.queue_draw();
     }
 }
