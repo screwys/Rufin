@@ -859,7 +859,9 @@ impl Authorization {
                 return Err(Box::new(response));
             }
         }
-        if token == Some(self.token.as_str()) {
+        if token.is_some_and(|token| {
+            constant_time_eq::constant_time_eq(token.as_bytes(), self.token.as_bytes())
+        }) {
             if let Some(index) = previous {
                 failures.remove(index);
             }
