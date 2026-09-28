@@ -557,8 +557,11 @@ mod context_menu_tests {
     #[test]
     fn side_submenus_require_one_complete_contiguous_side() {
         assert!(context_menu_has_submenu_side(988, 494.0, 276, 301));
-        assert!(context_menu_has_submenu_side(600, 50.0, 276, 301));
+        assert!(context_menu_has_submenu_side(600, 15.0, 276, 301));
+        assert!(!context_menu_has_submenu_side(600, 16.0, 276, 301));
+        assert!(!context_menu_has_submenu_side(600, 50.0, 276, 301));
         assert!(!context_menu_has_submenu_side(600, 300.0, 276, 301));
+        assert!(context_menu_has_submenu_side(600, 590.0, 276, 301));
         assert!(!context_menu_has_submenu_side(490, 245.0, 276, 230));
     }
 
