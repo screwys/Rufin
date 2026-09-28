@@ -350,6 +350,27 @@ impl PlayerPipeline {
         let certificate_policy = Arc::clone(&self.trust_invalid_certificate);
         configure_sources(&pipeline, move || certificate_policy.load(Ordering::SeqCst));
 
+        pipeline.connect("source-setup", false, |values| {
+            let pipeline = values[0].get::<gst::Bin>().expect("playbin source owner");
+            if let Some(decoder) = pipeline.iterate_recurse().find(|element| {
+                element
+                    .factory()
+                    .is_some_and(|factory| factory.name() == "decodebin3")
+            }) && decoder.current_state() < gst::State::Paused
+            {
+                // A fast source can send startup events before decodebin's pads
+                // are active. Prepare the decoder before the source starts.
+                if let Err(error) = decoder.set_state(gst::State::Paused) {
+                    gst::element_error!(
+                        pipeline,
+                        gst::CoreError::StateChange,
+                        ("Could not prepare the audio decoder: {error}")
+                    );
+                }
+            }
+            None
+        });
+
         let module_for_setup = Arc::clone(&self.module_decoder);
         pipeline.connect("element-setup", false, move |values| {
             let element = values[1].get::<gst::Element>().expect("playbin element-setup element");
