@@ -15,6 +15,6 @@
   </object>
   <object class="GtkLinkButton" id="sponsor">
     <property name="label" translatable="yes">Donate</property>
-    <property name="uri">https://github.com/screwys/Rufin/pull/1239</property>
+    <property name="uri">https://buymeacoffee.com/screwy</property>
   </object>
 </interface>
