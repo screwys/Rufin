@@ -1000,6 +1000,11 @@ msgstr "Nevar atvērt mapi: {error}"
 msgid "Could not open folder: {error}"
 msgstr "Nevar atvērt mapi: {error}"
 
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Could not play this track"
+msgstr "Šo lapu nevarēja ielādēt"
+
 msgid "Could not receive live updates"
 msgstr "Nevar saņemt jaunākos datus"
 
@@ -3003,9 +3008,6 @@ msgstr "Atiestatīt uz noklusējuma iestatījumiem"
 msgid "Reset"
 msgstr "Atiestatīt"
 
-msgid "Resource not found"
-msgstr "Resurss nav atrasts"
-
 msgid "Restart now"
 msgstr ""
 
@@ -4199,6 +4201,9 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "Resource not found"
+#~ msgstr "Resurss nav atrasts"
 
 #~ msgid "Increases memory usage"
 #~ msgstr "Palielina atmiņas izmantošanu"

@@ -959,6 +959,11 @@ msgstr "Impossible d'ouvrir le fichier : {error}"
 msgid "Could not open folder: {error}"
 msgstr "Impossible d'ouvrir le dossier : {error}"
 
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Could not play this track"
+msgstr "Impossible de charger cette page"
+
 msgid "Could not receive live updates"
 msgstr "Impossible de recevoir les mises à jour en direct"
 
@@ -2853,9 +2858,6 @@ msgstr "Rétablir les valeurs par défaut"
 msgid "Reset"
 msgstr "Réinitialiser"
 
-msgid "Resource not found"
-msgstr "Ressource non trouvée"
-
 msgid "Restart now"
 msgstr "Redémarrer maintenant"
 
@@ -3980,6 +3982,9 @@ msgstr "L'option de mise à jour automatique de {app_name} est invalide."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenue sur l'installateur de Rufin"
+
+#~ msgid "Resource not found"
+#~ msgstr "Ressource non trouvée"
 
 #~ msgid "Increases memory usage"
 #~ msgstr "Augmente l'utilisation de la mémoire"

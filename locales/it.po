@@ -980,6 +980,11 @@ msgstr "Non è stato possibile aprire la cartella: {error}"
 msgid "Could not open folder: {error}"
 msgstr "Non è stato possibile aprire la cartella: {error}"
 
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Could not play this track"
+msgstr "Non è stato possibile caricare questa pagina"
+
 msgid "Could not receive live updates"
 msgstr "Non è stato possibile ricevere aggiornamenti in tempo reale"
 
@@ -2902,9 +2907,6 @@ msgid "Reset to defaults"
 msgstr ""
 
 msgid "Reset"
-msgstr ""
-
-msgid "Resource not found"
 msgstr ""
 
 msgid "Restart now"

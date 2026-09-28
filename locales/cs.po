@@ -1050,6 +1050,11 @@ msgid "Could not open folder: {error}"
 msgstr "Nelze aktualizovat oblíbené"
 
 #, fuzzy
+#| msgid "Couldn't load this folder"
+msgid "Could not play this track"
+msgstr "Nelze načíst tuto složku"
+
+#, fuzzy
 #| msgid "Could not update favorites"
 msgid "Could not receive live updates"
 msgstr "Nelze aktualizovat oblíbené"
@@ -3229,9 +3234,6 @@ msgstr "Obnovit výchozí nastavení"
 
 msgid "Reset"
 msgstr "Obnovit"
-
-msgid "Resource not found"
-msgstr ""
 
 msgid "Restart now"
 msgstr ""

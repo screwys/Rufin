@@ -1017,6 +1017,11 @@ msgid "Could not open folder: {error}"
 msgstr "無法更新最愛"
 
 #, fuzzy
+#| msgid "Couldn't load this folder"
+msgid "Could not play this track"
+msgstr "無法載入此資料夾"
+
+#, fuzzy
 #| msgid "Could not update favorites"
 msgid "Could not receive live updates"
 msgstr "無法更新最愛"
@@ -3153,9 +3158,6 @@ msgstr "重置回預設值"
 
 msgid "Reset"
 msgstr "重置"
-
-msgid "Resource not found"
-msgstr ""
 
 msgid "Restart now"
 msgstr ""

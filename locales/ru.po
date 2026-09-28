@@ -983,6 +983,11 @@ msgstr "Не удалось открыть файл: {error}"
 msgid "Could not open folder: {error}"
 msgstr "Не удалось открыть папку: {error}"
 
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Could not play this track"
+msgstr "Не удалось загрузить эту страницу"
+
 msgid "Could not receive live updates"
 msgstr "Не удалось получить обновления в режиме реального времени"
 
@@ -2914,9 +2919,6 @@ msgstr "Восстановить настройки по умолчанию"
 msgid "Reset"
 msgstr "Сбросить"
 
-msgid "Resource not found"
-msgstr "Ресурс не найден"
-
 msgid "Restart now"
 msgstr "Перезапустить сейчас"
 
@@ -4069,6 +4071,9 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Resource not found"
+#~ msgstr "Ресурс не найден"
 
 #~ msgid "Increases memory usage"
 #~ msgstr "Увеличивает использование памяти"

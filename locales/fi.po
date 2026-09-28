@@ -986,6 +986,11 @@ msgid "Could not open folder: {error}"
 msgstr "Kansiota ei voitu avata: {error}"
 
 #, fuzzy
+#| msgid "Couldn't load this folder"
+msgid "Could not play this track"
+msgstr "Tätä kansiota ei voitu ladata"
+
+#, fuzzy
 #| msgid "Could not update favorites"
 msgid "Could not receive live updates"
 msgstr "Suosikkeja ei voitu päivittää"
@@ -3030,9 +3035,6 @@ msgstr "Palauta oletusarvot"
 msgid "Reset"
 msgstr "Palauta oletukset"
 
-msgid "Resource not found"
-msgstr "Resurssia ei löytynyt"
-
 msgid "Restart now"
 msgstr ""
 
@@ -4255,6 +4257,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#~ msgid "Resource not found"
+#~ msgstr "Resurssia ei löytynyt"
 
 #~ msgid ""
 #~ "These folders are combined into the Local source and shown through folder "

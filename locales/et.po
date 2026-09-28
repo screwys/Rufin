@@ -973,6 +973,11 @@ msgstr "Faili avamine ei õnnestunud: {error}"
 msgid "Could not open folder: {error}"
 msgstr "Kausta avamine ei õnnestunud: {error}"
 
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Could not play this track"
+msgstr "Selle lehe laadimine ei õnnestunud"
+
 msgid "Could not receive live updates"
 msgstr "Reaalajas uuenduste laadimine ei õnnestunud"
 
@@ -2892,9 +2897,6 @@ msgstr "Taasta vaikimisi väärtus"
 msgid "Reset"
 msgstr "Lähtesta"
 
-msgid "Resource not found"
-msgstr "Ressurssi ei leidu"
-
 msgid "Restart now"
 msgstr "Taaskäivita kohe"
 
@@ -4030,6 +4032,9 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#~ msgid "Resource not found"
+#~ msgstr "Ressurssi ei leidu"
 
 #~ msgid "Increases memory usage"
 #~ msgstr "Suurendab mälukasutust"
