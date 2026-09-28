@@ -2084,6 +2084,9 @@ msgstr ""
 msgid "No network devices found"
 msgstr ""
 
+msgid "No playable entries were found"
+msgstr ""
+
 msgid "No related tracks found"
 msgstr ""
 

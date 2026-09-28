@@ -1,7 +1,8 @@
 [Desktop Entry]
 Name=Rufin
 Comment=Native music player
-Exec=rufin
+Exec=rufin %U
+MimeType=application/m3u;application/ogg;application/pls;application/vnd.apple.mpegurl;application/x-ogg;application/x-ogm-audio;application/x-shorten;application/x-xspf+xml;application/xspf+xml;audio/AMR;audio/AMR-WB;audio/aac;audio/ac3;audio/annodex;audio/basic;audio/dsd;audio/dsf;audio/flac;audio/m3u;audio/m4a;audio/midi;audio/mp2;audio/mp3;audio/mp4;audio/mpeg;audio/mpegurl;audio/ogg;audio/qcelp;audio/riff-midi;audio/scpls;audio/tta;audio/usac;audio/vnd.dts;audio/vnd.dts.hd;audio/vnd.m-realaudio;audio/vnd.rn-realaudio;audio/vnd.wave;audio/vorbis;audio/wav;audio/webm;audio/wma;audio/x-aac;audio/x-ac3;audio/x-aifc;audio/x-aiff;audio/x-aiffc;audio/x-amr-nb-sh;audio/x-amr-wb-sh;audio/x-annodex;audio/x-ape;audio/x-au;audio/x-ay;audio/x-bfstm;audio/x-brstm;audio/x-dsd;audio/x-dsf;audio/x-dts;audio/x-dtshd;audio/x-flac;audio/x-flac+ogg;audio/x-gbs;audio/x-gsm;audio/x-gym;audio/x-hes;audio/x-ircam;audio/x-it;audio/x-kss;audio/x-m3u;audio/x-m4a;audio/x-m4b;audio/x-m4r;audio/x-matroska;audio/x-midi;audio/x-mod;audio/x-mp1;audio/x-mp2;audio/x-mp3;audio/x-mp3-playlist;audio/x-mpeg;audio/x-mpegurl;audio/x-mpg;audio/x-ms-wma;audio/x-musepack;audio/x-nist;audio/x-nsf;audio/x-ogg;audio/x-oggflac;audio/x-opus+ogg;audio/x-paris;audio/x-pn-aiff;audio/x-pn-au;audio/x-pn-realaudio;audio/x-pn-wav;audio/x-rf64;audio/x-s3m;audio/x-sap;audio/x-sbc;audio/x-scpls;audio/x-sds;audio/x-shorten;audio/x-spc;audio/x-speex;audio/x-speex+ogg;audio/x-stm;audio/x-svx;audio/x-tta;audio/x-ttafile;audio/x-vgm;audio/x-voc;audio/x-vorbis;audio/x-vorbis+ogg;audio/x-w64;audio/x-wav;audio/x-wavpack;audio/x-xi;audio/x-xm;audio/x-xwma;
 Icon=io.github.screwys.Rufin
 Terminal=false
 Type=Application

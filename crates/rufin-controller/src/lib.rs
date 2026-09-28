@@ -39,28 +39,41 @@ pub fn run(arguments: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
     }
 }
 
-fn run_inner(mut arguments: impl Iterator<Item = std::ffi::OsString>) -> Result<(), String> {
+fn run_inner(arguments: impl Iterator<Item = std::ffi::OsString>) -> Result<(), String> {
     localization::initialize()?;
-    const USAGE: &str = "Usage: rufin --headless [--listen [ADDRESS:PORT]]\n       rufin-controller [--listen [ADDRESS:PORT]]\nTo enable web and API access, pass --listen and set RUFIN_API_TOKEN.\nDefault address: 127.0.0.1:1717. GET /api lists the available commands.";
-    let address: Option<SocketAddr> = match arguments.next() {
-        Some(option) if option == "--help" => {
+    const USAGE: &str = "Usage: rufin --headless [--listen [ADDRESS:PORT]] [--] [FILE_OR_URI ...]\n       rufin-controller [--listen [ADDRESS:PORT]] [--] [FILE_OR_URI ...]\nOpen audio files or M3U, PLS and XSPF playlists. Press Ctrl+C to stop.\nTo enable web and API access, pass --listen and set RUFIN_API_TOKEN.\nDefault address: 127.0.0.1:1717. GET /api lists the available commands.";
+    let mut arguments = arguments.peekable();
+    let mut address: Option<SocketAddr> = None;
+    let mut files = Vec::new();
+    while let Some(option) = arguments.next() {
+        if option == "--help" {
             let _ = writeln!(io::stdout().lock(), "{USAGE}");
             return Ok(());
+        } else if option == "--listen" {
+            address = Some(
+                match arguments
+                    .peek()
+                    .and_then(|value| value.to_str())
+                    .and_then(|value| value.parse::<SocketAddr>().ok())
+                {
+                    Some(value) => {
+                        arguments.next();
+                        value
+                    }
+                    None => "127.0.0.1:1717".parse().unwrap(),
+                },
+            );
+        } else if option == "--" {
+            files.extend(arguments);
+            break;
+        } else if option.to_string_lossy().starts_with('-') {
+            return Err(format!(
+                "Unknown option: {}\n{USAGE}",
+                option.to_string_lossy()
+            ));
+        } else {
+            files.push(option);
         }
-        Some(option) if option == "--listen" => Some(
-            arguments
-                .next()
-                .unwrap_or_else(|| "127.0.0.1:1717".into())
-                .to_str()
-                .ok_or(USAGE)?
-                .parse()
-                .map_err(|error| format!("Invalid listen address: {error}"))?,
-        ),
-        Some(_) => return Err(USAGE.into()),
-        None => None,
-    };
-    if arguments.next().is_some() {
-        return Err(USAGE.to_string());
     }
     let token = if address.is_some() {
         Some(
@@ -94,6 +107,11 @@ fn run_inner(mut arguments: impl Iterator<Item = std::ffi::OsString>) -> Result<
         inputs.receivers.visualizer.close();
         drop(inputs.receivers);
         let result = runtime.block_on(async {
+            if !files.is_empty() {
+                rufin_core::open::arguments(&inputs.products.playback.queue, files)
+                    .await
+                    .map_err(io::Error::other)?;
+            }
             if let Some(address) = address {
                 let listener = tokio::net::TcpListener::bind(address).await?;
                 let _ = writeln!(io::stdout().lock(), "Rufin API listening on http://{}", listener.local_addr()?);

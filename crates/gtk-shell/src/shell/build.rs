@@ -60,6 +60,7 @@ pub async fn build(
     force_initial_presentation: bool,
     presented: Option<Box<dyn FnOnce()>>,
     window_bar_preview: Option<crate::application::WindowBarPreview>,
+    open_requests: async_channel::Receiver<Vec<gtk::gio::File>>,
 ) -> Result<(), String> {
     let appearance = Rc::new(gtk_preferences::appearance::ApplicationAppearance::install());
 
@@ -528,6 +529,19 @@ pub async fn build(
     build_compact_navigation(&shell);
     connect_shell_actions(&shell);
     super::drop_import::install(&shell);
+    let weak = Rc::downgrade(&shell);
+    let open_task = gtk::glib::spawn_future_local(async move {
+        while let Ok(files) = open_requests.recv().await {
+            let Some(shell) = weak.upgrade() else {
+                break;
+            };
+            if let Err(error) = rufin_core::open::files(&shell.products.playback.queue, files).await
+            {
+                shell.control_feedback.show_feedback_toast(error);
+            }
+        }
+    });
+    app.connect_shutdown(move |_| open_task.abort());
     shell.chrome.topbar.bind(&shell);
     install_application_quit(&shell);
     install_desktop_lifecycle(&shell);
