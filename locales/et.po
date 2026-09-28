@@ -3438,6 +3438,9 @@ msgstr "Siia esitusloendisse saab lisada vaid lugusid allikast {source}"
 msgid "This source cannot edit this field"
 msgstr "Sellest allikast ei saa antud välja muuta"
 
+msgid "This will remove all configured state. Do you want to continue?"
+msgstr ""
+
 msgid "Thursday"
 msgstr "Neljapäev"
 

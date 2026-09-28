@@ -3395,6 +3395,9 @@ msgstr "Cette playlist n'accepte que {source} morceauxs"
 msgid "This source cannot edit this field"
 msgstr "Cette source ne peut pas modifier ce champ"
 
+msgid "This will remove all configured state. Do you want to continue?"
+msgstr ""
+
 msgid "Thursday"
 msgstr "Jeudi"
 

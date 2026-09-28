@@ -3770,6 +3770,9 @@ msgstr ""
 msgid "This source cannot edit this field"
 msgstr ""
 
+msgid "This will remove all configured state. Do you want to continue?"
+msgstr ""
+
 msgid "Thursday"
 msgstr ""
 

@@ -3573,6 +3573,9 @@ msgstr "Šajā atskaņošanas sarakstā var ievietot tikai {source} dziesmas"
 msgid "This source cannot edit this field"
 msgstr "Šo lauku nevar rediģēt no šī avota"
 
+msgid "This will remove all configured state. Do you want to continue?"
+msgstr ""
+
 msgid "Thursday"
 msgstr "Ceturtdiena"
 
