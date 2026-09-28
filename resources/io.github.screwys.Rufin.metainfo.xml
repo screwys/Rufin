@@ -38,39 +38,39 @@
   <screenshots>
     <screenshot type="default">
       <caption>Browse your music library</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.0/resources/screenshots/Rufin.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.5/resources/screenshots/Rufin.png</image>
     </screenshot>
     <screenshot>
       <caption>View artist details</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.0/resources/screenshots/artist_detail.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.5/resources/screenshots/artist_detail.png</image>
     </screenshot>
     <screenshot>
       <caption>Browse genres</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.0/resources/screenshots/genres.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.5/resources/screenshots/genres.png</image>
     </screenshot>
     <screenshot>
       <caption>Create smart playlists</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.0/resources/screenshots/smart_playlists.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.5/resources/screenshots/smart_playlists.png</image>
     </screenshot>
     <screenshot>
       <caption>Configure playback</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.0/resources/screenshots/playback_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.5/resources/screenshots/playback_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Use the fullscreen player</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.0/resources/screenshots/fullscreen_player.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.5/resources/screenshots/fullscreen_player.png</image>
     </screenshot>
     <screenshot>
       <caption>Configure the visualizer</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.0/resources/screenshots/visualizer_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.5/resources/screenshots/visualizer_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Configure integrations</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.0/resources/screenshots/integrations.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.5/resources/screenshots/integrations.png</image>
     </screenshot>
     <screenshot>
       <caption>Edit a playlist</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.0/resources/screenshots/playlist_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.5/resources/screenshots/playlist_settings.png</image>
     </screenshot>
   </screenshots>
   <launchable type="desktop-id">io.github.screwys.Rufin.desktop</launchable>
@@ -81,6 +81,65 @@
     <control>touch</control>
   </supports>
   <releases>
+    <release version="0.16.5" date="2026-09-28">
+      <description>
+        <p>This is a mid-sized release that focuses mostly on fixes and refining existing features, but we also have several new features. I also have a buymeacoffee page now!</p>
+        <ul>
+          <li>Accessibility improvements: A new reduce-animation toggle has been added. You can also select various new display options, such as alternate color rows, larger/smaller columns from Customize menu. The typography setting for lyrics now applies separately to the sidebar and fullscreen mode.</li>
+        </ul>
+        <ul>
+          <li>New columns, such as codec, folder path, bitrate, and more, can be enabled from the Customize menu.</li>
+        </ul>
+        <ul>
+          <li>Long texts in the bottom bar and showcase entries now slide instead of wrapping.</li>
+        </ul>
+        <ul>
+          <li>The search dropdown now dismisses when necessary (e.g., for context menu actions like editing metadata).</li>
+        </ul>
+        <ul>
+          <li>JXL images and animated GIFs are now supported as covers. Covers are also stored in their original format, except for thumbnails when required.</li>
+        </ul>
+        <ul>
+          <li>You can now drag and drop folders and files into Rufin. You can choose to import them as a playlist or as regular folders that can be watched for changes.</li>
+        </ul>
+        <ul>
+          <li>Better integration with the system: Rufin can now be used to open audio files or playlists directly. This also works from the CLI with `rufin track.mp4` or &quot;flatpak run io.github.screwys.Rufin playlist.m3u8&quot;.</li>
+        </ul>
+        <ul>
+          <li>For local, WebDAV, and Samba sources, subfolders are browsable in the Folders route. You can now exclude subfolders from the library.</li>
+        </ul>
+        <ul>
+          <li>In-app artwork editing: The Edit Metadata popup now has a tab for replacing artwork. You can also save artwork that Rufin automatically fetched or search for alternatives from within this tab. This also applies to playlists and smart playlists. Additionally, you can regenerate mosaics used in these collections.</li>
+        </ul>
+        <ul>
+          <li>Metadata editing has more fields available for both server and file sources.</li>
+        </ul>
+        <ul>
+          <li>Artist images are now fetched online instead of using album fallbacks when they are missing.</li>
+        </ul>
+        <ul>
+          <li>Listening overview PNG exports are now independent of the current window size.</li>
+        </ul>
+        <ul>
+          <li>Streaming manifests, such as HLS, are recognized separately from ordinary local .m3u/.m3u8 playlists.</li>
+        </ul>
+        <ul>
+          <li>Several fixes for Rufin Connect, mostly related to reducing the amount of resources the feature uses.</li>
+        </ul>
+        <ul>
+          <li>Fixed an issue with the Customize button not applying new column settings to routes.</li>
+        </ul>
+        <ul>
+          <li>Fixed an issue with track info getting clipped based on the fallback font used for CJK text.</li>
+        </ul>
+        <ul>
+          <li>Fixed several issues with WebDAV and Samba sources regarding refresh and separated .cue tracks.</li>
+        </ul>
+        <ul>
+          <li>And several other smaller fixes and improvements.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.16.0" date="2026-09-22">
       <description>
         <p>This release brings significant UI changes with the new topbar and new fullscreen player, and it also introduces a preview version of &quot;Rufin Connect&quot;, which is a cross-device sync engine that will be used for... our upcoming Android version! The Android version will become a native player just like the desktop version is; it will be a standalone app. Rufin Connect will let you sync logins and local folders and continue the music. I intend to keep the feature parity close by reusing existing Rust code (with UniFFI Kotling bindings) and make this ready by the next major release. There is also a Matrix chat for Rufin now, you can drop in to say hi!</p>
