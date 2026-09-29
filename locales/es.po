@@ -7,15 +7,15 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-19 19:55+0000\n"
-"Last-Translator: \"David Yakobi (Houtarou)\" <houtarou86@duck.com>\n"
+"PO-Revision-Date: 2026-09-29 17:51+0000\n"
+"Last-Translator: Jhonatan Romani <Jhonadav@tutamail.com>\n"
 "Language-Team: Spanish <https://hosted.weblate.org/projects/rufin/app/es/>\n"
 "Language: es\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
-"X-Generator: Weblate 2026.9.dev0\n"
+"X-Generator: Weblate 2026.10.dev0\n"
 
 msgid ""
 "A Japanese dictionary is downloaded for furigana and romaji readings. This "
@@ -225,7 +225,7 @@ msgid "192 kbps"
 msgstr "192 kbps"
 
 msgid "24 hours"
-msgstr ""
+msgstr "24 Horas"
 
 msgid "256 kbps"
 msgstr "256 kbps"
@@ -240,7 +240,7 @@ msgid "6 hours"
 msgstr ""
 
 msgid "A new update is available, restart to apply"
-msgstr ""
+msgstr "Hay una actualización disponible, reinicie para aplicarla"
 
 #, fuzzy
 #| msgid "API keys"
@@ -263,13 +263,13 @@ msgid "Accent color"
 msgstr "Color de acento"
 
 msgid "Access token"
-msgstr ""
+msgstr "Token de acceso"
 
 msgid "Accessibility"
-msgstr ""
+msgstr "Accesibilidad"
 
 msgid "Action required"
-msgstr ""
+msgstr "Acción requerida"
 
 msgid "Actions"
 msgstr ""
@@ -308,10 +308,8 @@ msgstr "Añade actual"
 msgid "Add folder"
 msgstr "Agregar carpeta"
 
-#, fuzzy
-#| msgid "Add a title"
 msgid "Add image"
-msgstr "Añadir un título"
+msgstr "Añadir una imagen"
 
 #, fuzzy
 #| msgid "Add folder"
@@ -327,10 +325,8 @@ msgstr "Añadir a Fijados"
 msgid "Add to Playlist"
 msgstr "Añadir a la lista de reproducción"
 
-#, fuzzy
-#| msgid "Add to Playlist"
 msgid "Add to library"
-msgstr "Añadir a la lista de reproducción"
+msgstr "Añadir a la librería"
 
 msgid "Add tracks when fewer than this many remain"
 msgstr "Agregar pistas cuando menos de esto muchos permanecen"
@@ -344,10 +340,8 @@ msgstr "Añadido a los favoritos"
 msgid "Added to"
 msgstr "Añadido a"
 
-#, fuzzy
-#| msgid "Add a new source"
 msgid "Adding source"
-msgstr "Añadir una nueva fuente"
+msgstr "Añadiendo nueva fuente"
 
 msgid "Album Artists"
 msgstr "Artistas de álbum"
@@ -377,10 +371,8 @@ msgstr "Título de álbum"
 msgid "Album tracks"
 msgstr "Pistas de álbum"
 
-#, fuzzy
-#| msgid "Album title"
 msgid "Album unavailable"
-msgstr "Título de álbum"
+msgstr "Álbum no disponible"
 
 msgid "Album"
 msgstr "Álbum"
@@ -404,15 +396,13 @@ msgid "All"
 msgstr ""
 
 msgid "Allow remote connections"
-msgstr ""
+msgstr "Permitir conexiones remotas"
 
 msgid "Alternate addresses"
 msgstr ""
 
-#, fuzzy
-#| msgid "Accent color"
 msgid "Alternate row colors"
-msgstr "Color de acento"
+msgstr "Alternar color de filas"
 
 msgid "Anonymous (WebDAV / SMB)"
 msgstr ""
@@ -506,7 +496,7 @@ msgid "Audio fade on play/pause"
 msgstr ""
 
 msgid "Audio output"
-msgstr ""
+msgstr "Salida de audio"
 
 msgid "Audio processing is unavailable while casting"
 msgstr ""
@@ -518,7 +508,7 @@ msgid "August {year}"
 msgstr ""
 
 msgid "Authentication"
-msgstr ""
+msgstr "Autenticación"
 
 msgid "Auto DJ off"
 msgstr ""
@@ -533,10 +523,10 @@ msgid "Auto DJ"
 msgstr ""
 
 msgid "Automatic Backups"
-msgstr ""
+msgstr "Respaldos automáticos"
 
 msgid "Automatic updates"
-msgstr ""
+msgstr "Actualizaciones automáticas"
 
 msgid "Automatic"
 msgstr ""
@@ -548,15 +538,13 @@ msgid "Back"
 msgstr ""
 
 msgid "Backup Folder"
-msgstr ""
+msgstr "Carpeta de respaldos"
 
 msgid "Backup Password"
-msgstr ""
+msgstr "Contraseña de respaldos"
 
-#, fuzzy
-#| msgid "App settings"
 msgid "Backup Settings"
-msgstr "Ajustes de la aplicación"
+msgstr "Ajustes de respaldo"
 
 msgid "Backup exported"
 msgstr ""
@@ -571,7 +559,7 @@ msgid "Backup restored"
 msgstr ""
 
 msgid "Backups"
-msgstr ""
+msgstr "Respaldos"
 
 msgid "Bar spacing (px)"
 msgstr ""
@@ -618,18 +606,14 @@ msgstr ""
 msgid "Certificate authority (PEM)"
 msgstr ""
 
-#, fuzzy
-#| msgid "Add a new source"
 msgid "Change Profile"
-msgstr "Añadir una nueva fuente"
+msgstr "Cambiar perfil"
 
 msgid "Change Secret Storage"
 msgstr ""
 
-#, fuzzy
-#| msgid "Add a new source"
 msgid "Change Source"
-msgstr "Añadir una nueva fuente"
+msgstr "Cambiar fuente"
 
 #, fuzzy
 #| msgid "Add a new source"
@@ -665,10 +649,10 @@ msgid "Check for updates"
 msgstr ""
 
 msgid "Choose Folder"
-msgstr ""
+msgstr "Elegir carpeta"
 
 msgid "Choose Server"
-msgstr ""
+msgstr "Elegir servidor"
 
 msgid "Choose a connection for profile storage."
 msgstr ""
@@ -685,10 +669,8 @@ msgstr ""
 msgid "Choose connection"
 msgstr ""
 
-#, fuzzy
-#| msgid "Add folder"
 msgid "Choose folder"
-msgstr "Agregar carpeta"
+msgstr "Elegir carpeta"
 
 msgid "Choose one or more folders to scan and play directly from this computer"
 msgstr ""
@@ -708,15 +690,11 @@ msgstr ""
 msgid "Clear Mapping"
 msgstr ""
 
-#, fuzzy
-#| msgid "Add a title"
 msgid "Clear album"
-msgstr "Añadir un título"
+msgstr "Limpiar álbum"
 
-#, fuzzy
-#| msgid "Album artist"
 msgid "Clear artist"
-msgstr "Artista de álbum"
+msgstr "Limpiar artista"
 
 msgid "Clear fetched lyrics for this track"
 msgstr ""
@@ -738,10 +716,10 @@ msgid "Clearing queue also clears the current song"
 msgstr ""
 
 msgid "Close Window"
-msgstr ""
+msgstr "Cerrar ventana"
 
 msgid "Close app window"
-msgstr ""
+msgstr "Cerrar aplicación"
 
 msgid "Close fullscreen player"
 msgstr ""
@@ -981,10 +959,8 @@ msgstr ""
 msgid "Create a playlist from queue"
 msgstr "Todas las listas"
 
-#, fuzzy
-#| msgid "Add to Playlist"
 msgid "Create playlist"
-msgstr "Añadir a la lista de reproducción"
+msgstr "Crear lista de reproducción"
 
 msgid "Create"
 msgstr ""
