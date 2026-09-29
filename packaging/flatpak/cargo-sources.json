@@ -5618,14 +5618,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/loro/loro-1.16.0.crate",
-        "sha256": "7fcab151bb96d4bf8589fb42275fe3f4111d733edb98da2562752a093280cad4",
-        "dest": "cargo/vendor/loro-1.16.0"
+        "url": "https://static.crates.io/crates/loro/loro-1.16.2.crate",
+        "sha256": "8e86dea63b66576db244cbc3a40bdb17517263c93f318e2fbe08aca3be1192cb",
+        "dest": "cargo/vendor/loro-1.16.2"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"7fcab151bb96d4bf8589fb42275fe3f4111d733edb98da2562752a093280cad4\", \"files\": {}}",
-        "dest": "cargo/vendor/loro-1.16.0",
+        "contents": "{\"package\": \"8e86dea63b66576db244cbc3a40bdb17517263c93f318e2fbe08aca3be1192cb\", \"files\": {}}",
+        "dest": "cargo/vendor/loro-1.16.2",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -5657,14 +5657,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/loro-internal/loro-internal-1.16.0.crate",
-        "sha256": "26d86659b029a6faedddf8a0d7c4d017e04a96a7acf784cd979266303f39139b",
-        "dest": "cargo/vendor/loro-internal-1.16.0"
+        "url": "https://static.crates.io/crates/loro-internal/loro-internal-1.16.2.crate",
+        "sha256": "8d5806b65ee68c3ae7891959dd968898860dab74fbf6498b312de9b548dce5ec",
+        "dest": "cargo/vendor/loro-internal-1.16.2"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"26d86659b029a6faedddf8a0d7c4d017e04a96a7acf784cd979266303f39139b\", \"files\": {}}",
-        "dest": "cargo/vendor/loro-internal-1.16.0",
+        "contents": "{\"package\": \"8d5806b65ee68c3ae7891959dd968898860dab74fbf6498b312de9b548dce5ec\", \"files\": {}}",
+        "dest": "cargo/vendor/loro-internal-1.16.2",
         "dest-filename": ".cargo-checksum.json"
     },
     {
