@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-28 12:49+0000\n"
+"PO-Revision-Date: 2026-09-29 17:51+0000\n"
 "Last-Translator: Arnaud Constantin <a.constantin@laposte.net>\n"
 "Language-Team: French <https://hosted.weblate.org/projects/rufin/app/fr/>\n"
 "Language: fr\n"
@@ -21,6 +21,8 @@ msgid ""
 "A Japanese dictionary is downloaded for furigana and romaji readings. This "
 "setting also increases resource usage."
 msgstr ""
+"Un dictionnaire japonais est téléchargé pour les lectures furigana et "
+"romaji. Ce paramètre accroît également l'utilisation des ressources."
 
 msgid ""
 "Approving gives this device access to your profile and saved source logins."
@@ -110,6 +112,12 @@ msgid ""
 "will use a file to store its credentials. Cancelling will not save "
 "credentials at all."
 msgstr ""
+"Aucun service de stockage sécurisé n’a été trouvé. Il est possible qu’un tel "
+"service soit installé, mais que le portail soit défaillant. Vous pouvez "
+"consulter <a href=\"https://github.com/screwys/Rufin/issues/"
+"1055#issuecomment-5637922622\">ce ticket</a> pour tenter de résoudre le "
+"problème. Sinon, Rufin utilisera un fichier pour stocker ses identifiants. "
+"Si vous annulez, aucun identifiant ne sera enregistré."
 
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
@@ -323,7 +331,7 @@ msgid "Access token"
 msgstr "Jeton d'accès"
 
 msgid "Accessibility"
-msgstr ""
+msgstr "Accessibilité"
 
 msgid "Action required"
 msgstr "Action requise"
@@ -448,10 +456,8 @@ msgstr "Autoriser les connections à distance"
 msgid "Alternate addresses"
 msgstr "Adresses alternatives"
 
-#, fuzzy
-#| msgid "Accent color"
 msgid "Alternate row colors"
-msgstr "Couleur de contraste"
+msgstr "Couleurs de rangée alternées"
 
 msgid "Anonymous (WebDAV / SMB)"
 msgstr "Anonyme (WebDAV / SMB)"
@@ -484,7 +490,7 @@ msgid "Applied"
 msgstr "Appliqué"
 
 msgid "Applies to sidebar and fullscreen separately"
-msgstr ""
+msgstr "S'applique séparément à la barre latérale et au plein écran"
 
 msgid "Apply Template"
 msgstr "Appliquer le modèle"
@@ -619,7 +625,7 @@ msgid "Bit depth"
 msgstr ""
 
 msgid "Bitrate"
-msgstr ""
+msgstr "Bitrate"
 
 msgid "Blue"
 msgstr "Bleu"
@@ -748,7 +754,7 @@ msgid "Clear queue"
 msgstr "Effacer la file d'attente"
 
 msgid "Clear title"
-msgstr "Effacer le morceau"
+msgstr "Effacer le titre"
 
 msgid "Clear"
 msgstr "Effacer"
@@ -786,10 +792,8 @@ msgstr "Collections"
 msgid "Color for the active word during playback"
 msgstr "Couleur pour le mot actif pendant la lecture"
 
-#, fuzzy
-#| msgid "Columns"
 msgid "Column borders"
-msgstr "Colonnes"
+msgstr "Bordures des colonnes"
 
 msgid "Columns"
 msgstr "Colonnes"
@@ -959,10 +963,8 @@ msgstr "Impossible d'ouvrir le fichier : {error}"
 msgid "Could not open folder: {error}"
 msgstr "Impossible d'ouvrir le dossier : {error}"
 
-#, fuzzy
-#| msgid "Could not load this page"
 msgid "Could not play this track"
-msgstr "Impossible de charger cette page"
+msgstr "Impossible de jouer ce morceau"
 
 msgid "Could not receive live updates"
 msgstr "Impossible de recevoir les mises à jour en direct"
@@ -1151,7 +1153,7 @@ msgid "Discord"
 msgstr "Discord"
 
 msgid "Display"
-msgstr ""
+msgstr "Afficher"
 
 msgid "Do not encrypt"
 msgstr "Ne pas chiffrer"
@@ -1163,7 +1165,7 @@ msgid "Don't duplicate"
 msgstr "Ne pas dupliquer"
 
 msgid "Donate"
-msgstr ""
+msgstr "Donner"
 
 msgid "Download Folder"
 msgstr "Dossier de téléchargement"
@@ -1389,10 +1391,8 @@ msgstr "Fichier de connexion"
 msgid "File connections"
 msgstr "Fichiers de connexion"
 
-#, fuzzy
-#| msgid "Folder path"
 msgid "File path"
-msgstr "Chemin du dossier"
+msgstr "Chemin du fichier"
 
 msgid "Filename"
 msgstr "Nom du fichier"
@@ -1477,10 +1477,8 @@ msgstr "Aigus au maximum"
 msgid "Full"
 msgstr "Complète"
 
-#, fuzzy
-#| msgid "Open fullscreen player"
 msgid "Fullscreen player"
-msgstr "Ouvrir le lecteur en plein écran"
+msgstr "Lecteur en plein écran"
 
 msgid "Fullscreen"
 msgstr "Plein écran"
@@ -1702,7 +1700,7 @@ msgid "Laptop/Headphones"
 msgstr "Ordinateur portable / Casques"
 
 msgid "Large"
-msgstr ""
+msgstr "Large"
 
 msgid "Last 30 days"
 msgstr "30 derniers jours"
@@ -2512,7 +2510,7 @@ msgid "Playlist radio"
 msgstr "Radio de la playlist"
 
 msgid "Playlist tracks"
-msgstr "Morceauxs de la playlist"
+msgstr "Morceaux de la playlist"
 
 msgid "Playlist"
 msgstr "Playlist"
@@ -2907,7 +2905,7 @@ msgid "Rounded bars"
 msgstr "Barres arrondies"
 
 msgid "Row borders"
-msgstr ""
+msgstr "Bord de rangée"
 
 msgid "Rows"
 msgstr "Lignes"
@@ -2931,7 +2929,7 @@ msgid "SMB Domain"
 msgstr "Domaine SMB"
 
 msgid "Sample rate"
-msgstr ""
+msgstr "Fréquence d’échantillonnage"
 
 msgid "Saturday"
 msgstr "Samedi"
@@ -3302,7 +3300,7 @@ msgid "Singles"
 msgstr "Singles"
 
 msgid "Size"
-msgstr ""
+msgstr "Taille"
 
 msgid "Skip count"
 msgstr "Nombre de passages"
@@ -3314,7 +3312,7 @@ msgid "Slate"
 msgstr "Ardoise"
 
 msgid "Small"
-msgstr ""
+msgstr "Petit"
 
 msgid "Smart Playlist"
 msgstr "Playlist intelligente"
@@ -3486,7 +3484,7 @@ msgid "This source cannot edit this field"
 msgstr "Cette source ne peut pas modifier ce champ"
 
 msgid "This will remove all configured state. Do you want to continue?"
-msgstr ""
+msgstr "Cela supprimera la configuration enregistrée. Voulez-vous continuer ?"
 
 msgid "Thursday"
 msgstr "Jeudi"
@@ -3767,7 +3765,7 @@ msgid "Weekly"
 msgstr "Hebdomadaire"
 
 msgid "Wide"
-msgstr ""
+msgstr "Large"
 
 msgid "Window"
 msgstr "Fenêtre"
