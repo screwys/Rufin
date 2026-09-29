@@ -17,7 +17,7 @@ iroh-blobs = { version = "0.103.0", default-features = false }
 iroh-io = "0.6.2"
 iroh-mdns-address-lookup = "0.5.0"
 library.workspace = true
-loro = "=1.16.0"
+loro = "=1.16.2"
 rustls = { workspace = true, features = ["prefer-post-quantum"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
