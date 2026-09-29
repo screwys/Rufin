@@ -3707,14 +3707,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/gstreamer/gstreamer-0.25.3.crate",
-        "sha256": "ab4527e1b9bae8d29ce137bde5b8eec8ae8f78f13ad00fc6e70cbe227d6ad027",
-        "dest": "cargo/vendor/gstreamer-0.25.3"
+        "url": "https://static.crates.io/crates/gstreamer/gstreamer-0.25.4.crate",
+        "sha256": "f4237e2066a25ecb7e54be6c066409e30615920265b9799b8d560ef8ac9857c6",
+        "dest": "cargo/vendor/gstreamer-0.25.4"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"ab4527e1b9bae8d29ce137bde5b8eec8ae8f78f13ad00fc6e70cbe227d6ad027\", \"files\": {}}",
-        "dest": "cargo/vendor/gstreamer-0.25.3",
+        "contents": "{\"package\": \"f4237e2066a25ecb7e54be6c066409e30615920265b9799b8d560ef8ac9857c6\", \"files\": {}}",
+        "dest": "cargo/vendor/gstreamer-0.25.4",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -3746,14 +3746,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/gstreamer-audio/gstreamer-audio-0.25.3.crate",
-        "sha256": "f97532c3e21287a6e94563a328cce89367324acf8a4489291b40ede2e39163a0",
-        "dest": "cargo/vendor/gstreamer-audio-0.25.3"
+        "url": "https://static.crates.io/crates/gstreamer-audio/gstreamer-audio-0.25.4.crate",
+        "sha256": "544f14e19e3b7221845be0e5c2f2cf284576b7baa16835ac16def6e734bfa866",
+        "dest": "cargo/vendor/gstreamer-audio-0.25.4"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"f97532c3e21287a6e94563a328cce89367324acf8a4489291b40ede2e39163a0\", \"files\": {}}",
-        "dest": "cargo/vendor/gstreamer-audio-0.25.3",
+        "contents": "{\"package\": \"544f14e19e3b7221845be0e5c2f2cf284576b7baa16835ac16def6e734bfa866\", \"files\": {}}",
+        "dest": "cargo/vendor/gstreamer-audio-0.25.4",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -3798,14 +3798,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/gstreamer-pbutils/gstreamer-pbutils-0.25.2.crate",
-        "sha256": "2230395c2bf062b2538350e6a962b1ff5888f1b29cd65cd1d96dfd5ff74dfb66",
-        "dest": "cargo/vendor/gstreamer-pbutils-0.25.2"
+        "url": "https://static.crates.io/crates/gstreamer-pbutils/gstreamer-pbutils-0.25.4.crate",
+        "sha256": "3b72d09000974d928f66735a0332fc89af5b12d5d6a5897da29c664718655b72",
+        "dest": "cargo/vendor/gstreamer-pbutils-0.25.4"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"2230395c2bf062b2538350e6a962b1ff5888f1b29cd65cd1d96dfd5ff74dfb66\", \"files\": {}}",
-        "dest": "cargo/vendor/gstreamer-pbutils-0.25.2",
+        "contents": "{\"package\": \"3b72d09000974d928f66735a0332fc89af5b12d5d6a5897da29c664718655b72\", \"files\": {}}",
+        "dest": "cargo/vendor/gstreamer-pbutils-0.25.4",
         "dest-filename": ".cargo-checksum.json"
     },
     {
