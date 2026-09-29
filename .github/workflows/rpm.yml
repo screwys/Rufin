@@ -13,7 +13,7 @@ on:
         required: false
         default: ""
       copr_build_id:
-        description: Optional existing COPR build IDs, separated by spaces, to collect for release recovery
+        description: Optional existing COPR build to collect for release recovery
         required: false
         default: ""
 
@@ -46,14 +46,13 @@ jobs:
             echo "Manual release uploads must build the same tag they upload" >&2
             exit 1
           fi
-          if [[ -n "$COPR_BUILD_ID" && ! "$COPR_BUILD_ID" =~ ^[0-9]+(\ [0-9]+)*$ ]]; then
-            echo "COPR build IDs must be numbers separated by spaces." >&2
+          if [[ -n "$COPR_BUILD_ID" && ! "$COPR_BUILD_ID" =~ ^[0-9]+$ ]]; then
+            echo "COPR build ID must be numeric." >&2
             exit 1
           fi
 
   srpm:
     name: Generate source RPM
-    if: inputs.upload_release_tag == ''
     needs: validate
     uses: ./.github/workflows/rpm-source.yml
     with:
@@ -62,66 +61,10 @@ jobs:
       verify_release_tag: ${{ inputs.upload_release_tag != '' }}
       upload_artifact: true
 
-  build:
-    name: Build RPM ${{ matrix.arch }}
-    if: inputs.upload_release_tag != '' && inputs.copr_build_id == ''
-    needs: validate
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            runner: ubuntu-24.04
-          - arch: aarch64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
-    env:
-      RUFIN_RPM_TAG: ${{ inputs.upload_release_tag }}
-      RUFIN_ARTIFACT_ROOT: ${{ github.workspace }}/dist
-      RPM_ARCH: ${{ matrix.arch }}
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ inputs.ref }}
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Install RPM tooling
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y just rpm gnupg
-          gpg --batch --import .github/release-gpg.pub
-
-      - name: Build x86_64 RPM
-        if: matrix.arch == 'x86_64'
-        run: just build rpm
-
-      - name: Build ARM RPM
-        if: matrix.arch == 'aarch64'
-        run: just build rpm arm
-
-      - name: Verify source checksums
-        run: |
-          cd ".local/build/rpm/$RUFIN_RPM_TAG/$RPM_ARCH"
-          sha256sum --check SHA256SUMS
-
-      - name: Upload unsigned RPMs
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: rpm-unsigned-${{ matrix.arch }}
-          path: dist/*.rpm
-          if-no-files-found: error
-          retention-days: 7
-
   copr:
-    name: Sign RPMs in COPR
-    if: >-
-      !cancelled() && inputs.upload_release_tag != '' &&
-      needs.validate.result == 'success' &&
-      (needs.build.result == 'success' || inputs.copr_build_id != '')
-    needs: [validate, build]
+    name: Build RPMs in COPR
+    if: inputs.upload_release_tag != ''
+    needs: srpm
     runs-on: ubuntu-24.04
     container:
       image: registry.fedoraproject.org/fedora-minimal:44
@@ -130,31 +73,22 @@ jobs:
 
     steps:
       - name: Install COPR client
-        run: dnf -y --setopt=install_weak_deps=False install bash cargo cpio copr-cli curl findutils gawk git gnupg2 grep gzip jq rpm rpmlint tar wavpack
+        run: dnf -y --setopt=install_weak_deps=False install bash cargo cpio copr-cli curl findutils gawk git gnupg2 grep jq rpm rpmlint wavpack
 
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.ref }}
-          fetch-depth: 0
           persist-credentials: false
 
       - name: Trust checked-out repository
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Verify release context
-        env:
-          RELEASE_TAG: ${{ inputs.upload_release_tag }}
-        run: |
-          gpg --batch --import .github/release-gpg.pub
-          cargo run --locked -p xtask -- verify release-tag "$RELEASE_TAG"
-
-      - name: Download unsigned RPMs
-        if: inputs.copr_build_id == ''
+      - name: Download source RPM
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          pattern: rpm-unsigned-*
-          path: dist/unsigned
+          name: rpm-srpm
+          path: dist
 
       - name: Configure COPR
         env:
@@ -180,121 +114,97 @@ jobs:
           test "$fingerprint" = 3C724C8F016C6D63890CFDBFD57ADF06B547821C
           rpm --import "$key_path"
 
-      - name: Upload RPMs for signing
+      - name: Select and monitor COPR build
         env:
           RECOVERY_COPR_BUILD_ID: ${{ inputs.copr_build_id }}
           RELEASE_TAG: ${{ inputs.upload_release_tag }}
         run: |
           set -euo pipefail
-          build_ids=()
-          if [[ -z "$RECOVERY_COPR_BUILD_ID" ]]; then
-            for arch in x86_64 aarch64; do
-              rpm_dir="dist/unsigned/rpm-unsigned-$arch"
-              mapfile -t rpm_paths < <(find "$rpm_dir" -name "rufin-[0-9]*.${arch}.rpm" -print)
-              mapfile -t source_rpms < <(find "$rpm_dir" -name 'rufin-*.src.rpm' -print)
-              test "${#rpm_paths[@]}" -eq 1
-              test "${#source_rpms[@]}" -eq 1
-              rpm -K "${source_rpms[0]}"
-              test "$(rpm -qp --queryformat '%{NAME}' "${source_rpms[0]}")" = rufin
-              rpmlint "${source_rpms[0]}"
-              version="$(rpm -qp --queryformat '%{VERSION}' "${rpm_paths[0]}")"
-              release="$(rpm -qp --queryformat '%{RELEASE}' "${rpm_paths[0]}")"
-              test "$version" = "${RELEASE_TAG#v}"
-              tar -czf "dist/upload-$arch.tar.gz" -C dist/unsigned "rpm-unsigned-$arch"
-              output="$(copr-cli uploadrpm \
-                --nowait \
-                --chroot "fedora-44-$arch" \
-                --name rufin --version "$version" --release "$release" \
-                screwyy/rufin "dist/upload-$arch.tar.gz")"
-              printf '%s\n' "$output"
-              build_line="$(printf '%s\n' "$output" | grep -E '^Created builds: [0-9]+$')"
-              build_id="${build_line#Created builds: }"
-              [[ "$build_id" =~ ^[0-9]+$ ]]
-              build_ids+=("$build_id")
-              echo "COPR $arch signing build: $build_id" >> "$GITHUB_STEP_SUMMARY"
-            done
-          else
-            read -r -a build_ids <<< "$RECOVERY_COPR_BUILD_ID"
-            echo "Reusing COPR builds ${build_ids[*]}."
-          fi
-          echo "COPR_BUILD_IDS=${build_ids[*]}" >> "$GITHUB_ENV"
-
-      - name: Monitor and download signed RPMs
-        env:
-          RELEASE_TAG: ${{ inputs.upload_release_tag }}
-        run: |
-          set -euo pipefail
-          read -r -a build_ids <<< "$COPR_BUILD_IDS"
-          expected_version="${RELEASE_TAG#v}-1"
-          for build_id in "${build_ids[@]}"; do
-            api_errors=0
-            while true; do
-              if response="$(curl \
-                --fail \
-                --silent \
-                --show-error \
-                --retry 3 \
-                --retry-all-errors \
-                "https://copr.fedorainfracloud.org/api_3/build/$build_id")" \
-                && state="$(jq -er '.state | strings' <<<"$response")"; then
-                api_errors=0
-              else
-                api_errors=$((api_errors + 1))
-                if ((api_errors >= 10)); then
-                  echo "COPR API remained unavailable while monitoring build $build_id." >&2
-                  exit 1
-                fi
-                sleep 30
-                continue
-              fi
-
-              echo "COPR build $build_id: $state"
-              case "$state" in
-                succeeded|failed)
-                  if [[ "$state" == failed ]]; then
-                    echo "COPR reported failure; checking whether it produced valid signed RPMs before failing."
-                    echo "COPR build logs: https://copr.fedorainfracloud.org/coprs/screwyy/rufin/build/$build_id/"
-                  fi
-                  break
-                  ;;
-                canceled|skipped)
-                  exit 1
-                  ;;
-                pending|starting|running|importing|waiting|forked)
-                  sleep 30
-                  ;;
-                *)
-                  echo "Unexpected COPR build state: $state" >&2
-                  exit 1
-                  ;;
-              esac
-            done
-
-            if ! jq -e \
-              --arg version "$expected_version" \
-              '.ownername == "screwyy"
-                and .projectname == "rufin"
-                and .source_package.name == "rufin"
-                and (.source_package.version == $version
-                  or .source_package.version == ($version + ".fc44"))' \
-              <<<"$response" >/dev/null; then
-              echo "COPR build $build_id does not match screwyy/rufin package rufin $expected_version:" >&2
-              jq '{ownername, projectname, source_package: (.source_package | {name, version})}' \
-                <<<"$response" >&2
-              exit 1
-            fi
-
-            copr-cli download-build \
-              --rpms \
-              --dest dist/copr \
+          build_id="$RECOVERY_COPR_BUILD_ID"
+          if [[ -z "$build_id" ]]; then
+            srpm="$(find dist -maxdepth 1 -name 'rufin-*.src.rpm' -print -quit)"
+            test -n "$srpm"
+            output="$(copr-cli build \
+              --nowait \
               --chroot fedora-44-x86_64 \
               --chroot fedora-44-aarch64 \
-              "$build_id"
+              screwyy/rufin \
+              "$srpm")"
+            printf '%s\n' "$output"
+            build_line="$(printf '%s\n' "$output" | grep -E '^Created builds: [0-9]+$')"
+            build_id="${build_line#Created builds: }"
+            [[ "$build_id" =~ ^[0-9]+$ ]]
+          else
+            echo "Reusing COPR build $build_id."
+          fi
+          echo "COPR_BUILD_ID=$build_id" >> "$GITHUB_ENV"
+
+          expected_version="${RELEASE_TAG#v}-1"
+          api_errors=0
+          while true; do
+            if response="$(curl \
+              --fail \
+              --silent \
+              --show-error \
+              --retry 3 \
+              --retry-all-errors \
+              "https://copr.fedorainfracloud.org/api_3/build/$build_id")" \
+              && state="$(jq -er '.state | strings' <<<"$response")"; then
+              api_errors=0
+            else
+              api_errors=$((api_errors + 1))
+              if ((api_errors >= 10)); then
+                echo "COPR API remained unavailable while monitoring build $build_id." >&2
+                exit 1
+              fi
+              sleep 30
+              continue
+            fi
+
+            echo "COPR build $build_id: $state"
+            case "$state" in
+              succeeded|failed)
+                if [[ "$state" == failed ]]; then
+                  echo "COPR reported failure; checking whether it produced valid signed RPMs before failing."
+                  echo "COPR build logs: https://copr.fedorainfracloud.org/coprs/screwyy/rufin/build/$build_id/"
+                fi
+                break
+                ;;
+              canceled|skipped)
+                exit 1
+                ;;
+              pending|starting|running|importing|waiting|forked)
+                sleep 30
+                ;;
+              *)
+                echo "Unexpected COPR build state: $state" >&2
+                exit 1
+                ;;
+            esac
           done
 
-      - name: Verify signed Fedora 44 packages
+          if ! jq -e \
+            --arg version "$expected_version" \
+            '.ownername == "screwyy"
+              and .projectname == "rufin"
+              and .source_package.name == "rufin"
+              and .source_package.version == $version' \
+            <<<"$response" >/dev/null; then
+            echo "COPR build $build_id does not match screwyy/rufin package rufin $expected_version:" >&2
+            jq '{ownername, projectname, source_package: (.source_package | {name, version})}' \
+              <<<"$response" >&2
+            exit 1
+          fi
+
+      - name: Collect Fedora 44 packages
         run: |
           set -euo pipefail
+          copr-cli download-build \
+            --rpms \
+            --dest dist/copr \
+            --chroot fedora-44-x86_64 \
+            --chroot fedora-44-aarch64 \
+            "$COPR_BUILD_ID"
           mkdir -p dist/release
           x86_rpm_path=
           check_rpmlint() {
@@ -353,7 +263,7 @@ jobs:
 
   release:
     name: Upload RPM release assets
-    if: "!cancelled() && needs.copr.result == 'success' && inputs.upload_release_tag != ''"
+    if: inputs.upload_release_tag != ''
     needs: copr
     runs-on: ubuntu-24.04
     permissions:

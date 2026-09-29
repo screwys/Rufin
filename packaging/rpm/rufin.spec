@@ -1,4 +1,5 @@
 %global debug_package %{nil}
+%global rustflags_debuginfo 0
 Name:           rufin
 Version:        0.16.6
 Release:        1%{?dist}
