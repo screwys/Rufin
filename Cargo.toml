@@ -64,7 +64,7 @@ ashpd = { version = "0.13.13", default-features = false, features = [
 base64 = "0.23.0"
 blake3 = "1.8.2"
 bytes = "1"
-constant_time_eq = "0.4.2"
+constant_time_eq = "0.6.0"
 digest_auth = "0.3.1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["server", "http1"] }
