@@ -137,49 +137,18 @@ pub fn lookup_album_cover(
     missing_or_errors(failures)
 }
 
-/// Finds a public URL suitable for Discord rich presence.
-///
-/// Discord cannot use Rufin's cached bytes, so its established Last.fm-first
-/// order intentionally differs from visible artwork selection.
+/// Finds a Last.fm cover URL for Discord, which cannot use Rufin's cached bytes.
 pub fn public_album_cover_url(
     album: &AlbumCover,
-    size: u32,
-    policy: &AlbumCoverPolicy,
+    lastfm_api_key: &str,
 ) -> Result<Option<String>, String> {
-    let client = client()?;
-    let mut failures = Vec::new();
-    if !policy.lastfm_api_key.trim().is_empty()
-        && let Some((artist, title)) = album.text()
-    {
-        match lastfm_url(client, artist, title, &policy.lastfm_api_key) {
-            Ok(Some(url)) => return Ok(Some(url)),
-            Ok(None) => {}
-            Err(error) => failures.push(error),
-        }
+    if lastfm_api_key.trim().is_empty() {
+        return Ok(None);
     }
-    if policy.allow_musicbrainz {
-        for (root, id) in [
-            (RELEASE_GROUP_URL, album.release_group_id.as_deref()),
-            (RELEASE_URL, album.release_id.as_deref()),
-        ] {
-            if let Some(id) = id {
-                return Ok(Some(cover_art_url(root, id, Some(size))));
-            }
-        }
-        if let Some((artist, title)) = album.text() {
-            match search_album_release_ids(artist, title) {
-                Ok(ids) => {
-                    if let Some(id) = ids.into_iter().find_map(|id| {
-                        usable_mbid(&id).map(|valid| cover_art_url(RELEASE_URL, valid, Some(size)))
-                    }) {
-                        return Ok(Some(id));
-                    }
-                }
-                Err(error) => failures.push(error),
-            }
-        }
-    }
-    missing_or_errors(failures)
+    let Some((artist, title)) = album.text() else {
+        return Ok(None);
+    };
+    lastfm_url(client()?, artist, title, lastfm_api_key)
 }
 
 fn download_identities(
@@ -338,7 +307,7 @@ mod tests {
     }
 
     #[test]
-    fn public_url_prefers_the_release_group_without_a_remote_lookup() {
+    fn public_url_without_lastfm_does_not_construct_a_cover_url() {
         let album = AlbumCover::new(
             "Artist",
             "Album",
@@ -346,15 +315,7 @@ mod tests {
             Some("22222222-2222-2222-2222-222222222222"),
         )
         .expect("album cover");
-        let url = public_album_cover_url(&album, 250, &AlbumCoverPolicy::new("", true))
-            .unwrap_or_else(|error| panic!("public URL: {error}"));
-
-        assert_eq!(
-            url.as_deref(),
-            Some(
-                "https://coverartarchive.org/release-group/11111111-1111-1111-1111-111111111111/front-250"
-            )
-        );
+        assert_eq!(public_album_cover_url(&album, ""), Ok(None));
     }
 
     #[test]
