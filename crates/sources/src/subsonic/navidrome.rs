@@ -68,6 +68,63 @@ impl fmt::Debug for NavidromeSession {
 }
 
 impl SubsonicSource {
+    pub(super) async fn navidrome_radio_tracks(
+        &self,
+        seed: &crate::SourceRadioSeed,
+        limit: usize,
+    ) -> SourceResult<Option<Vec<Track>>> {
+        if self.flavor != super::SubsonicFlavor::Navidrome {
+            return Ok(None);
+        }
+        let result = async {
+            let raw = match seed {
+                crate::SourceRadioSeed::Playlist(id) => crate::policy::raw_item_id(id).to_string(),
+                crate::SourceRadioSeed::Genre(name)
+                    if self.credential.navidrome_password().is_some() =>
+                {
+                    self.navidrome_genre_id(self.genre_name(name)).await?
+                }
+                _ => return Ok(None),
+            };
+            self.similar_songs(&raw, limit).await.map(Some)
+        }
+        .await;
+        match result {
+            // Older Navidrome versions do not accept playlist or genre seeds.
+            Err(SourceError::NotFound) => Ok(None),
+            result => result,
+        }
+    }
+
+    async fn navidrome_genre_id(&self, name: &str) -> SourceResult<String> {
+        let mut offset = 0;
+        loop {
+            let page: Vec<Value> = self
+                .navidrome_json(
+                    "genre",
+                    &[
+                        ("name", name.to_string()),
+                        ("_start", offset.to_string()),
+                        ("_end", (offset + NAVIDROME_PAGE_SIZE).to_string()),
+                        ("_sort", "id".to_string()),
+                        ("_order", "ASC".to_string()),
+                    ],
+                )
+                .await?;
+            if let Some(raw) = page
+                .iter()
+                .filter(|genre| genre["name"].as_str() == Some(name))
+                .find_map(|genre| id(&genre["id"]))
+            {
+                return Ok(raw);
+            }
+            if page.len() < NAVIDROME_PAGE_SIZE {
+                return Err(SourceError::NotFound);
+            }
+            offset += page.len();
+        }
+    }
+
     async fn navidrome_items(&self, kind: &str, values: &[Value]) -> SourceResult<Vec<Value>> {
         let ids: Vec<_> = values.iter().filter_map(|value| id(&value["id"])).collect();
         let mut result = Vec::with_capacity(ids.len());

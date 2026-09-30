@@ -222,20 +222,12 @@ impl JellyfinEmbySource {
             crate::SourceRadioSeed::Track(_) if !self.use_instant_mix => {
                 format!("Items/{raw}/Similar")
             }
-            _ if self.kind == ServerKind::Emby => format!("Items/{raw}/InstantMix"),
-            crate::SourceRadioSeed::Track(_) => format!("Songs/{raw}/InstantMix"),
-            crate::SourceRadioSeed::Album(_) => format!("Albums/{raw}/InstantMix"),
-            crate::SourceRadioSeed::Artist(_) => format!("Artists/{raw}/InstantMix"),
-            crate::SourceRadioSeed::Playlist(_) => format!("Playlists/{raw}/InstantMix"),
-            crate::SourceRadioSeed::Genre(_) => "MusicGenres/InstantMix".to_string(),
+            _ => format!("Items/{raw}/InstantMix"),
         };
         let mut url = endpoint(&self.base_url, &path)?;
         url.query_pairs_mut()
             .append_pair("UserId", &self.user_id)
             .append_pair("Limit", &limit.clamp(1, 500).to_string());
-        if matches!(seed, crate::SourceRadioSeed::Genre(_)) {
-            url.query_pairs_mut().append_pair("Id", raw);
-        }
         let mut items = self.get_json::<Value>(url).await?["Items"]
             .as_array()
             .cloned()
@@ -244,11 +236,7 @@ impl JellyfinEmbySource {
             && matches!(seed, crate::SourceRadioSeed::Track(_))
             && !self.use_instant_mix
         {
-            let kind = match self.kind {
-                ServerKind::Jellyfin => "Songs",
-                ServerKind::Emby => "Items",
-            };
-            let mut url = endpoint(&self.base_url, &format!("{kind}/{raw}/InstantMix"))?;
+            let mut url = endpoint(&self.base_url, &format!("Items/{raw}/InstantMix"))?;
             url.query_pairs_mut()
                 .append_pair("UserId", &self.user_id)
                 .append_pair("Limit", &limit.clamp(1, 500).to_string());
@@ -1421,11 +1409,6 @@ mod tests {
                     } else {
                         ""
                     };
-                    let mix_kind = if kind == crate::ServerKind::Emby {
-                        "Items"
-                    } else {
-                        "Songs"
-                    };
                     let similar_items = if similar_is_empty {
                         serde_json::json!([])
                     } else {
@@ -1441,7 +1424,7 @@ mod tests {
                         .mount(&server)
                         .await;
                     Mock::given(method("GET"))
-                        .and(path(format!("{prefix}/{mix_kind}/track-one/InstantMix")))
+                        .and(path(format!("{prefix}/Items/track-one/InstantMix")))
                         .respond_with(
                             ResponseTemplate::new(200)
                                 .set_body_json(serde_json::json!({"Items":[{"Id":"mix-track"}]})),
