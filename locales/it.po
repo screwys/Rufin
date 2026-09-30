@@ -88,13 +88,18 @@ msgstr ""
 "Nessun servizio per i segreti trovato. Rufin utilizzerà un file per salvare "
 "le credenziali. Annullare l'operazione non salverà le credeneziali."
 
+#, fuzzy, python-brace-format
+#| msgid ""
+#| "No secret service found. Rufin will use a file to store its credentials. "
+#| "Cancelling will not save credentials at all."
 msgid ""
 "No secret service found. You might have a secret service but the portal can "
-"be broken, you can check <a href=\"https://github.com/screwys/Rufin/issues/"
-"1055#issuecomment-5637922622\">this issue</a> to fix it, otherwise Rufin "
-"will use a file to store its credentials. Cancelling will not save "
-"credentials at all."
+"be broken, you can check {link_start}this issue{link_end} to fix it, "
+"otherwise Rufin will use a file to store its credentials. Cancelling will "
+"not save credentials at all."
 msgstr ""
+"Nessun servizio per i segreti trovato. Rufin utilizzerà un file per salvare "
+"le credenziali. Annullare l'operazione non salverà le credeneziali."
 
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
@@ -1102,6 +1107,7 @@ msgstr "Predefinito"
 msgid "Delete Playlist"
 msgstr "Cancella Playlist"
 
+#, python-brace-format
 msgid "Delete \"{name}\"?"
 msgstr "Sei sicuro di cancellare \"{name}\"?"
 

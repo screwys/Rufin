@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-26 23:13+0000\n"
+"PO-Revision-Date: 2026-09-30 14:52+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
 "Language: ru\n"
@@ -22,6 +22,8 @@ msgid ""
 "A Japanese dictionary is downloaded for furigana and romaji readings. This "
 "setting also increases resource usage."
 msgstr ""
+"Японский словарь загружен для отображения фуриганы и ромадзи. Эта настройка "
+"также увеличивает использование ресурсов."
 
 msgid ""
 "Approving gives this device access to your profile and saved source logins."
@@ -102,13 +104,24 @@ msgstr ""
 "Служба секретных ключей не найдена. Rufin будет использовать файл для "
 "хранения учетных данных. Отмена не сохранит учетные данные."
 
+#, fuzzy, python-brace-format
+#| msgid ""
+#| "No secret service found. You might have a secret service but the portal "
+#| "can be broken, you can check <a href=\"https://github.com/screwys/Rufin/"
+#| "issues/1055#issuecomment-5637922622\">this issue</a> to fix it, otherwise "
+#| "Rufin will use a file to store its credentials. Cancelling will not save "
+#| "credentials at all."
 msgid ""
 "No secret service found. You might have a secret service but the portal can "
-"be broken, you can check <a href=\"https://github.com/screwys/Rufin/issues/"
-"1055#issuecomment-5637922622\">this issue</a> to fix it, otherwise Rufin "
-"will use a file to store its credentials. Cancelling will not save "
-"credentials at all."
+"be broken, you can check {link_start}this issue{link_end} to fix it, "
+"otherwise Rufin will use a file to store its credentials. Cancelling will "
+"not save credentials at all."
 msgstr ""
+"Служба секретных ключей не найдена. Возможно, у вас установлена служба "
+"секретных ключей, но она не работает. Вы можете проверить <a href=\"https://"
+"github.com/screwys/Rufin/issues/1055#issuecomment-5637922622\">этот вопрос</"
+"a>, чтобы исправить проблему, иначе Rufin будет использовать файл для "
+"хранения учетных данных. Отмена не сохранит учетные данные."
 
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
@@ -120,6 +133,7 @@ msgstr ""
 msgid ""
 "Only imports the tracks as a playlist, does not watch the folder for changes."
 msgstr ""
+"Импортирует только треки в виде плейлиста, не отслеживает изменения в папке."
 
 msgid ""
 "Open Rufin Connect on another device, connect via Join button or by copying "
@@ -132,6 +146,8 @@ msgid ""
 "Relative paths start at the music folder or source URL. Local paths can also "
 "be absolute."
 msgstr ""
+"Относительные пути начинаются с папки с музыкой или URL-адреса источника. "
+"Локальные пути также могут быть абсолютными."
 
 msgid ""
 "Remove Local and its cached library from Rufin? Your music files will not be "
@@ -204,6 +220,8 @@ msgid ""
 "This is a fallback artwork Rufin uses, do you want to set this as the item "
 "artwork?"
 msgstr ""
+"Это изображение, которое Rufin использует по умолчанию, хотите ли вы "
+"установить его в качестве обложки для этого элемента?"
 
 msgid ""
 "This is not supported natively by this source, but Rufin can show partial "
@@ -319,7 +337,7 @@ msgid "Access token"
 msgstr "Токен доступа"
 
 msgid "Accessibility"
-msgstr ""
+msgstr "Специальные возможности"
 
 msgid "Action required"
 msgstr "Требуется действие"
@@ -357,15 +375,11 @@ msgstr "Добавить текущий"
 msgid "Add folder"
 msgstr "Добавить папку"
 
-#, fuzzy
-#| msgid "Add a title"
 msgid "Add image"
-msgstr "Добавить название"
+msgstr "Добавить изображение"
 
-#, fuzzy
-#| msgid "My music"
 msgid "Add music"
-msgstr "Моя музыка"
+msgstr "Добавить музыку"
 
 msgid "Add to Favorites"
 msgstr "Добавить в избранное"
@@ -376,10 +390,8 @@ msgstr "Добавить в закрепленные"
 msgid "Add to Playlist"
 msgstr "Добавить в плейлист"
 
-#, fuzzy
-#| msgid "Add music library"
 msgid "Add to library"
-msgstr "Добавить музыкальную библиотеку"
+msgstr "Добавить в библиотеку"
 
 msgid "Add tracks when fewer than this many remain"
 msgstr ""
@@ -400,10 +412,8 @@ msgstr "Добавление источника"
 msgid "Album Artists"
 msgstr "Авторы альбома"
 
-#, fuzzy
-#| msgid "Album artists"
 msgid "Album artist sort"
-msgstr "Авторы альбома"
+msgstr "Сортировка по исполнителю альбома"
 
 msgid "Album artist"
 msgstr "Исполнитель альбома"
@@ -414,10 +424,8 @@ msgstr "Авторы альбома"
 msgid "Album radio"
 msgstr "Радио по альбому"
 
-#, fuzzy
-#| msgid "Albums"
 msgid "Album sort"
-msgstr "Альбомы"
+msgstr "Сортировка альбомов"
 
 msgid "Album title"
 msgstr "Название альбома"
@@ -441,7 +449,7 @@ msgid "All Playlists"
 msgstr "Все плейлисты"
 
 msgid "All time"
-msgstr ""
+msgstr "Всё время"
 
 msgid "All tracks"
 msgstr "Все треки"
@@ -455,10 +463,8 @@ msgstr "Разрешить удалённые подключения"
 msgid "Alternate addresses"
 msgstr "Альтернативные адреса"
 
-#, fuzzy
-#| msgid "Accent color"
 msgid "Alternate row colors"
-msgstr "Акцентный цвет"
+msgstr "Чередующиеся цвета строк"
 
 msgid "Anonymous (WebDAV / SMB)"
 msgstr "Анонимный (WebDAV / SMB)"
@@ -491,7 +497,7 @@ msgid "Applied"
 msgstr "Применено"
 
 msgid "Applies to sidebar and fullscreen separately"
-msgstr ""
+msgstr "Применяется отдельно к боковой панели и полноэкранному режиму"
 
 msgid "Apply Template"
 msgstr "Применить шаблон"
@@ -517,10 +523,8 @@ msgstr "Имя исполнителя"
 msgid "Artist radio"
 msgstr "Радио по исполнителю"
 
-#, fuzzy
-#| msgid "Artists"
 msgid "Artist sort"
-msgstr "Исполнители"
+msgstr "Сортировка по исполнителю"
 
 msgid "Artist tracks"
 msgstr "Треки исполнителя"
@@ -534,20 +538,14 @@ msgstr "Исполнитель"
 msgid "Artists"
 msgstr "Исполнители"
 
-#, fuzzy
-#| msgid "Metadata editing is no longer available"
 msgid "Artwork editing is no longer available"
-msgstr "Редактирование метаданных больше недоступно"
+msgstr "Редактирование обложки больше не доступно"
 
-#, fuzzy
-#| msgid "folders selected"
 msgid "Artwork selected"
-msgstr "папок выбрано"
+msgstr "Выбрана обложка"
 
-#, fuzzy
-#| msgid "Secret storage"
 msgid "Artwork storage"
-msgstr "Скрытое хранилище"
+msgstr "Хранилище обложек"
 
 msgid "Artwork"
 msgstr "Обложка"
@@ -631,10 +629,10 @@ msgid "Bearer token"
 msgstr "Токен-носитель"
 
 msgid "Bit depth"
-msgstr ""
+msgstr "Битовая глубина"
 
 msgid "Bitrate"
-msgstr ""
+msgstr "Битрейт"
 
 msgid "Blue"
 msgstr "Синий"
@@ -698,10 +696,8 @@ msgstr ""
 "Изменение этого параметра приведет к повторной загрузке всех локальных "
 "файлов."
 
-#, fuzzy
-#| msgid "Change"
 msgid "Channels"
-msgstr "Изменить"
+msgstr "Каналы"
 
 msgid "Check for updates every"
 msgstr "Проверять обновления каждые"
@@ -753,10 +749,8 @@ msgstr "Классическая"
 msgid "Clear Mapping"
 msgstr "Удалить Соответствия"
 
-#, fuzzy
-#| msgid "Play album"
 msgid "Clear album"
-msgstr "Воспроизвести альбом"
+msgstr "Очистить альбом"
 
 msgid "Clear artist"
 msgstr "Очистить исполнителя"
@@ -806,10 +800,8 @@ msgstr "Коллекции"
 msgid "Color for the active word during playback"
 msgstr "Цвет для активного слова во время воспроизведения"
 
-#, fuzzy
-#| msgid "Columns"
 msgid "Column borders"
-msgstr "Столбцы"
+msgstr "Границы столбцов"
 
 msgid "Columns"
 msgstr "Столбцы"
@@ -829,25 +821,23 @@ msgstr "Компактный"
 msgid "Compare these emoji on both devices"
 msgstr "Сравните эти эмодзи на обоих устройствах"
 
-#, fuzzy
-#| msgid "Copy invitation"
 msgid "Compilation"
-msgstr "Скопировать приглашение"
+msgstr "Подборка"
 
 msgid "Complete sign-in in your browser"
 msgstr "Завершите вход в систему в вашем браузере"
 
 msgid "Composer sort"
-msgstr ""
+msgstr "Сортировка по композитору"
 
 msgid "Composer"
-msgstr ""
+msgstr "Композитор"
 
 msgid "Configure another"
 msgstr "Настроить другие"
 
 msgid "Configured items: {count}"
-msgstr ""
+msgstr "Настроенные элементы: {count}"
 
 msgid "Confirm"
 msgstr "Подтвердить"
@@ -963,10 +953,8 @@ msgstr "Скопировать текущий внешний вид в буфе�
 msgid "Copy"
 msgstr "Копировать"
 
-#, fuzzy
-#| msgid "Copy"
 msgid "Copyright"
-msgstr "Копировать"
+msgstr "Авторское право"
 
 msgid "Could not load listening overview"
 msgstr "Не удалось загрузить обзор прослушивания"
@@ -983,10 +971,8 @@ msgstr "Не удалось открыть файл: {error}"
 msgid "Could not open folder: {error}"
 msgstr "Не удалось открыть папку: {error}"
 
-#, fuzzy
-#| msgid "Could not load this page"
 msgid "Could not play this track"
-msgstr "Не удалось загрузить эту страницу"
+msgstr "Не удалось воспроизвести этот трек"
 
 msgid "Could not receive live updates"
 msgstr "Не удалось получить обновления в режиме реального времени"
@@ -1013,15 +999,13 @@ msgid "Couldn’t download Japanese dictionary"
 msgstr "Не удалось загрузить японский словарь"
 
 msgid "Country"
-msgstr ""
+msgstr "Страна"
 
 msgid "Create a playlist from queue"
 msgstr "Создать плейлист из очереди"
 
-#, fuzzy
-#| msgid "Export playlist"
 msgid "Create playlist"
-msgstr "Экспортировать плейлист"
+msgstr "Создать плейлист"
 
 msgid "Create"
 msgstr "Создать"
@@ -1035,10 +1019,8 @@ msgstr "Режим кроссфейда"
 msgid "Crossfade"
 msgstr "Кроссфейд"
 
-#, fuzzy
-#| msgid "Current server"
 msgid "Current artwork"
-msgstr "Текущий сервер"
+msgstr "Текущая обложка"
 
 msgid "Custom HTTP headers"
 msgstr "Настраиваемые HTTP-заголовки"
@@ -1068,7 +1050,7 @@ msgid "Date added"
 msgstr "Дата добавления"
 
 msgid "Date"
-msgstr ""
+msgstr "Дата"
 
 msgid "Days after month ends"
 msgstr "Дни после конца месяца"
@@ -1103,6 +1085,7 @@ msgstr "По умолчанию"
 msgid "Delete Playlist"
 msgstr "Удалить плейлист"
 
+#, python-brace-format
 msgid "Delete \"{name}\"?"
 msgstr "Удалить \"{name}\"?"
 
@@ -1178,10 +1161,8 @@ msgstr "Доступ к Discord в Flatpak"
 msgid "Discord"
 msgstr "Discord"
 
-#, fuzzy
-#| msgid "Reset display"
 msgid "Display"
-msgstr "Сбросить настройки отображения"
+msgstr "Отображение"
 
 msgid "Do not encrypt"
 msgstr "Не шифровать"
@@ -1193,7 +1174,7 @@ msgid "Don't duplicate"
 msgstr "Не дублировать"
 
 msgid "Donate"
-msgstr ""
+msgstr "Пожертвовать"
 
 msgid "Download Folder"
 msgstr "Локальная папка"
@@ -1324,18 +1305,14 @@ msgstr "Вся библиотека"
 msgid "Equalizer"
 msgstr "Эквалайзер"
 
-#, fuzzy
-#| msgid "Never Played"
 msgid "Ever played"
-msgstr "Ни разу не воспроизводилось"
+msgstr "Когда-либо воспроизводили"
 
 msgid "Everything, including new tracks"
 msgstr "Всё, включая новые треки"
 
-#, fuzzy
-#| msgid "Add folder"
 msgid "Excluded folders"
-msgstr "Добавить папку"
+msgstr "Исключенные папки"
 
 msgid "Existing profile file"
 msgstr "Существующий файл профиля"
@@ -1423,10 +1400,8 @@ msgstr "Подключение к файлу"
 msgid "File connections"
 msgstr "Файловые подключения"
 
-#, fuzzy
-#| msgid "Folder"
 msgid "File path"
-msgstr "Папка"
+msgstr "Путь к файлу"
 
 msgid "Filename"
 msgstr "Имя файла"
@@ -1457,10 +1432,8 @@ msgstr "Фиксированное расположение"
 msgid "Flat"
 msgstr "Плоский"
 
-#, fuzzy
-#| msgid "Folder"
 msgid "Folder path"
-msgstr "Папка"
+msgstr "Путь к папке"
 
 msgid "Folders"
 msgstr "Папки"
@@ -1512,10 +1485,8 @@ msgstr "Максимальные высокие частоты"
 msgid "Full"
 msgstr "Полный"
 
-#, fuzzy
-#| msgid "Open fullscreen player"
 msgid "Fullscreen player"
-msgstr "Открыть полноэкранный плеер"
+msgstr "Полноэкранный проигрыватель"
 
 msgid "Fullscreen"
 msgstr "Полноэкранный режим"
@@ -1577,16 +1548,14 @@ msgstr "Зелёный"
 msgid "Grid labels"
 msgstr "Метки сетки"
 
-#, fuzzy
-#| msgid "Bar spacing (px)"
 msgid "Grid spacing"
-msgstr "Интервал между панелями (в пикселях)"
+msgstr "Шаг сетки"
 
 msgid "Grid"
 msgstr "Сетка"
 
 msgid "Grouping"
-msgstr ""
+msgstr "Группировка"
 
 msgid "Guest / public access"
 msgstr "Гостевой / публичный доступ"
@@ -1601,7 +1570,7 @@ msgid "Hide sidebar"
 msgstr "Скрыть боковую панель"
 
 msgid "Highlight hovered row"
-msgstr ""
+msgstr "Выделить строку при наведении"
 
 msgid "History"
 msgstr "История"
@@ -1638,10 +1607,8 @@ msgstr ""
 msgid "If you do not have API keys, create them"
 msgstr "Если у вас нет ключей API, создайте их"
 
-#, fuzzy
-#| msgid "Change Profile"
 msgid "Image files"
-msgstr "Изменить профиль"
+msgstr "Файлы изображений"
 
 msgid "Image"
 msgstr "Изображение"
@@ -1657,6 +1624,7 @@ msgstr "Импорт"
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
+"Импортирует файлы в библиотеку и отслеживает изменения в добавленных папках."
 
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr "Включить подробную диагностику Rufin в текущей сессии"
@@ -1727,7 +1695,7 @@ msgid "LRCLIB"
 msgstr "LRCLIB"
 
 msgid "Labels"
-msgstr ""
+msgstr "Ярлыки"
 
 msgid "Language and readings"
 msgstr "Язык и чтение"
@@ -1739,20 +1707,16 @@ msgid "Laptop/Headphones"
 msgstr "Ноутбук/Наушники"
 
 msgid "Large"
-msgstr ""
+msgstr "Большой"
 
-#, fuzzy
-#| msgid "Last played"
 msgid "Last 30 days"
-msgstr "Посл. прослушано"
+msgstr "Последние 30 дней"
 
 msgid "Last 365 days"
-msgstr ""
+msgstr "Последние 365 дней"
 
-#, fuzzy
-#| msgid "Last played"
 msgid "Last 7 days"
-msgstr "Посл. прослушано"
+msgstr "Последние 7 дней"
 
 msgid "Last played"
 msgstr "Посл. прослушано"
@@ -1856,10 +1820,8 @@ msgstr[2] ""
 "Локальное сопоставление файлов: {matched} совпад из {total} с путями на "
 "сервере"
 
-#, fuzzy
-#| msgid "Local music folders"
 msgid "Local files and folders"
-msgstr "Локальный источник, папки с музыкой"
+msgstr "Локальные файлы и папки"
 
 msgid "Local folder"
 msgstr "Локальная папка"
@@ -2041,10 +2003,8 @@ msgstr "Музыка на этом устройстве"
 msgid "MusicBrainz + Last.fm"
 msgstr "MusicBrainz и Last.fm"
 
-#, fuzzy
-#| msgid "MusicBrainz artist ID"
 msgid "MusicBrainz album artist ID"
-msgstr "MusicBrainz ID исполнителя"
+msgstr "Идентификатор исполнителя альбома MusicBrainz"
 
 msgid "MusicBrainz artist ID"
 msgstr "MusicBrainz ID исполнителя"
@@ -2064,10 +2024,8 @@ msgstr "MusicBrainz ID трека релиза"
 msgid "MusicBrainz"
 msgstr "MusicBrainz"
 
-#, fuzzy
-#| msgid "Music Folder"
 msgid "Musical key"
-msgstr "Папка с музыкой"
+msgstr "Музыкальный ключ"
 
 msgid "Mute"
 msgstr "Отключить звук"
@@ -2158,10 +2116,8 @@ msgstr "Серверы не найдены"
 msgid "No albums from this artist yet"
 msgstr "Пока нет альбомов этого исполнителя"
 
-#, fuzzy
-#| msgid "No network devices found"
 msgid "No artwork found"
-msgstr "Устройства в сети не найдены"
+msgstr "Обложка не найдена"
 
 msgid "No cached server path yet"
 msgstr "Пока нет кэшированных путей к серверу"
@@ -2193,10 +2149,8 @@ msgstr "Нет активности прослушивания в этот пе�
 msgid "No local file mapping"
 msgstr "Нет сопоставлений для локального файла"
 
-#, fuzzy
-#| msgid "No local folders configured"
 msgid "No local files or folders configured"
-msgstr "Не настроено ни одной локальной папки"
+msgstr "Нет настроенных локальных файлов или папок"
 
 msgid "No lyrics available."
 msgstr "Текст песни отсутствует."
@@ -2219,10 +2173,8 @@ msgstr "Сетевой адрес недоступен"
 msgid "No network devices found"
 msgstr "Устройства в сети не найдены"
 
-#, fuzzy
-#| msgid "No linked servers found"
 msgid "No playable entries were found"
-msgstr "Не найдено связанных серверов"
+msgstr "Воспроизводимые записи не найдены"
 
 msgid "No related tracks found"
 msgstr "Не найдено похожих треков"
@@ -2403,10 +2355,8 @@ msgstr "Параметры"
 msgid "Orange"
 msgstr "Оранжевый"
 
-#, fuzzy
-#| msgid "Release date"
 msgid "Original release date"
-msgstr "Дата выпуска"
+msgstr "Дата первого выпуска"
 
 msgid "Original"
 msgstr "Оригинал"
@@ -2459,10 +2409,10 @@ msgid "Perceptual"
 msgstr "Воспринимаемая"
 
 msgid "Performer"
-msgstr ""
+msgstr "Исполнитель"
 
 msgid "Period"
-msgstr ""
+msgstr "Период"
 
 msgid "Pink"
 msgstr "Розовый"
@@ -2745,10 +2695,8 @@ msgstr "Рекомендуется, если ваш сервер предост�
 msgid "Reconnect"
 msgstr "Повторное подключение"
 
-#, fuzzy
-#| msgid "Grid labels"
 msgid "Record label"
-msgstr "Метки сетки"
+msgstr "Лейбл"
 
 msgid "Red"
 msgstr "Красный"
@@ -2756,10 +2704,8 @@ msgstr "Красный"
 msgid "Redo"
 msgstr "Повторить"
 
-#, fuzzy
-#| msgid "Rule actions"
 msgid "Reduce motion"
-msgstr "Действия с правилами"
+msgstr "Уменьшить движение"
 
 msgid "Refresh automatically"
 msgstr "Автоматическое обновление"
@@ -2782,10 +2728,8 @@ msgstr "Сгенерировать новый токен доступа"
 msgid "Regenerate access token?"
 msgstr "Сгенерировать новый токен доступа?"
 
-#, fuzzy
-#| msgid "Regenerate access token"
 msgid "Regenerate"
-msgstr "Сгенерировать новый токен доступа"
+msgstr "Сгенерировать"
 
 msgid "Related"
 msgstr "Похожие"
@@ -2874,10 +2818,8 @@ msgstr "Удалить правило"
 msgid "Remove search"
 msgstr "Удалить из поиска"
 
-#, fuzzy
-#| msgid "Album unavailable"
 msgid "Remove unavailable tracks"
-msgstr "Альбом недоступен"
+msgstr "Удалить недоступные треки"
 
 msgid "Remove"
 msgstr "Удалить"
@@ -2968,7 +2910,7 @@ msgid "Rounded bars"
 msgstr "Закруглённые полосы"
 
 msgid "Row borders"
-msgstr ""
+msgstr "Границы строк"
 
 msgid "Rows"
 msgstr "Строки"
@@ -2992,7 +2934,7 @@ msgid "SMB Domain"
 msgstr "SMB-домен"
 
 msgid "Sample rate"
-msgstr ""
+msgstr "Частота дискретизации"
 
 msgid "Saturday"
 msgstr "Суббота"
@@ -3013,10 +2955,8 @@ msgstr ""
 msgid "Save changes automatically"
 msgstr "Автоматически сохранять изменения"
 
-#, fuzzy
-#| msgid "Remove folder"
 msgid "Save in folder"
-msgstr "Удалить папку"
+msgstr "Сохранить в папке"
 
 msgid "Save lyrics automatically"
 msgstr "Автоматически сохранять текст песни"
@@ -3075,10 +3015,8 @@ msgstr "Повторить поиск"
 msgid "Search Lyrics"
 msgstr "Поиск текстов песен"
 
-#, fuzzy
-#| msgid "Show artwork"
 msgid "Search artwork"
-msgstr "Показать обложку"
+msgstr "Поиск обложки"
 
 msgid "Search current folder"
 msgstr "Поиск в текущей папке"
@@ -3180,7 +3118,7 @@ msgid "Selected folders"
 msgstr "Выбранные папки"
 
 msgid "Selected items: {count}"
-msgstr ""
+msgstr "Выбранные элементы: {count}"
 
 msgid "Selection"
 msgstr "Выбор"
@@ -3270,10 +3208,8 @@ msgstr ""
 msgid "Show external site links"
 msgstr "Показывать ссылки на внешние сайты"
 
-#, fuzzy
-#| msgid "Show sidebar"
 msgid "Show header"
-msgstr "Показать боковую панель"
+msgstr "Показать заголовок"
 
 msgid "Show lyrics in the right panel"
 msgstr "Показать текст песни в правой панели"
@@ -3356,10 +3292,8 @@ msgstr "Войти используя код"
 msgid "Sign in"
 msgstr "Войти"
 
-#, fuzzy
-#| msgid "Clear artist"
 msgid "Similar artists"
-msgstr "Очистить исполнителя"
+msgstr "Похожие исполнители"
 
 msgid "SimpMusic"
 msgstr "SimpMusic"
@@ -3371,7 +3305,7 @@ msgid "Singles"
 msgstr "Синглы"
 
 msgid "Size"
-msgstr ""
+msgstr "Размер"
 
 msgid "Skip count"
 msgstr "Количество пропусков"
@@ -3383,7 +3317,7 @@ msgid "Slate"
 msgstr "Серый"
 
 msgid "Small"
-msgstr ""
+msgstr "Маленький"
 
 msgid "Smart Playlist"
 msgstr "Умный плейлист"
@@ -3462,15 +3396,11 @@ msgstr ""
 msgid "Stream quality"
 msgstr "Качество потока"
 
-#, fuzzy
-#| msgid "Audio"
 msgid "Studio"
-msgstr "Аудио"
+msgstr "Студия"
 
-#, fuzzy
-#| msgid "Audio"
 msgid "Studios"
-msgstr "Аудио"
+msgstr "Студии"
 
 msgid "Style"
 msgstr "Стиль"
@@ -3503,7 +3433,7 @@ msgid "System"
 msgstr "Система"
 
 msgid "Tags"
-msgstr ""
+msgstr "Теги"
 
 msgid "Target loudness"
 msgstr "Целевая громкость"
@@ -3527,12 +3457,10 @@ msgid "The API token was not accepted. Please connect again."
 msgstr "Токен API не был принят. Пожалуйста, повторите подключение."
 
 msgid "TheAudioDB album ID"
-msgstr ""
+msgstr "Идентификатор альбома TheAudioDB"
 
-#, fuzzy
-#| msgid "MusicBrainz artist ID"
 msgid "TheAudioDB artist ID"
-msgstr "MusicBrainz ID исполнителя"
+msgstr "Идентификатор исполнителя TheAudioDB"
 
 msgid "Theme"
 msgstr "Тема"
@@ -3561,7 +3489,7 @@ msgid "This source cannot edit this field"
 msgstr "Этот источник не может редактировать это поле"
 
 msgid "This will remove all configured state. Do you want to continue?"
-msgstr ""
+msgstr "Это удалит все настроенные параметры. Хотите продолжить?"
 
 msgid "Thursday"
 msgstr "Четверг"
@@ -3596,12 +3524,10 @@ msgid "Top tracks"
 msgstr "Лучшие треки"
 
 msgid "Total discs"
-msgstr ""
+msgstr "Всего дисков"
 
-#, fuzzy
-#| msgid "Top tracks"
 msgid "Total tracks"
-msgstr "Лучшие треки"
+msgstr "Всего треков"
 
 msgid "Track number"
 msgstr "Номер трека"
@@ -3690,10 +3616,8 @@ msgstr "Rufin обновлён на {version}"
 msgid "Updating Rufin to {version}..."
 msgstr "Обновляю Rufin на {version}..."
 
-#, fuzzy
-#| msgid "Show artwork"
 msgid "Upload artwork"
-msgstr "Показать обложку"
+msgstr "Загрузить обложку"
 
 msgid "Use API key"
 msgstr "Использовать ключ API"
@@ -3847,7 +3771,7 @@ msgid "Weekly"
 msgstr "Еженедельно"
 
 msgid "Wide"
-msgstr ""
+msgstr "Широкий"
 
 msgid "Window"
 msgstr "Окно"

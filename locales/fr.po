@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-29 17:51+0000\n"
+"PO-Revision-Date: 2026-09-30 14:52+0000\n"
 "Last-Translator: Arnaud Constantin <a.constantin@laposte.net>\n"
 "Language-Team: French <https://hosted.weblate.org/projects/rufin/app/fr/>\n"
 "Language: fr\n"
@@ -102,15 +102,21 @@ msgid ""
 "No secret service found. Rufin will use a file to store its credentials. "
 "Cancelling will not save credentials at all."
 msgstr ""
-"Pas de service secret trouvé. Rufin utilisera un fichier pour stocker ses "
-"identifiants. Annuler ne sauvegardera pas les identifiants du tout."
+"Pas de stockage sécurisé trouvé. Rufin utilisera un fichier pour stocker ses "
+"identifiants. Annuler ne sauvegardera pas les identifiants."
 
+#, fuzzy, python-brace-format
+#| msgid ""
+#| "No secret service found. You might have a secret service but the portal "
+#| "can be broken, you can check <a href=\"https://github.com/screwys/Rufin/"
+#| "issues/1055#issuecomment-5637922622\">this issue</a> to fix it, otherwise "
+#| "Rufin will use a file to store its credentials. Cancelling will not save "
+#| "credentials at all."
 msgid ""
 "No secret service found. You might have a secret service but the portal can "
-"be broken, you can check <a href=\"https://github.com/screwys/Rufin/issues/"
-"1055#issuecomment-5637922622\">this issue</a> to fix it, otherwise Rufin "
-"will use a file to store its credentials. Cancelling will not save "
-"credentials at all."
+"be broken, you can check {link_start}this issue{link_end} to fix it, "
+"otherwise Rufin will use a file to store its credentials. Cancelling will "
+"not save credentials at all."
 msgstr ""
 "Aucun service de stockage sécurisé n’a été trouvé. Il est possible qu’un tel "
 "service soit installé, mais que le portail soit défaillant. Vous pouvez "
@@ -622,7 +628,7 @@ msgid "Bearer token"
 msgstr "Bearer token"
 
 msgid "Bit depth"
-msgstr ""
+msgstr "Résolution en bits"
 
 msgid "Bitrate"
 msgstr "Bitrate"
@@ -686,10 +692,8 @@ msgstr "Changement de source"
 msgid "Changing this will redownload all local files."
 msgstr "Changer cela retéléchargera tous les fichiers locaux."
 
-#, fuzzy
-#| msgid "Change"
 msgid "Channels"
-msgstr "Changer"
+msgstr "Canaux"
 
 msgid "Check for updates every"
 msgstr "Rechercher les mises à jour tous les"
@@ -919,7 +923,7 @@ msgid "Continue"
 msgstr "Continuer"
 
 msgid "Control notifications"
-msgstr "Contrôler les notifications"
+msgstr "Notifications de contrôle"
 
 msgid "Controller status"
 msgstr "État du contrôleur"
@@ -994,7 +998,7 @@ msgid "Country"
 msgstr "Pays"
 
 msgid "Create a playlist from queue"
-msgstr "Créer une playlist à partir de la fil d'attente"
+msgstr "Créer une playlist à partir de la file d'attente"
 
 msgid "Create playlist"
 msgstr "Créer une playlist"
@@ -1077,6 +1081,7 @@ msgstr "Par défaut"
 msgid "Delete Playlist"
 msgstr "Supprimer la playlist"
 
+#, python-brace-format
 msgid "Delete \"{name}\"?"
 msgstr "Supprimer \"{name}\" ?"
 
@@ -1153,7 +1158,7 @@ msgid "Discord"
 msgstr "Discord"
 
 msgid "Display"
-msgstr "Afficher"
+msgstr "Affichage"
 
 msgid "Do not encrypt"
 msgstr "Ne pas chiffrer"
@@ -1302,7 +1307,7 @@ msgid "Ever played"
 msgstr "Jamais joué"
 
 msgid "Everything, including new tracks"
-msgstr "Tout, y compris les nouvelles pistes"
+msgstr "Tout, y compris le nouveaux morceaux"
 
 msgid "Excluded folders"
 msgstr "Dossiers exclus"
@@ -1338,7 +1343,7 @@ msgid "Export playlist"
 msgstr "Exporter la playlist"
 
 msgid "Export your listening history in Rufin"
-msgstr "Exportez votre historique d'écoute de Rufin"
+msgstr "Exporter votre historique d'écoute de Rufin"
 
 msgid "Export"
 msgstr "Exporter"
@@ -1368,7 +1373,7 @@ msgid "Favorite tracks"
 msgstr "Morceaux favoris"
 
 msgid "Favorite tracks, plus tracks from favorite albums and artists"
-msgstr "Pistes favorites, plus les pistes des albums et artistes favoris"
+msgstr "Morceaux favoris, plus les morceaux des albums et artistes favoris"
 
 msgid "Favorite"
 msgstr "Favori"
@@ -1445,10 +1450,10 @@ msgstr ""
 "archive non chiffrée."
 
 msgid "Forget Source"
-msgstr "Oublie la source"
+msgstr "Oublier la source"
 
 msgid "Forget \"{name}\"?"
-msgstr "Oubliez \"{name}\" ?"
+msgstr "Oublier \"{name}\" ?"
 
 msgid "Format"
 msgstr "Format"
@@ -1505,7 +1510,7 @@ msgid "Genre radio"
 msgstr "Radio du genre"
 
 msgid "Genre tracks"
-msgstr "Pistes du genre"
+msgstr "Morceaux par genre"
 
 msgid "Genre"
 msgstr "Genre"
@@ -1517,7 +1522,7 @@ msgid "Get token"
 msgstr "Obtenir le jeton"
 
 msgid "Go to Album"
-msgstr "Allez à l'album"
+msgstr "Aller à l'album"
 
 msgid "Go to {artist}"
 msgstr "Aller à {artist}"
@@ -1540,10 +1545,8 @@ msgstr "Vert"
 msgid "Grid labels"
 msgstr "Libellés de la grille"
 
-#, fuzzy
-#| msgid "Bar spacing (px)"
 msgid "Grid spacing"
-msgstr "Espacement des barres (px)"
+msgstr "Espacement de la grille"
 
 msgid "Grid"
 msgstr "Grille"
@@ -1564,7 +1567,7 @@ msgid "Hide sidebar"
 msgstr "Cacher la barre latérale"
 
 msgid "Highlight hovered row"
-msgstr ""
+msgstr "Mettre en surbrillance la ligne survolée"
 
 msgid "History"
 msgstr "Historique"
@@ -1600,7 +1603,7 @@ msgid "If you do not have API keys, create them"
 msgstr "Si vous n'avez pas de clés API, créez-les"
 
 msgid "Image files"
-msgstr "Fichiers de l'image"
+msgstr "Fichiers image"
 
 msgid "Image"
 msgstr "Image"
@@ -1626,7 +1629,7 @@ msgid "Increase"
 msgstr "Augmenter"
 
 msgid "Install available updates when Rufin starts"
-msgstr "Installez les mises à jour disponibles lors du démarrage de Rufin"
+msgstr "Installer les mises à jour disponibles au démarrage de Rufin"
 
 msgid "Installed"
 msgstr "Installé"
@@ -1779,7 +1782,7 @@ msgid "Load file contents"
 msgstr "Charger le contenu du fichier"
 
 msgid "Loading related tracks..."
-msgstr "Chargement des pistes correspondantes..."
+msgstr "Chargement des morceaux correspondants…"
 
 msgid "Loading..."
 msgstr "Chargement..."
@@ -1932,7 +1935,7 @@ msgid "Monthly"
 msgstr "Mensuel"
 
 msgid "Mood tracks"
-msgstr "Pistes d’ambiance"
+msgstr "Morceaux d’ambiance"
 
 msgid "Mood"
 msgstr "Ambiance"
@@ -2164,10 +2167,8 @@ msgstr "Aucune adresse réseau disponible"
 msgid "No network devices found"
 msgstr "Aucun périphérique réseau trouvé"
 
-#, fuzzy
-#| msgid "No linked servers found"
 msgid "No playable entries were found"
-msgstr "Aucun serveur lié trouvé"
+msgstr "Aucune entrée lisible n’a été trouvée"
 
 msgid "No related tracks found"
 msgstr "Aucun morceau associé trouvé"
@@ -2274,10 +2275,10 @@ msgid "One path per line"
 msgstr "Un chemin par ligne"
 
 msgid "Only played tracks"
-msgstr "Uniquement les pistes déjà lues"
+msgstr "Uniquement les morceaux déjà lus"
 
 msgid "Only unplayed tracks"
-msgstr "Uniquement les pistes non lues"
+msgstr "Uniquement les morceaux non lus"
 
 msgid "Opacity (%)"
 msgstr "Opacité (%)"
@@ -2310,10 +2311,10 @@ msgid "Open on Jellyfin"
 msgstr "Ouvrir dans Jellyfin"
 
 msgid "Open on Last.fm"
-msgstr "Ouvrir sur Last.fm"
+msgstr "Ouvrir dans Last.fm"
 
 msgid "Open on MusicBrainz"
-msgstr "Ouvrir sur MusicBrainz"
+msgstr "Ouvrir dans MusicBrainz"
 
 msgid "Open on Navidrome"
 msgstr "Ouvrir dans Navidrome"
@@ -2395,7 +2396,7 @@ msgstr "Maintien des pics (secondes)"
 
 msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
 msgstr ""
-"Perceptuel pour un contrôle plus fin à faible volume ; linéaire pour une "
+"Perceptuel pour un contrôle plus précis à faible volume ; linéaire pour une "
 "échelle directe"
 
 msgid "Perceptual"
@@ -2537,7 +2538,7 @@ msgid "Position"
 msgstr "Position"
 
 msgid "Prefer distinct track covers"
-msgstr "Préférer des pochettes distinctes pour les pistes"
+msgstr "Privilégier des pochettes distinctes pour les morceaux"
 
 msgid "Prefer server lyrics"
 msgstr "Préférer les paroles du serveur"
@@ -2641,13 +2642,13 @@ msgid "Queue and transitions"
 msgstr "File d’attente et transitions"
 
 msgid "Queue tracks to show"
-msgstr "Pistes de la file d’attente à afficher"
+msgstr "Morceaux de la file d’attente à afficher"
 
 msgid "Queue"
-msgstr "Fil d'attente"
+msgstr "File d'attente"
 
 msgid "Queued"
-msgstr "Mis en fil d'attente"
+msgstr "Mis en file d'attente"
 
 msgid "Quick Connect"
 msgstr "Connexion rapide"
@@ -2697,10 +2698,8 @@ msgstr "Rouge"
 msgid "Redo"
 msgstr "Rétablir"
 
-#, fuzzy
-#| msgid "Rule actions"
 msgid "Reduce motion"
-msgstr "Actions des règles"
+msgstr "Réduire les animations"
 
 msgid "Refresh automatically"
 msgstr "Rafraîchir automatiquement"
@@ -2814,7 +2813,7 @@ msgid "Remove search"
 msgstr "Supprimer la recherche"
 
 msgid "Remove unavailable tracks"
-msgstr "Supprimer les pistes non disponibles"
+msgstr "Supprimer les morceaux non disponibles"
 
 msgid "Remove"
 msgstr "Supprimer"
@@ -3144,7 +3143,7 @@ msgid "Server Settings"
 msgstr "Paramètres du serveur"
 
 msgid "Server discovery failed: {error}"
-msgstr "Échec de la découverte du serveur : {error}"
+msgstr "Échec de la détection de serveur : {error}"
 
 msgid "Server is unreachable"
 msgstr "Le serveur est inaccessible"
@@ -3162,7 +3161,7 @@ msgid "Servers"
 msgstr "Serveurs"
 
 msgid "Set the Discord activity type to Listening"
-msgstr "Définir le type d’activité Discord sur Écoute"
+msgstr "Définir le type d’activité Discord sur \"Écoute\""
 
 msgid "Set up this device"
 msgstr "Configurez cet appareil"
@@ -3201,10 +3200,8 @@ msgstr ""
 msgid "Show external site links"
 msgstr "Afficher les liens vers les sites externes"
 
-#, fuzzy
-#| msgid "Show sidebar"
 msgid "Show header"
-msgstr "Afficher la barre latérale"
+msgstr "Afficher l’en-tête"
 
 msgid "Show lyrics in the right panel"
 msgstr "Afficher les paroles dans le panneau de droite"
@@ -3219,7 +3216,7 @@ msgid "Show peak markers"
 msgstr "Afficher les marqueurs de pic"
 
 msgid "Show playback queue"
-msgstr "Afficher la file d'attente de lecture"
+msgstr "Afficher la file de lecture"
 
 msgid "Show ratings in the bottom bar"
 msgstr "Afficher les notes dans la barre inférieure"
@@ -3321,7 +3318,7 @@ msgid "Smart Playlists"
 msgstr "Playlists intelligentes"
 
 msgid "Smart playlist tracks"
-msgstr "Pistes de la playlist intelligente"
+msgstr "Morceaux de la playlist intelligente"
 
 msgid "Smart playlists"
 msgstr "Playlists intelligentes"
@@ -3419,7 +3416,7 @@ msgid "Synced lyrics"
 msgstr "Paroles synchronisées"
 
 msgid "System default"
-msgstr "Valeur par défaut du système"
+msgstr "Valeur du système"
 
 msgid "System flatpak:"
 msgstr "Flatpak système :"
@@ -3765,7 +3762,7 @@ msgid "Weekly"
 msgstr "Hebdomadaire"
 
 msgid "Wide"
-msgstr "Large"
+msgstr "Étendu"
 
 msgid "Window"
 msgstr "Fenêtre"
@@ -3789,7 +3786,7 @@ msgid "Your music belongs here"
 msgstr "Votre musique a sa place ici"
 
 msgid "Your queue is empty."
-msgstr "Votre file d'attente est vide."
+msgstr "Votre file de lecture est vide."
 
 msgid "Your {period} in Rufin"
 msgstr "Votre {period} dans Rufin"
