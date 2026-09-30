@@ -101,13 +101,18 @@ msgstr ""
 "Salasõna tasku tüüpi teenust ei leidu. Rufin salvestab autentimiseks "
 "vajalikud andmed faili. Katkestamisel ei salvestata mitte midagi."
 
+#, fuzzy, python-brace-format
+#| msgid ""
+#| "No secret service found. Rufin will use a file to store its credentials. "
+#| "Cancelling will not save credentials at all."
 msgid ""
 "No secret service found. You might have a secret service but the portal can "
-"be broken, you can check <a href=\"https://github.com/screwys/Rufin/issues/"
-"1055#issuecomment-5637922622\">this issue</a> to fix it, otherwise Rufin "
-"will use a file to store its credentials. Cancelling will not save "
-"credentials at all."
+"be broken, you can check {link_start}this issue{link_end} to fix it, "
+"otherwise Rufin will use a file to store its credentials. Cancelling will "
+"not save credentials at all."
 msgstr ""
+"Salasõna tasku tüüpi teenust ei leidu. Rufin salvestab autentimiseks "
+"vajalikud andmed faili. Katkestamisel ei salvestata mitte midagi."
 
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
@@ -1093,6 +1098,7 @@ msgstr "Vaikimisi"
 msgid "Delete Playlist"
 msgstr "Kustuta esitusloend"
 
+#, python-brace-format
 msgid "Delete \"{name}\"?"
 msgstr "Kas kustutad: „{name}“?"
 

@@ -103,13 +103,19 @@ msgstr ""
 "Anmeldedaten zu speichern. Bei Abbruch werden die Anmeldedaten überhaupt "
 "nicht gespeichert."
 
+#, fuzzy, python-brace-format
+#| msgid ""
+#| "No secret service found. Rufin will use a file to store its credentials. "
+#| "Cancelling will not save credentials at all."
 msgid ""
 "No secret service found. You might have a secret service but the portal can "
-"be broken, you can check <a href=\"https://github.com/screwys/Rufin/issues/"
-"1055#issuecomment-5637922622\">this issue</a> to fix it, otherwise Rufin "
-"will use a file to store its credentials. Cancelling will not save "
-"credentials at all."
+"be broken, you can check {link_start}this issue{link_end} to fix it, "
+"otherwise Rufin will use a file to store its credentials. Cancelling will "
+"not save credentials at all."
 msgstr ""
+"Kein Schlüsselbunddienst gefunden. Rufin wird eine Datei verwenden, um seine "
+"Anmeldedaten zu speichern. Bei Abbruch werden die Anmeldedaten überhaupt "
+"nicht gespeichert."
 
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
@@ -1080,6 +1086,7 @@ msgstr "Standard"
 msgid "Delete Playlist"
 msgstr "Playlist löschen"
 
+#, python-brace-format
 msgid "Delete \"{name}\"?"
 msgstr "„{name}“ löschen?"
 
