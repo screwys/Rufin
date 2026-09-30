@@ -146,32 +146,36 @@ impl SubsonicSource {
         seed: &crate::SourceRadioSeed,
         limit: usize,
     ) -> SourceResult<Vec<String>> {
-        let tracks = match seed {
-            crate::SourceRadioSeed::Track(id)
-            | crate::SourceRadioSeed::Album(id)
-            | crate::SourceRadioSeed::Artist(id) => {
-                self.similar_songs(raw_item_id(id), limit).await?
-            }
-            crate::SourceRadioSeed::Playlist(id) => {
-                let playlist = self.read_playlist(id).await?;
-                let first = playlist.entries.first().ok_or(SourceError::NotFound)?;
-                self.similar_songs(raw_item_id(&first.track_id), limit)
-                    .await?
-            }
-            crate::SourceRadioSeed::Genre(name) => {
-                let body: Value = self
-                    .get_json(
-                        "getRandomSongs",
-                        &[
-                            ("size", limit.clamp(1, 500).to_string()),
-                            ("genre", name.clone()),
-                        ],
-                    )
-                    .await?;
-                json::items(&body["randomSongs"]["song"])
-                    .iter()
-                    .filter_map(|song| track_from_json(self, song))
-                    .collect()
+        let tracks = if let Some(tracks) = self.navidrome_radio_tracks(seed, limit).await? {
+            tracks
+        } else {
+            match seed {
+                crate::SourceRadioSeed::Track(id)
+                | crate::SourceRadioSeed::Album(id)
+                | crate::SourceRadioSeed::Artist(id) => {
+                    self.similar_songs(raw_item_id(id), limit).await?
+                }
+                crate::SourceRadioSeed::Playlist(id) => {
+                    let playlist = self.read_playlist(id).await?;
+                    let first = playlist.entries.first().ok_or(SourceError::NotFound)?;
+                    self.similar_songs(raw_item_id(&first.track_id), limit)
+                        .await?
+                }
+                crate::SourceRadioSeed::Genre(name) => {
+                    let body: Value = self
+                        .get_json(
+                            "getRandomSongs",
+                            &[
+                                ("size", limit.clamp(1, 500).to_string()),
+                                ("genre", self.genre_name(name).to_string()),
+                            ],
+                        )
+                        .await?;
+                    json::items(&body["randomSongs"]["song"])
+                        .iter()
+                        .filter_map(|song| track_from_json(self, song))
+                        .collect()
+                }
             }
         };
         Ok(tracks.into_iter().map(|track| track.id).collect())
@@ -1059,6 +1063,8 @@ pub(super) async fn subsonic_json(
         };
         return Err(if matches!(code, Some(40..=44)) {
             SourceError::Auth(message)
+        } else if code == Some(70) {
+            SourceError::NotFound
         } else {
             SourceError::Server {
                 status: 200,
@@ -1217,6 +1223,12 @@ impl SubsonicSource {
         format!("{}:{kind}:{raw_id}", self.source_id())
     }
 
+    pub(super) fn genre_name<'a>(&self, object_id: &'a str) -> &'a str {
+        object_id
+            .strip_prefix(self.id("genre", "").as_str())
+            .unwrap_or(object_id)
+    }
+
     fn authenticated_url(&self, method: &str, extra: &[(&str, String)]) -> SourceResult<Url> {
         let mut url = endpoint(&self.base_url, method)?;
         {
@@ -1245,7 +1257,11 @@ impl SubsonicSource {
         subsonic_json(self.client.get(url)).await.map(|_| ())
     }
 
-    async fn similar_songs(&self, raw_id: &str, count: usize) -> SourceResult<Vec<Track>> {
+    pub(super) async fn similar_songs(
+        &self,
+        raw_id: &str,
+        count: usize,
+    ) -> SourceResult<Vec<Track>> {
         let body: Value = self
             .get_json(
                 "getSimilarSongs",
