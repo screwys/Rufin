@@ -16,8 +16,7 @@ pub(super) fn start(requests: ArtworkRequests) {
                 let started = Instant::now();
                 let result = metadata_lookup::public_album_cover_url(
                     &request.key.album,
-                    250,
-                    &request.key.policy,
+                    &request.key.lastfm_api_key,
                 );
                 let lookup_millis = started.elapsed().as_millis();
                 let total_millis = queued_millis.saturating_add(lookup_millis);
