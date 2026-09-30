@@ -657,7 +657,12 @@ impl JellyfinEmbySource {
                 "image/jpeg, image/png, image/webp, image/gif, image/apng, image/jxl, image/tiff, image/bmp",
             );
         }
-        send_bytes(self.kind, self.authenticated(request).await?).await
+        send_bytes(
+            self.kind,
+            self.authenticated(request).await?,
+            &self.media_client,
+        )
+        .await
     }
 }
 
@@ -802,9 +807,12 @@ pub(super) async fn send_unit(
 pub(super) async fn send_bytes(
     kind: ServerKind,
     request: reqwest::RequestBuilder,
+    anonymous: &Client,
 ) -> SourceResult<ImageBytes> {
-    remote_http::bytes(
+    remote_http::media_bytes(
         request,
+        anonymous,
+        JELLYFIN_REQUEST_TIMEOUT,
         http_policy(kind),
         BodyLimit {
             max_bytes: JELLYFIN_IMAGE_MAX_BYTES,
@@ -818,6 +826,17 @@ pub(super) fn build_client(trust_invalid_cert: bool) -> SourceResult<Client> {
         trust_invalid_cert,
         JELLYFIN_CONNECT_TIMEOUT,
         JELLYFIN_REQUEST_TIMEOUT,
+    )
+}
+
+pub(super) fn build_media_client(trust_invalid_cert: bool) -> SourceResult<Client> {
+    remote_http::build_url_client(
+        trust_invalid_cert,
+        RemoteTimeouts {
+            connect: JELLYFIN_CONNECT_TIMEOUT,
+            request: JELLYFIN_REQUEST_TIMEOUT,
+        },
+        JELLYFIN_HTTP,
     )
 }
 

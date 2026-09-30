@@ -18,7 +18,7 @@ impl PlexSource {
                 if url.origin() == base.origin() {
                     self.request(Method::GET, &image.item_id, &[]).await?
                 } else {
-                    self.client.get(url)
+                    self.media_client.get(url)
                 }
             }
             crate::ImageSize::Thumbnail(size) => {
@@ -35,7 +35,14 @@ impl PlexSource {
                 .await?
             }
         };
-        remote_http::bytes(request, HTTP, RESPONSE).await
+        remote_http::media_bytes(
+            request,
+            &self.media_client,
+            Duration::from_secs(60),
+            HTTP,
+            RESPONSE,
+        )
+        .await
     }
     pub(crate) async fn set_rating(&self, object: &str, rating: Option<u8>) -> SourceResult<()> {
         self.unit(

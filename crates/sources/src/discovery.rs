@@ -492,6 +492,7 @@ async fn probe_plex_localhost_server(client: &Client, target: &str) -> Option<Di
 }
 
 fn parse_plex_server(packet: &[u8], sender: SocketAddr) -> Option<DiscoveredServer> {
+    // GDM identifiers and addresses are hints. The account resource owns token destinations.
     let packet = std::str::from_utf8(packet).ok()?;
     let mut lines = packet.lines();
     let mut status = lines.next()?.split_whitespace();

@@ -312,7 +312,7 @@ impl PlexLogin {
                 owned: crate::remote_json::boolean(&resource["owned"]).unwrap_or(false),
                 connections: crate::remote_json::items(&resource["connections"])
                     .iter()
-                    .filter_map(connection)
+                    .flat_map(resource_connections)
                     .collect(),
             };
             server.merge_lan(lan);
@@ -354,6 +354,18 @@ impl PlexLogin {
             },
             HTTP,
         )?;
+        let strict_client = if trust_invalid_cert {
+            remote_http::build_client(
+                false,
+                RemoteTimeouts {
+                    connect: Duration::from_secs(5),
+                    request: Duration::from_secs(10),
+                },
+                HTTP,
+            )?
+        } else {
+            client.clone()
+        };
         let mut server = server.clone();
         if address_override.is_none_or(|address| address.trim().is_empty()) {
             server.merge_lan(&crate::discovery::plex_loopback_servers().await);
@@ -362,8 +374,13 @@ impl PlexLogin {
         let mut failure =
             SourceError::Network("No connection is available for this Plex server".into());
         for connection in connections {
+            let client = if connection.require_valid_certificate {
+                &strict_client
+            } else {
+                &client
+            };
             let request = self
-                .request(&client, Method::GET, connection.address.as_str())
+                .request(client, Method::GET, connection.address.as_str())
                 .header("X-Plex-Token", token);
             match json_response(request).await {
                 Ok(response)
@@ -430,6 +447,8 @@ pub struct PlexConnection {
     pub address: reqwest::Url,
     pub local: bool,
     pub relay: bool,
+    #[serde(default)]
+    pub(crate) require_valid_certificate: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -442,6 +461,19 @@ pub struct PlexServer {
 
 impl PlexServer {
     fn merge_lan(&mut self, lan: &[crate::DiscoveredServer]) {
+        // Only account resource URLs supply the server's certificate identity.
+        let secure = self
+            .connections
+            .iter()
+            .filter(|connection| connection.address.scheme() == "https" && !connection.relay)
+            .find_map(|connection| {
+                let host = connection
+                    .address
+                    .host_str()?
+                    .strip_suffix(".plex.direct")?;
+                let (_, certificate) = host.rsplit_once('.')?;
+                Some((connection.address.clone(), certificate.to_owned()))
+            });
         for found in lan
             .iter()
             .filter(|found| found.id.as_deref() == Some(&self.id))
@@ -449,15 +481,44 @@ impl PlexServer {
             let Ok(address) = reqwest::Url::parse(&found.address) else {
                 continue;
             };
+            if self
+                .connections
+                .iter()
+                .any(|connection| connection.address.origin() == address.origin())
+            {
+                continue;
+            }
+            let Some((mut secure_address, certificate)) = secure.clone() else {
+                continue;
+            };
+            let ip = match address.host() {
+                Some(url::Host::Ipv4(ip)) => ip.to_string().replace('.', "-"),
+                Some(url::Host::Ipv6(ip)) => ip
+                    .segments()
+                    .iter()
+                    .map(|part| format!("{part:x}"))
+                    .collect::<Vec<_>>()
+                    .join("-"),
+                _ => continue,
+            };
+            let host = format!("{}.{}.plex.direct", ip, certificate);
+            if secure_address.set_host(Some(&host)).is_err()
+                || secure_address
+                    .set_port(address.port_or_known_default())
+                    .is_err()
+            {
+                continue;
+            }
             if !self
                 .connections
                 .iter()
-                .any(|connection| connection.address == address)
+                .any(|connection| connection.address == secure_address)
             {
                 self.connections.push(PlexConnection {
-                    address,
+                    address: secure_address,
                     local: true,
                     relay: false,
+                    require_valid_certificate: true,
                 });
             }
         }
@@ -480,6 +541,7 @@ impl PlexServer {
                 address: address.clone(),
                 local: known.is_some_and(|connection| connection.local),
                 relay: known.is_some_and(|connection| connection.relay),
+                require_valid_certificate: false,
             }]);
         }
         let mut connections: Vec<_> = self
@@ -534,7 +596,39 @@ fn connection(value: &Value) -> Option<PlexConnection> {
         address: reqwest::Url::parse(value["uri"].as_str()?).ok()?,
         local: crate::remote_json::boolean(&value["local"]).unwrap_or(false),
         relay: crate::remote_json::boolean(&value["relay"]).unwrap_or(false),
+        require_valid_certificate: false,
     })
+}
+
+fn resource_connections(value: &Value) -> Vec<PlexConnection> {
+    let Some(connection) = connection(value) else {
+        return Vec::new();
+    };
+    let mut connections = vec![connection.clone()];
+    if connection.local
+        && !connection.relay
+        && let Some(host) = value["address"].as_str()
+        && let Some(port) =
+            crate::remote_json::id(&value["port"]).and_then(|port| port.parse::<u16>().ok())
+    {
+        let host = match host.parse::<std::net::Ipv6Addr>() {
+            Ok(ip) => format!("[{ip}]"),
+            Err(_) => host.to_owned(),
+        };
+        let mut address = connection.address.clone();
+        if address.set_scheme("http").is_ok()
+            && address.set_host(Some(&host)).is_ok()
+            && address.set_port(Some(port)).is_ok()
+            && address != connection.address
+        {
+            // HTTP fallback is authorized by the account response, never by GDM.
+            connections.push(PlexConnection {
+                address,
+                ..connection
+            });
+        }
+    }
+    connections
 }
 
 impl PlexBrowserLogin {
@@ -623,10 +717,10 @@ mod tests {
             connections: [
                 json!({"uri": "https://relay.example:443", "relay": true, "local": false}),
                 json!({"uri": "https://remote.example:32400", "relay": false, "local": false}),
-                json!({"uri": "https://local.example:32400", "relay": false, "local": true}),
+                json!({"uri": "https://local.example:32400", "address": "192.0.2.20", "port": 32400, "relay": false, "local": true}),
             ]
             .iter()
-            .filter_map(connection)
+            .flat_map(resource_connections)
             .collect(),
         };
         let lan = crate::DiscoveredServer {

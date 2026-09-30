@@ -48,8 +48,13 @@ pub(crate) struct PlexSourceConfig {
     pub relay: bool,
     pub owned: bool,
     pub trust_invalid_cert: bool,
+    #[serde(default)]
+    pub require_valid_certificate: bool,
 }
 impl PlexSourceConfig {
+    fn trust_invalid_certificate(&self) -> bool {
+        self.trust_invalid_cert && !self.require_valid_certificate
+    }
     pub(crate) fn from_configuration(configuration: &SourceConfiguration) -> SourceResult<Self> {
         let config: Self = crate::config::decode_provider_payload(configuration)?;
         crate::config::require_payload_version(config.version, 1)?;
@@ -61,10 +66,19 @@ pub(crate) struct PlexSource {
     pub(crate) login: Arc<tokio::sync::Mutex<PlexLogin>>,
     config: PlexSourceConfig,
     client: Client,
+    media_client: Client,
 }
 impl PlexSource {
     fn new(config: PlexSourceConfig, login: PlexLogin) -> SourceResult<Self> {
         let client = remote_http::build_client(
+            config.trust_invalid_certificate(),
+            RemoteTimeouts {
+                connect: Duration::from_secs(10),
+                request: Duration::from_secs(60),
+            },
+            HTTP,
+        )?;
+        let media_client = remote_http::build_url_client(
             config.trust_invalid_cert,
             RemoteTimeouts {
                 connect: Duration::from_secs(10),
@@ -75,6 +89,7 @@ impl PlexSource {
         Ok(Self {
             config,
             client,
+            media_client,
             login: Arc::new(tokio::sync::Mutex::new(login)),
         })
     }
@@ -113,6 +128,7 @@ impl PlexSource {
         )
         .await
     }
+
     async fn unit(
         &self,
         method: Method,
@@ -170,6 +186,7 @@ pub(crate) async fn connect(
         relay: connection.relay,
         owned: input.server.owned,
         trust_invalid_cert: input.trust_invalid_cert,
+        require_valid_certificate: connection.require_valid_certificate,
     };
     let credential = input.login.encode()?;
     let configuration = crate::config::encode_provider_payload(
@@ -227,6 +244,7 @@ pub(crate) async fn edit(
         config.base_url = connection.address.to_string();
         config.local = connection.local;
         config.relay = connection.relay;
+        config.require_valid_certificate = connection.require_valid_certificate;
     }
     config.address_override = input.address_override;
     config.trust_invalid_cert = input.trust_invalid_cert;

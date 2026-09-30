@@ -687,6 +687,7 @@ async fn remote_response(
         return Ok((headers, Body::empty()).into_response());
     }
     let client = reqwest::Client::builder()
+        .referer(false)
         .danger_accept_invalid_certs(resource.stream.trust_invalid_certificate())
         .build()
         .map_err(|error| error.to_string())?;
@@ -847,6 +848,7 @@ fn response_content_length(response: &reqwest::blocking::Response) -> Option<u64
 
 fn upstream_client(stream: &PreparedStream) -> Result<reqwest::blocking::Client, String> {
     reqwest::blocking::Client::builder()
+        .referer(false)
         .danger_accept_invalid_certs(stream.trust_invalid_certificate())
         .build()
         .map_err(|error| error.to_string())

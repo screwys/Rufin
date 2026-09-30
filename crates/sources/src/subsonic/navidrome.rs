@@ -44,6 +44,17 @@ const NAVIDROME_HTTP: RemoteHttpPolicy = RemoteHttpPolicy {
     redact_error_url: None,
 };
 
+pub(super) fn build_client(trust_invalid_cert: bool) -> SourceResult<reqwest::Client> {
+    remote_http::build_client(
+        trust_invalid_cert,
+        crate::remote_http::RemoteTimeouts {
+            connect: std::time::Duration::from_secs(10),
+            request: std::time::Duration::from_secs(60),
+        },
+        NAVIDROME_HTTP,
+    )
+}
+
 #[derive(Serialize)]
 struct NavidromeLoginRequest<'a> {
     username: &'a str,
@@ -325,7 +336,7 @@ impl SubsonicSource {
         let url = &url;
         self.navidrome_authenticated(|token| async move {
             remote_http::json_with_header(
-                self.client
+                self.navidrome_client
                     .get(url.clone())
                     .header(&NAVIDROME_AUTH_HEADER, format!("Bearer {token}")),
                 NAVIDROME_HTTP,
@@ -400,11 +411,11 @@ impl SubsonicSource {
                                 .unwrap_or("application/octet-stream"),
                         )
                         .map_err(|error| SourceError::Other(error.to_string()))?;
-                    self.client
+                    self.navidrome_client
                         .post(url.clone())
                         .multipart(reqwest::multipart::Form::new().part("image", part))
                 }
-                crate::ArtworkChange::Remove => self.client.delete(url.clone()),
+                crate::ArtworkChange::Remove => self.navidrome_client.delete(url.clone()),
             }
             .header(&NAVIDROME_AUTH_HEADER, format!("Bearer {token}"));
             remote_http::unit_with_header(request, NAVIDROME_HTTP, &NAVIDROME_AUTH_HEADER)
@@ -424,7 +435,13 @@ impl SubsonicSource {
                 "saved Navidrome credentials cannot use its private library API".to_string(),
             )
         })?;
-        let login = navidrome_login(&self.client, &self.base_url, &self.username, password).await?;
+        let login = navidrome_login(
+            &self.navidrome_client,
+            &self.base_url,
+            &self.username,
+            password,
+        )
+        .await?;
         let next = required(
             field(&login, "token").unwrap_or_default(),
             "Navidrome session token",
