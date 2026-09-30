@@ -43,30 +43,67 @@ pub fn new_key() -> String {
         .to_owned()
 }
 
-pub fn encrypt(mut snapshot: File, output: &Path, profile: &str, key: &str) -> Result<(), String> {
+pub fn encrypt(
+    output: File,
+    profile: &str,
+    key: &str,
+) -> Result<age::stream::StreamWriter<File>, String> {
     let identity: age::x25519::Identity = key.parse().map_err(error)?;
     let recipient = identity.to_public();
     let encryptor =
         age::Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient))
             .map_err(error)?;
-    let file = File::create(output).map_err(error)?;
-    let mut stream = encryptor.wrap_output(file).map_err(error)?;
+    let mut stream = encryptor.wrap_output(output).map_err(error)?;
     stream.write_all(MAGIC).map_err(error)?;
     let length: u16 = profile.len().try_into().map_err(error)?;
     stream.write_all(&length.to_le_bytes()).map_err(error)?;
     stream.write_all(profile.as_bytes()).map_err(error)?;
-    snapshot.rewind().map_err(error)?;
-    std::io::copy(&mut snapshot, &mut stream).map_err(error)?;
-    stream.finish().map_err(error)?.sync_all().map_err(error)
+    Ok(stream)
+}
+
+/// Retain encrypted input so import and comparison can read it without plaintext staging.
+pub struct Snapshot {
+    file: File,
+    identities: Vec<age::x25519::Identity>,
+    profile: String,
+}
+
+impl Snapshot {
+    pub fn reader(&self) -> Result<age::stream::StreamReader<File>, String> {
+        let mut file = self.file.try_clone().map_err(error)?;
+        file.rewind().map_err(error)?;
+        let (profile, reader) = open_snapshot(file, &self.identities)?;
+        if profile != self.profile {
+            return Err("The Connect file belongs to another profile".into());
+        }
+        Ok(reader)
+    }
 }
 
 /// Authenticate the complete input before returning a snapshot for application.
-pub fn decrypt(input: &Path, keys: &[String], directory: &Path) -> Result<(String, File), String> {
-    let identities = keys
+pub fn decrypt(input: &Path, keys: &[String]) -> Result<(String, Snapshot), String> {
+    let identities: Vec<age::x25519::Identity> = keys
         .iter()
         .map(|key| key.parse::<age::x25519::Identity>().map_err(error))
         .collect::<Result<Vec<_>, _>>()?;
-    let decryptor = age::Decryptor::new(File::open(input).map_err(error)?).map_err(error)?;
+    let file = File::open(input).map_err(error)?;
+    let (profile, mut stream) = open_snapshot(file.try_clone().map_err(error)?, &identities)?;
+    std::io::copy(&mut stream, &mut std::io::sink()).map_err(error)?;
+    Ok((
+        profile.clone(),
+        Snapshot {
+            file,
+            identities,
+            profile,
+        },
+    ))
+}
+
+fn open_snapshot(
+    input: File,
+    identities: &[age::x25519::Identity],
+) -> Result<(String, age::stream::StreamReader<File>), String> {
+    let decryptor = age::Decryptor::new(input).map_err(error)?;
     let mut stream = decryptor
         .decrypt(
             identities
@@ -84,11 +121,7 @@ pub fn decrypt(input: &Path, keys: &[String], directory: &Path) -> Result<(Strin
     let mut profile = vec![0; usize::from(u16::from_le_bytes(length))];
     stream.read_exact(&mut profile).map_err(error)?;
     let profile = String::from_utf8(profile).map_err(error)?;
-    let mut staged = tempfile::tempfile_in(directory).map_err(error)?;
-    std::io::copy(&mut stream, &mut staged).map_err(error)?;
-    staged.sync_all().map_err(error)?;
-    staged.rewind().map_err(error)?;
-    Ok((profile, staged))
+    Ok((profile, stream))
 }
 
 pub async fn install(input: tempfile::NamedTempFile, destination: PathBuf) -> Result<(), String> {
@@ -129,21 +162,22 @@ mod tests {
         compressed.write_all(&contents).unwrap();
         compressed.finish().unwrap();
         let key = new_key();
-        encrypt(File::open(&snapshot).unwrap(), &encrypted, "profile", &key).unwrap();
+        let mut output = encrypt(File::create(&encrypted).unwrap(), "profile", &key).unwrap();
+        std::io::copy(&mut File::open(&snapshot).unwrap(), &mut output).unwrap();
+        output.finish().unwrap();
         let ciphertext = std::fs::read(&encrypted).unwrap();
         assert!(ciphertext.len() < contents.len() / 10);
         assert!(!ciphertext.windows(11).any(|bytes| bytes == b"credentials"));
-        let (profile, staged) =
-            decrypt(&encrypted, std::slice::from_ref(&key), dir.path()).unwrap();
+        let (profile, staged) = decrypt(&encrypted, std::slice::from_ref(&key)).unwrap();
         assert_eq!(profile, "profile");
         let mut restored = Vec::new();
-        flate2::read::MultiGzDecoder::new(staged)
+        flate2::read::MultiGzDecoder::new(staged.reader().unwrap())
             .read_to_end(&mut restored)
             .unwrap();
         assert_eq!(restored, contents);
-        assert!(decrypt(&encrypted, &[new_key()], dir.path()).is_err());
+        assert!(decrypt(&encrypted, &[new_key()]).is_err());
         std::fs::write(&encrypted, &ciphertext[..ciphertext.len() - 1]).unwrap();
-        assert!(decrypt(&encrypted, std::slice::from_ref(&key), dir.path()).is_err());
+        assert!(decrypt(&encrypted, std::slice::from_ref(&key)).is_err());
     }
 
     #[test]
@@ -163,10 +197,14 @@ mod tests {
         stream.write_all(&7u16.to_le_bytes()).unwrap();
         stream.write_all(b"profile1\nEND\n").unwrap();
         stream.finish().unwrap();
-        let (profile, mut staged) = decrypt(&encrypted, &[key], dir.path()).unwrap();
+        let (profile, staged) = decrypt(&encrypted, &[key]).unwrap();
         assert_eq!(profile, "profile");
         let mut restored = String::new();
-        staged.read_to_string(&mut restored).unwrap();
+        staged
+            .reader()
+            .unwrap()
+            .read_to_string(&mut restored)
+            .unwrap();
         assert_eq!(restored, "1\nEND\n");
     }
     #[test]
@@ -183,17 +221,16 @@ mod tests {
         let old = new_key();
         let intermediate = new_key();
         let current = new_key();
-        encrypt(
-            File::open(&snapshot).unwrap(),
-            &destination,
-            "profile",
-            &old,
-        )
-        .unwrap();
+        let mut output = encrypt(File::create(&destination).unwrap(), "profile", &old).unwrap();
+        std::io::copy(&mut File::open(&snapshot).unwrap(), &mut output).unwrap();
+        output.finish().unwrap();
         let keys = vec![current.clone(), old.clone(), intermediate];
-        let (profile, staged) = decrypt(&destination, &keys, dir.path()).unwrap();
-        encrypt(staged, &destination, &profile, &current).unwrap();
-        assert!(decrypt(&destination, &[old], dir.path()).is_err());
-        assert!(decrypt(&destination, &[current], dir.path()).is_ok());
+        let (profile, staged) = decrypt(&destination, &keys).unwrap();
+        let rewritten = dir.path().join("rewritten");
+        let mut output = encrypt(File::create(&rewritten).unwrap(), &profile, &current).unwrap();
+        std::io::copy(&mut staged.reader().unwrap(), &mut output).unwrap();
+        output.finish().unwrap();
+        assert!(decrypt(&rewritten, &[old]).is_err());
+        assert!(decrypt(&rewritten, &[current]).is_ok());
     }
 }

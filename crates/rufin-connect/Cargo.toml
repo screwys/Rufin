@@ -8,6 +8,8 @@ publish = false
 
 [dependencies]
 anyhow = "1"
+age.workspace = true
+base64.workspace = true
 bao-tree = "0.16.1"
 blake3.workspace = true
 futures-util.workspace = true

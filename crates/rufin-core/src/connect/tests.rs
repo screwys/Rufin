@@ -549,7 +549,10 @@ fn folder_exchange_preserves_disconnected_edits_without_rewriting_peer_files() {
                 .exchange_import(&session, folders[0].join(&names[0]))
                 .await
                 .unwrap();
-            assert!(after.metadata().unwrap().len() < before.metadata().unwrap().len());
+            let before =
+                std::io::copy(&mut before.reader().unwrap(), &mut std::io::sink()).unwrap();
+            let after = std::io::copy(&mut after.reader().unwrap(), &mut std::io::sink()).unwrap();
+            assert!(after < before);
             let compact = std::fs::read(folders[0].join(&names[0])).unwrap();
             a.exchange().await.unwrap();
             assert!(std::fs::read(folders[0].join(&names[0])).unwrap() == compact);

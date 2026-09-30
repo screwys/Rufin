@@ -2,8 +2,9 @@
 //! document; a playlist's occurrences share a movable list. Playback is not stored here.
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Seek, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use flate2::{Compression, bufread::MultiGzDecoder, write::GzEncoder};
@@ -11,9 +12,11 @@ use library::{CONNECT_PAGE_SIZE, ConnectRecord, Database};
 use loro::{ExportMode, LoroDoc, ToJson, VersionVector};
 use serde::{Deserialize, Serialize};
 use sqlx::{Connection, QueryBuilder, Row, SqliteConnection};
-use tokio::sync::Mutex;
+use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard};
 
+mod encryption;
 mod history;
+use encryption::{expose, expose_payload, protect, protect_payload, sensitive};
 #[cfg(test)]
 mod history_tests;
 
@@ -25,9 +28,10 @@ pub const INCOMPATIBLE_PROFILE: &str =
 const PROJECTION_ORDER: &str = "CASE kind WHEN 'source' THEN 0 WHEN 'integration' THEN 0 WHEN 'playlist' THEN 1 WHEN 'native_playlist' THEN 1 WHEN 'album' THEN 2 WHEN 'artist' THEN 2 WHEN 'genre' THEN 2 WHEN 'mood' THEN 2 WHEN 'folder' THEN 2 WHEN 'track' THEN 3 WHEN 'entry' THEN 5 WHEN 'native_entry' THEN 5 WHEN 'playlist_order' THEN 7 WHEN 'smart_order' THEN 7 WHEN 'album_artists' THEN 6 WHEN 'album_genres' THEN 6 WHEN 'track_artists' THEN 6 WHEN 'track_genres' THEN 6 WHEN 'track_moods' THEN 6 WHEN 'track_folders' THEN 6 ELSE 4 END,CASE WHEN kind IN ('entry','native_entry') THEN json_extract(payload,'$.playlist') END,CASE WHEN kind IN ('entry','native_entry','playlist_order','smart_order') THEN json_extract(payload,'$.position') END,object_key";
 
 pub struct ProfileStore {
-    connection: Mutex<SqliteConnection>,
-    reader: Mutex<SqliteConnection>,
+    connection: Mutex<Option<SqliteConnection>>,
+    reader: Mutex<Option<SqliteConnection>>,
     peer_id: u64,
+    identity: Arc<age::x25519::Identity>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -49,7 +53,8 @@ pub struct DocumentVersion {
 }
 
 impl ProfileStore {
-    pub async fn open(path: &Path, peer_id: u64) -> Result<Self> {
+    pub async fn open(path: &Path, peer_id: u64, key: age::x25519::Identity) -> Result<Self> {
+        let identity = Arc::new(key);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -71,17 +76,35 @@ impl ProfileStore {
             CREATE TABLE IF NOT EXISTS history_pending(name TEXT PRIMARY KEY) STRICT;
             CREATE TABLE IF NOT EXISTS local_values(kind TEXT NOT NULL,object_key TEXT NOT NULL,payload TEXT,PRIMARY KEY(kind,object_key)) STRICT;")
             .execute(&mut connection).await?;
-        index_documents(&mut connection).await?;
+        index_documents(&mut connection, &identity).await?;
         sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
             "DROP INDEX IF EXISTS projection_order; CREATE INDEX IF NOT EXISTS projection_order_native ON projection({PROJECTION_ORDER})"
         )))
         .execute(&mut connection)
         .await?;
         Ok(Self {
-            connection: Mutex::new(connection),
-            reader: Mutex::new(SqliteConnection::connect_with(&options.read_only(true)).await?),
+            connection: Mutex::new(Some(connection)),
+            reader: Mutex::new(Some(
+                SqliteConnection::connect_with(&options.read_only(true)).await?,
+            )),
             peer_id,
+            identity,
         })
+    }
+
+    pub async fn close(&self) -> Result<()> {
+        let reader = self.reader.lock().await.take();
+        let reader_closed = match reader {
+            Some(reader) => reader.close().await,
+            None => Ok(()),
+        };
+        let connection = self.connection.lock().await.take();
+        let writer_closed = match connection {
+            Some(connection) => connection.close().await,
+            None => Ok(()),
+        };
+        reader_closed.and(writer_closed)?;
+        Ok(())
     }
 
     pub async fn capture(&self, database: &Database) -> Result<usize> {
@@ -96,13 +119,13 @@ impl ProfileStore {
     }
 
     pub async fn device_name(&self, peer: &str) -> Result<Option<String>> {
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         Ok(sqlx::query_scalar("SELECT json_extract(payload,'$') FROM local_values WHERE kind='device' AND object_key=?1 AND json_type(payload)='text'")
             .bind(peer).fetch_optional(&mut *connection).await?)
     }
 
     pub async fn revision(&self) -> Result<i64> {
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         Ok(
             sqlx::query_scalar("SELECT revision FROM file_revision WHERE id=1")
                 .fetch_one(&mut *connection)
@@ -111,7 +134,7 @@ impl ProfileStore {
     }
 
     pub async fn file_exchange(&self) -> Result<Option<String>> {
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         Ok(
             sqlx::query_scalar("SELECT state FROM file_exchange WHERE id=1")
                 .fetch_optional(&mut *connection)
@@ -120,7 +143,7 @@ impl ProfileStore {
     }
 
     pub async fn save_file_exchange(&self, state: &str) -> Result<()> {
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         sqlx::query("INSERT INTO file_exchange(id,state) VALUES(1,?1) ON CONFLICT(id) DO UPDATE SET state=excluded.state WHERE state<>excluded.state")
             .bind(state).execute(&mut *connection).await?;
         Ok(())
@@ -128,7 +151,7 @@ impl ProfileStore {
 
     /// Resume this peer's incoming stream after its last fully imported page.
     pub async fn sync_cursor(&self, peer: &str, setup: bool) -> Result<i64> {
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         Ok(
             sqlx::query_scalar("SELECT revision FROM sync_cursors WHERE peer=?1 AND setup=?2")
                 .bind(peer)
@@ -141,7 +164,7 @@ impl ProfileStore {
 
     /// Persist only after every document in the page has been imported.
     pub async fn acknowledge_sync(&self, peer: &str, setup: bool, revision: i64) -> Result<()> {
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         sqlx::query("INSERT INTO sync_cursors(peer,setup,revision) VALUES(?1,?2,?3) ON CONFLICT(peer,setup) DO UPDATE SET revision=excluded.revision")
             .bind(peer).bind(setup).bind(revision).execute(&mut *connection).await?;
         Ok(())
@@ -151,7 +174,7 @@ impl ProfileStore {
     /// Resume after the last returned revision. Repeated edits replace a document's
     /// index entry; their complete Loro history remains available through `updates`.
     pub async fn changes(&self, after: i64, limit: usize) -> Result<Vec<DocumentVersion>> {
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         Ok(sqlx::query("SELECT name,version,revision FROM documents WHERE revision>?1 AND revision<=coalesce((SELECT min(revision) FROM documents WHERE revision>?1 AND name GLOB 'playlist_artwork:*'),9223372036854775807) ORDER BY revision,name LIMIT ?2")
             .bind(after)
             .bind(i64::try_from(limit).unwrap_or(i64::MAX))
@@ -169,7 +192,7 @@ impl ProfileStore {
         limit: usize,
         setup: bool,
     ) -> Result<Vec<DocumentVersion>> {
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         Ok(sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT name,version,revision FROM documents WHERE ({SYNC_PRIORITY})=?1 AND revision>?2 AND revision<=coalesce((SELECT min(revision) FROM documents WHERE ({SYNC_PRIORITY})=?1 AND revision>?2 AND name GLOB 'playlist_artwork:*'),9223372036854775807) ORDER BY revision,name LIMIT ?3"
         )))
@@ -183,7 +206,7 @@ impl ProfileStore {
     /// Return versions in the requested order. Missing documents have an encoded
     /// empty version vector and revision zero, allowing their full history to sync.
     pub async fn versions(&self, names: &[String]) -> Result<Vec<DocumentVersion>> {
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         let mut versions = Vec::with_capacity(names.len());
         for name in names {
             let row = sqlx::query("SELECT version,revision FROM documents WHERE name=?1")
@@ -206,7 +229,7 @@ impl ProfileStore {
     /// Export only operations absent from the supplied remote version vectors.
     /// Unknown documents and histories the remote already contains produce no update.
     pub async fn updates(&self, versions: &[DocumentVersion]) -> Result<Vec<Vec<u8>>> {
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         let mut updates = Vec::new();
         for version in versions {
             let remote = VersionVector::decode(&version.version)?;
@@ -220,12 +243,18 @@ impl ProfileStore {
                 continue;
             }
             let bytes = if remote.is_empty() {
-                sqlx::query_scalar("SELECT snapshot FROM documents WHERE name=?1")
-                    .bind(&version.name)
-                    .fetch_one(&mut *connection)
-                    .await?
+                let bytes: Vec<u8> =
+                    sqlx::query_scalar("SELECT snapshot FROM documents WHERE name=?1")
+                        .bind(&version.name)
+                        .fetch_one(&mut *connection)
+                        .await?;
+                if sensitive(&version.name) {
+                    expose(&version.name, &bytes, &self.identity)?.into_owned()
+                } else {
+                    bytes
+                }
             } else {
-                let document = load_document(&mut connection, &version.name, self.peer_id).await?;
+                let document = self.load_document(&mut connection, &version.name).await?;
                 document.export(ExportMode::updates(&remote))?
             };
             updates.push(serde_json::to_vec(&Update {
@@ -241,13 +270,13 @@ impl ProfileStore {
     /// Import a page atomically. Returns whether projected values changed, so
     /// repeated or history-only imports do not cause a Store or UI refresh.
     pub async fn import_updates(&self, updates: &[Vec<u8>]) -> Result<bool> {
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         let mut transaction = connection.begin().await?;
         let mut changed = false;
         for bytes in updates {
             let update: Update = serde_json::from_slice(bytes).context("invalid Connect update")?;
             validate_version(update.version)?;
-            changed |= import_on(&mut transaction, update, self.peer_id).await?.0;
+            changed |= self.import_on(&mut transaction, update).await?.0;
         }
         transaction.commit().await?;
         Ok(changed)
@@ -270,7 +299,7 @@ impl ProfileStore {
             }
         }
         let records = &ordered;
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         let mut transaction = connection.begin().await?;
         let mut grouped: BTreeMap<String, Vec<&ConnectRecord>> = BTreeMap::new();
         for record in records {
@@ -281,6 +310,9 @@ impl ProfileStore {
             .bind(&record.key)
             .fetch_optional(&mut *transaction)
             .await?;
+            let old = old
+                .map(|payload| expose_payload(&record.kind, payload, &self.identity))
+                .transpose()?;
             let mut value = record.value.clone();
             if let (Some(value), Some(Some(old))) = (&mut value, &old) {
                 preserve_unknown_fields(value, &serde_json::from_str(old)?);
@@ -293,11 +325,12 @@ impl ProfileStore {
                 .entry(document_name(record)?)
                 .or_default()
                 .push(record);
+            let payload = protect_payload(&record.kind, payload, &self.identity)?;
             sqlx::query("INSERT INTO local_values(kind,object_key,payload) VALUES(?1,?2,?3) ON CONFLICT(kind,object_key) DO UPDATE SET payload=excluded.payload").bind(&record.kind).bind(&record.key).bind(payload).execute(&mut *transaction).await?;
         }
         let count = grouped.len();
         for (name, records) in grouped {
-            let doc = load_document(&mut transaction, &name, self.peer_id).await?;
+            let doc = self.load_document(&mut transaction, &name).await?;
             let before = doc.oplog_vv();
             let previous = self::records(&doc)?;
             for record in records {
@@ -320,6 +353,7 @@ impl ProfileStore {
                     continue;
                 }
                 let payload = current.get(key).map(serde_json::to_string).transpose()?;
+                let payload = protect_payload(&key.0, payload, &self.identity)?;
                 sqlx::query("UPDATE projection SET payload=?3 WHERE kind=?1 AND object_key=?2")
                     .bind(&key.0)
                     .bind(&key.1)
@@ -327,7 +361,7 @@ impl ProfileStore {
                     .execute(&mut *transaction)
                     .await?;
             }
-            save_document(&mut transaction, &name, &doc).await?;
+            self.save_document(&mut transaction, &name, &doc).await?;
         }
         transaction.commit().await?;
         Ok(count)
@@ -341,7 +375,7 @@ impl ProfileStore {
             .collect::<BTreeSet<_>>();
         let mut records = records.to_vec();
         {
-            let mut connection = self.connection.lock().await;
+            let mut connection = database_connection(&self.connection).await?;
             let rows=sqlx::query("SELECT kind,object_key FROM local_values WHERE kind IN ('source','integration') AND payload IS NOT NULL").fetch_all(&mut *connection).await?;
             for row in rows {
                 let kind: String = row.get(0);
@@ -361,9 +395,9 @@ impl ProfileStore {
     pub async fn import(&self, bytes: &[u8]) -> Result<bool> {
         let update: Update = serde_json::from_slice(bytes).context("invalid Connect update")?;
         validate_version(update.version)?;
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         let mut transaction = connection.begin().await?;
-        let (changed, _) = import_on(&mut transaction, update, self.peer_id).await?;
+        let (changed, _) = self.import_on(&mut transaction, update).await?;
         transaction.commit().await?;
         Ok(changed)
     }
@@ -372,17 +406,17 @@ impl ProfileStore {
     /// changed. Acknowledge only after settings/device owners persist their changes too.
     pub async fn project(&self, database: &Database) -> Result<(Vec<ConnectRecord>, bool)> {
         let records = {
-            let mut connection = self.connection.lock().await;
+            let mut connection = database_connection(&self.connection).await?;
             let rows=sqlx::query(sqlx::AssertSqlSafe(format!("SELECT kind,object_key,payload FROM projection WHERE kind!='playlist_artwork' OR NOT EXISTS(SELECT 1 FROM projection WHERE kind!='playlist_artwork') ORDER BY {PROJECTION_ORDER} LIMIT CASE WHEN EXISTS(SELECT 1 FROM projection WHERE kind!='playlist_artwork') THEN ?1 ELSE 1 END"))).bind(CONNECT_PAGE_SIZE as i64).fetch_all(&mut *connection).await?;
             rows.into_iter()
                 .map(|row| {
+                    let kind: String = row.get(0);
                     Ok(ConnectRecord {
-                        kind: row.get(0),
-                        key: row.get(1),
-                        value: row
-                            .get::<Option<String>, _>(2)
+                        value: expose_payload(&kind, row.get(2), &self.identity)?
                             .map(|s| serde_json::from_str(&s))
                             .transpose()?,
+                        kind,
+                        key: row.get(1),
                     })
                 })
                 .collect::<Result<Vec<_>>>()?
@@ -395,7 +429,7 @@ impl ProfileStore {
     }
 
     pub async fn projection_pending(&self) -> Result<bool> {
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         Ok(
             sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projection)")
                 .fetch_one(&mut *connection)
@@ -404,7 +438,7 @@ impl ProfileStore {
     }
 
     pub async fn acknowledge_projection(&self, records: &[ConnectRecord]) -> Result<()> {
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         let mut transaction = connection.begin().await?;
         for record in records {
             let payload = record
@@ -412,13 +446,28 @@ impl ProfileStore {
                 .as_ref()
                 .map(serde_json::to_string)
                 .transpose()?;
-            sqlx::query("DELETE FROM projection WHERE kind=?1 AND object_key=?2 AND payload IS ?3")
+            let projected = if sensitive(&record.kind) && payload.is_some() {
+                sqlx::query_scalar("SELECT payload FROM projection WHERE kind=?1 AND object_key=?2")
+                    .bind(&record.kind)
+                    .bind(&record.key)
+                    .fetch_optional(&mut *transaction)
+                    .await?
+                    .flatten()
+            } else {
+                payload.clone()
+            };
+            if expose_payload(&record.kind, projected.clone(), &self.identity)? == payload {
+                sqlx::query(
+                    "DELETE FROM projection WHERE kind=?1 AND object_key=?2 AND payload IS ?3",
+                )
                 .bind(&record.kind)
                 .bind(&record.key)
-                .bind(&payload)
+                .bind(projected)
                 .execute(&mut *transaction)
                 .await?;
+            }
             // Polling the local owners after an incoming edit must not republish it.
+            let payload = protect_payload(&record.kind, payload, &self.identity)?;
             sqlx::query("INSERT INTO local_values(kind,object_key,payload) VALUES(?1,?2,?3) ON CONFLICT(kind,object_key) DO UPDATE SET payload=excluded.payload").bind(&record.kind).bind(&record.key).bind(payload).execute(&mut *transaction).await?;
         }
         transaction.commit().await?;
@@ -427,22 +476,36 @@ impl ProfileStore {
 
     /// Stream current state and the history still needed by enrolled devices.
     pub async fn export_snapshot(&self, path: &Path) -> Result<()> {
-        self.export_documents(File::create(path)?, false, None)
-            .await
-            .map(|_| ())
+        let (file, _) = self
+            .export_documents(File::create(path)?, false, None)
+            .await?;
+        file.sync_all()?;
+        Ok(())
     }
 
     /// The caller appends membership after exporting, before publishing the file.
     /// Returns the revision included in the snapshot.
-    pub async fn export_device_snapshot(&self, output: File, peer: &str) -> Result<i64> {
+    pub async fn export_device_snapshot<W: Write + Send + 'static>(
+        &self,
+        output: W,
+        peer: &str,
+    ) -> Result<(W, i64)> {
         self.export_documents(output, false, Some(peer)).await
     }
 
-    pub async fn export_setup_snapshot(&self, output: File) -> Result<i64> {
+    pub async fn export_setup_snapshot<W: Write + Send + 'static>(
+        &self,
+        output: W,
+    ) -> Result<(W, i64)> {
         self.export_documents(output, true, None).await
     }
 
-    async fn export_documents(&self, file: File, setup: bool, peer: Option<&str>) -> Result<i64> {
+    async fn export_documents<W: Write + Send + 'static>(
+        &self,
+        file: W,
+        setup: bool,
+        peer: Option<&str>,
+    ) -> Result<(W, i64)> {
         self.compress_documents(setup).await?;
         let mut output = tokio::task::spawn_blocking(move || -> Result<_> {
             let mut output = BufWriter::new(file);
@@ -455,7 +518,7 @@ impl ProfileStore {
         let mut author = peer.map(str::to_owned);
         // A WAL read transaction gives the file a consistent snapshot without
         // holding the writer connection throughout a full catalog export.
-        let mut connection = self.reader.lock().await;
+        let mut connection = database_connection(&self.reader).await?;
         let mut snapshot = connection.begin().await?;
         let revision = sqlx::query_scalar("SELECT revision FROM file_revision WHERE id=1")
             .fetch_one(&mut *snapshot)
@@ -479,21 +542,28 @@ impl ProfileStore {
             // Reuse unchanged gzip members. Concatenating them preserves the
             // portable snapshot stream without serializing the catalog again.
             let mut author = author.take();
+            let identity = Arc::clone(&self.identity);
             output = tokio::task::spawn_blocking(move || -> Result<_> {
                 for row in rows {
-                    let cached: Option<&[u8]> = row.get(2);
+                    let name: &str = row.get(0);
+                    let cached = row
+                        .get::<Option<&[u8]>, _>(2)
+                        .map(|bytes| expose(name, bytes, &identity))
+                        .transpose()?;
                     if author.is_none()
-                        && let Some(cached) = cached
+                        && let Some(cached) = &cached
                     {
                         output.write_all(cached)?;
                         continue;
                     }
                     let mut update = match cached {
-                        Some(cached) => serde_json::from_reader(MultiGzDecoder::new(cached))?,
+                        Some(cached) => {
+                            serde_json::from_reader(MultiGzDecoder::new(cached.as_ref()))?
+                        }
                         None => Update {
                             version: FORMAT,
                             document: row.get(0),
-                            bytes: row.get(1),
+                            bytes: expose(name, row.get(1), &identity)?.into_owned(),
                             author: None,
                         },
                     };
@@ -508,17 +578,16 @@ impl ProfileStore {
             })
             .await??;
         }
-        tokio::task::spawn_blocking(move || -> Result<()> {
+        let output = tokio::task::spawn_blocking(move || -> Result<_> {
             let mut end = GzEncoder::new(&mut output, Compression::default());
             writeln!(end, "END")?;
             end.finish()?;
             output.flush()?;
-            output.get_ref().sync_all()?;
-            Ok(())
+            Ok(output.into_inner().map_err(|error| error.into_error())?)
         })
         .await??;
         snapshot.commit().await?;
-        Ok(revision)
+        Ok((output, revision))
     }
 
     // Fill the cache before pinning the export's read snapshot. Writing compressed
@@ -527,7 +596,7 @@ impl ProfileStore {
         let mut cursor = String::new();
         loop {
             let rows = {
-                let mut connection = self.connection.lock().await;
+                let mut connection = database_connection(&self.connection).await?;
                 sqlx::query("SELECT name,snapshot FROM documents WHERE compressed IS NULL AND name>?1 AND (?3=0 OR substr(name,1,instr(name,':')-1) IN ('source','integration','root','preference','scrobbling','device','connect_key','connect_network','connect_storage')) AND (?3=1 OR name<=coalesce((SELECT min(name) FROM documents WHERE compressed IS NULL AND name>?1 AND name GLOB 'playlist_artwork:*'),char(1114111))) ORDER BY name LIMIT ?2")
                     .bind(&cursor).bind(CONNECT_PAGE_SIZE as i64).bind(setup)
                     .fetch_all(&mut *connection).await?
@@ -536,24 +605,34 @@ impl ProfileStore {
                 break;
             }
             cursor = rows.last().unwrap().get(0);
+            let identity = Arc::clone(&self.identity);
             let encoded = tokio::task::spawn_blocking(move || -> Result<_> {
                 rows.into_iter()
                     .map(|row| {
+                        let name: String = row.get(0);
                         let update = Update {
                             version: FORMAT,
-                            document: row.get(0),
-                            bytes: row.get(1),
+                            bytes: expose(&name, row.get(1), &identity)?.into_owned(),
+                            document: name,
                             author: None,
                         };
                         let mut compressed = GzEncoder::new(Vec::new(), Compression::default());
                         serde_json::to_writer(&mut compressed, &update)?;
                         compressed.write_all(b"\n")?;
-                        Ok((update.document, update.bytes, compressed.finish()?))
+                        let compressed = compressed.finish()?;
+                        let compressed =
+                            protect(&update.document, &compressed, &identity)?.into_owned();
+                        let stored_snapshot = if sensitive(&update.document) {
+                            row.get(1)
+                        } else {
+                            update.bytes
+                        };
+                        Ok((update.document, stored_snapshot, compressed))
                     })
                     .collect::<Result<Vec<_>>>()
             })
             .await??;
-            let mut connection = self.connection.lock().await;
+            let mut connection = database_connection(&self.connection).await?;
             let mut transaction = connection.begin().await?;
             for (name, snapshot, compressed) in encoded {
                 sqlx::query("UPDATE documents SET compressed=?3 WHERE name=?1 AND snapshot=?2")
@@ -570,13 +649,16 @@ impl ProfileStore {
 
     /// Every document is validated inside one SQLite transaction before any pending
     /// projection becomes visible. A corrupt/truncated snapshot preserves usable state.
-    pub async fn import_snapshot(&self, input: File) -> Result<bool> {
+    pub async fn import_snapshot<R: Read + Send + 'static>(&self, input: R) -> Result<bool> {
         self.read_snapshot(input, false).await
     }
 
     /// Check an imported snapshot for local edits it does not contain. Exports
     /// order documents by name, so both histories can be compared a page at a time.
-    pub async fn snapshot_contains_current(&self, file: File) -> Result<bool> {
+    pub async fn snapshot_contains_current<R: Read + Send + 'static>(
+        &self,
+        file: R,
+    ) -> Result<bool> {
         let (mut input, mut line) = tokio::task::spawn_blocking(move || -> Result<_> {
             let mut input = snapshot_reader(file)?;
             let mut line = String::new();
@@ -585,7 +667,7 @@ impl ProfileStore {
         })
         .await??;
         let mut remote: Option<Update> = None;
-        let mut connection = self.reader.lock().await;
+        let mut connection = database_connection(&self.reader).await?;
         let mut transaction = connection.begin().await?;
         let mut cursor = String::new();
         loop {
@@ -600,6 +682,7 @@ impl ProfileStore {
                 return Ok(true);
             }
             cursor = rows.last().unwrap().get(0);
+            let identity = Arc::clone(&self.identity);
             let compared = tokio::task::spawn_blocking(move || -> Result<_> {
                 for row in rows {
                     let cursor: String = row.get(0);
@@ -617,8 +700,8 @@ impl ProfileStore {
                     if update.document != cursor {
                         return Ok(None);
                     }
-                    let saved: &[u8] = row.get(2);
-                    if update.bytes == saved {
+                    let saved = expose(&cursor, row.get(2), &identity)?;
+                    if update.bytes == saved.as_ref() {
                         continue;
                     }
                     let incoming = LoroDoc::decode_import_blob_meta(&update.bytes, true)?;
@@ -626,7 +709,7 @@ impl ProfileStore {
                     if !incoming.partial_end_vv.includes_vv(&local) {
                         return Ok(None);
                     }
-                    let saved = LoroDoc::decode_import_blob_meta(saved, true)?;
+                    let saved = LoroDoc::decode_import_blob_meta(&saved, true)?;
                     if !incoming
                         .partial_start_vv
                         .includes_vv(&saved.partial_start_vv)
@@ -644,11 +727,15 @@ impl ProfileStore {
         }
     }
 
-    pub async fn replace_snapshot(&self, input: File) -> Result<bool> {
+    pub async fn replace_snapshot<R: Read + Send + 'static>(&self, input: R) -> Result<bool> {
         self.read_snapshot(input, true).await
     }
 
-    async fn read_snapshot(&self, file: File, replace: bool) -> Result<bool> {
+    async fn read_snapshot<R: Read + Send + 'static>(
+        &self,
+        file: R,
+        replace: bool,
+    ) -> Result<bool> {
         let mut input = tokio::task::spawn_blocking(move || -> Result<_> {
             let mut input = snapshot_reader(file)?;
             let mut line = String::new();
@@ -662,7 +749,7 @@ impl ProfileStore {
         })
         .await??;
         let mut peer = None;
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         let mut transaction = connection.begin().await?;
         if replace {
             sqlx::raw_sql(
@@ -703,7 +790,7 @@ impl ProfileStore {
                     peer = Some(author.clone());
                 }
                 let name = update.document.clone();
-                let (imported, version) = import_on(&mut transaction, update, self.peer_id).await?;
+                let (imported, version) = self.import_on(&mut transaction, update).await?;
                 changed |= imported;
                 if let Some(peer) = &peer {
                     history::acknowledge_on(&mut transaction, peer, &name, &version).await?;
@@ -737,7 +824,7 @@ impl ProfileStore {
 
     /// Used only after the user confirms replacing this installation's old profile.
     pub async fn reproject_all(&self) -> Result<()> {
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         let mut transaction = connection.begin().await?;
         let mut cursor = String::new();
         loop {
@@ -754,9 +841,14 @@ impl ProfileStore {
             for row in rows {
                 cursor = row.get(0);
                 let document = LoroDoc::new();
-                document.import(&row.get::<Vec<u8>, _>(1))?;
+                document.import(&expose(&cursor, row.get(1), &self.identity)?)?;
                 for ((kind, key), value) in records(&document)? {
-                    sqlx::query("INSERT INTO projection(kind,object_key,payload) VALUES(?1,?2,?3) ON CONFLICT(kind,object_key) DO UPDATE SET payload=excluded.payload").bind(kind).bind(key).bind(serde_json::to_string(&value)?).execute(&mut *transaction).await?;
+                    let payload = protect_payload(
+                        &kind,
+                        Some(serde_json::to_string(&value)?),
+                        &self.identity,
+                    )?;
+                    sqlx::query("INSERT INTO projection(kind,object_key,payload) VALUES(?1,?2,?3) ON CONFLICT(kind,object_key) DO UPDATE SET payload=excluded.payload").bind(kind).bind(key).bind(payload).execute(&mut *transaction).await?;
                 }
             }
         }
@@ -766,14 +858,20 @@ impl ProfileStore {
 
     /// Used only after the user confirms replacing this installation's old profile.
     pub async fn clear(&self) -> Result<()> {
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         sqlx::raw_sql("BEGIN; DELETE FROM documents; DELETE FROM projection; DELETE FROM local_values; DELETE FROM sync_cursors; DELETE FROM history_peers; DELETE FROM history_acknowledgements; DELETE FROM history_pending; COMMIT;").execute(&mut *connection).await?;
         Ok(())
     }
 }
 
-fn snapshot_reader(mut file: File) -> Result<Box<dyn BufRead + Send>> {
-    file.rewind()?;
+async fn database_connection(
+    connection: &Mutex<Option<SqliteConnection>>,
+) -> Result<MappedMutexGuard<'_, SqliteConnection>> {
+    MutexGuard::try_map(connection.lock().await, Option::as_mut)
+        .map_err(|_| anyhow::anyhow!("Connect profile is closed"))
+}
+
+fn snapshot_reader(file: impl Read + Send + 'static) -> Result<Box<dyn BufRead + Send>> {
     let mut input = BufReader::new(file);
     if input.fill_buf()?.starts_with(&[0x1f, 0x8b]) {
         Ok(Box::new(BufReader::new(MultiGzDecoder::new(input))))
@@ -809,65 +907,70 @@ fn document_name(record: &ConnectRecord) -> Result<String> {
     Ok(format!("{}:{}", record.kind, record.key))
 }
 
-async fn load_document(
-    connection: &mut SqliteConnection,
-    name: &str,
-    peer_id: u64,
-) -> Result<LoroDoc> {
-    let document = LoroDoc::new();
-    let snapshot: Option<Vec<u8>> =
-        sqlx::query_scalar("SELECT snapshot FROM documents WHERE name=?1")
-            .bind(name)
-            .fetch_optional(connection)
-            .await?;
-    if let Some(snapshot) = snapshot {
-        document.import(&snapshot)?;
+impl ProfileStore {
+    async fn load_document(
+        &self,
+        connection: &mut SqliteConnection,
+        name: &str,
+    ) -> Result<LoroDoc> {
+        let document = LoroDoc::new();
+        let snapshot: Option<Vec<u8>> =
+            sqlx::query_scalar("SELECT snapshot FROM documents WHERE name=?1")
+                .bind(name)
+                .fetch_optional(connection)
+                .await?;
+        if let Some(snapshot) = snapshot {
+            document.import(&expose(name, &snapshot, &self.identity)?)?;
+        }
+        document.set_peer_id(self.peer_id)?;
+        Ok(document)
     }
-    document.set_peer_id(peer_id)?;
-    Ok(document)
-}
 
-async fn save_document(
-    connection: &mut SqliteConnection,
-    name: &str,
-    document: &LoroDoc,
-) -> Result<()> {
-    let snapshot = document.export(ExportMode::Snapshot)?;
-    save_snapshot(
-        connection,
-        name,
-        snapshot,
-        document.oplog_vv().encode(),
-        name.starts_with("device:") && records(document)?.is_empty(),
-    )
-    .await
-}
+    async fn save_document(
+        &self,
+        connection: &mut SqliteConnection,
+        name: &str,
+        document: &LoroDoc,
+    ) -> Result<()> {
+        let snapshot = document.export(ExportMode::Snapshot)?;
+        self.save_snapshot(
+            connection,
+            name,
+            snapshot,
+            document.oplog_vv().encode(),
+            name.starts_with("device:") && records(document)?.is_empty(),
+        )
+        .await
+    }
 
-async fn save_snapshot(
-    connection: &mut SqliteConnection,
-    name: &str,
-    snapshot: Vec<u8>,
-    version: Vec<u8>,
-    removed_device: bool,
-) -> Result<()> {
-    let revision = next_revision(connection).await?;
-    sqlx::query("INSERT INTO documents(name,snapshot,revision,version) VALUES(?1,?2,?3,?4) ON CONFLICT(name) DO UPDATE SET snapshot=excluded.snapshot,revision=excluded.revision,version=excluded.version")
-        .bind(name).bind(snapshot).bind(revision).bind(version)
+    async fn save_snapshot(
+        &self,
+        connection: &mut SqliteConnection,
+        name: &str,
+        snapshot: Vec<u8>,
+        version: Vec<u8>,
+        removed_device: bool,
+    ) -> Result<()> {
+        let revision = next_revision(connection).await?;
+        let snapshot = protect(name, &snapshot, &self.identity)?;
+        sqlx::query("INSERT INTO documents(name,snapshot,revision,version) VALUES(?1,?2,?3,?4) ON CONFLICT(name) DO UPDATE SET snapshot=excluded.snapshot,revision=excluded.revision,version=excluded.version")
+        .bind(name).bind(snapshot.as_ref()).bind(revision).bind(version)
         .execute(&mut *connection).await?;
-    sqlx::query("INSERT OR IGNORE INTO history_pending(name) VALUES(?1)")
-        .bind(name)
-        .execute(&mut *connection)
-        .await?;
-    if removed_device {
-        sqlx::query("DELETE FROM history_acknowledgements WHERE peer=?1")
-            .bind(name.strip_prefix("device:").unwrap())
+        sqlx::query("INSERT OR IGNORE INTO history_pending(name) VALUES(?1)")
+            .bind(name)
             .execute(&mut *connection)
             .await?;
-        sqlx::query("INSERT OR IGNORE INTO history_pending SELECT name FROM documents")
-            .execute(&mut *connection)
-            .await?;
+        if removed_device {
+            sqlx::query("DELETE FROM history_acknowledgements WHERE peer=?1")
+                .bind(name.strip_prefix("device:").unwrap())
+                .execute(&mut *connection)
+                .await?;
+            sqlx::query("INSERT OR IGNORE INTO history_pending SELECT name FROM documents")
+                .execute(&mut *connection)
+                .await?;
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 async fn next_revision(connection: &mut SqliteConnection) -> Result<i64> {
@@ -879,7 +982,10 @@ async fn next_revision(connection: &mut SqliteConnection) -> Result<i64> {
 }
 
 /// Upgrade existing snapshots once, in bounded pages, without rewriting them.
-async fn index_documents(connection: &mut SqliteConnection) -> Result<()> {
+async fn index_documents(
+    connection: &mut SqliteConnection,
+    identity: &Arc<age::x25519::Identity>,
+) -> Result<()> {
     let mut transaction = connection.begin().await?;
     let columns: Vec<String> =
         sqlx::query_scalar("SELECT name FROM pragma_table_info('documents')")
@@ -926,12 +1032,14 @@ async fn index_documents(connection: &mut SqliteConnection) -> Result<()> {
         if rows.is_empty() {
             break;
         }
+        let identity = Arc::clone(identity);
         let versions = tokio::task::spawn_blocking(move || {
             rows.into_iter()
                 .map(|row| {
-                    let metadata =
-                        LoroDoc::decode_import_blob_meta(&row.get::<Vec<u8>, _>(1), true)?;
-                    Ok((row.get::<String, _>(0), metadata.partial_end_vv.encode()))
+                    let name: String = row.get(0);
+                    let snapshot = expose(&name, row.get(1), &identity)?;
+                    let metadata = LoroDoc::decode_import_blob_meta(&snapshot, true)?;
+                    Ok((name, metadata.partial_end_vv.encode()))
                 })
                 .collect::<Result<Vec<_>>>()
         })
@@ -1088,87 +1196,93 @@ fn records(document: &LoroDoc) -> Result<BTreeMap<(String, String), serde_json::
     Ok(records)
 }
 
-async fn import_on(
-    connection: &mut SqliteConnection,
-    update: Update,
-    peer_id: u64,
-) -> Result<(bool, VersionVector)> {
-    let saved = sqlx::query("SELECT version,snapshot FROM documents WHERE name=?1")
-        .bind(&update.document)
-        .fetch_optional(&mut *connection)
-        .await?;
-    if let Some(saved) = &saved
-        && saved.get::<&[u8], _>(1) == update.bytes
-    {
-        return Ok((false, VersionVector::decode(saved.get(0))?));
-    }
-    let name = update.document.clone();
-    let (incoming, prepared) = tokio::task::spawn_blocking(move || -> Result<_> {
-        let incoming = LoroDoc::decode_import_blob_meta(&update.bytes, true)?.partial_end_vv;
+impl ProfileStore {
+    async fn import_on(
+        &self,
+        connection: &mut SqliteConnection,
+        update: Update,
+    ) -> Result<(bool, VersionVector)> {
+        let saved = sqlx::query("SELECT version,snapshot FROM documents WHERE name=?1")
+            .bind(&update.document)
+            .fetch_optional(&mut *connection)
+            .await?;
         if let Some(saved) = &saved
-            && VersionVector::decode(saved.get(0))?.includes_vv(&incoming)
+            && !sensitive(&update.document)
+            && saved.get::<&[u8], _>(1) == update.bytes
         {
-            return Ok((incoming, None));
+            return Ok((false, VersionVector::decode(saved.get(0))?));
         }
-        let document = LoroDoc::new();
-        if let Some(saved) = saved {
-            document.import(saved.get(1))?;
-        }
-        document.set_peer_id(peer_id)?;
-        let before = records(&document)?;
-        let version = document.oplog_vv();
-        document.import(&update.bytes)?;
-        if version == document.oplog_vv() {
-            return Ok((incoming, None));
-        }
-        let after = records(&document)?;
-        let mut projection = Vec::new();
-        for key in before.keys().chain(after.keys()).collect::<BTreeSet<_>>() {
-            if before.get(key) == after.get(key) {
-                continue;
+        let name = update.document.clone();
+        let identity = Arc::clone(&self.identity);
+        let peer_id = self.peer_id;
+        let (incoming, prepared) = tokio::task::spawn_blocking(move || -> Result<_> {
+            let incoming = LoroDoc::decode_import_blob_meta(&update.bytes, true)?.partial_end_vv;
+            if let Some(saved) = &saved
+                && VersionVector::decode(saved.get(0))?.includes_vv(&incoming)
+            {
+                return Ok((incoming, None));
             }
-            let record = ConnectRecord {
-                kind: key.0.clone(),
-                key: key.1.clone(),
-                value: after.get(key).cloned(),
-            };
-            if document_name(&record)? != name {
-                bail!("Connect document contains another object's records");
+            let document = LoroDoc::new();
+            if let Some(saved) = saved {
+                document.import(&expose(&name, saved.get(1), &identity)?)?;
             }
-            let payload = record
-                .value
-                .as_ref()
-                .map(serde_json::to_string)
-                .transpose()?;
-            projection.push((record.kind, record.key, payload));
+            document.set_peer_id(peer_id)?;
+            let before = records(&document)?;
+            let version = document.oplog_vv();
+            document.import(&update.bytes)?;
+            if version == document.oplog_vv() {
+                return Ok((incoming, None));
+            }
+            let after = records(&document)?;
+            let mut projection = Vec::new();
+            for key in before.keys().chain(after.keys()).collect::<BTreeSet<_>>() {
+                if before.get(key) == after.get(key) {
+                    continue;
+                }
+                let record = ConnectRecord {
+                    kind: key.0.clone(),
+                    key: key.1.clone(),
+                    value: after.get(key).cloned(),
+                };
+                if document_name(&record)? != name {
+                    bail!("Connect document contains another object's records");
+                }
+                let payload = record
+                    .value
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()?;
+                projection.push((record.kind, record.key, payload));
+            }
+            Ok((
+                incoming,
+                Some((
+                    projection,
+                    document.export(ExportMode::Snapshot)?,
+                    document.oplog_vv().encode(),
+                    name.starts_with("device:") && after.is_empty(),
+                    before != after,
+                )),
+            ))
+        })
+        .await??;
+        let Some((projection, snapshot, version, removed_device, changed)) = prepared else {
+            return Ok((false, incoming));
+        };
+        for (kind, key, payload) in projection {
+            let payload = protect_payload(&kind, payload, &self.identity)?;
+            sqlx::query("INSERT INTO projection(kind,object_key,payload) VALUES(?1,?2,?3) ON CONFLICT(kind,object_key) DO UPDATE SET payload=excluded.payload").bind(kind).bind(key).bind(payload).execute(&mut *connection).await?;
         }
-        Ok((
-            incoming,
-            Some((
-                projection,
-                document.export(ExportMode::Snapshot)?,
-                document.oplog_vv().encode(),
-                name.starts_with("device:") && after.is_empty(),
-                before != after,
-            )),
-        ))
-    })
-    .await??;
-    let Some((projection, snapshot, version, removed_device, changed)) = prepared else {
-        return Ok((false, incoming));
-    };
-    for (kind, key, payload) in projection {
-        sqlx::query("INSERT INTO projection(kind,object_key,payload) VALUES(?1,?2,?3) ON CONFLICT(kind,object_key) DO UPDATE SET payload=excluded.payload").bind(kind).bind(key).bind(payload).execute(&mut *connection).await?;
+        self.save_snapshot(
+            connection,
+            &update.document,
+            snapshot,
+            version,
+            removed_device,
+        )
+        .await?;
+        Ok((changed, incoming))
     }
-    save_snapshot(
-        connection,
-        &update.document,
-        snapshot,
-        version,
-        removed_device,
-    )
-    .await?;
-    Ok((changed, incoming))
 }
 
 #[cfg(test)]
@@ -1176,6 +1290,8 @@ mod tests {
     use super::*;
 
     use serde_json::json;
+
+    const KEY: &str = "AGE-SECRET-KEY-1GQ9778VQXMMJVE8SK7J6VT8UJ4HDQAJUVSFCWCM02D8GEWQ72PVQ2Y5J33";
 
     fn entry(id: &str, position: usize) -> ConnectRecord {
         ConnectRecord {
@@ -1213,11 +1329,13 @@ mod tests {
     #[tokio::test]
     async fn synced_device_names_remain_available_after_restart() {
         let directory = tempfile::tempdir().unwrap();
-        let a = ProfileStore::open(&directory.path().join("a.sqlite"), 1)
+        let a = ProfileStore::open(&directory.path().join("a.sqlite"), 1, KEY.parse().unwrap())
             .await
             .unwrap();
         let path = directory.path().join("b.sqlite");
-        let b = ProfileStore::open(&path, 2).await.unwrap();
+        let b = ProfileStore::open(&path, 2, KEY.parse().unwrap())
+            .await
+            .unwrap();
         a.write_records(&[ConnectRecord {
             kind: "device".into(),
             key: "peer-identity".into(),
@@ -1232,7 +1350,9 @@ mod tests {
         let (records, _) = b.project(&database).await.unwrap();
         b.acknowledge_projection(&records).await.unwrap();
         drop(b);
-        let b = ProfileStore::open(&path, 2).await.unwrap();
+        let b = ProfileStore::open(&path, 2, KEY.parse().unwrap())
+            .await
+            .unwrap();
         assert_eq!(
             b.device_name("peer-identity").await.unwrap().as_deref(),
             Some("Work Laptop")
@@ -1243,8 +1363,10 @@ mod tests {
     async fn version_pages_catch_up_after_restart_and_merge_offline_edits() {
         let directory = tempfile::tempdir().unwrap();
         let a_path = directory.path().join("a.sqlite");
-        let a = ProfileStore::open(&a_path, 1).await.unwrap();
-        let b = ProfileStore::open(&directory.path().join("b.sqlite"), 2)
+        let a = ProfileStore::open(&a_path, 1, KEY.parse().unwrap())
+            .await
+            .unwrap();
+        let b = ProfileStore::open(&directory.path().join("b.sqlite"), 2, KEY.parse().unwrap())
             .await
             .unwrap();
         let record = |key: &str, value: &str| ConnectRecord {
@@ -1259,7 +1381,9 @@ mod tests {
         a.write_records(&[record("a", "initial")]).await.unwrap();
         assert_eq!(a.revision().await.unwrap(), revision);
         drop(a);
-        let a = ProfileStore::open(&a_path, 1).await.unwrap();
+        let a = ProfileStore::open(&a_path, 1, KEY.parse().unwrap())
+            .await
+            .unwrap();
         assert_eq!(a.revision().await.unwrap(), revision);
         let mut cursor = 0;
         let mut names = Vec::new();
@@ -1310,15 +1434,21 @@ mod tests {
                 .is_empty()
         );
         let a_records = records(
-            &load_document(&mut *a.connection.lock().await, "preference:a", 1)
-                .await
-                .unwrap(),
+            &a.load_document(
+                &mut *database_connection(&a.connection).await.unwrap(),
+                "preference:a",
+            )
+            .await
+            .unwrap(),
         )
         .unwrap();
         let b_records = records(
-            &load_document(&mut *b.connection.lock().await, "preference:a", 2)
-                .await
-                .unwrap(),
+            &b.load_document(
+                &mut *database_connection(&b.connection).await.unwrap(),
+                "preference:a",
+            )
+            .await
+            .unwrap(),
         )
         .unwrap();
         assert_eq!(a_records, b_records);
@@ -1328,10 +1458,10 @@ mod tests {
     #[tokio::test]
     async fn update_page_rolls_back_on_invalid_document() {
         let directory = tempfile::tempdir().unwrap();
-        let a = ProfileStore::open(&directory.path().join("a.sqlite"), 1)
+        let a = ProfileStore::open(&directory.path().join("a.sqlite"), 1, KEY.parse().unwrap())
             .await
             .unwrap();
-        let b = ProfileStore::open(&directory.path().join("b.sqlite"), 2)
+        let b = ProfileStore::open(&directory.path().join("b.sqlite"), 2, KEY.parse().unwrap())
             .await
             .unwrap();
         a.write_records(&[ConnectRecord {
@@ -1399,7 +1529,11 @@ mod tests {
             .unwrap();
         transaction.commit().await.unwrap();
         old.close().await.unwrap();
-        assert!(ProfileStore::open(&path, 1).await.is_err());
+        assert!(
+            ProfileStore::open(&path, 1, age::x25519::Identity::generate())
+                .await
+                .is_err()
+        );
         let mut old = SqliteConnection::connect_with(&options).await.unwrap();
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT revision FROM file_revision")
@@ -1420,7 +1554,9 @@ mod tests {
             .await
             .unwrap();
         old.close().await.unwrap();
-        let profile = ProfileStore::open(&path, 1).await.unwrap();
+        let profile = ProfileStore::open(&path, 1, KEY.parse().unwrap())
+            .await
+            .unwrap();
         let versions = profile.changes(0, count).await.unwrap();
         assert_eq!(versions.len(), count);
         for (offset, version) in versions.iter().enumerate() {
@@ -1431,7 +1567,7 @@ mod tests {
             );
         }
         let saved = sqlx::query("SELECT name,snapshot FROM documents ORDER BY name")
-            .fetch_all(&mut *profile.connection.lock().await)
+            .fetch_all(&mut *database_connection(&profile.connection).await.unwrap())
             .await
             .unwrap();
         for row in saved {
@@ -1442,7 +1578,9 @@ mod tests {
         }
         profile.acknowledge_sync("peer", true, 99).await.unwrap();
         drop(profile);
-        let profile = ProfileStore::open(&path, 1).await.unwrap();
+        let profile = ProfileStore::open(&path, 1, KEY.parse().unwrap())
+            .await
+            .unwrap();
         assert_eq!(profile.changes(0, count).await.unwrap(), versions);
         assert_eq!(profile.revision().await.unwrap(), base + count as i64);
         assert_eq!(profile.sync_cursor("peer", true).await.unwrap(), 99);
@@ -1451,12 +1589,20 @@ mod tests {
     #[tokio::test]
     async fn artwork_added_to_an_existing_profile_reaches_the_catalog() {
         let directory = tempfile::tempdir().unwrap();
-        let host = ProfileStore::open(&directory.path().join("host.sqlite"), 1)
-            .await
-            .unwrap();
-        let guest = ProfileStore::open(&directory.path().join("guest.sqlite"), 2)
-            .await
-            .unwrap();
+        let host = ProfileStore::open(
+            &directory.path().join("host.sqlite"),
+            1,
+            KEY.parse().unwrap(),
+        )
+        .await
+        .unwrap();
+        let guest = ProfileStore::open(
+            &directory.path().join("guest.sqlite"),
+            2,
+            KEY.parse().unwrap(),
+        )
+        .await
+        .unwrap();
         let source = Database::open(directory.path().join("source.sqlite"))
             .await
             .unwrap();
@@ -1528,12 +1674,20 @@ mod tests {
     #[tokio::test]
     async fn older_models_preserve_new_fields_and_settings_without_echoing_them() {
         let directory = tempfile::tempdir().unwrap();
-        let a = ProfileStore::open(&directory.path().join("newer.sqlite"), 1)
-            .await
-            .unwrap();
-        let b = ProfileStore::open(&directory.path().join("older.sqlite"), 2)
-            .await
-            .unwrap();
+        let a = ProfileStore::open(
+            &directory.path().join("newer.sqlite"),
+            1,
+            KEY.parse().unwrap(),
+        )
+        .await
+        .unwrap();
+        let b = ProfileStore::open(
+            &directory.path().join("older.sqlite"),
+            2,
+            KEY.parse().unwrap(),
+        )
+        .await
+        .unwrap();
         let database = Database::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
@@ -1588,9 +1742,9 @@ mod tests {
         .unwrap();
         b.write_records(&[state(true, false)]).await.unwrap();
         deliver(&b, &a).await;
-        let mut connection = a.connection.lock().await;
+        let mut connection = database_connection(&a.connection).await.unwrap();
         let source_values = records(
-            &load_document(&mut connection, "source:server", 1)
+            &a.load_document(&mut connection, "source:server")
                 .await
                 .unwrap(),
         )
@@ -1600,7 +1754,7 @@ mod tests {
             json!({"configuration":{"name":"Renamed","future_option":42},"credential":null})
         );
         let preferences = records(
-            &load_document(&mut connection, "preference:new_feature", 1)
+            &a.load_document(&mut connection, "preference:new_feature")
                 .await
                 .unwrap(),
         )
@@ -1610,7 +1764,7 @@ mod tests {
             future.value.unwrap()
         );
         let track = records(
-            &load_document(&mut connection, "state:https://example.org/track.flac", 1)
+            &a.load_document(&mut connection, "state:https://example.org/track.flac")
                 .await
                 .unwrap(),
         )
@@ -1628,11 +1782,17 @@ mod tests {
     #[tokio::test]
     async fn incompatible_updates_leave_persisted_profile_ready_to_resume() {
         let directory = tempfile::tempdir().unwrap();
-        let sender = ProfileStore::open(&directory.path().join("sender.sqlite"), 1)
+        let sender = ProfileStore::open(
+            &directory.path().join("sender.sqlite"),
+            1,
+            KEY.parse().unwrap(),
+        )
+        .await
+        .unwrap();
+        let path = directory.path().join("receiver.sqlite");
+        let receiver = ProfileStore::open(&path, 2, KEY.parse().unwrap())
             .await
             .unwrap();
-        let path = directory.path().join("receiver.sqlite");
-        let receiver = ProfileStore::open(&path, 2).await.unwrap();
         let record = |key, value| ConnectRecord {
             kind: "preference".into(),
             key: String::from(key),
@@ -1677,12 +1837,15 @@ mod tests {
             INCOMPATIBLE_PROFILE
         );
         drop(receiver);
-        let receiver = ProfileStore::open(&path, 2).await.unwrap();
+        let receiver = ProfileStore::open(&path, 2, KEY.parse().unwrap())
+            .await
+            .unwrap();
         deliver(&sender, &receiver).await;
-        let mut connection = receiver.connection.lock().await;
+        let mut connection = database_connection(&receiver.connection).await.unwrap();
         for (key, value) in [("theme", "dark"), ("language", "en")] {
             let values = records(
-                &load_document(&mut connection, &format!("preference:{key}"), 2)
+                &receiver
+                    .load_document(&mut connection, &format!("preference:{key}"))
                     .await
                     .unwrap(),
             )
@@ -1694,10 +1857,10 @@ mod tests {
     #[tokio::test]
     async fn concurrent_playlist_occurrences_and_credential_edits_converge_after_restart() {
         let directory = tempfile::tempdir().unwrap();
-        let a = ProfileStore::open(&directory.path().join("a.sqlite"), 1)
+        let a = ProfileStore::open(&directory.path().join("a.sqlite"), 1, KEY.parse().unwrap())
             .await
             .unwrap();
-        let b = ProfileStore::open(&directory.path().join("b.sqlite"), 2)
+        let b = ProfileStore::open(&directory.path().join("b.sqlite"), 2, KEY.parse().unwrap())
             .await
             .unwrap();
         a.write_records(&[entry("first", 0), entry("duplicate", 1)])
@@ -1720,22 +1883,22 @@ mod tests {
         deliver(&a, &b).await;
         deliver(&b, &a).await;
         let expected = {
-            let mut connection = a.connection.lock().await;
+            let mut connection = database_connection(&a.connection).await.unwrap();
             records(
-                &load_document(&mut connection, "playlist:[null,\"mix\"]", 1)
+                &a.load_document(&mut connection, "playlist:[null,\"mix\"]")
                     .await
                     .unwrap(),
             )
             .unwrap()
         };
         drop(b);
-        let b = ProfileStore::open(&directory.path().join("b.sqlite"), 2)
+        let b = ProfileStore::open(&directory.path().join("b.sqlite"), 2, KEY.parse().unwrap())
             .await
             .unwrap();
         let actual = {
-            let mut connection = b.connection.lock().await;
+            let mut connection = database_connection(&b.connection).await.unwrap();
             records(
-                &load_document(&mut connection, "playlist:[null,\"mix\"]", 2)
+                &b.load_document(&mut connection, "playlist:[null,\"mix\"]")
                     .await
                     .unwrap(),
             )
@@ -1743,9 +1906,9 @@ mod tests {
         };
         assert_eq!(actual, expected);
         assert_eq!(actual.len(), 4);
-        let mut connection = b.connection.lock().await;
+        let mut connection = database_connection(&b.connection).await.unwrap();
         let source = records(
-            &load_document(&mut connection, "source:server", 2)
+            &b.load_document(&mut connection, "source:server")
                 .await
                 .unwrap(),
         )
@@ -1765,10 +1928,10 @@ mod tests {
         let target = Database::open(directory.path().join("target.sqlite"))
             .await
             .unwrap();
-        let a = ProfileStore::open(&directory.path().join("a.sqlite"), 1)
+        let a = ProfileStore::open(&directory.path().join("a.sqlite"), 1, KEY.parse().unwrap())
             .await
             .unwrap();
-        let b = ProfileStore::open(&directory.path().join("b.sqlite"), 2)
+        let b = ProfileStore::open(&directory.path().join("b.sqlite"), 2, KEY.parse().unwrap())
             .await
             .unwrap();
         let id = library::SourceId::new("server");
@@ -1866,10 +2029,10 @@ mod tests {
     #[tokio::test]
     async fn playlist_order_and_setup_snapshot_preserve_profile_boundaries() {
         let directory = tempfile::tempdir().unwrap();
-        let a = ProfileStore::open(&directory.path().join("a.sqlite"), 1)
+        let a = ProfileStore::open(&directory.path().join("a.sqlite"), 1, KEY.parse().unwrap())
             .await
             .unwrap();
-        let b = ProfileStore::open(&directory.path().join("b.sqlite"), 2)
+        let b = ProfileStore::open(&directory.path().join("b.sqlite"), 2, KEY.parse().unwrap())
             .await
             .unwrap();
         let playlist = |id: &str, position| ConnectRecord {
@@ -1934,7 +2097,7 @@ mod tests {
         b.replace_snapshot(std::fs::File::open(&setup).unwrap())
             .await
             .unwrap();
-        let mut connection = b.connection.lock().await;
+        let mut connection = database_connection(&b.connection).await.unwrap();
         let names: Vec<String> = sqlx::query_scalar("SELECT name FROM documents ORDER BY name")
             .fetch_all(&mut *connection)
             .await
@@ -1952,9 +2115,13 @@ mod tests {
     #[tokio::test]
     async fn settings_and_catalog_have_separate_indexed_cursors() {
         let directory = tempfile::tempdir().unwrap();
-        let store = ProfileStore::open(&directory.path().join("profile.sqlite"), 1)
-            .await
-            .unwrap();
+        let store = ProfileStore::open(
+            &directory.path().join("profile.sqlite"),
+            1,
+            KEY.parse().unwrap(),
+        )
+        .await
+        .unwrap();
         let record = |kind: &str, key: &str, value| ConnectRecord {
             kind: kind.into(),
             key: key.into(),
@@ -1993,7 +2160,7 @@ mod tests {
             .unwrap();
         let next = store.changes_in(3, 1, true).await.unwrap();
         assert_eq!(next[0].name, "playlist_order");
-        let mut connection = store.connection.lock().await;
+        let mut connection = database_connection(&store.connection).await.unwrap();
         let plan: Vec<String> = sqlx::query(sqlx::AssertSqlSafe(format!(
             "EXPLAIN QUERY PLAN SELECT name,version,revision FROM documents WHERE ({SYNC_PRIORITY})=1 AND revision>0 ORDER BY revision,name LIMIT 1"
         )))
@@ -2013,10 +2180,10 @@ mod tests {
     #[tokio::test]
     async fn newer_local_credentials_replace_queued_incoming_projection() {
         let directory = tempfile::tempdir().unwrap();
-        let a = ProfileStore::open(&directory.path().join("a.sqlite"), 1)
+        let a = ProfileStore::open(&directory.path().join("a.sqlite"), 1, KEY.parse().unwrap())
             .await
             .unwrap();
-        let b = ProfileStore::open(&directory.path().join("b.sqlite"), 2)
+        let b = ProfileStore::open(&directory.path().join("b.sqlite"), 2, KEY.parse().unwrap())
             .await
             .unwrap();
         let source = |credential: &str| ConnectRecord {
@@ -2039,15 +2206,27 @@ mod tests {
     #[tokio::test]
     async fn file_edits_are_delivered_to_peers_after_offline_import() {
         let directory = tempfile::tempdir().unwrap();
-        let original = ProfileStore::open(&directory.path().join("original.sqlite"), 1)
-            .await
-            .unwrap();
-        let offline = ProfileStore::open(&directory.path().join("offline.sqlite"), 2)
-            .await
-            .unwrap();
-        let joining = ProfileStore::open(&directory.path().join("joining.sqlite"), 3)
-            .await
-            .unwrap();
+        let original = ProfileStore::open(
+            &directory.path().join("original.sqlite"),
+            1,
+            KEY.parse().unwrap(),
+        )
+        .await
+        .unwrap();
+        let offline = ProfileStore::open(
+            &directory.path().join("offline.sqlite"),
+            2,
+            KEY.parse().unwrap(),
+        )
+        .await
+        .unwrap();
+        let joining = ProfileStore::open(
+            &directory.path().join("joining.sqlite"),
+            3,
+            KEY.parse().unwrap(),
+        )
+        .await
+        .unwrap();
         let record = |value| ConnectRecord {
             kind: "preference".into(),
             key: "private_mode".into(),
@@ -2147,7 +2326,9 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("profile.sqlite");
         let snapshot = directory.path().join("profile.jsonl");
-        let profile = ProfileStore::open(&path, 1).await.unwrap();
+        let profile = ProfileStore::open(&path, 1, KEY.parse().unwrap())
+            .await
+            .unwrap();
         profile
             .write_records(&[ConnectRecord {
                 kind: "preference".into(),
@@ -2161,7 +2342,9 @@ mod tests {
         profile.acknowledge_sync("peer", true, 12).await.unwrap();
         profile.acknowledge_sync("peer", false, 24).await.unwrap();
         drop(profile);
-        let profile = ProfileStore::open(&path, 1).await.unwrap();
+        let profile = ProfileStore::open(&path, 1, KEY.parse().unwrap())
+            .await
+            .unwrap();
         assert_eq!(profile.sync_cursor("peer", true).await.unwrap(), 12);
         assert_eq!(profile.sync_cursor("peer", false).await.unwrap(), 24);
         profile
@@ -2202,10 +2385,10 @@ mod tests {
     #[tokio::test]
     async fn invalid_snapshot_rolls_back_every_document_and_stale_snapshot_keeps_newer_edits() {
         let directory = tempfile::tempdir().unwrap();
-        let a = ProfileStore::open(&directory.path().join("a.sqlite"), 1)
+        let a = ProfileStore::open(&directory.path().join("a.sqlite"), 1, KEY.parse().unwrap())
             .await
             .unwrap();
-        let b = ProfileStore::open(&directory.path().join("b.sqlite"), 2)
+        let b = ProfileStore::open(&directory.path().join("b.sqlite"), 2, KEY.parse().unwrap())
             .await
             .unwrap();
         let record = |value| ConnectRecord {
@@ -2234,7 +2417,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        let mut connection = b.connection.lock().await;
+        let mut connection = database_connection(&b.connection).await.unwrap();
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT count(*) FROM documents")
                 .fetch_one(&mut *connection)
@@ -2253,9 +2436,9 @@ mod tests {
                 .await
                 .unwrap()
         );
-        let mut connection = b.connection.lock().await;
+        let mut connection = database_connection(&b.connection).await.unwrap();
         let current = records(
-            &load_document(&mut connection, "preference:theme", 2)
+            &b.load_document(&mut connection, "preference:theme")
                 .await
                 .unwrap(),
         )

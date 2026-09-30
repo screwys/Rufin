@@ -4,6 +4,8 @@ use rufin_connect::{
     ConnectNetwork, Credentials, NetworkConfig, NetworkEvent, profile::ProfileStore,
 };
 use std::{path::Path, sync::Arc, time::Duration};
+
+const KEY: &str = "AGE-SECRET-KEY-1GQ9778VQXMMJVE8SK7J6VT8UJ4HDQAJUVSFCWCM02D8GEWQ72PVQ2Y5J33";
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
@@ -64,7 +66,7 @@ async fn ended(events: &mut mpsc::Receiver<NetworkEvent>, expected_session: &str
 
 async fn documents(root: &Path, peer: u64) -> Arc<ProfileStore> {
     Arc::new(
-        ProfileStore::open(&root.join("profile.sqlite"), peer)
+        ProfileStore::open(&root.join("profile.sqlite"), peer, KEY.parse().unwrap())
             .await
             .unwrap(),
     )

@@ -1,4 +1,6 @@
 use super::*;
+
+const KEY: &str = "AGE-SECRET-KEY-1GQ9778VQXMMJVE8SK7J6VT8UJ4HDQAJUVSFCWCM02D8GEWQ72PVQ2Y5J33";
 use serde_json::json;
 
 fn preference(value: usize) -> ConnectRecord {
@@ -12,7 +14,7 @@ fn preference(value: usize) -> ConnectRecord {
 async fn snapshot(store: &ProfileStore, name: &str) -> Vec<u8> {
     sqlx::query_scalar("SELECT snapshot FROM documents WHERE name=?1")
         .bind(name)
-        .fetch_one(&mut *store.connection.lock().await)
+        .fetch_one(&mut *database_connection(&store.connection).await.unwrap())
         .await
         .unwrap()
 }
@@ -27,8 +29,10 @@ async fn edit_history(store: &ProfileStore) {
 async fn converged_playlist_history_prunes_without_changing_sync_or_projection() {
     let directory = tempfile::tempdir().unwrap();
     let a_path = directory.path().join("a.sqlite");
-    let a = ProfileStore::open(&a_path, 1).await.unwrap();
-    let b = ProfileStore::open(&directory.path().join("b.sqlite"), 2)
+    let a = ProfileStore::open(&a_path, 1, KEY.parse().unwrap())
+        .await
+        .unwrap();
+    let b = ProfileStore::open(&directory.path().join("b.sqlite"), 2, KEY.parse().unwrap())
         .await
         .unwrap();
     let members = vec!["a".into(), "b".into()];
@@ -52,15 +56,11 @@ async fn converged_playlist_history_prunes_without_changing_sync_or_projection()
         .await
         .unwrap();
     let file = directory.path().join("b-profile");
-    b.export_device_snapshot(std::fs::File::create(&file).unwrap(), "b")
+    let (output, _) = b
+        .export_device_snapshot(std::fs::File::create(&file).unwrap(), "b")
         .await
         .unwrap();
-    b.finish_device_snapshot(
-        std::fs::OpenOptions::new().write(true).open(&file).unwrap(),
-        &members,
-    )
-    .await
-    .unwrap();
+    b.finish_device_snapshot(output, &members).await.unwrap();
     assert!(
         !a.import_snapshot(std::fs::File::open(&file).unwrap())
             .await
@@ -71,7 +71,9 @@ async fn converged_playlist_history_prunes_without_changing_sync_or_projection()
     let file_revision = a.revision().await.unwrap();
     assert!(!a.projection_pending().await.unwrap());
     drop(a);
-    let a = ProfileStore::open(&a_path, 1).await.unwrap();
+    let a = ProfileStore::open(&a_path, 1, KEY.parse().unwrap())
+        .await
+        .unwrap();
     assert_eq!(a.prune_history("a", &members, 10).await.unwrap(), 1);
     let compact = snapshot(&a, name).await;
     assert!(compact.len() < before.len());
@@ -104,7 +106,7 @@ async fn converged_playlist_history_prunes_without_changing_sync_or_projection()
     full_doc.import(&snapshot(&b, name).await).unwrap();
     assert_eq!(updated_doc.get_deep_value(), full_doc.get_deep_value());
 
-    let c = ProfileStore::open(&directory.path().join("c.sqlite"), 3)
+    let c = ProfileStore::open(&directory.path().join("c.sqlite"), 3, KEY.parse().unwrap())
         .await
         .unwrap();
     a.export_snapshot(&file).await.unwrap();
@@ -122,7 +124,7 @@ async fn converged_playlist_history_prunes_without_changing_sync_or_projection()
 #[tokio::test]
 async fn offline_member_blocks_pruning_until_removed() {
     let directory = tempfile::tempdir().unwrap();
-    let a = ProfileStore::open(&directory.path().join("a.sqlite"), 1)
+    let a = ProfileStore::open(&directory.path().join("a.sqlite"), 1, KEY.parse().unwrap())
         .await
         .unwrap();
     let members = vec!["a".into(), "offline".into()];
@@ -152,10 +154,10 @@ async fn offline_member_blocks_pruning_until_removed() {
 #[tokio::test]
 async fn acknowledging_an_unseen_concurrent_branch_does_not_prune_it_away() {
     let directory = tempfile::tempdir().unwrap();
-    let a = ProfileStore::open(&directory.path().join("a.sqlite"), 1)
+    let a = ProfileStore::open(&directory.path().join("a.sqlite"), 1, KEY.parse().unwrap())
         .await
         .unwrap();
-    let b = ProfileStore::open(&directory.path().join("b.sqlite"), 2)
+    let b = ProfileStore::open(&directory.path().join("b.sqlite"), 2, KEY.parse().unwrap())
         .await
         .unwrap();
     let members = vec!["a".into(), "b".into()];

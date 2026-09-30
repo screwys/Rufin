@@ -7815,8 +7815,10 @@ dependencies = [
 name = "rufin-connect"
 version = "0.16.6"
 dependencies = [
+ "age",
  "anyhow",
  "bao-tree",
+ "base64 0.23.1",
  "blake3",
  "flate2",
  "futures-util",
