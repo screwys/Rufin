@@ -1246,6 +1246,8 @@ pub(crate) async fn read_frame<T: DeserializeOwned>(
 mod tests {
     use super::*;
 
+    const KEY: &str = "AGE-SECRET-KEY-1GQ9778VQXMMJVE8SK7J6VT8UJ4HDQAJUVSFCWCM02D8GEWQ72PVQ2Y5J33";
+
     #[tokio::test]
     async fn relay_aliases_share_one_address_and_disabled_transport_stays_direct() {
         let root = tempfile::tempdir().unwrap();
@@ -1340,9 +1342,13 @@ mod tests {
                 .await
                 .unwrap();
             let documents = Arc::new(
-                ProfileStore::open(&directory.path().join("host.sqlite"), 1)
-                    .await
-                    .unwrap(),
+                ProfileStore::open(
+                    &directory.path().join("host.sqlite"),
+                    1,
+                    KEY.parse().unwrap(),
+                )
+                .await
+                .unwrap(),
             );
             for value in 0..80 {
                 documents
@@ -1356,9 +1362,13 @@ mod tests {
             }
             host.attach_documents(documents.clone()).await.unwrap();
             let receiving_documents = Arc::new(
-                ProfileStore::open(&directory.path().join("peer.sqlite"), 2)
-                    .await
-                    .unwrap(),
+                ProfileStore::open(
+                    &directory.path().join("peer.sqlite"),
+                    2,
+                    KEY.parse().unwrap(),
+                )
+                .await
+                .unwrap(),
             );
             let file = directory.path().join("snapshot");
             documents.export_snapshot(&file).await.unwrap();
@@ -1422,7 +1432,7 @@ mod tests {
             peer.accept_enrollment(&profile_id, &roster, host.endpoint.id()).await.unwrap();
             peer.open_profile(&profile_id, false, Vec::new()).await.unwrap();
             peer.remember_peer(&host.invitation().await.unwrap()).await.unwrap();
-            peer.attach_documents(Arc::new(ProfileStore::open(&peer_dir.path().join("profile.sqlite"), 2).await.unwrap())).await.unwrap();
+            peer.attach_documents(Arc::new(ProfileStore::open(&peer_dir.path().join("profile.sqlite"), 2, KEY.parse().unwrap()).await.unwrap())).await.unwrap();
 
             // Hold the server's document attachment until the request has
             // arrived. Closing its profile must interrupt this active sync.

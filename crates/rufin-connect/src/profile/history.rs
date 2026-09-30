@@ -2,7 +2,7 @@ use super::*;
 
 impl ProfileStore {
     pub async fn register_members(&self, members: &[String]) -> Result<()> {
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         let mut transaction = connection.begin().await?;
         register_on(&mut transaction, members).await?;
         transaction.commit().await?;
@@ -16,7 +16,7 @@ impl ProfileStore {
         versions: &[DocumentVersion],
         members: &[String],
     ) -> Result<()> {
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         let mut transaction = connection.begin().await?;
         register_on(&mut transaction, members).await?;
         register_on(&mut transaction, &[peer.to_owned()]).await?;
@@ -35,19 +35,22 @@ impl ProfileStore {
 
     /// Include membership observed after the snapshot, so a newly enrolled device
     /// cannot disappear from the acknowledgement used by another device to prune.
-    pub async fn finish_device_snapshot(&self, mut file: File, members: &[String]) -> Result<()> {
-        let mut connection = self.connection.lock().await;
+    pub async fn finish_device_snapshot<W: Write + Send + 'static>(
+        &self,
+        mut output: W,
+        members: &[String],
+    ) -> Result<W> {
+        let mut connection = database_connection(&self.connection).await?;
         register_on(&mut connection, members).await?;
         let members = participants(&mut connection).await?;
         drop(connection);
-        tokio::task::spawn_blocking(move || -> Result<()> {
-            file.seek(std::io::SeekFrom::End(0))?;
-            let mut output = GzEncoder::new(&mut file, Compression::default());
-            serde_json::to_writer(&mut output, &members)?;
-            output.write_all(b"\n")?;
-            output.finish()?;
-            file.sync_all()?;
-            Ok(())
+        tokio::task::spawn_blocking(move || -> Result<W> {
+            let mut membership = GzEncoder::new(&mut output, Compression::default());
+            serde_json::to_writer(&mut membership, &members)?;
+            membership.write_all(b"\n")?;
+            membership.finish()?;
+            output.flush()?;
+            Ok(output)
         })
         .await?
     }
@@ -61,7 +64,7 @@ impl ProfileStore {
         members: &[String],
         limit: usize,
     ) -> Result<usize> {
-        let mut connection = self.connection.lock().await;
+        let mut connection = database_connection(&self.connection).await?;
         let mut transaction = connection.begin().await?;
         register_on(&mut transaction, members).await?;
         register_on(&mut transaction, &[identity.to_owned()]).await?;
@@ -109,12 +112,21 @@ impl ProfileStore {
                 continue;
             }
             let snapshot: Vec<u8> = row.get(0);
+            let identity = Arc::clone(&self.identity);
+            let document_name = name.clone();
             let pruned = tokio::task::spawn_blocking(move || -> Result<_> {
                 let document = LoroDoc::new();
-                document.import(&snapshot)?;
+                let plaintext = expose(&document_name, &snapshot, &identity)?;
+                document.import(&plaintext)?;
                 let pruned =
                     document.export(ExportMode::shallow_snapshot(&document.oplog_frontiers()))?;
-                Ok((pruned.len() < snapshot.len()).then_some(pruned))
+                if pruned.len() < plaintext.len() {
+                    Ok(Some(
+                        protect(&document_name, &pruned, &identity)?.into_owned(),
+                    ))
+                } else {
+                    Ok(None)
+                }
             })
             .await??;
             let Some(pruned) = pruned else {

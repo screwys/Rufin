@@ -575,6 +575,26 @@ impl ConnectOwner {
             .map_err(error)?
     }
 
+    async fn local_key(
+        &self,
+        profile: &str,
+        create: bool,
+    ) -> Result<age::x25519::Identity, String> {
+        let reference = local_key(&self.identity_reference()?, profile);
+        if let Some(value) = self.secret(reference.clone()).await? {
+            return value.parse().map_err(error);
+        }
+        if !create {
+            return Err(
+                "The Connect local secrets key is unavailable. Pair with a trusted device again"
+                    .into(),
+            );
+        }
+        let key = portable::new_key();
+        self.save_secret(reference, key.clone()).await?;
+        key.parse().map_err(error)
+    }
+
     async fn install_file_key(&self, profile: &str, key: String) -> Result<(), String> {
         let _: age::x25519::Identity = key.parse().map_err(error)?;
         if !self
@@ -745,10 +765,15 @@ impl ConnectOwner {
                 .unwrap(),
         );
         let path = self.directory.join(format!(
-            "{}.sqlite",
+            "{}.profile.sqlite",
             blake3::hash(profile.as_bytes()).to_hex()
         ));
-        let documents = Arc::new(ProfileStore::open(&path, peer).await.map_err(error)?);
+        let local_key = self.local_key(&profile, create).await?;
+        let documents = Arc::new(
+            ProfileStore::open(&path, peer, local_key)
+                .await
+                .map_err(error)?,
+        );
         if let Some(previous) = self.session.write().await.replace(Arc::new(Session {
             settings_revision: Mutex::new(None),
             profile: profile.clone(),
@@ -921,7 +946,8 @@ impl ConnectOwner {
 
     async fn leave_profile(&self) -> Result<(), String> {
         self.save(|config| *config = ConnectSettings::default())?;
-        if let Some(session) = self.session.write().await.take() {
+        let session = self.session.write().await.take();
+        if let Some(session) = &session {
             session.stop.cancel();
         }
         let _sync = self.sync.lock().await;
@@ -957,7 +983,52 @@ impl ConnectOwner {
             status.media_status = None;
             status.profile_status = localization::tr("Connect is not enabled");
         });
+        if let Some(session) = session {
+            session.documents.close().await.map_err(error)?;
+        }
+        self.cleanup_profiles(None).await?;
         capture.and(closed)
+    }
+
+    async fn cleanup_profiles(&self, keep: Option<&str>) -> Result<(), String> {
+        let keep = keep.map(|profile| blake3::hash(profile.as_bytes()).to_hex().to_string());
+        let mut files = match tokio::fs::read_dir(&self.directory).await {
+            Ok(files) => files,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(cause) => return Err(error(cause)),
+        };
+        while let Some(file) = files.next_entry().await.map_err(error)? {
+            let name = file.file_name();
+            let Some((profile, suffix)) = name.to_str().and_then(|name| name.split_once('.'))
+            else {
+                continue;
+            };
+            if profile.len() != 64
+                || !profile.bytes().all(|byte| byte.is_ascii_hexdigit())
+                || keep.as_ref().is_some_and(|keep| {
+                    keep.eq_ignore_ascii_case(profile) && suffix.starts_with("profile.sqlite")
+                })
+                || !matches!(
+                    suffix,
+                    "sqlite"
+                        | "sqlite-wal"
+                        | "sqlite-shm"
+                        | "sqlite-journal"
+                        | "profile.sqlite"
+                        | "profile.sqlite-wal"
+                        | "profile.sqlite-shm"
+                        | "profile.sqlite-journal"
+                )
+            {
+                continue;
+            }
+            match tokio::fs::remove_file(file.path()).await {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(cause) => return Err(error(cause)),
+            }
+        }
+        Ok(())
     }
 
     fn cancel_download(&self) {
@@ -1054,6 +1125,8 @@ impl ConnectOwner {
                     self.create_profile().await?;
                 }
                 self.synchronize().await?;
+                self.cleanup_profiles(self.status().settings.profile.as_deref())
+                    .await?;
             }
             Action::Create => {
                 if self.status().settings.profile.is_some() {
@@ -1065,6 +1138,8 @@ impl ConnectOwner {
                     self.create_profile().await?;
                 }
                 self.synchronize().await?;
+                self.cleanup_profiles(self.status().settings.profile.as_deref())
+                    .await?;
             }
             Action::Join {
                 invitation,
@@ -2324,8 +2399,9 @@ impl ConnectOwner {
             .secret(file_key(&self.identity_reference()?, &session.profile))
             .await?
             .ok_or("The Connect file key is unavailable")?;
-        let snapshot = tempfile::tempfile_in(&self.directory).map_err(error)?;
-        let revision = if setup {
+        let output = tempfile::NamedTempFile::new_in(&self.directory).map_err(error)?;
+        let snapshot = portable::encrypt(output.reopen().map_err(error)?, &session.profile, &key)?;
+        let (snapshot, revision) = if setup {
             // Folder identities and labels are setup data; track rows can follow
             // after this device chooses which existing folders to reuse.
             for source in self.source.list_sources().sources.iter() {
@@ -2348,31 +2424,32 @@ impl ConnectOwner {
             }
             session
                 .documents
-                .export_setup_snapshot(snapshot.try_clone().map_err(error)?)
+                .export_setup_snapshot(snapshot)
                 .await
                 .map_err(error)?
         } else {
-            let revision = session
+            let (snapshot, revision) = session
                 .documents
-                .export_device_snapshot(snapshot.try_clone().map_err(error)?, &session.identity)
+                .export_device_snapshot(snapshot, &session.identity)
                 .await
                 .map_err(error)?;
             let members = match self.network.lock().await.as_ref() {
                 Some(network) => network.members().await.map_err(error)?,
                 None => vec![session.identity.clone()],
             };
-            session
+            let snapshot = session
                 .documents
-                .finish_device_snapshot(snapshot.try_clone().map_err(error)?, &members)
+                .finish_device_snapshot(snapshot, &members)
                 .await
                 .map_err(error)?;
-            revision
+            (snapshot, revision)
         };
-        let profile = session.profile.clone();
-        let directory = self.directory.clone();
         tokio::task::spawn_blocking(move || {
-            let output = tempfile::NamedTempFile::new_in(directory).map_err(error)?;
-            portable::encrypt(snapshot, output.path(), &profile, &key)?;
+            snapshot
+                .finish()
+                .map_err(error)?
+                .sync_all()
+                .map_err(error)?;
             Ok((output, revision))
         })
         .await
@@ -2431,13 +2508,10 @@ impl ConnectOwner {
                 keys
             }
         };
-        let directory = self.directory.clone();
-        let (profile, staged) = tokio::task::spawn_blocking(move || {
-            std::fs::create_dir_all(&directory).map_err(error)?;
-            portable::decrypt(&path, &keys, &directory)
-        })
-        .await
-        .map_err(error)??;
+        let (profile, staged) =
+            tokio::task::spawn_blocking(move || portable::decrypt(&path, &keys))
+                .await
+                .map_err(error)??;
         let key = match explicit_key {
             Some(key) => key,
             None => self
@@ -2464,14 +2538,17 @@ impl ConnectOwner {
                     .unwrap(),
             );
             let path = self.directory.join(format!(
-                "{}.sqlite",
+                "{}.profile.sqlite",
                 blake3::hash(profile.as_bytes()).to_hex()
             ));
-            let documents = ProfileStore::open(&path, peer).await.map_err(error)?;
+            let local_key = self.local_key(&profile, true).await?;
+            let documents = ProfileStore::open(&path, peer, local_key)
+                .await
+                .map_err(error)?;
             // Validate the complete snapshot transaction before touching working
             // settings, queues or collection. A failed import keeps them intact.
             documents
-                .replace_snapshot(staged.try_clone().map_err(error)?)
+                .replace_snapshot(staged.reader()?)
                 .await
                 .map_err(error)?;
             self.joining
@@ -2493,10 +2570,13 @@ impl ConnectOwner {
             }
             if let Some(session) = self.session.write().await.take() {
                 session.stop.cancel();
+                session.documents.close().await.map_err(error)?;
             }
-            drop(documents);
+            documents.close().await.map_err(error)?;
             self.open(profile, false).await?;
             self.finish_adoption().await?;
+            self.cleanup_profiles(self.status().settings.profile.as_deref())
+                .await?;
             if expected_profile.is_none() {
                 self.joining
                     .store(false, std::sync::atomic::Ordering::Release);
@@ -2523,7 +2603,7 @@ impl ConnectOwner {
             drop(_sync);
             session
                 .documents
-                .import_snapshot(staged.try_clone().map_err(error)?)
+                .import_snapshot(staged.reader()?)
                 .await
                 .map_err(error)?;
             let _sync = self.sync.lock().await;
@@ -2585,7 +2665,7 @@ impl ConnectOwner {
         &self,
         session: &Arc<Session>,
         path: PathBuf,
-    ) -> Result<std::fs::File, String> {
+    ) -> Result<portable::Snapshot, String> {
         let identity = self.identity_reference()?;
         let mut keys = vec![
             self.secret(file_key(&identity, &session.profile))
@@ -2598,9 +2678,8 @@ impl ConnectOwner {
         {
             keys.extend(serde_json::from_str::<Vec<String>>(&previous).map_err(error)?);
         }
-        let directory = self.directory.clone();
         let (profile, staged) =
-            tokio::task::spawn_blocking(move || portable::decrypt(&path, &keys, &directory))
+            tokio::task::spawn_blocking(move || portable::decrypt(&path, &keys))
                 .await
                 .map_err(error)??;
         if profile != session.profile {
@@ -2610,7 +2689,7 @@ impl ConnectOwner {
         // a file must not hold the lock needed by Join or Disconnect.
         session
             .documents
-            .import_snapshot(staged.try_clone().map_err(error)?)
+            .import_snapshot(staged.reader()?)
             .await
             .map_err(error)?;
         Ok(staged)
@@ -2727,7 +2806,7 @@ impl ConnectOwner {
             if path == own_path
                 && session
                     .documents
-                    .snapshot_contains_current(imported)
+                    .snapshot_contains_current(imported.reader()?)
                     .await
                     .map_err(error)?
             {
@@ -2805,6 +2884,14 @@ fn file_key(identity_ref: &str, profile: &str) -> SecretKey {
         "connect-file",
         format!("{identity_ref}:{profile}"),
         "Rufin Connect profile file",
+    )
+}
+
+fn local_key(identity_ref: &str, profile: &str) -> SecretKey {
+    SecretKey::namespaced(
+        "connect-local",
+        format!("{identity_ref}:{profile}"),
+        "Rufin Connect local secrets key",
     )
 }
 fn error(error: impl std::fmt::Display) -> String {
