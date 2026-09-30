@@ -577,8 +577,14 @@ pub async fn build(
             shell_root_resource,
             "secret_storage_portal_body",
         );
+        let body = gtk::glib::markup_escape_text(&body.label())
+            .replace(
+                "{link_start}",
+                "<a href=\"https://github.com/screwys/Rufin/issues/1055#issuecomment-5637922622\">",
+            )
+            .replace("{link_end}", "</a>");
         secret_storage_fallback_dialog.set_body_use_markup(true);
-        secret_storage_fallback_dialog.set_body(&body.label());
+        secret_storage_fallback_dialog.set_body(&body);
     }
     gtk::glib::spawn_future_local(async move {
         while let Ok(storage) = secret_storage_fallbacks.recv().await {
