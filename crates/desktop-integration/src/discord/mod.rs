@@ -10,7 +10,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use playback::{PlaybackView, TransportStatus};
 use tracing::debug;
 
-use presence::{APP_ICON_ASSET, Activity, LinkType, Settings, visible_playback_state};
+use presence::{APP_ICON_ASSET, Activity, Settings, visible_playback_state};
 
 pub(crate) struct LatestSender<T> {
     value: Arc<Mutex<Option<T>>>,
@@ -83,7 +83,7 @@ fn latest_slot<T>() -> (LatestSender<T>, LatestReceiver<T>) {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ArtworkKey {
     album: metadata_lookup::AlbumCover,
-    policy: metadata_lookup::AlbumCoverPolicy,
+    lastfm_api_key: String,
 }
 
 pub(crate) struct ArtworkRequest {
@@ -208,7 +208,6 @@ impl Presence {
                         if Some(key) != ArtworkKey::from_view(
                             view,
                             &state.lastfm_api_key,
-                            state.settings.link_type,
                         ).as_ref()
                 )
             {
@@ -245,9 +244,7 @@ impl Presence {
     }
 
     fn artwork_image(&self, state: &mut State, view: &PlaybackView) -> String {
-        let Some(key) =
-            ArtworkKey::from_view(view, &state.lastfm_api_key, state.settings.link_type)
-        else {
+        let Some(key) = ArtworkKey::from_view(view, &state.lastfm_api_key) else {
             state.artwork = ArtworkState::Empty;
             self.inner.artwork.clear();
             return APP_ICON_ASSET.to_string();
@@ -370,34 +367,19 @@ impl State {
 }
 
 impl ArtworkKey {
-    fn from_view(view: &PlaybackView, lastfm_api_key: &str, link_type: LinkType) -> Option<Self> {
-        if link_type == LinkType::None {
+    fn from_view(view: &PlaybackView, lastfm_api_key: &str) -> Option<Self> {
+        if lastfm_api_key.trim().is_empty() {
             return None;
         }
         let track = &view.transport.current.as_ref()?;
-        let lastfm_api_key = if matches!(link_type, LinkType::LastFm | LinkType::MusicBrainzLastFm)
-        {
-            lastfm_api_key
-        } else {
-            ""
-        };
-        let allow_musicbrainz = matches!(
-            link_type,
-            LinkType::MusicBrainz | LinkType::MusicBrainzLastFm
-        );
         let album_artist = track
             .album_display_artist
             .as_deref()
             .filter(|artist| !artist.trim().is_empty())
             .unwrap_or(&track.artist);
         Some(Self {
-            album: metadata_lookup::AlbumCover::new(
-                album_artist,
-                &track.album,
-                track.musicbrainz_release_group_id.as_deref(),
-                track.musicbrainz_album_id.as_deref(),
-            )?,
-            policy: metadata_lookup::AlbumCoverPolicy::new(lastfm_api_key, allow_musicbrainz),
+            album: metadata_lookup::AlbumCover::new(album_artist, &track.album, None, None)?,
+            lastfm_api_key: lastfm_api_key.to_string(),
         })
     }
 }
