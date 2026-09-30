@@ -60,7 +60,7 @@ const PLURAL_KEYWORDS: &[&str] = &["trn", "trn_with"];
 struct Message {
     plural: Option<String>,
     comments: BTreeSet<String>,
-    rust_format: bool,
+    format_flags: BTreeSet<&'static str>,
 }
 
 #[derive(Default)]
@@ -75,7 +75,7 @@ impl Catalog {
         message: String,
         plural: Option<String>,
         comment: Option<&str>,
-        rust_format: bool,
+        format_flag: Option<&'static str>,
     ) -> Result<()> {
         if message.is_empty() {
             return Ok(());
@@ -91,7 +91,7 @@ impl Catalog {
         if let Some(comment) = comment.filter(|comment| !comment.is_empty()) {
             entry.comments.insert(comment.to_owned());
         }
-        entry.rust_format |= rust_format;
+        entry.format_flags.extend(format_flag);
         Ok(())
     }
 }
@@ -110,7 +110,13 @@ pub(crate) fn template(root: &Path) -> Result<String> {
         }
         for message in web_gettext::messages(&read_to_string(&file)?) {
             let formatted = rust_format(&message);
-            catalog.insert(None, message, None, None, formatted)?;
+            catalog.insert(
+                None,
+                message,
+                None,
+                None,
+                formatted.then_some("rust-format"),
+            )?;
         }
     }
     for (id, message) in crate::windows_i18n::source_strings(root)? {
@@ -124,7 +130,7 @@ pub(crate) fn template(root: &Path) -> Result<String> {
             message,
             None,
             Some(&comment),
-            formatted,
+            formatted.then_some("rust-format"),
         )?;
     }
     render(&catalog)
@@ -206,8 +212,13 @@ fn extract_call<'a>(
         None
     };
     if let Some((message, plural)) = message
-        && let Err(error) =
-            catalog.insert(None, message.clone(), plural, None, rust_format(&message))
+        && let Err(error) = catalog.insert(
+            None,
+            message.clone(),
+            plural,
+            None,
+            rust_format(&message).then_some("rust-format"),
+        )
     {
         errors.push(error.to_string());
     }
@@ -270,12 +281,13 @@ fn extract_builder_document(document: &Document<'_>, catalog: &mut Catalog) -> R
             .children()
             .filter_map(|child| child.text())
             .collect::<String>();
+        let formatted = rust_format(&message);
         catalog.insert(
             node.attribute("context"),
             message,
             None,
             node.attribute("comments"),
-            false,
+            formatted.then_some("python-brace-format"),
         )?;
     }
     Ok(())
@@ -324,8 +336,17 @@ fn render(catalog: &Catalog) -> Result<String> {
                 writeln!(output, "#. {line}")?;
             }
         }
-        if entry.rust_format {
-            output.push_str("#, rust-format\n");
+        if !entry.format_flags.is_empty() {
+            writeln!(
+                output,
+                "#, {}",
+                entry
+                    .format_flags
+                    .iter()
+                    .copied()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )?;
         }
         if !context.is_empty() {
             write_field(&mut output, "msgctxt", context)?;
