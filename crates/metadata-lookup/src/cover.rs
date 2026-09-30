@@ -7,7 +7,6 @@ use crate::http::{client, download, fetch_optional_json};
 use crate::musicbrainz::{search_album_release_group_ids, search_album_release_ids, usable_mbid};
 
 const LASTFM_API_URL: &str = "https://ws.audioscrobbler.com/2.0/";
-const LASTFM_IMAGE_HOST: &str = "lastfm.freetls.fastly.net";
 const LASTFM_PLACEHOLDER_IMAGE_ID: &str = "2a96cbd8b46e442fc41c2b86b821562f";
 const RELEASE_URL: &str = "https://coverartarchive.org/release";
 const RELEASE_GROUP_URL: &str = "https://coverartarchive.org/release-group";
@@ -137,18 +136,53 @@ pub fn lookup_album_cover(
     missing_or_errors(failures)
 }
 
-/// Finds a Last.fm cover URL for Discord, which cannot use Rufin's cached bytes.
+/// Finds a public cover URL for Discord, which cannot use Rufin's cached bytes.
 pub fn public_album_cover_url(
     album: &AlbumCover,
     lastfm_api_key: &str,
 ) -> Result<Option<String>, String> {
-    if lastfm_api_key.trim().is_empty() {
-        return Ok(None);
+    let mut failures = Vec::new();
+    for (root, id) in [
+        (RELEASE_GROUP_URL, album.release_group_id.as_deref()),
+        (RELEASE_URL, album.release_id.as_deref()),
+    ] {
+        let Some(id) = id else {
+            continue;
+        };
+        let url = Url::parse(&format!("{root}/{id}")).map_err(|error| error.to_string())?;
+        match fetch_optional_json(client()?, url, "Cover Art Archive listing") {
+            Ok(Some(listing)) => {
+                if let Some(url) = listing
+                    .get("images")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter(|image| image.get("front").and_then(Value::as_bool) == Some(true))
+                    .find_map(|image| {
+                        image
+                            .pointer("/thumbnails/250")
+                            .or_else(|| image.get("image"))
+                            .and_then(Value::as_str)
+                            .filter(|url| !url.is_empty())
+                    })
+                {
+                    return Ok(Some(url.to_string()));
+                }
+            }
+            Ok(None) => {}
+            Err(error) => failures.push(error),
+        }
     }
-    let Some((artist, title)) = album.text() else {
-        return Ok(None);
-    };
-    lastfm_url(client()?, artist, title, lastfm_api_key)
+    if !lastfm_api_key.trim().is_empty()
+        && let Some((artist, title)) = album.text()
+    {
+        match lastfm_url(client()?, artist, title, lastfm_api_key) {
+            Ok(Some(url)) => return Ok(Some(url)),
+            Ok(None) => {}
+            Err(error) => failures.push(error),
+        }
+    }
+    missing_or_errors(failures)
 }
 
 fn download_identities(
@@ -235,7 +269,6 @@ fn public_lastfm_url(raw: &str) -> Option<String> {
     }
     let url = Url::parse(raw).ok()?;
     (url.scheme() == "https"
-        && url.host_str() == Some(LASTFM_IMAGE_HOST)
         && url.port_or_known_default() == Some(443)
         && url.username().is_empty()
         && url.password().is_none())
@@ -292,11 +325,15 @@ mod tests {
     }
 
     #[test]
-    fn lastfm_urls_are_limited_to_the_public_image_host() {
+    fn lastfm_urls_accept_image_hosts_but_reject_placeholders() {
+        assert!(
+            public_lastfm_url("https://lastfm-img.freetls.fastly.net/i/u/300x300/cover.png")
+                .is_some()
+        );
         assert!(
             public_lastfm_url("https://lastfm.freetls.fastly.net/i/u/300x300/cover.jpg").is_some()
         );
-        assert!(public_lastfm_url("https://example.com/cover.jpg").is_none());
+        assert!(public_lastfm_url("https://example.com/cover.jpg").is_some());
         assert!(public_lastfm_url("http://lastfm.freetls.fastly.net/cover.jpg").is_none());
         assert!(
             public_lastfm_url(
@@ -307,14 +344,8 @@ mod tests {
     }
 
     #[test]
-    fn public_url_without_lastfm_does_not_construct_a_cover_url() {
-        let album = AlbumCover::new(
-            "Artist",
-            "Album",
-            Some("11111111-1111-1111-1111-111111111111"),
-            Some("22222222-2222-2222-2222-222222222222"),
-        )
-        .expect("album cover");
+    fn public_url_without_providers_does_not_construct_a_cover_url() {
+        let album = AlbumCover::new("Artist", "Album", None, None).expect("album cover");
         assert_eq!(public_album_cover_url(&album, ""), Ok(None));
     }
 

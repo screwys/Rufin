@@ -368,9 +368,6 @@ impl State {
 
 impl ArtworkKey {
     fn from_view(view: &PlaybackView, lastfm_api_key: &str) -> Option<Self> {
-        if lastfm_api_key.trim().is_empty() {
-            return None;
-        }
         let track = &view.transport.current.as_ref()?;
         let album_artist = track
             .album_display_artist
@@ -378,7 +375,12 @@ impl ArtworkKey {
             .filter(|artist| !artist.trim().is_empty())
             .unwrap_or(&track.artist);
         Some(Self {
-            album: metadata_lookup::AlbumCover::new(album_artist, &track.album, None, None)?,
+            album: metadata_lookup::AlbumCover::new(
+                album_artist,
+                &track.album,
+                track.musicbrainz_release_group_id.as_deref(),
+                track.musicbrainz_album_id.as_deref(),
+            )?,
             lastfm_api_key: lastfm_api_key.to_string(),
         })
     }
