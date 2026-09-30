@@ -396,6 +396,7 @@ impl SubsonicFlavor {
 #[derive(Debug)]
 pub struct SubsonicSource {
     client: Client,
+    navidrome_client: Client,
     base_url: Url,
     username: String,
     credential: Arc<SubsonicCredential>,
@@ -413,6 +414,7 @@ impl SubsonicSource {
     ) -> SourceResult<Self> {
         let base_url = normalize_base_url(&config.base_url)?;
         let client = build_client(config.trust_invalid_cert)?;
+        let navidrome_client = navidrome::build_client(config.trust_invalid_cert)?;
         let credential = SubsonicCredential::parse(&credential)?;
         let navidrome_library = config.navidrome_library_version > 0;
         if config.navidrome_library_version > NAVIDROME_LIBRARY_VERSION {
@@ -435,6 +437,7 @@ impl SubsonicSource {
         }
         Ok(Self {
             client,
+            navidrome_client,
             base_url,
             username: config.username,
             credential: Arc::new(credential),
@@ -554,6 +557,7 @@ impl SubsonicSource {
             .into_payload(),
         );
         let source = Self {
+            navidrome_client: navidrome::build_client(trust_invalid_cert)?,
             client,
             base_url,
             username: canonical_username,

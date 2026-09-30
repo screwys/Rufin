@@ -58,6 +58,8 @@ impl SubsonicSource {
         mut changed: impl FnMut(RemoteItemChange) -> bool + Send,
     ) -> SourceResult<()> {
         let client = reqwest::Client::builder()
+            .referer(false)
+            .redirect(remote_http::authenticated_redirect_policy())
             .danger_accept_invalid_certs(self.trust_invalid_cert)
             .connect_timeout(Duration::from_secs(10))
             .read_timeout(Duration::from_secs(45))

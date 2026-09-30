@@ -1101,7 +1101,7 @@ pub(super) fn build_client_with_timeouts(
     connect_timeout: Duration,
     request_timeout: Duration,
 ) -> SourceResult<Client> {
-    remote_http::build_client(
+    remote_http::build_url_client(
         trust_invalid_cert,
         RemoteTimeouts {
             connect: connect_timeout,

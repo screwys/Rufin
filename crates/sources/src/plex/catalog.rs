@@ -464,6 +464,7 @@ pub(super) mod tests {
             "account_id":"user", "profiles":{}, "resources":{"user":{"server":"token"}},"home_admin_subscription":false,"download_subscriptions":{}}).to_string()).unwrap();
         PlexSource::new(
             super::super::PlexSourceConfig {
+                require_valid_certificate: false,
                 version: 1,
                 server_id: "server".into(),
                 profile_id: "user".into(),

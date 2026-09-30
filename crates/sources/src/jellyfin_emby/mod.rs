@@ -317,6 +317,7 @@ pub struct JellyfinEmbySource {
     pub(crate) kind: ServerKind,
     socket_base_url: Url,
     client: Client,
+    media_client: Client,
     base_url: Url,
     user_id: String,
     access_token: Arc<str>,
@@ -341,6 +342,7 @@ impl JellyfinEmbySource {
         let socket_base_url = normalize_base_url(&client_config.base_url)?;
         let base_url = config.kind.api_base(&socket_base_url)?;
         let client = build_client(client_config.trust_invalid_cert)?;
+        let media_client = build_media_client(client_config.trust_invalid_cert)?;
         let authorization = authenticated_header(&client_config, &access_token)?;
         Ok(Self {
             connect_credential,
@@ -348,6 +350,7 @@ impl JellyfinEmbySource {
             kind: config.kind,
             socket_base_url,
             client,
+            media_client,
             base_url,
             user_id: config.user_id,
             access_token: Arc::from(access_token),
@@ -446,6 +449,7 @@ impl JellyfinEmbySource {
             .into_payload(),
         );
         let source = Self {
+            media_client: build_media_client(config.trust_invalid_cert)?,
             connect_credential: None,
             connect_token: tokio::sync::OnceCell::new(),
             kind: config.kind,

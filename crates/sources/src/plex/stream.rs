@@ -91,7 +91,7 @@ impl PlexSource {
         }
         let mut stream = ResolvedStream::new(url.to_string())
             .with_content_type(content_type)
-            .with_trust_invalid_certificate(self.config.trust_invalid_cert);
+            .with_trust_invalid_certificate(self.config.trust_invalid_certificate());
         if let Some((_, session)) = params.iter().find(|(key, _)| *key == "session") {
             let mut ping = reqwest::Url::parse(&self.config.base_url)
                 .map_err(|error| SourceError::InvalidConfig(error.to_string()))?

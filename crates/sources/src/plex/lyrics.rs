@@ -28,17 +28,18 @@ impl PlexSource {
             reqwest::header::ACCEPT,
             reqwest::header::HeaderValue::from_static("application/xml"),
         );
-        let response = self
-            .client
-            .execute(request)
-            .await
-            .map_err(|error| remote_http::map_reqwest_error(error, HTTP))?;
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Ok(None);
-        }
-        let response = response
-            .error_for_status()
-            .map_err(|error| remote_http::map_reqwest_error(error, HTTP))?;
+        let response = match remote_http::media_response(
+            RequestBuilder::from_parts(self.client.clone(), request),
+            &self.media_client,
+            Duration::from_secs(60),
+            HTTP,
+        )
+        .await
+        {
+            Ok(response) => response,
+            Err(SourceError::NotFound) => return Ok(None),
+            Err(error) => return Err(error),
+        };
         let body = remote_http::bounded_response_body(response, HTTP, RESPONSE).await?;
         Ok(parse(&body))
     }

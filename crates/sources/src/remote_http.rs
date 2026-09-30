@@ -55,9 +55,36 @@ fn configured_client_builder(
     timeouts: RemoteTimeouts,
 ) -> reqwest::ClientBuilder {
     Client::builder()
+        .referer(false)
+        .redirect(authenticated_redirect_policy())
         .danger_accept_invalid_certs(trust_invalid_cert)
         .connect_timeout(timeouts.connect)
         .timeout(timeouts.request)
+}
+
+pub(crate) fn authenticated_redirect_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        if attempt
+            .previous()
+            .first()
+            .is_some_and(|from| from.origin() != attempt.url().origin())
+        {
+            attempt.stop()
+        } else {
+            reqwest::redirect::Policy::limited(10).redirect(attempt)
+        }
+    })
+}
+
+pub(crate) fn build_url_client(
+    trust_invalid_cert: bool,
+    timeouts: RemoteTimeouts,
+    policy: RemoteHttpPolicy,
+) -> SourceResult<Client> {
+    configured_client_builder(trust_invalid_cert, timeouts)
+        .redirect(reqwest::redirect::Policy::default())
+        .build()
+        .map_err(|error| map_reqwest_error(error, policy))
 }
 
 pub async fn json<T: DeserializeOwned>(
@@ -140,6 +167,25 @@ pub async fn bytes(
     limit: BodyLimit,
 ) -> SourceResult<ImageBytes> {
     let checked = checked_response(request, policy).await?;
+    image_response(checked, policy, limit).await
+}
+
+pub(crate) async fn media_bytes(
+    request: reqwest::RequestBuilder,
+    anonymous: &Client,
+    timeout: Duration,
+    policy: RemoteHttpPolicy,
+    limit: BodyLimit,
+) -> SourceResult<ImageBytes> {
+    let checked = checked_response_with_media(request, policy, Some((anonymous, timeout))).await?;
+    image_response(checked, policy, limit).await
+}
+
+async fn image_response(
+    checked: CheckedResponse,
+    policy: RemoteHttpPolicy,
+    limit: BodyLimit,
+) -> SourceResult<ImageBytes> {
     let content_type = checked
         .response
         .headers()
@@ -192,8 +238,34 @@ async fn checked_response(
     request: reqwest::RequestBuilder,
     policy: RemoteHttpPolicy,
 ) -> SourceResult<CheckedResponse> {
+    checked_response_with_media(request, policy, None).await
+}
+
+pub(crate) async fn media_response(
+    request: reqwest::RequestBuilder,
+    anonymous: &Client,
+    timeout: Duration,
+    policy: RemoteHttpPolicy,
+) -> SourceResult<reqwest::Response> {
+    Ok(
+        checked_response_with_media(request, policy, Some((anonymous, timeout)))
+            .await?
+            .response,
+    )
+}
+
+async fn checked_response_with_media(
+    request: reqwest::RequestBuilder,
+    policy: RemoteHttpPolicy,
+    media: Option<(&Client, Duration)>,
+) -> SourceResult<CheckedResponse> {
     let (client, request) = request.build_split();
-    let request = request.map_err(|error| map_reqwest_error(error, policy))?;
+    let mut request = request.map_err(|error| map_reqwest_error(error, policy))?;
+    let timeout = media.map(|(_, timeout)| request.timeout().copied().unwrap_or(timeout));
+    if let Some(timeout) = timeout {
+        *request.timeout_mut() = Some(timeout);
+    }
+    let mut headers = request.headers().clone();
     let request_metadata = RequestMetadata::new(&request, policy.service);
     let started = Instant::now();
     debug!(
@@ -204,8 +276,56 @@ async fn checked_response(
         query_keys = %request_metadata.query_keys,
         "sending remote request"
     );
-    let response = client.execute(request).await.map_err(|error| {
-        let error = map_reqwest_error(error, policy);
+    let response = async {
+        let mut response = client
+            .execute(request)
+            .await
+            .map_err(|error| map_reqwest_error(error, policy))?;
+        if matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308)
+            && let Some(next) = response
+                .headers()
+                .get(header::LOCATION)
+                .and_then(|value| std::str::from_utf8(value.as_bytes()).ok())
+                .and_then(|value| response.url().join(value).ok())
+            && next.origin() != response.url().origin()
+        {
+            let Some((anonymous, _)) = media else {
+                return Err(SourceError::Network(
+                    "Authenticated request redirected outside the configured server".into(),
+                ));
+            };
+            // Media may leave the server, but its original credentials must stay there.
+            for name in [
+                "authorization",
+                "cookie",
+                "cookie2",
+                "proxy-authorization",
+                "www-authenticate",
+                "x-emby-authorization",
+                "x-emby-token",
+                "x-connect-usertoken",
+                "x-plex-token",
+                "x-nd-authorization",
+                "host",
+            ] {
+                headers.remove(name);
+            }
+            let remaining = timeout
+                .unwrap()
+                .checked_sub(started.elapsed())
+                .ok_or_else(|| SourceError::Network("Remote request timed out".into()))?;
+            response = anonymous
+                .get(next)
+                .headers(headers)
+                .timeout(remaining)
+                .send()
+                .await
+                .map_err(|error| map_reqwest_error(error, policy))?;
+        }
+        Ok::<_, SourceError>(response)
+    }
+    .await
+    .map_err(|error| {
         warn!(
             request = request_metadata.id,
             service = request_metadata.service,
