@@ -4845,9 +4845,9 @@ dependencies = [
 
 [[package]]
 name = "lindera"
-version = "6.0.0"
+version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ba619c086410a8d3b82f0208e45a8d496d895a8b883fe8975713abd340957db"
+checksum = "870fc70f665817ed538b82def2b3c4a2b4919450f47e862d6c257c102e289f3e"
 dependencies = [
  "anyhow",
  "lindera-dictionary",
@@ -4862,9 +4862,9 @@ dependencies = [
 
 [[package]]
 name = "lindera-dictionary"
-version = "6.0.0"
+version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c1b3280d38586314078049deb66f332f544765cc23b683c56c28e335cabcb20"
+checksum = "e68a62cebe5344df42b4458f603c973a4b2ad997af4a0d55d72a9def1ac47701"
 dependencies = [
  "anyhow",
  "byteorder",
