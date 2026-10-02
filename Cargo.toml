@@ -133,7 +133,7 @@ tokio-tungstenite = { version = "0.30.0", default-features = false }
 tracing = "0.1.41"
 tracing-subscriber = "0.3.23"
 url = "2.5.7"
-lindera = "=6.0.0"
+lindera = "=6.1.0"
 walkdir = "2.5.0"
 wana_kana = { version = "=5.0.0", default-features = false }
 windows-native-keyring-store = { version = "1.1.0", default-features = false }

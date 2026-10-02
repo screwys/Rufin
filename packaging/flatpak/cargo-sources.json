@@ -5410,27 +5410,27 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/lindera/lindera-6.0.0.crate",
-        "sha256": "2ba619c086410a8d3b82f0208e45a8d496d895a8b883fe8975713abd340957db",
-        "dest": "cargo/vendor/lindera-6.0.0"
+        "url": "https://static.crates.io/crates/lindera/lindera-6.1.0.crate",
+        "sha256": "870fc70f665817ed538b82def2b3c4a2b4919450f47e862d6c257c102e289f3e",
+        "dest": "cargo/vendor/lindera-6.1.0"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"2ba619c086410a8d3b82f0208e45a8d496d895a8b883fe8975713abd340957db\", \"files\": {}}",
-        "dest": "cargo/vendor/lindera-6.0.0",
+        "contents": "{\"package\": \"870fc70f665817ed538b82def2b3c4a2b4919450f47e862d6c257c102e289f3e\", \"files\": {}}",
+        "dest": "cargo/vendor/lindera-6.1.0",
         "dest-filename": ".cargo-checksum.json"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/lindera-dictionary/lindera-dictionary-6.0.0.crate",
-        "sha256": "5c1b3280d38586314078049deb66f332f544765cc23b683c56c28e335cabcb20",
-        "dest": "cargo/vendor/lindera-dictionary-6.0.0"
+        "url": "https://static.crates.io/crates/lindera-dictionary/lindera-dictionary-6.2.0.crate",
+        "sha256": "e68a62cebe5344df42b4458f603c973a4b2ad997af4a0d55d72a9def1ac47701",
+        "dest": "cargo/vendor/lindera-dictionary-6.2.0"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"5c1b3280d38586314078049deb66f332f544765cc23b683c56c28e335cabcb20\", \"files\": {}}",
-        "dest": "cargo/vendor/lindera-dictionary-6.0.0",
+        "contents": "{\"package\": \"e68a62cebe5344df42b4458f603c973a4b2ad997af4a0d55d72a9def1ac47701\", \"files\": {}}",
+        "dest": "cargo/vendor/lindera-dictionary-6.2.0",
         "dest-filename": ".cargo-checksum.json"
     },
     {
