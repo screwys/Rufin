@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-28 12:49+0000\n"
+"PO-Revision-Date: 2026-10-03 13:26+0000\n"
 "Last-Translator: Sebastian <sevachka@users.noreply.hosted.weblate.org>\n"
 "Language-Team: German <https://hosted.weblate.org/projects/rufin/app/de/>\n"
 "Language: de\n"
@@ -15,12 +15,14 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
-"X-Generator: Weblate 2026.10.dev0\n"
+"X-Generator: Weblate 2026.10.1.dev0\n"
 
 msgid ""
 "A Japanese dictionary is downloaded for furigana and romaji readings. This "
 "setting also increases resource usage."
 msgstr ""
+"Ein japanisches Wörterbuch wird für Furigana- und Romaji-Lesungen "
+"heruntergeladen. Diese Einstellung erhöht außerdem den Ressourcenverbrauch."
 
 msgid ""
 "Approving gives this device access to your profile and saved source logins."
@@ -103,19 +105,18 @@ msgstr ""
 "Anmeldedaten zu speichern. Bei Abbruch werden die Anmeldedaten überhaupt "
 "nicht gespeichert."
 
-#, fuzzy, python-brace-format
-#| msgid ""
-#| "No secret service found. Rufin will use a file to store its credentials. "
-#| "Cancelling will not save credentials at all."
+#, python-brace-format
 msgid ""
 "No secret service found. You might have a secret service but the portal can "
 "be broken, you can check {link_start}this issue{link_end} to fix it, "
 "otherwise Rufin will use a file to store its credentials. Cancelling will "
 "not save credentials at all."
 msgstr ""
-"Kein Schlüsselbunddienst gefunden. Rufin wird eine Datei verwenden, um seine "
-"Anmeldedaten zu speichern. Bei Abbruch werden die Anmeldedaten überhaupt "
-"nicht gespeichert."
+"Kein Schlüsselbunddienst gefunden. Möglicherweise ist ein "
+"Schlüsselbunddienst vorhanden, aber das Portal ist defekt. Unter {link_start}"
+"diesem Issue{link_end} findest du eine Lösung. Andernfalls verwendet Rufin "
+"eine Datei, um seine Anmeldedaten zu speichern. Bei Abbruch werden die "
+"Anmeldedaten überhaupt nicht gespeichert."
 
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
@@ -333,7 +334,7 @@ msgid "Access token"
 msgstr "Zugriffstoken"
 
 msgid "Accessibility"
-msgstr ""
+msgstr "Barrierefreiheit"
 
 msgid "Action required"
 msgstr "Aktion erforderlich"
@@ -458,10 +459,8 @@ msgstr "Remote-Verbindungen erlauben"
 msgid "Alternate addresses"
 msgstr "Alternative Adressen"
 
-#, fuzzy
-#| msgid "Accent color"
 msgid "Alternate row colors"
-msgstr "Akzentfarbe"
+msgstr "Alternative Zeilenfarben"
 
 msgid "Anonymous (WebDAV / SMB)"
 msgstr "Anonym (WebDAV / SMB)"
@@ -494,7 +493,7 @@ msgid "Applied"
 msgstr "Angewendet"
 
 msgid "Applies to sidebar and fullscreen separately"
-msgstr ""
+msgstr "Gilt separat für Seitenleiste und Vollbild"
 
 msgid "Apply Template"
 msgstr "Vorlage anwenden"
@@ -626,10 +625,10 @@ msgid "Bearer token"
 msgstr "Bearer-Token"
 
 msgid "Bit depth"
-msgstr ""
+msgstr "Bittiefe"
 
 msgid "Bitrate"
-msgstr ""
+msgstr "Bitrate"
 
 msgid "Blue"
 msgstr "Blau"
@@ -691,10 +690,8 @@ msgid "Changing this will redownload all local files."
 msgstr ""
 "Wenn du dies änderst, werden alle lokalen Dateien erneut heruntergeladen."
 
-#, fuzzy
-#| msgid "Change"
 msgid "Channels"
-msgstr "Ändern"
+msgstr "Kanäle"
 
 msgid "Check for updates every"
 msgstr "Nach Updates suchen: alle"
@@ -797,10 +794,8 @@ msgstr "Sammlungen"
 msgid "Color for the active word during playback"
 msgstr "Farbe des aktuellen Wortes während der Wiedergabe"
 
-#, fuzzy
-#| msgid "Columns"
 msgid "Column borders"
-msgstr "Spalten"
+msgstr "Spaltenrahmen"
 
 msgid "Columns"
 msgstr "Spalten"
@@ -970,10 +965,8 @@ msgstr "Datei konnte nicht geöffnet werden: {error}"
 msgid "Could not open folder: {error}"
 msgstr "Ordner konnte nicht geöffnet werden: {error}"
 
-#, fuzzy
-#| msgid "Could not load this page"
 msgid "Could not play this track"
-msgstr "Diese Seite konnte nicht geladen werden"
+msgstr "Dieser Titel konnte nicht abgespielt werden"
 
 msgid "Could not receive live updates"
 msgstr "Live-Updates konnten nicht empfangen werden"
@@ -1162,10 +1155,8 @@ msgstr "Discord-Zugriff in Flatpak"
 msgid "Discord"
 msgstr "Discord"
 
-#, fuzzy
-#| msgid "Reset display"
 msgid "Display"
-msgstr "Ansicht zurücksetzen"
+msgstr "Anzeige"
 
 msgid "Do not encrypt"
 msgstr "Nicht verschlüsseln"
@@ -1177,7 +1168,7 @@ msgid "Don't duplicate"
 msgstr "Duplikate vermeiden"
 
 msgid "Donate"
-msgstr ""
+msgstr "Spenden"
 
 msgid "Download Folder"
 msgstr "Download-Ordner"
@@ -1406,10 +1397,8 @@ msgstr "Dateiverbindung"
 msgid "File connections"
 msgstr "Dateiverbindungen"
 
-#, fuzzy
-#| msgid "Folder path"
 msgid "File path"
-msgstr "Ordnerpfad"
+msgstr "Dateipfad"
 
 msgid "Filename"
 msgstr "Dateiname"
@@ -1493,10 +1482,8 @@ msgstr "Höhen-Anhebung"
 msgid "Full"
 msgstr "Vollständig"
 
-#, fuzzy
-#| msgid "Open fullscreen player"
 msgid "Fullscreen player"
-msgstr "Vollbildmodus aktivieren"
+msgstr "Vollbild-Player"
 
 msgid "Fullscreen"
 msgstr "Vollbild"
@@ -1558,10 +1545,8 @@ msgstr "Grün"
 msgid "Grid labels"
 msgstr "Rasterbeschriftung"
 
-#, fuzzy
-#| msgid "Bar spacing (px)"
 msgid "Grid spacing"
-msgstr "Leistenabstand (px)"
+msgstr "Rasterabstand"
 
 msgid "Grid"
 msgstr "Raster"
@@ -1582,7 +1567,7 @@ msgid "Hide sidebar"
 msgstr "Seitenleiste ausblenden"
 
 msgid "Highlight hovered row"
-msgstr ""
+msgstr "Zeile unter dem Mauszeiger hervorheben"
 
 msgid "History"
 msgstr "Verlauf"
@@ -1719,7 +1704,7 @@ msgid "Laptop/Headphones"
 msgstr "Laptop/Kopfhörer"
 
 msgid "Large"
-msgstr ""
+msgstr "Groß"
 
 msgid "Last 30 days"
 msgstr "Letzte 30 Tage"
@@ -2180,10 +2165,8 @@ msgstr "Keine Netzwerkadresse verfügbar"
 msgid "No network devices found"
 msgstr "Keine Netzwerkgeräte gefunden"
 
-#, fuzzy
-#| msgid "No linked servers found"
 msgid "No playable entries were found"
-msgstr "Keine verbundenen Server gefunden"
+msgstr "Keine abspielbaren Einträge gefunden"
 
 msgid "No related tracks found"
 msgstr "Keine verwandten Titel gefunden"
@@ -2713,10 +2696,8 @@ msgstr "Rot"
 msgid "Redo"
 msgstr "Wiederholen"
 
-#, fuzzy
-#| msgid "Rule actions"
 msgid "Reduce motion"
-msgstr "Regelaktionen"
+msgstr "Bewegung reduzieren"
 
 msgid "Refresh automatically"
 msgstr "Automatisch aktualisieren"
@@ -2921,7 +2902,7 @@ msgid "Rounded bars"
 msgstr "Abgerundete Balken"
 
 msgid "Row borders"
-msgstr ""
+msgstr "Zeilenrahmen"
 
 msgid "Rows"
 msgstr "Reihen"
@@ -2945,7 +2926,7 @@ msgid "SMB Domain"
 msgstr "SMB-Domain"
 
 msgid "Sample rate"
-msgstr ""
+msgstr "Abtastrate"
 
 msgid "Saturday"
 msgstr "Samstag"
@@ -3214,10 +3195,8 @@ msgstr "Symbole externer Dienste auf Album- und Künstlerseiten anzeigen"
 msgid "Show external site links"
 msgstr "Externe Website-Links anzeigen"
 
-#, fuzzy
-#| msgid "Show sidebar"
 msgid "Show header"
-msgstr "Seitenleiste einblenden"
+msgstr "Kopfzeile anzeigen"
 
 msgid "Show lyrics in the right panel"
 msgstr "Liedtexte im rechten Bereich anzeigen"
@@ -3313,7 +3292,7 @@ msgid "Singles"
 msgstr "Singles"
 
 msgid "Size"
-msgstr ""
+msgstr "Größe"
 
 msgid "Skip count"
 msgstr "Überspringungszähler"
@@ -3325,7 +3304,7 @@ msgid "Slate"
 msgstr "Schiefergrau"
 
 msgid "Small"
-msgstr ""
+msgstr "Klein"
 
 msgid "Smart Playlist"
 msgstr "Smart-Playlist"
@@ -3496,6 +3475,8 @@ msgstr "Diese Quelle kann dieses Feld nicht bearbeiten"
 
 msgid "This will remove all configured state. Do you want to continue?"
 msgstr ""
+"Dadurch wird der gesamte konfigurierte Zustand entfernt. Möchtest du "
+"fortfahren?"
 
 msgid "Thursday"
 msgstr "Donnerstag"
@@ -3776,7 +3757,7 @@ msgid "Weekly"
 msgstr "Wöchentlich"
 
 msgid "Wide"
-msgstr ""
+msgstr "Breit"
 
 msgid "Window"
 msgstr "Fenster"
