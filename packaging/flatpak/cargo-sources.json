@@ -5410,14 +5410,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/lindera/lindera-6.1.0.crate",
-        "sha256": "870fc70f665817ed538b82def2b3c4a2b4919450f47e862d6c257c102e289f3e",
-        "dest": "cargo/vendor/lindera-6.1.0"
+        "url": "https://static.crates.io/crates/lindera/lindera-6.2.0.crate",
+        "sha256": "acdfde95c0360c7214c7f97cbd52f293c41da5c7f215979b065b2b41772d199f",
+        "dest": "cargo/vendor/lindera-6.2.0"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"870fc70f665817ed538b82def2b3c4a2b4919450f47e862d6c257c102e289f3e\", \"files\": {}}",
-        "dest": "cargo/vendor/lindera-6.1.0",
+        "contents": "{\"package\": \"acdfde95c0360c7214c7f97cbd52f293c41da5c7f215979b065b2b41772d199f\", \"files\": {}}",
+        "dest": "cargo/vendor/lindera-6.2.0",
         "dest-filename": ".cargo-checksum.json"
     },
     {
