@@ -7,8 +7,8 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-10-04 04:12+0000\n"
-"Last-Translator: Javcar Tech <leguminosjc@gmail.com>\n"
+"PO-Revision-Date: 2026-10-05 17:36+0000\n"
+"Last-Translator: \"David Yakobi (Houtarou)\" <houtarou86@duck.com>\n"
 "Language-Team: Spanish <https://hosted.weblate.org/projects/rufin/app/es/>\n"
 "Language: es\n"
 "MIME-Version: 1.0\n"
@@ -1357,9 +1357,8 @@ msgstr "Enlaces a sitios externos"
 msgid "Fade audio when playback is paused or resumed"
 msgstr "Desvanecer el audio cuando la reproducción se pausa o se reanuda"
 
-#, fuzzy
 msgid "Fall speed (%)"
-msgstr "­Velocidad de caída (%)"
+msgstr "Velocidad de caída (%)"
 
 msgid "Favorite current track"
 msgstr "Marcar como Favorita la pista actual"
@@ -1821,15 +1820,11 @@ msgstr[1] ""
 "Asignación local de archivos: {matched} de {total} coinciden en las rutas "
 "del servidor"
 
-#, fuzzy
-#| msgid "Add folder"
 msgid "Local files and folders"
-msgstr "Agregar carpeta"
+msgstr "Archivos y carpetas locales"
 
-#, fuzzy
-#| msgid "Add folder"
 msgid "Local folder"
-msgstr "Agregar carpeta"
+msgstr "Carpeta local"
 
 msgid "Local imports and access"
 msgstr "Importaciones y accesos locales"
@@ -1843,10 +1838,8 @@ msgstr "La carpeta de música local no está disponible"
 msgid "Local music folder"
 msgstr "Carpeta local de música"
 
-#, fuzzy
-#| msgid "Add folder"
 msgid "Local music folders"
-msgstr "Agregar carpeta"
+msgstr "Carpeta local de música"
 
 msgid "Local network"
 msgstr "Red local"
@@ -2355,10 +2348,8 @@ msgstr "Abrir en el servidor"
 msgid "Open release notes"
 msgstr "Abrir notas del lanzamiento"
 
-#, fuzzy
-#| msgid "App settings"
 msgid "Open settings"
-msgstr "Ajustes de la aplicación"
+msgstr "Abrir ajustes"
 
 #, fuzzy
 msgid "Open"
@@ -2529,20 +2520,14 @@ msgstr "Reproduciendo en este dispositivo"
 msgid "Playing on {device}"
 msgstr "Reproduciendo en {device}"
 
-#, fuzzy
-#| msgid "All Playlists"
 msgid "Playlist File"
-msgstr "Todas las listas"
+msgstr "Archivo de playlist"
 
-#, fuzzy
-#| msgid "All Playlists"
 msgid "Playlist file changed"
-msgstr "Todas las listas"
+msgstr "Archivo de lista de reproducción cambiado"
 
-#, fuzzy
-#| msgid "All Playlists"
 msgid "Playlist files"
-msgstr "Todas las listas"
+msgstr "Archivo de listas de reproducción"
 
 msgid "Playlist name"
 msgstr "Nombre de la lista de reproducción"
@@ -2591,7 +2576,7 @@ msgid "Prefer translations"
 msgstr "Preferir traducciones"
 
 msgid "Preferences"
-msgstr "Ajustes"
+msgstr "Preferencias"
 
 msgid "Preparing library..."
 msgstr "Preparando la biblioteca..."
@@ -3009,10 +2994,8 @@ msgstr "La acción de guardar, guarda las letras directamente en tu fuente"
 msgid "Save changes automatically"
 msgstr "Guardar cambios automáticamente"
 
-#, fuzzy
-#| msgid "Add folder"
 msgid "Save in folder"
-msgstr "Agregar carpeta"
+msgstr "Guardar en carpeta"
 
 msgid "Save lyrics automatically"
 msgstr "Guardar las letras automáticamente"
@@ -3159,10 +3142,8 @@ msgstr "Ir a {time}"
 msgid "Seekbar"
 msgstr "Barra de reproducción"
 
-#, fuzzy
-#| msgid "Add folder"
 msgid "Segmented bars"
-msgstr "Agregar carpeta"
+msgstr "Barras segmentadas"
 
 msgid "Select All"
 msgstr "Seleccionar todo"
@@ -3180,15 +3161,11 @@ msgstr "Seleccionar fuente"
 msgid "Select all"
 msgstr "Seleccionar todo"
 
-#, fuzzy
-#| msgid "Add a title"
 msgid "Select {title}"
-msgstr "Añadir un título"
+msgstr "Seleccionar {title}"
 
-#, fuzzy
-#| msgid "Add folder"
 msgid "Selected folders"
-msgstr "Agregar carpeta"
+msgstr "Carpetas seleccionadas"
 
 msgid "Selected items: {count}"
 msgstr "Elementos seleccionados: {count}"
@@ -3253,10 +3230,8 @@ msgstr "Configurar este dispositivo"
 msgid "Settings and sources"
 msgstr "Ajustes y fuentes"
 
-#, fuzzy
-#| msgid "App settings"
 msgid "Settings"
-msgstr "Ajustes de la aplicación"
+msgstr "Ajustes"
 
 msgid "Share"
 msgstr "Compartir"
