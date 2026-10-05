@@ -192,6 +192,11 @@ msgstr ""
 "un long moment."
 
 msgid ""
+"Some changes were saved. Close this editor and reopen it to review the "
+"result."
+msgstr ""
+
+msgid ""
 "Temporary library storage is in use. Changes may be lost when Rufin closes."
 msgstr ""
 "Une bibliothèque temporaire est utilisée. Des changements peuvent être "
@@ -273,6 +278,11 @@ msgid ""
 msgstr ""
 "Vous devrez vous reconnecter via les clients que vous utilisez avec la "
 "nouvelle clé d’API."
+
+#, fuzzy
+#| msgid "Play Next (shuffled)"
+msgid "(hold to shuffle)"
+msgstr "Lire ensuite (aléatoire)"
 
 msgid ". You only need to fill email and an application name parts"
 msgstr ""
@@ -359,6 +369,9 @@ msgstr "Ajouter une source de musique pour commencer l'écoute."
 msgid "Add a new source"
 msgstr "Ajouter une nouvelle source"
 
+msgid "Add a server to configure downloads."
+msgstr ""
+
 msgid "Add a title"
 msgstr "Ajouter un morceau"
 
@@ -391,9 +404,6 @@ msgstr "Ajouter des morceaux lorsqu’il en reste moins que ce nombre"
 
 msgid "Add"
 msgstr "Ajouter"
-
-msgid "Added to favorites"
-msgstr "Ajouté aux favoris"
 
 msgid "Added to"
 msgstr "Ajouté à"
@@ -503,6 +513,9 @@ msgstr "Application…"
 msgid "Approve sign-in in your browser"
 msgstr "Approuver la connexion dans votre navigateur"
 
+msgid "Approve"
+msgstr ""
+
 msgid "April {year}"
 msgstr "Avril {year}"
 
@@ -560,11 +573,8 @@ msgstr "Août {year}"
 msgid "Authentication"
 msgstr "Authentification"
 
-msgid "Auto DJ off"
-msgstr "Auto DJ off"
-
-msgid "Auto DJ on"
-msgstr "Auto DJ on"
+msgid "Authorization timed out"
+msgstr ""
 
 msgid "Auto DJ refill threshold"
 msgstr "Seuil de remplissage Auto DJ"
@@ -629,6 +639,9 @@ msgstr "Bitrate"
 msgid "Blue"
 msgstr "Bleu"
 
+msgid "Browse"
+msgstr ""
+
 msgid "Cached"
 msgstr "Mise en cache"
 
@@ -688,9 +701,6 @@ msgstr "Changer cela retéléchargera tous les fichiers locaux."
 msgid "Channels"
 msgstr "Canaux"
 
-msgid "Check for updates every"
-msgstr "Rechercher les mises à jour tous les"
-
 msgid "Check for updates"
 msgstr "Rechercher les mises à jour"
 
@@ -725,6 +735,9 @@ msgstr ""
 
 msgid "Choose playback output"
 msgstr "Choisir la sortie de lecture"
+
+msgid "Choose whether to keep the completed downloads."
+msgstr ""
 
 msgid "Choose"
 msgstr "Choisissez"
@@ -815,6 +828,9 @@ msgstr "Compilation"
 
 msgid "Complete sign-in in your browser"
 msgstr "Compléter l'identification dans votre navigateur"
+
+msgid "Completed downloads will stay on this device."
+msgstr ""
 
 msgid "Composer sort"
 msgstr "Tri par compositeur"
@@ -954,6 +970,11 @@ msgstr "Impossible de charger des morceaux correspondants"
 msgid "Could not load this page"
 msgstr "Impossible de charger cette page"
 
+#, fuzzy
+#| msgid "Could not open file: {error}"
+msgid "Could not open browser"
+msgstr "Impossible d'ouvrir le fichier : {error}"
+
 msgid "Could not open file: {error}"
 msgstr "Impossible d'ouvrir le fichier : {error}"
 
@@ -962,6 +983,11 @@ msgstr "Impossible d'ouvrir le dossier : {error}"
 
 msgid "Could not play this track"
 msgstr "Impossible de jouer ce morceau"
+
+#, fuzzy
+#| msgid "Could not load related tracks"
+msgid "Could not read artwork"
+msgstr "Impossible de charger des morceaux correspondants"
 
 msgid "Could not receive live updates"
 msgstr "Impossible de recevoir les mises à jour en direct"
@@ -1125,6 +1151,9 @@ msgstr "Disque {number}"
 
 msgid "Disc"
 msgstr "Disque"
+
+msgid "Discard changes?"
+msgstr ""
 
 msgid "Discography"
 msgstr "Discographie"
@@ -1335,6 +1364,11 @@ msgstr "Exporter le format"
 msgid "Export playlist"
 msgstr "Exporter la playlist"
 
+#, fuzzy
+#| msgid "Choose connection"
+msgid "Export to connection"
+msgstr "Choisissez la connexion"
+
 msgid "Export your listening history in Rufin"
 msgstr "Exporter votre historique d'écoute de Rufin"
 
@@ -1400,6 +1434,11 @@ msgstr ""
 "Les fichiers nécessitent des balises Mood/BPM intégrées. Non pris en charge "
 "pour Jellyfin"
 
+#, fuzzy
+#| msgid "Selected items: {count}"
+msgid "Files received: {count}"
+msgstr "Éléments sélectionnés : {count}"
+
 msgid "Files"
 msgstr "Fichiers"
 
@@ -1423,6 +1462,11 @@ msgstr "Plat"
 
 msgid "Folder path"
 msgstr "Chemin du dossier"
+
+#, fuzzy
+#| msgid "Folders"
+msgid "Folder"
+msgstr "Dossiers"
 
 msgid "Folders"
 msgstr "Dossiers"
@@ -1510,6 +1554,9 @@ msgstr "Genre"
 
 msgid "Genres"
 msgstr "Genres"
+
+msgid "Gestures"
+msgstr ""
 
 msgid "Get token"
 msgstr "Obtenir le jeton"
@@ -1606,6 +1653,16 @@ msgstr "Importer une sauvegarde"
 
 msgid "Import Playlist"
 msgstr "Importer une playlist"
+
+#, fuzzy
+#| msgid "Waiting for connection"
+msgid "Import from connection"
+msgstr "En attente de connexion"
+
+#, fuzzy
+#| msgid "Import"
+msgid "Import theme"
+msgstr "Importer"
 
 msgid "Import"
 msgstr "Importer"
@@ -1719,6 +1776,14 @@ msgstr "Last.fm"
 msgid "Layout"
 msgstr "Disposition"
 
+#, fuzzy
+#| msgid ""
+#| "For this import or export only. Leave empty for an unencrypted archive."
+msgid "Leave empty for an unencrypted archive."
+msgstr ""
+"Pour cette importation ou exportation seulement. Laisser vide pour une "
+"archive non chiffrée."
+
 msgid "Leave the password empty to keep the saved credential"
 msgstr ""
 "Laissez le mot de passe vide pour conserver les identifiants enregistrés"
@@ -1795,6 +1860,9 @@ msgstr "Préfixe local"
 msgid "Local file access configured"
 msgstr "Accès aux fichiers locaux configuré"
 
+msgid "Local file access is required before these tags can be saved."
+msgstr ""
+
 msgid "Local file mapping is no longer available"
 msgstr "Le mappage de fichiers locaux n’est plus disponible"
 
@@ -1827,6 +1895,12 @@ msgstr "Dossier de musique local"
 
 msgid "Local music folders"
 msgstr "Dossiers de musique locaux"
+
+msgid "Local network permission is required for remote connections"
+msgstr ""
+
+msgid "Local network permission was denied"
+msgstr ""
 
 msgid "Local network"
 msgstr "Réseau local"
@@ -1891,11 +1965,11 @@ msgstr "Mai {year}"
 msgid "Media available"
 msgstr "Médias disponibles"
 
-msgid "Media transferring: {received} / {total} bytes"
-msgstr "Transfert du média : {received} / {total} octets"
-
 msgid "Menu"
 msgstr "Menu"
+
+msgid "Metadata changed before it was saved. Reload it before trying again."
+msgstr ""
 
 msgid "Metadata editing is no longer available"
 msgstr "L'édition des métadonnées n'est plus disponible"
@@ -1905,6 +1979,9 @@ msgstr "La modification des métadonnées nécessite l’accès Local"
 
 msgid "Metadata source"
 msgstr "Source de métadonnées"
+
+msgid "Metadata was saved, but refreshing the source failed."
+msgstr ""
 
 msgid "Metadata"
 msgstr "Métadonnées"
@@ -1938,6 +2015,9 @@ msgstr "Humeurs"
 
 msgid "More actions"
 msgstr "Autres actions"
+
+msgid "More"
+msgstr ""
 
 msgid "Most Played (Monthly)"
 msgstr "Le plus joué (mois)"
@@ -1981,11 +2061,19 @@ msgstr "Valeurs multiples"
 msgid "Music Folder"
 msgstr "Dossier de musique"
 
+msgid "Music access permission was denied"
+msgstr ""
+
 msgid "Music folders on the Rufin machine"
 msgstr "Dossiers de musique sur la machine Rufin"
 
 msgid "Music on this device"
 msgstr "Musique sur cet appareil"
+
+#, fuzzy
+#| msgid "My music"
+msgid "Music"
+msgstr "Ma musique"
 
 msgid "MusicBrainz + Last.fm"
 msgstr "MusicBrainz + Last.fm"
@@ -2076,6 +2164,11 @@ msgstr "Nouvelle playlist intelligente"
 msgid "New download rule"
 msgstr "Nouvelle règle de téléchargement"
 
+#, fuzzy
+#| msgid "No network address available"
+msgid "New release is available"
+msgstr "Aucune adresse réseau disponible"
+
 msgid "Newly added"
 msgstr "Nouvellement ajouté"
 
@@ -2109,6 +2202,11 @@ msgstr "Aucune illustration trouvée"
 msgid "No cached server path yet"
 msgstr "Aucun chemin de serveur en cache pour le moment"
 
+#, fuzzy
+#| msgid "Download queued"
+msgid "No downloads queued"
+msgstr "Téléchargement mis en liste d'attente"
+
 msgid "No favorite albums yet"
 msgstr "Pas encore d'albums favori"
 
@@ -2117,6 +2215,11 @@ msgstr "Pas encore d'artistes favori"
 
 msgid "No favorites yet"
 msgstr "Pas encore de favoris"
+
+#, fuzzy
+#| msgid "File connections"
+msgid "No file connections"
+msgstr "Fichiers de connexion"
 
 msgid "No file linked"
 msgstr "Aucun fichier lié"
@@ -2246,6 +2349,9 @@ msgstr "Désactiver uniquement pour un serveur que vous contrôlez"
 
 msgid "Off"
 msgstr "Off"
+
+msgid "Offline"
+msgstr ""
 
 msgid "On this device"
 msgstr "Sur cet appareil"
@@ -2446,6 +2552,16 @@ msgstr "Lire l’ambiance"
 msgid "Play playlist"
 msgstr "Jouer la playlist"
 
+#, fuzzy
+#| msgid "Play radio"
+msgid "Play radio later"
+msgstr "Lire la radio"
+
+#, fuzzy
+#| msgid "Play radio"
+msgid "Play radio next"
+msgstr "Lire la radio"
+
 msgid "Play radio"
 msgstr "Lire la radio"
 
@@ -2478,6 +2594,16 @@ msgstr "Vitesse de lecture"
 
 msgid "Playback"
 msgstr "Lecture"
+
+#, fuzzy
+#| msgid "Playing on {device}"
+msgid "Playing from {}"
+msgstr "Jouer sur {device}"
+
+#, fuzzy
+#| msgid "Play random"
+msgid "Playing from"
+msgstr "Jouer en aléatoire"
 
 msgid "Playing on this device"
 msgstr "Jouer sur cet appareil"
@@ -2652,6 +2778,9 @@ msgstr "Quitter Rufin"
 msgid "Quit"
 msgstr "Quitter"
 
+msgid "Radio"
+msgstr ""
+
 msgid "Range selection"
 msgstr "Sélection de plage"
 
@@ -2742,6 +2871,9 @@ msgstr "Version"
 msgid "Reload from file"
 msgstr "Recharger depuis le fichier"
 
+msgid "Reload metadata to review the current values."
+msgstr ""
+
 msgid "Reload themes"
 msgstr "Recharger les thèmes"
 
@@ -2811,14 +2943,16 @@ msgstr "Supprimer les morceaux non disponibles"
 msgid "Remove"
 msgstr "Supprimer"
 
-msgid "Removed from favorites"
-msgstr "Supprimé des favoris"
-
 msgid "Removed from"
 msgstr "Supprimé de"
 
 msgid "Rename file"
 msgstr "Renommer le fichier"
+
+#, fuzzy
+#| msgid "Row borders"
+msgid "Reorder"
+msgstr "Bord de rangée"
 
 msgid "Repeat all"
 msgstr "Répétez tout"
@@ -2976,6 +3110,11 @@ msgstr "Enregistré dans"
 msgid "Saved"
 msgstr "Enregistré"
 
+#, fuzzy
+#| msgid "Saved"
+msgid "Saved..."
+msgstr "Enregistré"
+
 msgid "Saves lyrics to your source"
 msgstr "Enregistre les paroles dans votre source"
 
@@ -3059,9 +3198,6 @@ msgstr "Recherche..."
 
 msgid "Secret storage"
 msgstr "Stockage des secrets"
-
-msgid "Secure storage"
-msgstr "Stockage sécurisé"
 
 msgid "Seek Backward"
 msgstr "Reculer dans la lecture"
@@ -3183,6 +3319,11 @@ msgstr "Afficher l’illustration"
 msgid "Show comparison"
 msgstr "Afficher la comparaison"
 
+#, fuzzy
+#| msgid "Show lyrics"
+msgid "Show current lyrics line"
+msgstr "Afficher les paroles"
+
 msgid "Show downloaded badge"
 msgstr "Afficher le badge de téléchargement"
 
@@ -3240,12 +3381,6 @@ msgstr "Afficher / masquer la barre latérale droite"
 
 msgid "Showcase"
 msgstr "Vitrine"
-
-msgid "Shuffle off"
-msgstr "Lecture aléatoire Off"
-
-msgid "Shuffle on"
-msgstr "Lecture aléatoire On"
 
 msgid "Shuffle"
 msgstr "Lecture aléatoire"
@@ -3340,6 +3475,11 @@ msgstr "Trie"
 msgid "Source by position"
 msgstr "Source par position"
 
+#, fuzzy
+#| msgid "Search is unavailable"
+msgid "Source setup is unavailable"
+msgstr "La recherche n’est pas disponible"
+
 msgid "Source to use for cover images and song/artist links"
 msgstr "Source à utiliser pour les illustrations et les liens chanson/artiste"
 
@@ -3393,6 +3533,14 @@ msgstr "Style"
 msgid "Sunday"
 msgstr "Dimanche"
 
+msgid "Swipe left"
+msgstr ""
+
+#, fuzzy
+#| msgid "Copyright"
+msgid "Swipe right"
+msgstr "Copyright"
+
 msgid "Switch Search/Favorites tabs"
 msgstr "Basculer entre les onglets Recherche/Favoris"
 
@@ -3413,6 +3561,11 @@ msgstr "Valeur du système"
 
 msgid "System flatpak:"
 msgstr "Flatpak système :"
+
+#, fuzzy
+#| msgid "System"
+msgid "System keyring"
+msgstr "Système"
 
 msgid "System"
 msgstr "Système"
@@ -3592,6 +3745,9 @@ msgstr "Son rétabli"
 msgid "Untitled"
 msgstr "Sans titre"
 
+msgid "Update check interval"
+msgstr ""
+
 msgid "Update"
 msgstr "Mise à jour"
 
@@ -3630,6 +3786,11 @@ msgstr "Utilisez une couleur de contrast"
 
 msgid "Use an existing connection?"
 msgstr "Utiliser une connexion existante ?"
+
+#, fuzzy
+#| msgid "Current artwork"
+msgid "Use current artwork"
+msgstr "Illustration actuelle"
 
 msgid "Use different layout below a threshold width"
 msgstr "Utiliser une disposition différente sous une largeur seuil"
@@ -3729,9 +3890,6 @@ msgstr "En attente de connexion"
 
 msgid "Waiting for device"
 msgstr "En attente du périphérique"
-
-msgid "Waiting for media provider"
-msgstr "En attente du fournisseur de médias"
 
 msgid "Waiting for the other device to approve"
 msgstr "En attente de l’approbation de l’autre appareil"
@@ -3843,6 +4001,11 @@ msgstr "aujourd'hui"
 
 msgid "yesterday"
 msgstr "hier"
+
+#, fuzzy
+#| msgid "Play (shuffled)"
+msgid "{action} (Shuffle)"
+msgstr "Lire (aléatoire)"
 
 msgid "{count} album"
 msgid_plural "{count} albums"
@@ -3975,6 +4138,36 @@ msgstr "L'option de mise à jour automatique de {app_name} est invalide."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenue sur l'installateur de Rufin"
+
+#~ msgid "Added to favorites"
+#~ msgstr "Ajouté aux favoris"
+
+#~ msgid "Auto DJ off"
+#~ msgstr "Auto DJ off"
+
+#~ msgid "Auto DJ on"
+#~ msgstr "Auto DJ on"
+
+#~ msgid "Check for updates every"
+#~ msgstr "Rechercher les mises à jour tous les"
+
+#~ msgid "Media transferring: {received} / {total} bytes"
+#~ msgstr "Transfert du média : {received} / {total} octets"
+
+#~ msgid "Removed from favorites"
+#~ msgstr "Supprimé des favoris"
+
+#~ msgid "Secure storage"
+#~ msgstr "Stockage sécurisé"
+
+#~ msgid "Shuffle off"
+#~ msgstr "Lecture aléatoire Off"
+
+#~ msgid "Shuffle on"
+#~ msgstr "Lecture aléatoire On"
+
+#~ msgid "Waiting for media provider"
+#~ msgstr "En attente du fournisseur de médias"
 
 #~ msgid "Sponsor"
 #~ msgstr "Sponsor"
