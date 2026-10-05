@@ -59,6 +59,7 @@ pub(super) struct PlayerPipeline {
     shared: Arc<Mutex<SharedBackendState>>,
     native: Option<(gst::Element, gst::Bus)>,
     id: Option<PipelineId>,
+    pub(super) initial_stream_started: bool,
     trust_invalid_certificate: Arc<AtomicBool>,
     module_decoder: Arc<AtomicBool>,
     about_to_finish_id: Option<glib::SignalHandlerId>,
@@ -85,6 +86,15 @@ struct SegmentPlayback {
     seek: Option<gst::Seqnum>,
     done: bool,
     starts_stream: bool,
+    progress: SeekProgress,
+}
+
+#[derive(Default)]
+enum SeekProgress {
+    #[default]
+    Ready,
+    Pausing(gst::Event),
+    Preroll,
 }
 
 impl PlayerPipeline {
@@ -94,6 +104,7 @@ impl PlayerPipeline {
             shared,
             native: None,
             id: None,
+            initial_stream_started: false,
             trust_invalid_certificate: Arc::new(AtomicBool::new(false)),
             module_decoder: Arc::new(AtomicBool::new(false)),
             about_to_finish_id: None,
@@ -209,6 +220,51 @@ impl PlayerPipeline {
         self.native
             .as_ref()
             .is_some_and(|(pipeline, _)| pipeline.current_state() == gst::State::Playing)
+    }
+
+    pub(super) fn log_output_timing(&self) {
+        let Some((pipeline, _)) = &self.native else {
+            return;
+        };
+        let Some(graph) = &self.audio_graph else {
+            return;
+        };
+        let output = graph.output();
+        let sink = if output.find_property("last-sample").is_some() {
+            Some(output.clone())
+        } else {
+            output.downcast_ref::<gst::Bin>().and_then(|bin| {
+                bin.iterate_recurse()
+                    .find(|element| element.find_property("last-sample").is_some())
+            })
+        };
+        let sample = sink
+            .as_ref()
+            .and_then(|sink| sink.property::<Option<gst::Sample>>("last-sample"));
+        let stats = sink
+            .as_ref()
+            .filter(|sink| sink.find_property("stats").is_some())
+            .map(|sink| sink.property::<gst::Structure>("stats"));
+        let (_, current, pending) = pipeline.state(gst::ClockTime::ZERO);
+        let output_state = sink.as_ref().map(|sink| sink.state(gst::ClockTime::ZERO));
+        debug!(
+            clock_time_millis = pipeline.clock().map(|clock| clock.time().mseconds()),
+            base_time_millis = pipeline.base_time().map(|time| time.mseconds()),
+            rendered_buffers = stats
+                .as_ref()
+                .and_then(|stats| stats.get::<u64>("rendered").ok()),
+            last_buffer_pts_millis = sample
+                .as_ref()
+                .and_then(|sample| sample.buffer())
+                .and_then(|buffer| buffer.pts())
+                .map(|time| time.mseconds()),
+            ?current,
+            ?pending,
+            output_current = ?output_state.as_ref().map(|state| state.1),
+            output_pending = ?output_state.as_ref().map(|state| state.2),
+            output_factory = sink.as_ref().and_then(|sink| sink.factory()).map(|factory| factory.name().to_string()),
+            "GStreamer output timing"
+        );
     }
 
     pub(super) fn set_buffering(
@@ -365,15 +421,75 @@ impl PlayerPipeline {
         let module_for_setup = Arc::clone(&self.module_decoder);
         pipeline.connect("element-setup", false, move |values| {
             let element = values[1].get::<gst::Element>().expect("playbin element-setup element");
+            if element.factory().is_some_and(|factory| factory.name() == "qtdemux") {
+                element.connect_pad_added(|_, pad| {
+                    pad.add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, |pad, info| {
+                        if !pad.current_caps().is_some_and(|caps| {
+                            caps.structure(0).is_some_and(|caps| caps.name().starts_with("audio/"))
+                        }) {
+                            return gst::PadProbeReturn::Ok;
+                        }
+                        let Some(event) = info.event_mut() else { return gst::PadProbeReturn::Ok; };
+                        let gst::EventView::Segment(value) = event.view() else { return gst::PadProbeReturn::Ok; };
+                        let Some(segment) = value.segment().downcast_ref::<gst::ClockTime>() else { return gst::PadProbeReturn::Ok; };
+                        let mut query = gst::query::Segment::new(gst::Format::Time);
+                        let seek_stop = if pad.query(&mut query) {
+                            match query.result().2 {
+                                gst::GenericFormattedValue::Time(stop) => stop,
+                                _ => None,
+                            }
+                        } else { None };
+                        let end = pad.query_duration::<gst::ClockTime>().into_iter().chain(seek_stop).min();
+                        if let Some(end) = end
+                            && segment.stop().and_then(|stop| segment.to_stream_time(stop)).is_some_and(|stop| stop > end)
+                            && let Some(stop) = segment.position_from_stream_time(end)
+                        {
+                            // qtdemux can add the full AAC duration to a seek position.
+                            // Keep the declared stop within the actual stream and seek bounds.
+                            let mut segment = segment.clone();
+                            segment.set_stop(stop);
+                            event.make_mut().structure_mut().set("segment", segment);
+                        }
+                        gst::PadProbeReturn::Ok
+                    });
+                });
+            }
             if let Some(factory) = element.factory()
                 && factory.klass().split('/').any(|class| class == "Decoder")
-                && factory.static_pad_templates().iter().any(|pad| {
+            {
+                debug!(decoder = %factory.name(), "GStreamer decoder selected");
+                if factory.name() == "flacdec" {
+                    // Headers are already read from caps. Their duplicate buffers
+                    // shift the reused decoder's queued frame timestamps.
+                    element.static_pad("sink").expect("FLAC decoder input").add_probe(
+                        gst::PadProbeType::BUFFER | gst::PadProbeType::BUFFER_LIST,
+                        |pad, info| {
+                            if !pad.current_caps().is_some_and(|caps| {
+                                caps.structure(0).is_some_and(|caps| caps.has_field("streamheader"))
+                            }) {
+                                return gst::PadProbeReturn::Ok;
+                            }
+                            match info.data.as_mut() {
+                                Some(gst::PadProbeData::Buffer(buffer)) if buffer.flags().contains(gst::BufferFlags::HEADER) => gst::PadProbeReturn::Drop,
+                                Some(gst::PadProbeData::BufferList(list)) => {
+                                    list.make_mut().foreach_mut(|buffer, _| {
+                                        std::ops::ControlFlow::Continue((!buffer.flags().contains(gst::BufferFlags::HEADER)).then_some(buffer))
+                                    });
+                                    if list.is_empty() { gst::PadProbeReturn::Drop } else { gst::PadProbeReturn::Ok }
+                                }
+                                _ => gst::PadProbeReturn::Ok,
+                            }
+                        },
+                    );
+                }
+                if factory.static_pad_templates().iter().any(|pad| {
                     pad.direction() == gst::PadDirection::Sink
                         && pad.caps().iter().any(|caps| caps.name() == "audio/x-mod")
                 })
-            {
-                info!(decoder = %factory.name(), "isolating tracker decoder from seeks and preloading");
-                module_for_setup.store(true, Ordering::Relaxed);
+                {
+                    info!(decoder = %factory.name(), "isolating tracker decoder from seeks and preloading");
+                    module_for_setup.store(true, Ordering::Relaxed);
+                }
             }
             None
         });
@@ -493,7 +609,7 @@ impl PlayerPipeline {
         // Keep normalization out of the sink: playbin searches it for a volume
         // control and would otherwise let track gain overwrite the user's volume.
         self.native()?.0.set_property("audio-filter", graph.root());
-        self.native()?.0.set_property("audio-sink", graph.output());
+        self.native()?.0.set_property("audio-sink", graph.sink());
         self.audio_graph = Some(graph);
         Ok(())
     }
@@ -544,9 +660,27 @@ impl PlayerPipeline {
     }
 
     pub(super) fn set_output_volume(&self, volume: f64, muted: bool) {
-        if let Some((pipeline, _)) = self.native.as_ref() {
-            pipeline.set_property("volume", volume.clamp(0.0, 1.0));
-            pipeline.set_property("mute", muted);
+        if let Some(graph) = &self.audio_graph {
+            graph.set_output_volume(volume, muted);
+        }
+    }
+
+    pub(super) fn fade_output(&self, start: Option<f64>, target: f64, duration: Duration) {
+        if let Some(graph) = &self.audio_graph {
+            graph.fade_output(start, target, duration.mul_f64(self.playback_rate));
+        }
+    }
+
+    pub(super) fn fade_finished(&self) -> bool {
+        self.audio_graph
+            .as_ref()
+            .and_then(AudioGraph::fade_end)
+            .is_none_or(|end| self.position().is_some_and(|position| position >= end))
+    }
+
+    pub(super) fn retarget_output(&self, target: f64, muted: bool) {
+        if let Some(graph) = &self.audio_graph {
+            graph.retarget_output(target, muted);
         }
     }
 
@@ -566,7 +700,8 @@ impl PlayerPipeline {
     fn apply_requested_state(&self) -> Result<gst::StateChangeSuccess, String> {
         let requested = self.requested_state.get();
         let waiting = requested == gst::State::Playing && self.is_buffering();
-        let state = if waiting {
+        let seeking = self.seek_in_progress();
+        let state = if waiting || seeking {
             gst::State::Paused
         } else {
             requested
@@ -598,7 +733,7 @@ impl PlayerPipeline {
         }
         // A prepared handoff must wait for Playing, even if pausing to refill
         // completed synchronously.
-        if waiting && !self.live.get() {
+        if seeking || waiting && !self.live.get() {
             Ok(gst::StateChangeSuccess::Async)
         } else {
             Ok(result)
@@ -618,6 +753,7 @@ impl PlayerPipeline {
             let _ = pipeline.set_state(gst::State::Null);
         }
         self.id = None;
+        self.initial_stream_started = false;
         self.current_stream = None;
         *lock_recover(&self.queued_loudness) = TrackLoudness::default();
         *lock_recover(&self.gapless) = GaplessPlayback::default();
@@ -677,7 +813,32 @@ impl PlayerPipeline {
             seek: Some(event.seqnum()),
             done: false,
             starts_stream,
+            progress: if flags.contains(gst::SeekFlags::FLUSH) {
+                SeekProgress::Pausing(event.clone())
+            } else {
+                SeekProgress::Ready
+            },
         };
+        if flags.contains(gst::SeekFlags::FLUSH) {
+            let result = self
+                .native()?
+                .0
+                .set_state(gst::State::Paused)
+                .map_err(|error| error.to_string());
+            match result {
+                Ok(gst::StateChangeSuccess::NoPreroll) => self.live.set(true),
+                Err(error) => {
+                    self.segment
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .progress = SeekProgress::Ready;
+                    return Err(error);
+                }
+                _ => {}
+            }
+            self.complete_seek()?;
+            return Ok(());
+        }
         self.native()?
             .0
             .send_event(event)
@@ -685,27 +846,96 @@ impl PlayerPipeline {
             .ok_or_else(|| "GStreamer segment seek failed".to_string())
     }
 
+    pub(super) fn seek_in_progress(&self) -> bool {
+        !matches!(
+            self.segment
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .progress,
+            SeekProgress::Ready
+        )
+    }
+
+    pub(super) fn has_prerolled(&self) -> bool {
+        let Some((pipeline, _)) = &self.native else {
+            return false;
+        };
+        let (result, current, pending) = pipeline.state(gst::ClockTime::ZERO);
+        matches!(
+            result,
+            Ok(gst::StateChangeSuccess::Success | gst::StateChangeSuccess::NoPreroll)
+        ) && current == gst::State::Paused
+            && pending == gst::State::VoidPending
+    }
+
+    pub(super) fn complete_seek(&self) -> Result<(), String> {
+        if !self.has_prerolled() {
+            return Ok(());
+        }
+        let pipeline = &self.native()?.0;
+        let progress = {
+            let mut segment = self.segment.lock().unwrap_or_else(|p| p.into_inner());
+            match std::mem::take(&mut segment.progress) {
+                SeekProgress::Pausing(event) => {
+                    segment.progress = SeekProgress::Preroll;
+                    Some(event)
+                }
+                SeekProgress::Preroll => None,
+                SeekProgress::Ready => return Ok(()),
+            }
+        };
+        if let Some(event) = progress {
+            if !pipeline.send_event(event) {
+                self.segment
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .progress = SeekProgress::Ready;
+                let _ = self.apply_requested_state();
+                return Err("GStreamer segment seek failed".to_string());
+            }
+            // Live sources cannot preroll. Other sinks can finish the flush
+            // synchronously, so neither case needs another bus message.
+            if self.live.get() || self.has_prerolled() {
+                self.segment
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .progress = SeekProgress::Ready;
+                self.apply_requested_state()?;
+            }
+        } else {
+            self.apply_requested_state()?;
+        }
+        Ok(())
+    }
+
     pub(super) fn set_playback_rate(
         &mut self,
         rate: f64,
-        seek_current_position: bool,
+        seek_position_millis: Option<u64>,
         settings: &BackendAudioSettings,
     ) -> Result<bool, String> {
         let previous_rate = self.playback_rate;
+        let fade = seek_position_millis
+            .and_then(|_| self.position())
+            .and_then(|position| self.audio_graph.as_ref()?.fade_at(position))
+            .map(|(start, target, duration)| (start, target, duration.div_f64(previous_rate)));
         self.playback_rate = sanitize_playback_rate(rate);
         let result = (|| {
             self.configure_audio(settings)?;
-            let position = seek_current_position.then(|| self.position()).flatten();
-            match position {
-                Some(position) => self
-                    .seek_physical_millis(position.mseconds())
-                    .map(|()| true),
+            if let Some((start, target, duration)) = fade {
+                self.fade_output(Some(start), target, duration);
+            }
+            match seek_position_millis {
+                Some(position) => self.seek_physical_millis(position).map(|()| true),
                 None => Ok(false),
             }
         })();
         if result.is_err() {
             self.playback_rate = previous_rate;
             let _ = self.configure_audio(settings);
+            if let Some((start, target, duration)) = fade {
+                self.fade_output(Some(start), target, duration);
+            }
         }
         result
     }

@@ -12,6 +12,12 @@ use crate::{
 
 const LOCAL_FILE_PAGE_LIMIT: usize = 128;
 
+#[derive(Clone, Debug)]
+pub enum LocalMediaLocation {
+    File(std::path::PathBuf),
+    Document(String),
+}
+
 #[derive(Debug, FromRow)]
 pub struct ObservedMediaFile {
     pub path: String,
@@ -284,10 +290,11 @@ impl Database {
         let prefix = crate::source_window::quote(&prefix);
         let separator = crate::source_window::quote(&separator.to_string());
         let tail = format!("substr(path,length({prefix})+1)");
-        let folders: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT DISTINCT {prefix}||CASE WHEN instr({tail},{separator})>0 THEN substr({tail},1,instr({tail},{separator})-1) ELSE {tail} END
+        let folders: Vec<(String, Option<String>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "WITH folders(path) AS (SELECT DISTINCT {prefix}||CASE WHEN instr({tail},{separator})>0 THEN substr({tail},1,instr({tail},{separator})-1) ELSE {tail} END
                 FROM local_files WHERE source_key=?1 AND kind='directory'
-                  AND path>={prefix} AND path<{prefix}||char(1114111) AND {tail}<>''"
+                  AND path>={prefix} AND path<{prefix}||char(1114111) AND {tail}<>'')
+              SELECT folders.path,file.relative_path FROM folders LEFT JOIN local_files file ON file.source_key=?1 AND file.path=folders.path"
         ))).bind(source).fetch_all(&mut *transaction).await?;
         let tracks = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT object_id FROM tracks WHERE source_key=?1 AND source_path>={prefix}
@@ -301,8 +308,13 @@ impl Database {
         Ok((
             folders
                 .into_iter()
-                .map(|path| {
-                    let name = folder_path_name(&path);
+                .map(|(path, relative)| {
+                    let name = folder_path_name(
+                        relative
+                            .as_deref()
+                            .filter(|name| !name.is_empty())
+                            .unwrap_or(&path),
+                    );
                     (path, name)
                 })
                 .collect(),
@@ -392,6 +404,26 @@ impl Database {
         Ok(usize::try_from(count?).unwrap_or_default())
     }
 
+    pub async fn downloaded_media_count(
+        &self,
+        media_uris: &[String],
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<i64> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        Ok(sqlx::query_scalar("SELECT count(DISTINCT media_uri) FROM main.local_locators WHERE origin='download' AND media_uri IN (SELECT value FROM json_each(?1))")
+            .bind(serde_json::to_string(media_uris)?).fetch_one(&mut *connection).await?)
+    }
+
+    pub async fn downloaded_media_uris(
+        &self,
+        media_uris: &[String],
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<String>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        Ok(sqlx::query_scalar("SELECT DISTINCT media_uri FROM main.local_locators WHERE origin='download' AND media_uri IN (SELECT value FROM json_each(?1))")
+            .bind(serde_json::to_string(media_uris)?).fetch_all(&mut *connection).await?)
+    }
+
     pub async fn download_metadata(
         &self,
         media_uri: &str,
@@ -423,33 +455,66 @@ impl Database {
     }
 
     /// Paths admitted on this device, including downloaded and mapped copies.
-    pub async fn local_media_paths(
+    pub async fn local_media_locations(
         &self,
         uris: &[String],
-    ) -> LibraryResult<Vec<(String, Vec<std::path::PathBuf>, bool)>> {
+    ) -> LibraryResult<Vec<(String, Vec<LocalMediaLocation>, bool)>> {
+        let backings = uris
+            .iter()
+            .map(|uri| {
+                crate::cue_media_parts(uri)
+                    .map(|(_, backing, _, _)| backing)
+                    .filter(|backing| crate::document_media_id(backing).is_some())
+            })
+            .collect::<Vec<_>>();
         let mut connection = self.acquire_reader().await?;
         let rows: Vec<(String, String, bool, bool)> = sqlx::query_as(
             "SELECT requested.value,
                 (SELECT json_group_array(path) FROM (
-                    SELECT path FROM main.local_locators WHERE media_uri=requested.value
+                    SELECT CASE WHEN access_uri LIKE 'content:%' THEN access_uri ELSE path END AS path FROM main.local_locators WHERE media_uri IN (requested.value,json_extract(?2,'$[' || requested.key || ']'))
                     UNION SELECT source_path FROM catalog.tracks
                       WHERE media_uri=requested.value AND source_path IS NOT NULL
-                        AND (media_uri LIKE 'file:%' OR media_uri LIKE 'rufin:cue/%'))),
+                        AND (media_uri LIKE 'file:%' OR media_uri LIKE 'rufin:cue/%')
+                    UNION SELECT track.source_path FROM catalog.tracks track JOIN local_files file ON file.source_key=track.source_key AND file.path=track.source_path
+                      WHERE track.media_uri=requested.value AND track.source_path LIKE 'rufin-document:%')),
                 EXISTS(SELECT 1 FROM connect_collection WHERE media_uri=requested.value),
                 EXISTS(SELECT 1 FROM main.playlist_entries WHERE media_uri=requested.value)
                     OR EXISTS(SELECT 1 FROM queue_occurrences WHERE media_uri=requested.value AND NOT received_from_connect)
              FROM json_each(?1) requested",
         )
         .bind(serde_json::to_string(uris)?)
+        .bind(serde_json::to_string(&backings)?)
         .fetch_all(&mut *connection).await?;
         rows.into_iter()
             .map(|(uri, paths, shared, direct)| {
-                let mut paths: Vec<std::path::PathBuf> = serde_json::from_str(&paths)?;
+                let paths: Vec<String> = serde_json::from_str(&paths)?;
+                let mut paths = paths
+                    .into_iter()
+                    .map(|path| {
+                        if path.starts_with("content:") {
+                            Ok(LocalMediaLocation::Document(path))
+                        } else if path.starts_with("rufin-document:") {
+                            crate::document_access_uri(&path)
+                                .map(LocalMediaLocation::Document)
+                                .ok_or(LibraryError::InvalidRequest(
+                                    "Document locator has no access URI".into(),
+                                ))
+                        } else {
+                            Ok(LocalMediaLocation::File(path.into()))
+                        }
+                    })
+                    .collect::<LibraryResult<Vec<_>>>()?;
                 // A direct import can be checked before its metadata has been read.
                 if direct && !shared {
                     let backing = crate::cue_media_parts(&uri).map(|(_, backing, _, _)| backing);
                     if let Some(path) = crate::file_media_path(backing.as_deref().unwrap_or(&uri)) {
-                        paths.push(path);
+                        paths.push(LocalMediaLocation::File(path));
+                    } else if let Some(uri) = backing
+                        .as_deref()
+                        .or(Some(uri.as_str()))
+                        .filter(|uri| uri.starts_with("content:"))
+                    {
+                        paths.push(LocalMediaLocation::Document(uri.to_owned()));
                     }
                 }
                 Ok((uri, paths, shared))
@@ -979,6 +1044,18 @@ fn validate_local_access(access: &LocalAccessWrite) -> LibraryResult<()> {
 }
 
 impl Database {
+    pub async fn upsert_local_locator(
+        &self,
+        locator: &LocalLocatorWrite,
+    ) -> LibraryResult<LocalAccessFileKey> {
+        let mut writer = self.writer().await?;
+        write_local_locator(
+            writer.as_mut().ok_or(LibraryError::WriterUnavailable)?,
+            locator,
+        )
+        .await
+    }
+
     pub async fn import_local_locators_jsonl(
         &self,
         input: impl std::io::BufRead,

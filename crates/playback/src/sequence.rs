@@ -17,6 +17,7 @@ impl BatchItem {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Batch {
     pub(crate) input: library::QueueInput,
+    pub(crate) context_title: Option<Arc<library::QueueContextTitle>>,
     pub(crate) shuffle_seed: u64,
     pub(crate) random_start: bool,
     pub(crate) shuffled: bool,
@@ -33,6 +34,7 @@ impl Batch {
     pub fn from_input(input: library::QueueInput) -> Self {
         Self {
             input,
+            context_title: None,
             shuffle_seed: 0,
             random_start: false,
             shuffled: false,
@@ -43,8 +45,15 @@ impl Batch {
         self.random_start = random_start;
         self
     }
+    pub fn with_context_title(mut self, title: Option<Arc<library::QueueContextTitle>>) -> Self {
+        self.context_title = title;
+        self
+    }
     pub fn input(&self) -> &library::QueueInput {
         &self.input
+    }
+    pub fn context_title(&self) -> Option<&Arc<library::QueueContextTitle>> {
+        self.context_title.as_ref()
     }
     pub fn shuffled_seed(&self) -> Option<u64> {
         self.shuffled.then_some(self.shuffle_seed)
@@ -67,6 +76,7 @@ impl Batch {
                     Provenance::Context {
                         context_id,
                         source_rank,
+                        ..
                     },
                 ) = items.get(index)?
                 else {
@@ -187,6 +197,11 @@ impl Sequence {
     pub(crate) fn entry_at(&self, index: usize) -> Option<&library::QueueEntry> {
         self.members.get(*self.order.get(index)? as usize)
     }
+    pub(crate) fn member_at(&self, index: usize, occurrence: &str) -> Option<&library::QueueEntry> {
+        self.members
+            .get(index)
+            .filter(|entry| entry.occurrence.as_str() == occurrence)
+    }
     pub(crate) fn selected_id(&self) -> Option<&OccurrenceId> {
         Some(&self.entry_at(self.selected_index?)?.occurrence)
     }
@@ -225,7 +240,7 @@ impl Sequence {
     }
     pub fn context_index(&self, context_id: &str, uri: &str, rank: usize) -> Option<usize> {
         self.order.iter().position(|&i| { let e = &self.members[i as usize];
-            e.media_uri.as_ref() == uri && matches!(&e.provenance, Provenance::Context { context_id: c, source_rank } if c.as_ref() == context_id && *source_rank == rank) })
+            e.media_uri.as_ref() == uri && matches!(&e.provenance, Provenance::Context { context_id: c, source_rank, .. } if c.as_ref() == context_id && *source_rank == rank) })
     }
     pub fn repeat_mode(&self) -> RepeatMode {
         self.repeat_mode

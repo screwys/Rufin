@@ -3,6 +3,7 @@
 pub(crate) mod artwork;
 pub(crate) mod cue;
 pub(crate) mod discovery;
+pub(crate) mod documents;
 pub(crate) mod local;
 pub(crate) mod lofty;
 pub(crate) mod media;

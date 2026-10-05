@@ -241,8 +241,13 @@ fn library_sources_page(
         download_folder_row.set_subtitle(
             &download_settings
                 .directory
-                .as_deref()
-                .map(desktop_integration::display_path)
+                .as_ref()
+                .map(|directory| {
+                    directory
+                        .native()
+                        .map(desktop_integration::display_path)
+                        .unwrap_or_else(|| directory.to_string())
+                })
                 .unwrap_or_else(|| tr(DEFAULT_DOWNLOAD_DIRECTORY_SUBTITLE)),
         );
         reset_folder.set_visible(download_settings.directory.is_some());

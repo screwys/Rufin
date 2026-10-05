@@ -3,6 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 use ::library::{AlbumRow, ArtistRow, PlaylistRow, QueuePageRow, SmartPlaylistRow, TrackRow};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
+#[cfg(test)]
 use gtk::glib;
 
 use crate::format_duration_units;
@@ -94,37 +95,7 @@ impl TrackPresentation for library::HistoryRow {
         )
     }
     fn field(&self, field: LibraryField) -> String {
-        match field {
-            LibraryField::Bitrate
-            | LibraryField::SampleRate
-            | LibraryField::BitDepth
-            | LibraryField::Channels => audio_property_field(&self.audio_properties, field),
-            LibraryField::Format => self.source_format.clone().unwrap_or_default(),
-            LibraryField::FilePath => self.source_path.clone().unwrap_or_default(),
-            LibraryField::Source => self.source_name.clone().unwrap_or_default(),
-            LibraryField::Title | LibraryField::TitleMerged => self.title.clone(),
-            LibraryField::Artist => self.artist.clone(),
-            LibraryField::Album => self.album.clone(),
-            LibraryField::AlbumArtist => self.album_display_artist.clone().unwrap_or_default(),
-            LibraryField::Year => optional_year(self.year),
-            LibraryField::ReleaseDate => self.release_date.clone().unwrap_or_default(),
-            LibraryField::DateAdded => self.date_added.clone().unwrap_or_default(),
-            LibraryField::LastPlayed => display_unix_date(self.last_played),
-            LibraryField::PlayCount => count(self.play_count),
-            LibraryField::Genre => self.genre.clone(),
-            LibraryField::Bpm => self.bpm.map(|value| value.to_string()).unwrap_or_default(),
-            LibraryField::UserRating => stored_rating(self.rating),
-            LibraryField::DiscNumber => self
-                .disc_number
-                .map(|value| value.to_string())
-                .unwrap_or_default(),
-            LibraryField::TrackNumber => optional_track_number(self.disc_number, self.track_number),
-            LibraryField::Duration => {
-                crate::format_duration((self.duration_millis.max(0) / 1_000) as u32)
-            }
-            LibraryField::Favorite => favorite_text(self.favorite),
-            _ => String::new(),
-        }
+        rufin_core::settings::presentation::history_field(self, field)
     }
 }
 
@@ -143,37 +114,7 @@ impl TrackPresentation for library::SmartPlaylistTrackRow {
         )
     }
     fn field(&self, field: LibraryField) -> String {
-        match field {
-            LibraryField::Bitrate
-            | LibraryField::SampleRate
-            | LibraryField::BitDepth
-            | LibraryField::Channels => audio_property_field(&self.audio_properties, field),
-            LibraryField::Format => self.source_format.clone().unwrap_or_default(),
-            LibraryField::FilePath => self.source_path.clone().unwrap_or_default(),
-            LibraryField::Source => self.source_name.clone().unwrap_or_default(),
-            LibraryField::Title | LibraryField::TitleMerged => self.title.clone(),
-            LibraryField::Artist => self.artist.clone(),
-            LibraryField::Album => self.album.clone(),
-            LibraryField::AlbumArtist => self.album_display_artist.clone().unwrap_or_default(),
-            LibraryField::Year => optional_year(self.year),
-            LibraryField::ReleaseDate => self.release_date.clone().unwrap_or_default(),
-            LibraryField::DateAdded => self.date_added.clone().unwrap_or_default(),
-            LibraryField::LastPlayed => display_unix_date(self.last_played),
-            LibraryField::PlayCount => count(self.play_count),
-            LibraryField::UserRating => stored_rating(self.rating),
-            LibraryField::Genre => self.genre.clone(),
-            LibraryField::Bpm => self.bpm.map(|value| value.to_string()).unwrap_or_default(),
-            LibraryField::DiscNumber => self
-                .disc_number
-                .map(|value| value.to_string())
-                .unwrap_or_default(),
-            LibraryField::TrackNumber => optional_track_number(self.disc_number, self.track_number),
-            LibraryField::Duration => {
-                crate::format_duration((self.duration_millis.max(0) / 1_000) as u32)
-            }
-            LibraryField::Favorite => favorite_text(self.favorite),
-            _ => String::new(),
-        }
+        rufin_core::settings::presentation::smart_track_field(self, field)
     }
 }
 
@@ -340,75 +281,9 @@ pub fn smart_playlist_field(playlist: &SmartPlaylistRow, field: LibraryField) ->
         _ => String::new(),
     }
 }
-pub fn track_field(track: &TrackRow, field: LibraryField) -> String {
-    match field {
-        LibraryField::Bitrate
-        | LibraryField::SampleRate
-        | LibraryField::BitDepth
-        | LibraryField::Channels => audio_property_field(&track.audio_properties, field),
-        LibraryField::Format => track.source_format.clone().unwrap_or_default(),
-        LibraryField::FilePath => track.source_path.clone().unwrap_or_default(),
-        LibraryField::Source => track.source_name.clone(),
-        LibraryField::Title | LibraryField::TitleMerged => track.title.clone(),
-        LibraryField::Artist => track.artist.clone(),
-        LibraryField::AlbumArtist => joined_credits(&track.album_artists),
-        LibraryField::Album => track.album.clone(),
-        LibraryField::Year => optional_year(track.year),
-        LibraryField::ReleaseDate => track.release_date.clone().unwrap_or_default(),
-        LibraryField::DateAdded => track.date_added.clone().unwrap_or_default(),
-        LibraryField::LastPlayed => display_unix_date(track.last_played),
-        LibraryField::PlayCount => count(track.play_count),
-        LibraryField::UserRating => stored_rating(track.rating),
-        LibraryField::Genre => track
-            .genres
-            .iter()
-            .map(|genre| genre.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", "),
-        LibraryField::Bpm => track.bpm.map(|bpm| bpm.to_string()).unwrap_or_default(),
-        LibraryField::DiscNumber => track.disc_number.to_string(),
-        LibraryField::TrackNumber => {
-            optional_track_number(Some(track.disc_number), Some(track.track_number))
-        }
-        LibraryField::Duration => {
-            crate::format_duration((track.duration_millis.max(0) / 1_000) as u32)
-        }
-        LibraryField::Favorite => favorite_text(track.favorite),
-        _ => String::new(),
-    }
-}
-
-pub fn audio_property_field(properties: &library::AudioProperties, field: LibraryField) -> String {
-    match field {
-        LibraryField::Bitrate => properties
-            .bitrate_kbps
-            .filter(|value| *value > 0)
-            .map(|value| format!("{value} kbps")),
-        LibraryField::SampleRate => properties
-            .sample_rate_hz
-            .filter(|value| *value > 0)
-            .map(|value| format!("{} kHz", f64::from(value) / 1000.0)),
-        LibraryField::BitDepth => properties
-            .bit_depth
-            .filter(|value| *value > 0)
-            .map(|value| value.to_string()),
-        LibraryField::Channels => properties
-            .channels
-            .filter(|value| *value > 0)
-            .map(|value| value.to_string()),
-        _ => None,
-    }
-    .unwrap_or_default()
-}
-
-pub fn optional_track_number(disc: Option<i64>, track: Option<i64>) -> String {
-    match (disc, track) {
-        (Some(disc), Some(track)) => format!("{disc}-{track:02}"),
-        (_, Some(track)) => track.to_string(),
-        _ => String::new(),
-    }
-}
-
+pub use rufin_core::settings::presentation::{
+    audio_property_field, optional_track_number, track_field,
+};
 pub fn opaque_artwork(binding: Option<&[u8]>) -> ArtworkBinding {
     binding.map(ArtworkBinding::opaque).unwrap_or_default()
 }
@@ -661,33 +536,9 @@ pub fn play_count_column_width() -> i32 {
 pub fn compact_header_column_width(header: &str, min_width: i32) -> i32 {
     crate::table_sizing::compact_header_text_width(&tr(header), min_width)
 }
-pub fn count(value: i64) -> String {
-    value.max(0).to_string()
-}
-
-pub fn stored_rating(value: Option<i64>) -> String {
-    value
-        .map(|value| format!("{:.1}", value as f64 / 2.0))
-        .unwrap_or_default()
-}
-
-pub fn optional_year(year: Option<i64>) -> String {
-    year.filter(|year| *year != 0)
-        .map(|year| year.to_string())
-        .unwrap_or_default()
-}
-
-pub fn display_unix_date(value: Option<i64>) -> String {
-    value
-        .and_then(|value| glib::DateTime::from_unix_local(value).ok())
-        .and_then(|value| value.format("%Y-%m-%d %H:%M").ok())
-        .map(|value| value.to_string())
-        .unwrap_or_default()
-}
-pub fn favorite_text(favorite: bool) -> String {
-    if favorite { "♥" } else { "" }.to_string()
-}
-use crate::detail_links::joined_credits;
+pub use rufin_core::settings::presentation::{
+    count, display_unix_date, favorite_text, optional_year, stored_rating,
+};
 
 #[cfg(test)]
 mod tests {

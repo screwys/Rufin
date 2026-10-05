@@ -280,6 +280,7 @@ pub async fn resolve_queue(
 ) -> library::QueueRestore {
     let mut page = database
         .read_queue(library::QueueReadRequest::Capture {
+            context_title: None,
             input: Box::new(input),
             anchor_index,
             random_start: None,

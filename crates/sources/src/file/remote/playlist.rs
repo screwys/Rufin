@@ -4,10 +4,10 @@ use std::path::Path;
 use library::{Database, PlaylistFile, PlaylistImportReport, PlaylistKey, PlaylistPathMode};
 use url::Url;
 
-use super::{RemoteSource, input::FileInput, metadata::WorkingFile};
+use super::{FileSource, input::FileInput, metadata::WorkingFile};
 use crate::{SourceError, SourceResult};
 
-impl RemoteSource {
+impl FileSource {
     pub(crate) async fn import_playlist_file(
         &self,
         database: &Database,
@@ -15,10 +15,15 @@ impl RemoteSource {
         target: Option<PlaylistKey>,
     ) -> SourceResult<PlaylistImportReport> {
         let location = self.location(path)?;
+        let display_path = if self.document_access().is_some() {
+            crate::file::documents::display_path(path)
+        } else {
+            path.to_owned()
+        };
         let copy = self.working_copy(path, &location).await.map_err(error)?;
         let mut playlist = PlaylistFile::read(
             BufReader::new(std::fs::File::open(&copy.file).map_err(error)?),
-            Path::new(&location),
+            Path::new(&display_path),
         )?;
         if target.is_none() {
             playlist.identity = None;
@@ -27,7 +32,7 @@ impl RemoteSource {
         let entries = std::mem::take(&mut playlist.entries);
         playlist.entries.reserve(entries.len());
         for mut entry in entries {
-            if let Some(location) = self.playlist_location(path, &entry.locator) {
+            if let Some(location) = self.playlist_location(path, &entry.locator).await? {
                 if database
                     .file_path_is_rejected(&self.source_id, &location)
                     .await?
@@ -42,7 +47,10 @@ impl RemoteSource {
                         library::source_entity_uri(
                             &self.source_id,
                             "track",
-                            &format!("file:{:016x}", crate::policy::stable_hash(&location)),
+                            &format!(
+                                "file:{:016x}",
+                                crate::policy::stable_hash(&super::file_identity(&location))
+                            ),
                         )
                     });
             }
@@ -64,6 +72,11 @@ impl RemoteSource {
         expected_revision: Option<&str>,
     ) -> SourceResult<()> {
         self.location(path)?;
+        let display_path = if self.document_access().is_some() {
+            crate::file::documents::display_path(path)
+        } else {
+            path.to_owned()
+        };
         let input = self.input().await?;
         let (existed, revision) = match self.stat(&input, path).await {
             Ok(file) => {
@@ -92,7 +105,7 @@ impl RemoteSource {
         let prepared = tempfile::NamedTempFile::new().map_err(error)?;
         let mut playlist = PlaylistFile::read(
             BufReader::new(std::fs::File::open(&file).map_err(error)?),
-            Path::new(path),
+            Path::new(&display_path),
         )?;
         for entry in &mut playlist.entries {
             let uri = &entry.locator;
@@ -102,11 +115,18 @@ impl RemoteSource {
                 && observation.cue_start_millis.is_none()
             {
                 let file = self.relative(&observation.path)?;
+                let file = if self.document_access().is_some() {
+                    crate::file::documents::display_path(&file)
+                } else {
+                    file
+                };
                 if mode == PlaylistPathMode::Absolute {
                     entry.locator = self.location(&file)?;
                     continue;
                 }
-                let parent = path.rsplit_once('/').map_or("", |(parent, _)| parent);
+                let parent = display_path
+                    .rsplit_once('/')
+                    .map_or("", |(parent, _)| parent);
                 let parents = parent
                     .split('/')
                     .filter(|part| !part.is_empty())
@@ -137,7 +157,7 @@ impl RemoteSource {
             }
         }
         let mut output = BufWriter::new(prepared.reopen().map_err(error)?);
-        playlist.write(Path::new(path), mode, &mut output)?;
+        playlist.write(Path::new(&display_path), mode, &mut output)?;
         output.flush().map_err(error)?;
         drop(output);
         self.save_file(&WorkingFile {
@@ -157,7 +177,27 @@ impl RemoteSource {
         })
     }
 
-    fn playlist_location(&self, playlist: &str, value: &str) -> Option<String> {
+    async fn playlist_location(&self, playlist: &str, value: &str) -> SourceResult<Option<String>> {
+        if self.document_access().is_some() {
+            let relative = match Url::parse(value) {
+                Ok(uri) if uri.scheme() == "rufin-document" => self.relative(value)?,
+                Ok(_) => return Ok(None),
+                Err(_) => super::referenced_path(
+                    crate::file::documents::relative_parts(playlist).0,
+                    value,
+                )?,
+            };
+            let input = self.input().await?;
+            return match self.stat(&input, &relative).await {
+                Ok(entry) => Ok(Some(entry.path)),
+                Err(SourceError::NotFound) => Ok(Some(self.location(&relative)?)),
+                Err(error) => Err(error),
+            };
+        }
+        Ok(self.network_playlist_location(playlist, value))
+    }
+
+    fn network_playlist_location(&self, playlist: &str, value: &str) -> Option<String> {
         if let Ok(uri) = Url::parse(value) {
             if !uri.username().is_empty()
                 || uri.password().is_some()
@@ -166,10 +206,11 @@ impl RemoteSource {
             {
                 return None;
             }
-            for address in std::iter::once(&self.namespace_url)
-                .chain(std::iter::once(&self.settings.url))
-                .chain(&self.settings.alternate_urls)
-            {
+            for address in std::iter::once(&self.namespace_url).chain(
+                self.network().ok().into_iter().flat_map(|(settings, _)| {
+                    std::iter::once(&settings.url).chain(&settings.alternate_urls)
+                }),
+            ) {
                 let base = super::collection_url(address).ok()?;
                 if uri.scheme() == base.scheme()
                     && uri.host() == base.host()
@@ -196,6 +237,13 @@ impl RemoteSource {
         self.location(to)?;
         let input = self.input().await?;
         match input.input() {
+            FileInput::Documents(access) => {
+                let access = std::sync::Arc::clone(access);
+                let (from, to) = (from.to_owned(), to.to_owned());
+                tokio::task::spawn_blocking(move || access.rename(&from, &to))
+                    .await
+                    .map_err(error)?
+            }
             FileInput::Smb(client) => client.rename(from, to, false).await,
             FileInput::WebDav(client) => {
                 let from = url::Url::parse(&self.input_path(input.input(), from)?)
@@ -220,6 +268,13 @@ impl RemoteSource {
         self.location(path)?;
         let input = self.input().await?;
         match input.input() {
+            FileInput::Documents(access) => {
+                let access = std::sync::Arc::clone(access);
+                let path = path.to_owned();
+                tokio::task::spawn_blocking(move || access.remove(&path))
+                    .await
+                    .map_err(error)?
+            }
             FileInput::Smb(client) => client.remove(path).await,
             FileInput::WebDav(client) => {
                 let url = url::Url::parse(&self.input_path(input.input(), path)?)
@@ -279,7 +334,7 @@ mod tests {
                     "DAV".into(),
                 )
                 .unwrap();
-            let source = RemoteSource::open(&config, None).unwrap();
+            let source = FileSource::open(&config, None).unwrap();
             let directory = tempfile::tempdir().unwrap();
             let database = Database::open(directory.path().join("library.db"))
                 .await

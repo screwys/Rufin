@@ -143,6 +143,12 @@ type Reply<T> = SyncSender<PlaybackResult<T>>;
 type Clock = Arc<dyn Fn() -> ClockSample + Send + Sync>;
 
 enum RuntimeCommand {
+    QueueMembers {
+        offset: usize,
+        limit: usize,
+        matches: Option<Vec<(usize, String)>>,
+        reply: Reply<(Vec<library::QueueEntry>, usize, usize)>,
+    },
     QueueContentId {
         reply: Reply<String>,
     },
@@ -260,6 +266,19 @@ enum PlaybackOutput {
 /// backend polling cadence, and ordered output worker; callers cannot mutate
 /// the session or drive the backend through a second path.
 impl Playback {
+    pub fn queue_members(
+        &self,
+        offset: usize,
+        limit: usize,
+        matches: Option<Vec<(usize, String)>>,
+    ) -> PlaybackResult<(Vec<library::QueueEntry>, usize, usize)> {
+        self.request(|reply| RuntimeCommand::QueueMembers {
+            offset,
+            limit,
+            matches,
+            reply,
+        })
+    }
     pub fn queue_content_id(&self) -> PlaybackResult<String> {
         self.request(|reply| RuntimeCommand::QueueContentId { reply })
     }
@@ -593,6 +612,30 @@ fn apply_runtime_command(
 ) -> bool {
     let sample = clock();
     match command {
+        RuntimeCommand::QueueMembers {
+            offset,
+            limit,
+            matches,
+            reply,
+        } => {
+            let sequence = runtime.session.sequence();
+            let window_offset = runtime
+                .session
+                .external_queue_extent()
+                .map_or(0, |(_, offset)| offset);
+            let entries = match matches {
+                Some(matches) => matches
+                    .into_iter()
+                    .take(limit.min(library::QUEUE_CONTEXT_LIMIT))
+                    .filter_map(|(index, id)| sequence.member_at(index, &id).cloned())
+                    .collect(),
+                None => (offset.saturating_sub(window_offset)..sequence.total())
+                    .take(limit.min(library::QUEUE_CONTEXT_LIMIT))
+                    .filter_map(|index| sequence.entry_at(index).cloned())
+                    .collect(),
+            };
+            let _ = reply.send(Ok((entries, sequence.total(), window_offset)));
+        }
         RuntimeCommand::QueueContentId { reply } => {
             let _ = reply.send(Ok(runtime.session.sequence().content_id().to_owned()));
         }
@@ -969,6 +1012,7 @@ mod persistence_tests {
         for backend_failure in [false, true] {
             let page = database
                 .read_queue(library::QueueReadRequest::Capture {
+                    context_title: None,
                     input: Box::new(library::QueueInput::Items(vec![(
                         QueueItem::direct(
                             "https://example.test/track",
@@ -1171,6 +1215,7 @@ mod persistence_tests {
             .unwrap();
         let page = database
             .read_queue(library::QueueReadRequest::Capture {
+                context_title: None,
                 input: Box::new(library::QueueInput::Uris {
                     order: (1..=4)
                         .map(|key| format!("https://example.test/{key}"))

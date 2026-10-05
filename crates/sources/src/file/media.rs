@@ -1,4 +1,4 @@
-//! One Local media candidate: Lofty metadata with container-specific GStreamer admission.
+//! One Local media candidate: Lofty metadata with GStreamer fallback and MP4 stream separation.
 
 use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
@@ -140,6 +140,30 @@ impl Worker {
     }
 }
 
+pub(crate) fn queue_item(track: ScannedTrack, uri: String) -> library::QueueItem {
+    let mut item = library::QueueItem::direct(
+        uri,
+        track.title,
+        track.artist,
+        track.album,
+        i64::from(track.duration_seconds) * 1000,
+    );
+    item.album_display_artist = Some(track.album_artist);
+    item.disc_number = (track.disc_number > 0).then_some(i64::from(track.disc_number));
+    item.track_number = (track.track_number > 0).then_some(i64::from(track.track_number));
+    item.year = (track.year > 0).then_some(i64::from(track.year));
+    item.source_format = track.source_format;
+    item.musicbrainz_recording_id = track.musicbrainz_recording_id;
+    item.musicbrainz_release_track_id = track.musicbrainz_release_track_id;
+    item.musicbrainz_album_id = track.musicbrainz_album_id;
+    item.musicbrainz_release_group_id = track.musicbrainz_release_group_id;
+    item.primary_artist_musicbrainz_id = track
+        .artists
+        .first()
+        .and_then(|artist| artist.musicbrainz_artist_id.clone());
+    item
+}
+
 pub(crate) fn excluded_from_audio_scan(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -172,12 +196,10 @@ pub(crate) fn read_media_input(
     )
     .ok()
     .flatten()
-    .filter(|file| {
-        requires_topology_admission(file.file_type()) || lofty_supplies_required_audio(file)
-    });
+    .filter(|file| file.file_type() == FileType::Mp4 || lofty_supplies_required_audio(file));
     let discovered = if tagged_file
         .as_ref()
-        .is_none_or(|file| requires_topology_admission(file.file_type()))
+        .is_none_or(|file| file.file_type() == FileType::Mp4)
     {
         match worker.discovery.read_input(file, uri) {
             Ok(Some(metadata)) => Some(metadata),
@@ -338,13 +360,6 @@ fn lofty_duration_seconds(tagged_file: &lofty::file::TaggedFile) -> u32 {
 
 fn lofty_supplies_required_audio(file: &lofty::file::TaggedFile) -> bool {
     !file.properties().duration().is_zero()
-}
-
-fn requires_topology_admission(file_type: FileType) -> bool {
-    matches!(
-        file_type,
-        FileType::Mp4 | FileType::Opus | FileType::Vorbis | FileType::Speex
-    )
 }
 
 // Vorbis-style R128 gain is a signed Q7.8 dB adjustment to the -23 LUFS target.

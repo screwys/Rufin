@@ -11,7 +11,7 @@ use adw::prelude::*;
 use artwork::ArtworkBinding;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gio, glib};
-use library::{ReadCancellation, SearchRequest, SearchResults};
+use library::{ReadCancellation, SearchResults};
 use localization::{msgid, tr};
 use playback::QueuePlacement;
 
@@ -1238,53 +1238,9 @@ async fn acquire_search(
     query: String,
     cancellation: ReadCancellation,
 ) -> Result<[Vec<SearchItem>; 3], String> {
-    if selected.source_id.as_str() == sources::LOCAL_LIBRARY_SOURCE_ID {
-        let database = Arc::clone(&selected.database);
-        let source = selected.source_key;
-        let folder = selected.music_folder_key;
-        let task = selected.runtime.spawn(async move {
-            database
-                .search(
-                    source,
-                    folder,
-                    false,
-                    &SearchRequest::with_limit(query, 60),
-                    &cancellation,
-                )
-                .await
-        });
-        return task
-            .await
-            .map_err(|error| error.to_string())?
-            .map(cached_items)
-            .map_err(|error| error.to_string());
-    }
-    let receiver = selected.operations.search(query.clone(), 60);
-    match receiver.recv().await {
-        Ok(Ok(rows)) => Ok(cached_items(rows)),
-        _ => {
-            let database = Arc::clone(&selected.database);
-            let source = selected.source_key;
-            let folder = selected.music_folder_key;
-            selected
-                .runtime
-                .spawn(async move {
-                    database
-                        .search(
-                            source,
-                            folder,
-                            false,
-                            &SearchRequest::with_limit(query, 60),
-                            &cancellation,
-                        )
-                        .await
-                })
-                .await
-                .map_err(|error| error.to_string())?
-                .map(cached_items)
-                .map_err(|error| error.to_string())
-        }
-    }
+    rufin_core::source::search::acquire_search(selected, query, 60, cancellation)
+        .await
+        .map(cached_items)
 }
 
 fn cached_items(results: SearchResults) -> [Vec<SearchItem>; 3] {

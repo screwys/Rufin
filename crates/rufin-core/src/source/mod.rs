@@ -1,6 +1,10 @@
 //! The configured sources and the one selected Database-backed source session.
 mod availability;
+mod download;
+pub mod folders;
 mod integrations;
+mod pins;
+pub mod search;
 pub use integrations::FileIntegration;
 
 use std::collections::HashMap;
@@ -344,6 +348,7 @@ pub(crate) struct Shared {
     outputs: SourceOutputs,
     operation: tokio::sync::watch::Sender<SourceOperation>,
     catalog_changed: tokio::sync::watch::Sender<()>,
+    configuration_changed: tokio::sync::watch::Sender<()>,
     selected: Mutex<Option<Arc<ActiveSource>>>,
     catalog_counts: Mutex<HashMap<SourceId, (usize, usize)>>,
     observer: Mutex<Option<Arc<SelectedFeed>>>,
@@ -422,6 +427,15 @@ impl Shared {
     }
 
     pub(crate) async fn send(&self, event: SourceEvent) {
+        if matches!(
+            &event,
+            SourceEvent::Configured(_)
+                | SourceEvent::Selected { .. }
+                | SourceEvent::CatalogReplaced { .. }
+                | SourceEvent::ReleaseSelected
+        ) {
+            self.configuration_changed.send_replace(());
+        }
         if matches!(&event, SourceEvent::CatalogPublished(publication) if publication.change != CatalogChange::Home)
         {
             self.catalog_changed.send_replace(());
@@ -533,6 +547,7 @@ impl SourceOwner {
             .map_or(0, |elapsed| elapsed.as_nanos() as i64);
         let shared = Arc::new(Shared {
             catalog_changed: tokio::sync::watch::channel(()).0,
+            configuration_changed: tokio::sync::watch::channel(()).0,
             home_showcase_variation: home_variation,
             home_explore_variation: std::sync::atomic::AtomicI64::new(home_variation),
             artwork,
@@ -630,7 +645,14 @@ impl SourceOwner {
         {
             self.shared.warn_nonfatal(&error);
         }
-        if setup {
+        let connect_setup = self
+            .shared
+            .connect
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .upgrade()
+            .is_some_and(|connect| connect.status().settings.setup_pending);
+        if setup && !connect_setup {
             let current = self.shared.settings.load();
             if let Some(source) = current.sources.selected_source_id.filter(|id| {
                 current
@@ -835,7 +857,6 @@ impl SourceOwner {
             configured.clone(),
             None,
             publication,
-            false,
             Arc::clone(&cancelled),
         )
         .await?;
@@ -886,11 +907,16 @@ impl SourceOwner {
             {
                 owner.shared.warn_nonfatal(&error);
             }
-            owner.start_observer(session, Arc::clone(&selected), cached_start);
+            owner.start_observer(Arc::clone(&session), Arc::clone(&selected));
             if !cached_start {
                 let _ = owner
-                    .manual_refresh_selected(&selected, "cold-select", cancelled)
+                    .refresh_selected(&selected, "cold-select", cancelled, true)
                     .await;
+            } else if selected.configuration.is_local() {
+                let catch_up = owner.clone();
+                owner.shared.runtime.spawn(async move {
+                    catch_up.catch_up_local(session, cancelled).await;
+                });
             }
         });
         Ok(())
@@ -973,7 +999,6 @@ impl SourceOwner {
         configured: ConfiguredSource,
         source: Option<Arc<Source>>,
         publication: library::Publication,
-        catch_up: bool,
         acquisition: Arc<AtomicBool>,
     ) -> Result<(), String> {
         let selected = self.selected_state(configured, source, publication).await?;
@@ -1007,7 +1032,7 @@ impl SourceOwner {
             })
             .await;
         self.publish_operation(SourceOperation::Idle).await;
-        self.start_observer(session, selected, catch_up);
+        self.start_observer(session, selected);
         Ok(())
     }
 
@@ -1033,12 +1058,7 @@ impl SourceOwner {
         }
     }
 
-    fn start_observer(
-        &self,
-        session: Arc<ActiveSource>,
-        selected: Arc<SelectedSourceState>,
-        catch_up: bool,
-    ) {
+    fn start_observer(&self, session: Arc<ActiveSource>, selected: Arc<SelectedSourceState>) {
         let Some(source) = selected.source.clone() else {
             return;
         };
@@ -1058,13 +1078,6 @@ impl SourceOwner {
                 .consume_selected_feed(consumer_session, consumer_observer)
                 .await;
         });
-        if catch_up && selected.configuration.is_local() {
-            let owner = self.clone();
-            let cancelled = observer.cancellation();
-            self.shared.runtime.spawn(async move {
-                owner.catch_up_local(session, cancelled).await;
-            });
-        }
     }
 
     async fn consume_selected_feed(&self, session: Arc<ActiveSource>, observer: Arc<SelectedFeed>) {
@@ -1125,6 +1138,9 @@ impl SourceOwner {
 
     async fn catch_up_local(&self, session: Arc<ActiveSource>, cancelled: Arc<AtomicBool>) {
         let _lane = self.shared.lane.lock().await;
+        if !self.shared.acquisition_is_current(&cancelled) {
+            return;
+        }
         let Some(selected) = session.resolve() else {
             return;
         };
@@ -1140,21 +1156,23 @@ impl SourceOwner {
                 Arc::clone(&cancelled),
             )
             .await;
-        if !cancelled.load(Ordering::Relaxed) {
-            self.finish_refresh(selected.source_id(), result).await;
+        if self.shared.acquisition_is_current(&cancelled) {
+            self.finish_automatic_refresh(selected.source_id(), result)
+                .await;
         }
     }
 
-    async fn manual_refresh_selected(
+    async fn refresh_selected(
         &self,
         selected: &SelectedSourceState,
         trigger: &'static str,
         acquisition: Arc<AtomicBool>,
+        automatic: bool,
     ) -> Result<(), String> {
         if !self.shared.acquisition_is_current(&acquisition) {
             return Err(SourceError::Cancelled.to_string());
         }
-        info!(trigger, source_key = %selected.source_key, "starting explicit source acquisition");
+        info!(trigger, source_key = %selected.source_key, "starting source acquisition");
         let Some(source) = selected.source.as_ref() else {
             self.shared.warn_nonfatal(&source_access_unavailable());
             return Err(source_access_unavailable());
@@ -1164,6 +1182,7 @@ impl SourceOwner {
             source,
             &selected.configuration.name,
             acquisition,
+            automatic,
         )
         .await
     }
@@ -1174,6 +1193,7 @@ impl SourceOwner {
         source: &Source,
         name: &str,
         acquisition: Arc<AtomicBool>,
+        automatic: bool,
     ) -> Result<(), String> {
         if !self.shared.acquisition_is_current(&acquisition) {
             return Err(SourceError::Cancelled.to_string());
@@ -1192,11 +1212,18 @@ impl SourceOwner {
                 Arc::clone(&acquisition),
             )
             .await;
-        let result = outcome.as_ref().map(|_| ()).map_err(string_error);
+        let result = outcome
+            .as_ref()
+            .map(|_| ())
+            .map_err(source_refresh_error_text);
         if !self.shared.acquisition_is_current(&acquisition) {
             return Err(SourceError::Cancelled.to_string());
         }
-        self.finish_refresh(source_id, outcome).await;
+        if automatic {
+            self.finish_automatic_refresh(source_id, outcome).await;
+        } else {
+            self.finish_refresh(source_id, outcome).await;
+        }
         result
     }
 
@@ -1224,7 +1251,18 @@ impl SourceOwner {
             })
             .await;
         }
-        self.finish_refresh(source_id, result).await;
+        if let Err(error) = &result
+            && source_error_is_temporary(error)
+        {
+            warn!(%error, "automatic source refresh unavailable");
+            if let Err(SourceError::IncompleteScan { outcome, .. }) = &result {
+                self.accept_scan(source_id, *outcome, CatalogChange::Acquired)
+                    .await;
+            }
+            self.publish_operation(SourceOperation::Idle).await;
+        } else {
+            self.finish_refresh(source_id, result).await;
+        }
     }
 
     pub(crate) async fn finish_refresh(
@@ -1240,7 +1278,10 @@ impl SourceOwner {
             Ok(_) | Err(SourceError::Cancelled) => SourceOperation::Idle,
             Err(error) => SourceOperation::Failed {
                 source_id: Some(source_id.clone()),
-                message: error.to_string(),
+                message: {
+                    warn!(%error, "source refresh failed");
+                    source_refresh_error_text(&error)
+                },
                 add_form: false,
             },
         };
@@ -1335,14 +1376,15 @@ impl SourceOwner {
                     replacement,
                     Some(Arc::clone(&source)),
                     publication,
-                    false,
                     Arc::clone(&cancelled),
                 )
                 .await?;
                 if let Some(selected) = self.shared.selected() {
-                    let _ = self
-                        .manual_refresh_selected(&selected, "source-edit", Arc::clone(&cancelled))
-                        .await;
+                    self.spawn_serialized(move |owner| async move {
+                        let _ = owner
+                            .refresh_selected(&selected, "source-edit", cancelled, false)
+                            .await;
+                    });
                 }
             } else {
                 if replacement.configuration.is_local() || exclusions_changed {
@@ -1351,6 +1393,7 @@ impl SourceOwner {
                         &source,
                         &replacement.configuration.name,
                         Arc::clone(&cancelled),
+                        false,
                     )
                     .await?;
                 } else {
@@ -1890,6 +1933,10 @@ impl SourceOwner {
         self.shared.catalog_changed.subscribe()
     }
 
+    pub fn configuration_changes(&self) -> tokio::sync::watch::Receiver<()> {
+        self.shared.configuration_changed.subscribe()
+    }
+
     pub fn cached_source_counts(&self, source: &SourceId) -> Option<(usize, usize)> {
         self.shared.cached_source_counts(source)
     }
@@ -2117,7 +2164,6 @@ impl SourceOwner {
                         configured,
                         Some(Arc::clone(&source)),
                         publication,
-                        false,
                         Arc::clone(&cancelled),
                     )
                     .await?;
@@ -2138,7 +2184,7 @@ impl SourceOwner {
                 if let Some(session) = owner.shared.selected_session()
                     && let Some(selected) = session.resolve()
                 {
-                    owner.start_observer(session, selected, false);
+                    owner.start_observer(session, selected);
                 }
                 owner
                     .publish_operation(SourceOperation::Failed {
@@ -2228,7 +2274,7 @@ impl SourceOwner {
                 if let Some(session) = owner.shared.selected_session()
                     && let Some(selected) = session.resolve()
                 {
-                    owner.start_observer(session, selected, false);
+                    owner.start_observer(session, selected);
                 }
                 owner
                     .publish_operation(SourceOperation::Failed {
@@ -2422,6 +2468,61 @@ impl SourceOwner {
         receiver
     }
 
+    pub fn document_roots(&self) -> Result<Vec<sources::DocumentRoot>, String> {
+        let stored = self.shared.settings.load();
+        let Some(local) = stored
+            .sources
+            .configured
+            .iter()
+            .find(|source| source.configuration.is_local())
+        else {
+            return Ok(Vec::new());
+        };
+        match local.configuration.editable().map_err(string_error)? {
+            sources::EditableSource::Local { document_roots, .. } => Ok(document_roots),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn add_document_roots(
+        &self,
+        added: Vec<sources::DocumentRoot>,
+    ) -> Receiver<Result<(), String>> {
+        let (sender, receiver) = async_channel::bounded(1);
+        let cancelled = self.shared.begin_acquisition();
+        self.spawn_serialized(move |owner| async move {
+            let result = async {
+                let source = owner.ensure_local_source().await?;
+                let mut roots = owner.document_roots()?;
+                for mut root in added {
+                    if let Some(current) = roots.iter_mut().find(|current| current.uri == root.uri)
+                    {
+                        root.id = current.id.clone();
+                        *current = root;
+                    } else {
+                        roots.push(root);
+                    }
+                }
+                owner
+                    .edit_configured_source(
+                        source.source_id().clone(),
+                        SourceSettingsInput::LocalDocuments { roots },
+                        Arc::clone(&cancelled),
+                    )
+                    .await?;
+                if owner.shared.selected().is_none() {
+                    owner
+                        .select_now(source.source_id().clone(), cancelled)
+                        .await?;
+                }
+                Ok(())
+            }
+            .await;
+            let _ = sender.send(result).await;
+        });
+        receiver
+    }
+
     pub fn replace_local_folder(&self, current: String, replacement: PathBuf) {
         edit_local_roots(self, move |roots| {
             if let Some(root) = roots
@@ -2461,7 +2562,7 @@ impl SourceOwner {
             let result = match result {
                 Ok((source, configuration)) => {
                     owner
-                        .refresh_now(&source_id, &source, &configuration.name, acquisition)
+                        .refresh_now(&source_id, &source, &configuration.name, acquisition, false)
                         .await
                 }
                 Err(message) => {
@@ -2725,6 +2826,19 @@ impl SourceOwner {
         self.shared.downloads.connect_changed();
     }
 
+    pub(crate) async fn connect_artwork_changed(&self) {
+        if let Ok(playback) = self.shared.playback() {
+            playback.catalog_changed();
+        }
+        self.shared
+            .send(SourceEvent::CatalogPublished(CatalogPublication {
+                source_key: None,
+                favorite: None,
+                change: CatalogChange::Broad,
+            }))
+            .await;
+    }
+
     pub fn download_media(&self, subject: downloads::DownloadSubject, media_uris: Vec<String>) {
         self.spawn_serialized(move |owner| async move {
             let mut source_ids = media_uris
@@ -2766,6 +2880,7 @@ impl SourceOwner {
         target: FavoriteTarget,
         favorite: bool,
     ) -> Receiver<Result<bool, String>> {
+        info!(kind = target.kind(), favorite, "Favorite requested");
         let (sender, receiver) = async_channel::bounded(1);
         self.spawn_serialized(move |owner| async move {
             let result = match owner.apply_favorite(target.clone(), favorite).await {
@@ -2831,7 +2946,7 @@ impl ActiveSource {
                 crate::runtime::LibraryRefreshTrigger::NewlyAdded => "home-newly-added",
             };
             owner
-                .manual_refresh_selected(&selected, label, acquisition)
+                .refresh_selected(&selected, label, acquisition, false)
                 .await
         })
     }
@@ -3433,13 +3548,19 @@ impl SourceOwner {
         };
         match source.set_favorite(kind, &object_id, favorite).await {
             Ok(()) => {
-                let _ = self
+                let acknowledgement = self
                     .shared
                     .database
                     .acknowledge_remote_favorite(&target, favorite)
                     .await;
+                info!(
+                    favorite,
+                    acknowledged = matches!(acknowledgement, Ok(true)),
+                    "Favorite delivered"
+                );
             }
             Err(error) if source_error_is_temporary(&error) => {
+                info!(favorite, "Favorite delivery deferred");
                 let _ = self
                     .shared
                     .database
@@ -3447,6 +3568,7 @@ impl SourceOwner {
                     .await;
             }
             Err(_) => {
+                info!(favorite, "Favorite delivery rejected");
                 if let Ok(Some(previous)) = self
                     .shared
                     .database
@@ -3494,6 +3616,9 @@ fn favorite_object(
 }
 
 fn source_error_is_temporary(error: &SourceError) -> bool {
+    if let SourceError::IncompleteScan { error, .. } = error {
+        return source_error_is_temporary(error);
+    }
     source_error_allows_cache(error)
         || matches!(
             error,
@@ -3663,6 +3788,9 @@ fn ui_selected(
 }
 
 pub(crate) fn source_error_allows_cache(error: &SourceError) -> bool {
+    if let SourceError::IncompleteScan { error, .. } = error {
+        return source_error_allows_cache(error);
+    }
     matches!(
         error,
         SourceError::Network(_)
@@ -3671,6 +3799,14 @@ pub(crate) fn source_error_allows_cache(error: &SourceError) -> bool {
                 ..
             }
     )
+}
+
+fn source_refresh_error_text(error: &SourceError) -> String {
+    if source_error_allows_cache(error) {
+        localization::tr("Server is unreachable")
+    } else {
+        error.to_string()
+    }
 }
 
 fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource, String> {
@@ -4189,6 +4325,42 @@ mod artwork_preparation_tests {
             }
             assert_eq!(refreshing, visible);
         }
+
+        for error in [
+            SourceError::Network("connection refused".into()),
+            SourceError::IncompleteScan {
+                outcome: ScanOutcome::Identical(publication),
+                error: Box::new(SourceError::Network("connection timed out".into())),
+            },
+        ] {
+            while receiver.try_recv().is_ok() {}
+            owner.finish_automatic_refresh(&source_id, Err(error)).await;
+            assert!(matches!(
+                *owner.shared.operation.borrow(),
+                SourceOperation::Idle
+            ));
+            while let Ok(event) = receiver.try_recv() {
+                assert!(!matches!(
+                    event,
+                    SourceEvent::Operation(SourceOperation::Failed { .. })
+                ));
+            }
+        }
+        owner
+            .finish_refresh(
+                &source_id,
+                Err(SourceError::Network("connection refused".into())),
+            )
+            .await;
+        assert!(matches!(&*owner.shared.operation.borrow(),
+            SourceOperation::Failed { message, .. } if message == "Server is unreachable"));
+        owner
+            .finish_automatic_refresh(&source_id, Err(SourceError::Auth("Login expired".into())))
+            .await;
+        assert!(matches!(
+            *owner.shared.operation.borrow(),
+            SourceOperation::Failed { .. }
+        ));
 
         let image = directory.path().join("cover.png");
         image::RgbaImage::from_pixel(16, 16, image::Rgba([30, 80, 160, 255]))

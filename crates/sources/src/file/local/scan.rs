@@ -20,7 +20,7 @@ use crate::{SourceError, SourceResult};
 
 const LOCAL_BATCH_SIZE: usize = 128;
 const LOCAL_CUE_MAX_BYTES: u64 = 1024 * 1024;
-pub(crate) const LOCAL_PARSER_VERSION: u32 = 13;
+pub(crate) const LOCAL_PARSER_VERSION: u32 = 14;
 
 pub(crate) async fn publish_metadata_paths(
     database: &library::Database,
@@ -38,6 +38,14 @@ pub(crate) async fn publish_metadata_paths(
         scan.remove_artist(artist).await?;
     }
     scan.finish_batch().await?;
+    stage_metadata_paths(&mut scan, paths).await?;
+    crate::file::artwork::ArtworkFiles::Local
+        .stage(database, &mut scan, &|| false)
+        .await?;
+    Ok(scan.finish().await?)
+}
+
+pub(crate) async fn stage_metadata_paths(scan: &mut Scan, paths: &[PathBuf]) -> SourceResult<()> {
     let mut worker = media::Worker::default();
     for page in paths.chunks(LOCAL_BATCH_SIZE) {
         let mut tracks = Vec::with_capacity(page.len());
@@ -65,13 +73,10 @@ pub(crate) async fn publish_metadata_paths(
             }
         }
         scan.begin_batch().await?;
-        stage_audio_tracks_batch(&mut scan, &tracks).await?;
+        stage_audio_tracks_batch(scan, &tracks).await?;
         scan.finish_batch().await?;
     }
-    crate::file::artwork::ArtworkFiles::Local
-        .stage(database, &mut scan, &|| false)
-        .await?;
-    Ok(scan.finish().await?)
+    Ok(())
 }
 
 pub(crate) async fn catch_up(
@@ -567,10 +572,6 @@ pub(crate) async fn stage_catalog(
 ) -> SourceResult<()> {
     stage_roots(database, local, scan, progress, cancelled, reuse_unchanged).await?;
     stage_imported_paths(database, scan, None).await?;
-    crate::file::artwork::ArtworkFiles::Local
-        .stage(database, scan, cancelled)
-        .await?;
-    scan.retain_connected_file_tracks().await?;
     Ok(())
 }
 

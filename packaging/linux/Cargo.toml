@@ -1,0 +1,186 @@
+[workspace]
+members = ["crates/rufin"]
+exclude = ["crates/rufin-android", "crates/xtask"]
+resolver = "3"
+
+[workspace.package]
+version = "0.16.6"
+authors = ["screwy <screwygit@proton.me>"]
+edition = "2024"
+license = "GPL-3.0-or-later"
+rust-version = "1.96"
+description = "Native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and Emby servers;  local folders,  WebDAV including a direct Nextcloud browser login path, Samba and NAS shares."
+repository = "https://github.com/screwys/Rufin"
+readme = "README.md"
+publish = false
+
+[workspace.dependencies]
+# Rufin crates
+app-identity = { path = "crates/app-identity" }
+artwork = { path = "crates/artwork" }
+audio-processing = { path = "crates/audio-processing" }
+backup = { path = "crates/backup" }
+desktop-integration = { path = "crates/desktop-integration" }
+downloads = { path = "crates/downloads" }
+gtk-editors = { path = "crates/gtk-editors" }
+gtk-library = { path = "crates/gtk-library" }
+gtk-media-menus = { path = "crates/gtk-media-menus" }
+gtk-player = { path = "crates/gtk-player" }
+gtk-preferences = { path = "crates/gtk-preferences" }
+gtk-shell = { path = "crates/gtk-shell" }
+gtk-widgets = { path = "crates/gtk-widgets" }
+library = { path = "crates/library" }
+localization = { path = "crates/localization" }
+lyrics = { path = "crates/lyrics" }
+metadata-lookup = { path = "crates/metadata-lookup" }
+playback = { path = "crates/playback" }
+playback-cast = { path = "crates/playback-cast" }
+playback-gstreamer = { path = "crates/playback-gstreamer" }
+presence = { path = "crates/presence" }
+rufin-connect = { path = "crates/rufin-connect" }
+rufin-controller = { path = "crates/rufin-controller" }
+rufin-core = { path = "crates/rufin-core" }
+scrobbling = { path = "crates/scrobbling" }
+secrets = { path = "crates/secrets" }
+sources = { path = "crates/sources" }
+windows-updater = { path = "crates/windows-updater" }
+web = { path = "crates/web" }
+
+# External dependencies
+axum = "0.8.9"
+askama = "0.16.1"
+age = "0.12.1"
+flate2 = "1.1.10"
+tar = "0.4.46"
+chrono = "0.4.45"
+adw = { package = "libadwaita", version = "0.9.1" }
+apple-native-keyring-store = { version = "1.0.1", features = ["keychain"] }
+apple-cf = "=0.6.0"
+async-channel = "2.5.0"
+async-trait = "0.1.89"
+ashpd = { version = "0.13.13", default-features = false, features = [
+    "background",
+    "tokio",
+] }
+base64 = "0.23.0"
+blake3 = "1.8.2"
+bytes = "1"
+constant_time_eq = "0.6.0"
+digest_auth = "0.3.1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "service"] }
+directories = "6.0.0"
+ebur128 = "0.1.10"
+fcast-sender-sdk = { version = "0.3.0", default-features = false, features = ["chromecast"] }
+futures-util = "0.3.32"
+getrandom = "0.4.0"
+gettext-rs = { version = "0.8.0", features = ["gettext-system"] }
+spiritless_po = "1.1.0"
+gio = "0.22.6"
+gstreamer = "0.25.2"
+gstreamer-app = "0.25.2"
+gstreamer-audio = "0.25.2"
+gstreamer-controller = "0.25.2"
+gstreamer-pbutils = "0.25.2"
+gtk = { package = "gtk4", version = "0.11.3" }
+glib = "0.22.7"
+glib-build-tools = "0.22.8"
+httpdate = "1.0.3"
+image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "tiff", "webp"] }
+jxl = "0.7.4"
+jxl-image-rs-integration = "0.7.4"
+gif = "0.14.2"
+fast_image_resize = { version = "6.1.0", features = ["image"] }
+if-addrs = "0.15.0"
+mdns-sd = { version = "0.21.0", default-features = false }
+ksni = "0.3.4"
+keyring-core = "1.0.0"
+lofty = "0.25.1"
+md5_digest = { package = "md-5", version = "0.10" }
+mediaplayer = "0.4.3"
+mpris-server = "0.10.0"
+notify = "8.2.0"
+oo7 = "0.6.0"
+percent-encoding = "2.3.2"
+proc-macro2 = "1.0.107"
+quick-xml = { version = "0.42", features = ["async-tokio"] }
+pulldown-cmark = { version = "0.13.0", default-features = false }
+smb = { version = "=0.12.1", default-features = false, features = ["multi_threaded", "sign", "encrypt"] }
+smb-fscc = "=0.12.1"
+smb-msg = "=0.12.1"
+tokio-util = { version = "0.7", features = ["io"] }
+reqwest = { version = "0.13.3", default-features = false, features = ["http2", "rustls", "system-proxy"] }
+roxmltree = "0.21.0"
+resvg = { version = "0.48.1", default-features = false, features = ["text", "system-fonts", "memmap-fonts", "raster-images"] }
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "logging", "tls12"] }
+rustls-native-certs = "0.8.4"
+rustix = { version = "1.1.4", features = ["fs"] }
+rustfft = "6.2.0"
+syn = { version = "3.0.0", features = ["full", "visit"] }
+serde = { version = "1.0.228", features = ["derive", "rc"] }
+serde_json = "1.0.150"
+serde_path_to_error = "0.1.20"
+sha2 = "0.10"
+socket2 = { version = "0.6.5", features = ["all"] }
+sqlx = { version = "0.9.0", default-features = false, features = ["derive", "runtime-tokio", "sqlite", "regexp"] }
+regex = "1.13.1"
+tempfile = "3.23.0"
+zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2"] }
+thiserror = "2.0.18"
+tray-icon = { version = "0.25.0", default-features = false }
+tokio = "1.52.3"
+tokio-rustls = { version = "0.26.4", default-features = false }
+tokio-tungstenite = { version = "0.30.0", default-features = false }
+tracing = "0.1.41"
+tracing-subscriber = "0.3.23"
+url = "2.5.7"
+lindera = "=6.2.0"
+walkdir = "2.5.0"
+wana_kana = { version = "=5.0.0", default-features = false }
+windows-native-keyring-store = { version = "1.1.0", default-features = false }
+windows = "0.62.2"
+windows-registry = "0.100.0"
+winsafe = { version = "0.0.29", features = ["kernel", "ole", "shell", "user"] }
+wiremock = "0.6.5"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+warnings = "deny"
+
+[workspace.lints.clippy]
+style = { level = "allow", priority = -1 }
+complexity = { level = "allow", priority = -1 }
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+mem_forget = "deny"
+large_include_file = "deny"
+exit = "deny"
+fallible_impl_from = "deny"
+panic_in_result_fn = "deny"
+string_slice = "deny"
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"
+
+[profile.android]
+inherits = "dev"
+debug = 0
+
+[profile.android-release]
+inherits = "release"
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+
+[profile.dev.package.libsqlite3-sys]
+opt-level = 3
+
+[profile.test.package.libsqlite3-sys]
+opt-level = 3

@@ -6,7 +6,7 @@ use adw::prelude::*;
 use gtk::glib;
 use tracing::warn;
 
-use crate::preferences::source::source_operation_text;
+use rufin_core::runtime::source::source_operation_text;
 
 use super::Shell;
 

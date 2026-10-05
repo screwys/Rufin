@@ -238,6 +238,8 @@ fn create_tag(mut args: Vec<String>) -> Result<()> {
             "resources/io.github.screwys.Rufin.metainfo.xml",
             ".github/ISSUE_TEMPLATE/bug_report.yml",
             "packaging/flatpak/cargo-sources.json",
+            "packaging/linux/Cargo.toml",
+            "packaging/linux/Cargo.lock",
             RPM_SPEC,
         ])?;
         run_command(

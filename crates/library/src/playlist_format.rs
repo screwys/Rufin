@@ -693,6 +693,31 @@ fn xspf_location(node: roxmltree::Node<'_, '_>, file: &Path) -> Option<String> {
         .filter(|file| file.contains("://"))
         .and_then(|file| url::Url::parse(file).ok())
         .or_else(|| normalized_file_uri(file).and_then(|value| url::Url::parse(&value).ok()))?;
+    if base.scheme() == "content" {
+        let mut location = node.text()?.to_owned();
+        for value in ancestors
+            .iter()
+            .filter_map(|node| node.attribute((roxmltree::NS_XML_URI, "base")))
+        {
+            if url::Url::parse(&location).is_ok() || location.starts_with('/') {
+                break;
+            }
+            if let Ok(base) = url::Url::parse(value) {
+                return base.join(&location).ok().map(|uri| uri.to_string());
+            }
+            if let Some((parent, _)) = value.rsplit_once('/') {
+                location = format!("{parent}/{location}");
+            }
+        }
+        return if url::Url::parse(&location).is_ok() || location.starts_with('/') {
+            Some(location)
+        } else {
+            percent_encoding::percent_decode_str(&location)
+                .decode_utf8()
+                .ok()
+                .map(String::from)
+        };
+    }
     for value in ancestors
         .iter()
         .rev()
@@ -794,11 +819,13 @@ pub fn playlist_locator(value: &str, base: &Path) -> Option<String> {
     if Path::new(value).is_absolute() {
         return normalized_file_uri(Path::new(value));
     }
-    if crate::source_entity_parts(value).is_some() {
+    if crate::source_entity_parts(value).is_some() || crate::document_media_id(value).is_some() {
         return Some(value.to_owned());
     }
     if let Some((_, backing, _, _)) = crate::cue_media_parts(value) {
-        return crate::file_media_path(&backing).map(|_| value.to_owned());
+        return (crate::file_media_path(&backing).is_some()
+            || crate::document_media_id(&backing).is_some())
+        .then(|| value.to_owned());
     }
     if !value.contains("://") && !value.starts_with("file:") {
         let path = base.join(value);

@@ -90,11 +90,13 @@ impl Shell {
         self.shutdown_tray();
 
         let transport = self.products.playback.transport.clone();
+        let scrobbling = self.products.scrobbling.clone();
         let (completed, completion) = channel();
         if let Err(error) = std::thread::Builder::new()
             .name("rufin-shutdown".to_string())
             .spawn(move || {
                 transport.shutdown();
+                scrobbling.shutdown();
                 let _ = completed.send(());
             })
         {

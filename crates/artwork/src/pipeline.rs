@@ -49,6 +49,7 @@ struct Shared {
 #[derive(Default)]
 struct State {
     next_request: u64,
+    cache_epoch: u64,
     external_epoch: u64,
     source_epochs: HashMap<SourceId, u64>,
     foreground: VecDeque<ArtworkKey>,
@@ -106,6 +107,43 @@ pub(crate) enum Resolution {
 }
 
 impl Pipeline {
+    pub(crate) fn cache(&self) -> &FilesystemCache {
+        &self.shared.cache
+    }
+
+    pub(crate) fn import_cache_file(&self, key: &str, bytes: &[u8]) -> Result<bool, ArtworkError> {
+        let _commit = lock_cache_commit(&self.shared);
+        Ok(self.shared.cache.import(key, bytes)?)
+    }
+
+    pub(crate) fn remove_cache_file(&self, key: &str) -> Result<bool, ArtworkError> {
+        let _commit = lock_cache_commit(&self.shared);
+        Ok(self.shared.cache.remove(key)?)
+    }
+
+    pub(crate) fn invalidate_decoded_cache(&self) {
+        let commit = lock_cache_commit(&self.shared);
+        let mut state = lock_state(&self.shared);
+        state.cache_epoch = state.cache_epoch.wrapping_add(1);
+        state.decoded_index.entries.clear();
+        state.foreground.clear();
+        state.preparations.clear();
+        let jobs = std::mem::take(&mut state.jobs);
+        drop(state);
+        drop(commit);
+        for completion in jobs
+            .into_values()
+            .flat_map(|job| job.subscribers.into_values())
+        {
+            let _ = completion.completion.send(Resolution::Invalidated);
+        }
+        self.shared.wake.notify_all();
+    }
+
+    pub(crate) fn cache_revision(&self) -> u64 {
+        lock_state(&self.shared).cache_epoch
+    }
+
     pub(crate) fn install_database(&self, database: Arc<library::Database>) {
         self.shared.fetch.install_database(database);
     }
@@ -544,6 +582,7 @@ fn source_epoch(state: &State, binding: &ArtworkBinding) -> u64 {
         .and_then(|source_id| state.source_epochs.get(source_id))
         .copied()
         .unwrap_or_default()
+        .wrapping_add(state.cache_epoch)
 }
 
 fn run_worker(shared: Arc<Shared>, foreground_reserved: bool) {
@@ -621,10 +660,9 @@ fn resolve_candidate(shared: &Shared, work: &Work, candidate: &Candidate) -> Res
     let result = resolve_request(shared, work, candidate)
         .unwrap_or_else(|error| Resolution::Failed(error.into()));
     let request = &work.request;
-    if request.fetch_size == ImageSize::Original
-        && matches!(result, Resolution::Missing | Resolution::Failed(_))
+    if matches!(result, Resolution::Missing | Resolution::Failed(_))
         && (!candidate.is_external() || request.external.allow_cached)
-        && let Some(path) = cached_leaf_file(shared, candidate, &CACHED_IMAGE_SIZES[1..])
+        && let Some(path) = cached_leaf_file(shared, candidate, &[ImageSize::Thumbnail(1)])
         && let Ok(bytes) = std::fs::read(path)
         && let Ok(image) = decode_original(
             Arc::from(bytes),
@@ -649,11 +687,21 @@ fn resolve_request(
     let artwork_key = job_key(request, work.source_epoch, work.external_epoch);
     let may_read_cache = !candidate.is_external() || request.external.allow_cached;
     if may_read_cache {
-        if let Some(entry) = shared.cache.ready_entry(candidate, request.fetch_size) {
+        let entry = shared
+            .cache
+            .ready_entry(candidate, request.fetch_size)
+            .map(|entry| (entry, request.fetch_size == ImageSize::Original))
+            .or_else(|| {
+                shared
+                    .cache
+                    .ready_entry(candidate, ImageSize::Original)
+                    .map(|entry| (entry, true))
+            });
+        if let Some((entry, original)) = entry {
             if !work.decode {
                 return Ok(Resolution::Cached);
             }
-            if request.fetch_size == ImageSize::Original {
+            if original {
                 let result = std::fs::read(&entry.path)
                     .map_err(ArtworkError::Cache)
                     .and_then(|bytes| store_image(shared, work, candidate, bytes, true));
@@ -672,18 +720,6 @@ fn resolve_request(
                     Err(_) => shared.cache.remove_ready(&entry.path),
                 }
             }
-        }
-        if let ImageSize::Thumbnail(_) = request.fetch_size
-            && let Some(entry) = shared.cache.ready_entry(candidate, ImageSize::Original)
-        {
-            if let Ok(bytes) = std::fs::read(&entry.path) {
-                match store_image(shared, work, candidate, bytes, true) {
-                    Ok(resolved) => return Ok(resolved),
-                    Err(ArtworkError::Decode(_)) => {}
-                    Err(error) => return Err(error.to_string()),
-                }
-            }
-            shared.cache.remove_ready(&entry.path);
         }
         if shared.cache.is_missing(candidate, request.fetch_size) {
             return Ok(Resolution::Missing);

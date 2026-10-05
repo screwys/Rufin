@@ -75,6 +75,11 @@ impl PlayRequest {
         self
     }
 
+    pub fn with_context_title(mut self, title: Option<Arc<library::QueueContextTitle>>) -> Self {
+        self.batch = self.batch.with_context_title(title);
+        self
+    }
+
     pub fn compact_batch(self, shuffle_seed: u64) -> (Batch, Placement) {
         let placement = self.placement.with_anchor(self.anchor_index);
         (
@@ -128,6 +133,8 @@ impl RadioPlayRequest {
 }
 
 pub trait QueueCommandPort: Send + Sync {
+    fn page(&self, offset: u64, limit: u32, filter: String) -> Result<QueuePage, String>;
+    fn snapshot(&self) -> Result<library::QueueRestore, String>;
     fn media_uris(&self) -> Result<Vec<String>, String>;
     fn play(&self, request: PlayRequest);
     fn insert(&self, input: library::QueueInput, target: QueueReorderTarget);
@@ -137,6 +144,13 @@ pub trait QueueCommandPort: Send + Sync {
     fn move_after_current(&self, occurrence: OccurrenceId);
     fn reorder(&self, request: QueueReorderRequest);
     fn clear(&self, include_current: bool);
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct QueuePage {
+    pub rows: Vec<Arc<crate::QueueOccurrence>>,
+    pub total: u64,
+    pub window_offset: u64,
 }
 
 pub trait RadioCommandPort: Send + Sync {
@@ -287,6 +301,7 @@ mod tests {
         );
         let page = database
             .read_queue(library::QueueReadRequest::Capture {
+                context_title: None,
                 input: Box::new(request.batch.input.clone()),
                 anchor_index: 0,
                 random_start: None,

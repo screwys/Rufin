@@ -1748,6 +1748,7 @@ fn play_album_track(shell: &Rc<CatalogUi>, album: Option<library::AlbumKey>, med
         library::QueueInput::Query {
             query: library::QueueQuery::Collection {
                 collection: library::QueueCollection::AlbumKey(album),
+                downloaded_only: false,
                 favorites_only: false,
             },
             folder: selected.music_folder_key,

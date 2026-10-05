@@ -3,8 +3,6 @@ import { api } from "./connection.js";
 import { tr, notice } from "./ui.js";
 
 const element = (id) => document.getElementById(`connect-${id}`);
-const replacementMessage =
-  "Connecting an existing profile will remove all data in this device, do you really want to continue?";
 const confirmation = () =>
   window.confirm(
     tr(
@@ -54,7 +52,7 @@ function updateView() {
   element("save-storage").hidden = importing;
   element("file").placeholder = importing ? tr("Connect file") : tr("Connect folder");
   element("file").setAttribute("aria-label", element("file").placeholder);
-  element("leave").hidden = !profileControls;
+  element("leave").hidden = !profileControls || !state.devices.some((device) => device.enrolled);
   element("approve").hidden = !!state.pairing?.approved;
   element("approval-status").hidden = !state.pairing?.approved;
   element("approval-status").textContent = state.pairing?.verified
@@ -103,9 +101,9 @@ async function action(value) {
     show(await api("/connect", "POST", value));
   } catch (error) {
     if (
-      value.action === "import" &&
+      (value.action === "import" || value.action === "pair") &&
       !value.replace &&
-      error.message === replacementMessage
+      error.confirmation === "replace_profile"
     ) {
       if (confirmation()) await action({ ...value, replace: true });
       return;

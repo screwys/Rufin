@@ -1,13 +1,20 @@
 //! Reviewed metadata operations and publication.
+mod editor;
 use crate::runtime::CatalogChange;
 use crate::source::{SourceOwner, string_error};
 use async_channel::Receiver;
+pub use editor::{
+    MetadataDraft, MetadataEditor, MetadataField, MetadataFieldState, MetadataIdentification,
+    MetadataIdentifyReceiver, MetadataReceiver, MetadataValues, identification_available,
+};
 pub use metadata_lookup::{ArtworkQuery, ArtworkResult};
 use sources::{
     AlbumMetadata, AlbumMetadataValues, ArtistMetadata, ArtistMetadataValues, Source,
     SourceMetadataError, TrackMetadata, TrackMetadataValues,
 };
 use std::sync::Arc;
+pub const MAX_ARTWORK_BYTES: usize = 32 * 1024 * 1024;
+
 pub fn track_metadata(
     owner: &SourceOwner,
     media_uri: String,
@@ -349,7 +356,7 @@ pub fn current_artwork(
 }
 
 fn checked_artwork(bytes: Vec<u8>) -> Result<Arc<sources::ImageBytes>, String> {
-    if bytes.len() > 32 * 1024 * 1024 {
+    if bytes.len() > MAX_ARTWORK_BYTES {
         return Err("Artwork exceeds 32 MiB".into());
     }
     artwork::decode_rgba(&bytes, 512).map_err(string_error)?;

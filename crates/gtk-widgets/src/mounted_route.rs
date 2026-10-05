@@ -28,6 +28,7 @@ pub fn route_current_track(player: Option<&playback::PlaybackView>) -> Option<Ro
         playback::Provenance::Context {
             context_id,
             source_rank,
+            ..
         } => Some(RouteCurrentTrackContext {
             context_id: context_id.to_string(),
             source_rank: *source_rank,

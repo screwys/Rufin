@@ -18,7 +18,13 @@ const NOTIFICATION_CAPACITY: usize = 1;
 const DELIVERY_BATCH_SIZE: usize = 50;
 const NOW_PLAYING_STABLE_DELAY: Duration = Duration::from_secs(1);
 const RETRY_POLL: Duration = Duration::from_secs(30);
-const USER_AGENT: &str = concat!("Rufin/", env!("CARGO_PKG_VERSION"));
+pub(crate) const USER_AGENT: &str = concat!(
+    "Rufin/",
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("CARGO_PKG_REPOSITORY"),
+    ")"
+);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct SubmissionTrack {
@@ -170,6 +176,7 @@ enum DeliveryFlow {
 struct PendingWork {
     now_playing: Option<(SubmissionTrack, Instant)>,
     wake: bool,
+    closed: bool,
 }
 
 fn take_stable_now_playing(
@@ -185,7 +192,7 @@ fn take_stable_now_playing(
 struct Worker {
     sender: SyncSender<()>,
     pending: Arc<Mutex<PendingWork>>,
-    _thread: JoinHandle<()>,
+    thread: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl Worker {
@@ -209,7 +216,7 @@ impl Worker {
         Ok(Self {
             sender,
             pending,
-            _thread: thread,
+            thread: Mutex::new(Some(thread)),
         })
     }
 
@@ -219,6 +226,9 @@ impl Worker {
 
     fn update(&self, update: impl FnOnce(&mut PendingWork)) {
         if let Ok(mut pending) = self.pending.lock() {
+            if pending.closed {
+                return;
+            }
             update(&mut pending);
             drop(pending);
             let _ = self.sender.try_send(());
@@ -227,6 +237,22 @@ impl Worker {
 
     fn wake(&self) {
         self.update(|pending| pending.wake = true);
+    }
+
+    fn shutdown(&self) {
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.closed = true;
+        }
+        let _ = self.sender.try_send(());
+        if let Some(thread) = self.thread.lock().unwrap_or_else(|p| p.into_inner()).take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+impl Drop for Worker {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
@@ -238,6 +264,10 @@ pub struct Scrobbler {
 }
 
 impl Scrobbler {
+    pub fn shutdown(&self) {
+        self.worker.shutdown();
+    }
+
     pub fn new(
         database: Database,
         runtime: tokio::runtime::Handle,
@@ -439,11 +469,17 @@ fn run_worker(
     let mut retry_at = Instant::now() + RETRY_POLL;
     loop {
         let now = Instant::now();
-        let wake = pending
-            .lock()
-            .is_ok_and(|mut pending| std::mem::take(&mut pending.wake));
+        let wake = match pending.lock() {
+            Ok(mut pending) => {
+                if pending.closed {
+                    return;
+                }
+                std::mem::take(&mut pending.wake)
+            }
+            Err(_) => return,
+        };
         if wake || now >= retry_at {
-            deliver_due(&client, &database, &runtime, &state);
+            deliver_due(&client, &database, &runtime, &state, &pending);
             retry_at = Instant::now() + RETRY_POLL;
             continue;
         }
@@ -460,7 +496,7 @@ fn run_worker(
             Err(_) => return,
         };
         if let Some(track) = track {
-            deliver_now_playing(&client, &state, track);
+            deliver_now_playing(&client, &state, &pending, track);
             continue;
         }
         match receiver.recv_timeout(deadline.saturating_duration_since(now)) {
@@ -470,7 +506,12 @@ fn run_worker(
     }
 }
 
-fn deliver_now_playing(client: &Client, state: &Arc<Mutex<DeliveryState>>, track: SubmissionTrack) {
+fn deliver_now_playing(
+    client: &Client,
+    state: &Arc<Mutex<DeliveryState>>,
+    pending: &Mutex<PendingWork>,
+    track: SubmissionTrack,
+) {
     let targets = state
         .lock()
         .ok()
@@ -479,6 +520,9 @@ fn deliver_now_playing(client: &Client, state: &Arc<Mutex<DeliveryState>>, track
         .unwrap_or_default();
     let submission = Submission::NowPlaying(track);
     for target in targets {
+        if pending.lock().map_or(true, |pending| pending.closed) {
+            return;
+        }
         if let Err(error) = submit(client, &target, &submission) {
             warn!(%error, service = ?target.service, "now-playing update failed");
         }
@@ -490,6 +534,7 @@ fn deliver_due(
     database: &Database,
     runtime: &tokio::runtime::Handle,
     state: &Arc<Mutex<DeliveryState>>,
+    work: &Mutex<PendingWork>,
 ) {
     if state.lock().map_or(true, |state| state.private_mode) {
         return;
@@ -509,6 +554,9 @@ fn deliver_due(
     };
     let mut stopped = std::collections::HashSet::new();
     for pending in pending {
+        if work.lock().map_or(true, |work| work.closed) {
+            return;
+        }
         let Some(service) = DeliveryService::parse(&pending.service) else {
             let _ = runtime.block_on(database.complete_listen_delivery(pending.outbox_key));
             continue;
@@ -892,6 +940,7 @@ mod tests {
             },
             listenbrainz: ListenBrainzSettings {
                 enabled: true,
+                username: String::new(),
                 user_token: "token".to_string(),
                 now_playing_enabled: true,
             },

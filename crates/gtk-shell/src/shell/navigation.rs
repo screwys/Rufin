@@ -154,66 +154,22 @@ impl Shell {
     }
 
     pub(crate) fn import_remote_playlist_pins_once(self: &Rc<Self>) {
-        let sources = {
-            let settings = self.settings.current.borrow();
-            self.source
-                .configured
-                .borrow()
-                .sources
-                .iter()
-                .filter(|source| {
-                    source.kind != "local"
-                        && !settings
-                            .sidebar
-                            .playlist_pin_imported_sources
-                            .contains(&source.id)
-                })
-                .map(|source| source.id.clone())
-                .collect::<Vec<_>>()
-        };
-        if sources.is_empty() {
-            return;
-        }
-        let database = Arc::clone(&self.products.library);
-        let task = self.products.runtime.spawn(async move {
-            let cancellation = library::ReadCancellation::new();
-            let mut imports = Vec::new();
-            for source_id in sources {
-                let Some(source) = database.source_identity_key(&source_id).await? else {
-                    continue;
-                };
-                let ids = database
-                    .source_playlist_object_ids(source, &cancellation)
-                    .await?;
-                if !ids.is_empty() {
-                    imports.push((source_id, ids));
-                }
-            }
-            Ok::<_, library::LibraryError>(imports)
-        });
+        let result = self
+            .products
+            .source
+            .import_playlist_pins_once(self.products.settings.clone());
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
-            let result = task.await.ok().and_then(Result::ok);
+            let result = result.recv().await;
             let Some(shell) = weak.upgrade() else { return };
-            let Some(imports) = result else {
-                warn!("failed to read remote playlists for Pins import");
-                return;
-            };
-            if imports.is_empty() {
-                return;
-            }
-            if shell
-                .settings
-                .update_app_settings("remote playlist Pins import", |settings| {
-                    let mut changed = false;
-                    for (source, ids) in imports {
-                        changed |= settings.sidebar.import_playlist_pins_once(source, ids);
-                    }
-                    changed
-                })
-                .is_some()
-            {
-                request_sidebar_pins(&shell);
+            match result {
+                Ok(Ok(true)) => {
+                    *shell.settings.current.borrow_mut() = shell.products.settings.load();
+                    request_sidebar_pins(&shell);
+                }
+                Ok(Ok(false)) => {}
+                Ok(Err(error)) => warn!(%error, "failed to import remote playlist Pins"),
+                Err(error) => warn!(%error, "failed to import remote playlist Pins"),
             }
         });
     }
@@ -1774,7 +1730,7 @@ fn rail_button(shell: &Rc<Shell>, item: SidebarRouteItem) -> gtk::Button {
     let button = gtk::Button::new();
     button.add_css_class("nav-button");
     button.add_css_class("flat");
-    button.add_css_class(descriptor.css_class);
+    button.add_css_class(gtk_widgets::route::sidebar_route_css_class(item));
     button.add_css_class("rail-button");
     button.set_widget_name(descriptor.stable_id);
     let accessible_label = tr(descriptor.title);

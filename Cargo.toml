@@ -80,6 +80,7 @@ gio = "0.22.6"
 gstreamer = "0.25.2"
 gstreamer-app = "0.25.2"
 gstreamer-audio = "0.25.2"
+gstreamer-controller = "0.25.2"
 gstreamer-pbutils = "0.25.2"
 gtk = { package = "gtk4", version = "0.11.3" }
 glib = "0.22.7"
@@ -143,7 +144,7 @@ winsafe = { version = "0.0.29", features = ["kernel", "ole", "shell", "user"] }
 wiremock = "0.6.5"
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 warnings = "deny"
 
 [workspace.lints.clippy]
@@ -166,6 +167,16 @@ debug = "line-tables-only"
 
 [profile.test]
 debug = "line-tables-only"
+
+[profile.android]
+inherits = "dev"
+debug = 0
+
+[profile.android-release]
+inherits = "release"
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
 
 [profile.dev.package.libsqlite3-sys]
 opt-level = 3

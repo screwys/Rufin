@@ -119,7 +119,7 @@ impl RatingControl {
             value.set(rating);
             preview.set(Some(rating));
             set_rating_icons(&committed_stars, rating);
-            commit(Some(rating));
+            commit((rating > 0).then_some(rating));
         });
         self.root.add_controller(drag);
     }
@@ -142,8 +142,9 @@ fn widget_width(widget: Option<gtk::Widget>) -> i32 {
 }
 
 fn rating_at(x: f64, width: i32, step: u8) -> u8 {
-    let rating = ((x / f64::from(width.max(1)) * 10.0).ceil() as u8).clamp(1, 10);
-    rating.div_ceil(step) * step
+    ((x / f64::from(width.max(1)) * 10.0 / f64::from(step)).round() as u8)
+        .saturating_mul(step)
+        .min(10)
 }
 
 fn normalized_rating(rating: Option<u8>, step: u8) -> u8 {

@@ -73,7 +73,6 @@ pub const BOTTOM_PLAYER_COMPACT_MIN_WIDTH: i32 =
 pub const BOTTOM_PLAYER_TINY_WIDTH: i32 = BOTTOM_PLAYER_COMPACT_MIN_WIDTH;
 const BOTTOM_PLAYER_PROGRESS_CENTER_PERCENT: i32 = 95;
 const BOTTOM_PLAYER_LAYOUT_COLUMNS: i32 = 3;
-pub const SEEK_PREVIEW_TOLERANCE_MILLIS: u64 = 1_500;
 pub const VOLUME_PERSIST_DELAY: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1082,13 +1081,7 @@ impl crate::PlayerUi {
         set_active_class(&controls.repeat_button, repeat_mode != RepeatMode::Off);
         set_repeat_button_icon(&controls.repeat_button, repeat_mode);
         set_active_class(&controls.dj_button, auto_dj_enabled);
-        controls
-            .dj_button
-            .set_tooltip_text(Some(&if auto_dj_enabled {
-                tr("Auto DJ on")
-            } else {
-                tr("Auto DJ")
-            }));
+        controls.dj_button.set_tooltip_text(Some(&tr("Auto DJ")));
         controls
             .repeat_button
             .set_tooltip_text(Some(&repeat_label(repeat_mode)));
@@ -1284,13 +1277,6 @@ impl crate::PlayerUi {
     }
 }
 
-fn seek_preview_matches_position(target_seconds: u32, position_millis: u64) -> bool {
-    let target_millis = u64::from(target_seconds) * 1_000;
-    let lower = target_millis.saturating_sub(SEEK_PREVIEW_TOLERANCE_MILLIS);
-    let upper = target_millis.saturating_add(SEEK_PREVIEW_TOLERANCE_MILLIS);
-    (lower..=upper).contains(&position_millis)
-}
-
 fn should_clear_seek_preview(
     target_seconds: u32,
     position_millis: u64,
@@ -1302,7 +1288,11 @@ fn should_clear_seek_preview(
     track_changed
         || !has_current
         || !can_seek
-        || (!pointer_active && seek_preview_matches_position(target_seconds, position_millis))
+        || (!pointer_active
+            && rufin_core::playback::seek_preview_matches_position(
+                u64::from(target_seconds) * 1_000,
+                position_millis,
+            ))
 }
 
 fn playback_state_label(state: TransportStatus) -> String {
@@ -1573,6 +1563,7 @@ fn add_output_row(
                 RemoteOutputProtocol::Upnp => tr("UPnP"),
                 RemoteOutputProtocol::GoogleCast => tr("Google Cast"),
                 RemoteOutputProtocol::PlexCompanion => "Plex Companion".into(),
+                RemoteOutputProtocol::RufinConnect => tr("Rufin Connect"),
             });
             format!("{name}  <span size=\"small\" alpha=\"55%\">{protocol}</span>").into()
         }
@@ -1583,6 +1574,11 @@ fn add_output_row(
         .activatable(true)
         .build();
     row.add_css_class("playback-output-row");
+    if matches!(&output, PlaybackOutput::Remote(remote)
+        if remote.protocol == RemoteOutputProtocol::RufinConnect)
+    {
+        row.add_prefix(&gtk::Image::from_icon_name("rufin-phonelink-symbolic"));
+    }
     if &output == selected {
         row.add_css_class("selected-output");
         row.add_suffix(&gtk::Image::from_icon_name("rufin-object-select-symbolic"));
@@ -2202,13 +2198,6 @@ pub fn connect_player_controls(shell: &Rc<crate::PlayerUi>) {
                 .playback_handles
                 .transport
                 .set_shuffle(enabled);
-            feedback_shell
-                .control_feedback
-                .show_control_feedback_toast(if enabled {
-                    tr("Shuffle on")
-                } else {
-                    tr("Shuffle off")
-                });
         });
 
     let feedback_shell = Rc::clone(shell);
@@ -2217,22 +2206,10 @@ pub fn connect_player_controls(shell: &Rc<crate::PlayerUi>) {
         .player_controls
         .repeat_button
         .connect_clicked(move |_| {
-            let Some(repeat_mode) = feedback_shell
-                .selected_playback()
-                .as_deref()
-                .map(|player| player.controls.repeat_mode)
-            else {
+            if feedback_shell.selected_playback().is_none() {
                 return;
-            };
-            let title = match repeat_mode {
-                RepeatMode::Off => tr("Repeat all"),
-                RepeatMode::All => tr("Repeat one"),
-                RepeatMode::One => tr("Repeat off"),
-            };
+            }
             feedback_shell.playback_handles.transport.cycle_repeat();
-            feedback_shell
-                .control_feedback
-                .show_control_feedback_toast(title);
         });
 
     let feedback_shell = Rc::clone(shell);
@@ -2241,21 +2218,10 @@ pub fn connect_player_controls(shell: &Rc<crate::PlayerUi>) {
         .player_controls
         .dj_button
         .connect_clicked(move |_| {
-            let Some(enabled) = feedback_shell
-                .selected_playback()
-                .as_deref()
-                .map(|player| !player.controls.auto_dj_enabled)
-            else {
+            if feedback_shell.selected_playback().is_none() {
                 return;
-            };
+            }
             feedback_shell.playback_handles.transport.toggle_auto_dj();
-            feedback_shell
-                .control_feedback
-                .show_control_feedback_toast(if enabled {
-                    tr("Auto DJ on")
-                } else {
-                    tr("Auto DJ off")
-                });
         });
 
     let mute_shell = Rc::clone(shell);

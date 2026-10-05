@@ -15,7 +15,10 @@ use serde::{Deserialize, Serialize};
 use sources::{Source, SourceError, SourceId};
 use tracing::warn;
 
+mod storage;
 mod track_download;
+use storage::DownloadAudio;
+pub use storage::DownloadDirectory;
 
 use track_download::*;
 
@@ -98,7 +101,7 @@ enum Command {
         delete_downloads: bool,
     },
     Cancel {
-        source_id: SourceId,
+        source_id: Option<SourceId>,
         job_id: String,
     },
     ClearJob {
@@ -127,7 +130,7 @@ struct AttachedSource {
     source_key: SourceKey,
     source: Option<Weak<Source>>,
     folder: Option<FolderKey>,
-    directory: Option<PathBuf>,
+    directory: Option<DownloadDirectory>,
 }
 
 #[derive(Clone)]
@@ -271,7 +274,7 @@ async fn load_queue(
     source_id: &SourceId,
     database: &Database,
     source_key: SourceKey,
-    custom_directory: Option<&Path>,
+    custom_directory: Option<&DownloadDirectory>,
 ) -> Result<Vec<DownloadJob>, String> {
     let Some((bytes, recovered, path, part)) = read_queue_file(root, Some(source_id))? else {
         return Ok(Vec::new());
@@ -428,7 +431,7 @@ async fn migrate_released_staging(
     source_id: &SourceId,
     track_object_id: &str,
     media_uri: &str,
-    custom_directory: Option<&Path>,
+    custom_directory: Option<&DownloadDirectory>,
 ) -> Result<(), String> {
     let (old_part, old_checkpoint) =
         released_staging_paths(root, source_id, track_object_id, custom_directory);
@@ -536,7 +539,7 @@ pub struct SourceDownloadSettings {
     #[serde(default)]
     pub quality: StreamQuality,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub directory: Option<PathBuf>,
+    pub directory: Option<DownloadDirectory>,
 }
 
 impl SourceDownloadSettings {
@@ -815,6 +818,10 @@ impl Downloads {
     }
 
     pub fn cancel(&self, source_id: SourceId, job_id: String) {
+        self.cancel_job(Some(source_id), job_id);
+    }
+
+    pub fn cancel_job(&self, source_id: Option<SourceId>, job_id: String) {
         self.send(Command::Cancel { source_id, job_id });
     }
 
@@ -1118,7 +1125,7 @@ impl Actor {
                 self.remove_rule(&source_id, rule, delete_downloads).await;
             }
             Command::Cancel { source_id, job_id } => {
-                self.cancel(&source_id, &job_id, active).await;
+                self.cancel(source_id.as_ref(), &job_id, active).await;
             }
             Command::ClearJob { source_id, job_id } => {
                 self.clear_job(&source_id, &job_id, active).await;
@@ -1296,7 +1303,7 @@ impl Actor {
         source_key: SourceKey,
         source: Option<Weak<Source>>,
         folder: Option<FolderKey>,
-        directory: Option<PathBuf>,
+        directory: Option<DownloadDirectory>,
     ) -> Result<(), String> {
         let unchanged = self.attached.get(&source_id).is_some_and(|attached| {
             attached.directory == directory
@@ -1326,7 +1333,7 @@ impl Actor {
             &self.database,
             source_key,
             &source_id,
-            directory.as_deref(),
+            directory.as_ref(),
         )
         .await
         {
@@ -1341,7 +1348,7 @@ impl Actor {
                 &source_id,
                 &self.database,
                 source_key,
-                directory.as_deref(),
+                directory.as_ref(),
             )
             .await
             {
@@ -1367,7 +1374,7 @@ impl Actor {
         if let Err(error) = cleanup_staging(
             &self.root,
             Some(&source_id),
-            directory.as_deref(),
+            directory.as_ref(),
             &queued_tracks,
         )
         .await
@@ -1384,7 +1391,7 @@ impl Actor {
         source_id: Option<&SourceId>,
         media_uri: &str,
         owner: &DownloadOwner,
-        custom_directory: Option<&Path>,
+        custom_directory: Option<&DownloadDirectory>,
     ) -> Result<bool, String> {
         let connect = self
             .connect
@@ -1438,7 +1445,7 @@ impl Actor {
                     source_id.as_ref(),
                     media_uri,
                     &owner,
-                    custom_directory.as_deref(),
+                    custom_directory.as_ref(),
                 )
                 .await
             {
@@ -1567,14 +1574,15 @@ impl Actor {
         let custom_directory = self
             .attached
             .get(&source_id)
-            .and_then(|attached| attached.directory.as_deref());
-        let records = match load_download_records(&self.root, Some(&source_id), custom_directory) {
-            Ok(records) => records,
-            Err(error) => {
-                warn!(%error, %source_id, "could not read rule downloads");
-                return;
-            }
-        };
+            .and_then(|attached| attached.directory.as_ref());
+        let records =
+            match load_download_records(&self.root, Some(&source_id), custom_directory).await {
+                Ok(records) => records,
+                Err(error) => {
+                    warn!(%error, %source_id, "could not read rule downloads");
+                    return;
+                }
+            };
         for (identity, mut record) in records {
             if desired.contains(&identity) || !record.owners.remove(&owner) {
                 continue;
@@ -1706,7 +1714,7 @@ impl Actor {
             }
             let custom_directory = attached
                 .as_ref()
-                .and_then(|attached| attached.directory.as_deref());
+                .and_then(|attached| attached.directory.as_ref());
             let owner = DownloadOwner::Subject(subject.clone());
             match self
                 .add_download_owner(source_id.as_ref(), &media_uri, &owner, custom_directory)
@@ -1801,10 +1809,18 @@ impl Actor {
                 match connect.destination(&media_uri).await {
                     Ok(Some(destination)) => {
                         let directory = destination.parent();
-                        paths =
-                            staging_paths(&self.root, source_id.as_ref(), &media_uri, directory);
-                        paths.audio_root = directory.map(Path::to_path_buf);
-                        paths.audio = destination;
+                        let native_directory =
+                            directory.map(|path| DownloadDirectory::Native(path.to_owned()));
+                        paths = staging_paths(
+                            &self.root,
+                            source_id.as_ref(),
+                            &media_uri,
+                            native_directory.as_ref(),
+                        );
+                        paths.audio = DownloadAudio::Native {
+                            root: directory.map(Path::to_path_buf),
+                            path: destination,
+                        };
                     }
                     Ok(None) => {}
                     Err(error) => {
@@ -1955,9 +1971,11 @@ impl Actor {
                         .unwrap_or_else(|p| p.into_inner())
                         .as_ref()
                         .and_then(Weak::upgrade);
-                    if let (Some(receipt), Some(connect)) = (receipt.as_ref(), connect.as_ref()) {
+                    if let (Some(receipt), Some(connect), Some(native)) =
+                        (receipt.as_ref(), connect.as_ref(), paths.audio.native())
+                    {
                         connect
-                            .finish(receipt.clone(), &paths.audio)
+                            .finish(receipt.clone(), native)
                             .await
                             .map_err(DownloadFailure::NeedsAttention)?;
                         let _ = self
@@ -1968,16 +1986,14 @@ impl Actor {
                             })
                             .await;
                     } else {
-                        self.commit_transfer(&source_id, &media_uri, &subject, &paths)
+                        let published = self
+                            .commit_transfer(&source_id, &media_uri, &subject, &paths)
                             .await?;
                         if let Some(mut receipt) = receipt {
-                            receipt.path = reqwest::Url::from_file_path(&paths.audio)
-                                .map_err(|()| {
-                                    DownloadFailure::NeedsAttention(
-                                        "Download path must be absolute".into(),
-                                    )
-                                })?
-                                .to_string();
+                            receipt.path = published
+                                .audio
+                                .access_uri()
+                                .map_err(DownloadFailure::NeedsAttention)?;
                             self.database
                                 .connect_save_media_file(&receipt)
                                 .await
@@ -2034,19 +2050,20 @@ impl Actor {
         media_uri: &str,
         subject: &DownloadSubject,
         paths: &DownloadPaths,
-    ) -> Result<(), DownloadFailure> {
-        finalize_download(
+    ) -> Result<DownloadPaths, DownloadFailure> {
+        let finished = finalize_download(
             paths,
             media_uri.to_string(),
             DownloadOwner::Subject(subject.clone()),
         )
         .await
         .map_err(DownloadFailure::NeedsAttention)?;
+        let paths = finished.paths;
         let source = source_id
             .as_ref()
             .and_then(|source_id| self.attached.get(source_id))
             .map(|attached| attached.source_key);
-        self.store_download_access(source, media_uri, paths)
+        self.store_download_access(source, media_uri, &paths)
             .await
             .map_err(DownloadFailure::NeedsAttention)?;
         let _ = self
@@ -2056,11 +2073,14 @@ impl Actor {
                 downloaded: true,
             })
             .await;
-        Ok(())
+        if let Some(error) = finished.cleanup_error {
+            let _ = self.events.send(DownloadEvent::Notice(error)).await;
+        }
+        Ok(paths)
     }
 
     async fn restore_direct_download_access(&self) -> Result<(), String> {
-        for (_, record) in load_download_records(&self.root, None, None)? {
+        for (_, record) in load_download_records(&self.root, None, None).await? {
             let paths = record_download_paths(&self.root, None, &record, None)?;
             self.store_download_access(None, &record.media_uri, &paths)
                 .await?;
@@ -2101,7 +2121,22 @@ impl Actor {
                     None,
                 )
             };
-        let metadata = std::fs::metadata(&paths.audio).map_err(|error| error.to_string())?;
+        let metadata = paths
+            .audio
+            .inspect()
+            .await?
+            .ok_or("The downloaded file is unavailable")?;
+        let size = match metadata.size {
+            Some(size) => size,
+            None => serde_json::from_slice::<DownloadRecord>(
+                &tokio::fs::read(&paths.record)
+                    .await
+                    .map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?
+            .completed_size
+            .ok_or("The download record has no completed size")?,
+        };
         let (storage_root, relative_path) = local_access_projection(paths)?;
         self.database
             .upsert_local_access(
@@ -2109,17 +2144,11 @@ impl Actor {
                 &library::LocalAccessWrite {
                     media_uri: media_uri.to_string(),
                     origin: library::LocalAccessOrigin::Download,
-                    path: paths.audio.to_string_lossy().into_owned(),
-                    root: storage_root.to_string_lossy().into_owned(),
-                    relative_path: relative_path.to_string_lossy().into_owned(),
-                    size_bytes: i64::try_from(metadata.len()).unwrap_or(i64::MAX),
-                    mtime_ns: metadata
-                        .modified()
-                        .ok()
-                        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
-                        .map_or(0, |value| {
-                            i64::try_from(value.as_nanos()).unwrap_or(i64::MAX)
-                        }),
+                    path: paths.audio.location()?,
+                    root: storage_root,
+                    relative_path,
+                    size_bytes: i64::try_from(size).unwrap_or(i64::MAX),
+                    mtime_ns: metadata.mtime_ns,
                     device_id: None,
                     inode: None,
                     parser_version: RECORD_VERSION as i64,
@@ -2129,9 +2158,7 @@ impl Actor {
                     disc_number,
                     track_number,
                     duration_millis,
-                    access_uri: reqwest::Url::from_file_path(&paths.audio)
-                        .map_err(|()| "Download path is not absolute".to_string())?
-                        .into(),
+                    access_uri: paths.audio.access_uri()?,
                     loudness_analysis_key: loudness,
                 },
             )
@@ -2194,7 +2221,7 @@ impl Actor {
                     )
                     .await
                 {
-                    Ok(()) => {
+                    Ok(_) => {
                         completed_tracks.push(download.media_uri.clone());
                         self.remove_job_track(
                             &download.source_id,
@@ -2255,7 +2282,7 @@ impl Actor {
         let directory = source_id
             .as_ref()
             .and_then(|source_id| self.attached.get(source_id))
-            .and_then(|attached| attached.directory.as_deref());
+            .and_then(|attached| attached.directory.as_ref());
         if let Err(error) =
             cleanup_staging(&self.root, source_id.as_ref(), directory, &queued).await
         {
@@ -2263,7 +2290,11 @@ impl Actor {
         }
     }
 
-    async fn discard_previous_directory(&self, source_id: &SourceId, directory: &Option<PathBuf>) {
+    async fn discard_previous_directory(
+        &self,
+        source_id: &SourceId,
+        directory: &Option<DownloadDirectory>,
+    ) {
         let Some(attached) = self.attached.get(source_id) else {
             return;
         };
@@ -2273,7 +2304,7 @@ impl Actor {
         if let Err(error) = cleanup_staging(
             &self.root,
             Some(source_id),
-            attached.directory.as_deref(),
+            attached.directory.as_ref(),
             &HashSet::new(),
         )
         .await
@@ -2442,9 +2473,10 @@ impl Actor {
         let mut failed = 0usize;
         let custom_directory = source_id
             .and_then(|source_id| self.settings.get(source_id))
-            .and_then(|settings| settings.directory.as_deref());
-        let records =
-            load_download_records(&self.root, source_id, custom_directory).unwrap_or_default();
+            .and_then(|settings| settings.directory.as_ref());
+        let records = load_download_records(&self.root, source_id, custom_directory)
+            .await
+            .unwrap_or_default();
         for media_uri in media_uris {
             let connect = self
                 .connect
@@ -2506,7 +2538,7 @@ impl Actor {
         let Some(access) = access.into_iter().next() else {
             return;
         };
-        if Path::new(&access.path) == paths.audio
+        if paths.audio.location().as_deref() == Ok(access.path.as_str())
             && matches!(
                 self.database
                     .remove_local_access(access.local_access_file_key)
@@ -2562,11 +2594,11 @@ impl Actor {
 
     async fn cancel(
         &mut self,
-        source_id: &SourceId,
+        source_id: Option<&SourceId>,
         job_id: &str,
         active: &mut Vec<ActiveDownload>,
     ) {
-        let group = Some(source_id.clone());
+        let group = source_id.cloned();
         let subject = self
             .jobs
             .get(&group)
@@ -2575,7 +2607,7 @@ impl Actor {
         let Some(subject) = subject else { return };
         self.mark_subject_incomplete(&subject).await;
         self.abort_matching(active, true, |download| {
-            download.source_id.as_ref() == Some(source_id) && download.job_id == job_id
+            download.source_id.as_ref() == source_id && download.job_id == job_id
         })
         .await;
         self.jobs
@@ -2583,7 +2615,7 @@ impl Actor {
             .or_default()
             .retain(|job| job.id != job_id);
         self.reconcile_staging(&group).await;
-        self.persist_and_publish(Some(source_id)).await;
+        self.persist_and_publish(source_id).await;
     }
 
     async fn clear_job(
@@ -2636,14 +2668,15 @@ impl Actor {
         let custom_directory = self
             .attached
             .get(source_id)
-            .and_then(|attached| attached.directory.as_deref());
-        let records = match load_download_records(&self.root, Some(source_id), custom_directory) {
-            Ok(records) => records,
-            Err(error) => {
-                warn!(%error, %source_id, "could not read download ownership");
-                return;
-            }
-        };
+            .and_then(|attached| attached.directory.as_ref());
+        let records =
+            match load_download_records(&self.root, Some(source_id), custom_directory).await {
+                Ok(records) => records,
+                Err(error) => {
+                    warn!(%error, %source_id, "could not read download ownership");
+                    return;
+                }
+            };
         let owner = DownloadOwner::Subject(subject.clone());
         for (identity, mut record) in records {
             if media_ids.is_some_and(|media_ids| !media_ids.contains(&identity)) {
@@ -2717,19 +2750,20 @@ impl Actor {
             cleanup_staging(
                 &self.root,
                 Some(source_id),
-                staging_directory.as_deref(),
+                staging_directory.as_ref(),
                 &HashSet::new(),
             )
             .await
             .map_err(|error| error.to_string())?;
             for (_, record) in
-                load_download_records(&self.root, Some(source_id), staging_directory.as_deref())?
+                load_download_records(&self.root, Some(source_id), staging_directory.as_ref())
+                    .await?
             {
                 let paths = record_download_paths(
                     &self.root,
                     Some(source_id),
                     &record,
-                    staging_directory.as_deref(),
+                    staging_directory.as_ref(),
                 )?;
                 self.remove_download_access(&record, &paths).await;
                 remove_download_files(&paths).await?;
@@ -3080,7 +3114,7 @@ mod tests {
                 .unwrap()
                 .to_file_path()
                 .unwrap(),
-            paths.audio
+            paths.audio.native().unwrap()
         );
         assert_eq!(
             received.recv().await.unwrap(),
@@ -3126,7 +3160,7 @@ mod tests {
             .unwrap()
             .map(|(uri, _)| uri);
         assert!(access.is_none());
-        assert!(!paths.audio.exists());
+        assert!(!paths.audio.native().unwrap().exists());
         assert_eq!(
             received.recv().await.unwrap(),
             DownloadEvent::SubjectChanged {
@@ -3189,7 +3223,10 @@ mod tests {
             connect_receipt: Arc::new(Mutex::new(Some(receipt))),
         };
         actor.finish(active, Ok(Ok(())), &mut Vec::new()).await;
-        assert_eq!(std::fs::read(&paths.audio).unwrap(), b"verified peer bytes");
+        assert_eq!(
+            std::fs::read(paths.audio.native().unwrap()).unwrap(),
+            b"verified peer bytes"
+        );
         assert!(!paths.audio_part.exists());
         let saved = database
             .connect_media_file(&uri, "mp3")
@@ -3197,7 +3234,10 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(saved.revision, "original-revision-2");
-        assert_eq!(library::file_media_path(&saved.path), Some(paths.audio));
+        assert_eq!(
+            library::file_media_path(&saved.path),
+            paths.audio.native().map(Path::to_owned)
+        );
         assert!(saved.managed);
         assert!(
             database
@@ -3336,6 +3376,7 @@ mod tests {
             .await
             .expect("attach released download");
         let records = load_download_records(downloads.path(), Some(&source_id), None)
+            .await
             .expect("load migrated records");
         let migrated = records.values().next().expect("migrated record");
         assert_eq!(
@@ -3344,7 +3385,13 @@ mod tests {
         );
         assert_eq!(migrated.completed_size, Some(14));
         assert_eq!(
-            migrated.relative_audio_path.as_deref(),
+            match &migrated.audio {
+                RecordedAudio::Native {
+                    relative_audio_path,
+                    ..
+                } => relative_audio_path.as_deref(),
+                _ => panic!("expected native record"),
+            },
             audio.file_name().map(Path::new)
         );
         assert!(audio.is_file());
@@ -3405,19 +3452,29 @@ mod tests {
             &database,
             source_key,
             &source_id,
-            Some(custom.path()),
+            Some(&DownloadDirectory::Native(custom.path().to_owned())),
         )
         .await
         .expect("attach released custom download");
-        let records =
-            load_download_records(downloads.path(), Some(&source_id), Some(custom.path()))
-                .expect("load migrated custom record");
+        let records = load_download_records(
+            downloads.path(),
+            Some(&source_id),
+            Some(&DownloadDirectory::Native(custom.path().to_owned())),
+        )
+        .await
+        .expect("load migrated custom record");
         let migrated = records.values().next().expect("migrated custom record");
         assert_eq!(
             migrated.media_uri,
             library::source_entity_uri(&source_id, "track", "custom-track")
         );
-        assert!(migrated.custom_storage);
+        assert!(matches!(
+            migrated.audio,
+            RecordedAudio::Native {
+                custom_storage: true,
+                ..
+            }
+        ));
         assert!(
             migrated
                 .owners
@@ -3426,7 +3483,13 @@ mod tests {
                 )))
         );
         assert_eq!(
-            migrated.relative_audio_path.as_deref(),
+            match &migrated.audio {
+                RecordedAudio::Native {
+                    relative_audio_path,
+                    ..
+                } => relative_audio_path.as_deref(),
+                _ => panic!("expected native record"),
+            },
             Some(relative.as_path())
         );
         assert_eq!(migrated.completed_size, Some(12));
@@ -3625,7 +3688,7 @@ mod tests {
             task,
         }];
 
-        actor.cancel(&source_id, "job", &mut active).await;
+        actor.cancel(Some(&source_id), "job", &mut active).await;
 
         assert!(actor.jobs[&Some(source_id)].is_empty());
         assert!(active.is_empty());
@@ -3660,7 +3723,7 @@ mod tests {
 
         actor.finish(active, Ok(Ok(())), &mut Vec::new()).await;
 
-        assert!(!paths.audio.exists());
+        assert!(!paths.audio.native().unwrap().exists());
         assert!(paths.audio_part.exists());
     }
 

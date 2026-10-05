@@ -57,14 +57,14 @@ async fn connect_uses_scanned_originals_and_repairs_existing_folder_references()
     sqlx::query("INSERT INTO catalog.local_files(source_key,path,root,relative_path,kind,mtime_ns,state) VALUES(?1,?2,?3,'track.flac','media',0,'accepted')")
         .bind(fixture.source).bind(original.to_str().unwrap()).bind(root.to_str().unwrap())
         .execute(&mut connection).await.unwrap();
-    assert_eq!(
+    assert!(matches!(
         fixture
             .database
             .connect_original_file(uri, |path| path)
             .await
             .unwrap(),
-        Some(original.clone())
-    );
+        Some(library::LocalMediaLocation::File(path)) if path == original
+    ));
     assert!(
         fixture
             .database
@@ -142,10 +142,10 @@ async fn connect_uses_scanned_originals_and_repairs_existing_folder_references()
         .connect_forget_media_file(&receipt)
         .await
         .unwrap();
-    assert_eq!(
+    assert!(matches!(
         fixture.database.connect_local_file(uri).await.unwrap(),
-        Some(copy)
-    );
+        Some(library::LocalMediaLocation::File(path)) if path == copy
+    ));
     assert_eq!(std::fs::read(original).unwrap(), b"original audio");
 }
 

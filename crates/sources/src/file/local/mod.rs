@@ -48,6 +48,8 @@ struct LocalSourcePayload {
     roots: Vec<String>,
     #[serde(default)]
     excluded_folders: Vec<PathBuf>,
+    #[serde(default)]
+    document_roots: Vec<crate::DocumentRoot>,
     #[serde(default, alias = "base_url")]
     legacy_root: Option<String>,
 }
@@ -56,6 +58,7 @@ struct LocalSourcePayload {
 pub struct LocalSourceConfig {
     pub roots: Vec<PathBuf>,
     pub excluded_folders: Vec<PathBuf>,
+    pub document_roots: Vec<crate::DocumentRoot>,
 }
 
 impl LocalSourceConfig {
@@ -82,6 +85,7 @@ impl LocalSourceConfig {
         Ok(Self {
             roots,
             excluded_folders: payload.excluded_folders,
+            document_roots: payload.document_roots,
         })
     }
 
@@ -100,14 +104,15 @@ impl LocalSourceConfig {
             "version": SOURCE_CONFIG_VERSION,
             "roots": roots,
             "excluded_folders": excluded_folders,
+            "document_roots": self.document_roots,
         })
     }
 }
 
-#[derive(Debug)]
 pub struct LocalSource {
     roots: Vec<PathBuf>,
     excluded_folders: Vec<PathBuf>,
+    pub(crate) documents: Vec<crate::file::remote::FileSource>,
 }
 
 impl LocalSource {
@@ -118,6 +123,11 @@ impl LocalSource {
         Ok(Self {
             roots,
             excluded_folders,
+            documents: config
+                .document_roots
+                .into_iter()
+                .map(|root| crate::file::remote::FileSource::documents(configuration, root))
+                .collect(),
         })
     }
 
@@ -126,11 +136,44 @@ impl LocalSource {
         Ok(Self {
             roots,
             excluded_folders: Vec::new(),
+            documents: Vec::new(),
         })
     }
 
     pub fn roots(&self) -> &[PathBuf] {
         &self.roots
+    }
+
+    pub(crate) fn document_source(&self, path: &str) -> Option<&crate::file::remote::FileSource> {
+        self.documents
+            .iter()
+            .find(|source| source.relative(path).is_ok())
+    }
+
+    pub(crate) fn document_root_name(&self, locator: &str) -> Option<&str> {
+        self.documents.iter().find_map(|source| {
+            (source.location("").ok().as_deref() == Some(locator))
+                .then(|| {
+                    source
+                        .document_access()
+                        .map(|access| access.root.name.as_str())
+                })
+                .flatten()
+        })
+    }
+
+    pub(crate) fn document_playlist(
+        &self,
+        path: &str,
+    ) -> Option<(&crate::file::remote::FileSource, String)> {
+        if let Some(source) = self.document_source(path) {
+            return Some((source, source.relative(path).ok()?));
+        }
+        let (index, path) = path.strip_prefix("@document:")?.split_once('/')?;
+        Some((
+            self.documents.get(index.parse::<usize>().ok()?)?,
+            path.to_owned(),
+        ))
     }
 
     pub(crate) fn excludes(&self, path: &std::path::Path) -> bool {
@@ -147,7 +190,39 @@ impl LocalSource {
         cancelled: &(dyn Fn() -> bool + Send + Sync),
         reuse_unchanged: bool,
     ) -> SourceResult<()> {
-        scan::stage_catalog(database, self, scan, progress, cancelled, reuse_unchanged).await
+        scan::stage_catalog(database, self, scan, progress, cancelled, reuse_unchanged).await?;
+        for source in &self.documents {
+            source
+                .stage_inventory(database, scan, progress, cancelled)
+                .await?;
+        }
+        for source in &self.documents {
+            source
+                .stage_cues(
+                    database,
+                    scan,
+                    &|completed| {
+                        progress(SourceReadProgress {
+                            stage: crate::SourceReadStage::Tracks,
+                            completed,
+                            total: None,
+                        })
+                    },
+                    cancelled,
+                    None,
+                )
+                .await?;
+        }
+        for source in &self.documents {
+            source
+                .stage_media_files(database, scan, progress, cancelled, None, 0)
+                .await?;
+        }
+        crate::file::artwork::ArtworkFiles::Local
+            .stage(database, scan, cancelled)
+            .await?;
+        scan.retain_connected_file_tracks().await?;
+        Ok(())
     }
 
     pub(crate) async fn import_playlist_files(
@@ -176,6 +251,14 @@ impl LocalSource {
             .await
     }
 
+    pub(crate) async fn stage_metadata_paths(
+        &self,
+        scan: &mut library::Scan,
+        paths: &[PathBuf],
+    ) -> SourceResult<()> {
+        scan::stage_metadata_paths(scan, paths).await
+    }
+
     pub(crate) async fn publish_paths(
         &self,
         database: &library::Database,
@@ -195,6 +278,13 @@ impl LocalSource {
         progress: &(dyn Fn(crate::SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<library::ScanOutcome> {
+        if !self.documents.is_empty() {
+            let mut scan =
+                library::Scan::begin(database, source_id, "Local", "local", None).await?;
+            self.stage_catalog(database, &mut scan, progress, cancelled, true)
+                .await?;
+            return scan.finish().await.map_err(Into::into);
+        }
         scan::catch_up(database, source, source_id, self, progress, cancelled).await
     }
 
@@ -222,7 +312,17 @@ impl LocalSource {
         artwork::read_image(&reference)
     }
 
-    pub(crate) fn image(&self, request: crate::SourceImageRequest) -> SourceResult<ImageBytes> {
+    pub(crate) async fn image(
+        &self,
+        request: crate::SourceImageRequest,
+    ) -> SourceResult<ImageBytes> {
+        if let crate::SourceImageRequest::Local(reference) = &request {
+            let (crate::LocalImageRef::File { path, .. }
+            | crate::LocalImageRef::Embedded { path, .. }) = reference;
+            if let Some(source) = self.document_source(path) {
+                return source.image(request).await;
+            }
+        }
         match request {
             crate::SourceImageRequest::Local(reference) => self.image_bytes(&reference),
             crate::SourceImageRequest::Native { .. } => Err(SourceError::NotFound),
@@ -255,6 +355,7 @@ pub(crate) fn connect(
         LocalSourceConfig {
             roots: source.roots().to_vec(),
             excluded_folders: Vec::new(),
+            document_roots: Vec::new(),
         }
         .into_payload(),
     );
@@ -272,6 +373,12 @@ pub(crate) fn edit(
         None => LocalSourceConfig::from_configuration(&current)?.excluded_folders,
     };
     let mut source = LocalSource::from_roots(roots)?;
+    let document_roots = LocalSourceConfig::from_configuration(&current)?.document_roots;
+    source.documents = document_roots
+        .iter()
+        .cloned()
+        .map(|root| crate::file::remote::FileSource::documents(&current, root))
+        .collect();
     source.excluded_folders = excluded_paths(source.roots(), &excluded_folders);
     let configuration = crate::config::encode_provider_payload(
         current.source_id.clone(),
@@ -280,6 +387,7 @@ pub(crate) fn edit(
         LocalSourceConfig {
             roots: source.roots().to_vec(),
             excluded_folders,
+            document_roots,
         }
         .into_payload(),
     );

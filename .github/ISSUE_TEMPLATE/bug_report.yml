@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a problem in Rufin
+description: Report a bug in Rufin
 title: "[Bug]: "
 body:
   - type: checkboxes
@@ -39,7 +39,7 @@ body:
         - Emby
         - Plex
         - WebDAV
-        - Samba   
+        - Samba
     validations:
       required: true
 
@@ -54,6 +54,7 @@ body:
         - Fedora RPM
         - Windows
         - MacOS
+        - Android
         - Other
     validations:
       required: true
@@ -87,7 +88,7 @@ body:
     id: problem
     attributes:
       label: What happened?
-      description: Please describe the problem and what you expected to happen instead.
+      description: Please describe the problem and what you expected to happen instead
     validations:
       required: true
 
@@ -95,7 +96,7 @@ body:
     id: steps
     attributes:
       label: Steps to reproduce
-      description: List the exact steps needed to reproduce the problem.
+      description: List the exact steps needed to reproduce the problem
       placeholder: |
         1. Open ...
         2. Click ...
@@ -108,7 +109,7 @@ body:
     attributes:
       label: Logs
       description: >-
-        Open **Troubleshooting** from the main menu, enable **Debug logging**, reproduce the problem, then click `Save`. Crash logs also appear here on
+        Open **Troubleshooting** from the main menu, enable **Debug logging**, reproduce the problem, then either click `Copy` or `Save`. Crash logs also appear here on
         the next launch. Logs have secrets and absolute folder paths redacted, but you may still want to review the logs before sharing them.
       render: shell
     validations:

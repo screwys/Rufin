@@ -1,16 +1,18 @@
 use super::ensure_gstreamer_initialized;
-use gst::prelude::*;
 use gstreamer as gst;
 #[cfg(test)]
 use gstreamer_app as gst_app;
+use gstreamer_audio::gst_base::{BaseTransform, prelude::BaseTransformExt};
+use gstreamer_controller::{self as controller, prelude::*};
 use playback::TrackLoudness;
 use playback::{
     AudioOutput, BackendAudioSettings, DEFAULT_PLAYBACK_RATE, EQUALIZER_BAND_COUNT,
     EqualizerSettings, LoudnessNormalization, LoudnessNormalizationScope,
 };
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 const AUDIO_OUTPUT_DEVICE_PREFIX: &str = "gst-device:";
 const CLASSIC_EQUALIZER_FREQUENCIES: [f64; EQUALIZER_BAND_COUNT] = [
@@ -26,6 +28,10 @@ pub(super) struct AudioGraph {
     input: gst::Element,
     effect_bins: [gst::Element; 3],
     output: gst::Element,
+    sink: gst::Element,
+    gain: BaseTransform,
+    gain_curve: controller::InterpolationControlSource,
+    gain_frontier: Arc<AtomicU64>,
     audio_output: Option<String>,
     state: Arc<Mutex<AudioGraphState>>,
     visualizer_pad: Option<gst::Pad>,
@@ -110,15 +116,80 @@ impl AudioGraph {
         let output = make_audio_output(settings.audio_output.as_deref())?;
         #[cfg(test)]
         configure_test_output(&output);
+        let gain = make_element("volume", "rufin-output-gain")?
+            .downcast::<BaseTransform>()
+            .expect("volume is an audio transform");
+        let gain_curve = controller::InterpolationControlSource::new();
+        gain_curve.set_mode(controller::InterpolationMode::Linear);
+        let binding = controller::DirectControlBinding::new_absolute(&gain, "volume", &gain_curve);
+        gain.add_control_binding(&binding)
+            .map_err(|error| error.to_string())?;
+        binding.set_disabled(true);
+        let tempo_bin = make_element("insertbin", "rufin-tempo-bin")?;
+        let sink = gst::Bin::new();
+        sink.add_many([gain.upcast_ref::<gst::Element>(), &tempo_bin, &output])
+            .map_err(|error| error.to_string())?;
+        gst::Element::link_many([gain.upcast_ref::<gst::Element>(), &tempo_bin, &output])
+            .map_err(|error| error.to_string())?;
+        let sink_pad = gst::GhostPad::with_target(&gain.static_pad("sink").expect("gain input"))
+            .map_err(|error| error.to_string())?;
+        sink_pad
+            .set_active(true)
+            .map_err(|error| error.to_string())?;
+        sink.add_pad(&sink_pad).map_err(|error| error.to_string())?;
+        let gain_frontier = Arc::new(AtomicU64::new(0));
+        let frontier = Arc::clone(&gain_frontier);
+        let curve = gain_curve.clone();
+        let controlled_gain = gain.downgrade();
+        gain.static_pad("src").expect("gain output").add_probe(
+            gst::PadProbeType::EVENT_DOWNSTREAM | gst::PadProbeType::BUFFER,
+            move |pad, info| {
+                if let Some(event) = info.event()
+                    && let gst::EventView::Segment(segment) = event.view()
+                    && let Some(segment) = segment.segment().downcast_ref::<gst::ClockTime>()
+                {
+                    let previous = gst::ClockTime::from_nseconds(frontier.load(Ordering::Acquire));
+                    let start = segment
+                        .position()
+                        .and_then(|position| segment.to_stream_time(position))
+                        .unwrap_or(gst::ClockTime::ZERO);
+                    if controlled_gain
+                        .upgrade()
+                        .is_some_and(|gain| gain.has_active_control_bindings())
+                        && let Some(end) = curve.list_control_points().last()
+                    {
+                        let volume =
+                            ControlSourceExt::value(&curve, previous).unwrap_or(end.value());
+                        let remaining = end.timestamp().saturating_sub(previous);
+                        let target = end.value();
+                        curve.unset_all();
+                        curve.set(start, volume);
+                        curve.set(start + remaining, target);
+                    }
+                    frontier.store(start.nseconds(), Ordering::Release);
+                }
+                if let Some(buffer) = info.buffer()
+                    && let Some(segment) = pad.sticky_event::<gst::event::Segment>(0)
+                    && let Some(segment) = segment.segment().downcast_ref::<gst::ClockTime>()
+                    && let Some(start) = buffer.pts().and_then(|pts| segment.to_stream_time(pts))
+                {
+                    frontier.store(
+                        (start + buffer.duration().unwrap_or(gst::ClockTime::ZERO)).nseconds(),
+                        Ordering::Release,
+                    );
+                }
+                gst::PadProbeReturn::Ok
+            },
+        );
         let effects = prepare_effects(settings, playback_rate, &AudioEffects::default())?;
         let effect_bins = [
             make_element("insertbin", "rufin-equalizer-bin")?,
             make_element("insertbin", "rufin-normalization-bin")?,
-            make_element("insertbin", "rufin-tempo-bin")?,
+            tempo_bin,
         ];
         apply_effects(&effect_bins, &AudioEffects::default(), &effects);
         let mut elements = vec![convert_in.clone()];
-        elements.extend(effect_bins.iter().cloned());
+        elements.extend(effect_bins[..2].iter().cloned());
         let state = Arc::new(Mutex::new(AudioGraphState {
             settings: settings.clone(),
             effects,
@@ -167,6 +238,10 @@ impl AudioGraph {
             input: convert_in,
             effect_bins,
             output,
+            sink: sink.upcast(),
+            gain,
+            gain_curve,
+            gain_frontier,
             audio_output: settings.audio_output.clone(),
             state,
             visualizer_pad,
@@ -178,6 +253,9 @@ impl AudioGraph {
     }
 
     pub(super) fn clear_stream(&mut self) {
+        self.gain_frontier.store(0, Ordering::Release);
+        self.gain.set_control_binding_disabled("volume", true);
+        self.gain_curve.unset_all();
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         state.tags = gst::TagList::new();
         state.current_loudness = TrackLoudness::default();
@@ -185,6 +263,79 @@ impl AudioGraph {
 
     pub(super) fn output(&self) -> &gst::Element {
         &self.output
+    }
+
+    pub(super) fn sink(&self) -> &gst::Element {
+        &self.sink
+    }
+
+    pub(super) fn set_output_volume(&self, volume: f64, muted: bool) {
+        self.gain.set_control_binding_disabled("volume", true);
+        // GstVolume still reads disabled bindings for per-sample gain.
+        self.gain_curve.unset_all();
+        self.gain.set_property("volume", volume.clamp(0.0, 1.0));
+        self.gain.set_property("mute", muted);
+        self.gain.set_passthrough(volume == 1.0 && !muted);
+    }
+
+    pub(super) fn fade_output(&self, start_volume: Option<f64>, target: f64, duration: Duration) {
+        let start = gst::ClockTime::from_nseconds(self.gain_frontier.load(Ordering::Acquire));
+        let duration = gst::ClockTime::try_from(duration).expect("fade duration");
+        let end = start + duration;
+        let volume = start_volume.unwrap_or_else(|| {
+            if self.gain.has_active_control_bindings() {
+                ControlSourceExt::value(&self.gain_curve, start)
+                    .unwrap_or(self.gain.property("volume"))
+            } else {
+                self.gain.property("volume")
+            }
+        });
+        self.gain_curve.unset_all();
+        self.gain_curve.set(start, volume);
+        self.gain_curve.set(end, target);
+        self.gain.set_control_binding_disabled("volume", false);
+        // An envelope can leave unity within this buffer, before the volume
+        // property's next change updates the transform's passthrough state.
+        self.gain.set_passthrough(false);
+    }
+
+    pub(super) fn fade_end(&self) -> Option<gst::ClockTime> {
+        self.gain
+            .has_active_control_bindings()
+            .then(|| {
+                self.gain_curve
+                    .list_control_points()
+                    .last()
+                    .map(|point| point.timestamp())
+            })
+            .flatten()
+    }
+
+    pub(super) fn fade_remaining(&self) -> Duration {
+        let start = gst::ClockTime::from_nseconds(self.gain_frontier.load(Ordering::Acquire));
+        self.fade_end().map_or(Duration::ZERO, |end| {
+            Duration::from_nanos(end.saturating_sub(start).nseconds())
+        })
+    }
+
+    pub(super) fn fade_at(&self, position: gst::ClockTime) -> Option<(f64, f64, Duration)> {
+        if !self.gain.has_active_control_bindings() {
+            return None;
+        }
+        let points = self.gain_curve.list_control_points();
+        let first = points.first()?;
+        let end = points.last()?;
+        let position = position.max(first.timestamp());
+        Some((
+            ControlSourceExt::value(&self.gain_curve, position)?,
+            end.value(),
+            Duration::from_nanos(end.timestamp().saturating_sub(position).nseconds()),
+        ))
+    }
+
+    pub(super) fn retarget_output(&self, target: f64, muted: bool) {
+        self.gain.set_property("mute", muted);
+        self.fade_output(None, target, self.fade_remaining());
     }
 
     pub(super) fn uses_output(&self, selected: Option<&str>) -> bool {
@@ -763,10 +914,10 @@ mod tests {
             .build();
         let pipeline = gst::Pipeline::new();
         pipeline
-            .add_many([source.upcast_ref(), graph.root(), graph.output()])
+            .add_many([source.upcast_ref(), graph.root(), graph.sink()])
             .unwrap();
         source.link(graph.root()).unwrap();
-        graph.root().link(graph.output()).unwrap();
+        graph.root().link(graph.sink()).unwrap();
         let expected = (0..4_017)
             .flat_map(|index| ((index as f32 - 2_000.0) / 8_000.0).to_le_bytes())
             .collect::<Vec<_>>();
@@ -993,12 +1144,12 @@ mod tests {
         };
         let graph = test_graph(&enabled, DEFAULT_PLAYBACK_RATE, empty_stream())
             .expect("normal-speed audio graph");
-        let bin = graph.root.downcast_ref::<gst::Bin>().expect("audio bin");
+        let bin = graph.sink.downcast_ref::<gst::Bin>().expect("audio bin");
         assert!(bin.by_name("rufin-playback-rate").is_none());
 
         let mut graph =
             test_graph(&enabled, 1.25, empty_stream()).expect("pitch-preserving audio graph");
-        let bin = graph.root.downcast_ref::<gst::Bin>().expect("audio bin");
+        let bin = graph.sink.downcast_ref::<gst::Bin>().expect("audio bin");
         assert!(bin.by_name("rufin-playback-rate").is_some());
 
         let disabled = BackendAudioSettings {
@@ -1010,7 +1161,7 @@ mod tests {
                 .reconfigure(&disabled, 1.25)
                 .expect("pitch preservation configuration change")
         );
-        let bin = graph.root.downcast_ref::<gst::Bin>().expect("audio bin");
+        let bin = graph.sink.downcast_ref::<gst::Bin>().expect("audio bin");
         assert!(bin.by_name("rufin-playback-rate").is_none());
     }
 
@@ -1167,12 +1318,12 @@ mod tests {
             .expect("test audio source");
         let pipeline = gst::Pipeline::new();
         pipeline
-            .add_many([&source, graph.root(), graph.output()])
+            .add_many([&source, graph.root(), graph.sink()])
             .expect("test normalization pipeline");
         source
             .link(graph.root())
             .expect("test normalization pipeline link");
-        graph.root().link(graph.output()).unwrap();
+        graph.root().link(graph.sink()).unwrap();
         let bin = graph.root.downcast_ref::<gst::Bin>().expect("audio bin");
         let volume = bin
             .by_name("rufin-loudness-normalization")
@@ -1280,14 +1431,14 @@ mod tests {
             });
         let pipeline = gst::Pipeline::new();
         pipeline
-            .add_many([&source, graph.root(), graph.output()])
+            .add_many([&source, graph.root(), graph.sink()])
             .unwrap();
         let caps = gst::Caps::builder("audio/x-raw")
             .field("rate", 8000_i32)
             .field("channels", 1_i32)
             .build();
         source.link_filtered(graph.root(), &caps).unwrap();
-        graph.root().link(graph.output()).unwrap();
+        graph.root().link(graph.sink()).unwrap();
         let sink = graph.output.clone().downcast::<gst_app::AppSink>().unwrap();
         pipeline.set_state(gst::State::Playing).unwrap();
         let mut samples = Vec::new();

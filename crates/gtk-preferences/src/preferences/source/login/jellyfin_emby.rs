@@ -35,9 +35,7 @@ impl Flow {
                 name: saved
                     .map(|s| s.credentials.source_name.clone())
                     .unwrap_or_default(),
-                use_instant_mix: saved
-                    .and_then(|s| s.use_instant_mix)
-                    .unwrap_or(presentation.kind == "emby"),
+                use_instant_mix: saved.and_then(|s| s.use_instant_mix).unwrap_or(true),
             })),
         }
     }
@@ -462,6 +460,7 @@ impl Flow {
         let state = self.draft.clone();
         let submit_status = status.downgrade();
         let host_for_submit = host.clone();
+        let weak_shell = Rc::downgrade(shell);
         action.connect_clicked(move |button| {
             let draft = state.borrow();
             let use_instant_mix = draft.use_instant_mix;
@@ -475,12 +474,16 @@ impl Flow {
             {
                 let source_name = optional_name(&draft.name);
                 if let Some(source_id) = source_id.clone() {
-                    source.update_source(SourceSettingsChange::EmbyConnect {
+                    let result = source.update_source(SourceSettingsChange::EmbyConnect {
                         source_id,
                         server,
                         source_name,
                         use_instant_mix,
                     });
+                    drop(draft);
+                    if let Some(shell) = weak_shell.upgrade() {
+                        complete_source_save(&shell, button, result);
+                    }
                 } else {
                     source.configure_source(SourceSetup::EmbyConnect {
                         server,
@@ -504,12 +507,16 @@ impl Flow {
                     host_for_submit.input()
                 };
                 if let Some(source_id) = source_id.clone() {
-                    source.update_source(SourceSettingsChange::JellyfinEmby {
+                    let result = source.update_source(SourceSettingsChange::JellyfinEmby {
                         source_id,
                         credentials,
                         use_instant_mix,
                         connect_manually: draft.manual,
                     });
+                    drop(draft);
+                    if let Some(shell) = weak_shell.upgrade() {
+                        complete_source_save(&shell, button, result);
+                    }
                 } else {
                     source.configure_source(SourceSetup::JellyfinEmby {
                         kind: if emby {

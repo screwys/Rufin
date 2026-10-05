@@ -1,4 +1,4 @@
-use super::{RemoteSource, input::FileInput, webdav::client::Body};
+use super::{FileSource, input::FileInput, webdav::client::Body};
 use crate::{SourceError, SourceResult};
 use reqwest::{
     Method, StatusCode,
@@ -7,7 +7,7 @@ use reqwest::{
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
 
-impl RemoteSource {
+impl FileSource {
     pub(crate) async fn profile_files(
         &self,
         relative: &str,
@@ -36,6 +36,7 @@ impl RemoteSource {
                 Err(error) => return Err(error),
             }
             match input.input() {
+                FileInput::Documents(access) => access.create_directory(&folder)?,
                 FileInput::Smb(client) => client.create_directory(&folder).await?,
                 FileInput::WebDav(client) => {
                     let url = url::Url::parse(&self.input_path(input.input(), &folder)?)
@@ -62,8 +63,40 @@ impl RemoteSource {
                 }
             }
         }
+        self.list_profile_files(relative).await
+    }
+
+    pub(crate) async fn list_profile_files(
+        &self,
+        relative: &str,
+    ) -> SourceResult<Vec<(String, Option<String>)>> {
+        self.location(relative)?;
+        let input = self.input().await?;
         let mut files = Vec::new();
         match input.input() {
+            FileInput::Documents(access) => {
+                let entry = access.resolve(relative)?;
+                let mut offset = 0;
+                loop {
+                    let page = crate::list_documents(&entry.uri, offset)?;
+                    for child in page.entries {
+                        if !child.directory && child.name.ends_with(".rufin-connect") {
+                            files.push((
+                                crate::file::documents::document_relative(
+                                    &format!("{}/{}", relative.trim_end_matches('/'), child.name),
+                                    &child.native_id,
+                                    &child.uri,
+                                ),
+                                child.revision,
+                            ));
+                        }
+                    }
+                    match page.next {
+                        Some(next) => offset = next,
+                        None => break,
+                    }
+                }
+            }
             FileInput::Smb(client) => {
                 client
                     .list(relative.trim_matches('/'), |entry| {
@@ -116,6 +149,15 @@ impl RemoteSource {
     ) -> SourceResult<Option<Option<String>>> {
         self.location(relative)?;
         let input = self.input().await?;
+        if let FileInput::Documents(access) = input.input() {
+            let entry = match access.resolve(relative) {
+                Ok(entry) => entry,
+                Err(SourceError::NotFound) => return Ok(None),
+                Err(error) => return Err(error),
+            };
+            crate::copy_document(&entry.uri, destination)?;
+            return Ok(Some(entry.revision));
+        }
         if let FileInput::Smb(client) = input.input() {
             let (file, entry) = match client.open_read(relative).await {
                 Ok(value) => value,
@@ -178,7 +220,7 @@ impl RemoteSource {
     ) -> SourceResult<()> {
         self.location(relative)?;
         let input = self.input().await?;
-        if matches!(input.input(), FileInput::Smb(_)) {
+        if matches!(input.input(), FileInput::Smb(_) | FileInput::Documents(_)) {
             let previous = if previous == Some(None) {
                 match self.stat(&input, relative).await {
                     Ok(entry) => Some(entry.revision),
@@ -281,7 +323,7 @@ mod tests {
         let config = settings
             .configuration(SourceId::new("dav"), "webdav", "Files".into())
             .unwrap();
-        let source = RemoteSource::open(&config, None).unwrap();
+        let source = FileSource::open(&config, None).unwrap();
         let file = tempfile::NamedTempFile::new().unwrap();
         let version = source
             .read_profile_file("profile.rufin-connect", file.path())

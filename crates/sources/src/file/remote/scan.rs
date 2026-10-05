@@ -3,21 +3,29 @@ use std::sync::{Arc, Mutex};
 use futures_util::{StreamExt, stream};
 use library::{Database, LocalFileKind, LocalFileState, LocalFileWrite, ReadCancellation, Scan};
 
-use super::RemoteSource;
+use super::FileSource;
 use super::reader::FileReader;
 use crate::file::remote::input::{FileInput, FileInputServer};
 use crate::file::{media, scan::stage_audio_tracks_batch};
 use crate::{LocalImageRef, SourceError, SourceReadProgress, SourceReadStage, SourceResult};
 
-pub(crate) const PARSER_VERSION: i64 = 5;
+pub(crate) const PARSER_VERSION: i64 = 6;
 
-impl RemoteSource {
+impl FileSource {
     pub(crate) async fn stat(
         &self,
         input: &FileInputServer,
         relative: &str,
     ) -> SourceResult<LocalFileWrite> {
         match input.input() {
+            FileInput::Documents(access) => {
+                let access = Arc::clone(access);
+                let path = relative.to_owned();
+                let (path, entry) = tokio::task::spawn_blocking(move || access.resolve_path(&path))
+                    .await
+                    .map_err(|error| SourceError::Other(error.to_string()))??;
+                self.document_observation(&path, entry)
+            }
             FileInput::Smb(client) => {
                 let entry = client.stat(relative).await?;
                 self.observation(
@@ -70,7 +78,11 @@ impl RemoteSource {
         let mut file =
             std::fs::File::open(&copy.file).map_err(|e| SourceError::Other(e.to_string()))?;
         let uri = url::Url::from_file_path(&copy.file).map_err(|_| SourceError::NotFound)?;
-        let relative = copy.relative.clone();
+        let relative = if self.document_access().is_some() {
+            crate::file::documents::display_path(&copy.relative)
+        } else {
+            copy.relative.clone()
+        };
         let parsed = tokio::task::spawn_blocking(move || {
             let mut worker = media::Worker::network();
             let parsed = media::read_media_input(
@@ -147,17 +159,38 @@ impl RemoteSource {
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
+        self.stage_inventory(database, scan, progress, cancelled)
+            .await?;
+        self.stage_files(database, scan, progress, cancelled, None)
+            .await?;
+        progress(SourceReadProgress {
+            stage: SourceReadStage::Finalizing,
+            completed: 0,
+            total: None,
+        });
+        if self.document_access().is_none() {
+            crate::file::artwork::ArtworkFiles::Remote(self)
+                .stage(database, scan, cancelled)
+                .await?;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn stage_inventory(
+        &self,
+        database: &Database,
+        scan: &mut Scan,
+        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<()> {
         let input = self.input().await?;
+        let root_scope = self.location("")?;
         progress(SourceReadProgress {
             stage: SourceReadStage::Files,
             completed: 0,
             total: None,
         });
-        for folder in if self.settings.folders.is_empty() {
-            vec![String::new()]
-        } else {
-            self.settings.folders.clone()
-        } {
+        for folder in self.folders() {
             if self.excludes(&folder) {
                 continue;
             }
@@ -175,7 +208,13 @@ impl RemoteSource {
                 return Err(SourceError::Cancelled);
             }
             let page = scan
-                .local_inventory_path_page(LocalFileKind::Directory, after.as_deref(), false, 1)
+                .local_inventory_path_page_in_root(
+                    LocalFileKind::Directory,
+                    after.as_deref(),
+                    false,
+                    1,
+                    Some(&root_scope),
+                )
                 .await?;
             let Some(directory) = page.into_iter().next() else {
                 break;
@@ -202,16 +241,7 @@ impl RemoteSource {
             }
             after = Some(directory);
         }
-        self.stage_files(database, scan, progress, cancelled, None)
-            .await?;
-        progress(SourceReadProgress {
-            stage: SourceReadStage::Finalizing,
-            completed: 0,
-            total: None,
-        });
-        crate::file::artwork::ArtworkFiles::Remote(self)
-            .stage(database, scan, cancelled)
-            .await
+        Ok(())
     }
 
     pub(crate) async fn stage_files(
@@ -230,9 +260,30 @@ impl RemoteSource {
             })
         };
         report(0);
-        let mut completed = self
+        let completed = self
             .stage_cues(database, scan, &report, cancelled, rename)
             .await?;
+        self.stage_media_files(database, scan, progress, cancelled, rename, completed)
+            .await
+    }
+
+    pub(crate) async fn stage_media_files(
+        &self,
+        database: &Database,
+        scan: &mut Scan,
+        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+        rename: Option<&(String, String)>,
+        mut completed: usize,
+    ) -> SourceResult<()> {
+        let root_scope = self.location("")?;
+        let report = |completed| {
+            progress(SourceReadProgress {
+                stage: SourceReadStage::Tracks,
+                completed,
+                total: None,
+            })
+        };
         let workers: [_; 4] =
             std::array::from_fn(|_| Arc::new(Mutex::new(media::Worker::network())));
         let mut after = None;
@@ -241,7 +292,11 @@ impl RemoteSource {
                 return Err(SourceError::Cancelled);
             }
             let observations = scan
-                .local_inventory_file_page(LocalFileKind::Media, after.as_deref())
+                .local_inventory_file_page_in_root(
+                    LocalFileKind::Media,
+                    after.as_deref(),
+                    Some(&root_scope),
+                )
                 .await?;
             if observations.is_empty() {
                 break;
@@ -375,8 +430,10 @@ impl RemoteSource {
                             if let Some(id) = prior.and_then(|old| old.track_object_id.as_ref()) {
                                 track.id = id.clone();
                             } else {
-                                track.id =
-                                    format!("file:{:016x}", crate::policy::stable_hash(&file.path));
+                                track.id = format!(
+                                    "file:{:016x}",
+                                    crate::policy::stable_hash(&super::file_identity(&file.path))
+                                );
                             }
                             file.picture_index = match &track.local_artwork {
                                 Some(LocalImageRef::Embedded { picture_index, .. }) => {
@@ -480,7 +537,7 @@ impl RemoteSource {
         worker: Arc<Mutex<media::Worker>>,
     ) -> SourceResult<media::MediaRead> {
         let relative = self.relative(&file.path)?;
-        if media::excluded_from_audio_scan(std::path::Path::new(&relative)) {
+        if media::excluded_from_audio_scan(std::path::Path::new(&file.relative_path)) {
             return Ok(media::MediaRead::Rejected);
         }
         let input = self.input().await?;
@@ -497,15 +554,11 @@ impl RemoteSource {
         let source_id = self.source_id.clone();
         let artwork_path = file.path.clone();
         let revision = file.revision.clone().unwrap_or_default();
+        let display_path = file.relative_path.clone();
         tokio::task::spawn_blocking(move || {
             let mut worker = worker.lock().unwrap_or_else(|p| p.into_inner());
-            let mut parsed = media::read_media_input(
-                &mut worker,
-                relative.clone().into(),
-                &mut reader,
-                &uri,
-                None,
-            );
+            let mut parsed =
+                media::read_media_input(&mut worker, display_path.into(), &mut reader, &uri, None);
             if let media::MediaRead::Accepted(track) = &mut parsed {
                 let (cover, portraits) = crate::file::artwork::inspect_embedded_input(
                     &mut worker.discovery,
@@ -540,6 +593,40 @@ impl RemoteSource {
         let (send, receive) = async_channel::bounded(128);
         let listing = async {
             match input.input() {
+                FileInput::Documents(access) => {
+                    let access = Arc::clone(access);
+                    let path = relative.to_owned();
+                    let parent = tokio::task::spawn_blocking(move || access.resolve(&path))
+                        .await
+                        .map_err(|error| SourceError::Other(error.to_string()))??;
+                    let mut offset = 0;
+                    loop {
+                        let uri = parent.uri.clone();
+                        let page = tokio::task::spawn_blocking(move || {
+                            crate::list_documents(&uri, offset)
+                        })
+                        .await
+                        .map_err(|error| SourceError::Other(error.to_string()))??;
+                        for entry in page.entries {
+                            let parent = crate::file::documents::relative_parts(relative)
+                                .0
+                                .trim_end_matches('/');
+                            let path = if parent.is_empty() {
+                                entry.name.clone()
+                            } else {
+                                format!("{parent}/{}", entry.name)
+                            };
+                            send.send(self.document_observation(&path, entry)?)
+                                .await
+                                .map_err(|_| SourceError::Cancelled)?;
+                        }
+                        match page.next {
+                            Some(next) => offset = next,
+                            None => break,
+                        }
+                    }
+                    Ok(())
+                }
                 FileInput::Smb(client) => {
                     client
                         .list(relative, move |entry: crate::file::remote::smb::Entry| {
@@ -643,6 +730,45 @@ impl RemoteSource {
         Ok(())
     }
 
+    fn document_observation(
+        &self,
+        relative: &str,
+        entry: crate::DocumentEntry,
+    ) -> SourceResult<LocalFileWrite> {
+        let relative = if entry.directory
+            && !relative.is_empty()
+            && !relative
+                .rsplit('/')
+                .next()
+                .unwrap_or_default()
+                .contains('\u{1f}')
+        {
+            format!(
+                "{relative}\u{1f}{}",
+                percent_encoding::utf8_percent_encode(
+                    &entry.uri,
+                    percent_encoding::NON_ALPHANUMERIC
+                )
+            )
+        } else {
+            relative.to_owned()
+        };
+        let relative = if entry.directory {
+            relative
+        } else {
+            crate::file::documents::document_relative(&relative, &entry.native_id, &entry.uri)
+        };
+        let mut file = self.observation(
+            &relative,
+            entry.directory,
+            entry.size,
+            entry.revision,
+            Some(entry.native_id),
+        )?;
+        file.relative_path = crate::file::documents::display_path(&relative);
+        Ok(file)
+    }
+
     pub(crate) fn observation(
         &self,
         relative: &str,
@@ -651,14 +777,15 @@ impl RemoteSource {
         revision: Option<String>,
         native_id: Option<String>,
     ) -> SourceResult<LocalFileWrite> {
-        let extension = relative
+        let display_path = crate::file::documents::relative_parts(relative).0;
+        let extension = display_path
             .rsplit('.')
             .next()
             .unwrap_or_default()
             .to_ascii_lowercase();
         let kind = if directory {
             LocalFileKind::Directory
-        } else if crate::file::artwork::supported_image(std::path::Path::new(relative)) {
+        } else if crate::file::artwork::supported_image(std::path::Path::new(display_path)) {
             LocalFileKind::Image
         } else {
             match extension.as_str() {

@@ -109,6 +109,78 @@ impl Default for SidebarSettings {
     }
 }
 impl SidebarSettings {
+    pub fn set_route_visible(&mut self, item: SidebarRouteItem, visible: bool) -> bool {
+        let Some(stored) = self
+            .route_items
+            .iter_mut()
+            .find(|stored| stored.item == item)
+        else {
+            return false;
+        };
+        if stored.visible == visible {
+            return false;
+        }
+        stored.visible = visible;
+        self.sanitize();
+        true
+    }
+
+    pub fn move_route(&mut self, item: SidebarRouteItem, delta: isize) -> bool {
+        let Some(index) = self.route_items.iter().position(|entry| entry.item == item) else {
+            return false;
+        };
+        let new_index = if delta < 0 {
+            index.saturating_sub(1)
+        } else {
+            (index + 1).min(self.route_items.len().saturating_sub(1))
+        };
+        if index == new_index {
+            return false;
+        }
+        self.route_items.swap(index, new_index);
+        self.sanitize();
+        true
+    }
+
+    pub fn reorder_route(
+        &mut self,
+        source: SidebarRouteItem,
+        target: SidebarRouteItem,
+        after: bool,
+    ) -> bool {
+        if source == target {
+            return false;
+        }
+        let before = self.route_items.clone();
+        let Some(source_index) = self
+            .route_items
+            .iter()
+            .position(|entry| entry.item == source)
+        else {
+            return false;
+        };
+        let entry = self.route_items.remove(source_index);
+        let Some(mut target_index) = self
+            .route_items
+            .iter()
+            .position(|entry| entry.item == target)
+        else {
+            self.route_items
+                .insert(source_index.min(self.route_items.len()), entry);
+            return false;
+        };
+        if after {
+            target_index += 1;
+        }
+        self.route_items
+            .insert(target_index.min(self.route_items.len()), entry);
+        let changed = self.route_items != before;
+        if changed {
+            self.sanitize();
+        }
+        changed
+    }
+
     pub fn sanitize(&mut self) {
         let mut sanitized = Vec::with_capacity(SidebarRouteItem::all().len());
         for entry in &self.route_items {

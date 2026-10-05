@@ -1,4 +1,7 @@
-use lyrics::pronunciation_line_for;
+use lyrics::{
+    LYRICS_USER_SCROLL_PAUSE_MS, active_lyrics_line_index, intro_lyrics_line_index,
+    lyric_line_has_text, pronunciation_line_for, should_highlight_all_lyrics_lines,
+};
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -13,13 +16,12 @@ use lyrics::{
     japanese_reading_for_language_options, japanese_reading_from_romanization,
 };
 
-use super::timing::{KaraokeTiming, effective_cue_end};
 use super::wrapping_line::WrappingLine;
+use lyrics::{KaraokeTiming, effective_cue_end};
 
 const DEFAULT_LYRICS_SCROLL_ANIMATION_MS: u64 = 300;
 const MIN_LYRICS_SCROLL_ANIMATION_MS: u64 = 80;
 const LYRICS_SCROLL_MS: u64 = 200;
-const LYRICS_USER_SCROLL_PAUSE_MS: u64 = 3_000;
 
 mod karaoke_text {
     use std::cell::RefCell;
@@ -1434,36 +1436,6 @@ fn centered_scroll_target(
     surface_center - viewport_height / 2.0
 }
 
-pub fn active_lyrics_line_index(lines: &[LyricsLine], position_millis: i128) -> Option<usize> {
-    lines
-        .iter()
-        .enumerate()
-        .filter_map(|(index, line)| {
-            let start = line.start_millis?;
-            (i128::from(start) <= position_millis).then_some((
-                lyric_line_has_text(line).then_some(index),
-                start,
-                index,
-            ))
-        })
-        .max_by_key(|(_, start, index)| (*start, *index))
-        .and_then(|(index, _, _)| index)
-}
-
-fn intro_lyrics_line_index(lines: &[LyricsLine], position_millis: i128) -> Option<usize> {
-    let (index, start) = lines
-        .iter()
-        .enumerate()
-        .filter(|(_, line)| lyric_line_has_text(line))
-        .filter_map(|(index, line)| line.start_millis.map(|start| (index, start)))
-        .min_by_key(|&(_, start)| start)?;
-    (position_millis < i128::from(start)).then_some(index)
-}
-
-pub fn should_highlight_all_lyrics_lines(lines: &[LyricsLine]) -> bool {
-    !lines.is_empty() && lines.iter().all(|line| line.start_millis.is_none())
-}
-
 pub fn lyrics_follow_scroll_pause_state(
     paused_until: Option<Instant>,
     dragging: bool,
@@ -1516,10 +1488,6 @@ pub fn lyrics_scroll_animation_millis(
             )
         })
         .unwrap_or(DEFAULT_LYRICS_SCROLL_ANIMATION_MS)
-}
-
-fn lyric_line_has_text(line: &LyricsLine) -> bool {
-    !line.text.trim().is_empty()
 }
 
 #[cfg(test)]

@@ -199,6 +199,9 @@ fn library_socket_message(text: &str, user_id: &str) -> SourceResult<JellyfinSoc
                         "LastPlayedDate",
                     )),
                 };
+                if let Some(favorite) = facts.favorite {
+                    tracing::info!(favorite, "Received server favorite state");
+                }
                 updates
                     .entry(id)
                     .or_insert_with(library::SourceUserData::default)

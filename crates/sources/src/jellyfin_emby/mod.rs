@@ -143,7 +143,7 @@ impl JellyfinEmbySourceConfig {
             use_instant_mix: payload
                 .use_instant_mix
                 .or(payload.use_jellyfin_instant_mix)
-                .unwrap_or(kind == ServerKind::Emby),
+                .unwrap_or(true),
             emby_connect: payload.emby_connect,
         })
     }
@@ -219,9 +219,9 @@ pub(crate) async fn edit(
     let has_password = !credentials.password.is_empty();
     let switching_to_manual = saved.emby_connect && connect_manually;
 
-    if (address_changed || username_changed) && !has_password && !switching_to_manual {
+    if username_changed && !has_password && !switching_to_manual {
         return Err(SourceError::Other(
-            "Enter the server password to save address or username changes.".to_string(),
+            "Enter the server password to save username changes.".to_string(),
         ));
     }
 
@@ -250,7 +250,8 @@ pub(crate) async fn edit(
         )));
     }
 
-    let reopen = credentials.trust_invalid_cert != saved.trust_invalid_cert
+    let reopen = address_changed
+        || credentials.trust_invalid_cert != saved.trust_invalid_cert
         || use_instant_mix != saved.use_instant_mix;
     let configuration = crate::config::encode_provider_payload(
         current.source_id.clone(),
@@ -259,7 +260,10 @@ pub(crate) async fn edit(
         JellyfinEmbySourceConfig {
             emby_connect: saved.emby_connect,
             kind: saved.kind,
-            base_url: saved.base_url,
+            base_url: normalize_base_url(&credentials.base_url)?
+                .as_str()
+                .trim_end_matches('/')
+                .to_owned(),
             server_id: saved.server_id,
             user_id: saved.user_id,
             username: saved.username,
@@ -488,7 +492,7 @@ mod config_tests {
     fn saved_mix_preferences_and_manual_tokens_survive_migration() {
         for (kind, legacy, expected) in [
             ("emby", None, true),
-            ("jellyfin", None, false),
+            ("jellyfin", None, true),
             ("jellyfin", Some(false), false),
             ("jellyfin", Some(true), true),
         ] {

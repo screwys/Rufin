@@ -1,7 +1,6 @@
 use crate::shell::Shell;
 use gtk_widgets::favorites::{favorite_button_is_active, set_favorite_button_active};
 use library::FavoriteTarget;
-use localization::tr;
 use std::rc::Rc;
 impl Shell {
     pub(crate) fn clear_favorite_controls(&self) {
@@ -74,12 +73,6 @@ impl Shell {
         self.player_ui
             .set_bottom_player_favorite(&item_id, favorite);
         self.products.source.set_favorite(item_id.clone(), favorite);
-        let title = if favorite {
-            tr("Added to favorites")
-        } else {
-            tr("Removed from favorites")
-        };
-        self.control_feedback.show_control_feedback_toast(title);
     }
 
     pub(crate) fn apply_favorite_settlement(

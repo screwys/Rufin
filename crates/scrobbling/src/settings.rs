@@ -157,6 +157,8 @@ pub struct ListenBrainzSettings {
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
+    pub username: String,
+    #[serde(default)]
     pub user_token: String,
     #[serde(default = "default_now_playing_enabled")]
     pub now_playing_enabled: bool,
@@ -166,6 +168,7 @@ impl Default for ListenBrainzSettings {
     fn default() -> Self {
         Self {
             enabled: false,
+            username: String::new(),
             user_token: String::new(),
             now_playing_enabled: true,
         }
@@ -174,6 +177,7 @@ impl Default for ListenBrainzSettings {
 
 impl ListenBrainzSettings {
     pub fn sanitize(&mut self) {
+        self.username = self.username.trim().to_string();
         self.user_token = self.user_token.trim().to_string();
     }
 

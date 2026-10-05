@@ -3,8 +3,8 @@
 use crate::{Database, LibraryError, LibraryResult};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{Connection, Row, SqliteConnection};
-use std::collections::BTreeMap;
+use sqlx::{Connection, QueryBuilder, Row, Sqlite, SqliteConnection};
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const CONNECT_PAGE_SIZE: usize = 128;
 
@@ -82,6 +82,13 @@ const PROJECTIONS: &[Projection] = &[
         table: "main.user_media_state",
         key: "r.media_uri",
         fields: "media_uri favorite rating",
+        extra: "",
+    },
+    Projection {
+        kind: "cache_lyrics",
+        table: "catalog.lyrics_cache",
+        key: "json_array(r.media_uri,r.authority,r.role,r.language,r.script)",
+        fields: "media_uri authority role language script cache_input_digest lyrics updated_at",
         extra: "",
     },
     Projection {
@@ -171,6 +178,16 @@ fn link_projection(left: &str, right: &str, table: &str, alias: &str) -> (String
 }
 
 fn portable_relative(value: &mut Value) {
+    if value.get("local_media").and_then(Value::as_bool) == Some(false) {
+        value.as_object_mut().unwrap().remove("local_media");
+    }
+    if let Some(backing) = value
+        .as_object_mut()
+        .and_then(|value| value.remove("_document_backing"))
+        .and_then(|value| value.as_str().map(str::to_owned))
+    {
+        value["backing_id"] = crate::document_media_uri(&backing).into();
+    }
     if let Some(root) = value
         .as_object_mut()
         .and_then(|v| v.remove("_local_root"))
@@ -199,12 +216,15 @@ fn object(projection: &Projection, alias: &str) -> String {
     let mut pairs = projection
         .fields
         .split_whitespace()
-        .map(|field| if matches!(field, "artwork_binding" | "artwork_bytes") {
+        .map(|field| if matches!(field, "artwork_binding" | "artwork_bytes" | "cache_input_digest") {
             format!("'{field}',CASE WHEN {alias}.{field} IS NULL THEN NULL ELSE hex({alias}.{field}) END")
         } else { format!("'{field}',{alias}.{field}") })
         .collect::<Vec<_>>();
     if !projection.extra.is_empty() {
         pairs.push(projection.extra.replace("r.", &format!("{alias}.")));
+    }
+    if projection.kind == "track" {
+        pairs.push(format!("'local_media',json(CASE WHEN EXISTS(SELECT 1 FROM catalog.local_files f WHERE f.source_key={alias}.source_key AND f.path={alias}.source_path AND f.path LIKE 'rufin-document:%') OR EXISTS(SELECT 1 FROM main.local_locators l WHERE l.media_uri={alias}.media_uri AND l.origin IN ('local','import') AND l.access_uri LIKE 'content://%') THEN 'true' ELSE 'false' END),'cue_start_millis',{alias}.cue_start_millis,'cue_end_millis',{alias}.cue_end_millis,'_document_backing',(SELECT f.native_id FROM catalog.local_files f WHERE f.source_key={alias}.source_key AND f.path={alias}.source_path AND f.path LIKE 'rufin-document:%')"));
     }
     format!("json_object({})", pairs.join(","))
 }
@@ -290,7 +310,10 @@ async fn install_capture(connection: &mut SqliteConnection) -> LibraryResult<()>
             }
             if operation == "DELETE" && projection.kind == "native_entry" {
                 predicate.push_str(" AND EXISTS(SELECT 1 FROM catalog.native_playlists WHERE playlist_key=OLD.playlist_key)");
-            } else if operation == "DELETE" && projection.table.starts_with("catalog.") {
+            } else if operation == "DELETE"
+                && projection.table.starts_with("catalog.")
+                && projection.kind != "cache_lyrics"
+            {
                 predicate.push_str(
                     " AND EXISTS(SELECT 1 FROM catalog.sources WHERE source_key=OLD.source_key)",
                 );
@@ -339,10 +362,9 @@ async fn install_capture(connection: &mut SqliteConnection) -> LibraryResult<()>
     }
     // Capture identities before a source/metadata cascade removes the lookup rows.
     let mut deletions = String::new();
-    for projection in PROJECTIONS
-        .iter()
-        .filter(|p| p.table.starts_with("catalog.") && p.kind != "native_entry")
-    {
+    for projection in PROJECTIONS.iter().filter(|p| {
+        p.table.starts_with("catalog.") && !matches!(p.kind, "native_entry" | "cache_lyrics")
+    }) {
         deletions.push_str(&format!("INSERT INTO connect_changes(kind,object_key,payload) SELECT '{}',{},NULL FROM {} r WHERE r.source_key=OLD.source_key ON CONFLICT(kind,object_key) DO UPDATE SET sequence=excluded.sequence,payload=excluded.payload;",projection.kind,projection.key,projection.table));
     }
     for (left, right, table) in LINKS {
@@ -478,6 +500,14 @@ impl Database {
 
     /// Seeds one bounded page. Subsequent calls resume after interruption.
     pub async fn connect_seed_page(&self) -> LibraryResult<bool> {
+        self.connect_seed_page_for_cache(false).await
+    }
+
+    pub async fn connect_seed_cache_page(&self) -> LibraryResult<bool> {
+        self.connect_seed_page_for_cache(true).await
+    }
+
+    async fn connect_seed_page_for_cache(&self, cache: bool) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
         let mut transaction = writer
             .as_mut()
@@ -485,8 +515,9 @@ impl Database {
             .begin()
             .await?;
         let row = sqlx::query(
-            "SELECT kind,cursor,artwork_only FROM connect_seed WHERE complete=0 ORDER BY rowid LIMIT 1",
+            "SELECT kind,cursor,artwork_only FROM connect_seed WHERE complete=0 AND (kind GLOB 'cache_*')=?1 ORDER BY rowid LIMIT 1",
         )
+        .bind(cache)
         .fetch_optional(&mut *transaction)
         .await?;
         let Some(row) = row else {
@@ -546,7 +577,7 @@ impl Database {
                 "SELECT r.rowid,{key},{value} FROM catalog.{table} r WHERE r.rowid>?1 ORDER BY r.rowid LIMIT ?2"
             )
         };
-        let page_size = if kind == "playlist_artwork" {
+        let page_size = if matches!(kind.as_str(), "playlist_artwork" | "cache_lyrics") {
             1
         } else {
             CONNECT_PAGE_SIZE
@@ -556,21 +587,22 @@ impl Database {
             .bind(page_size as i64)
             .fetch_all(&mut *transaction)
             .await?;
-        let mut last = cursor;
-        for row in &rows {
-            last = row.get(0);
-            sqlx::query(
-                "INSERT OR IGNORE INTO connect_changes(kind,object_key,payload) VALUES(?1,?2,?3)",
-            )
-            .bind(if kind == "local_reference" {
-                "track"
-            } else {
-                &kind
-            })
-            .bind(row.get::<String, _>(1))
-            .bind(row.get::<String, _>(2))
-            .execute(&mut *transaction)
-            .await?;
+        let last = rows.last().map_or(cursor, |row| row.get(0));
+        if !rows.is_empty() {
+            let mut insert = QueryBuilder::<Sqlite>::new(
+                "INSERT OR IGNORE INTO connect_changes(kind,object_key,payload) ",
+            );
+            insert.push_values(&rows, |mut values, row| {
+                values
+                    .push_bind(if kind == "local_reference" {
+                        "track"
+                    } else {
+                        &kind
+                    })
+                    .push_bind(row.get::<String, _>(1))
+                    .push_bind(row.get::<String, _>(2));
+            });
+            insert.build().execute(&mut *transaction).await?;
         }
         sqlx::query("UPDATE connect_seed SET cursor=?2,complete=?3 WHERE kind=?1")
             .bind(&kind)
@@ -622,16 +654,21 @@ impl Database {
             .ok_or(LibraryError::WriterUnavailable)?
             .begin()
             .await?;
-        for change in changes {
-            if change.record.kind == "track" {
-                if let Some(value) = &change.record.value {
-                    remember_root(&mut transaction, value).await?;
-                }
+        for page in changes.chunks(CONNECT_PAGE_SIZE) {
+            let roots: Vec<_> = page
+                .iter()
+                .filter(|change| change.record.kind == "track")
+                .filter_map(|change| change.record.value.as_ref())
+                .collect();
+            remember_roots(&mut transaction, &roots).await?;
+            let mut delete =
+                QueryBuilder::<Sqlite>::new("DELETE FROM connect_changes WHERE sequence IN (");
+            let mut sequences = delete.separated(",");
+            for change in page {
+                sequences.push_bind(change.sequence);
             }
-            sqlx::query("DELETE FROM connect_changes WHERE sequence=?1")
-                .bind(change.sequence)
-                .execute(&mut *transaction)
-                .await?;
+            sequences.push_unseparated(")");
+            delete.build().execute(&mut *transaction).await?;
         }
         transaction.commit().await?;
         Ok(())
@@ -654,9 +691,47 @@ impl Database {
             .await?;
         let mut changed = false;
         let mut sources = BTreeMap::new();
-        for record in records {
-            let applied = apply_record(&mut transaction, record, &mut sources).await?;
-            changed |= applied && !matches!(record.kind.as_str(), "listen" | "legacy_activity");
+        let mut remaining = records;
+        while let Some(record) = remaining.first() {
+            if record.value.is_some()
+                && (matches!(
+                    record.kind.as_str(),
+                    "track" | "album" | "artist" | "genre" | "mood" | "folder" | "native_playlist"
+                ) || LINKS.iter().any(|(_, _, table)| *table == record.kind))
+            {
+                let mut keys = BTreeSet::new();
+                let count = remaining
+                    .iter()
+                    .take(CONNECT_PAGE_SIZE)
+                    .take_while(|next| {
+                        next.kind == record.kind && next.value.is_some() && keys.insert(&next.key)
+                    })
+                    .count();
+                changed |= if let Some((left, right, table)) =
+                    LINKS.iter().find(|(_, _, table)| *table == record.kind)
+                {
+                    apply_link_page(
+                        &mut transaction,
+                        &remaining[..count],
+                        left,
+                        right,
+                        table,
+                        &mut sources,
+                    )
+                    .await?
+                } else {
+                    apply_catalog_page(&mut transaction, &remaining[..count], &mut sources).await?
+                };
+                remaining = &remaining[count..];
+            } else {
+                let applied = apply_record(&mut transaction, record, &mut sources).await?;
+                changed |= applied
+                    && !matches!(
+                        record.kind.as_str(),
+                        "listen" | "legacy_activity" | "cache_lyrics"
+                    );
+                remaining = &remaining[1..];
+            }
         }
         for (source, artwork_changed) in sources {
             sqlx::query("UPDATE catalog.sources SET catalog_revision=catalog_revision+1,artwork_digest=CASE WHEN ?2 THEN randomblob(32) ELSE artwork_digest END WHERE source_key=?1")
@@ -729,13 +804,18 @@ impl Database {
     pub async fn connect_local_file(
         &self,
         media_uri: &str,
-    ) -> LibraryResult<Option<std::path::PathBuf>> {
+    ) -> LibraryResult<Option<crate::LocalMediaLocation>> {
         let mut connection = self.acquire_reader().await?;
-        let paths:Vec<String>=sqlx::query_scalar("SELECT path FROM main.local_locators WHERE media_uri=?1 ORDER BY CASE origin WHEN 'local' THEN 0 WHEN 'import' THEN 1 WHEN 'mapping' THEN 2 ELSE 3 END LIMIT 4").bind(media_uri).fetch_all(&mut *connection).await?;
-        Ok(paths
-            .into_iter()
-            .map(std::path::PathBuf::from)
-            .find(|path| path.is_file()))
+        let backing = crate::cue_media_parts(media_uri).map(|(_, backing, _, _)| backing);
+        let paths:Vec<String>=sqlx::query_scalar("SELECT access_uri FROM main.local_locators WHERE media_uri IN (?1,?2) ORDER BY media_uri=?1 DESC, CASE origin WHEN 'local' THEN 0 WHEN 'import' THEN 1 WHEN 'mapping' THEN 2 ELSE 3 END LIMIT 4").bind(media_uri).bind(backing.as_deref()).fetch_all(&mut *connection).await?;
+        Ok(paths.into_iter().find_map(|uri| {
+            if uri.starts_with("content://") {
+                return Some(crate::LocalMediaLocation::Document(uri));
+            }
+            crate::file_media_path(&uri)
+                .filter(|path| path.is_file())
+                .map(crate::LocalMediaLocation::File)
+        }))
     }
 
     /// Register a completed transferred file or a trusted corresponding-folder file
@@ -746,22 +826,80 @@ impl Database {
         path: &std::path::Path,
         managed: bool,
     ) -> LibraryResult<()> {
+        let metadata = std::fs::metadata(path)?;
+        let access_uri = url::Url::from_file_path(path)
+            .map_err(|()| {
+                LibraryError::InvalidRequest("Connect media path must be absolute".into())
+            })?
+            .to_string();
+        self.connect_set_file_access(
+            media_uri,
+            managed,
+            path.to_string_lossy().into_owned(),
+            path.parent().unwrap_or(path).to_string_lossy().into_owned(),
+            access_uri,
+            i64::try_from(metadata.len()).unwrap_or(i64::MAX),
+            metadata
+                .modified()?
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| i64::try_from(duration.as_nanos()).unwrap_or(i64::MAX))
+                .unwrap_or(0),
+        )
+        .await
+    }
+
+    pub async fn connect_set_document_file(
+        &self,
+        media_uri: &str,
+        document_uri: &str,
+        root: &str,
+        managed: bool,
+        size: Option<u64>,
+    ) -> LibraryResult<()> {
+        self.connect_set_file_access(
+            media_uri,
+            managed,
+            document_uri.to_string(),
+            root.to_string(),
+            document_uri.to_string(),
+            size.and_then(|size| i64::try_from(size).ok()).unwrap_or(0),
+            0,
+        )
+        .await
+    }
+
+    pub async fn connect_document_mapping_matches(
+        &self,
+        media_uri: &str,
+        document_uri: &str,
+        root: &str,
+        relative: &str,
+    ) -> LibraryResult<bool> {
+        let mut reader = self.acquire_reader().await?;
+        Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM main.local_locators WHERE media_uri=?1 AND access_uri=?2 AND root=?3 AND relative_path=?4 AND origin IN ('mapping','download'))")
+            .bind(media_uri).bind(document_uri).bind(root).bind(relative).fetch_one(&mut *reader).await?)
+    }
+
+    async fn connect_set_file_access(
+        &self,
+        media_uri: &str,
+        managed: bool,
+        path: String,
+        root: String,
+        access_uri: String,
+        size_bytes: i64,
+        mtime_ns: i64,
+    ) -> LibraryResult<()> {
         let reference = self
             .connect_track_reference(media_uri)
             .await?
             .ok_or_else(|| {
                 LibraryError::InvalidRequest("Connect track is not in the collection".into())
             })?;
-        let metadata = std::fs::metadata(path)?;
         let source = match reference["source_id"].as_str() {
             Some(id) => self.source_identity_key(&crate::SourceId::new(id)).await?,
             None => None,
         };
-        let access_uri = url::Url::from_file_path(path)
-            .map_err(|()| {
-                LibraryError::InvalidRequest("Connect media path must be absolute".into())
-            })?
-            .to_string();
         self.upsert_local_access(
             source,
             &crate::LocalAccessWrite {
@@ -771,18 +909,14 @@ impl Database {
                 } else {
                     crate::LocalAccessOrigin::Mapping
                 },
-                path: path.to_string_lossy().into_owned(),
-                root: path.parent().unwrap_or(path).to_string_lossy().into_owned(),
+                path,
+                root,
                 relative_path: reference["relative_path"]
                     .as_str()
                     .unwrap_or_default()
                     .to_owned(),
-                size_bytes: i64::try_from(metadata.len()).unwrap_or(i64::MAX),
-                mtime_ns: metadata
-                    .modified()?
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| i64::try_from(d.as_nanos()).unwrap_or(i64::MAX))
-                    .unwrap_or(0),
+                size_bytes,
+                mtime_ns,
                 device_id: None,
                 inode: None,
                 parser_version: 1,
@@ -839,11 +973,206 @@ async fn playlist_key(connection: &mut SqliteConnection, identity: &str) -> Libr
     Ok(sqlx::query_scalar("INSERT INTO main.playlists(source_key,object_id,position) VALUES(?1,?2,(SELECT coalesce(max(position),-1)+1 FROM main.playlists)) RETURNING playlist_key").bind(source).bind(identity.1).fetch_one(connection).await?)
 }
 
-async fn remember_root(connection: &mut SqliteConnection, value: &Value) -> LibraryResult<()> {
-    if let (Some(source), Some(root)) = (value["source_id"].as_str(), value["root_id"].as_str()) {
-        sqlx::query("INSERT INTO connect_roots(source_id,id,label) VALUES(?1,?2,?3) ON CONFLICT(source_id,id) DO UPDATE SET label=excluded.label").bind(source).bind(root).bind(value["root_label"].as_str().unwrap_or("")).execute(connection).await?;
+async fn remember_roots(connection: &mut SqliteConnection, values: &[&Value]) -> LibraryResult<()> {
+    if !values.is_empty() {
+        sqlx::query("INSERT INTO connect_roots(source_id,id,label) SELECT json_extract(value,'$.source_id'),json_extract(value,'$.root_id'),CASE WHEN json_type(value,'$.root_label')='text' THEN json_extract(value,'$.root_label') ELSE '' END FROM json_each(?1) WHERE json_type(value,'$.source_id')='text' AND json_type(value,'$.root_id')='text' ON CONFLICT(source_id,id) DO UPDATE SET label=excluded.label")
+            .bind(serde_json::to_string(values)?).execute(connection).await?;
     }
     Ok(())
+}
+
+async fn apply_catalog_page(
+    connection: &mut SqliteConnection,
+    records: &[ConnectRecord],
+    sources: &mut BTreeMap<i64, bool>,
+) -> LibraryResult<bool> {
+    let kind = records[0].kind.as_str();
+    let projection = PROJECTIONS
+        .iter()
+        .find(|projection| projection.kind == kind)
+        .unwrap();
+    let identity = if matches!(kind, "track" | "album" | "artist") {
+        "r.media_uri=json_extract(j.value,'$.key')"
+    } else {
+        "r.source_key=(SELECT source_key FROM catalog.sources WHERE object_id=json_extract(json_extract(j.value,'$.key'),'$[0]')) AND r.object_id=json_extract(json_extract(j.value,'$.key'),'$[1]')"
+    };
+    let query = format!(
+        "SELECT json_extract(j.value,'$.key') AS object_key,{} AS payload,{} AS saved FROM json_each(?1) j JOIN {} r ON {identity}",
+        object(projection, "r"),
+        if kind == "track" {
+            "(SELECT payload FROM connect_collection WHERE media_uri=r.media_uri)"
+        } else {
+            "NULL"
+        },
+        projection.table,
+    );
+    let old: BTreeMap<String, (String, Option<String>)> = sqlx::query(sqlx::AssertSqlSafe(query))
+        .bind(serde_json::to_string(records)?)
+        .fetch_all(&mut *connection)
+        .await?
+        .into_iter()
+        .map(|row| (row.get(0), (row.get(1), row.get(2))))
+        .collect();
+    let mut changed = Vec::new();
+    let mut source_artwork = BTreeMap::new();
+    for record in records {
+        let value = record.value.as_ref().unwrap();
+        let mut previous = old
+            .get(&record.key)
+            .map(|(payload, _)| serde_json::from_str::<Value>(payload))
+            .transpose()?;
+        if kind == "track" {
+            if let Some(previous) = &mut previous {
+                portable_relative(previous);
+                if previous.get("root_id").is_none() {
+                    if let Some(saved) =
+                        old.get(&record.key).and_then(|(_, saved)| saved.as_deref())
+                    {
+                        let saved: Value = serde_json::from_str(saved)?;
+                        for field in [
+                            "root_id",
+                            "root_label",
+                            "relative_path",
+                            "revision",
+                            "local_media",
+                            "cue_start_millis",
+                            "cue_end_millis",
+                            "backing_id",
+                        ] {
+                            if let Some(value) = saved.get(field) {
+                                previous[field] = value.clone();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if same_record(previous.as_mut(), value) {
+            continue;
+        }
+        let source = value["source_id"].as_str().ok_or_else(|| {
+            LibraryError::InvalidRequest("Connect track source is missing".into())
+        })?;
+        let artwork_changed = value.get("artwork_binding").is_some()
+            && previous.as_ref().and_then(|old| old.get("artwork_binding"))
+                != value.get("artwork_binding");
+        source_artwork
+            .entry(source)
+            .and_modify(|changed| *changed |= artwork_changed)
+            .or_insert(artwork_changed);
+        changed.push(record);
+    }
+    if changed.is_empty() {
+        return Ok(false);
+    }
+    let payload = serde_json::to_string(&changed)?;
+    sqlx::query("INSERT OR IGNORE INTO main.source_ids(object_id) SELECT DISTINCT json_extract(value,'$.value.source_id') FROM json_each(?1)")
+        .bind(&payload).execute(&mut *connection).await?;
+    sqlx::query("INSERT OR IGNORE INTO catalog.sources(object_id,display_name,normalized_name,artwork_digest) SELECT DISTINCT json_extract(value,'$.value.source_id'),json_extract(value,'$.value.source_id'),json_extract(value,'$.value.source_id'),zeroblob(32) FROM json_each(?1)")
+        .bind(&payload).execute(&mut *connection).await?;
+    let keys = sqlx::query("SELECT source_key,object_id FROM catalog.sources WHERE object_id IN (SELECT json_extract(value,'$.value.source_id') FROM json_each(?1))")
+        .bind(&payload).fetch_all(&mut *connection).await?;
+    for row in keys {
+        let artwork = source_artwork[row.get::<String, _>(1).as_str()];
+        sources
+            .entry(row.get(0))
+            .and_modify(|changed| *changed |= artwork)
+            .or_insert(artwork);
+    }
+    let columns = projection
+        .fields
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(",");
+    let values = projection.fields.split_whitespace().map(|field| {
+        let value = format!("json_extract(j.value,'$.value.{field}')");
+        if field == "artwork_binding" {
+            format!("CASE WHEN json_type(j.value,'$.value.artwork_binding') IS NULL THEN r.artwork_binding ELSE unhex({value}) END")
+        } else { value }
+    }).collect::<Vec<_>>().join(",");
+    let updates = projection
+        .fields
+        .split_whitespace()
+        .filter(|field| *field != "media_uri")
+        .map(|field| format!("{field}=excluded.{field}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let (extra_columns, extra_values, extra_updates) = if kind == "track" {
+        (
+            ",album_key",
+            ",(SELECT album_key FROM catalog.albums WHERE source_key=s.source_key AND object_id=json_extract(j.value,'$.value.album_id'))",
+            ",album_key=excluded.album_key",
+        )
+    } else {
+        ("", "", "")
+    };
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "INSERT INTO {table}(source_key,{columns}{extra_columns}) SELECT s.source_key,{values}{extra_values} FROM json_each(?1) j JOIN catalog.sources s ON s.object_id=json_extract(j.value,'$.value.source_id') LEFT JOIN {table} r ON r.source_key=s.source_key AND r.object_id=json_extract(j.value,'$.value.object_id') WHERE true ON CONFLICT(source_key,object_id) DO UPDATE SET {updates}{extra_updates}", table=projection.table
+    ))).bind(&payload).execute(&mut *connection).await?;
+    if kind == "track" {
+        let roots: Vec<_> = changed
+            .iter()
+            .map(|record| record.value.as_ref().unwrap())
+            .collect();
+        remember_roots(connection, &roots).await?;
+        sqlx::query("INSERT INTO connect_collection(media_uri,payload) SELECT json_extract(value,'$.key'),json_extract(value,'$.value') FROM json_each(?1) WHERE true ON CONFLICT(media_uri) DO UPDATE SET payload=excluded.payload")
+            .bind(&payload).execute(connection).await?;
+    } else if kind == "album" {
+        sqlx::query("UPDATE catalog.tracks AS t SET album_key=(SELECT a.album_key FROM catalog.albums a JOIN connect_collection c ON c.media_uri=t.media_uri WHERE a.source_key=t.source_key AND a.object_id=json_extract(c.payload,'$.album_id')) WHERE t.media_uri IN (SELECT c.media_uri FROM json_each(?1) j JOIN connect_collection c ON json_extract(c.payload,'$.source_id')=json_extract(j.value,'$.value.source_id') AND json_extract(c.payload,'$.album_id')=json_extract(j.value,'$.value.object_id'))")
+            .bind(&payload).execute(connection).await?;
+    }
+    Ok(true)
+}
+
+async fn apply_link_page(
+    connection: &mut SqliteConnection,
+    records: &[ConnectRecord],
+    left: &str,
+    right: &str,
+    table: &str,
+    sources: &mut BTreeMap<i64, bool>,
+) -> LibraryResult<bool> {
+    let joins = format!(
+        "FROM json_each(?1) j LEFT JOIN catalog.sources s ON s.object_id=json_extract(j.value,'$.value.source_id') LEFT JOIN catalog.{left}s l ON l.source_key=s.source_key AND l.object_id=json_extract(j.value,'$.value.left') LEFT JOIN catalog.{right}s r ON r.source_key=s.source_key AND r.object_id=json_extract(j.value,'$.value.right')"
+    );
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT j.key,s.source_key,l.{left}_key,r.{right}_key,coalesce(json_extract(j.value,'$.value.position'),0),x.position {joins} LEFT JOIN catalog.{table} x ON x.{left}_key=l.{left}_key AND x.{right}_key=r.{right}_key")))
+        .bind(serde_json::to_string(records)?).fetch_all(&mut *connection).await?;
+    let mut changed = Vec::new();
+    for row in rows {
+        let left_key: Option<i64> = row.get(2);
+        let right_key: Option<i64> = row.get(3);
+        if left_key.is_none() || right_key.is_none() {
+            return Err(LibraryError::ConnectPending);
+        }
+        if row.get::<Option<i64>, _>(5) != Some(row.get::<i64, _>(4)) {
+            sources.entry(row.get(1)).or_insert(false);
+            changed.push(&records[row.get::<i64, _>(0) as usize]);
+        }
+    }
+    if changed.is_empty() {
+        return Ok(false);
+    }
+    sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO catalog.{table}({left}_key,{right}_key,position) SELECT l.{left}_key,r.{right}_key,coalesce(json_extract(j.value,'$.value.position'),0) {joins} WHERE true ON CONFLICT({left}_key,{right}_key) DO UPDATE SET position=excluded.position")))
+        .bind(serde_json::to_string(&changed)?).execute(connection).await?;
+    Ok(true)
+}
+
+fn same_record(old: Option<&mut Value>, value: &Value) -> bool {
+    let Some(Value::Object(old)) = old else {
+        return false;
+    };
+    if value.get("artwork_binding").is_none() {
+        old.remove("artwork_binding");
+    }
+    old.iter().all(|(field, old)| {
+        let incoming = value.get(field).unwrap_or(&Value::Null);
+        match (old, incoming) {
+            (Value::Number(old), Value::Bool(incoming)) => {
+                old.as_i64() == Some(i64::from(*incoming))
+            }
+            _ => incoming == old,
+        }
+    })
 }
 
 async fn apply_record(
@@ -863,7 +1192,7 @@ async fn apply_record(
     }
     if record.kind == "root" {
         if let Some(value) = &record.value {
-            remember_root(connection, value).await?;
+            remember_roots(connection, &[value]).await?;
         }
         return Ok(false);
     }
@@ -918,47 +1247,20 @@ async fn apply_record(
     }
     if let Some((left, right, table)) = LINKS.iter().find(|(_, _, table)| *table == record.kind) {
         let (key, _) = link_projection(left, right, table, "r");
-        let Some(value) = &record.value else {
-            let source: Option<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-                "SELECT source_key FROM catalog.{left}s WHERE {left}_key=(SELECT {left}_key FROM catalog.{table} r WHERE {key}=?1)"
-            )))
-            .bind(&record.key)
-            .fetch_optional(&mut *connection).await?;
-            let Some(source) = source else {
-                return Ok(false);
-            };
-            sqlx::query(sqlx::AssertSqlSafe(format!(
-                "DELETE FROM catalog.{table} AS r WHERE {key}=?1"
-            )))
-            .bind(&record.key)
-            .execute(connection)
-            .await?;
-            sources.entry(source).or_insert(false);
-            return Ok(true);
-        };
-        let source = value["source_id"].as_str();
-        let left_key:Option<i64>=sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT {left}_key FROM catalog.{left}s WHERE source_key=(SELECT source_key FROM catalog.sources WHERE object_id=?1) AND object_id=?2"))).bind(source).bind(value["left"].as_str()).fetch_optional(&mut *connection).await?;
-        let right_key:Option<i64>=sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT {right}_key FROM catalog.{right}s WHERE source_key=(SELECT source_key FROM catalog.sources WHERE object_id=?1) AND object_id=?2"))).bind(source).bind(value["right"].as_str()).fetch_optional(&mut *connection).await?;
-        let (Some(left_key), Some(right_key)) = (left_key, right_key) else {
-            return Err(LibraryError::ConnectPending);
-        };
-        let position = value["position"].as_i64().unwrap_or(0);
-        let old: Option<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT position FROM catalog.{table} WHERE {left}_key=?1 AND {right}_key=?2"
+        let source: Option<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT source_key FROM catalog.{left}s WHERE {left}_key=(SELECT {left}_key FROM catalog.{table} r WHERE {key}=?1)"
         )))
-        .bind(left_key)
-        .bind(right_key)
-        .fetch_optional(&mut *connection)
-        .await?;
-        if old == Some(position) {
+        .bind(&record.key)
+        .fetch_optional(&mut *connection).await?;
+        let Some(source) = source else {
             return Ok(false);
-        }
-        sqlx::query(sqlx::AssertSqlSafe(format!("INSERT OR REPLACE INTO catalog.{table}({left}_key,{right}_key,position) VALUES(?1,?2,?3)"))).bind(left_key).bind(right_key).bind(position).execute(&mut *connection).await?;
-        let source: i64 =
-            sqlx::query_scalar("SELECT source_key FROM catalog.sources WHERE object_id=?1")
-                .bind(source)
-                .fetch_one(connection)
-                .await?;
+        };
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM catalog.{table} AS r WHERE {key}=?1"
+        )))
+        .bind(&record.key)
+        .execute(connection)
+        .await?;
         sources.entry(source).or_insert(false);
         return Ok(true);
     }
@@ -994,7 +1296,7 @@ async fn apply_record(
             }
             return Ok(deleted);
         }
-        if projection.table.starts_with("catalog.") {
+        if projection.table.starts_with("catalog.") && record.kind != "cache_lyrics" {
             let artwork = if projection.fields.contains("artwork_binding") {
                 "artwork_binding IS NOT NULL"
             } else {
@@ -1037,45 +1339,14 @@ async fn apply_record(
         .as_deref()
         .map(serde_json::from_str::<Value>)
         .transpose()?;
-    if record.kind == "track" {
-        if let Some(old) = &mut old {
-            portable_relative(old);
-            if old.get("root_id").is_none() {
-                let saved: Option<String> =
-                    sqlx::query_scalar("SELECT payload FROM connect_collection WHERE media_uri=?1")
-                        .bind(&record.key)
-                        .fetch_optional(&mut *connection)
-                        .await?;
-                if let Some(saved) = saved {
-                    let saved: Value = serde_json::from_str(&saved)?;
-                    for field in ["root_id", "root_label", "relative_path", "revision"] {
-                        if let Some(value) = saved.get(field) {
-                            old[field] = value.clone();
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if value.get("artwork_binding").is_none() {
-        if let Some(Value::Object(old)) = &mut old {
-            old.remove("artwork_binding");
-        }
-    }
-    if old.as_ref().and_then(Value::as_object).is_some_and(|old| {
-        old.iter().all(|(field, old)| {
-            let incoming = value.get(field).unwrap_or(&Value::Null);
-            match (old, incoming) {
-                (Value::Number(old), Value::Bool(incoming)) => {
-                    old.as_i64() == Some(i64::from(*incoming))
-                }
-                _ => incoming == old,
-            }
-        })
-    }) {
+    if same_record(old.as_mut(), value) {
         return Ok(false);
     }
     match record.kind.as_str() {
+        "cache_lyrics" => {
+            sqlx::query("INSERT INTO lyrics_cache(media_uri,authority,role,language,script,cache_input_digest,lyrics,updated_at) VALUES(json_extract(?1,'$[0]'),json_extract(?1,'$[1]'),json_extract(?1,'$[2]'),json_extract(?1,'$[3]'),json_extract(?1,'$[4]'),unhex(json_extract(?2,'$.cache_input_digest')),json_extract(?2,'$.lyrics'),json_extract(?2,'$.updated_at')) ON CONFLICT(media_uri,authority,role,language,script) DO UPDATE SET cache_input_digest=excluded.cache_input_digest,lyrics=excluded.lyrics,updated_at=excluded.updated_at")
+                .bind(&record.key).bind(&payload).execute(connection).await?;
+        }
         "state" => {
             sqlx::query("INSERT INTO user_media_state(media_uri,favorite,rating) VALUES(?1,json_extract(?2,'$.favorite'),json_extract(?2,'$.rating')) ON CONFLICT(media_uri) DO UPDATE SET favorite=excluded.favorite,rating=excluded.rating").bind(&record.key).bind(&payload).execute(connection).await?;
         }
@@ -1191,57 +1462,6 @@ async fn apply_record(
         }
         "smart" => {
             sqlx::query("INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position,artwork_bytes,artwork_revision) VALUES(?1,json_extract(?2,'$.name'),json_extract(?2,'$.normalized_name'),json_extract(?2,'$.definition_json'),(SELECT coalesce(max(position),-1)+1 FROM smart_playlists),unhex(json_extract(?2,'$.artwork_bytes')),json_extract(?2,'$.artwork_revision')) ON CONFLICT(object_id) DO UPDATE SET name=excluded.name,normalized_name=excluded.normalized_name,definition_json=excluded.definition_json,artwork_bytes=excluded.artwork_bytes,artwork_revision=excluded.artwork_revision").bind(&record.key).bind(payload).execute(connection).await?;
-        }
-        "track" | "album" | "artist" | "genre" | "mood" | "folder" | "native_playlist" => {
-            let source = value["source_id"].as_str().ok_or_else(|| {
-                LibraryError::InvalidRequest("Connect track source is missing".into())
-            })?;
-            source_key(connection, source).await?;
-            sqlx::query("INSERT OR IGNORE INTO catalog.sources(object_id,display_name,normalized_name,artwork_digest) VALUES(?1,?1,?1,zeroblob(32))").bind(source).execute(&mut *connection).await?;
-            let key: i64 =
-                sqlx::query_scalar("SELECT source_key FROM catalog.sources WHERE object_id=?1")
-                    .bind(source)
-                    .fetch_one(&mut *connection)
-                    .await?;
-            let artwork_changed = value.get("artwork_binding").is_some()
-                && old.as_ref().and_then(|old| old.get("artwork_binding"))
-                    != value.get("artwork_binding");
-            sources
-                .entry(key)
-                .and_modify(|changed| *changed |= artwork_changed)
-                .or_insert(artwork_changed);
-            let columns = projection
-                .fields
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(",");
-            let values = projection
-                .fields
-                .split_whitespace()
-                .map(|f| {
-                    if f == "artwork_binding" {
-                        "unhex(json_extract(?2,'$.artwork_binding'))".into()
-                    } else {
-                        format!("json_extract(?2,'$.{f}')")
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(",");
-            let updates = projection
-                .fields
-                .split_whitespace()
-                .filter(|f| *f != "media_uri")
-                .map(|f| if f == "artwork_binding" { "artwork_binding=CASE WHEN json_type(?2,'$.artwork_binding') IS NULL THEN artwork_binding ELSE excluded.artwork_binding END".into() } else { format!("{f}=excluded.{f}") })
-                .collect::<Vec<_>>()
-                .join(",");
-            sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO {}(source_key,{columns}) VALUES(?1,{values}) ON CONFLICT(source_key,object_id) DO UPDATE SET {updates}",projection.table))).bind(key).bind(&payload).execute(&mut *connection).await?;
-            if record.kind == "track" {
-                remember_root(connection, value).await?;
-                sqlx::query("UPDATE catalog.tracks SET album_key=(SELECT album_key FROM catalog.albums WHERE source_key=?1 AND object_id=json_extract(?2,'$.album_id')) WHERE media_uri=?3").bind(key).bind(&payload).bind(&record.key).execute(&mut *connection).await?;
-                sqlx::query("INSERT INTO connect_collection(media_uri,payload) VALUES(?1,?2) ON CONFLICT(media_uri) DO UPDATE SET payload=excluded.payload").bind(&record.key).bind(payload).execute(connection).await?;
-            } else if record.kind == "album" {
-                sqlx::query("UPDATE catalog.tracks SET album_key=(SELECT album_key FROM catalog.albums WHERE media_uri=?1) WHERE source_key=?2 AND media_uri IN (SELECT media_uri FROM connect_collection WHERE json_extract(payload,'$.album_id')=json_extract(?3,'$.object_id') AND json_extract(payload,'$.source_id')=json_extract(?3,'$.source_id'))").bind(&record.key).bind(key).bind(payload).execute(connection).await?;
-            }
         }
         _ => unreachable!(),
     }

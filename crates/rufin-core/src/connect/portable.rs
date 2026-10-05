@@ -16,6 +16,9 @@ pub enum Destination {
     Local {
         path: PathBuf,
     },
+    Document {
+        uri: String,
+    },
     // Keep the existing file format; the saved connection owns its protocol.
     #[serde(rename = "web_dav", alias = "smb")]
     Remote {
@@ -26,12 +29,12 @@ pub enum Destination {
 
 impl Destination {
     pub fn is_remote(&self) -> bool {
-        !matches!(self, Self::Local { .. })
+        matches!(self, Self::Remote { .. })
     }
     pub fn source_id(&self) -> Option<&sources::SourceId> {
         match self {
             Self::Remote { source_id, .. } => Some(source_id),
-            Self::Local { .. } => None,
+            Self::Local { .. } | Self::Document { .. } => None,
         }
     }
 }

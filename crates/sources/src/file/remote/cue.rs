@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use library::{Database, LocalFileKind, LocalFileState, ReadCancellation, Scan};
 
-use super::{RemoteSource, scan::PARSER_VERSION};
+use super::{FileSource, scan::PARSER_VERSION};
 use crate::file::{
     cue::{cue_track, parse_cue_sheet},
     media,
@@ -10,7 +10,7 @@ use crate::file::{
 };
 use crate::{SourceError, SourceResult};
 
-impl RemoteSource {
+impl FileSource {
     pub(crate) async fn stage_cues(
         &self,
         database: &Database,
@@ -20,11 +20,16 @@ impl RemoteSource {
         rename: Option<&(String, String)>,
     ) -> SourceResult<usize> {
         let worker = Arc::new(Mutex::new(media::Worker::network()));
+        let root_scope = self.location("")?;
         let mut after = None;
         let mut completed = 0;
         loop {
             let files = scan
-                .local_inventory_file_page(LocalFileKind::Cue, after.as_deref())
+                .local_inventory_file_page_in_root(
+                    LocalFileKind::Cue,
+                    after.as_deref(),
+                    Some(&root_scope),
+                )
                 .await?;
             if files.is_empty() {
                 break;
@@ -87,9 +92,15 @@ impl RemoteSource {
                         return Ok(false);
                     };
                     for backing in &sheet.files {
-                        dependencies.push(
-                            self.location(&super::referenced_path(&relative, &backing.path)?)?,
-                        );
+                        let referenced = super::referenced_path(
+                            crate::file::documents::relative_parts(&relative).0,
+                            &backing.path,
+                        )?;
+                        dependencies.push(if self.document_access().is_some() {
+                            self.stat(&input, &referenced).await?.path
+                        } else {
+                            self.location(&referenced)?
+                        });
                     }
                     for page in dependencies.chunks(128) {
                         scan.write_local_dependency_paths(page).await?;
@@ -112,7 +123,10 @@ impl RemoteSource {
                         .and_then(|old| old.track_object_id.as_deref())
                         .and_then(|id| id.rsplit_once(':').map(|(prefix, _)| prefix.to_string()))
                         .unwrap_or_else(|| {
-                            format!("cue:{:016x}", crate::policy::stable_hash(&file.path))
+                            format!(
+                                "cue:{:016x}",
+                                crate::policy::stable_hash(&super::file_identity(&file.path))
+                            )
                         });
                     let mut failure = None;
                     for (entry, path) in sheet.files.iter().zip(&dependencies) {

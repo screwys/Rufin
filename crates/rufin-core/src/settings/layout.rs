@@ -1,6 +1,6 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
-pub const LIBRARY_LIST_LAYOUT_VERSION: u8 = 14;
+pub const LIBRARY_LIST_LAYOUT_VERSION: u8 = 15;
 pub const DEFAULT_WINDOW_WIDTH: i32 = 1_500;
 pub const DEFAULT_WINDOW_HEIGHT: i32 = 900;
 pub const MIN_RESTORED_WINDOW_WIDTH: i32 = 450;
@@ -916,6 +916,51 @@ impl LibraryListSettings {
         {
             self.row_fields = default_row_fields(key);
         }
+        if self.layout_version < 15 {
+            let removed = match key {
+                LibraryListKey::Albums | LibraryListKey::ArtistAlbums => {
+                    Some((2, LibraryField::PlayCount))
+                }
+                LibraryListKey::Artists | LibraryListKey::AlbumArtists => {
+                    Some((3, LibraryField::AlbumCount))
+                }
+                LibraryListKey::Genres => Some((2, LibraryField::AlbumCount)),
+                LibraryListKey::Moods => Some((3, LibraryField::Duration)),
+                LibraryListKey::Playlists | LibraryListKey::SmartPlaylists => {
+                    Some((3, LibraryField::SongCount))
+                }
+                LibraryListKey::Tracks
+                | LibraryListKey::Folders
+                | LibraryListKey::FavoriteTracks => Some((3, LibraryField::Year)),
+                LibraryListKey::GenreTracks
+                | LibraryListKey::MoodTracks
+                | LibraryListKey::PlaylistTracks => Some((3, LibraryField::Duration)),
+                LibraryListKey::SmartPlaylistTracks => Some((3, LibraryField::PlayCount)),
+                _ => None,
+            };
+            if let Some((index, field)) = removed {
+                let defaults = default_row_fields(key);
+                let mut previous = defaults.clone();
+                previous.insert(index, field);
+                if self.row_fields == previous
+                    || (self.layout_version < 12
+                        && matches!(
+                            key,
+                            LibraryListKey::Albums
+                                | LibraryListKey::ArtistAlbums
+                                | LibraryListKey::Artists
+                                | LibraryListKey::AlbumArtists
+                                | LibraryListKey::Genres
+                                | LibraryListKey::Moods
+                                | LibraryListKey::Playlists
+                                | LibraryListKey::SmartPlaylists
+                        )
+                        && self.row_fields == previous[1..])
+                {
+                    self.row_fields = defaults;
+                }
+            }
+        }
     }
 }
 pub fn default_library_list_settings() -> Vec<LibraryListSettingsEntry> {
@@ -1182,7 +1227,6 @@ fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
         LibraryListKey::Albums | LibraryListKey::ArtistAlbums => vec![
             LibraryField::RowIndex,
             LibraryField::TitleMerged,
-            LibraryField::PlayCount,
             LibraryField::Year,
             LibraryField::Tools,
         ],
@@ -1190,13 +1234,11 @@ fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
             LibraryField::RowIndex,
             LibraryField::Image,
             LibraryField::Title,
-            LibraryField::AlbumCount,
             LibraryField::Tools,
         ],
         LibraryListKey::Genres => vec![
             LibraryField::RowIndex,
             LibraryField::Title,
-            LibraryField::AlbumCount,
             LibraryField::SongCount,
             LibraryField::Tools,
         ],
@@ -1204,21 +1246,18 @@ fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
             LibraryField::RowIndex,
             LibraryField::Title,
             LibraryField::SongCount,
-            LibraryField::Duration,
             LibraryField::Tools,
         ],
         LibraryListKey::Playlists | LibraryListKey::SmartPlaylists => vec![
             LibraryField::RowIndex,
             LibraryField::Image,
             LibraryField::Title,
-            LibraryField::SongCount,
             LibraryField::Tools,
         ],
         LibraryListKey::Tracks | LibraryListKey::Folders | LibraryListKey::FavoriteTracks => vec![
             LibraryField::RowIndex,
             LibraryField::TitleMerged,
             LibraryField::Album,
-            LibraryField::Year,
             LibraryField::Tools,
         ],
         LibraryListKey::History => vec![
@@ -1241,7 +1280,6 @@ fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
                 LibraryField::RowIndex,
                 LibraryField::TitleMerged,
                 LibraryField::Album,
-                LibraryField::Duration,
                 LibraryField::Tools,
             ]
         }
@@ -1249,7 +1287,6 @@ fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
             LibraryField::RowIndex,
             LibraryField::TitleMerged,
             LibraryField::Album,
-            LibraryField::PlayCount,
             LibraryField::Tools,
         ],
     }

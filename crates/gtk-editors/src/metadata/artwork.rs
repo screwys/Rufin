@@ -169,7 +169,7 @@ impl Drop for ArtworkEditor {
 
 pub(super) fn connect(source: &Arc<SourceOwner>, editor: &Rc<Editor>) {
     seed_search(editor);
-    let fields: &[MetadataField] = match &editor.draft {
+    let fields: &[MetadataField] = match editor.draft.as_ref() {
         MetadataDraft::Track(_) => &[
             MetadataField::Artist,
             MetadataField::AlbumArtist,
@@ -297,31 +297,7 @@ fn seed_search(editor: &Editor) {
 }
 
 fn draft_search_fields(editor: &Editor) -> (String, Option<String>) {
-    let field = |field| {
-        editor
-            .entries
-            .iter()
-            .find(|entry| entry.field == field)
-            .map(|entry| entry.entry.text().to_string())
-            .unwrap_or_default()
-    };
-    let (artist, album) = match &editor.draft {
-        MetadataDraft::Track(_) => (
-            field(MetadataField::AlbumArtist),
-            Some(field(MetadataField::Album)),
-        ),
-        MetadataDraft::Album(_) => (
-            field(MetadataField::AlbumArtist),
-            Some(field(MetadataField::Title)),
-        ),
-        MetadataDraft::Artist(_) => (field(MetadataField::Title), None),
-    };
-    let artist = if artist.trim().is_empty() {
-        field(MetadataField::Artist)
-    } else {
-        artist
-    };
-    (artist, album)
+    editor.model.borrow().artwork_search_fields()
 }
 
 fn load_current(source: &Arc<SourceOwner>, editor: &Rc<Editor>) {
@@ -532,32 +508,10 @@ fn schedule_search(source: &Arc<SourceOwner>, editor: &Rc<Editor>, delay: Durati
 }
 
 fn search_query(editor: &Editor) -> ArtworkQuery {
-    let artist = editor.artwork.search_artist.text().trim().to_string();
-    let album = editor.artwork.search_album.text().trim().to_string();
-    let (draft_artist, draft_album) = draft_search_fields(editor);
-    let same_identity =
-        artist == draft_artist.trim() && album == draft_album.as_deref().unwrap_or_default().trim();
-    let value = |field| {
-        editor
-            .entries
-            .iter()
-            .find(|entry| entry.field == field)
-            .map(|entry| entry.entry.text().trim().to_string())
-            .filter(|value| same_identity && !value.is_empty())
-    };
-    if matches!(&editor.draft, MetadataDraft::Artist(_)) {
-        ArtworkQuery::Artist {
-            name: artist,
-            musicbrainz_id: value(MetadataField::MusicBrainzArtistId),
-        }
-    } else {
-        ArtworkQuery::Album {
-            artist,
-            album,
-            release_id: value(MetadataField::MusicBrainzAlbumId),
-            release_group_id: value(MetadataField::MusicBrainzReleaseGroupId),
-        }
-    }
+    editor.model.borrow().artwork_query(
+        editor.artwork.search_artist.text().to_string(),
+        editor.artwork.search_album.text().to_string(),
+    )
 }
 
 fn show_results(

@@ -1,6 +1,6 @@
 //! Shared artwork format, selection, and decoding semantics.
 
-use super::{discovery, local, lofty, remote::RemoteSource};
+use super::{discovery, local, lofty, remote::FileSource};
 use crate::{ImageBytes, LocalImageRef, SourceError, SourceResult};
 use ::lofty::file::{TaggedFile, TaggedFileExt};
 use ::lofty::picture::{Picture, PictureType};
@@ -239,12 +239,26 @@ fn image_format(path: &Path) -> Option<usize> {
 }
 
 /// Selects file artwork while each source owns file access and path semantics.
+#[derive(Clone, Copy)]
 pub(crate) enum ArtworkFiles<'a> {
     Local,
-    Remote(&'a RemoteSource),
+    Documents,
+    Remote(&'a FileSource),
 }
 
-impl ArtworkFiles<'_> {
+impl<'a> ArtworkFiles<'a> {
+    fn for_path(&self, path: &str) -> ArtworkFiles<'a> {
+        if path.starts_with("rufin-document://") {
+            return Self::Documents;
+        }
+        match *self {
+            Self::Documents => Self::Local,
+            Self::Local => Self::Local,
+            Self::Remote(source) if source.document_access().is_some() => Self::Local,
+            Self::Remote(source) => Self::Remote(source),
+        }
+    }
+
     pub(crate) async fn stage(
         &self,
         database: &library::Database,
@@ -346,7 +360,7 @@ impl ArtworkFiles<'_> {
         discoverer: &mut discovery::Reader,
         track: &library::LocalArtworkCandidate,
     ) -> Option<LocalImageRef> {
-        match self {
+        match self.for_path(&track.path) {
             Self::Local => {
                 let path = Path::new(&track.path);
                 local::artwork::inspect_embedded(
@@ -356,7 +370,7 @@ impl ArtworkFiles<'_> {
                     local::artwork::revision(path)?,
                 )
             }
-            Self::Remote(_) => Some(LocalImageRef::Embedded {
+            Self::Remote(_) | Self::Documents => Some(LocalImageRef::Embedded {
                 source_id: crate::SourceId::new(source_id),
                 path: track.path.clone(),
                 revision: track.revision.clone().unwrap_or_default(),
@@ -443,7 +457,7 @@ impl ArtworkFiles<'_> {
     }
 
     fn directories(&self, track: &library::LocalArtworkCandidate) -> SourceResult<Vec<String>> {
-        match self {
+        match self.for_path(&track.path) {
             Self::Local => Ok(Path::new(&track.path)
                 .ancestors()
                 .skip(1)
@@ -463,6 +477,23 @@ impl ArtworkFiles<'_> {
                     )
                 })
                 .collect()),
+            Self::Documents => {
+                let mut uri = url::Url::parse(&track.path).map_err(|_| SourceError::NotFound)?;
+                uri.set_fragment(None);
+                let mut directories = Vec::new();
+                loop {
+                    uri.path_segments_mut()
+                        .map_err(|_| SourceError::NotFound)?
+                        .pop_if_empty()
+                        .pop()
+                        .push("");
+                    directories.push(uri.to_string());
+                    if uri.path() == "/" {
+                        break;
+                    }
+                }
+                Ok(directories)
+            }
             Self::Remote(source) => {
                 let relative = source.relative(&track.path)?;
                 let parent = relative.rsplit_once('/').map_or("", |(parent, _)| parent);
@@ -487,7 +518,7 @@ impl ArtworkFiles<'_> {
         prefix: &str,
         artist: Option<&str>,
     ) -> SourceResult<Option<LocalImageRef>> {
-        match self {
+        match self.for_path(prefix) {
             Self::Local => {
                 let directory = Path::new(prefix);
                 let path = match artist {
@@ -499,6 +530,15 @@ impl ArtworkFiles<'_> {
                         local::artwork::file_reference(scan.source_id(), &path, revision)
                     })
                 }))
+            }
+            Self::Documents => {
+                crate::file::remote::artwork::directory_image_by_role(
+                    &crate::SourceId::new(scan.source_id()),
+                    scan,
+                    prefix,
+                    artist.map(|name| (name, true)),
+                )
+                .await
             }
             Self::Remote(source) => match artist {
                 Some(name) => {
@@ -520,18 +560,30 @@ impl ArtworkFiles<'_> {
     ) -> SourceResult<Option<LocalImageRef>> {
         let found = self.folder_image(scan, prefix, Some(name)).await?;
         if let Some(LocalImageRef::File { path, .. }) = &found {
-            let filename = match self {
+            let filename = match self.for_path(path) {
                 Self::Local => Path::new(path)
                     .file_name()
                     .unwrap_or_default()
                     .to_string_lossy()
                     .into_owned(),
-                Self::Remote(source) => source
-                    .relative(path)?
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or_default()
-                    .to_string(),
+                Self::Documents => {
+                    let uri = url::Url::parse(path).map_err(|_| SourceError::NotFound)?;
+                    percent_encoding::percent_decode_str(
+                        uri.path().rsplit('/').next().unwrap_or_default(),
+                    )
+                    .decode_utf8()
+                    .map_err(|_| SourceError::NotFound)?
+                    .into_owned()
+                }
+                Self::Remote(source) => {
+                    let relative = source.relative(path)?;
+                    let relative = if source.document_access().is_some() {
+                        crate::file::documents::display_path(&relative)
+                    } else {
+                        relative
+                    };
+                    relative.rsplit('/').next().unwrap_or_default().to_string()
+                }
             };
             if artist_image_rank_for(&filename, name, false) == usize::MAX
                 && !scan
@@ -550,17 +602,16 @@ impl ArtworkFiles<'_> {
         track: &library::LocalArtworkCandidate,
         artist: &str,
     ) -> SourceResult<Option<LocalImageRef>> {
-        let revision = match self {
+        let owner = self.for_path(&track.path);
+        let revision = match owner {
             Self::Local => local::artwork::revision(Path::new(&track.path)),
-            Self::Remote(_) => Some(track.revision.clone().unwrap_or_default()),
+            Self::Remote(_) | Self::Documents => Some(track.revision.clone().unwrap_or_default()),
         };
-        let pictures = match track
-            .artist_pictures
-            .as_deref()
-            .filter(|_| matches!(self, Self::Remote(_)) || revision == track.revision)
-        {
+        let pictures = match track.artist_pictures.as_deref().filter(|_| {
+            matches!(owner, Self::Remote(_) | Self::Documents) || revision == track.revision
+        }) {
             Some(cached) => serde_json::from_str(cached)?,
-            None if matches!(self, Self::Local) => {
+            None if matches!(owner, Self::Local) => {
                 let pictures = local::artwork::inspect_artist_pictures(Path::new(&track.path));
                 scan.record_artist_pictures(&track.path, &serde_json::to_string(&pictures)?)
                     .await?;

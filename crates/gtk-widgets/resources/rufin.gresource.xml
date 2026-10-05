@@ -25,6 +25,7 @@
     <file>hicolor/scalable/actions/rufin-heart-filled-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-heart-outline-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-list-drag-handle-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-reorder-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-lyrics-search-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-more-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-player-more-symbolic.svg</file>
@@ -62,6 +63,7 @@
     <file>hicolor/scalable/actions/rufin-external-link-compact-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-appointment-new-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-activity-overview-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-image-x-generic-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-preferences-desktop-appearance-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-applications-system-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-application-exit-symbolic.svg</file>
@@ -95,6 +97,8 @@
     <file>hicolor/scalable/actions/rufin-network-workgroup-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-phonelink-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-queue-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-view-pin-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-filter-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-library-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-speaker-front-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-non-starred-symbolic.svg</file>

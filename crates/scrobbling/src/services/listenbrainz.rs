@@ -1,13 +1,36 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use reqwest::{blocking::Client, header::AUTHORIZATION};
 use serde_json::{Value, json};
 use tracing::debug;
 
-use crate::retry::{DeliveryError, Submission, SubmissionTrack};
+use crate::retry::{DeliveryError, Submission, SubmissionTrack, USER_AGENT};
 use crate::settings::ListenBrainzSettings;
 
 const API_URL: &str = "https://api.listenbrainz.org/1/submit-listens";
+
+pub fn connect(user_token: &str) -> Result<String, String> {
+    let response = Client::builder()
+        .timeout(Duration::from_secs(6))
+        .user_agent(USER_AGENT)
+        .build()
+        .map_err(|error| error.to_string())?
+        .get("https://api.listenbrainz.org/1/validate-token")
+        .header(AUTHORIZATION, authorization_header(user_token.trim()))
+        .send()
+        .and_then(reqwest::blocking::Response::error_for_status)
+        .map_err(|error| error.to_string())?
+        .json::<Value>()
+        .map_err(|error| error.to_string())?;
+    if response.get("valid").and_then(Value::as_bool) != Some(true) {
+        return Err("The API token was not accepted. Please connect again.".into());
+    }
+    Ok(response
+        .get("user_name")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string())
+}
 
 pub(crate) fn submit(
     client: &Client,

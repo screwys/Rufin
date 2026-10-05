@@ -14,6 +14,11 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+#[cfg(target_os = "android")]
+pub mod android;
+#[cfg(target_os = "android")]
+use android::SystemKeyringBackend;
+
 const CONFIG_SECRET_FORMAT: &str = "config-base64";
 const KEYRING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
@@ -34,6 +39,7 @@ impl Default for SecretStorageMode {
 }
 
 #[cfg(any(
+    target_os = "android",
     target_os = "macos",
     target_os = "windows",
     all(unix, not(any(target_os = "android", target_vendor = "apple")))
@@ -43,6 +49,7 @@ fn default_secret_storage_mode() -> SecretStorageMode {
 }
 
 #[cfg(not(any(
+    target_os = "android",
     target_os = "macos",
     target_os = "windows",
     all(unix, not(any(target_os = "android", target_vendor = "apple")))
@@ -719,6 +726,7 @@ fn native_credential_error(error: keyring_core::Error) -> SecretError {
 }
 
 #[cfg(not(any(
+    target_os = "android",
     target_os = "macos",
     target_os = "windows",
     all(unix, not(any(target_os = "android", target_vendor = "apple")))
@@ -727,6 +735,7 @@ fn native_credential_error(error: keyring_core::Error) -> SecretError {
 struct SystemKeyringBackend;
 
 #[cfg(not(any(
+    target_os = "android",
     target_os = "macos",
     target_os = "windows",
     all(unix, not(any(target_os = "android", target_vendor = "apple")))
@@ -740,6 +749,7 @@ impl SystemKeyringBackend {
 }
 
 #[cfg(not(any(
+    target_os = "android",
     target_os = "macos",
     target_os = "windows",
     all(unix, not(any(target_os = "android", target_vendor = "apple")))
@@ -811,6 +821,7 @@ mod tests {
             SecretStorageMode::SystemKeyring
         );
         #[cfg(any(
+            target_os = "android",
             target_os = "macos",
             target_os = "windows",
             all(unix, not(any(target_os = "android", target_vendor = "apple")))
@@ -820,6 +831,7 @@ mod tests {
             SecretStorageMode::SystemKeyring
         );
         #[cfg(not(any(
+            target_os = "android",
             target_os = "macos",
             target_os = "windows",
             all(unix, not(any(target_os = "android", target_vendor = "apple")))

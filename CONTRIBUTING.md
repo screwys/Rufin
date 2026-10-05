@@ -89,6 +89,9 @@ The HTTP command reference is in `crates/web/src/help.json` and served by `GET /
 ```bash
 just build # builds the native binary, macOS disk image, or Windows installer
 just build headless # builds the headless development executable
+just build apk # builds the optimized Android release with the stable app identity
+just build apk-dev # builds the debug Android APK with the development app identity
+just install android # installs the most recently built APK, retaining app data
 just build arch # builds the Arch package
 just build flatpak # builds the Flatpak
 just build rpm # builds Fedora RPMs for x86_64

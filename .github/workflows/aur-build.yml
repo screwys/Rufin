@@ -132,21 +132,24 @@ jobs:
           set -euo pipefail
           source_dir="$GITHUB_WORKSPACE"
           target="$(runuser -u builder -- rustc -vV | sed -n 's/^host: //p')"
-          runuser -u builder -- bash -lc "
-            set -euo pipefail
-            export PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
-            cd '$source_dir'
-            cargo fetch --locked --target '$target'
-          "
           if [[ -n "$RELEASE_TAG" ]]; then
             runuser -u builder -- bash -lc "
               set -euo pipefail
               export PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
               cd '$source_dir'
               CARGO_TARGET_DIR=/home/builder/target \
-                cargo run --frozen -p xtask -- verify release-tag '$RELEASE_TAG'
+                cargo run --locked -p xtask -- verify release-tag '$RELEASE_TAG'
             "
           fi
+          runuser -u builder -- bash -lc "
+            set -euo pipefail
+            export PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
+            cd '$source_dir'
+            CARGO_TARGET_DIR=/home/builder/target cargo build --locked -p xtask
+            cp packaging/linux/Cargo.toml Cargo.toml
+            cp packaging/linux/Cargo.lock Cargo.lock
+            cargo fetch --locked --target '$target'
+          "
           test "$(uname -m)" = "x86_64"
 
       - name: Select payload version
@@ -198,8 +201,7 @@ jobs:
           runuser -u builder -- bash -lc "
             export PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
             cd '$source_dir'
-            CARGO_TARGET_DIR='$target_dir' \
-              cargo run --frozen -p xtask -- verify package-layout '$staging' /usr
+            '$target_dir/debug/xtask' verify package-layout '$staging' /usr
           "
           commit_time="$(runuser -u builder -- git -C "$source_dir" show -s --format=%ct HEAD)"
           tar \

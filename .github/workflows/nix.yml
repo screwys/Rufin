@@ -21,6 +21,7 @@ on:
       - locales/**
       - resources/**
       - vendor/**
+      - packaging/linux/**
       - web/**
       - flake.lock
       - flake.nix

@@ -296,18 +296,7 @@ fn request_from_settings(
     let genre = settings
         .selected_genre_id(source_id, music_folder_id)
         .and_then(|selected| genres.iter().find(|genre| genre.object_id == selected));
-    RandomPlayRequest {
-        placement,
-        requested: settings.limit,
-        criteria: RandomCriteria {
-            min_year: settings.min_year.map(i64::from),
-            max_year: settings.max_year.map(i64::from),
-            genre: genre.map(|genre| genre.genre_key),
-            played: settings.played_filter,
-            require_media: false,
-            variation: random_variation(),
-        },
-    }
+    rufin_core::radio::random_play_request(settings, genre.map(|genre| genre.genre_key), placement)
 }
 
 pub(crate) fn play_saved_random(shell: &Rc<Shell>, placement: QueuePlacement) {

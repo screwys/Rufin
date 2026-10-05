@@ -298,6 +298,8 @@ pub struct TrackQuery {
     pub collection: Option<crate::QueueCollection>,
     pub folder: Option<FolderKey>,
     pub favorites_only: bool,
+    #[serde(default)]
+    pub downloaded_only: bool,
 }
 
 impl TrackQuery {
@@ -317,6 +319,9 @@ impl TrackQuery {
             None => track_query(self.source, sort, descending, false, None, ""),
         };
         track_filter(&mut query, self.folder, filter, self.favorites_only);
+        if self.downloaded_only {
+            downloaded_filter(&mut query);
+        }
         query
     }
 
@@ -325,10 +330,12 @@ impl TrackQuery {
             Some(collection) => crate::QueueQuery::Collection {
                 collection: collection.clone(),
                 favorites_only: self.favorites_only,
+                downloaded_only: self.downloaded_only,
             },
             None => crate::QueueQuery::Tracks {
                 source: self.source,
                 favorites_only: self.favorites_only,
+                downloaded_only: self.downloaded_only,
                 recursive: true,
             },
         }
@@ -437,6 +444,7 @@ impl Database {
                 source,
                 collection: None,
                 folder,
+                downloaded_only: false,
                 favorites_only,
             },
             filter,
@@ -447,6 +455,19 @@ impl Database {
             cancellation,
         )
         .await
+    }
+
+    pub async fn query_tracks_count(
+        &self,
+        query: &TrackQuery,
+        filter: &str,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<i64> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        query
+            .sql(filter, TrackSort::Title, false)
+            .count(&mut connection)
+            .await
     }
 
     pub async fn query_tracks_page(
@@ -472,6 +493,53 @@ impl Database {
         let rows = load_track_rows(&mut transaction, &keys).await?;
         transaction.commit().await?;
         Ok(rows)
+    }
+
+    pub async fn track_section_positions(
+        &self,
+        query: &TrackQuery,
+        filter: &str,
+        sort: TrackSort,
+        descending: bool,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<crate::ScrollSection>> {
+        if !crate::scroll_sections::text_sort(sort) {
+            return Ok(Vec::new());
+        }
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let query = query.sql(filter, sort, descending);
+        let sql = crate::scroll_sections::section_sql(
+            &query.select("track.track_key"),
+            if sort == TrackSort::Title {
+                "track.title"
+            } else {
+                crate::scroll_sections::order_text(&query.order[0])
+            },
+        );
+        crate::scroll_sections::decode_sections(
+            sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+                .persistent(false)
+                .fetch_all(&mut *connection)
+                .await?,
+        )
+    }
+
+    pub async fn query_track_media_uris(
+        &self,
+        query: &TrackQuery,
+        filter: &str,
+        sort: TrackSort,
+        descending: bool,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<String>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let query = query.sql(filter, sort, descending);
+        Ok(
+            sqlx::query_scalar(sqlx::AssertSqlSafe(query.select(&query.uri)))
+                .persistent(false)
+                .fetch_all(&mut *connection)
+                .await?,
+        )
     }
 
     pub async fn track_uris_for_source(
@@ -705,6 +773,87 @@ impl Database {
         )
     }
 
+    pub async fn live_folder_track_count(
+        &self,
+        source: SourceKey,
+        candidates: &[String],
+        filter: &str,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<i64> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut query = track_query(source, TrackSort::Title, false, false, None, filter);
+        query
+            .predicate
+            .push_str(" AND track.media_uri IN (SELECT value FROM json_each(?1))");
+        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT count(*) FROM {} WHERE {}",
+            query.from, query.predicate
+        )))
+        .bind(serde_json::to_string(candidates)?)
+        .fetch_one(&mut *connection)
+        .await?)
+    }
+
+    pub async fn live_folder_track_sections(
+        &self,
+        source: SourceKey,
+        candidates: &[String],
+        filter: &str,
+        sort: TrackSort,
+        descending: bool,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<crate::ScrollSection>> {
+        if !crate::scroll_sections::text_sort(sort) {
+            return Ok(Vec::new());
+        }
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut query = track_query(source, sort, descending, false, None, filter);
+        query
+            .predicate
+            .push_str(" AND track.media_uri IN (SELECT value FROM json_each(?1))");
+        let sql = crate::scroll_sections::section_sql(
+            &query.select("track.track_key"),
+            crate::scroll_sections::order_text(&query.order[0]),
+        );
+        crate::scroll_sections::decode_sections(
+            sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+                .bind(serde_json::to_string(candidates)?)
+                .fetch_all(&mut *connection)
+                .await?,
+        )
+    }
+
+    pub async fn live_folder_track_page(
+        &self,
+        source: SourceKey,
+        candidates: &[String],
+        filter: &str,
+        sort: TrackSort,
+        descending: bool,
+        offset: usize,
+        limit: usize,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<TrackRow>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let mut query = track_query(source, sort, descending, false, None, filter);
+        query
+            .predicate
+            .push_str(" AND track.media_uri IN (SELECT value FROM json_each(?1))");
+        let keys = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "{} LIMIT ?2 OFFSET ?3",
+            query.select("track.track_key")
+        )))
+        .bind(serde_json::to_string(candidates)?)
+        .bind(limit.min(TRACK_ROW_LIMIT) as i64)
+        .bind(offset.min(i64::MAX as usize) as i64)
+        .fetch_all(&mut *transaction)
+        .await?;
+        let rows = load_track_rows(&mut transaction, &keys).await?;
+        transaction.commit().await?;
+        Ok(rows)
+    }
+
     pub async fn track_rows(
         &self,
         keys: &[TrackKey],
@@ -808,14 +957,14 @@ impl Database {
 
 pub(crate) async fn query_selected_track_uris_on(
     connection: &mut SqliteConnection,
-    query: &crate::QueueQuery,
+    query_filter: &crate::QueueQuery,
     folder: Option<FolderKey>,
     filter: &str,
     sort: TrackSort,
     descending: bool,
     ranges: &[std::ops::Range<usize>],
 ) -> LibraryResult<Vec<String>> {
-    let query = match query {
+    let mut query = match query_filter {
         crate::QueueQuery::Tracks {
             source,
             favorites_only,
@@ -824,6 +973,7 @@ pub(crate) async fn query_selected_track_uris_on(
         crate::QueueQuery::Collection {
             collection,
             favorites_only,
+            ..
         } => {
             crate::collections::playback_query(
                 connection,
@@ -852,6 +1002,18 @@ pub(crate) async fn query_selected_track_uris_on(
         }
         crate::QueueQuery::Smart { .. } => unreachable!("selection uses display order"),
     };
+    if matches!(
+        query_filter,
+        crate::QueueQuery::Tracks {
+            downloaded_only: true,
+            ..
+        } | crate::QueueQuery::Collection {
+            downloaded_only: true,
+            ..
+        }
+    ) {
+        downloaded_filter(&mut query);
+    }
     crate::source_window::selected_values_on(connection, &query, &query.uri, ranges).await
 }
 
@@ -896,6 +1058,10 @@ pub(crate) fn track_query(
         }
     }
     query
+}
+
+pub(crate) fn downloaded_filter(query: &mut crate::source_window::SourceQuery) {
+    query.predicate.push_str(" AND EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download')");
 }
 
 pub(crate) fn track_filter(

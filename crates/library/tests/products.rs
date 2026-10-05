@@ -336,6 +336,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                         source: fixture.source,
                         collection: Some(library::QueueCollection::AlbumKey(*album)),
                         folder: folder,
+                        downloaded_only: false,
                         favorites_only: false,
                     },
                     "",
@@ -1769,6 +1770,7 @@ async fn artist_play_order_stays_complete_beside_the_favorite_section() {
                     album_artist: false,
                 }),
                 folder: None,
+                downloaded_only: false,
                 favorites_only: false,
             },
             "",
@@ -1793,6 +1795,7 @@ async fn artist_play_order_stays_complete_beside_the_favorite_section() {
                     album_artist: false,
                 }),
                 folder: None,
+                downloaded_only: false,
                 favorites_only: true,
             },
             "",
@@ -1883,6 +1886,7 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
                     album_artist: false,
                 }),
                 folder: None,
+                downloaded_only: false,
                 favorites_only: false,
             },
             "",
@@ -1907,6 +1911,7 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
                     album_artist: true,
                 }),
                 folder: None,
+                downloaded_only: false,
                 favorites_only: false,
             },
             "",
@@ -1934,6 +1939,7 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
                         album_artist: true
                     }),
                     folder: None,
+                    downloaded_only: false,
                     favorites_only: false
                 },
                 "",
@@ -1961,6 +1967,7 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
                         album_artist: false
                     }),
                     folder: None,
+                    downloaded_only: false,
                     favorites_only: false
                 },
                 "",
@@ -2196,6 +2203,7 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
                         album_artist: false
                     }),
                     folder: None,
+                    downloaded_only: false,
                     favorites_only: false
                 },
                 "",
@@ -3213,6 +3221,7 @@ async fn home_search_and_radio_results_stay_bounded() {
                     source: fixture.source,
                     collection: None,
                     folder: None,
+                    downloaded_only: false,
                     favorites_only: false
                 },
                 "artist a",

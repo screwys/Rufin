@@ -37,13 +37,13 @@ use super::table_sizing::route_column_view_initial_width_with_inset;
 use crate::track_selection::PlaylistEntrySelection;
 use gtk_widgets::detail_links::DetailLinks;
 use gtk_widgets::library_fields::{
-    COLLECTION_GRID_MAX_CARD_WIDTH, add_field_skeleton_class, count, display_unix_date,
-    favorite_text, opaque_artwork, optional_track_number, optional_year, stored_rating,
+    COLLECTION_GRID_MAX_CARD_WIDTH, add_field_skeleton_class, opaque_artwork,
 };
 use gtk_widgets::recycled_cells::{
     RecycledArtworkCell, RecycledMergedCell, RecycledTextCell, list_cell,
 };
 use gtk_widgets::sparse_model::connect_sparse_bind;
+use rufin_core::settings::presentation::playlist_entry_field;
 
 #[derive(Clone)]
 pub struct PlaylistEntriesView {
@@ -935,45 +935,6 @@ fn playlist_entry_grid(
         move |position, _: PlaylistEntryRow| activate_model.activate(position, queue.clone()),
         |_| {},
     )
-}
-
-fn playlist_entry_field(entry: &PlaylistEntryRow, field: LibraryField) -> String {
-    match field {
-        LibraryField::Bitrate
-        | LibraryField::SampleRate
-        | LibraryField::BitDepth
-        | LibraryField::Channels => {
-            gtk_widgets::library_fields::audio_property_field(&entry.audio_properties, field)
-        }
-        LibraryField::Format => entry.source_format.clone().unwrap_or_default(),
-        LibraryField::FilePath => entry.source_path.clone().unwrap_or_default(),
-        LibraryField::Source => entry.source_name.clone().unwrap_or_default(),
-        LibraryField::Title | LibraryField::TitleMerged => entry.title.clone(),
-        LibraryField::Artist => entry.artist.clone(),
-        LibraryField::AlbumArtist => entry
-            .album_display_artist
-            .clone()
-            .unwrap_or_else(|| entry.artist.clone()),
-        LibraryField::Album => entry.album.clone(),
-        LibraryField::Year => optional_year(entry.year),
-        LibraryField::ReleaseDate => entry.release_date.clone().unwrap_or_default(),
-        LibraryField::DateAdded => entry.date_added.clone().unwrap_or_default(),
-        LibraryField::LastPlayed => display_unix_date(entry.last_played),
-        LibraryField::PlayCount => count(entry.play_count),
-        LibraryField::Genre => entry.genre.clone(),
-        LibraryField::Bpm => entry.bpm.map(|value| value.to_string()).unwrap_or_default(),
-        LibraryField::UserRating => stored_rating(entry.rating),
-        LibraryField::DiscNumber => entry
-            .disc_number
-            .map(|number| number.to_string())
-            .unwrap_or_default(),
-        LibraryField::TrackNumber => optional_track_number(entry.disc_number, entry.track_number),
-        LibraryField::Duration => {
-            gtk_widgets::format_duration((entry.duration_millis.max(0) / 1_000) as u32)
-        }
-        LibraryField::Favorite => favorite_text(entry.favorite),
-        _ => String::new(),
-    }
 }
 
 fn playlist_entry_field_links(entry: &PlaylistEntryRow, field: LibraryField) -> DetailLinks {

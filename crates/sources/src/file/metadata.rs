@@ -17,6 +17,64 @@ use crate::{AlbumMetadataEdit, ArtistMetadataEdit, SourceMetadataError, TrackMet
 
 mod fields;
 
+/// A provider working copy keeps the original revision and connection until replacement.
+pub(crate) struct WorkingFile {
+    pub file: tempfile::TempPath,
+    pub relative: String,
+    pub revision: Option<String>,
+    pub existed: bool,
+    pub input: std::sync::Arc<crate::file::remote::input::FileInputServer>,
+}
+
+pub(crate) struct CollectionTracks<'a> {
+    database: &'a library::Database,
+    uri: &'a str,
+    after: Option<library::TrackKey>,
+    page: std::vec::IntoIter<(library::TrackKey, String)>,
+    finished: bool,
+}
+
+impl<'a> CollectionTracks<'a> {
+    pub(crate) fn new(database: &'a library::Database, uri: &'a str) -> Self {
+        Self {
+            database,
+            uri,
+            after: None,
+            page: Vec::new().into_iter(),
+            finished: false,
+        }
+    }
+
+    pub(crate) async fn next(&mut self) -> Result<Option<library::TrackRow>, SourceMetadataError> {
+        if self.page.len() == 0 && !self.finished {
+            let page = self
+                .database
+                .file_metadata_track_page(self.uri, self.after)
+                .await
+                .map_err(|error| SourceMetadataError::Write(error.to_string()))?;
+            self.after = page.last().map(|(key, _)| *key);
+            self.finished = page.is_empty();
+            self.page = page.into_iter();
+        }
+        let Some((_, uri)) = self.page.next() else {
+            return Ok(None);
+        };
+        self.database
+            .track_row_by_uri(&uri, &library::ReadCancellation::new())
+            .await
+            .map_err(|error| SourceMetadataError::Write(error.to_string()))?
+            .ok_or(SourceMetadataError::Unavailable)
+            .map(Some)
+    }
+}
+
+pub(crate) fn hash_file_revision(hash: &mut blake3::Hasher, uri: &str, revision: Option<&str>) {
+    for value in [uri, revision.unwrap_or_default()] {
+        hash.update(&(value.len() as u64).to_le_bytes());
+        hash.update(value.as_bytes());
+    }
+}
+
 pub(crate) fn revision(path: &Path) -> Result<String, SourceMetadataError> {
     let metadata = fs::metadata(path).map_err(write_error)?;
     let modified = metadata
@@ -712,6 +770,15 @@ pub(crate) fn folder_artwork_filename(
             .unwrap_or_else(|| Path::new("cover"))
             .with_extension(extension)
     }
+}
+
+pub(crate) fn save_folder_artwork(
+    targets: &[MetadataFileTarget],
+    edit: &crate::ArtworkEdit,
+    artist_name: Option<&str>,
+    folder_image: Option<&Path>,
+) -> Result<(), SourceMetadataError> {
+    finish_artwork(Vec::new(), targets, Some(edit), artist_name, folder_image)
 }
 
 fn finish_artwork(

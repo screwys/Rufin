@@ -13,12 +13,13 @@ use rufin_core::runtime::source::{
     OpenSubsonicKind, SourceHandle, SourceOperation, SourceSettingsChange, SourceSetup,
 };
 
-use super::{folder_selected_text, source_operation_text};
+use super::folder_selected_text;
 use crate::Preferences;
 use gtk_widgets::controls::text_button;
 use gtk_widgets::layout::large_popup_content_width;
 use gtk_widgets::popup::present_light_dismiss_dialog;
 use localization::{tr, tr_with};
+use rufin_core::runtime::source::source_operation_text;
 
 const ADD_SERVER_CLAMP_WIDTH: i32 = 560;
 const SETUP_FORM_PAGE: &str = "form";
@@ -209,6 +210,7 @@ struct CredentialHost {
     cert_verify: adw::SwitchRow,
     authentication: Option<Rc<Cell<OpenSubsonicAuthentication>>>,
     authentication_toggles: Option<[adw::SwitchRow; 2]>,
+    save: gtk::Button,
 }
 
 impl CredentialHost {
@@ -536,7 +538,7 @@ fn subsonic_settings_group_for(
                 kind,
                 authentication: authentication.unwrap_or(OpenSubsonicAuthentication::Password),
                 credentials: input,
-            });
+            })
         },
     ))
 }
@@ -563,7 +565,12 @@ fn credential_source_settings_group(
     source_title: &'static str,
     authentication: Option<OpenSubsonicAuthentication>,
     extra: Option<adw::SwitchRow>,
-    submit: impl Fn(&SourceHandle, CredentialInput, Option<OpenSubsonicAuthentication>) + 'static,
+    submit: impl Fn(
+        &SourceHandle,
+        CredentialInput,
+        Option<OpenSubsonicAuthentication>,
+    ) -> async_channel::Receiver<Result<(), String>>
+    + 'static,
 ) -> gtk::Widget {
     let snapshot = credential_draft(Some(preset));
     let authentication = authentication.map(|value| Rc::new(Cell::new(value)));
@@ -576,14 +583,8 @@ fn credential_source_settings_group(
         host.rows.add(extra);
     }
 
-    let save = adw::ButtonRow::builder()
-        .title(tr("Save Server Settings"))
-        .start_icon_name("rufin-document-save-symbolic")
-        .end_icon_name("rufin-go-next-symbolic")
-        .build();
-    save.add_css_class("manage-server-action-row");
-    save.add_css_class("suggested-action");
-    host.rows.add(&save);
+    let save = &host.save;
+    save.set_visible(true);
 
     let source = shell.products.source.clone();
     let name = host.name.clone();
@@ -592,11 +593,12 @@ fn credential_source_settings_group(
     let password = host.password.clone();
     let cert_verify = host.cert_verify.clone();
     let authentication = host.authentication.clone();
-    save.connect_activated(move |_| {
+    let weak_shell = Rc::downgrade(shell);
+    save.connect_clicked(move |button| {
         let authentication = authentication
             .as_ref()
             .map(|authentication| authentication.get());
-        submit(
+        let result = submit(
             &source,
             CredentialInput {
                 source_name: Some(name.text().trim().to_string()),
@@ -607,9 +609,45 @@ fn credential_source_settings_group(
             },
             authentication,
         );
+        if let Some(shell) = weak_shell.upgrade() {
+            complete_source_save(&shell, button, result);
+        }
     });
 
     host.widget.upcast()
+}
+
+fn complete_source_save(
+    shell: &Rc<Preferences>,
+    button: &gtk::Button,
+    result: async_channel::Receiver<Result<(), String>>,
+) {
+    button.set_sensitive(false);
+    let button = button.downgrade();
+    let shell = Rc::downgrade(shell);
+    gtk::glib::spawn_future_local(async move {
+        let result = result
+            .recv()
+            .await
+            .unwrap_or_else(|error| Err(error.to_string()));
+        match result {
+            Ok(()) => {
+                if let Some(button) = button.upgrade() {
+                    button.set_label(&tr("Saved..."));
+                }
+                gtk::glib::timeout_future(std::time::Duration::from_secs(2)).await;
+            }
+            Err(error) => {
+                if let Some(shell) = shell.upgrade() {
+                    shell.control_feedback.show_feedback_toast(error);
+                }
+            }
+        }
+        if let Some(button) = button.upgrade() {
+            button.set_label(&tr("Save"));
+            button.set_sensitive(true);
+        }
+    });
 }
 
 impl SourceSetupFlow for CredentialSetupFlow {
@@ -1008,6 +1046,7 @@ fn credential_host_view(
         password: adw::PasswordEntryRow,
         cert_verify: adw::SwitchRow,
         api_key: adw::SwitchRow, legacy_password: adw::SwitchRow,
+        save: gtk::Button,
     });
     name.set_text(&snapshot.name);
     style_compact_field_row(&name);
@@ -1056,6 +1095,7 @@ fn credential_host_view(
         cert_verify,
         authentication,
         authentication_toggles,
+        save,
     }
 }
 

@@ -24,6 +24,35 @@ impl Default for ControllerSettings {
 }
 
 impl SettingsOwner {
+    pub fn set_controller_enabled(&self, enabled: bool) -> Result<ControllerSettings, String> {
+        self.update_controller(|settings| settings.enabled = enabled)
+    }
+
+    pub fn set_controller_remote(&self, remote: bool) -> Result<ControllerSettings, String> {
+        self.update_controller(|settings| {
+            settings.address = match (settings.address.is_ipv6(), remote) {
+                (false, false) => Ipv4Addr::LOCALHOST.into(),
+                (false, true) => Ipv4Addr::UNSPECIFIED.into(),
+                (true, false) => std::net::Ipv6Addr::LOCALHOST.into(),
+                (true, true) => std::net::Ipv6Addr::UNSPECIFIED.into(),
+            };
+        })
+    }
+
+    pub fn set_controller_port(&self, port: u16) -> Result<ControllerSettings, String> {
+        self.update_controller(|settings| settings.port = port)
+    }
+
+    fn update_controller(
+        &self,
+        edit: impl FnOnce(&mut ControllerSettings),
+    ) -> Result<ControllerSettings, String> {
+        self.file.update(|stored| {
+            edit(&mut stored.ui.web_controller);
+            Ok(stored.ui.web_controller.clone())
+        })
+    }
+
     pub fn web_controller_changes(&self) -> tokio::sync::watch::Receiver<ControllerSettings> {
         self.file.web_controller_changes()
     }

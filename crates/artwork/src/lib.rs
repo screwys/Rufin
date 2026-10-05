@@ -23,6 +23,7 @@ mod pipeline;
 mod selection;
 
 pub use animation::{Animation, AnimationFrame};
+pub use cache::{ArtworkCacheChange, ArtworkCacheEntries, ArtworkCacheEntry};
 pub use decode::{
     DecodedImage, RgbaImage, collage_png, decode_rgba, image_mime, square_thumbnail_png,
 };
@@ -252,6 +253,38 @@ impl SourceManifest {
 }
 
 impl Artwork {
+    /// Enumerate ready images and originals, one filesystem entry at a time.
+    pub fn cache_entries(&self) -> Result<ArtworkCacheEntries, ArtworkError> {
+        Ok(self.pipeline.cache().entries()?)
+    }
+
+    pub fn subscribe_cache_changes(&self) -> tokio::sync::broadcast::Receiver<ArtworkCacheChange> {
+        self.pipeline.cache().subscribe()
+    }
+
+    /// Keys are relative to the existing v1 cache layout, never filesystem paths.
+    pub fn cache_file(&self, key: &str) -> Result<Option<PathBuf>, ArtworkError> {
+        Ok(self.pipeline.cache().file(key)?)
+    }
+
+    /// Import existing bytes without fetching, decoding or announcing another local write.
+    pub fn import_cache_file(&self, key: &str, bytes: &[u8]) -> Result<bool, ArtworkError> {
+        self.pipeline.import_cache_file(key, bytes)
+    }
+
+    pub fn remove_cache_file(&self, key: &str) -> Result<bool, ArtworkError> {
+        self.pipeline.remove_cache_file(key)
+    }
+
+    /// Refresh live images and jobs after a changed import batch, preserving files on disk.
+    pub fn invalidate_decoded_cache(&self) {
+        self.pipeline.invalidate_decoded_cache();
+    }
+
+    pub fn cache_revision(&self) -> u64 {
+        self.pipeline.cache_revision()
+    }
+
     pub fn install_database(&self, database: Arc<library::Database>) {
         self.pipeline.install_database(database);
     }
@@ -338,17 +371,17 @@ impl Artwork {
             .transpose()
     }
 
-    /// Reuse a cached image before asking its source for the original bytes.
-    pub async fn image_bytes(
-        &self,
-        mut request: ArtworkRequest,
-    ) -> Result<Option<Vec<u8>>, String> {
-        request.fetch_size = ImageSize::Original;
+    /// Reuse cached image bytes before asking the source for the requested size.
+    pub async fn image_bytes(&self, request: ArtworkRequest) -> Result<Option<Vec<u8>>, String> {
         let pipeline = self.pipeline.clone();
         let cached_request = request.clone();
         let cached = tokio::task::spawn_blocking(move || {
+            let mut sizes = pipeline::CACHED_IMAGE_SIZES.to_vec();
+            if cached_request.fetch_size != ImageSize::Original {
+                sizes.rotate_left(1);
+            }
             pipeline
-                .cache_only_file(&cached_request, pipeline::CACHED_IMAGE_SIZES)
+                .cache_only_file(&cached_request, &sizes)
                 .map(std::fs::read)
                 .transpose()
         })
@@ -358,7 +391,7 @@ impl Artwork {
         if cached.is_some() {
             return Ok(cached);
         }
-        let loaded = match self.load(request) {
+        let loaded = match self.load(request.clone()) {
             ArtworkLoad::Ready(loaded) => loaded,
             ArtworkLoad::Missing => return Ok(None),
             ArtworkLoad::Pending(pending) => match pending.finish().await {
@@ -367,7 +400,19 @@ impl Artwork {
                 ArtworkOutcome::Failed(error) => return Err(error.to_string()),
             },
         };
-        Ok(loaded.original().map(|bytes| bytes.to_vec()))
+        if let Some(bytes) = loaded.original() {
+            return Ok(Some(bytes.to_vec()));
+        }
+        let pipeline = self.pipeline.clone();
+        tokio::task::spawn_blocking(move || {
+            pipeline
+                .cache_only_file(&request, &[request.fetch_size])
+                .map(std::fs::read)
+                .transpose()
+        })
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
     }
 
     pub fn retry_external(&self) -> Result<(), ArtworkError> {

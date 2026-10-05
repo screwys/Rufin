@@ -14,7 +14,7 @@ pub(crate) async fn pragma(
 }
 pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA application_id = 1381320270;
 
-PRAGMA user_version = 45;
+PRAGMA user_version = 46;
 
 CREATE TABLE IF NOT EXISTS source_ids (source_key INTEGER PRIMARY KEY, object_id TEXT NOT NULL UNIQUE CHECK(object_id<>'')) STRICT;
 
@@ -216,6 +216,7 @@ CREATE TABLE IF NOT EXISTS queue_occurrences (
         provenance_kind IN ('context', 'manual', 'random', 'radio', 'auto-dj', 'legacy')
     ),
     provenance_context_id TEXT,
+    provenance_context_title TEXT,
     provenance_source_rank INTEGER,
     title TEXT NOT NULL,
     artist TEXT NOT NULL,

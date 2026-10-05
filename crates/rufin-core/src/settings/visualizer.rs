@@ -294,3 +294,97 @@ mod tests {
         assert!(VisualizerPreset::from_json("not a preset").is_none());
     }
 }
+
+pub const VISUALIZER_ZERO_THRESHOLD: f64 = 0.004;
+pub const VISUALIZER_TOP_GAP: f64 = 50.0;
+pub const VISUALIZER_REFERENCE_FRAME_MICROS: f64 = 1_000_000.0 / 60.0;
+pub const VISUALIZER_STALE_MICROS: i64 = 133_333;
+
+#[derive(Clone, Copy, Default)]
+pub struct VisualizerPeak {
+    pub level: f64,
+    pub hold: f64,
+}
+
+impl VisualizerPeak {
+    pub fn advance(&mut self, level: f64, elapsed: f64, hold: f64, fall: f64) {
+        if level >= self.level {
+            self.level = level;
+            self.hold = hold;
+        } else {
+            let falling = (elapsed - self.hold).max(0.0);
+            self.hold = (self.hold - elapsed).max(0.0);
+            self.level = (self.level - falling * fall).max(level);
+        }
+    }
+}
+
+pub fn visualizer_column_geometry(width: f64, level_count: usize, gap: f64) -> (usize, f64) {
+    let available_width = (width * 0.984).max(1.0);
+    let fitting_columns = ((available_width + gap) / (2.0 + gap)).floor() as usize;
+    let columns = level_count.min(fitting_columns.max(1)).max(1);
+    let cell =
+        ((available_width - gap * columns.saturating_sub(1) as f64) / columns as f64).max(2.0);
+    (columns, cell)
+}
+
+pub fn visualizer_row_geometry(height: f64, cell: f64, gap: f64) -> (usize, f64) {
+    let grid_height = (height - VISUALIZER_TOP_GAP).max(height * 0.64);
+    let rows = (((grid_height + gap) / (cell + gap)).floor() as usize).clamp(8, 32);
+    let row_height = ((grid_height - gap * rows.saturating_sub(1) as f64) / rows as f64).max(1.0);
+    (rows, row_height)
+}
+
+pub fn visualizer_accent_gradient(base: [f32; 3]) -> [[f32; 3]; 2] {
+    [
+        base.map(|value| value * 0.75),
+        base.map(|value| value + (1.0 - value) * 0.32),
+    ]
+}
+
+pub fn visualizer_lerp(start: f64, end: f64, mix: f64) -> f64 {
+    start + (end - start) * mix
+}
+
+pub fn visualizer_bar_levels(levels: &[f64], columns: usize) -> Vec<f64> {
+    if columns == 0 || levels.is_empty() {
+        return Vec::new();
+    }
+    (0..columns)
+        .map(|column| {
+            let start = column * levels.len() / columns;
+            let end = ((column + 1) * levels.len() / columns).max(start + 1);
+            let mut total = 0.0;
+            let mut peak = 0.0_f64;
+            let mut count = 0;
+            for level in &levels[start..end.min(levels.len())] {
+                let level = level.clamp(0.0, 1.0);
+                total += level;
+                peak = peak.max(level);
+                count += 1;
+            }
+            let average = if count == 0 {
+                0.0
+            } else {
+                total / count as f64
+            };
+            average * 0.4 + peak * 0.6
+        })
+        .collect()
+}
+
+pub fn visualizer_smoothing_weights(elapsed_frames: f64, rise: f64, fall: f64) -> (f64, f64) {
+    (
+        1.0 - (1.0 - rise).powf(elapsed_frames),
+        1.0 - (1.0 - fall).powf(elapsed_frames),
+    )
+}
+
+pub fn visualizer_smoothed_level(value: f64, target: f64, weight: f64) -> f64 {
+    let next = target * weight + value * (1.0 - weight);
+    if target == 0.0 && next < VISUALIZER_ZERO_THRESHOLD {
+        0.0
+    } else {
+        next
+    }
+}

@@ -6,7 +6,7 @@ use std::sync::{
 use library::{Database, ReadCancellation, Scan, ScanOutcome, SourceId};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers::any};
 
-use super::{FileAuthentication, FileCredentials, FileSourceSettings, RemoteSource};
+use super::{FileAuthentication, FileCredentials, FileSource, FileSourceSettings};
 
 #[test]
 fn file_source_locations_preserve_server_authority_and_encoded_names() {
@@ -29,7 +29,7 @@ fn file_source_locations_preserve_server_authority_and_encoded_names() {
         let configuration = settings
             .configuration(SourceId::new("files:test"), kind, "Files".into())
             .unwrap();
-        let source = RemoteSource::open(&configuration, None).unwrap();
+        let source = FileSource::open(&configuration, None).unwrap();
         let name = "日本語/track 100% # ?.flac";
         let location = source.location(name).unwrap();
         assert_eq!(source.relative(&location).unwrap(), name);
@@ -330,7 +330,7 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
         headers: vec![],
     })
     .unwrap();
-    let source = RemoteSource::open(&configuration, Some(credential)).unwrap();
+    let source = FileSource::open(&configuration, Some(credential)).unwrap();
     let directory = tempfile::tempdir().unwrap();
     let database = Database::open(directory.path().join("library.sqlite3"))
         .await
@@ -494,7 +494,7 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
     let configuration = settings
         .configuration(SourceId::new("webdav:cue-test"), "webdav", "DAV".into())
         .unwrap();
-    let source = RemoteSource::open(&configuration, None).unwrap();
+    let source = FileSource::open(&configuration, None).unwrap();
     let folder = tempfile::tempdir().unwrap();
     let database = Database::open(folder.path().join("library.sqlite3"))
         .await
@@ -614,7 +614,7 @@ async fn dav_recovers_an_unavailable_endpoint_and_keeps_namespace_on_address_edi
         .configuration(SourceId::new("dav:addresses"), "webdav", "Music".into())
         .unwrap();
     let credential = Some(serde_json::to_string(&credentials).unwrap());
-    let source = RemoteSource::open(&configuration, credential.clone()).unwrap();
+    let source = FileSource::open(&configuration, credential.clone()).unwrap();
     let original = source.location("a song #.wav").unwrap();
     let first = source.input().await.unwrap();
     unavailable.store(1, Ordering::Relaxed);
@@ -641,7 +641,7 @@ async fn dav_recovers_an_unavailable_endpoint_and_keeps_namespace_on_address_edi
     let (configuration, _, saved) = edited.into_parts();
     assert_eq!(saved, credential);
     assert!(!configuration.provider_payload.contains("retained-secret"));
-    let reopened = RemoteSource::open(&configuration, saved).unwrap();
+    let reopened = FileSource::open(&configuration, saved).unwrap();
     assert_eq!(reopened.location("a song #.wav").unwrap(), original);
     assert_eq!(reopened.relative(&original).unwrap(), "a song #.wav");
 }

@@ -564,7 +564,7 @@ impl MediaDragSource {
             } => {
                 let target = prepare_live_collection(operations, media_uri).await?;
                 let media_uris = target.resolve_media_uris(database, None, None).await?;
-                let subject = download_subject(&target);
+                let subject = target.download_subject();
                 Ok((media_uris, subject))
             }
             Self::Target {
@@ -575,7 +575,7 @@ impl MediaDragSource {
                 let media_uris = target
                     .resolve_media_uris(database, *source_key, *folder)
                     .await?;
-                let subject = download_subject(&target);
+                let subject = target.download_subject();
                 Ok((media_uris, subject))
             }
             Self::Selection(selection) => {
@@ -633,24 +633,6 @@ async fn prepare_live_collection(
     }
 }
 
-pub fn download_subject(target: &PlaybackTarget) -> DownloadSubject {
-    let title = match target {
-        PlaybackTarget::Track(_) => localization::tr("Track"),
-        PlaybackTarget::Album(_) | PlaybackTarget::AlbumKey(_) => localization::tr("Album"),
-        PlaybackTarget::Artist(_)
-        | PlaybackTarget::AlbumArtist(_)
-        | PlaybackTarget::ArtistKey(..) => localization::tr("Artist"),
-        PlaybackTarget::Genre(_) => localization::tr("Genre"),
-        PlaybackTarget::Mood(_) => localization::tr("Mood"),
-        PlaybackTarget::Playlist(_) => localization::tr("Playlist"),
-        PlaybackTarget::SmartPlaylist(_) => localization::tr("Smart Playlist"),
-        PlaybackTarget::Contextual { target, .. } => return download_subject(target),
-    };
-    DownloadSubject::Prepared {
-        context_id: target.context_id(),
-        title: Some(title),
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -22,7 +22,7 @@ mod history_tests;
 
 // Wire format, independent of Rufin releases and local database migrations.
 const FORMAT: u32 = 1;
-const SYNC_PRIORITY: &str = "substr(name,1,instr(name||':',':')-1) IN ('source','integration','root','preference','scrobbling','device','connect_key','connect_network','connect_storage','playlist','playlist_order','smart','smart_order','state')";
+const SYNC_PRIORITY: &str = "CASE WHEN substr(name,1,instr(name||':',':')-1) IN ('cache_artwork','cache_lyrics') THEN 2 ELSE substr(name,1,instr(name||':',':')-1) IN ('source','integration','root','preference','scrobbling','device','connect_key','connect_network','connect_storage','playlist','playlist_order','smart','smart_order','state') END";
 pub const INCOMPATIBLE_PROFILE: &str =
     "Devices using Rufin Connect are no longer compatible. Please update Rufin.";
 const PROJECTION_ORDER: &str = "CASE kind WHEN 'source' THEN 0 WHEN 'integration' THEN 0 WHEN 'playlist' THEN 1 WHEN 'native_playlist' THEN 1 WHEN 'album' THEN 2 WHEN 'artist' THEN 2 WHEN 'genre' THEN 2 WHEN 'mood' THEN 2 WHEN 'folder' THEN 2 WHEN 'track' THEN 3 WHEN 'entry' THEN 5 WHEN 'native_entry' THEN 5 WHEN 'playlist_order' THEN 7 WHEN 'smart_order' THEN 7 WHEN 'album_artists' THEN 6 WHEN 'album_genres' THEN 6 WHEN 'track_artists' THEN 6 WHEN 'track_genres' THEN 6 WHEN 'track_moods' THEN 6 WHEN 'track_folders' THEN 6 ELSE 4 END,CASE WHEN kind IN ('entry','native_entry') THEN json_extract(payload,'$.playlist') END,CASE WHEN kind IN ('entry','native_entry','playlist_order','smart_order') THEN json_extract(payload,'$.position') END,object_key";
@@ -52,6 +52,53 @@ pub struct DocumentVersion {
     pub revision: i64,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SyncStream {
+    Catalog = 0,
+    Settings = 1,
+    Cache = 2,
+}
+
+impl From<bool> for SyncStream {
+    fn from(setup: bool) -> Self {
+        if setup { Self::Settings } else { Self::Catalog }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SnapshotScope {
+    Backup,
+    Device,
+    Setup,
+    Cache,
+}
+
+impl SnapshotScope {
+    fn predicate(self) -> &'static str {
+        match self {
+            Self::Backup => "1",
+            Self::Device => {
+                "substr(name,1,instr(name,':')-1) NOT IN ('cache_artwork','cache_lyrics')"
+            }
+            Self::Setup => {
+                "substr(name,1,instr(name,':')-1) IN ('source','integration','root','preference','scrobbling','device','connect_key','connect_network','connect_storage')"
+            }
+            Self::Cache => "substr(name,1,instr(name,':')-1) IN ('cache_artwork','cache_lyrics')",
+        }
+    }
+
+    fn revision_query(self) -> &'static str {
+        match self {
+            Self::Backup => "SELECT revision FROM file_revision WHERE id=1",
+            Self::Device => {
+                "SELECT coalesce(sum(revision),0) FROM snapshot_revisions WHERE stream IN (0,1)"
+            }
+            Self::Setup => "SELECT revision FROM snapshot_revisions WHERE stream=1",
+            Self::Cache => "SELECT revision FROM snapshot_revisions WHERE stream=2",
+        }
+    }
+}
+
 impl ProfileStore {
     pub async fn open(path: &Path, peer_id: u64, key: age::x25519::Identity) -> Result<Self> {
         let identity = Arc::new(key);
@@ -66,6 +113,7 @@ impl ProfileStore {
             CREATE TABLE IF NOT EXISTS documents(name TEXT PRIMARY KEY,snapshot BLOB NOT NULL,revision INTEGER NOT NULL DEFAULT 0,version BLOB NOT NULL DEFAULT X'') STRICT;
             CREATE TABLE IF NOT EXISTS file_revision(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL) STRICT;
             CREATE TABLE IF NOT EXISTS file_exchange(id INTEGER PRIMARY KEY CHECK(id=1),state TEXT NOT NULL) STRICT;
+            CREATE TABLE IF NOT EXISTS cache_file_exchange(id INTEGER PRIMARY KEY CHECK(id=1),state TEXT NOT NULL) STRICT;
             INSERT OR IGNORE INTO file_revision VALUES(1,0);
             CREATE TRIGGER IF NOT EXISTS file_revision_delete AFTER DELETE ON documents BEGIN UPDATE file_revision SET revision=revision+1; END;
             CREATE INDEX IF NOT EXISTS documents_kind ON documents(substr(name,1,instr(name,':')-1),name);
@@ -133,6 +181,20 @@ impl ProfileStore {
         )
     }
 
+    pub async fn device_revision(&self) -> Result<i64> {
+        let mut connection = database_connection(&self.connection).await?;
+        Ok(sqlx::query_scalar(SnapshotScope::Device.revision_query())
+            .fetch_one(&mut *connection)
+            .await?)
+    }
+
+    pub async fn cache_revision(&self) -> Result<i64> {
+        let mut connection = database_connection(&self.connection).await?;
+        Ok(sqlx::query_scalar(SnapshotScope::Cache.revision_query())
+            .fetch_one(&mut *connection)
+            .await?)
+    }
+
     pub async fn file_exchange(&self) -> Result<Option<String>> {
         let mut connection = database_connection(&self.connection).await?;
         Ok(
@@ -149,13 +211,33 @@ impl ProfileStore {
         Ok(())
     }
 
+    pub async fn cache_file_exchange(&self) -> Result<Option<String>> {
+        let mut connection = database_connection(&self.connection).await?;
+        Ok(
+            sqlx::query_scalar("SELECT state FROM cache_file_exchange WHERE id=1")
+                .fetch_optional(&mut *connection)
+                .await?,
+        )
+    }
+
+    pub async fn save_cache_file_exchange(&self, state: &str) -> Result<()> {
+        let mut connection = database_connection(&self.connection).await?;
+        sqlx::query("INSERT INTO cache_file_exchange(id,state) VALUES(1,?1) ON CONFLICT(id) DO UPDATE SET state=excluded.state WHERE state<>excluded.state")
+            .bind(state).execute(&mut *connection).await?;
+        Ok(())
+    }
+
     /// Resume this peer's incoming stream after its last fully imported page.
     pub async fn sync_cursor(&self, peer: &str, setup: bool) -> Result<i64> {
+        self.sync_cursor_in(peer, setup.into()).await
+    }
+
+    pub async fn sync_cursor_in(&self, peer: &str, stream: SyncStream) -> Result<i64> {
         let mut connection = database_connection(&self.connection).await?;
         Ok(
             sqlx::query_scalar("SELECT revision FROM sync_cursors WHERE peer=?1 AND setup=?2")
                 .bind(peer)
-                .bind(setup)
+                .bind(stream as i64)
                 .fetch_optional(&mut *connection)
                 .await?
                 .unwrap_or(0),
@@ -164,9 +246,18 @@ impl ProfileStore {
 
     /// Persist only after every document in the page has been imported.
     pub async fn acknowledge_sync(&self, peer: &str, setup: bool, revision: i64) -> Result<()> {
+        self.acknowledge_sync_in(peer, setup.into(), revision).await
+    }
+
+    pub async fn acknowledge_sync_in(
+        &self,
+        peer: &str,
+        stream: SyncStream,
+        revision: i64,
+    ) -> Result<()> {
         let mut connection = database_connection(&self.connection).await?;
         sqlx::query("INSERT INTO sync_cursors(peer,setup,revision) VALUES(?1,?2,?3) ON CONFLICT(peer,setup) DO UPDATE SET revision=excluded.revision")
-            .bind(peer).bind(setup).bind(revision).execute(&mut *connection).await?;
+            .bind(peer).bind(stream as i64).bind(revision).execute(&mut *connection).await?;
         Ok(())
     }
 
@@ -175,7 +266,7 @@ impl ProfileStore {
     /// index entry; their complete Loro history remains available through `updates`.
     pub async fn changes(&self, after: i64, limit: usize) -> Result<Vec<DocumentVersion>> {
         let mut connection = database_connection(&self.connection).await?;
-        Ok(sqlx::query("SELECT name,version,revision FROM documents WHERE revision>?1 AND revision<=coalesce((SELECT min(revision) FROM documents WHERE revision>?1 AND name GLOB 'playlist_artwork:*'),9223372036854775807) ORDER BY revision,name LIMIT ?2")
+        Ok(sqlx::query("SELECT name,version,revision FROM documents WHERE revision>?1 AND revision<=coalesce((SELECT min(revision) FROM documents WHERE revision>?1 AND (name GLOB 'playlist_artwork:*' OR name GLOB 'cache_artwork:*')),9223372036854775807) ORDER BY revision,name LIMIT ?2")
             .bind(after)
             .bind(i64::try_from(limit).unwrap_or(i64::MAX))
             .fetch_all(&mut *connection).await?
@@ -192,11 +283,20 @@ impl ProfileStore {
         limit: usize,
         setup: bool,
     ) -> Result<Vec<DocumentVersion>> {
+        self.changes_in_stream(after, limit, setup.into()).await
+    }
+
+    pub async fn changes_in_stream(
+        &self,
+        after: i64,
+        limit: usize,
+        stream: SyncStream,
+    ) -> Result<Vec<DocumentVersion>> {
         let mut connection = database_connection(&self.connection).await?;
         Ok(sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT name,version,revision FROM documents WHERE ({SYNC_PRIORITY})=?1 AND revision>?2 AND revision<=coalesce((SELECT min(revision) FROM documents WHERE ({SYNC_PRIORITY})=?1 AND revision>?2 AND name GLOB 'playlist_artwork:*'),9223372036854775807) ORDER BY revision,name LIMIT ?3"
+            "SELECT name,version,revision FROM documents WHERE ({SYNC_PRIORITY})=?1 AND revision>?2 AND revision<=coalesce((SELECT min(revision) FROM documents WHERE ({SYNC_PRIORITY})=?1 AND revision>?2 AND (name GLOB 'playlist_artwork:*' OR name GLOB 'cache_artwork:*')),9223372036854775807) ORDER BY revision,name LIMIT ?3"
         )))
-        .bind(setup).bind(after).bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .bind(stream as i64).bind(after).bind(i64::try_from(limit).unwrap_or(i64::MAX))
         .fetch_all(&mut *connection).await?
         .into_iter().map(|row| DocumentVersion {
             name: row.get(0), version: row.get(1), revision: row.get(2),
@@ -273,10 +373,21 @@ impl ProfileStore {
         let mut connection = database_connection(&self.connection).await?;
         let mut transaction = connection.begin().await?;
         let mut changed = false;
-        for bytes in updates {
-            let update: Update = serde_json::from_slice(bytes).context("invalid Connect update")?;
-            validate_version(update.version)?;
-            changed |= self.import_on(&mut transaction, update).await?.0;
+        for page in updates.chunks(CONNECT_PAGE_SIZE) {
+            let page = page
+                .iter()
+                .map(|bytes| {
+                    let update: Update =
+                        serde_json::from_slice(bytes).context("invalid Connect update")?;
+                    validate_version(update.version)?;
+                    Ok(update)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            changed |= self
+                .import_page_on(&mut transaction, page)
+                .await?
+                .iter()
+                .any(|(changed, _)| *changed);
         }
         transaction.commit().await?;
         Ok(changed)
@@ -298,73 +409,120 @@ impl ProfileStore {
                 });
             }
         }
-        let records = &ordered;
         let mut connection = database_connection(&self.connection).await?;
         let mut transaction = connection.begin().await?;
-        let mut grouped: BTreeMap<String, Vec<&ConnectRecord>> = BTreeMap::new();
-        for record in records {
-            let old: Option<Option<String>> = sqlx::query_scalar(
-                "SELECT payload FROM local_values WHERE kind=?1 AND object_key=?2",
-            )
-            .bind(&record.kind)
-            .bind(&record.key)
-            .fetch_optional(&mut *transaction)
-            .await?;
-            let old = old
-                .map(|payload| expose_payload(&record.kind, payload, &self.identity))
-                .transpose()?;
-            let mut value = record.value.clone();
-            if let (Some(value), Some(Some(old))) = (&mut value, &old) {
-                preserve_unknown_fields(value, &serde_json::from_str(old)?);
+        let mut changed_documents = BTreeSet::new();
+        for records in ordered.chunks(CONNECT_PAGE_SIZE) {
+            let mut query = QueryBuilder::new("WITH requested(kind,object_key) AS (");
+            query.push_values(records, |mut row, record| {
+                row.push_bind(&record.kind).push_bind(&record.key);
+            });
+            query.push(") SELECT v.kind,v.object_key,v.payload FROM local_values v JOIN requested r USING(kind,object_key)");
+            let mut previous_values = BTreeMap::new();
+            for row in query.build().fetch_all(&mut *transaction).await? {
+                let kind: String = row.get(0);
+                let payload = expose_payload(&kind, row.get(2), &self.identity)?;
+                previous_values.insert((kind, row.get::<String, _>(1)), payload);
             }
-            let payload = value.as_ref().map(serde_json::to_string).transpose()?;
-            if old.as_ref() == Some(&payload) {
-                continue;
-            }
-            grouped
-                .entry(document_name(record)?)
-                .or_default()
-                .push(record);
-            let payload = protect_payload(&record.kind, payload, &self.identity)?;
-            sqlx::query("INSERT INTO local_values(kind,object_key,payload) VALUES(?1,?2,?3) ON CONFLICT(kind,object_key) DO UPDATE SET payload=excluded.payload").bind(&record.kind).bind(&record.key).bind(payload).execute(&mut *transaction).await?;
-        }
-        let count = grouped.len();
-        for (name, records) in grouped {
-            let doc = self.load_document(&mut transaction, &name).await?;
-            let before = doc.oplog_vv();
-            let previous = self::records(&doc)?;
+            let mut grouped: BTreeMap<String, Vec<&ConnectRecord>> = BTreeMap::new();
+            let mut values = BTreeMap::new();
             for record in records {
-                edit(&doc, record)?;
-            }
-            doc.commit();
-            if before == doc.oplog_vv() {
-                continue;
-            }
-            let current = self::records(&doc)?;
-            // An incoming update may already be waiting for Store projection.
-            // Refresh those queued values so capturing a newer local edit cannot
-            // subsequently install the older incoming value over it.
-            for key in previous
-                .keys()
-                .chain(current.keys())
-                .collect::<BTreeSet<_>>()
-            {
-                if previous.get(key) == current.get(key) {
+                let key = (record.kind.clone(), record.key.clone());
+                let old = previous_values.get(&key);
+                let mut value = record.value.clone();
+                if let (Some(value), Some(Some(old))) = (&mut value, old) {
+                    preserve_unknown_fields(value, &serde_json::from_str(old)?);
+                }
+                let payload = value.as_ref().map(serde_json::to_string).transpose()?;
+                if old == Some(&payload) {
                     continue;
                 }
-                let payload = current.get(key).map(serde_json::to_string).transpose()?;
-                let payload = protect_payload(&key.0, payload, &self.identity)?;
-                sqlx::query("UPDATE projection SET payload=?3 WHERE kind=?1 AND object_key=?2")
-                    .bind(&key.0)
-                    .bind(&key.1)
-                    .bind(payload)
-                    .execute(&mut *transaction)
-                    .await?;
+                grouped
+                    .entry(document_name(record)?)
+                    .or_default()
+                    .push(record);
+                previous_values.insert(key.clone(), payload.clone());
+                let payload = protect_payload(&record.kind, payload, &self.identity)?;
+                values.insert(key, payload);
             }
-            self.save_document(&mut transaction, &name, &doc).await?;
+            if grouped.is_empty() {
+                continue;
+            }
+            let mut insert =
+                QueryBuilder::new("INSERT INTO local_values(kind,object_key,payload) ");
+            insert.push_values(values, |mut row, ((kind, key), payload)| {
+                row.push_bind(kind).push_bind(key).push_bind(payload);
+            });
+            insert.push(" ON CONFLICT(kind,object_key) DO UPDATE SET payload=excluded.payload");
+            insert.build().execute(&mut *transaction).await?;
+            let mut query =
+                QueryBuilder::new("SELECT name,snapshot FROM documents WHERE name IN (");
+            let mut names = query.separated(",");
+            for name in grouped.keys() {
+                names.push_bind(name);
+            }
+            names.push_unseparated(")");
+            let mut saved: BTreeMap<String, Vec<u8>> = query
+                .build()
+                .fetch_all(&mut *transaction)
+                .await?
+                .into_iter()
+                .map(|row| (row.get(0), row.get(1)))
+                .collect();
+            let mut snapshots = Vec::new();
+            let mut projection = Vec::new();
+            for (name, records) in grouped {
+                changed_documents.insert(name.clone());
+                let doc = LoroDoc::new();
+                if let Some(snapshot) = saved.remove(&name) {
+                    doc.import(&expose(&name, &snapshot, &self.identity)?)?;
+                }
+                doc.set_peer_id(self.peer_id)?;
+                let before = doc.oplog_vv();
+                let previous = self::records(&doc)?;
+                for record in records {
+                    edit(&doc, record)?;
+                }
+                doc.commit();
+                if before == doc.oplog_vv() {
+                    continue;
+                }
+                let current = self::records(&doc)?;
+                // An incoming update may already be waiting for Store projection.
+                // Refresh those queued values so capturing a newer local edit cannot
+                // subsequently install the older incoming value over it.
+                for key in previous
+                    .keys()
+                    .chain(current.keys())
+                    .collect::<BTreeSet<_>>()
+                {
+                    if previous.get(key) == current.get(key) {
+                        continue;
+                    }
+                    let payload = current.get(key).map(serde_json::to_string).transpose()?;
+                    let payload = protect_payload(&key.0, payload, &self.identity)?;
+                    projection.push((key.0.clone(), key.1.clone(), payload));
+                }
+                let removed_device = name.starts_with("device:") && current.is_empty();
+                snapshots.push((
+                    name,
+                    doc.export(ExportMode::Snapshot)?,
+                    doc.oplog_vv().encode(),
+                    removed_device,
+                ));
+            }
+            for page in projection.chunks(CONNECT_PAGE_SIZE) {
+                let mut update = QueryBuilder::new("WITH updates(kind,object_key,payload) AS (");
+                update.push_values(page, |mut row, (kind, key, payload)| {
+                    row.push_bind(kind).push_bind(key).push_bind(payload);
+                });
+                update.push(") UPDATE projection SET payload=updates.payload FROM updates WHERE projection.kind=updates.kind AND projection.object_key=updates.object_key");
+                update.build().execute(&mut *transaction).await?;
+            }
+            self.save_snapshots(&mut transaction, &snapshots).await?;
         }
         transaction.commit().await?;
-        Ok(count)
+        Ok(changed_documents.len())
     }
 
     /// Sources can be removed. Missing preference keys may belong to a newer device.
@@ -397,7 +555,7 @@ impl ProfileStore {
         validate_version(update.version)?;
         let mut connection = database_connection(&self.connection).await?;
         let mut transaction = connection.begin().await?;
-        let (changed, _) = self.import_on(&mut transaction, update).await?;
+        let changed = self.import_page_on(&mut transaction, vec![update]).await?[0].0;
         transaction.commit().await?;
         Ok(changed)
     }
@@ -407,7 +565,7 @@ impl ProfileStore {
     pub async fn project(&self, database: &Database) -> Result<(Vec<ConnectRecord>, bool)> {
         let records = {
             let mut connection = database_connection(&self.connection).await?;
-            let rows=sqlx::query(sqlx::AssertSqlSafe(format!("SELECT kind,object_key,payload FROM projection WHERE kind!='playlist_artwork' OR NOT EXISTS(SELECT 1 FROM projection WHERE kind!='playlist_artwork') ORDER BY {PROJECTION_ORDER} LIMIT CASE WHEN EXISTS(SELECT 1 FROM projection WHERE kind!='playlist_artwork') THEN ?1 ELSE 1 END"))).bind(CONNECT_PAGE_SIZE as i64).fetch_all(&mut *connection).await?;
+            let rows=sqlx::query(sqlx::AssertSqlSafe(format!("SELECT kind,object_key,payload FROM projection WHERE kind NOT IN ('cache_artwork','cache_lyrics') AND (kind!='playlist_artwork' OR NOT EXISTS(SELECT 1 FROM projection WHERE kind NOT IN ('playlist_artwork','cache_artwork','cache_lyrics'))) ORDER BY {PROJECTION_ORDER} LIMIT CASE WHEN EXISTS(SELECT 1 FROM projection WHERE kind NOT IN ('playlist_artwork','cache_artwork','cache_lyrics')) THEN ?1 ELSE 1 END"))).bind(CONNECT_PAGE_SIZE as i64).fetch_all(&mut *connection).await?;
             rows.into_iter()
                 .map(|row| {
                     let kind: String = row.get(0);
@@ -431,44 +589,163 @@ impl ProfileStore {
     pub async fn projection_pending(&self) -> Result<bool> {
         let mut connection = database_connection(&self.connection).await?;
         Ok(
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projection)")
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projection WHERE kind NOT IN ('cache_artwork','cache_lyrics'))")
                 .fetch_one(&mut *connection)
                 .await?,
         )
     }
 
+    /// Cache owners apply their own bounded pages without delaying profile settings.
+    pub async fn project_cache(&self, database: &Database) -> Result<(Vec<ConnectRecord>, bool)> {
+        let records = {
+            let mut connection = database_connection(&self.connection).await?;
+            let mut rows = sqlx::query("SELECT kind,object_key,payload FROM projection WHERE kind='cache_lyrics' ORDER BY object_key LIMIT ?1")
+                .bind(CONNECT_PAGE_SIZE as i64)
+                .fetch_all(&mut *connection).await?;
+            if rows.is_empty() {
+                rows = sqlx::query("SELECT kind,object_key,payload FROM projection WHERE kind='cache_artwork' ORDER BY object_key LIMIT 1")
+                    .fetch_all(&mut *connection).await?;
+            }
+            rows.into_iter()
+                .map(|row| {
+                    Ok(ConnectRecord {
+                        kind: row.get(0),
+                        key: row.get(1),
+                        value: row
+                            .get::<Option<String>, _>(2)
+                            .map(|payload| serde_json::from_str(&payload))
+                            .transpose()?,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?
+        };
+        let changed = database.connect_apply(&records).await?;
+        Ok((records, changed))
+    }
+
+    pub async fn cache_projection_pending(&self) -> Result<bool> {
+        let mut connection = database_connection(&self.connection).await?;
+        Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projection WHERE kind IN ('cache_artwork','cache_lyrics'))")
+            .fetch_one(&mut *connection).await?)
+    }
+
+    /// Page current cache records by their document name, without reading histories.
+    pub async fn cache_records(&self, after: &str, limit: usize) -> Result<Vec<ConnectRecord>> {
+        let mut connection = database_connection(&self.connection).await?;
+        let (kind, key) = after.split_once(':').unwrap_or(("", ""));
+        let rows = sqlx::query("SELECT kind,object_key,payload FROM local_values WHERE kind IN ('cache_artwork','cache_lyrics') AND (kind,object_key)>(?1,?2) AND payload IS NOT NULL ORDER BY kind,object_key LIMIT ?3")
+            .bind(kind).bind(key).bind(i64::try_from(limit).unwrap_or(i64::MAX))
+            .fetch_all(&mut *connection).await?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(ConnectRecord {
+                    kind: row.get(0),
+                    key: row.get(1),
+                    value: Some(serde_json::from_str(row.get(2))?),
+                })
+            })
+            .collect()
+    }
+
+    pub async fn cache_record(&self, kind: &str, key: &str) -> Result<Option<ConnectRecord>> {
+        let mut connection = database_connection(&self.connection).await?;
+        let row = sqlx::query("SELECT payload FROM projection WHERE kind=?1 AND object_key=?2 UNION ALL SELECT payload FROM local_values WHERE kind=?1 AND object_key=?2 LIMIT 1")
+            .bind(kind)
+            .bind(key)
+            .fetch_optional(&mut *connection)
+            .await?;
+        row.map(|row| {
+            Ok(ConnectRecord {
+                kind: kind.into(),
+                key: key.into(),
+                value: row
+                    .get::<Option<String>, _>(0)
+                    .map(|payload| serde_json::from_str(&payload))
+                    .transpose()?,
+            })
+        })
+        .transpose()
+    }
+
+    /// Read artwork identities without loading image payloads during cleanup.
+    pub async fn cache_keys(&self, after: &str, limit: usize) -> Result<Vec<String>> {
+        let mut connection = database_connection(&self.connection).await?;
+        Ok(sqlx::query_scalar("SELECT object_key FROM local_values v WHERE kind='cache_artwork' AND object_key>?1 AND payload IS NOT NULL AND NOT EXISTS(SELECT 1 FROM projection p WHERE p.kind=v.kind AND p.object_key=v.object_key) ORDER BY object_key LIMIT ?2")
+            .bind(after).bind(i64::try_from(limit).unwrap_or(i64::MAX))
+            .fetch_all(&mut *connection).await?)
+    }
+
     pub async fn acknowledge_projection(&self, records: &[ConnectRecord]) -> Result<()> {
         let mut connection = database_connection(&self.connection).await?;
         let mut transaction = connection.begin().await?;
-        for record in records {
-            let payload = record
-                .value
-                .as_ref()
-                .map(serde_json::to_string)
-                .transpose()?;
-            let projected = if sensitive(&record.kind) && payload.is_some() {
-                sqlx::query_scalar("SELECT payload FROM projection WHERE kind=?1 AND object_key=?2")
-                    .bind(&record.kind)
-                    .bind(&record.key)
-                    .fetch_optional(&mut *transaction)
+        for page in records.chunks(CONNECT_PAGE_SIZE) {
+            let protected = if page
+                .iter()
+                .any(|record| sensitive(&record.kind) && record.value.is_some())
+            {
+                let mut query = QueryBuilder::new("WITH requested(kind,object_key) AS (");
+                query.push_values(
+                    page.iter()
+                        .filter(|record| sensitive(&record.kind) && record.value.is_some()),
+                    |mut row, record| {
+                        row.push_bind(&record.kind).push_bind(&record.key);
+                    },
+                );
+                query.push(") SELECT p.kind,p.object_key,p.payload FROM projection p JOIN requested r USING(kind,object_key)");
+                query
+                    .build()
+                    .fetch_all(&mut *transaction)
                     .await?
-                    .flatten()
+                    .into_iter()
+                    .map(|row| {
+                        (
+                            (row.get::<String, _>(0), row.get::<String, _>(1)),
+                            row.get::<Option<String>, _>(2),
+                        )
+                    })
+                    .collect::<BTreeMap<_, _>>()
             } else {
-                payload.clone()
+                BTreeMap::new()
             };
-            if expose_payload(&record.kind, projected.clone(), &self.identity)? == payload {
-                sqlx::query(
-                    "DELETE FROM projection WHERE kind=?1 AND object_key=?2 AND payload IS ?3",
-                )
-                .bind(&record.kind)
-                .bind(&record.key)
-                .bind(projected)
-                .execute(&mut *transaction)
-                .await?;
+            let mut acknowledged = Vec::new();
+            let mut values = Vec::new();
+            for record in page {
+                let payload = record
+                    .value
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()?;
+                let projected = if sensitive(&record.kind) && payload.is_some() {
+                    protected
+                        .get(&(record.kind.clone(), record.key.clone()))
+                        .cloned()
+                        .flatten()
+                } else {
+                    payload.clone()
+                };
+                if expose_payload(&record.kind, projected.clone(), &self.identity)? == payload {
+                    acknowledged.push((&record.kind, &record.key, projected));
+                }
+                // Polling the local owners after an incoming edit must not republish it.
+                let payload = protect_payload(&record.kind, payload, &self.identity)?;
+                values.push((&record.kind, &record.key, payload));
             }
-            // Polling the local owners after an incoming edit must not republish it.
-            let payload = protect_payload(&record.kind, payload, &self.identity)?;
-            sqlx::query("INSERT INTO local_values(kind,object_key,payload) VALUES(?1,?2,?3) ON CONFLICT(kind,object_key) DO UPDATE SET payload=excluded.payload").bind(&record.kind).bind(&record.key).bind(payload).execute(&mut *transaction).await?;
+            if !acknowledged.is_empty() {
+                let mut delete =
+                    QueryBuilder::new("WITH acknowledged(kind,object_key,payload) AS (");
+                delete.push_values(acknowledged, |mut row, (kind, key, payload)| {
+                    row.push_bind(kind).push_bind(key).push_bind(payload);
+                });
+                delete.push(") DELETE FROM projection WHERE (kind,object_key) IN (SELECT a.kind,a.object_key FROM acknowledged a JOIN projection p ON p.kind=a.kind AND p.object_key=a.object_key AND p.payload IS a.payload)");
+                delete.build().execute(&mut *transaction).await?;
+            }
+            let mut insert =
+                QueryBuilder::new("INSERT INTO local_values(kind,object_key,payload) ");
+            insert.push_values(values, |mut row, (kind, key, payload)| {
+                row.push_bind(kind).push_bind(key).push_bind(payload);
+            });
+            insert.push(" ON CONFLICT(kind,object_key) DO UPDATE SET payload=excluded.payload");
+            insert.build().execute(&mut *transaction).await?;
         }
         transaction.commit().await?;
         Ok(())
@@ -477,7 +754,7 @@ impl ProfileStore {
     /// Stream current state and the history still needed by enrolled devices.
     pub async fn export_snapshot(&self, path: &Path) -> Result<()> {
         let (file, _) = self
-            .export_documents(File::create(path)?, false, None)
+            .export_documents(File::create(path)?, SnapshotScope::Backup, None)
             .await?;
         file.sync_all()?;
         Ok(())
@@ -490,23 +767,34 @@ impl ProfileStore {
         output: W,
         peer: &str,
     ) -> Result<(W, i64)> {
-        self.export_documents(output, false, Some(peer)).await
+        self.export_documents(output, SnapshotScope::Device, Some(peer))
+            .await
     }
 
     pub async fn export_setup_snapshot<W: Write + Send + 'static>(
         &self,
         output: W,
     ) -> Result<(W, i64)> {
-        self.export_documents(output, true, None).await
+        self.export_documents(output, SnapshotScope::Setup, None)
+            .await
+    }
+
+    pub async fn export_cache_snapshot<W: Write + Send + 'static>(
+        &self,
+        output: W,
+        peer: &str,
+    ) -> Result<(W, i64)> {
+        self.export_documents(output, SnapshotScope::Cache, Some(peer))
+            .await
     }
 
     async fn export_documents<W: Write + Send + 'static>(
         &self,
         file: W,
-        setup: bool,
+        scope: SnapshotScope,
         peer: Option<&str>,
     ) -> Result<(W, i64)> {
-        self.compress_documents(setup).await?;
+        self.compress_documents(scope).await?;
         let mut output = tokio::task::spawn_blocking(move || -> Result<_> {
             let mut output = BufWriter::new(file);
             let mut header = GzEncoder::new(&mut output, Compression::default());
@@ -520,21 +808,18 @@ impl ProfileStore {
         // holding the writer connection throughout a full catalog export.
         let mut connection = database_connection(&self.reader).await?;
         let mut snapshot = connection.begin().await?;
-        let revision = sqlx::query_scalar("SELECT revision FROM file_revision WHERE id=1")
+        let revision = sqlx::query_scalar(scope.revision_query())
             .fetch_one(&mut *snapshot)
             .await?;
         let mut cursor = String::new();
         loop {
-            let statement = if setup {
-                "SELECT name,CASE WHEN compressed IS NULL THEN snapshot END,compressed FROM documents WHERE substr(name,1,instr(name,':')-1) IN ('source','integration','root','preference','scrobbling','device','connect_key','connect_network','connect_storage') AND name>?1 ORDER BY name LIMIT ?2"
-            } else {
-                "SELECT name,CASE WHEN compressed IS NULL THEN snapshot END,compressed FROM documents WHERE name>?1 AND name<=coalesce((SELECT min(name) FROM documents WHERE name>?1 AND name GLOB 'playlist_artwork:*'),char(1114111)) ORDER BY name LIMIT ?2"
-            };
-            let rows = sqlx::query(statement)
+            let predicate = scope.predicate();
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "SELECT name,CASE WHEN compressed IS NULL THEN snapshot END,compressed FROM documents WHERE {predicate} AND name>?1 AND name<=coalesce((SELECT min(name) FROM documents WHERE {predicate} AND name>?1 AND (name GLOB 'playlist_artwork:*' OR name GLOB 'cache_artwork:*')),char(1114111)) ORDER BY name LIMIT ?2"
+            )))
                 .bind(&cursor)
                 .bind(CONNECT_PAGE_SIZE as i64)
-                .fetch_all(&mut *snapshot)
-                .await?;
+                .fetch_all(&mut *snapshot).await?;
             if rows.is_empty() {
                 break;
             }
@@ -592,13 +877,14 @@ impl ProfileStore {
 
     // Fill the cache before pinning the export's read snapshot. Writing compressed
     // copies during that snapshot prevents WAL checkpoints until the export ends.
-    async fn compress_documents(&self, setup: bool) -> Result<()> {
+    async fn compress_documents(&self, scope: SnapshotScope) -> Result<()> {
         let mut cursor = String::new();
         loop {
             let rows = {
                 let mut connection = database_connection(&self.connection).await?;
-                sqlx::query("SELECT name,snapshot FROM documents WHERE compressed IS NULL AND name>?1 AND (?3=0 OR substr(name,1,instr(name,':')-1) IN ('source','integration','root','preference','scrobbling','device','connect_key','connect_network','connect_storage')) AND (?3=1 OR name<=coalesce((SELECT min(name) FROM documents WHERE compressed IS NULL AND name>?1 AND name GLOB 'playlist_artwork:*'),char(1114111))) ORDER BY name LIMIT ?2")
-                    .bind(&cursor).bind(CONNECT_PAGE_SIZE as i64).bind(setup)
+                let predicate = scope.predicate();
+                sqlx::query(sqlx::AssertSqlSafe(format!("SELECT name,snapshot FROM documents WHERE compressed IS NULL AND {predicate} AND name>?1 AND name<=coalesce((SELECT min(name) FROM documents WHERE compressed IS NULL AND {predicate} AND name>?1 AND (name GLOB 'playlist_artwork:*' OR name GLOB 'cache_artwork:*')),char(1114111)) ORDER BY name LIMIT ?2")))
+                    .bind(&cursor).bind(CONNECT_PAGE_SIZE as i64)
                     .fetch_all(&mut *connection).await?
             };
             if rows.is_empty() {
@@ -634,14 +920,14 @@ impl ProfileStore {
             .await??;
             let mut connection = database_connection(&self.connection).await?;
             let mut transaction = connection.begin().await?;
-            for (name, snapshot, compressed) in encoded {
-                sqlx::query("UPDATE documents SET compressed=?3 WHERE name=?1 AND snapshot=?2")
-                    .bind(name)
-                    .bind(snapshot)
-                    .bind(compressed)
-                    .execute(&mut *transaction)
-                    .await?;
-            }
+            let mut update = QueryBuilder::new("WITH updates(name,snapshot,compressed) AS (");
+            update.push_values(encoded, |mut row, (name, snapshot, compressed)| {
+                row.push_bind(name)
+                    .push_bind(snapshot)
+                    .push_bind(compressed);
+            });
+            update.push(") UPDATE documents SET compressed=updates.compressed FROM updates WHERE documents.name=updates.name AND documents.snapshot=updates.snapshot");
+            update.build().execute(&mut *transaction).await?;
             transaction.commit().await?;
         }
         Ok(())
@@ -653,11 +939,100 @@ impl ProfileStore {
         self.read_snapshot(input, false).await
     }
 
+    /// Each cache page commits independently so a large file does not hold up settings.
+    pub async fn import_cache_snapshot<R: Read + Send + 'static>(&self, file: R) -> Result<bool> {
+        let mut input = tokio::task::spawn_blocking(move || snapshot_start(file)).await??;
+        let mut peer = None;
+        let mut changed = false;
+        loop {
+            let (reader, page, ended) =
+                tokio::task::spawn_blocking(move || read_update_page(input)).await??;
+            input = reader;
+            if !page.is_empty() {
+                let mut acknowledged = Vec::with_capacity(page.len());
+                for update in &page {
+                    if !update.document.starts_with("cache_artwork:")
+                        && !update.document.starts_with("cache_lyrics:")
+                    {
+                        bail!("Connect cache snapshot contains another document kind");
+                    }
+                    if let Some(author) = &update.author {
+                        peer = Some(author.clone());
+                    }
+                    acknowledged.push((peer.clone(), update.document.clone()));
+                }
+                let mut connection = database_connection(&self.connection).await?;
+                let mut transaction = connection.begin().await?;
+                let versions = self.import_page_on(&mut transaction, page).await?;
+                let acknowledged = acknowledged
+                    .into_iter()
+                    .zip(versions)
+                    .filter_map(|((peer, name), (imported, version))| {
+                        changed |= imported;
+                        peer.map(|peer| (peer, name, version))
+                    })
+                    .collect::<Vec<_>>();
+                history::acknowledge_page_on(&mut transaction, &acknowledged).await?;
+                transaction.commit().await?;
+            }
+            if ended {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        let has_author = peer.is_some();
+        let mut members: Vec<String> = tokio::task::spawn_blocking(move || -> Result<_> {
+            let members = if has_author {
+                let mut line = String::new();
+                input.read_line(&mut line)?;
+                serde_json::from_str(&line).context("missing Connect snapshot membership")?
+            } else {
+                Vec::new()
+            };
+            std::io::copy(&mut input, &mut std::io::sink())?;
+            Ok(members)
+        })
+        .await??;
+        if let Some(peer) = peer {
+            members.push(peer);
+            let mut connection = database_connection(&self.connection).await?;
+            let mut transaction = connection.begin().await?;
+            history::register_on(&mut transaction, &members).await?;
+            transaction.commit().await?;
+        }
+        Ok(changed)
+    }
+
     /// Check an imported snapshot for local edits it does not contain. Exports
     /// order documents by name, so both histories can be compared a page at a time.
     pub async fn snapshot_contains_current<R: Read + Send + 'static>(
         &self,
         file: R,
+    ) -> Result<bool> {
+        self.snapshot_contains_scope(file, SnapshotScope::Backup)
+            .await
+    }
+
+    pub async fn device_snapshot_contains_current<R: Read + Send + 'static>(
+        &self,
+        file: R,
+    ) -> Result<bool> {
+        self.snapshot_contains_scope(file, SnapshotScope::Device)
+            .await
+    }
+
+    pub async fn cache_snapshot_contains_current<R: Read + Send + 'static>(
+        &self,
+        file: R,
+    ) -> Result<bool> {
+        self.snapshot_contains_scope(file, SnapshotScope::Cache)
+            .await
+    }
+
+    async fn snapshot_contains_scope<R: Read + Send + 'static>(
+        &self,
+        file: R,
+        scope: SnapshotScope,
     ) -> Result<bool> {
         let (mut input, mut line) = tokio::task::spawn_blocking(move || -> Result<_> {
             let mut input = snapshot_reader(file)?;
@@ -671,9 +1046,10 @@ impl ProfileStore {
         let mut transaction = connection.begin().await?;
         let mut cursor = String::new();
         loop {
-            let rows = sqlx::query(
-                "SELECT name,version,snapshot FROM documents WHERE name>?1 AND name<=coalesce((SELECT min(name) FROM documents WHERE name>?1 AND name GLOB 'playlist_artwork:*'),char(1114111)) ORDER BY name LIMIT ?2",
-            )
+            let predicate = scope.predicate();
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "SELECT name,version,snapshot FROM documents WHERE {predicate} AND name>?1 AND name<=coalesce((SELECT min(name) FROM documents WHERE {predicate} AND name>?1 AND (name GLOB 'playlist_artwork:*' OR name GLOB 'cache_artwork:*')),char(1114111)) ORDER BY name LIMIT ?2"
+            )))
             .bind(&cursor)
             .bind(CONNECT_PAGE_SIZE as i64)
             .fetch_all(&mut *transaction)
@@ -736,24 +1112,13 @@ impl ProfileStore {
         file: R,
         replace: bool,
     ) -> Result<bool> {
-        let mut input = tokio::task::spawn_blocking(move || -> Result<_> {
-            let mut input = snapshot_reader(file)?;
-            let mut line = String::new();
-            input.read_line(&mut line)?;
-            validate_version(
-                line.trim()
-                    .parse()
-                    .context("invalid Connect snapshot header")?,
-            )?;
-            Ok(input)
-        })
-        .await??;
+        let mut input = tokio::task::spawn_blocking(move || snapshot_start(file)).await??;
         let mut peer = None;
         let mut connection = database_connection(&self.connection).await?;
         let mut transaction = connection.begin().await?;
         if replace {
             sqlx::raw_sql(
-                "DELETE FROM documents; DELETE FROM projection; DELETE FROM local_values; DELETE FROM sync_cursors; DELETE FROM file_exchange; DELETE FROM history_peers; DELETE FROM history_acknowledgements; DELETE FROM history_pending;",
+                "DELETE FROM documents; DELETE FROM projection; DELETE FROM local_values; DELETE FROM sync_cursors; DELETE FROM file_exchange; DELETE FROM cache_file_exchange; DELETE FROM history_peers; DELETE FROM history_acknowledgements; DELETE FROM history_pending;",
             )
             .execute(&mut *transaction)
             .await?;
@@ -762,39 +1127,40 @@ impl ProfileStore {
         loop {
             // Only file and CPU work moves to the blocking pool. The caller
             // retains the transaction so cancellation still rolls back the import.
-            let (reader, page, ended) = tokio::task::spawn_blocking(move || -> Result<_> {
-                let mut page = Vec::with_capacity(CONNECT_PAGE_SIZE);
-                let mut line = String::new();
-                for _ in 0..CONNECT_PAGE_SIZE {
-                    line.clear();
-                    if input.read_line(&mut line)? == 0 {
-                        bail!("Connect snapshot is incomplete");
+            let (reader, page, ended) =
+                tokio::task::spawn_blocking(move || read_update_page(input)).await??;
+            input = reader;
+            let mut page = page.into_iter().peekable();
+            while page.peek().is_some() {
+                let mut updates = Vec::new();
+                let mut acknowledgements = Vec::new();
+                // Device removal clears that peer's acknowledgements. Keep it
+                // separate so batching retains the snapshot's operation order.
+                while let Some(update) = page.next() {
+                    if let Some(author) = &update.author {
+                        peer = Some(author.clone());
                     }
-                    if line.trim_end() == "END" {
-                        return Ok((input, page, true));
-                    }
-                    let update: Update = serde_json::from_str(&line)?;
-                    validate_version(update.version)?;
-                    let image = update.document.starts_with("playlist_artwork:");
-                    page.push(update);
-                    if image {
+                    let device = update.document.starts_with("device:");
+                    acknowledgements.push((peer.clone(), update.document.clone()));
+                    updates.push(update);
+                    if device
+                        || page
+                            .peek()
+                            .is_some_and(|next| next.document.starts_with("device:"))
+                    {
                         break;
                     }
                 }
-                Ok((input, page, false))
-            })
-            .await??;
-            input = reader;
-            for update in page {
-                if let Some(author) = &update.author {
-                    peer = Some(author.clone());
-                }
-                let name = update.document.clone();
-                let (imported, version) = self.import_on(&mut transaction, update).await?;
-                changed |= imported;
-                if let Some(peer) = &peer {
-                    history::acknowledge_on(&mut transaction, peer, &name, &version).await?;
-                }
+                let versions = self.import_page_on(&mut transaction, updates).await?;
+                let acknowledgements = acknowledgements
+                    .into_iter()
+                    .zip(versions)
+                    .filter_map(|((peer, name), (imported, version))| {
+                        changed |= imported;
+                        peer.map(|peer| (peer, name, version))
+                    })
+                    .collect::<Vec<_>>();
+                history::acknowledge_page_on(&mut transaction, &acknowledgements).await?;
             }
             if ended {
                 break;
@@ -829,7 +1195,7 @@ impl ProfileStore {
         let mut cursor = String::new();
         loop {
             let rows = sqlx::query(
-                "SELECT name,snapshot FROM documents WHERE name>?1 AND name<=coalesce((SELECT min(name) FROM documents WHERE name>?1 AND name GLOB 'playlist_artwork:*'),char(1114111)) ORDER BY name LIMIT ?2",
+                "SELECT name,snapshot FROM documents WHERE name>?1 AND name<=coalesce((SELECT min(name) FROM documents WHERE name>?1 AND (name GLOB 'playlist_artwork:*' OR name GLOB 'cache_artwork:*')),char(1114111)) ORDER BY name LIMIT ?2",
             )
             .bind(&cursor)
             .bind(CONNECT_PAGE_SIZE as i64)
@@ -838,6 +1204,7 @@ impl ProfileStore {
             if rows.is_empty() {
                 break;
             }
+            let mut projection = Vec::new();
             for row in rows {
                 cursor = row.get(0);
                 let document = LoroDoc::new();
@@ -848,8 +1215,17 @@ impl ProfileStore {
                         Some(serde_json::to_string(&value)?),
                         &self.identity,
                     )?;
-                    sqlx::query("INSERT INTO projection(kind,object_key,payload) VALUES(?1,?2,?3) ON CONFLICT(kind,object_key) DO UPDATE SET payload=excluded.payload").bind(kind).bind(key).bind(payload).execute(&mut *transaction).await?;
+                    projection.push((kind, key, payload));
                 }
+            }
+            for page in projection.chunks(CONNECT_PAGE_SIZE) {
+                let mut insert =
+                    QueryBuilder::new("INSERT INTO projection(kind,object_key,payload) ");
+                insert.push_values(page, |mut row, (kind, key, payload)| {
+                    row.push_bind(kind).push_bind(key).push_bind(payload);
+                });
+                insert.push(" ON CONFLICT(kind,object_key) DO UPDATE SET payload=excluded.payload");
+                insert.build().execute(&mut *transaction).await?;
             }
         }
         transaction.commit().await?;
@@ -878,6 +1254,43 @@ fn snapshot_reader(file: impl Read + Send + 'static) -> Result<Box<dyn BufRead +
     } else {
         Ok(Box::new(input))
     }
+}
+
+fn snapshot_start(file: impl Read + Send + 'static) -> Result<Box<dyn BufRead + Send>> {
+    let mut input = snapshot_reader(file)?;
+    let mut line = String::new();
+    input.read_line(&mut line)?;
+    validate_version(
+        line.trim()
+            .parse()
+            .context("invalid Connect snapshot header")?,
+    )?;
+    Ok(input)
+}
+
+fn read_update_page(
+    mut input: Box<dyn BufRead + Send>,
+) -> Result<(Box<dyn BufRead + Send>, Vec<Update>, bool)> {
+    let mut page = Vec::with_capacity(CONNECT_PAGE_SIZE);
+    let mut line = String::new();
+    for _ in 0..CONNECT_PAGE_SIZE {
+        line.clear();
+        if input.read_line(&mut line)? == 0 {
+            bail!("Connect snapshot is incomplete");
+        }
+        if line.trim_end() == "END" {
+            return Ok((input, page, true));
+        }
+        let update: Update = serde_json::from_str(&line)?;
+        validate_version(update.version)?;
+        let image = update.document.starts_with("playlist_artwork:")
+            || update.document.starts_with("cache_artwork:");
+        page.push(update);
+        if image {
+            break;
+        }
+    }
+    Ok((input, page, false))
 }
 
 fn validate_version(version: u32) -> Result<()> {
@@ -926,48 +1339,65 @@ impl ProfileStore {
         Ok(document)
     }
 
-    async fn save_document(
+    async fn save_snapshots(
         &self,
         connection: &mut SqliteConnection,
-        name: &str,
-        document: &LoroDoc,
+        snapshots: &[(String, Vec<u8>, Vec<u8>, bool)],
     ) -> Result<()> {
-        let snapshot = document.export(ExportMode::Snapshot)?;
-        self.save_snapshot(
-            connection,
-            name,
-            snapshot,
-            document.oplog_vv().encode(),
-            name.starts_with("device:") && records(document)?.is_empty(),
-        )
-        .await
-    }
-
-    async fn save_snapshot(
-        &self,
-        connection: &mut SqliteConnection,
-        name: &str,
-        snapshot: Vec<u8>,
-        version: Vec<u8>,
-        removed_device: bool,
-    ) -> Result<()> {
-        let revision = next_revision(connection).await?;
-        let snapshot = protect(name, &snapshot, &self.identity)?;
-        sqlx::query("INSERT INTO documents(name,snapshot,revision,version) VALUES(?1,?2,?3,?4) ON CONFLICT(name) DO UPDATE SET snapshot=excluded.snapshot,revision=excluded.revision,version=excluded.version")
-        .bind(name).bind(snapshot.as_ref()).bind(revision).bind(version)
-        .execute(&mut *connection).await?;
-        sqlx::query("INSERT OR IGNORE INTO history_pending(name) VALUES(?1)")
-            .bind(name)
-            .execute(&mut *connection)
+        for page in snapshots.chunks(CONNECT_PAGE_SIZE) {
+            let count = page.len() as i64;
+            let end: i64 = sqlx::query_scalar(
+                "UPDATE file_revision SET revision=revision+?1 WHERE id=1 RETURNING revision",
+            )
+            .bind(count)
+            .fetch_one(&mut *connection)
             .await?;
-        if removed_device {
-            sqlx::query("DELETE FROM history_acknowledgements WHERE peer=?1")
-                .bind(name.strip_prefix("device:").unwrap())
-                .execute(&mut *connection)
-                .await?;
-            sqlx::query("INSERT OR IGNORE INTO history_pending SELECT name FROM documents")
-                .execute(&mut *connection)
-                .await?;
+            let encrypted = page
+                .iter()
+                .map(|(name, snapshot, version, _)| {
+                    Ok((
+                        name,
+                        protect(name, snapshot, &self.identity)?.into_owned(),
+                        version,
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let mut insert =
+                QueryBuilder::new("INSERT INTO documents(name,snapshot,revision,version) ");
+            insert.push_values(
+                encrypted.into_iter().enumerate(),
+                |mut row, (offset, (name, snapshot, version))| {
+                    row.push_bind(name)
+                        .push_bind(snapshot)
+                        .push_bind(end - count + offset as i64 + 1)
+                        .push_bind(version);
+                },
+            );
+            insert.push(" ON CONFLICT(name) DO UPDATE SET snapshot=excluded.snapshot,revision=excluded.revision,version=excluded.version");
+            insert.build().execute(&mut *connection).await?;
+            let mut pending = QueryBuilder::new("INSERT OR IGNORE INTO history_pending(name) ");
+            pending.push_values(page, |mut row, (name, _, _, _)| {
+                row.push_bind(name);
+            });
+            pending.build().execute(&mut *connection).await?;
+            let removed = page
+                .iter()
+                .filter(|(_, _, _, removed)| *removed)
+                .map(|(name, _, _, _)| name.strip_prefix("device:").unwrap())
+                .collect::<Vec<_>>();
+            if !removed.is_empty() {
+                let mut delete =
+                    QueryBuilder::new("DELETE FROM history_acknowledgements WHERE peer IN (");
+                let mut peers = delete.separated(",");
+                for peer in removed {
+                    peers.push_bind(peer);
+                }
+                peers.push_unseparated(")");
+                delete.build().execute(&mut *connection).await?;
+                sqlx::query("INSERT OR IGNORE INTO history_pending SELECT name FROM documents")
+                    .execute(&mut *connection)
+                    .await?;
+            }
         }
         Ok(())
     }
@@ -1017,14 +1447,43 @@ async fn index_documents(
     )
     .execute(&mut *transaction)
     .await?;
-    sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
-        "CREATE INDEX IF NOT EXISTS documents_setup_revision ON documents(({SYNC_PRIORITY}),revision,name)"
-    )))
-    .execute(&mut *transaction)
+    let index = format!(
+        "CREATE INDEX documents_setup_revision ON documents(({SYNC_PRIORITY}),revision,name)"
+    );
+    let previous: Option<String> = sqlx::query_scalar(
+        "SELECT sql FROM sqlite_schema WHERE type='index' AND name='documents_setup_revision'",
+    )
+    .fetch_optional(&mut *transaction)
     .await?;
+    if previous.as_deref() != Some(&index) {
+        sqlx::query("DROP INDEX IF EXISTS documents_setup_revision")
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::raw_sql(sqlx::AssertSqlSafe(index))
+            .execute(&mut *transaction)
+            .await?;
+    }
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+        "CREATE INDEX IF NOT EXISTS documents_image_revision ON documents(({SYNC_PRIORITY}),revision,name) WHERE name GLOB 'playlist_artwork:*' OR name GLOB 'cache_artwork:*';
+        CREATE INDEX IF NOT EXISTS documents_image_name ON documents(name) WHERE name GLOB 'playlist_artwork:*' OR name GLOB 'cache_artwork:*';"
+    )))
+    .execute(&mut *transaction).await?;
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+        "CREATE TABLE IF NOT EXISTS snapshot_revisions(stream INTEGER PRIMARY KEY,revision INTEGER NOT NULL) STRICT;
+        INSERT OR IGNORE INTO snapshot_revisions SELECT stream,coalesce((SELECT max(revision) FROM documents WHERE ({SYNC_PRIORITY})=stream),0) FROM (SELECT 0 AS stream UNION ALL SELECT 1 UNION ALL SELECT 2);"
+    )))
+    .execute(&mut *transaction).await?;
+    let new_stream = SYNC_PRIORITY.replace("name", "NEW.name");
+    let old_stream = SYNC_PRIORITY.replace("name", "OLD.name");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+        "CREATE TRIGGER IF NOT EXISTS snapshot_revision_insert AFTER INSERT ON documents BEGIN UPDATE snapshot_revisions SET revision=revision+1 WHERE stream=({new_stream}); END;
+        CREATE TRIGGER IF NOT EXISTS snapshot_revision_update AFTER UPDATE OF snapshot ON documents WHEN NEW.snapshot IS NOT OLD.snapshot BEGIN UPDATE snapshot_revisions SET revision=revision+1 WHERE stream=({new_stream}); END;
+        CREATE TRIGGER IF NOT EXISTS snapshot_revision_delete AFTER DELETE ON documents BEGIN UPDATE snapshot_revisions SET revision=revision+1 WHERE stream=({old_stream}); END;"
+    )))
+    .execute(&mut *transaction).await?;
     loop {
         let rows = sqlx::query(
-            "SELECT name,snapshot FROM documents WHERE revision=0 AND name<=coalesce((SELECT min(name) FROM documents WHERE revision=0 AND name GLOB 'playlist_artwork:*'),char(1114111)) ORDER BY name LIMIT ?1",
+            "SELECT name,snapshot FROM documents WHERE revision=0 AND name<=coalesce((SELECT min(name) FROM documents WHERE revision=0 AND (name GLOB 'playlist_artwork:*' OR name GLOB 'cache_artwork:*')),char(1114111)) ORDER BY name LIMIT ?1",
         )
         .bind(CONNECT_PAGE_SIZE as i64)
         .fetch_all(&mut *transaction)
@@ -1197,91 +1656,111 @@ fn records(document: &LoroDoc) -> Result<BTreeMap<(String, String), serde_json::
 }
 
 impl ProfileStore {
-    async fn import_on(
+    async fn import_page_on(
         &self,
         connection: &mut SqliteConnection,
-        update: Update,
-    ) -> Result<(bool, VersionVector)> {
-        let saved = sqlx::query("SELECT version,snapshot FROM documents WHERE name=?1")
-            .bind(&update.document)
-            .fetch_optional(&mut *connection)
-            .await?;
-        if let Some(saved) = &saved
-            && !sensitive(&update.document)
-            && saved.get::<&[u8], _>(1) == update.bytes
-        {
-            return Ok((false, VersionVector::decode(saved.get(0))?));
+        updates: Vec<Update>,
+    ) -> Result<Vec<(bool, VersionVector)>> {
+        if updates.is_empty() {
+            return Ok(Vec::new());
         }
-        let name = update.document.clone();
+        let mut query =
+            QueryBuilder::new("SELECT name,version,snapshot FROM documents WHERE name IN (");
+        let mut names = query.separated(",");
+        for update in &updates {
+            names.push_bind(&update.document);
+        }
+        names.push_unseparated(")");
+        let mut saved: BTreeMap<String, (Vec<u8>, Vec<u8>)> = query
+            .build()
+            .fetch_all(&mut *connection)
+            .await?
+            .into_iter()
+            .map(|row| (row.get(0), (row.get(1), row.get(2))))
+            .collect();
         let identity = Arc::clone(&self.identity);
         let peer_id = self.peer_id;
-        let (incoming, prepared) = tokio::task::spawn_blocking(move || -> Result<_> {
-            let incoming = LoroDoc::decode_import_blob_meta(&update.bytes, true)?.partial_end_vv;
-            if let Some(saved) = &saved
-                && VersionVector::decode(saved.get(0))?.includes_vv(&incoming)
-            {
-                return Ok((incoming, None));
-            }
-            let document = LoroDoc::new();
-            if let Some(saved) = saved {
-                document.import(&expose(&name, saved.get(1), &identity)?)?;
-            }
-            document.set_peer_id(peer_id)?;
-            let before = records(&document)?;
-            let version = document.oplog_vv();
-            document.import(&update.bytes)?;
-            if version == document.oplog_vv() {
-                return Ok((incoming, None));
-            }
-            let after = records(&document)?;
+        let (results, projection, snapshots) = tokio::task::spawn_blocking(move || -> Result<_> {
+            let mut results = Vec::with_capacity(updates.len());
             let mut projection = Vec::new();
-            for key in before.keys().chain(after.keys()).collect::<BTreeSet<_>>() {
-                if before.get(key) == after.get(key) {
+            let mut snapshots = Vec::new();
+            for update in updates {
+                let name = update.document;
+                let previous = saved.get(&name);
+                if let Some((version, snapshot)) = previous
+                    && !sensitive(&name)
+                    && *snapshot == update.bytes
+                {
+                    results.push((false, VersionVector::decode(version)?));
                     continue;
                 }
-                let record = ConnectRecord {
-                    kind: key.0.clone(),
-                    key: key.1.clone(),
-                    value: after.get(key).cloned(),
-                };
-                if document_name(&record)? != name {
-                    bail!("Connect document contains another object's records");
+                let incoming =
+                    LoroDoc::decode_import_blob_meta(&update.bytes, true)?.partial_end_vv;
+                if let Some((version, _)) = previous
+                    && VersionVector::decode(version)?.includes_vv(&incoming)
+                {
+                    results.push((false, incoming));
+                    continue;
                 }
-                let payload = record
-                    .value
-                    .as_ref()
-                    .map(serde_json::to_string)
-                    .transpose()?;
-                projection.push((record.kind, record.key, payload));
+                let document = LoroDoc::new();
+                if let Some((_, snapshot)) = previous {
+                    document.import(&expose(&name, snapshot, &identity)?)?;
+                }
+                document.set_peer_id(peer_id)?;
+                let before = records(&document)?;
+                let version = document.oplog_vv();
+                document.import(&update.bytes)?;
+                if version == document.oplog_vv() {
+                    results.push((false, incoming));
+                    continue;
+                }
+                let after = records(&document)?;
+                for key in before.keys().chain(after.keys()).collect::<BTreeSet<_>>() {
+                    if before.get(key) == after.get(key) {
+                        continue;
+                    }
+                    let record = ConnectRecord {
+                        kind: key.0.clone(),
+                        key: key.1.clone(),
+                        value: after.get(key).cloned(),
+                    };
+                    if document_name(&record)? != name {
+                        bail!("Connect document contains another object's records");
+                    }
+                    let payload = record
+                        .value
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()?;
+                    let payload = protect_payload(&record.kind, payload, &identity)?;
+                    projection.push((record.kind, record.key, payload));
+                }
+                let snapshot = document.export(ExportMode::Snapshot)?;
+                let version = document.oplog_vv().encode();
+                saved.insert(
+                    name.clone(),
+                    (
+                        version.clone(),
+                        protect(&name, &snapshot, &identity)?.into_owned(),
+                    ),
+                );
+                let removed_device = name.starts_with("device:") && after.is_empty();
+                snapshots.push((name, snapshot, version, removed_device));
+                results.push((before != after, incoming));
             }
-            Ok((
-                incoming,
-                Some((
-                    projection,
-                    document.export(ExportMode::Snapshot)?,
-                    document.oplog_vv().encode(),
-                    name.starts_with("device:") && after.is_empty(),
-                    before != after,
-                )),
-            ))
+            Ok((results, projection, snapshots))
         })
         .await??;
-        let Some((projection, snapshot, version, removed_device, changed)) = prepared else {
-            return Ok((false, incoming));
-        };
-        for (kind, key, payload) in projection {
-            let payload = protect_payload(&kind, payload, &self.identity)?;
-            sqlx::query("INSERT INTO projection(kind,object_key,payload) VALUES(?1,?2,?3) ON CONFLICT(kind,object_key) DO UPDATE SET payload=excluded.payload").bind(kind).bind(key).bind(payload).execute(&mut *connection).await?;
+        for page in projection.chunks(CONNECT_PAGE_SIZE) {
+            let mut insert = QueryBuilder::new("INSERT INTO projection(kind,object_key,payload) ");
+            insert.push_values(page, |mut row, (kind, key, payload)| {
+                row.push_bind(kind).push_bind(key).push_bind(payload);
+            });
+            insert.push(" ON CONFLICT(kind,object_key) DO UPDATE SET payload=excluded.payload");
+            insert.build().execute(&mut *connection).await?;
         }
-        self.save_snapshot(
-            connection,
-            &update.document,
-            snapshot,
-            version,
-            removed_device,
-        )
-        .await?;
-        Ok((changed, incoming))
+        self.save_snapshots(connection, &snapshots).await?;
+        Ok(results)
     }
 }
 

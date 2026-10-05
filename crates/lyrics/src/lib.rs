@@ -6,6 +6,13 @@ use std::collections::HashMap;
 use std::path::Path;
 use wana_kana::ConvertJapanese;
 
+mod timing;
+pub use timing::{
+    KaraokeTiming, LYRICS_USER_SCROLL_PAUSE_MS, LyricsTiming, active_lyrics_line_index,
+    effective_cue_end, intro_lyrics_line_index, lyric_line_has_text,
+    playback_position_for_lyrics_position, should_highlight_all_lyrics_lines,
+};
+
 mod dictionary;
 mod lyrics;
 
@@ -147,6 +154,44 @@ pub fn pronunciation_line_for<'a>(
 }
 
 impl Settings {
+    pub fn user_preferences(&self) -> serde_json::Value {
+        serde_json::json!({
+            "external_lyrics_enabled": self.external_lyrics_enabled,
+            "external_lyrics_providers": self.external_lyrics_providers,
+            "prefer_server_lyrics": self.prefer_server_lyrics,
+            "save_lyrics_to_source": self.save_lyrics_to_source,
+            "save_lyrics_automatically": self.save_lyrics_automatically,
+            "save_lyrics_as_sidecar": self.save_lyrics_as_sidecar,
+            "prefer_translations": self.prefer_translations,
+            "preferred_translation_language": self.preferred_translation_language,
+            "show_furigana": self.show_furigana,
+            "show_romanization": self.show_romanization,
+            "karaoke_mode": self.karaoke_mode,
+            "lyrics_font_family": self.lyrics_font_family,
+            "lyrics_font_size": self.lyrics_font_size,
+            "fullscreen_lyrics_font_family": self.fullscreen_lyrics_font_family,
+            "fullscreen_lyrics_font_size": self.fullscreen_lyrics_font_size,
+            "lyrics_highlight_color": self.lyrics_highlight_color,
+        })
+    }
+    pub fn set_user_preference(
+        &mut self,
+        field: String,
+        value: serde_json::Value,
+    ) -> Result<(), serde_json::Error> {
+        let mut preferences = self.user_preferences();
+        preferences
+            .as_object_mut()
+            .expect("Lyrics preferences object")
+            .insert(field, value);
+        let mut next: Self = serde_json::from_value(preferences)?;
+        next.suppressed_auto_lyrics_track_ids =
+            std::mem::take(&mut self.suppressed_auto_lyrics_track_ids);
+        next.lyrics_provider_settings_version = self.lyrics_provider_settings_version;
+        *self = next;
+        Ok(())
+    }
+
     pub fn sanitize(&mut self) {
         if !self.save_lyrics_to_source {
             self.save_lyrics_automatically = false;

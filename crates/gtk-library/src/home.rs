@@ -270,15 +270,10 @@ impl HomeRouteProjection {
         let mut previous_provider = None::<gtk::Widget>;
         for provider in &home.provider_sections {
             live_provider_ids.push(provider.section_id.clone());
-            let title = provider.title.clone().unwrap_or_else(|| {
-                provider
-                    .section_id
-                    .split(['-', '_'])
-                    .filter(|part| !part.is_empty())
-                    .map(title_case)
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            });
+            let title = rufin_core::settings::presentation::home_provider_title(
+                &provider.section_id,
+                provider.title.as_deref(),
+            );
             let items = home_items(&provider.rows);
             if !items.is_empty() {
                 let existing = self
@@ -826,14 +821,6 @@ impl CatalogUi {
         button.connect_clicked(move |_| shell.navigate(Route::GenreDetail(key)));
         button.upcast()
     }
-}
-
-fn title_case(part: &str) -> String {
-    let mut chars = part.chars();
-    chars
-        .next()
-        .map(|first| first.to_uppercase().collect::<String>() + chars.as_str())
-        .unwrap_or_default()
 }
 
 fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, HomeItemBinding) {

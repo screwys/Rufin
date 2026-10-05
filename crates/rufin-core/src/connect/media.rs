@@ -1,5 +1,6 @@
 //! Shared track identity with device-owned files and encoding choices.
 use super::*;
+use library::LocalMediaLocation;
 use std::{
     io::{Read, Write},
     path::{Component, Path},
@@ -35,6 +36,105 @@ fn file_uri(path: &Path) -> Result<String, String> {
 
 fn file_path(file: &library::ConnectMediaFile) -> Option<PathBuf> {
     library::file_media_path(&file.path).filter(|path| path.is_file())
+}
+
+fn location(uri: &str) -> Option<LocalMediaLocation> {
+    if uri.starts_with("content://") {
+        Some(LocalMediaLocation::Document(uri.into()))
+    } else {
+        library::file_media_path(uri).map(LocalMediaLocation::File)
+    }
+}
+
+pub(super) fn raw_document_reference(uri: &str) -> bool {
+    uri.starts_with("content://")
+        || library::cue_media_parts(uri)
+            .is_some_and(|(_, backing, _, _)| backing.starts_with("content://"))
+}
+
+fn location_uri(location: &LocalMediaLocation) -> Result<String, String> {
+    match location {
+        LocalMediaLocation::File(path) => file_uri(path),
+        LocalMediaLocation::Document(uri) => Ok(uri.clone()),
+    }
+}
+
+async fn available_location(
+    location: LocalMediaLocation,
+) -> Result<Option<LocalMediaLocation>, String> {
+    match &location {
+        LocalMediaLocation::File(path) => Ok(path.is_file().then_some(location)),
+        LocalMediaLocation::Document(uri) => {
+            let uri = uri.clone();
+            let present = tokio::task::spawn_blocking(move || match sources::stat_document(&uri) {
+                Ok(entry) => Ok(!entry.directory),
+                Err(sources::SourceError::NotFound) => Ok(false),
+                Err(error) => Err(error.to_string()),
+            })
+            .await
+            .map_err(error)??;
+            Ok(present.then_some(location))
+        }
+    }
+}
+
+fn reference_backing<'a>(uri: &'a str, reference: &'a serde_json::Value) -> &'a str {
+    reference["backing_id"].as_str().unwrap_or(uri)
+}
+
+#[derive(Clone, PartialEq)]
+enum MediaDestination {
+    Native(PathBuf),
+    Document { root: String, relative: Vec<String> },
+}
+
+impl MediaDestination {
+    async fn entry(&self) -> Result<Option<sources::DocumentEntry>, String> {
+        match self {
+            Self::Native(_) => Ok(None),
+            Self::Document { root, relative } => {
+                let root = root.clone();
+                let relative = relative.clone();
+                tokio::task::spawn_blocking(move || sources::find_document(&root, &relative))
+                    .await
+                    .map_err(error)?
+                    .map_err(error)
+            }
+        }
+    }
+
+    fn uri(&self, entry: Option<&sources::DocumentEntry>) -> Result<Option<String>, String> {
+        match self {
+            Self::Native(path) => file_uri(path).map(Some),
+            Self::Document { .. } => Ok(entry.map(|entry| entry.uri.clone())),
+        }
+    }
+
+    fn present(&self, entry: Option<&sources::DocumentEntry>) -> bool {
+        match self {
+            Self::Native(path) => path.is_file(),
+            Self::Document { .. } => entry.is_some(),
+        }
+    }
+
+    fn occupied(&self, entry: Option<&sources::DocumentEntry>) -> bool {
+        match self {
+            Self::Native(path) => path.exists(),
+            Self::Document { .. } => entry.is_some(),
+        }
+    }
+
+    fn version(&mut self, backing: &str, revision: &str, encoding: Encoding) {
+        match self {
+            Self::Native(path) => *path = versioned_path(path, backing, revision, encoding),
+            Self::Document { relative, .. } => {
+                let name = relative.last_mut().unwrap();
+                *name = versioned_path(Path::new(name), backing, revision, encoding)
+                    .to_string_lossy()
+                    .into_owned();
+            }
+        }
+    }
 }
 
 /// A shared path is source-relative; it cannot select a file outside the root.
@@ -73,9 +173,9 @@ fn serving_key(peer: &str, id: &str) -> String {
 }
 
 fn mapped_root<'a>(
-    folders: &'a BTreeMap<String, PathBuf>,
+    folders: &'a BTreeMap<String, downloads::DownloadDirectory>,
     reference: &serde_json::Value,
-) -> Option<&'a PathBuf> {
+) -> Option<&'a downloads::DownloadDirectory> {
     let source = reference["source_id"].as_str()?;
     reference["root_id"]
         .as_str()
@@ -97,10 +197,147 @@ impl ConnectOwner {
             .map_or(path, |(_, access)| access)
     }
 
-    async fn original_media_file(&self, uri: &str) -> library::LibraryResult<Option<PathBuf>> {
-        self.database
+    async fn original_media_file(&self, uri: &str) -> Result<Option<LocalMediaLocation>, String> {
+        let location = self
+            .database
             .connect_original_file(uri, |path| self.local_file_path(path))
             .await
+            .map_err(error)?;
+        match location {
+            Some(location) => available_location(location).await,
+            None => Ok(None),
+        }
+    }
+
+    pub(crate) async fn is_local_media(&self, uri: &str) -> Result<bool, String> {
+        let cue = library::cue_media_parts(uri);
+        let backing = cue.as_ref().map_or(uri, |(_, backing, _, _)| backing);
+        if location(backing).is_some() || library::document_media_id(backing).is_some() {
+            return Ok(true);
+        }
+        if library::source_entity_parts(uri).is_some_and(|(source, kind, _)| {
+            kind == "track"
+                && self
+                    .source
+                    .configuration(&source)
+                    .is_some_and(|config| config.is_local())
+        }) {
+            return Ok(true);
+        }
+        Ok(self
+            .database
+            .connect_track_reference(uri)
+            .await
+            .map_err(error)?
+            .is_some_and(|reference| reference["local_media"].as_bool() == Some(true)))
+    }
+
+    fn representation_path(&self, backing: &str, revision: &str, encoding: Encoding) -> PathBuf {
+        self.directory.join("representations").join(format!(
+            "{}.{}",
+            file_key(backing, revision, encoding),
+            encoding.name()
+        ))
+    }
+
+    fn document_representation_directory(
+        &self,
+        backing: &str,
+        revision: &str,
+        encoding: Encoding,
+    ) -> PathBuf {
+        self.directory.join("representations").join(format!(
+            "{}.documents",
+            file_key(backing, revision, encoding)
+        ))
+    }
+
+    fn document_representation_path(
+        &self,
+        backing: &str,
+        revision: &str,
+        encoding: Encoding,
+        entry: &sources::DocumentEntry,
+    ) -> PathBuf {
+        let metadata = format!(
+            "{}\0{:?}\0{:?}",
+            entry.native_id, entry.revision, entry.size
+        );
+        self.document_representation_directory(backing, revision, encoding)
+            .join(format!(
+                "{}.{}",
+                blake3::hash(metadata.as_bytes()).to_hex(),
+                encoding.name()
+            ))
+    }
+
+    async fn materialize_document(
+        &self,
+        uri: &str,
+        backing: &str,
+        revision: &str,
+        encoding: Encoding,
+        cancel: &CancellationToken,
+    ) -> Result<PathBuf, String> {
+        let uri = uri.to_string();
+        let inspect = uri.clone();
+        let entry = tokio::task::spawn_blocking(move || sources::stat_document(&inspect))
+            .await
+            .map_err(error)?
+            .map_err(error)?;
+        let destination = self.document_representation_path(backing, revision, encoding, &entry);
+        if entry.revision.is_some() && destination.is_file() {
+            return Ok(destination);
+        }
+        let output = destination.clone();
+        let cancel = cancel.clone();
+        tokio::task::spawn_blocking(move || {
+            let parent = output.parent().unwrap();
+            std::fs::create_dir_all(parent).map_err(error)?;
+            let mut staged = tempfile::NamedTempFile::new_in(parent).map_err(error)?;
+            let mut input = sources::open_document_input(&uri).map_err(error)?;
+            let mut buffer = [0_u8; 65536];
+            loop {
+                if cancel.is_cancelled() {
+                    return Err("Transfer cancelled".into());
+                }
+                let read = input.read(&mut buffer).map_err(error)?;
+                if read == 0 {
+                    break;
+                }
+                staged.write_all(&buffer[..read]).map_err(error)?;
+            }
+            staged.as_file().sync_all().map_err(error)?;
+            staged.persist(output).map_err(error)?;
+            Ok::<_, String>(())
+        })
+        .await
+        .map_err(error)??;
+        Ok(destination)
+    }
+
+    async fn materialize_receipt(
+        &self,
+        file: &library::ConnectMediaFile,
+        cancel: &CancellationToken,
+    ) -> Result<PathBuf, String> {
+        match location(&file.path).ok_or("The media location is unavailable")? {
+            LocalMediaLocation::File(path) => Ok(path),
+            LocalMediaLocation::Document(uri) => {
+                let backing = self
+                    .database
+                    .connect_backing_id(&file.media_uri)
+                    .await
+                    .map_err(error)?;
+                let encoding = if file.encoding == "mp3" {
+                    Encoding::Mp3
+                } else {
+                    Encoding::Original
+                };
+                self.materialize_document(&uri, &backing, &file.revision, encoding, cancel)
+                    .await
+            }
+        }
     }
 
     fn media_path(
@@ -124,12 +361,12 @@ impl ConnectOwner {
         path
     }
 
-    fn selected_media_path(
+    fn selected_media_destination(
         &self,
         uri: &str,
         encoding: Encoding,
         reference: &serde_json::Value,
-    ) -> Result<Option<PathBuf>, String> {
+    ) -> Result<Option<MediaDestination>, String> {
         let config = self.status().settings;
         let Some(root) = mapped_root(&config.folders, reference) else {
             return Ok(None);
@@ -137,12 +374,41 @@ impl ConnectOwner {
         let Some(relative) = reference["relative_path"].as_str() else {
             return Ok(None);
         };
-        let mut path = self.local_file_path(corresponding_path(root, relative)?);
-        if encoding == Encoding::Mp3 {
-            let key = file_key(uri, &revision(reference), encoding);
-            path.set_extension(format!("{key:.12}.mp3"));
-        }
-        Ok(Some(path))
+        let backing = reference_backing(uri, reference);
+        Ok(Some(match root {
+            downloads::DownloadDirectory::Native(root) => {
+                let mut path = self.local_file_path(corresponding_path(root, relative)?);
+                if encoding == Encoding::Mp3 {
+                    let key = file_key(backing, &revision(reference), encoding);
+                    path.set_extension(format!("{key:.12}.mp3"));
+                }
+                MediaDestination::Native(path)
+            }
+            downloads::DownloadDirectory::Document { uri: root } => {
+                let mut relative = relative
+                    .split('/')
+                    .filter(|part| *part != ".")
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>();
+                if relative.is_empty()
+                    || relative.iter().any(|part| part.is_empty() || part == "..")
+                {
+                    return Err("The shared track has an invalid source-relative path".into());
+                }
+                if encoding == Encoding::Mp3 {
+                    let key = file_key(backing, &revision(reference), encoding);
+                    let name = relative.last_mut().unwrap();
+                    *name = Path::new(name)
+                        .with_extension(format!("{key:.12}.mp3"))
+                        .to_string_lossy()
+                        .into_owned();
+                }
+                MediaDestination::Document {
+                    root: root.clone(),
+                    relative,
+                }
+            }
+        }))
     }
 
     // Callers hold media_files while changing files and their receipts.
@@ -150,10 +416,8 @@ impl ConnectOwner {
         &self,
         mut file: library::ConnectMediaFile,
         destination: &Path,
-    ) -> Result<PathBuf, String> {
-        let source = file_path(&file).ok_or("The completed media file is missing")?;
+    ) -> Result<LocalMediaLocation, String> {
         let source_file = file.clone();
-        let source_managed = file.managed;
         let encoding = if file.encoding == "mp3" {
             Encoding::Mp3
         } else {
@@ -166,89 +430,165 @@ impl ConnectOwner {
             .map_err(error)?;
         let selected = reference
             .as_ref()
-            .map(|reference| self.selected_media_path(&file.media_uri, encoding, reference))
+            .map(|reference| self.selected_media_destination(&file.media_uri, encoding, reference))
             .transpose()?
             .flatten();
-        let backing = self
+        let backing_id = self
             .database
-            .connect_backing_media_file(&file.media_uri, &file.encoding, &file.revision)
+            .connect_backing_id(&file.media_uri)
             .await
             .map_err(error)?;
-        let mut target = backing
-            .as_ref()
-            .and_then(file_path)
-            .filter(|path| {
-                selected.as_ref().is_none_or(|selected| {
-                    path == selected
-                        || *path
-                            == versioned_path(selected, &file.media_uri, &file.revision, encoding)
+        let mut target = selected
+            .clone()
+            .unwrap_or_else(|| MediaDestination::Native(destination.into()));
+        let source = if let MediaDestination::Native(path) = &mut target {
+            let source = self
+                .materialize_receipt(&file, &CancellationToken::new())
+                .await?;
+            let backing = self
+                .database
+                .connect_backing_media_file(&file.media_uri, &file.encoding, &file.revision)
+                .await
+                .map_err(error)?;
+            if let Some(backing) = backing.as_ref().and_then(file_path).filter(|backing| {
+                selected.as_ref().is_none_or(|selected| match selected {
+                    MediaDestination::Native(selected) => {
+                        backing == selected
+                            || *backing
+                                == versioned_path(selected, &backing_id, &file.revision, encoding)
+                    }
+                    MediaDestination::Document { .. } => false,
                 })
-            })
-            .or_else(|| selected.clone())
-            .unwrap_or_else(|| destination.to_path_buf());
+            }) {
+                *path = backing;
+            }
+            Some(source)
+        } else {
+            None
+        };
         let previous = self
             .database
             .connect_media_file(&file.media_uri, &file.encoding)
             .await
             .map_err(error)?;
-        let mut shared = self
-            .database
-            .connect_media_file_at_path(&file_uri(&target)?, &file.encoding, &file.revision)
-            .await
-            .map_err(error)?;
+        let file_encoding = &file.encoding;
+        let file_revision = &file.revision;
+        let inspect = |target: MediaDestination| async move {
+            let entry = target.entry().await?;
+            let shared = match target.uri(entry.as_ref())? {
+                Some(uri) => self
+                    .database
+                    .connect_media_file_at_path(&uri, file_encoding, file_revision)
+                    .await
+                    .map_err(error)?,
+                None => None,
+            };
+            Ok::<_, String>((entry, shared))
+        };
+        let (mut entry, mut shared) = inspect(target.clone()).await?;
         if shared
             .as_ref()
             .is_some_and(|old| old.revision != file.revision)
         {
-            target = versioned_path(&target, &file.media_uri, &file.revision, encoding);
-            shared = self
-                .database
-                .connect_media_file_at_path(&file_uri(&target)?, &file.encoding, &file.revision)
-                .await
-                .map_err(error)?;
+            target.version(&backing_id, &file.revision, encoding);
+            (entry, shared) = inspect(target.clone()).await?;
         }
-        let shared = shared.filter(|file| file.revision == source_file.revision);
-        let owned_target = previous
-            .as_ref()
-            .is_some_and(|old| old.managed && file_path(old).as_ref() == Some(&target));
-        let reused = target != source
-            && target.is_file()
-            && (shared.is_some()
-                || encoding == Encoding::Original
-                    && selected.as_ref() == Some(&target)
-                    && !owned_target);
-        if reused {
-            file.managed = shared.as_ref().is_some_and(|file| file.managed);
-            file.hash = shared.and_then(|file| file.hash);
-        } else if target != source {
-            // A revised original must not overwrite a file the user supplied.
-            if target.exists() && !owned_target {
-                target = versioned_path(&target, &file.media_uri, &file.revision, encoding);
-            }
-            let from = source.clone();
-            let to = target.clone();
-            tokio::task::spawn_blocking(move || -> Result<(), String> {
-                let parent = to.parent().ok_or("Media path has no parent")?;
-                std::fs::create_dir_all(parent).map_err(error)?;
-                let staged = tempfile::NamedTempFile::new_in(parent).map_err(error)?;
-                std::fs::copy(&from, staged.path()).map_err(error)?;
-                if owned_target {
-                    staged.persist(&to).map_err(error)?;
-                } else {
-                    staged.persist_noclobber(&to).map_err(error)?;
+        let shared = shared.filter(|old| old.revision == file.revision);
+        let target_uri = target.uri(entry.as_ref())?;
+        let owned_target = previous.as_ref().is_some_and(|old| {
+            old.managed
+                && match &target {
+                    MediaDestination::Native(path) => file_path(old).as_ref() == Some(path),
+                    MediaDestination::Document { .. } => Some(&old.path) == target_uri.as_ref(),
                 }
-                Ok(())
-            })
-            .await
-            .map_err(error)??;
+        });
+        let same = match &target {
+            MediaDestination::Native(path) => source.as_ref() == Some(path),
+            MediaDestination::Document { .. } => target_uri.as_ref() == Some(&file.path),
+        };
+        let mapped_original =
+            encoding == Encoding::Original && selected.as_ref() == Some(&target) && !owned_target;
+        let reused = target.present(entry.as_ref())
+            && (shared.is_some() || mapped_original || same)
+            && (!same || matches!(target, MediaDestination::Document { .. }));
+        if reused {
+            file.managed = shared
+                .as_ref()
+                .map_or(file.managed && same, |old| old.managed);
+            file.hash = shared.and_then(|old| old.hash);
+        } else if !same {
+            // A revised original must not overwrite a file the user supplied.
+            if target.occupied(entry.as_ref()) && !owned_target {
+                target.version(&backing_id, &file.revision, encoding);
+                entry = target.entry().await?;
+                if entry.is_some() {
+                    return Err("A file already occupies the versioned media destination".into());
+                }
+            }
+            match &target {
+                MediaDestination::Native(path) => {
+                    let from = source.as_ref().unwrap().clone();
+                    let to = path.clone();
+                    tokio::task::spawn_blocking(move || -> Result<(), String> {
+                        let parent = to.parent().ok_or("Media path has no parent")?;
+                        std::fs::create_dir_all(parent).map_err(error)?;
+                        let staged = tempfile::NamedTempFile::new_in(parent).map_err(error)?;
+                        std::fs::copy(from, staged.path()).map_err(error)?;
+                        if owned_target {
+                            staged.persist(to).map_err(error)?;
+                        } else {
+                            staged.persist_noclobber(to).map_err(error)?;
+                        }
+                        Ok(())
+                    })
+                    .await
+                    .map_err(error)??;
+                }
+                MediaDestination::Document { root, relative } => {
+                    let path = self
+                        .materialize_receipt(&file, &CancellationToken::new())
+                        .await?;
+                    let root = root.clone();
+                    let relative = relative.clone();
+                    entry = Some(
+                        tokio::task::spawn_blocking(move || {
+                            if let Some(entry) = entry {
+                                sources::save_document(
+                                    &entry.uri,
+                                    &path,
+                                    entry.revision.as_deref(),
+                                )
+                                .map_err(error)?;
+                                return sources::stat_document(&entry.uri).map_err(error);
+                            }
+                            let parent = sources::create_document_directories(
+                                &root,
+                                &relative[..relative.len() - 1],
+                            )
+                            .map_err(error)?;
+                            sources::create_document(
+                                &parent.uri,
+                                relative.last().unwrap(),
+                                "application/octet-stream",
+                                &path,
+                            )
+                            .map_err(error)
+                        })
+                        .await
+                        .map_err(error)??,
+                    );
+                }
+            }
             file.managed = true;
         }
-        let remove_source = source != target && source_managed;
-        file.path = file_uri(&target)?;
-        if !reused && let Some(network) = self.network.lock().await.as_ref() {
+        file.path = target.uri(entry.as_ref())?.unwrap();
+        if let MediaDestination::Native(path) = &target
+            && !reused
+            && let Some(network) = self.network.lock().await.as_ref()
+        {
             network
                 .media()
-                .relocate(&source, &target)
+                .relocate(source.as_ref().unwrap(), path)
                 .await
                 .map_err(error)?;
         }
@@ -256,13 +596,72 @@ impl ConnectOwner {
             .connect_save_media_file(&file)
             .await
             .map_err(error)?;
-        if reference.is_some() {
-            self.database
-                .connect_set_local_file(&file.media_uri, &target, file.managed)
-                .await
-                .map_err(error)?;
+        match &target {
+            MediaDestination::Native(path) => {
+                if reference.is_some() {
+                    self.database
+                        .connect_set_local_file(&file.media_uri, path, file.managed)
+                        .await
+                        .map_err(error)?;
+                }
+            }
+            MediaDestination::Document { root, .. } => {
+                self.database
+                    .connect_set_document_file(
+                        &file.media_uri,
+                        &file.path,
+                        root,
+                        file.managed,
+                        entry.as_ref().unwrap().size,
+                    )
+                    .await
+                    .map_err(error)?;
+            }
         }
-        if remove_source
+        let source = match &target {
+            MediaDestination::Native(path) => source.filter(|source| source != path),
+            MediaDestination::Document { .. } => {
+                file_path(&source_file).filter(|_| source_file.path != file.path)
+            }
+        };
+        let mut retain_source = false;
+        // A blob publisher keeps reading its registered file after this method returns.
+        if matches!(target, MediaDestination::Document { .. })
+            && !reused
+            && let Some(path) = &source
+        {
+            let entry = entry.as_ref().unwrap();
+            let destination =
+                self.document_representation_path(&backing_id, &file.revision, encoding, entry);
+            retain_source = *path == destination;
+            if !retain_source {
+                if entry.revision.is_none() || !destination.is_file() {
+                    let from = path.clone();
+                    let to = destination.clone();
+                    tokio::task::spawn_blocking(move || {
+                        std::fs::create_dir_all(to.parent().unwrap()).map_err(error)?;
+                        let staged =
+                            tempfile::NamedTempFile::new_in(to.parent().unwrap()).map_err(error)?;
+                        std::fs::copy(from, staged.path()).map_err(error)?;
+                        staged.as_file().sync_all().map_err(error)?;
+                        staged.persist(to).map_err(error)?;
+                        Ok::<_, String>(())
+                    })
+                    .await
+                    .map_err(error)??;
+                }
+                if let Some(network) = self.network.lock().await.as_ref() {
+                    network
+                        .media()
+                        .relocate(path, &destination)
+                        .await
+                        .map_err(error)?;
+                }
+            }
+        }
+        if source_file.managed
+            && !retain_source
+            && let Some(path) = source
             && !self
                 .database
                 .connect_media_file_users(&source_file)
@@ -270,23 +669,13 @@ impl ConnectOwner {
                 .map_err(error)?
                 .0
         {
-            tokio::fs::remove_file(&source).await.map_err(error)?;
+            tokio::fs::remove_file(path).await.map_err(error)?;
         }
-        if let Some(previous) = previous.filter(|old| old.managed && old.path != file.path) {
-            if !self
-                .database
-                .connect_media_file_users(&previous)
-                .await
-                .map_err(error)?
-                .0
-                && let Some(path) = file_path(&previous)
-            {
-                tokio::fs::remove_file(path).await.map_err(error)?;
-            }
-            self.database
-                .connect_forget_media_file(&previous)
-                .await
-                .map_err(error)?;
+        if let Some(previous) =
+            previous.filter(|old| old.path != file.path || old.revision != file.revision)
+        {
+            self.remove_media_file(&previous, previous.managed && previous.path != file.path)
+                .await?;
         }
         for old in self
             .database
@@ -298,7 +687,10 @@ impl ConnectOwner {
                 self.remove_media_file(&old, old.path != file.path).await?;
             }
         }
-        Ok(target)
+        match target {
+            MediaDestination::Native(path) => Ok(LocalMediaLocation::File(path)),
+            MediaDestination::Document { .. } => Ok(LocalMediaLocation::Document(file.path)),
+        }
     }
 
     async fn remove_media_file(
@@ -312,12 +704,22 @@ impl ConnectOwner {
             .await
             .map_err(error)?;
         let mut removed = 0;
-        if remove_path
-            && !path_used
-            && let Some(path) = file_path(file)
-        {
-            tokio::fs::remove_file(path).await.map_err(error)?;
-            removed = 1;
+        if remove_path && !path_used {
+            if file.path.starts_with("content://") {
+                let uri = file.path.clone();
+                removed = usize::from(
+                    tokio::task::spawn_blocking(move || match sources::delete_document(&uri) {
+                        Ok(()) => Ok(true),
+                        Err(sources::SourceError::NotFound) => Ok(false),
+                        Err(error) => Err(error.to_string()),
+                    })
+                    .await
+                    .map_err(error)??,
+                );
+            } else if let Some(path) = file_path(file) {
+                tokio::fs::remove_file(path).await.map_err(error)?;
+                removed = 1;
+            }
         }
         if let (Some(network), Some(hash)) = (self.network.lock().await.as_ref(), &file.hash) {
             network
@@ -330,6 +732,35 @@ impl ConnectOwner {
             .connect_forget_media_file(file)
             .await
             .map_err(error)?;
+        if file.path.starts_with("content://")
+            && !self
+                .database
+                .connect_document_backing_used(&file.media_uri, &file.encoding, &file.revision)
+                .await
+                .map_err(error)?
+        {
+            let backing = self
+                .database
+                .connect_backing_id(&file.media_uri)
+                .await
+                .map_err(error)?;
+            let encoding = if file.encoding == "mp3" {
+                Encoding::Mp3
+            } else {
+                Encoding::Original
+            };
+            match tokio::fs::remove_dir_all(self.document_representation_directory(
+                &backing,
+                &file.revision,
+                encoding,
+            ))
+            .await
+            {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.to_string()),
+            }
+        }
         Ok(removed)
     }
 
@@ -338,7 +769,7 @@ impl ConnectOwner {
             .media_jobs
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .get(&serving_key(peer, id))
+            .remove(&serving_key(peer, id))
         {
             cancel.cancel();
         }
@@ -360,9 +791,12 @@ impl ConnectOwner {
         else {
             return Ok(None);
         };
-        let Some(path) = file_path(&saved) else {
+        if !saved.path.starts_with("content://") && file_path(&saved).is_none() {
             return Ok(None);
-        };
+        }
+        let path = self
+            .materialize_receipt(&saved, &CancellationToken::new())
+            .await?;
         let hash = self
             .connected_network()
             .await?
@@ -396,13 +830,15 @@ impl ConnectOwner {
         occurrence: Option<&library::OccurrenceId>,
     ) -> Result<serde_json::Value, String> {
         let session = self.active().await?;
-        let reference = self
+        let mut reference = self
             .database
             .connect_track_reference(uri)
             .await
             .map_err(error)?;
-        // Direct files can be queued without joining the collection. An actual
-        // local queue occurrence authorizes their transfer, never a supplied path.
+        if raw_document_reference(uri) && occurrence.is_some() {
+            reference = None;
+        }
+        // A direct item is authorized by its captured queue occurrence or a private locator.
         let direct = if reference.is_none() {
             let current = occurrence
                 .cloned()
@@ -427,28 +863,57 @@ impl ConnectOwner {
                 .connect_received_occurrence(&current)
                 .await
                 .map_err(error)?;
+            if received && raw_document_reference(uri) {
+                return Err(
+                    "The source device did not provide a portable document identity".into(),
+                );
+            }
             if received && let Some(offer) = self.offer_saved_media(uri, encoding, None).await? {
                 return Ok(offer);
             }
-            let path = (!received)
-                .then(|| library::file_media_path(uri))
+            let cue = library::cue_media_parts(uri);
+            let backing = cue.as_ref().map_or(uri, |(_, backing, _, _)| backing);
+            let original = (!received)
+                .then(|| location(backing))
                 .flatten()
-                .or_else(|| {
-                    (!received)
-                        .then(|| {
-                            library::cue_media_parts(uri)
-                                .and_then(|(_, uri, _, _)| library::file_media_path(&uri))
-                        })
-                        .flatten()
+                .map(|location| match location {
+                    LocalMediaLocation::File(path) => {
+                        LocalMediaLocation::File(self.local_file_path(path))
+                    }
+                    document => document,
                 })
-                .map(|path| self.local_file_path(path))
-                .filter(|path| path.is_file())
+                .filter(|location| match location {
+                    LocalMediaLocation::File(path) => path.is_file(),
+                    LocalMediaLocation::Document(_) => true,
+                })
                 .or(self.database.connect_local_file(uri).await.map_err(error)?)
                 .ok_or("The current item is not a local file")?;
-            let metadata = tokio::fs::metadata(&path).await.map_err(error)?;
+            let revision = match &original {
+                LocalMediaLocation::File(path) => {
+                    let metadata = tokio::fs::metadata(path).await.map_err(error)?;
+                    serde_json::json!([
+                        metadata.len(),
+                        metadata
+                            .modified()
+                            .map_err(error)?
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_nanos()
+                            .to_string()
+                    ])
+                }
+                LocalMediaLocation::Document(uri) => {
+                    let uri = uri.clone();
+                    let entry = tokio::task::spawn_blocking(move || sources::stat_document(&uri))
+                        .await
+                        .map_err(error)?
+                        .map_err(error)?;
+                    serde_json::json!([entry.size, entry.revision])
+                }
+            };
             Some((
-                path,
-                serde_json::json!({"source_format":item.source_format,"revision":[metadata.len(),metadata.modified().map_err(error)?.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos().to_string()]}),
+                original,
+                serde_json::json!({"source_format":item.source_format,"revision":revision,"backing_id":backing}),
             ))
         } else {
             None
@@ -468,36 +933,35 @@ impl ConnectOwner {
             .connect_media_file(uri, Encoding::Original.name())
             .await
             .map_err(error)?;
-        let original = if let Some((path, _)) = direct {
-            path
-        } else if let Some(path) = self.original_media_file(uri).await.map_err(error)? {
-            path
-        } else if let Some(path) = original_receipt
+        let original = if let Some((location, _)) = direct {
+            location
+        } else if let Some(location) = self.original_media_file(uri).await? {
+            location
+        } else if let Some(location) = original_receipt
             .as_ref()
             .filter(|receipt| receipt.revision == revision)
-            .and_then(file_path)
+            .and_then(|receipt| location(&receipt.path))
         {
-            path
+            location
+        } else if let Some(location) = self.database.connect_local_file(uri).await.map_err(error)? {
+            location
         } else {
-            let Some(path) = self.database.connect_local_file(uri).await.map_err(error)? else {
-                return Ok(serde_json::Value::Null);
-            };
-            path
+            return Ok(serde_json::Value::Null);
         };
-        let original_managed = original_receipt.as_ref().is_some_and(|receipt| {
-            receipt.managed && file_path(receipt).as_ref() == Some(&original)
-        });
-        // A smaller downloaded representation cannot stand in for an original.
+        let original_uri = location_uri(&original)?;
+        let original_managed = original_receipt
+            .as_ref()
+            .is_some_and(|receipt| receipt.managed && receipt.path == original_uri);
         if let Some(smaller) = self
             .database
             .connect_media_file(uri, Encoding::Mp3.name())
             .await
             .map_err(error)?
-            && file_path(&smaller).as_ref() == Some(&original)
+            && smaller.path == original_uri
         {
             return Err("This device has only the smaller representation. Request it from a device with the original.".into());
         }
-        let key = media_key(uri, &revision, encoding);
+        let backing = reference_backing(uri, &reference);
         let job = serving_key(peer, id);
         let cancel = session.stop.child_token();
         self.media_jobs
@@ -505,12 +969,20 @@ impl ConnectOwner {
             .unwrap_or_else(|p| p.into_inner())
             .insert(job.clone(), cancel.clone());
         let result = async {
+            let document_original = matches!(&original, LocalMediaLocation::Document(_));
+            let original = match original {
+                LocalMediaLocation::File(path) => path,
+                LocalMediaLocation::Document(uri) => {
+                    self.materialize_document(&uri, backing, &revision, Encoding::Original, &cancel)
+                        .await?
+                }
+            };
             let path = match encoding {
                 Encoding::Original => original,
                 Encoding::Mp3 => {
                     let directory = self.directory.join("representations");
                     tokio::fs::create_dir_all(&directory).await.map_err(error)?;
-                    let destination = directory.join(format!("{key}.mp3"));
+                    let destination = self.representation_path(backing, &revision, encoding);
                     if !destination.is_file() {
                         let output = destination.clone();
                         let cancel = cancel.clone();
@@ -537,12 +1009,23 @@ impl ConnectOwner {
                     media_uri: uri.into(),
                     encoding: encoding.name().into(),
                     revision: revision.clone(),
-                    path: file_uri(&path)?,
+                    path: if document_original && encoding == Encoding::Original {
+                        original_uri
+                    } else {
+                        file_uri(&path)?
+                    },
                     managed: encoding != Encoding::Original || original_managed,
                     hash: hash.clone(),
                 })
                 .await
                 .map_err(error)?;
+            if encoding == Encoding::Original
+                && let Some(previous) = original_receipt
+                    .as_ref()
+                    .filter(|old| old.path.starts_with("content://") && old.revision != revision)
+            {
+                self.remove_media_file(previous, false).await?;
+            }
             serde_json::to_value(OfferedMedia {
                 hash,
                 revision,
@@ -559,17 +1042,53 @@ impl ConnectOwner {
         result
     }
 
+    async fn register_media_access(
+        &self,
+        file: &library::ConnectMediaFile,
+        reference: &serde_json::Value,
+    ) -> Result<(), String> {
+        match location(&file.path).ok_or("The media location is unavailable")? {
+            LocalMediaLocation::File(path) => self
+                .database
+                .connect_set_local_file(&file.media_uri, &path, file.managed)
+                .await
+                .map_err(error),
+            LocalMediaLocation::Document(uri) => {
+                let document = uri.clone();
+                let entry = tokio::task::spawn_blocking(move || sources::stat_document(&document))
+                    .await
+                    .map_err(error)?
+                    .map_err(error)?;
+                let settings = self.status().settings;
+                let root = match mapped_root(&settings.folders, reference) {
+                    Some(downloads::DownloadDirectory::Document { uri }) => uri.as_str(),
+                    _ => uri.as_str(),
+                };
+                self.database
+                    .connect_set_document_file(
+                        &file.media_uri,
+                        &uri,
+                        root,
+                        file.managed,
+                        entry.size,
+                    )
+                    .await
+                    .map_err(error)
+            }
+        }
+    }
+
     async fn reusable_media(
         &self,
         uri: &str,
         encoding: Encoding,
         reference: &serde_json::Value,
-    ) -> Result<Option<PathBuf>, String> {
+    ) -> Result<Option<LocalMediaLocation>, String> {
         let revision = revision(reference);
         if encoding == Encoding::Original
-            && let Some(path) = self.original_media_file(uri).await.map_err(error)?
+            && let Some(original) = self.original_media_file(uri).await?
         {
-            return Ok(Some(path));
+            return Ok(Some(original));
         }
         let _files = self.media_files.lock().await;
         let receipt = self
@@ -577,33 +1096,76 @@ impl ConnectOwner {
             .connect_media_file(uri, encoding.name())
             .await
             .map_err(error)?;
-        if receipt
-            .as_ref()
-            .is_none_or(|file| file.revision != revision || file_path(file).is_none())
-        {
-            if let Some((mut shared, path)) = self
+        let available =
+            if let Some(receipt) = receipt.as_ref().filter(|file| file.revision == revision) {
+                match location(&receipt.path) {
+                    Some(location) => available_location(location).await?,
+                    None => None,
+                }
+            } else {
+                None
+            };
+        if available.is_none()
+            && let Some(mut shared) = self
                 .database
                 .connect_backing_media_file(uri, encoding.name(), &revision)
                 .await
                 .map_err(error)?
-                .and_then(|file| file_path(&file).map(|path| (file, path)))
+        {
+            if let Some(location) = location(&shared.path)
+                && available_location(location).await?.is_some()
             {
                 shared.media_uri = uri.into();
-                return self.store_media(shared, &path).await.map(Some);
+                let destination = self.media_path(
+                    reference_backing(uri, reference),
+                    &revision,
+                    encoding,
+                    reference["source_format"].as_str(),
+                );
+                return self.store_media(shared, &destination).await.map(Some);
             }
         }
-        if let Some(receipt) = receipt
-            .as_ref()
-            .filter(|receipt| receipt.revision == revision)
-            && let Some(path) = file_path(receipt)
-        {
-            if self
-                .selected_media_path(uri, encoding, reference)?
-                .is_some_and(|selected| {
-                    selected != path && versioned_path(&selected, uri, &revision, encoding) != path
-                })
-            {
-                return self.store_media(receipt.clone(), &path).await.map(Some);
+        if let Some(available) = available {
+            let receipt = receipt.as_ref().unwrap();
+            let relocate = match self.selected_media_destination(uri, encoding, reference)? {
+                Some(MediaDestination::Native(selected)) => match &available {
+                    LocalMediaLocation::File(path) => {
+                        selected != *path
+                            && versioned_path(
+                                &selected,
+                                reference_backing(uri, reference),
+                                &revision,
+                                encoding,
+                            ) != *path
+                    }
+                    LocalMediaLocation::Document(_) => true,
+                },
+                Some(MediaDestination::Document { root, .. }) => match &available {
+                    LocalMediaLocation::Document(document) => !self
+                        .database
+                        .connect_document_mapping_matches(
+                            uri,
+                            document,
+                            &root,
+                            reference["relative_path"].as_str().unwrap_or_default(),
+                        )
+                        .await
+                        .map_err(error)?,
+                    LocalMediaLocation::File(_) => true,
+                },
+                None => false,
+            };
+            if relocate {
+                let destination = self.media_path(
+                    reference_backing(uri, reference),
+                    &revision,
+                    encoding,
+                    reference["source_format"].as_str(),
+                );
+                return self
+                    .store_media(receipt.clone(), &destination)
+                    .await
+                    .map(Some);
             }
             if self
                 .database
@@ -612,55 +1174,61 @@ impl ConnectOwner {
                 .map_err(error)?
                 .is_none_or(|(access, _)| access != receipt.path)
             {
-                self.database
-                    .connect_set_local_file(uri, &path, receipt.managed)
-                    .await
-                    .map_err(error)?;
+                self.register_media_access(receipt, reference).await?;
             }
-            return Ok(Some(path));
+            return Ok(Some(available));
         }
-        if encoding != Encoding::Original {
-            return Ok(None);
-        }
-        // Explicit source revisions supersede a previous receipt. Preserve a
-        // user's reused original and put its updated copy in managed storage.
-        if receipt.is_some_and(|receipt| receipt.revision != revision) {
-            return Ok(None);
-        }
-        let config = self.status().settings;
-        let mapped = mapped_root(&config.folders, reference);
-        if let (Some(root), Some(relative)) = (mapped, reference["relative_path"].as_str()) {
-            let expected = self.local_file_path(corresponding_path(root, relative)?);
-            if expected.is_file() {
-                self.database
-                    .connect_set_local_file(uri, &expected, false)
-                    .await
-                    .map_err(error)?;
-                self.database
-                    .connect_save_media_file(&library::ConnectMediaFile {
-                        media_uri: uri.into(),
-                        encoding: encoding.name().into(),
-                        revision,
-                        path: file_uri(&expected)?,
-                        managed: false,
-                        hash: None,
-                    })
-                    .await
-                    .map_err(error)?;
-                return Ok(Some(expected));
-            }
-        }
-        let path = self.database.connect_local_file(uri).await.map_err(error)?;
-        if let Some(smaller) = self
-            .database
-            .connect_media_file(uri, Encoding::Mp3.name())
-            .await
-            .map_err(error)?
-            && file_path(&smaller) == path
+        if encoding != Encoding::Original
+            || receipt.is_some_and(|receipt| receipt.revision != revision)
         {
             return Ok(None);
         }
-        Ok(path)
+        let candidate = match self.selected_media_destination(uri, encoding, reference)? {
+            Some(MediaDestination::Native(path)) => {
+                path.is_file().then_some(LocalMediaLocation::File(path))
+            }
+            Some(MediaDestination::Document { root, relative }) => {
+                tokio::task::spawn_blocking(move || sources::find_document(&root, &relative))
+                    .await
+                    .map_err(error)?
+                    .map_err(error)?
+                    .filter(|entry| !entry.directory)
+                    .map(|entry| LocalMediaLocation::Document(entry.uri))
+            }
+            None => None,
+        };
+        if let Some(candidate) = candidate {
+            let file = library::ConnectMediaFile {
+                media_uri: uri.into(),
+                encoding: encoding.name().into(),
+                revision,
+                path: location_uri(&candidate)?,
+                managed: false,
+                hash: None,
+            };
+            self.register_media_access(&file, reference).await?;
+            self.database
+                .connect_save_media_file(&file)
+                .await
+                .map_err(error)?;
+            return Ok(Some(candidate));
+        }
+        let candidate = match self.database.connect_local_file(uri).await.map_err(error)? {
+            Some(location) => available_location(location).await?,
+            None => None,
+        };
+        if let Some(candidate) = &candidate
+            && let Some(smaller) = self
+                .database
+                .connect_media_file(uri, Encoding::Mp3.name())
+                .await
+                .map_err(error)?
+        {
+            if smaller.path == location_uri(candidate)? {
+                return Ok(None);
+            }
+        }
+        Ok(candidate)
     }
 
     pub(super) async fn download(&self, peer: &str, uri: &str) -> Result<(), String> {
@@ -695,7 +1263,7 @@ impl ConnectOwner {
         uri: &str,
         encoding: Encoding,
         cancel: CancellationToken,
-    ) -> Result<PathBuf, String> {
+    ) -> Result<LocalMediaLocation, String> {
         let reference = self
             .database
             .connect_track_reference(uri)
@@ -725,12 +1293,15 @@ impl ConnectOwner {
             .await
             .map_err(error)?;
         let mut destination = self.media_path(
-            uri,
+            reference_backing(uri, &reference),
             &offer.revision,
             encoding,
             reference["source_format"].as_str(),
         );
-        if let Some(selected) = self.selected_media_path(uri, encoding, &reference)? {
+        // Documents are published after receipt; their incoming bytes use managed staging.
+        if let Some(MediaDestination::Native(selected)) =
+            self.selected_media_destination(uri, encoding, &reference)?
+        {
             destination = selected;
         }
         let parent = destination.parent().ok_or("Media path has no parent")?;
@@ -752,6 +1323,9 @@ impl ConnectOwner {
         item: &library::QueueItem,
         occurrence: &library::OccurrenceId,
     ) -> Result<(), String> {
+        if raw_document_reference(&item.media_uri) {
+            return Err("The source device did not provide a portable document identity".into());
+        }
         let encoding = self.status().settings.encoding;
         let cancel = CancellationToken::new();
         let offer = self
@@ -774,10 +1348,32 @@ impl ConnectOwner {
             .await?;
         let _files = self.media_files.lock().await;
         let destination = self.store_media(receipt, &destination).await?;
-        self.database
-            .connect_set_queue_file(item, &destination)
-            .await
-            .map_err(error)
+        self.register_queue_access(item, &destination).await
+    }
+
+    async fn register_queue_access(
+        &self,
+        item: &library::QueueItem,
+        location: &LocalMediaLocation,
+    ) -> Result<(), String> {
+        match location {
+            LocalMediaLocation::File(path) => self
+                .database
+                .connect_set_queue_file(item, path)
+                .await
+                .map_err(error),
+            LocalMediaLocation::Document(uri) => {
+                let document = uri.clone();
+                let entry = tokio::task::spawn_blocking(move || sources::stat_document(&document))
+                    .await
+                    .map_err(error)?
+                    .map_err(error)?;
+                self.database
+                    .connect_set_queue_document(item, uri, entry.size)
+                    .await
+                    .map_err(error)
+            }
+        }
     }
 
     async fn request_media(
@@ -793,9 +1389,7 @@ impl ConnectOwner {
         getrandom::fill(&mut nonce).map_err(|error| SourceError::Other(error.to_string()))?;
         let id = blake3::hash(&nonce).to_hex().to_string();
         let local = self.active().await.map_err(SourceError::Network)?.identity == peer;
-        self.status.send_modify(|status| {
-            status.media_status = Some(localization::tr("Waiting for media provider"))
-        });
+        self.publish_media_received();
         let offer = tokio::select! {
             offer = async {
                 if local { self.serve_media(peer, &id, uri, encoding, occurrence).await.map_err(SourceError::Other) }
@@ -829,29 +1423,15 @@ impl ConnectOwner {
             .hash
             .ok_or("The device did not provide a media transfer")?;
         let network = self.connected_network().await?;
-        let (progress, mut received) = tokio::sync::watch::channel(0u64);
-        let statuses = self.status.clone();
-        let report = tokio::spawn(async move {
-            while received.changed().await.is_ok() {
-                let bytes = *received.borrow_and_update();
-                statuses.send_modify(|status| {
-                    status.media_status = Some(localization::tr_with(
-                        "Media transferring: {received} / {total} bytes",
-                        &[
-                            ("received", &bytes.to_string()),
-                            ("total", &offer.size.to_string()),
-                        ],
-                    ))
-                });
-            }
-        });
-        let transferred = network
+        let (progress, _received) = tokio::sync::watch::channel(0u64);
+        network
             .media()
             .fetch(peer, &hash, destination, cancel, progress)
             .await
-            .map_err(error);
-        report.abort();
-        transferred?;
+            .map_err(error)?;
+        self.media_received
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.publish_media_received();
         Ok(library::ConnectMediaFile {
             media_uri: uri.into(),
             encoding: offer.encoding.name().into(),
@@ -862,41 +1442,60 @@ impl ConnectOwner {
         })
     }
 
+    fn publish_media_received(&self) {
+        self.status.send_if_modified(|status| {
+            let count = self
+                .media_received
+                .load(std::sync::atomic::Ordering::Relaxed)
+                .to_string();
+            let message = localization::tr_with("Files received: {count}", &[("count", &count)]);
+            if status.media_status.as_ref() == Some(&message) {
+                return false;
+            }
+            status.media_status = Some(message);
+            true
+        });
+    }
+
     /// Fetch a missing file or resolve a file reference received from another device.
     pub(crate) async fn fetch_playback_file(
         &self,
         occurrence: &library::QueueOccurrence,
-    ) -> Result<Option<PathBuf>, String> {
+    ) -> Result<Option<LocalMediaLocation>, String> {
         let uri = &occurrence.media_uri;
-        if self.session.read().await.is_none() {
-            return Ok(None);
+        let received = self
+            .database
+            .connect_received_occurrence(&occurrence.occurrence)
+            .await
+            .map_err(error)?;
+        if received && raw_document_reference(uri) {
+            return Err("The source device did not provide a portable document identity".into());
         }
         let mut reference = self
             .database
             .connect_track_reference(uri)
             .await
             .map_err(error)?;
-        if reference.is_none()
-            && self
-                .database
-                .connect_received_occurrence(&occurrence.occurrence)
-                .await
-                .map_err(error)?
-        {
-            if let Some(path) = self
+        if received
+            && reference.is_none()
+            && let Some(receipt) = self
                 .database
                 .connect_media_file(uri, self.status().settings.encoding.name())
                 .await
                 .map_err(error)?
-                .as_ref()
-                .and_then(file_path)
+        {
+            if let Some(location) = location(&receipt.path)
+                && let Some(location) = available_location(location).await?
             {
-                self.database
-                    .connect_set_queue_file(&occurrence.item, &path)
-                    .await
-                    .map_err(error)?;
-                return Ok(Some(path));
+                self.register_queue_access(&occurrence.item, &location)
+                    .await?;
+                return Ok(Some(location));
             }
+        }
+        if self.session.read().await.is_none() {
+            return Ok(None);
+        }
+        if reference.is_none() && received {
             let session = self.active().await?;
             let mut unavailable = "Waiting for a device with this media".to_string();
             for peer in self
@@ -1053,12 +1652,22 @@ impl downloads::ConnectDownload for ConnectOwner {
                 .connect_track_reference(uri)
                 .await
                 .map_err(error)?;
-            reference
-                .map(|reference| {
-                    self.selected_media_path(uri, self.status().settings.encoding, &reference)
-                })
-                .transpose()
-                .map(Option::flatten)
+            let Some(reference) = reference else {
+                return Ok(None);
+            };
+            let encoding = self.status().settings.encoding;
+            Ok(
+                match self.selected_media_destination(uri, encoding, &reference)? {
+                    Some(MediaDestination::Native(path)) => Some(path),
+                    Some(MediaDestination::Document { .. }) => Some(self.media_path(
+                        reference_backing(uri, &reference),
+                        &revision(&reference),
+                        encoding,
+                        reference["source_format"].as_str(),
+                    )),
+                    None => None,
+                },
+            )
         })
     }
 
@@ -1152,7 +1761,11 @@ impl ConnectOwner {
             .map_err(SourceError::Other)?;
         if reusable.is_none()
             && encoding == Encoding::Mp3
-            && self.original_media_file(uri).await?.is_some()
+            && self
+                .original_media_file(uri)
+                .await
+                .map_err(SourceError::Other)?
+                .is_some()
         {
             let identity = self
                 .active()
@@ -1168,6 +1781,19 @@ impl ConnectOwner {
                 .map_err(SourceError::Other)?;
         }
         if let Some(path) = reusable {
+            let path = match path {
+                LocalMediaLocation::File(path) => path,
+                LocalMediaLocation::Document(document) => self
+                    .materialize_document(
+                        &document,
+                        reference_backing(uri, &reference),
+                        &revision(&reference),
+                        encoding,
+                        &cancel,
+                    )
+                    .await
+                    .map_err(SourceError::Other)?,
+            };
             tokio::select! {
                 copy = tokio::fs::copy(path, partial) => { copy.map_err(|error|SourceError::Other(error.to_string()))?; },
                 _ = cancel.cancelled() => return Err(SourceError::Cancelled),

@@ -1,5 +1,5 @@
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use md5_digest::{Digest, Md5};
 use sources::{ImageSize, SourceId};
+use tokio::sync::broadcast;
 
 use crate::selection::Candidate;
 
@@ -16,6 +17,73 @@ const CACHE_LAYOUT: &str = "v1";
 const MAX_DISCRETIONARY_CACHE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_DISCRETIONARY_CACHE_FILES: usize = 50_000;
 const PRUNE_TARGET_PERCENT: u64 = 90;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ArtworkCacheChange {
+    Written(String),
+    Removed(String),
+}
+
+#[derive(Clone, Debug)]
+pub struct ArtworkCacheEntry {
+    pub key: String,
+    pub path: PathBuf,
+}
+
+/// Walks the fixed cache layout without collecting the artwork library in memory.
+pub struct ArtworkCacheEntries {
+    root: PathBuf,
+    directories: Vec<fs::ReadDir>,
+}
+
+impl Iterator for ArtworkCacheEntries {
+    type Item = io::Result<ArtworkCacheEntry>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let directory = self.directories.last_mut()?;
+            let entry = match directory.next() {
+                Some(Ok(entry)) => entry,
+                Some(Err(error)) => return Some(Err(error)),
+                None => {
+                    self.directories.pop();
+                    continue;
+                }
+            };
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(error) => return Some(Err(error)),
+            };
+            let path = entry.path();
+            if file_type.is_dir() {
+                let image_directory = path
+                    .strip_prefix(&self.root)
+                    .ok()
+                    .and_then(|path| path.components().next())
+                    .is_some_and(|part| {
+                        part.as_os_str() == "ready" || part.as_os_str() == "originals"
+                    });
+                if image_directory && self.directories.len() < 5 {
+                    match fs::read_dir(path) {
+                        Ok(directory) => self.directories.push(directory),
+                        Err(error) => return Some(Err(error)),
+                    }
+                }
+            } else if file_type.is_file()
+                && let Some(key) = cache_key(&self.root, &path)
+            {
+                match entry.metadata() {
+                    Ok(metadata) if metadata.len() > 0 => {
+                        return Some(Ok(ArtworkCacheEntry { key, path }));
+                    }
+                    Ok(_) => {}
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => return Some(Err(error)),
+                }
+            }
+        }
+    }
+}
 
 pub(crate) fn current_layout(root: &Path) -> io::Result<PathBuf> {
     fs::create_dir_all(root)?;
@@ -95,6 +163,7 @@ struct CacheMaintenance {
 pub(crate) struct FilesystemCache {
     root: PathBuf,
     maintenance: Arc<CacheMaintenance>,
+    changes: broadcast::Sender<ArtworkCacheChange>,
 }
 
 impl FilesystemCache {
@@ -136,11 +205,13 @@ impl FilesystemCache {
     ) -> io::Result<()> {
         let source = digest(source_id.as_str());
         reconcile_source_directory_marked(
+            self,
             &self.root.join("ready/native").join(&source),
             staging,
             true,
         )?;
         reconcile_source_directory_marked(
+            self,
             &self.root.join("missing/native").join(source),
             staging,
             false,
@@ -148,6 +219,7 @@ impl FilesystemCache {
         {
             let mut usage = lock(&self.maintenance.state)?;
             reconcile_source_directory_marked(
+                self,
                 &self
                     .root
                     .join("originals/native")
@@ -167,6 +239,7 @@ impl FilesystemCache {
         fs::create_dir_all(&root)?;
         let cache = Self {
             root,
+            changes: broadcast::channel(256).0,
             maintenance: Arc::new(CacheMaintenance {
                 state: Mutex::new(None),
                 limits: CacheLimits {
@@ -188,6 +261,83 @@ impl FilesystemCache {
             cache.initialize_usage()?;
         }
         Ok(cache)
+    }
+
+    pub(crate) fn entries(&self) -> io::Result<ArtworkCacheEntries> {
+        Ok(ArtworkCacheEntries {
+            root: self.root.clone(),
+            directories: vec![fs::read_dir(&self.root)?],
+        })
+    }
+
+    pub(crate) fn subscribe(&self) -> broadcast::Receiver<ArtworkCacheChange> {
+        self.changes.subscribe()
+    }
+
+    pub(crate) fn file(&self, key: &str) -> io::Result<Option<PathBuf>> {
+        let path = self.path_for_key(key)?;
+        match fs::metadata(&path) {
+            Ok(metadata) => Ok((metadata.is_file() && metadata.len() > 0).then_some(path)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub(crate) fn import(&self, key: &str, bytes: &[u8]) -> io::Result<bool> {
+        let path = self.path_for_key(key)?;
+        if bytes.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "artwork response was empty",
+            ));
+        }
+        if same_file_bytes(&path, bytes)? {
+            return Ok(false);
+        }
+        if is_budgeted_path(&self.root, &path) {
+            self.write_tracked(&path, bytes)?;
+        } else {
+            atomic_write(&path, bytes)?;
+        }
+        Ok(true)
+    }
+
+    pub(crate) fn remove(&self, key: &str) -> io::Result<bool> {
+        let path = self.path_for_key(key)?;
+        let mut state = lock(&self.maintenance.state)?;
+        let previous = file_usage(&path);
+        match fs::remove_file(&path) {
+            Ok(()) => {
+                if is_budgeted_path(&self.root, &path)
+                    && let Some(usage) = state.as_mut()
+                {
+                    usage.bytes = usage.bytes.saturating_sub(previous.bytes);
+                    usage.files = usage.files.saturating_sub(previous.files);
+                }
+                Ok(true)
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn path_for_key(&self, key: &str) -> io::Result<PathBuf> {
+        if valid_cache_key(key) {
+            Ok(key
+                .split('/')
+                .fold(self.root.clone(), |path, part| path.join(part)))
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid artwork cache key",
+            ))
+        }
+    }
+
+    fn notify_written(&self, path: &Path) {
+        if let Some(key) = cache_key(&self.root, path) {
+            let _ = self.changes.send(ArtworkCacheChange::Written(key));
+        }
     }
 
     pub(crate) fn ready_entry(
@@ -213,15 +363,24 @@ impl FilesystemCache {
                 .map(|entry| entry.path())
                 .filter(|path| path.file_stem().is_some_and(|name| name == "original"))
                 .collect::<Vec<_>>(),
-            ImageSize::Thumbnail(size) => reusable_sizes(size)
-                .into_iter()
-                .flat_map(|size| {
-                    ["png", "img"].map(|extension| {
-                        self.candidate_directory("ready", candidate)
-                            .join(format!("{size}.{extension}"))
+            ImageSize::Thumbnail(requested) => {
+                let mut entries = self
+                    .candidate_directory("ready", candidate)
+                    .read_dir()
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .filter_map(|entry| {
+                        let path = entry.path();
+                        let size = thumbnail_size(path.file_name()?.to_str()?)?;
+                        (candidate.is_external() || size >= requested).then_some((size, path))
                     })
-                })
-                .collect(),
+                    .collect::<Vec<_>>();
+                entries.sort_unstable_by(|left, right| {
+                    right.0.cmp(&left.0).then(left.1.cmp(&right.1))
+                });
+                entries.into_iter().map(|(_, path)| path).collect()
+            }
         };
         paths.into_iter().filter_map(|path| {
             let metadata = fs::metadata(&path).ok()?;
@@ -256,6 +415,9 @@ impl FilesystemCache {
                 .candidate_directory("ready", candidate)
                 .join(format!("{size}.png")),
         };
+        if same_file_bytes(&path, bytes)? {
+            return Ok(path);
+        }
         if candidate.is_external() || size == ImageSize::Original {
             self.write_tracked(&path, bytes)?;
             self.remove_file_tracked(&self.missing_path(candidate, size));
@@ -263,6 +425,7 @@ impl FilesystemCache {
             atomic_write(&path, bytes)?;
             remove_file_if_present(&self.missing_path(candidate, size))?;
         }
+        self.notify_written(&path);
         Ok(path)
     }
 
@@ -295,13 +458,13 @@ impl FilesystemCache {
 
     pub(crate) fn invalidate_source(&self, source_id: &SourceId) -> io::Result<()> {
         let source = digest(source_id.as_str());
-        remove_dir_if_present(&self.root.join("ready/native").join(&source))?;
+        self.remove_dir_notified(&self.root.join("ready/native").join(&source))?;
         remove_dir_if_present(&self.root.join("missing/native").join(&source))?;
         self.remove_dir_budgeted(&self.root.join("originals/native").join(source))
     }
 
     pub(crate) fn invalidate_image(&self, candidate: &Candidate) -> io::Result<()> {
-        remove_dir_if_present(&self.candidate_directory("ready", candidate))?;
+        self.remove_dir_notified(&self.candidate_directory("ready", candidate))?;
         remove_dir_if_present(&self.candidate_directory("missing", candidate))?;
         self.remove_dir_budgeted(&self.candidate_directory("originals", candidate))
     }
@@ -363,6 +526,7 @@ impl FilesystemCache {
             self.maintenance.limits,
             self.maintenance.limits,
             None,
+            &self.changes,
         )?;
         *state = Some(usage);
         Ok(())
@@ -388,6 +552,7 @@ impl FilesystemCache {
                     self.maintenance.limits,
                     self.maintenance.limits.prune_target(),
                     Some(path),
+                    &self.changes,
                 )?
             } else {
                 usage
@@ -398,6 +563,7 @@ impl FilesystemCache {
                 self.maintenance.limits,
                 self.maintenance.limits,
                 Some(path),
+                &self.changes,
             )?
         };
         *state = Some(usage);
@@ -407,8 +573,8 @@ impl FilesystemCache {
     fn remove_file_tracked(&self, path: &Path) {
         if is_budgeted_path(&self.root, path) {
             self.remove_file_budgeted(path);
-        } else {
-            let _ = fs::remove_file(path);
+        } else if fs::remove_file(path).is_ok() {
+            notify_removed(&self.changes, &self.root, path);
         }
     }
 
@@ -417,23 +583,46 @@ impl FilesystemCache {
             return;
         };
         let previous = file_usage(path);
-        if fs::remove_file(path).is_ok()
-            && let Some(usage) = state.as_mut()
-        {
-            usage.bytes = usage.bytes.saturating_sub(previous.bytes);
-            usage.files = usage.files.saturating_sub(previous.files);
+        if fs::remove_file(path).is_ok() {
+            if let Some(usage) = state.as_mut() {
+                usage.bytes = usage.bytes.saturating_sub(previous.bytes);
+                usage.files = usage.files.saturating_sub(previous.files);
+            }
+            notify_removed(&self.changes, &self.root, path);
         }
     }
 
     fn remove_dir_budgeted(&self, path: &Path) -> io::Result<()> {
         let mut state = lock(&self.maintenance.state)?;
         let previous = path_usage(path)?;
-        remove_dir_if_present(path)?;
+        self.remove_dir_notified(path)?;
         if let Some(usage) = state.as_mut() {
             usage.bytes = usage.bytes.saturating_sub(previous.bytes);
             usage.files = usage.files.saturating_sub(previous.files);
         }
         Ok(())
+    }
+
+    fn remove_dir_notified(&self, path: &Path) -> io::Result<()> {
+        let directory = match fs::read_dir(path) {
+            Ok(directory) => directory,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        for entry in (ArtworkCacheEntries {
+            root: self.root.clone(),
+            directories: vec![directory],
+        }) {
+            let entry = entry?;
+            match fs::remove_file(&entry.path) {
+                Ok(()) => {
+                    let _ = self.changes.send(ArtworkCacheChange::Removed(entry.key));
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+        }
+        remove_dir_if_present(path)
     }
 }
 
@@ -448,6 +637,7 @@ fn prune_cache(
     trigger: CacheLimits,
     target: CacheLimits,
     preserve: Option<&Path>,
+    changes: &broadcast::Sender<ArtworkCacheChange>,
 ) -> io::Result<CacheUsage> {
     let mut files = Vec::new();
     collect_discretionary_files(root, &mut files)?;
@@ -470,6 +660,7 @@ fn prune_cache(
         if fs::remove_file(&file.path).is_ok() {
             bytes = bytes.saturating_sub(file.bytes);
             remaining = remaining.saturating_sub(1);
+            notify_removed(changes, root, &file.path);
         }
     }
     Ok(CacheUsage {
@@ -538,6 +729,7 @@ fn is_budgeted_path(root: &Path, path: &Path) -> bool {
 }
 
 fn reconcile_source_directory_marked(
+    cache: &FilesystemCache,
     path: &Path,
     staging: &Path,
     keep_manifest: bool,
@@ -558,7 +750,7 @@ fn reconcile_source_directory_marked(
         }
         let entry_path = entry.path();
         if entry_path.is_dir() {
-            remove_dir_if_present(&entry_path)?;
+            cache.remove_dir_notified(&entry_path)?;
         } else {
             remove_file_if_present(&entry_path)?;
         }
@@ -570,6 +762,78 @@ fn lock<T>(mutex: &Mutex<T>) -> io::Result<MutexGuard<'_, T>> {
     mutex
         .lock()
         .map_err(|_| io::Error::other("artwork cache maintenance lock was poisoned"))
+}
+
+fn thumbnail_size(name: &str) -> Option<u32> {
+    let (size, extension) = name.split_once('.')?;
+    let parsed = size.parse::<u32>().ok()?;
+    (parsed > 0 && parsed.to_string() == size && matches!(extension, "png" | "img"))
+        .then_some(parsed)
+}
+
+fn valid_cache_key(key: &str) -> bool {
+    let parts = key.split('/').collect::<Vec<_>>();
+    let (state, identity, name) = match parts.as_slice() {
+        [state, "native", source, identity, name] if is_digest(source) => {
+            (*state, *identity, *name)
+        }
+        [state, "external" | "playlists", identity, name] => (*state, *identity, *name),
+        _ => return false,
+    };
+    is_digest(identity)
+        && match state {
+            "ready" => thumbnail_size(name).is_some(),
+            "originals" => name.strip_prefix("original.").is_some_and(|extension| {
+                matches!(
+                    extension,
+                    "jpg" | "png" | "gif" | "webp" | "tiff" | "bmp" | "jxl"
+                )
+            }),
+            _ => false,
+        }
+}
+
+fn is_digest(value: &str) -> bool {
+    value.len() == 32
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn cache_key(root: &Path, path: &Path) -> Option<String> {
+    let key = path
+        .strip_prefix(root)
+        .ok()?
+        .components()
+        .map(|component| component.as_os_str().to_str())
+        .collect::<Option<Vec<_>>>()?
+        .join("/");
+    valid_cache_key(&key).then_some(key)
+}
+
+fn notify_removed(changes: &broadcast::Sender<ArtworkCacheChange>, root: &Path, path: &Path) {
+    if let Some(key) = cache_key(root, path) {
+        let _ = changes.send(ArtworkCacheChange::Removed(key));
+    }
+}
+
+fn same_file_bytes(path: &Path, bytes: &[u8]) -> io::Result<bool> {
+    let mut file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    if file.metadata()?.len() != bytes.len() as u64 {
+        return Ok(false);
+    }
+    let mut buffer = [0; 16 * 1024];
+    for expected in bytes.chunks(buffer.len()) {
+        file.read_exact(&mut buffer[..expected.len()])?;
+        if &buffer[..expected.len()] != expected {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 #[derive(Clone, Debug)]

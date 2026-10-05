@@ -66,6 +66,29 @@ pub enum RepresentativeArtworkScope {
 }
 
 impl Database {
+    pub async fn collection_artwork_bindings(
+        &self,
+        media_uris: &[String],
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<Option<Vec<u8>>>> {
+        if media_uris.len() > ARTWORK_PAGE_LIMIT {
+            return Err(LibraryError::InvalidRequest(
+                "artwork URI window exceeds 128".into(),
+            ));
+        }
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        Ok(sqlx::query_scalar(
+            "SELECT COALESCE(album.artwork_binding,artist.artwork_binding)
+             FROM json_each(?1) requested
+             LEFT JOIN albums album ON album.media_uri=requested.value
+             LEFT JOIN artists artist ON artist.media_uri=requested.value
+             ORDER BY requested.key",
+        )
+        .bind(serde_json::to_string(media_uris)?)
+        .fetch_all(&mut *connection)
+        .await?)
+    }
+
     pub async fn playlist_representative_artwork(
         &self,
         playlist: crate::PlaylistKey,

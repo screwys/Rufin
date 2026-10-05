@@ -258,6 +258,10 @@ impl ScrobblingOwner {
         preferences(&self.scrobbler.settings())
     }
 
+    pub fn shutdown(&self) {
+        self.scrobbler.shutdown();
+    }
+
     pub fn save(
         &self,
         preferences: &ScrobblingPreferences,
@@ -304,8 +308,34 @@ impl ScrobblingOwner {
             }
             settings.lastfm.api_key = preferences.lastfm.api_key.trim().into();
             settings.lastfm.api_secret = preferences.lastfm.api_secret.trim().into();
+            if settings.listenbrainz.user_token != preferences.listenbrainz.user_token.trim() {
+                settings.listenbrainz.username.clear();
+            }
             settings.listenbrainz.user_token = preferences.listenbrainz.user_token.trim().into();
             let _ = sender.send_blocking(owner.commit(settings, &scope));
+        });
+        receiver
+    }
+
+    pub fn connect_listenbrainz(
+        &self,
+        user_token: String,
+    ) -> Receiver<Result<ScrobblingPreferences, String>> {
+        let (sender, receiver) = bounded(1);
+        let owner = self.clone();
+        let scope = self.settings.load().secret_scope_id;
+        self.runtime.spawn_blocking(move || {
+            let result = scrobbling::connect_listenbrainz(&user_token).and_then(|username| {
+                let _work = owner
+                    .credential_work
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner());
+                let mut settings = owner.loaded_settings();
+                settings.listenbrainz.user_token = user_token;
+                settings.listenbrainz.username = username;
+                owner.commit(settings, &scope)
+            });
+            let _ = sender.send_blocking(result);
         });
         receiver
     }
@@ -358,6 +388,7 @@ fn preferences(settings: &scrobbling::Settings) -> ScrobblingPreferences {
         },
         listenbrainz: ListenBrainzPreferences {
             enabled: settings.listenbrainz.enabled,
+            username: settings.listenbrainz.username.clone(),
             user_token: settings.listenbrainz.user_token.clone(),
             now_playing_enabled: settings.listenbrainz.now_playing_enabled,
         },

@@ -494,20 +494,38 @@ pub(super) fn track_from_item(server: ServerKind, item: &Value) -> Option<Track>
 }
 
 fn source_format_from_item(container: Option<&str>, path: Option<&str>) -> Option<String> {
-    container
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-        .or_else(|| {
-            let raw_path = path?;
-            let path = raw_path.split(['?', '#']).next().unwrap_or(raw_path);
-            Path::new(path)
-                .extension()
-                .and_then(|extension| extension.to_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToString::to_string)
+    let extension = path
+        .map(|path| {
+            if path.contains(['?', '#'])
+                && url::Url::parse(path)
+                    .is_ok_and(|uri| uri.scheme().len() > 1 && !uri.cannot_be_a_base())
+            {
+                path.split(['?', '#']).next().unwrap_or(path)
+            } else {
+                path
+            }
         })
+        .and_then(|path| path.rsplit(['/', '\\']).next())
+        .and_then(|path| Path::new(path).extension())
+        .and_then(|extension| extension.to_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let container = container.map(str::trim).filter(|value| !value.is_empty());
+    if let Some(container) = container {
+        if container.contains(',')
+            && let Some(extension) = extension
+            && container
+                .split(',')
+                .any(|alias| alias.trim().eq_ignore_ascii_case(extension))
+        {
+            return Some(extension.to_owned());
+        }
+        return container
+            .split(',')
+            .next()
+            .map(|alias| alias.trim().to_owned());
+    }
+    extension.map(ToString::to_string)
 }
 
 pub(super) fn is_audio_item(item: &Value) -> bool {

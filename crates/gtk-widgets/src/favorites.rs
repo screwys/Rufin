@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
 use crate::localization::bind_widget_tooltip;
 use ::library::FavoriteTarget;
@@ -20,7 +20,7 @@ struct FavoriteControl {
 #[derive(Default)]
 pub struct FavoriteSessionState {
     controls: RefCell<Vec<FavoriteControl>>,
-    pending_intents: RefCell<HashMap<FavoriteTarget, bool>>,
+    pending_intents: rufin_core::favorites::FavoriteIntents,
 }
 
 pub fn album_favorite_key(media_uri: &str) -> FavoriteControlKey {
@@ -106,14 +106,10 @@ impl FavoriteSessionState {
         self.controls.borrow_mut().clear();
     }
     pub fn projected_item_favorite(&self, item: &FavoriteTarget, fallback: bool) -> bool {
-        self.pending_intents
-            .borrow()
-            .get(item)
-            .copied()
-            .unwrap_or(fallback)
+        self.pending_intents.projected_item_favorite(item, fallback)
     }
     pub fn set_pending(&self, item: FavoriteTarget, favorite: bool) {
-        self.pending_intents.borrow_mut().insert(item, favorite);
+        self.pending_intents.set_pending(item, favorite);
     }
     pub fn update_visible_favorite_buttons(&self, item: &FavoriteTarget, favorite: bool) {
         self.controls.borrow_mut().retain(|control| {
@@ -127,14 +123,7 @@ impl FavoriteSessionState {
         });
     }
     pub fn response_matches_pending(&self, item: &FavoriteTarget, requested: bool) -> bool {
-        let mut pending = self.pending_intents.borrow_mut();
-        match pending.get(item).copied() {
-            Some(intent) if intent == requested => {
-                pending.remove(item);
-                true
-            }
-            Some(_) => false,
-            None => true,
-        }
+        self.pending_intents
+            .response_matches_pending(item, requested)
     }
 }

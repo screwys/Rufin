@@ -1049,7 +1049,26 @@ impl Scan {
         query.push_values(paths, |mut row, path| {
             row.push_bind(path);
         });
-        self.stage(query.build()).await
+        self.stage(query.build()).await?;
+        let documents = paths
+            .iter()
+            .filter(|path| path.starts_with("rufin-document://"))
+            .collect::<Vec<_>>();
+        if !documents.is_empty() {
+            let mut query = QueryBuilder::<Sqlite>::new(
+                "INSERT OR IGNORE INTO temp.scan_local_dependency_paths(path)
+                 SELECT alias.path FROM temp.scan_local_files original
+                 JOIN temp.scan_local_files alias ON alias.native_id=original.native_id
+                 WHERE original.native_id IS NOT NULL AND original.path IN (",
+            );
+            let mut values = query.separated(",");
+            for path in documents {
+                values.push_bind(path);
+            }
+            values.push_unseparated(")");
+            self.stage(query.build()).await?;
+        }
+        Ok(())
     }
 
     pub async fn write_local_files(
@@ -1262,10 +1281,22 @@ impl Scan {
         exclude_cue_dependencies: bool,
         limit: usize,
     ) -> LibraryResult<Vec<String>> {
+        self.local_inventory_path_page_in_root(kind, after, exclude_cue_dependencies, limit, None)
+            .await
+    }
+
+    pub async fn local_inventory_path_page_in_root(
+        &mut self,
+        kind: crate::LocalFileKind,
+        after: Option<&str>,
+        exclude_cue_dependencies: bool,
+        limit: usize,
+        root: Option<&str>,
+    ) -> LibraryResult<Vec<String>> {
         let query = || {
             sqlx::query_scalar::<_, String>(
                 "SELECT file.path FROM temp.scan_local_files file
-             WHERE file.kind=?1 AND file.path>?2
+             WHERE file.kind=?1 AND file.path>?2 AND (?5 IS NULL OR file.root=?5)
                AND (file.kind<>'directory' OR file.state='observed')
                AND (?3=0 OR NOT EXISTS (
                  SELECT 1 FROM temp.scan_local_dependency_paths dependency
@@ -1277,6 +1308,7 @@ impl Scan {
             .bind(after.unwrap_or(""))
             .bind(exclude_cue_dependencies)
             .bind(limit.clamp(1, 128) as i64)
+            .bind(root)
         };
         if let Some(writer) = self.batch_writer.as_mut() {
             let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
@@ -1292,9 +1324,19 @@ impl Scan {
         kind: crate::LocalFileKind,
         after: Option<&str>,
     ) -> LibraryResult<Vec<crate::LocalFileWrite>> {
+        self.local_inventory_file_page_in_root(kind, after, None)
+            .await
+    }
+
+    pub async fn local_inventory_file_page_in_root(
+        &mut self,
+        kind: crate::LocalFileKind,
+        after: Option<&str>,
+        root: Option<&str>,
+    ) -> LibraryResult<Vec<crate::LocalFileWrite>> {
         let query = || {
-            sqlx::query("SELECT path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,artist_pictures,parse_version,state FROM temp.scan_local_files WHERE kind=?1 AND path>?2 ORDER BY path LIMIT 128")
-            .bind(kind.as_str()).bind(after.unwrap_or(""))
+            sqlx::query("SELECT path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,artist_pictures,parse_version,state FROM temp.scan_local_files WHERE kind=?1 AND path>?2 AND (?3 IS NULL OR root=?3) ORDER BY path LIMIT 128")
+            .bind(kind.as_str()).bind(after.unwrap_or("")).bind(root)
         };
         let rows = if let Some(writer) = self.batch_writer.as_mut() {
             query()

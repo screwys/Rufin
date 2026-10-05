@@ -268,6 +268,8 @@ pub struct Settings {
     pub visualizer: super::visualizer::VisualizerSettings,
     #[serde(default = "default_lyrics_panel_visible")]
     pub fullscreen_lyrics_visible: bool,
+    #[serde(default = "default_lyrics_panel_visible")]
+    pub fullscreen_current_lyrics_line_visible: bool,
     #[serde(default)]
     pub fullscreen_visualizer_visible: bool,
     #[serde(default)]
@@ -338,6 +340,7 @@ impl Default for Settings {
             visualizer_panel_visible: false,
             visualizer: super::visualizer::VisualizerSettings::default(),
             fullscreen_lyrics_visible: true,
+            fullscreen_current_lyrics_line_visible: true,
             fullscreen_visualizer_visible: false,
             fullscreen_dynamic_background: false,
             fullscreen_background_image: true,
@@ -437,6 +440,12 @@ impl Settings {
     }
 
     pub fn download_directory(&self, source_id: &SourceId) -> Option<PathBuf> {
+        self.download_settings(source_id)
+            .directory
+            .and_then(|directory| directory.native().map(PathBuf::from))
+    }
+
+    pub fn download_location(&self, source_id: &SourceId) -> Option<downloads::DownloadDirectory> {
         self.download_settings(source_id).directory
     }
 
@@ -460,6 +469,17 @@ impl Settings {
         &mut self,
         source_id: SourceId,
         directory: Option<PathBuf>,
+    ) -> bool {
+        self.set_download_location(
+            source_id,
+            directory.map(downloads::DownloadDirectory::Native),
+        )
+    }
+
+    pub fn set_download_location(
+        &mut self,
+        source_id: SourceId,
+        directory: Option<downloads::DownloadDirectory>,
     ) -> bool {
         self.update_download_settings(source_id, |settings| settings.directory = directory)
     }
@@ -563,7 +583,10 @@ fn sanitize_downloads(downloads: &mut Vec<SourceDownloadSettings>) {
         if entry
             .directory
             .as_ref()
-            .is_some_and(|path| path.as_os_str().is_empty())
+            .is_some_and(|directory| match directory {
+                downloads::DownloadDirectory::Native(path) => path.as_os_str().is_empty(),
+                downloads::DownloadDirectory::Document { uri } => uri.is_empty(),
+            })
         {
             entry.directory = None;
         }

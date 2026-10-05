@@ -37,7 +37,18 @@ pub use config::{
     JellyfinEmbySettingsInput, JellyfinEmbySetupInput, LocalFolderHostInput, PlexSettingsInput,
     PlexSetupInput, SourceConfiguration, SourceSettingsInput, SourceSetupInput,
 };
+pub use file::discovery::DiscoveryWorker;
 pub use file::discovery::run_worker as run_discovery_worker;
+#[cfg(target_os = "android")]
+pub use file::discovery::{DiscoveryHost, DiscoverySession, install_discovery_host};
+pub use file::documents::{
+    DocumentEntry, DocumentHost, DocumentPage, DocumentReader, DocumentRoot, copy_document,
+    create_document, create_document_directories, create_document_directory, delete_document,
+    document_identity, document_root, find_document, find_document_child, install_document_host,
+    list_documents, open_document_input, rename_document, resolve_document_relative,
+    resolve_document_stream, save_document, stat_document,
+};
+pub use file::documents::{read_document_prefix, read_document_queue_item};
 pub use file::local::media::read_local_queue_item;
 pub use file::metadata::read_embedded_lyrics;
 pub use file::playlist::{playlist_file_is_non_audio, playlist_file_revision};

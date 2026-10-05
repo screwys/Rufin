@@ -1,6 +1,7 @@
-use super::{search::LyricsSearchDialog, timing::LyricsTiming, view::LyricsPane};
+use super::{search::LyricsSearchDialog, view::LyricsPane};
 use adw::prelude::*;
 use gtk::glib;
+use lyrics::{LyricsTiming, playback_position_for_lyrics_position};
 use std::cell::{Cell, RefCell};
 pub struct LyricsState {
     pub panel_visible: Cell<bool>,
@@ -346,14 +347,6 @@ impl PlayerUi {
     }
 }
 
-fn playback_position_for_lyrics_position(position_millis: u64, offset_millis: i64) -> u64 {
-    if offset_millis >= 0 {
-        position_millis.saturating_sub(offset_millis.unsigned_abs())
-    } else {
-        position_millis.saturating_add(offset_millis.unsigned_abs())
-    }
-}
-
 pub fn parse_lyrics_offset_millis(value: &str) -> Option<i64> {
     let value = value.trim();
     let number = ["ms", "MS", "Ms", "mS"]
@@ -366,7 +359,7 @@ pub fn parse_lyrics_offset_millis(value: &str) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_lyrics_offset_millis, playback_position_for_lyrics_position};
+    use super::parse_lyrics_offset_millis;
 
     #[test]
     fn lyrics_offset_input_accepts_milliseconds() {
@@ -374,13 +367,6 @@ mod tests {
         assert_eq!(parse_lyrics_offset_millis(" -250 ms "), Some(-250));
         assert_eq!(parse_lyrics_offset_millis("50"), Some(50));
         assert_eq!(parse_lyrics_offset_millis("later"), None);
-    }
-
-    #[test]
-    fn lyrics_row_seek_applies_the_inverse_offset() {
-        assert_eq!(playback_position_for_lyrics_position(5_000, 250), 4_750);
-        assert_eq!(playback_position_for_lyrics_position(5_000, -250), 5_250);
-        assert_eq!(playback_position_for_lyrics_position(100, 250), 0);
     }
 }
 

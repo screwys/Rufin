@@ -1,4 +1,5 @@
 //! Rufin crossings for compact Playback, Database Queue persistence, streams, and Activity.
+mod connect;
 mod continuation;
 mod plex;
 pub(crate) use continuation::PreparedContinuation;
@@ -6,6 +7,13 @@ pub(crate) use continuation::PreparedContinuation;
 mod queue_tests;
 mod target;
 pub use target::PlaybackTarget;
+
+pub fn seek_preview_matches_position(target_millis: u64, position_millis: u64) -> bool {
+    const TOLERANCE_MILLIS: u64 = 1_500;
+    (target_millis.saturating_sub(TOLERANCE_MILLIS)
+        ..=target_millis.saturating_add(TOLERANCE_MILLIS))
+        .contains(&position_millis)
+}
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -49,7 +57,7 @@ pub(crate) struct PlaybackOwner {
     visualizer_drain: Receiver<VisualizerPublication>,
     waveform: Arc<WaveformOwner>,
     loudness: Arc<LoudnessAnalysisOwner>,
-    lyrics: Arc<LyricsService>,
+    pub(crate) lyrics: Arc<LyricsService>,
     observe_playback: Arc<dyn Fn(Option<&PlaybackProjection>, bool) + Send + Sync>,
     audio_outputs: fn() -> Vec<playback::AudioOutput>,
     scrobbler: Arc<Scrobbler>,
@@ -68,6 +76,7 @@ pub(crate) struct PlaybackOwner {
     output: Mutex<OutputSelection>,
     plex_targets: Mutex<std::collections::HashMap<String, playback_cast::plex::PlexPlayer>>,
     plex: Mutex<Option<Arc<plex::PlexPlayback>>>,
+    rufin: Mutex<Option<Arc<connect::RufinPlayback>>>,
 }
 
 enum PlaybackStoreWork {
@@ -191,6 +200,7 @@ impl PlaybackOwner {
             }),
             plex_targets: Mutex::new(std::collections::HashMap::new()),
             plex: Mutex::new(None),
+            rufin: Mutex::new(None),
         });
         let weak = Arc::downgrade(&owner);
         owner.runtime.spawn(async move {
@@ -735,6 +745,10 @@ impl PlaybackOwner {
             .and_then(|active| active.playback.projection().ok())
     }
     fn send(&self, command: SessionCommand) {
+        let command = match self.send_rufin(command) {
+            Some(command) => command,
+            None => return,
+        };
         let command = match self.send_plex(command) {
             Some(command) => command,
             None => return,
@@ -785,6 +799,21 @@ impl PlaybackOwner {
         {
             return Ok(());
         }
+        if matches!(&selected, playback::PlaybackOutput::Remote(output) if output.protocol == playback::RemoteOutputProtocol::RufinConnect)
+        {
+            return self.select_rufin(selected, cancelled);
+        }
+        if self
+            .rufin
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_some()
+        {
+            self.leave_rufin(cancelled.clone())?;
+            if selected.is_local() {
+                return Ok(());
+            }
+        }
         if matches!(&selected, playback::PlaybackOutput::Remote(output) if output.protocol == playback::RemoteOutputProtocol::PlexCompanion)
         {
             return self.select_plex(selected, cancelled);
@@ -832,14 +861,31 @@ impl PlaybackOwner {
 }
 
 impl QueueCommandPort for PlaybackOwner {
-    fn media_uris(&self) -> Result<Vec<String>, String> {
+    fn page(&self, offset: u64, limit: u32, filter: String) -> Result<playback::QueuePage, String> {
+        self.runtime
+            .block_on(self.receiver_queue_page(offset, limit, filter))
+    }
+
+    fn snapshot(&self) -> Result<library::QueueRestore, String> {
+        let receiver = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        if let Some(receiver) = receiver {
+            return self
+                .runtime
+                .block_on(receiver.snapshot())
+                .map(|snapshot| snapshot.map(|snapshot| snapshot.queue).unwrap_or_default());
+        }
         let Some(active) = self.active() else {
-            return Ok(Vec::new());
+            return Ok(library::QueueRestore::default());
         };
-        let (queue, _, _) = active
+        active
             .playback
             .handoff_snapshot()
-            .map_err(|error| error.to_string())?;
+            .map(|(queue, _, _)| queue)
+            .map_err(string_error)
+    }
+
+    fn media_uris(&self) -> Result<Vec<String>, String> {
+        let queue = self.snapshot()?;
         Ok(queue
             .order
             .iter()
@@ -848,6 +894,9 @@ impl QueueCommandPort for PlaybackOwner {
     }
 
     fn play(&self, mut request: PlayRequest) {
+        if self.play_rufin(&request) {
+            return;
+        }
         if self.play_plex(&request) {
             return;
         }
@@ -915,6 +964,9 @@ impl RadioCommandPort for PlaybackOwner {
     }
 
     fn play_random(&self, request: RandomPlayRequest) {
+        if self.random_rufin(&request) {
+            return;
+        }
         if self.random_plex(&request) {
             return;
         }
@@ -932,6 +984,9 @@ impl RadioCommandPort for PlaybackOwner {
         }
     }
     fn play_radio(&self, request: RadioPlayRequest) {
+        if self.radio_rufin(&request) {
+            return;
+        }
         if self.radio_plex(&request) {
             return;
         }
@@ -995,6 +1050,16 @@ impl TransportCommandPort for PlaybackOwner {
         })
     }
     fn cycle_repeat(&self) {
+        if self
+            .rufin
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_some()
+            && let Some(projection) = self.current_projection()
+        {
+            self.set_repeat(next_repeat(projection.view.controls.repeat_mode));
+            return;
+        }
         match self.settings.update(|stored| {
             stored.ui.repeat_mode = next_repeat(stored.ui.repeat_mode);
             Ok(stored.ui.repeat_mode)
@@ -1011,6 +1076,16 @@ impl TransportCommandPort for PlaybackOwner {
         self.send(SessionCommand::SetRepeat(repeat))
     }
     fn toggle_auto_dj(&self) {
+        if self
+            .rufin
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_some()
+            && let Some(projection) = self.current_projection()
+        {
+            self.send_cast_auto_dj(!projection.view.controls.auto_dj_enabled);
+            return;
+        }
         let (value, threshold) = self
             .settings
             .update(|stored| {
@@ -1047,7 +1122,14 @@ impl TransportCommandPort for PlaybackOwner {
             debug!(%error, "generic receiver discovery unavailable");
             Vec::new()
         });
-        outputs.extend(self.discover_plex()?);
+        outputs.extend(self.discover_rufin());
+        match self.discover_plex() {
+            Ok(plex) => outputs.extend(plex),
+            Err(error) if !outputs.is_empty() => {
+                debug!(%error, "Plex receiver discovery unavailable")
+            }
+            Err(error) => return Err(error),
+        }
         Ok(outputs)
     }
     fn select_playback_output(
@@ -1058,6 +1140,9 @@ impl TransportCommandPort for PlaybackOwner {
         self.select_output(output, cancelled)
     }
     fn shutdown(&self) {
+        if let Some(receiver) = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).take() {
+            receiver.cancel();
+        }
         if let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).take() {
             plex.cancel();
         }
@@ -1104,6 +1189,12 @@ where
     let file_uri = cue
         .as_ref()
         .map_or(request.media_uri.as_str(), |(_, uri, _, _)| uri);
+    if access.is_none() && cue.is_some() && library::document_media_id(file_uri).is_some() {
+        access = database
+            .playback_access(file_uri)
+            .await
+            .map_err(string_error)?;
+    }
     let granted_uri = |uri: &str| {
         let path = library::file_media_path(uri)?;
         let (_, access) = local?.local_file_location(&path)?;
@@ -1116,28 +1207,56 @@ where
     }
     let granted_file = granted_uri(file_uri);
     let file_uri = granted_file.as_deref().unwrap_or(file_uri);
+    let mut fetched_uri = None;
     if let Some((connect, occurrence)) = file_transfer
-        && let Some(path) = library::file_media_path(file_uri)
+        && connect.is_local_media(&request.media_uri).await?
     {
-        let remote = database
-            .file_media_is_remote(&request.media_uri, &occurrence.occurrence)
-            .await
-            .map_err(string_error)?;
-        let local_access = access
-            .as_ref()
-            .and_then(|(uri, _)| library::file_media_path(uri))
-            .filter(|path| path.is_file());
-        let available = local_access.is_some() || path.is_file();
-        if remote || !available {
-            let fetched = connect.fetch_playback_file(occurrence).await?;
-            if remote && fetched.is_none() && local_access.is_none() {
-                return Err(sources::SourceError::NotFound.to_string());
-            }
-            access = database
-                .playback_access(&request.media_uri)
+        let received_document = url::Url::parse(file_uri)
+            .is_ok_and(|uri| uri.scheme() == "content")
+            && database
+                .connect_received_occurrence(&occurrence.occurrence)
                 .await
                 .map_err(string_error)?;
+        if received_document {
+            access = None;
         }
+        let remote = received_document
+            || database
+                .file_media_is_remote(&request.media_uri, &occurrence.occurrence)
+                .await
+                .map_err(string_error)?;
+        let local_access = match access.as_ref() {
+            Some((uri, _)) => local_access_available(uri).await.unwrap_or(false),
+            None => false,
+        };
+        // A content URI received from another device is not a grant to this device's provider.
+        let available =
+            local_access || (!remote && local_access_available(file_uri).await.unwrap_or(false));
+        if remote || !available {
+            let fetched = connect.fetch_playback_file(occurrence).await?;
+            if remote && fetched.is_none() && !local_access {
+                return Err(sources::SourceError::NotFound.to_string());
+            }
+            fetched_uri = fetched
+                .map(|location| match location {
+                    library::LocalMediaLocation::File(path) => url::Url::from_file_path(path)
+                        .map(String::from)
+                        .map_err(|_| "Media path must be absolute".to_string()),
+                    library::LocalMediaLocation::Document(uri) => Ok(uri),
+                })
+                .transpose()?;
+            if !received_document {
+                access = database
+                    .playback_access(&request.media_uri)
+                    .await
+                    .map_err(string_error)?;
+            }
+        }
+    }
+    if let Some((uri, library::LocalAccessOrigin::Download)) = access.as_ref()
+        && !local_access_available(uri).await?
+    {
+        access = None;
     }
     // Downloads names its owned file using the actual transcoded extension.
     // Mapped and original files still use their parsed source format.
@@ -1150,19 +1269,21 @@ where
                 .and_then(|extension| extension.to_str())
                 .and_then(audio_mime)
         });
-    let access_uri = access.map(|(uri, _)| uri);
-    if let Some((_, _, start, end)) = cue.as_ref() {
-        return Ok(playback::ResolvedStream::new(
-            access_uri.unwrap_or_else(|| file_uri.to_owned()),
-        )
-        .with_content_type(content_type)
-        .with_window(
-            u64::try_from(*start).map_err(string_error)?,
-            u64::try_from(*end).map_err(string_error)?,
-        ));
+    let access_uri = access.map(|(uri, _)| uri).or(fetched_uri);
+    let window = database
+        .connect_media_window(&request.media_uri)
+        .await
+        .map_err(string_error)?;
+    if let Some((start, end)) = window.filter(|_| access_uri.is_some() || cue.is_some()) {
+        return Ok(
+            direct_stream(access_uri.unwrap_or_else(|| file_uri.to_owned()))
+                .await?
+                .with_content_type(content_type)
+                .with_window(start, end),
+        );
     }
     if let Some(uri) = access_uri.or_else(|| library::normalize_direct_media_uri(file_uri)) {
-        return Ok(playback::ResolvedStream::new(uri).with_content_type(content_type));
+        return Ok(direct_stream(uri).await?.with_content_type(content_type));
     }
     let (source_id, kind, _) = library::source_entity_parts(&request.media_uri)
         .ok_or_else(crate::source::source_access_unavailable)?;
@@ -1171,6 +1292,33 @@ where
     }
     let source = source(source_id).await?;
     source.stream(database, request).await.map_err(string_error)
+}
+
+async fn local_access_available(uri: &str) -> Result<bool, String> {
+    let location = if url::Url::parse(uri).is_ok_and(|uri| uri.scheme() == "content") {
+        library::LocalMediaLocation::Document(uri.to_owned())
+    } else if let Some(path) = library::file_media_path(uri) {
+        library::LocalMediaLocation::File(path)
+    } else {
+        return Ok(false);
+    };
+    sources::local_files_available(vec![vec![location]])
+        .await
+        .map(|available| available.first() == Some(&true))
+        .map_err(string_error)
+}
+
+async fn direct_stream(uri: String) -> Result<playback::ResolvedStream, String> {
+    if library::document_media_id(&uri).is_some() {
+        return Err(sources::SourceError::NotFound.to_string());
+    }
+    if url::Url::parse(&uri).is_ok_and(|uri| uri.scheme() == "content") {
+        sources::resolve_document_stream(&uri)
+            .await
+            .map_err(string_error)
+    } else {
+        Ok(playback::ResolvedStream::new(uri))
+    }
 }
 
 fn prepare_media_stream(
@@ -1335,6 +1483,7 @@ mod tests {
             .unwrap();
         let occurrence = test_occurrence("flac");
         let path = folder.path().join("track.opus");
+        std::fs::write(&path, b"downloaded audio").unwrap();
         let uri = url::Url::from_file_path(&path).unwrap().to_string();
         database
             .upsert_local_access(
