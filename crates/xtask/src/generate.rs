@@ -118,14 +118,6 @@ pub(crate) fn linux_workspace(root: &Path) -> Result<(String, String)> {
     if !resolved.success() {
         return Err("cargo update failed while selecting Linux sources".into());
     }
-    let fetched = Command::new("cargo")
-        .current_dir(temporary.path())
-        .args(["fetch", "--locked"])
-        .stderr(Stdio::inherit())
-        .status()?;
-    if !fetched.success() {
-        return Err("cargo fetch failed while preparing Linux sources".into());
-    }
     Ok((
         manifest,
         read_to_string(&temporary.path().join("Cargo.lock"))?,
