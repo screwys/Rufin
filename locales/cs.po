@@ -146,6 +146,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"Some changes were saved. Close this editor and reopen it to review the "
+"result."
+msgstr ""
+
+msgid ""
 "Temporary library storage is in use. Changes may be lost when Rufin closes."
 msgstr ""
 
@@ -210,6 +215,11 @@ msgstr ""
 msgid ""
 "You will need to reconnect through the clients you use with the new API key."
 msgstr ""
+
+#, fuzzy
+#| msgid "Play Next"
+msgid "(hold to shuffle)"
+msgstr "Přehrát další"
 
 msgid ". You only need to fill email and an application name parts"
 msgstr ". Stačí vyplnit pouze e-mail a název části aplikace"
@@ -305,6 +315,9 @@ msgstr ""
 msgid "Add a new source"
 msgstr "Přidat nový zdroj"
 
+msgid "Add a server to configure downloads."
+msgstr ""
+
 msgid "Add a title"
 msgstr "Přidat název"
 
@@ -343,9 +356,6 @@ msgstr "Přidat skladby, pokud jich zbývá méně než tento počet"
 
 msgid "Add"
 msgstr "Přidat"
-
-msgid "Added to favorites"
-msgstr "Přidat do oblíbených"
 
 msgid "Added to"
 msgstr "Přidáno do"
@@ -473,6 +483,9 @@ msgstr "Ukládání..."
 msgid "Approve sign-in in your browser"
 msgstr ""
 
+msgid "Approve"
+msgstr ""
+
 msgid "April {year}"
 msgstr ""
 
@@ -540,11 +553,8 @@ msgstr ""
 msgid "Authentication"
 msgstr ""
 
-msgid "Auto DJ off"
-msgstr "Auto DJ vypnuto"
-
-msgid "Auto DJ on"
-msgstr "Auto DJ zapnuto"
+msgid "Authorization timed out"
+msgstr ""
 
 msgid "Auto DJ refill threshold"
 msgstr "Práh doplňování Auto DJ"
@@ -629,6 +639,9 @@ msgstr ""
 msgid "Blue"
 msgstr "Modrá"
 
+msgid "Browse"
+msgstr ""
+
 msgid "Cached"
 msgstr "V mezipaměti"
 
@@ -701,9 +714,6 @@ msgstr ""
 msgid "Channels"
 msgstr "Změnit"
 
-msgid "Check for updates every"
-msgstr ""
-
 msgid "Check for updates"
 msgstr ""
 
@@ -748,6 +758,9 @@ msgstr ""
 
 msgid "Choose playback output"
 msgstr "Vyberte výstup přehrávání"
+
+msgid "Choose whether to keep the completed downloads."
+msgstr ""
 
 msgid "Choose"
 msgstr "Vyberte"
@@ -853,6 +866,9 @@ msgid "Compilation"
 msgstr "Sbírka"
 
 msgid "Complete sign-in in your browser"
+msgstr ""
+
+msgid "Completed downloads will stay on this device."
 msgstr ""
 
 msgid "Composer sort"
@@ -1041,6 +1057,11 @@ msgstr "Nelze načíst tuto složku"
 
 #, fuzzy
 #| msgid "Could not update favorites"
+msgid "Could not open browser"
+msgstr "Nelze aktualizovat oblíbené"
+
+#, fuzzy
+#| msgid "Could not update favorites"
 msgid "Could not open file: {error}"
 msgstr "Nelze aktualizovat oblíbené"
 
@@ -1052,6 +1073,11 @@ msgstr "Nelze aktualizovat oblíbené"
 #, fuzzy
 #| msgid "Couldn't load this folder"
 msgid "Could not play this track"
+msgstr "Nelze načíst tuto složku"
+
+#, fuzzy
+#| msgid "Couldn't load this folder"
+msgid "Could not read artwork"
 msgstr "Nelze načíst tuto složku"
 
 #, fuzzy
@@ -1238,6 +1264,9 @@ msgstr "Číslo disku"
 
 msgid "Disc"
 msgstr "Disk"
+
+msgid "Discard changes?"
+msgstr ""
 
 msgid "Discography"
 msgstr "Diskografie"
@@ -1486,6 +1515,11 @@ msgstr ""
 msgid "Export playlist"
 msgstr "Chytré playlisty"
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Export to connection"
+msgstr "Spojení"
+
 msgid "Export your listening history in Rufin"
 msgstr ""
 
@@ -1567,6 +1601,9 @@ msgstr ""
 "Soubory musí obsahovat značky Mood/BPM. Tato funkce není v aplikaci Jellyfin "
 "podporována"
 
+msgid "Files received: {count}"
+msgstr ""
+
 msgid "Files"
 msgstr ""
 
@@ -1594,6 +1631,11 @@ msgstr "Plochý"
 #| msgid "Folder"
 msgid "Folder path"
 msgstr "Složka"
+
+#, fuzzy
+#| msgid "Folders"
+msgid "Folder"
+msgstr "Složky"
 
 msgid "Folders"
 msgstr "Složky"
@@ -1686,6 +1728,9 @@ msgstr "Žánr"
 
 msgid "Genres"
 msgstr "Žánry"
+
+msgid "Gestures"
+msgstr ""
 
 msgid "Get token"
 msgstr "Získat token"
@@ -1790,6 +1835,16 @@ msgstr ""
 #| msgid "Smart Playlist"
 msgid "Import Playlist"
 msgstr "Chytrý Playlist"
+
+#, fuzzy
+#| msgid "Waiting for connection"
+msgid "Import from connection"
+msgstr "Čekání na připojení"
+
+#, fuzzy
+#| msgid "Support"
+msgid "Import theme"
+msgstr "Uživatelská podpora"
 
 #, fuzzy
 #| msgid "Support"
@@ -1911,6 +1966,9 @@ msgstr "Last.fm"
 msgid "Layout"
 msgstr "Rozvržení"
 
+msgid "Leave empty for an unencrypted archive."
+msgstr ""
+
 msgid "Leave the password empty to keep the saved credential"
 msgstr ""
 
@@ -1998,6 +2056,9 @@ msgstr "Místní Prefix"
 msgid "Local file access configured"
 msgstr "Nastaven přístup k místním souborům"
 
+msgid "Local file access is required before these tags can be saved."
+msgstr ""
+
 msgid "Local file mapping is no longer available"
 msgstr "Mapování místních souborů již není k dispozici"
 
@@ -2035,6 +2096,12 @@ msgstr "Místní hudební složka"
 #| msgid "Local music folder"
 msgid "Local music folders"
 msgstr "Místní hudební složka"
+
+msgid "Local network permission is required for remote connections"
+msgstr ""
+
+msgid "Local network permission was denied"
+msgstr ""
 
 #, fuzzy
 #| msgid "Searching Local Network"
@@ -2111,11 +2178,11 @@ msgstr "Maximální rok"
 msgid "Media available"
 msgstr "Toto není dostupné"
 
-msgid "Media transferring: {received} / {total} bytes"
-msgstr ""
-
 msgid "Menu"
 msgstr "Menu"
+
+msgid "Metadata changed before it was saved. Reload it before trying again."
+msgstr ""
 
 msgid "Metadata editing is no longer available"
 msgstr "Úprava metadat již není k dispozici"
@@ -2127,6 +2194,9 @@ msgstr "Úprava metadat již není k dispozici"
 
 msgid "Metadata source"
 msgstr "Zdroj metadat"
+
+msgid "Metadata was saved, but refreshing the source failed."
+msgstr ""
 
 msgid "Metadata"
 msgstr "Metadata"
@@ -2160,6 +2230,9 @@ msgstr "Nálady"
 
 msgid "More actions"
 msgstr "Více akcí"
+
+msgid "More"
+msgstr ""
 
 #, fuzzy
 #| msgid "Most Played"
@@ -2213,6 +2286,9 @@ msgstr "Více hodnot"
 msgid "Music Folder"
 msgstr "Hudební složka"
 
+msgid "Music access permission was denied"
+msgstr ""
+
 msgid "Music folders on the Rufin machine"
 msgstr ""
 
@@ -2220,6 +2296,11 @@ msgstr ""
 #| msgid "This device"
 msgid "Music on this device"
 msgstr "Toto zařízení"
+
+#, fuzzy
+#| msgid "All Music"
+msgid "Music"
+msgstr "Všechna hudba"
 
 msgid "MusicBrainz + Last.fm"
 msgstr "MusicBrainz + Last.fm"
@@ -2316,6 +2397,11 @@ msgstr "Nový chytrý playlist"
 msgid "New download rule"
 msgstr "Nové pravidlo stahování"
 
+#, fuzzy
+#| msgid "No network devices found"
+msgid "New release is available"
+msgstr "Nebyly nalezeny žádné sítové zařízení"
+
 msgid "Newly added"
 msgstr "Nově přidané"
 
@@ -2356,6 +2442,11 @@ msgid "No cached server path yet"
 msgstr "Cesta k serveru zatím není uložena v mezipaměti"
 
 #, fuzzy
+#| msgid "Download queued"
+msgid "No downloads queued"
+msgstr "Stahování je ve frontě"
+
+#, fuzzy
 #| msgid "No favorites yet"
 msgid "No favorite albums yet"
 msgstr "Zatím žádné oblíbené položky"
@@ -2367,6 +2458,11 @@ msgstr "Zatím žádné oblíbené položky"
 
 msgid "No favorites yet"
 msgstr "Zatím žádné oblíbené položky"
+
+#, fuzzy
+#| msgid "Connection"
+msgid "No file connections"
+msgstr "Spojení"
 
 #, fuzzy
 #| msgid "No folder selected"
@@ -2520,6 +2616,9 @@ msgstr "Platí pouze pro server, který spravujete"
 
 msgid "Off"
 msgstr "Vypnuto"
+
+msgid "Offline"
+msgstr ""
 
 #, fuzzy
 #| msgid "This device"
@@ -2754,6 +2853,16 @@ msgstr "Poslouchejte podle nálady"
 msgid "Play playlist"
 msgstr "Přehrát playlist"
 
+#, fuzzy
+#| msgid "Play radio"
+msgid "Play radio later"
+msgstr "Pustit Rádio"
+
+#, fuzzy
+#| msgid "Play radio"
+msgid "Play radio next"
+msgstr "Pustit Rádio"
+
 msgid "Play radio"
 msgstr "Pustit Rádio"
 
@@ -2790,6 +2899,16 @@ msgstr "Rychlost přehrávání"
 
 msgid "Playback"
 msgstr "Přehrávání"
+
+#, fuzzy
+#| msgid "Playing on {device}"
+msgid "Playing from {}"
+msgstr "Přehrává se na {device}"
+
+#, fuzzy
+#| msgid "Play random"
+msgid "Playing from"
+msgstr "Přehrát náhodně"
 
 msgid "Playing on this device"
 msgstr "Přehrává se na tomto zařízení"
@@ -2996,6 +3115,9 @@ msgstr "Ukončit Rufin"
 msgid "Quit"
 msgstr "Ukončit"
 
+msgid "Radio"
+msgstr ""
+
 #, fuzzy
 #| msgid "Selection"
 msgid "Range selection"
@@ -3112,6 +3234,9 @@ msgstr "Vydání"
 msgid "Reload from file"
 msgstr "Odebrat z oblíbených"
 
+msgid "Reload metadata to review the current values."
+msgstr ""
+
 #, fuzzy
 #| msgid "Removed from favorites"
 msgid "Reload themes"
@@ -3193,9 +3318,6 @@ msgstr "Název alba"
 msgid "Remove"
 msgstr "Odebrat"
 
-msgid "Removed from favorites"
-msgstr "Odebrat z oblíbených"
-
 #, fuzzy
 #| msgid "Remove from Pins"
 msgid "Removed from"
@@ -3205,6 +3327,9 @@ msgstr "Odepnout"
 #| msgid "Rename"
 msgid "Rename file"
 msgstr "Přejmenovat"
+
+msgid "Reorder"
+msgstr ""
 
 msgid "Repeat all"
 msgstr "Opakovat vše"
@@ -3379,6 +3504,11 @@ msgstr "Uložit do"
 msgid "Saved"
 msgstr "Uloženo"
 
+#, fuzzy
+#| msgid "Saved"
+msgid "Saved..."
+msgstr "Uloženo"
+
 msgid "Saves lyrics to your source"
 msgstr ""
 
@@ -3484,9 +3614,6 @@ msgstr "Hledání..."
 
 msgid "Secret storage"
 msgstr "Tajné úložiště"
-
-msgid "Secure storage"
-msgstr "Bezpečné úložiště"
 
 msgid "Seek Backward"
 msgstr "Vyhledat vzad"
@@ -3626,6 +3753,11 @@ msgstr ""
 msgid "Show comparison"
 msgstr "Zobrazit ikonu v systémové liště"
 
+#, fuzzy
+#| msgid "Show lyrics"
+msgid "Show current lyrics line"
+msgstr "Zobrazit texty skladeb"
+
 msgid "Show downloaded badge"
 msgstr "Zobrazit odznak stažení"
 
@@ -3690,12 +3822,6 @@ msgstr "Zobrazit/skrýt pravý postranní panel"
 
 msgid "Showcase"
 msgstr "Nejlepší"
-
-msgid "Shuffle off"
-msgstr "Promíchání vypnuto"
-
-msgid "Shuffle on"
-msgstr "Promíchání zapnuto"
 
 msgid "Shuffle"
 msgstr "Promíchání"
@@ -3798,6 +3924,11 @@ msgstr "Seřadit"
 msgid "Source by position"
 msgstr "Rozložení postranního panelu podle pozice"
 
+#, fuzzy
+#| msgid "This isn't available"
+msgid "Source setup is unavailable"
+msgstr "Toto není dostupné"
+
 msgid "Source to use for cover images and song/artist links"
 msgstr "Zdroj pro získání obálky a odkazů na skladbu/interpreta"
 
@@ -3863,6 +3994,14 @@ msgstr ""
 msgid "Sunday"
 msgstr ""
 
+msgid "Swipe left"
+msgstr ""
+
+#, fuzzy
+#| msgid "Copy"
+msgid "Swipe right"
+msgstr "Kopírovat"
+
 msgid "Switch Search/Favorites tabs"
 msgstr ""
 
@@ -3885,6 +4024,11 @@ msgstr "Výchozí nastavení systému"
 #| msgid "System default"
 msgid "System flatpak:"
 msgstr "Výchozí nastavení systému"
+
+#, fuzzy
+#| msgid "System"
+msgid "System keyring"
+msgstr "Systém"
 
 msgid "System"
 msgstr "Systém"
@@ -4084,6 +4228,9 @@ msgstr "Zrušeno ztlumení"
 msgid "Untitled"
 msgstr "Název skladby"
 
+msgid "Update check interval"
+msgstr ""
+
 msgid "Update"
 msgstr "Aktualizovat"
 
@@ -4130,6 +4277,11 @@ msgstr "Barva zvýraznění"
 #| msgid "Waiting for connection"
 msgid "Use an existing connection?"
 msgstr "Čekání na připojení"
+
+#, fuzzy
+#| msgid "Favorite tracks"
+msgid "Use current artwork"
+msgstr "Oblíbené skladby"
 
 msgid "Use different layout below a threshold width"
 msgstr "Při šířce menší než stanovená hodnota použít jiné rozložení"
@@ -4251,11 +4403,6 @@ msgstr "Čekání na připojení"
 msgid "Waiting for device"
 msgstr "Hledání zařízení..."
 
-#, fuzzy
-#| msgid "Waiting for connection"
-msgid "Waiting for media provider"
-msgstr "Čekání na připojení"
-
 msgid "Waiting for the other device to approve"
 msgstr ""
 
@@ -4368,6 +4515,11 @@ msgstr "dnes"
 
 msgid "yesterday"
 msgstr "včera"
+
+#, fuzzy
+#| msgid "Play filter"
+msgid "{action} (Shuffle)"
+msgstr "Filtr přehrání"
 
 msgid "{count} album"
 msgid_plural "{count} albums"
@@ -4501,6 +4653,32 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Added to favorites"
+#~ msgstr "Přidat do oblíbených"
+
+#~ msgid "Auto DJ off"
+#~ msgstr "Auto DJ vypnuto"
+
+#~ msgid "Auto DJ on"
+#~ msgstr "Auto DJ zapnuto"
+
+#~ msgid "Removed from favorites"
+#~ msgstr "Odebrat z oblíbených"
+
+#~ msgid "Secure storage"
+#~ msgstr "Bezpečné úložiště"
+
+#~ msgid "Shuffle off"
+#~ msgstr "Promíchání vypnuto"
+
+#~ msgid "Shuffle on"
+#~ msgstr "Promíchání zapnuto"
+
+#, fuzzy
+#~| msgid "Waiting for connection"
+#~ msgid "Waiting for media provider"
+#~ msgstr "Čekání na připojení"
 
 #~ msgid "Increases memory usage"
 #~ msgstr "Zvyšuje využití paměti"
