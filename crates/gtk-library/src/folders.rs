@@ -5,6 +5,7 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use library::{FolderKey, ReadCancellation};
 use localization::{msgid, tr};
 use playback::QueuePlacement;
+use rufin_core::source::folders::FolderProjection;
 
 use crate::{CatalogUi, LibraryField, LibraryListKey};
 use gtk_widgets::interactions::install_context_menu_openers;
@@ -127,80 +128,57 @@ pub async fn prepare_folder_route(
 ) -> Result<PreparedFolderRoute, String> {
     let database = &selected.database;
     let source = selected.source_key;
-    let selected_folder = selected.music_folder_key;
     let folder_object_id = path.last().map(|item| item.id.clone());
-    {
-        let live = selected.operations.folder(
-            folder_object_id.clone(),
-            selected.music_folder_object_id.clone(),
-        );
-        match live.recv().await {
-            Ok(Ok(page)) => {
-                let track_ids = page.tracks;
-                let candidates = database
-                    .track_media_uris_by_objects(source, &track_ids, cancellation)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                if candidates.len() == track_ids.len() {
-                    let order = database
-                        .live_folder_track_order(
-                            source,
-                            &candidates,
-                            "",
-                            settings.sort_key.track_sort(),
-                            settings.descending,
-                            cancellation,
-                        )
-                        .await
-                        .map_err(|error| error.to_string())?;
-                    let mut folders: Vec<FolderLink> = page
-                        .folders
-                        .into_iter()
-                        .map(|folder| FolderLink {
-                            object_id: folder.object_id,
-                            name: folder.name,
-                        })
-                        .collect();
-                    folders.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-                    if settings.descending {
-                        folders.reverse();
-                    }
-                    let first_tracks = database
-                        .track_rows_by_uri(
-                            &order[..order.len().min(64_usize.saturating_sub(folders.len()))],
-                            cancellation,
-                        )
-                        .await
-                        .map_err(|error| error.to_string())?;
-                    return Ok(PreparedFolderRoute {
-                        folders,
-                        order: order.into(),
-                        source: FolderTrackSource::Live(candidates.into()),
-                        first_tracks,
-                    });
-                }
-                tracing::debug!("live Folder is newer than its accepted cache; using fallback");
-            }
-            Ok(Err(error)) => {
-                tracing::debug!(%error, "live Folder unavailable; using exact cached Folder");
-            }
-            Err(error) => {
-                tracing::debug!(%error, "live Folder ended; using exact cached Folder");
-            }
-        }
-    }
-    let exact_folder = exact_cached_folder_scope(
-        folder_object_id.is_some(),
-        match folder_object_id.as_deref() {
-            Some(object_id) => database
-                .folder_key_by_object(source, object_id, cancellation)
-                .await
-                .map_err(|error| error.to_string())?,
-            None => None,
-        },
-        selected_folder,
+    let exact_folder = match rufin_core::source::folders::resolve_folder(
+        selected,
+        folder_object_id.as_deref(),
+        cancellation,
     )
-    .map_err(|error| error.to_string())?;
+    .await
+    .map_err(|error| error.to_string())?
+    {
+        FolderProjection::Live {
+            folders,
+            candidates,
+        } => {
+            let order = database
+                .live_folder_track_order(
+                    source,
+                    &candidates,
+                    "",
+                    settings.sort_key.track_sort(),
+                    settings.descending,
+                    cancellation,
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+            let mut folders: Vec<FolderLink> = folders
+                .into_iter()
+                .map(|folder| FolderLink {
+                    object_id: folder.object_id,
+                    name: folder.name,
+                })
+                .collect();
+            folders.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            if settings.descending {
+                folders.reverse();
+            }
+            let first_tracks = database
+                .track_rows_by_uri(
+                    &order[..order.len().min(64_usize.saturating_sub(folders.len()))],
+                    cancellation,
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+            return Ok(PreparedFolderRoute {
+                folders,
+                order: order.into(),
+                source: FolderTrackSource::Live(candidates.into()),
+                first_tracks,
+            });
+        }
+        FolderProjection::Cached(folder) => folder,
+    };
     let folder_order = database
         .folder_child_order(source, exact_folder, cancellation)
         .await
@@ -224,6 +202,7 @@ pub async fn prepare_folder_route(
                 source: source,
                 collection: None,
                 folder: exact_folder,
+                downloaded_only: false,
                 favorites_only: false,
             },
             "",
@@ -245,22 +224,6 @@ pub async fn prepare_folder_route(
         source: FolderTrackSource::CachedFolder(exact_folder),
         first_tracks,
     })
-}
-
-fn exact_cached_folder_scope(
-    nested: bool,
-    resolved: Option<FolderKey>,
-    root_scope: Option<FolderKey>,
-) -> Result<Option<FolderKey>, library::LibraryError> {
-    if nested {
-        resolved.map(Some).ok_or_else(|| {
-            library::LibraryError::InvalidRequest(
-                "the exact cached Folder is unavailable".to_string(),
-            )
-        })
-    } else {
-        Ok(root_scope)
-    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -323,19 +286,16 @@ fn folder_page(
         .library_list(LibraryListKey::Folders);
     let queue_input = Rc::new(RefCell::new(match &source {
         FolderTrackSource::Live(_) => None,
-        FolderTrackSource::CachedFolder(folder) => Some(library::QueueInput::Query {
-            query: library::QueueQuery::Tracks {
+        FolderTrackSource::CachedFolder(folder) => Some(
+            rufin_core::playback::PlaybackTarget::Folder {
                 source: selected.source_key,
-                favorites_only: false,
-                recursive: false,
-            },
-            folder: *folder,
-            filter: String::new(),
-            sort: settings.sort_key.track_sort(),
-            descending: settings.descending,
-            context_id: folder_context_id(&path).into(),
-            anchor_uri: None,
-        }),
+                folder: *folder,
+                sort: settings.sort_key.track_sort(),
+                descending: settings.descending,
+            }
+            .in_context(folder_context_id(&path))
+            .queue_input(Some(selected.source_key), *folder),
+        ),
     }));
     let row_database = Arc::clone(&selected.database);
     let load_input = Rc::clone(&queue_input);
@@ -510,6 +470,7 @@ fn folder_page(
                                     source: source_key,
                                     collection: None,
                                     folder: folder,
+                                    downloaded_only: false,
                                     favorites_only: false,
                                 },
                                 &request.query,
@@ -1235,16 +1196,6 @@ mod tests {
         assert_eq!(item_at::<String>(&model, 0).as_deref(), Some("Music"));
     }
     use super::*;
-
-    #[test]
-    fn missing_nested_folder_never_substitutes_the_root_scope() {
-        let root = FolderKey::from_raw(1);
-        assert!(exact_cached_folder_scope(true, None, Some(root)).is_err());
-        assert_eq!(
-            exact_cached_folder_scope(false, None, Some(root)).unwrap(),
-            Some(root)
-        );
-    }
 
     #[test]
     fn folder_table_uses_the_complete_route_width() {

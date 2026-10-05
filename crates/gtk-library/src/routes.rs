@@ -1180,6 +1180,7 @@ impl CatalogUi {
                                 source: source_key,
                                 collection: None,
                                 folder,
+                                downloaded_only: false,
                                 favorites_only,
                             },
                             &request.query,

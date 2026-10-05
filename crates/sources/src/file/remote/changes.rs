@@ -3,7 +3,7 @@ use std::time::Duration;
 use library::{Database, LocalFileKind, Scan};
 use smb_fscc::NotifyAction;
 
-use super::RemoteSource;
+use super::FileSource;
 use crate::file::remote::input::FileInput;
 use crate::{SourceError, SourceResult};
 
@@ -46,16 +46,18 @@ impl FileChange {
     }
 }
 
-impl RemoteSource {
+impl FileSource {
     pub(crate) fn has_notifications(&self) -> bool {
         self.kind == "smb"
     }
 
     pub(crate) async fn watch(&self, mut changed: impl FnMut(FileChange) -> bool) {
+        let Ok((settings, _)) = self.network() else {
+            return;
+        };
         loop {
             let mut connected = None;
-            for address in std::iter::once(&self.settings.url).chain(&self.settings.alternate_urls)
-            {
+            for address in std::iter::once(&settings.url).chain(&settings.alternate_urls) {
                 match self.connect_input(address).await {
                     Ok(FileInput::Smb(client)) => {
                         connected = Some(client);
@@ -134,7 +136,7 @@ impl RemoteSource {
                     affected.push(path.clone());
                 }
             } else {
-                for folder in &self.settings.folders {
+                for folder in &self.folders() {
                     if folder
                         .strip_prefix(path)
                         .is_some_and(|rest| rest.starts_with('/'))

@@ -26,6 +26,7 @@ async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue
     let database = &fixture.database;
     let captured = database
         .read_queue(library::QueueReadRequest::Capture {
+            context_title: None,
             input: Box::new(library::QueueInput::Items(
                 (0..205)
                     .map(|index| {
@@ -350,6 +351,7 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
                 source: fixture.source,
                 collection: Some(library::QueueCollection::AlbumKey(fixture.albums[0])),
                 folder: None,
+                downloaded_only: false,
                 favorites_only: false,
             },
             "",
@@ -411,6 +413,7 @@ async fn source_items(
 ) -> Vec<QueueItem> {
     let page = database
         .read_queue(library::QueueReadRequest::Capture {
+            context_title: None,
             input: Box::new(input),
             anchor_index: 0,
             random_start: None,
@@ -464,6 +467,7 @@ async fn source_membership_matches_track_view_sort_filter_and_null_order() {
                             source: fixture.source,
                             collection: None,
                             folder: None,
+                            downloaded_only: false,
                             favorites_only: false,
                         },
                         filter,
@@ -477,6 +481,7 @@ async fn source_membership_matches_track_view_sort_filter_and_null_order() {
                 let input = library::QueueInput::Query {
                     query: library::QueueQuery::Tracks {
                         source: fixture.source,
+                        downloaded_only: false,
                         favorites_only: false,
                         recursive: false,
                     },
@@ -615,14 +620,17 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
     unavailable.primary_artist_musicbrainz_id = Some("artist".into());
     let rows = [
         QueueProvenance::Context {
+            context_title: None,
             context_id: "shared context".into(),
             source_rank: 37,
         },
         QueueProvenance::Context {
+            context_title: None,
             context_id: "shared context".into(),
             source_rank: 2,
         },
         QueueProvenance::Context {
+            context_title: None,
             context_id: "other \"context\"".into(),
             source_rank: 900,
         },
@@ -701,6 +709,7 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
         fixture
             .database
             .read_queue(library::QueueReadRequest::Capture {
+                context_title: None,
                 input: Box::new(library::QueueInput::Items(vec![(
                     unavailable.clone(),
                     QueueProvenance::Manual,
@@ -808,6 +817,7 @@ async fn imported_snapshot_batches_keep_order_and_existing_fallback_facts() {
             row.source_index = Some(index % 2);
             row.playlist_entry_id = Some(format!("[null,\"playlist\",\"entry-{index}\"]"));
             row.provenance = QueueProvenance::Context {
+                context_title: None,
                 context_id: "original".into(),
                 source_rank: 700 + index,
             };
@@ -944,6 +954,7 @@ async fn coalesced_replacements_retire_snapshots_without_rewriting_them_on_order
         let page = fixture
             .database
             .read_queue(library::QueueReadRequest::Capture {
+                context_title: None,
                 input: Box::new(library::QueueInput::Items(
                     (0..2)
                         .map(|index| {
@@ -1038,6 +1049,7 @@ async fn installed_shuffled_source_keeps_its_exact_pending_order() {
             source_index: Some(0),
             playlist_entry_id: None,
             provenance: library::QueueProvenance::Context {
+                context_title: None,
                 context_id: "source".into(),
                 source_rank: index,
             },
@@ -1057,6 +1069,7 @@ async fn installed_shuffled_source_keeps_its_exact_pending_order() {
         scope: library::QueueScope::Tracks {
             source: library::SourceId::new("source"),
             folder: None,
+            downloaded_only: false,
             favorites_only: false,
             recursive: false,
         },
@@ -1102,9 +1115,11 @@ async fn repeated_large_source_starts_resolve_only_the_selected_window() {
         let page = fixture
             .database
             .read_queue(library::QueueReadRequest::Capture {
+                context_title: None,
                 input: Box::new(library::QueueInput::Query {
                     query: library::QueueQuery::Tracks {
                         source: fixture.source,
+                        downloaded_only: false,
                         favorites_only: false,
                         recursive: false,
                     },

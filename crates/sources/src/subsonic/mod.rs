@@ -312,7 +312,7 @@ pub(crate) async fn edit(
     let has_password = !credentials.password.is_empty();
     let authentication_changed = authentication != saved.authentication;
 
-    if (address_changed || username_changed || authentication_changed) && !has_password {
+    if (username_changed || authentication_changed) && !has_password {
         return Err(SourceError::Other(
             "Enter the server password or API key to save authentication changes.".to_string(),
         ));
@@ -337,13 +337,16 @@ pub(crate) async fn edit(
         )));
     }
 
-    let reopen = credentials.trust_invalid_cert != saved.trust_invalid_cert;
+    let reopen = address_changed || credentials.trust_invalid_cert != saved.trust_invalid_cert;
     let configuration = crate::config::encode_provider_payload(
         current.source_id.clone(),
         flavor.source_id(),
         name,
         SubsonicSourceConfig {
-            base_url: saved.base_url,
+            base_url: normalize_base_url(&credentials.base_url)?
+                .as_str()
+                .trim_end_matches('/')
+                .to_owned(),
             username: saved.username,
             trust_invalid_cert: credentials.trust_invalid_cert,
             navidrome_library_version: saved.navidrome_library_version,

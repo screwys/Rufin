@@ -183,6 +183,52 @@ pub(crate) async fn selected_playlist_entries_on(
 }
 
 impl Database {
+    pub async fn playlist_section_positions(
+        &self,
+        source: Option<SourceKey>,
+        folder: Option<FolderKey>,
+        sort: PlaylistSort,
+        descending: bool,
+        filter: &str,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<crate::ScrollSection>> {
+        if sort != PlaylistSort::Title {
+            return Ok(Vec::new());
+        }
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        crate::scroll_sections::builder_sections(
+            playlist_order_query(source, folder, sort, descending, filter, false),
+            "playlist.sort_text",
+            &mut connection,
+        )
+        .await
+    }
+
+    pub async fn playlist_track_section_positions(
+        &self,
+        playlist: PlaylistKey,
+        folder: Option<FolderKey>,
+        sort: PlaylistEntrySort,
+        descending: bool,
+        filter: &str,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<crate::ScrollSection>> {
+        if sort == PlaylistEntrySort::Position {
+            return Ok(Vec::new());
+        }
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let query = playlist_query(playlist, folder, sort, descending, filter);
+        let sql = crate::scroll_sections::section_sql(
+            &query.select(&query.entry_key),
+            crate::scroll_sections::order_text(&query.order[0]),
+        );
+        crate::scroll_sections::decode_sections(
+            sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+                .persistent(false)
+                .fetch_all(&mut *connection)
+                .await?,
+        )
+    }
     pub async fn selected_playlist_entries(
         &self,
         input: &crate::QueueInput,

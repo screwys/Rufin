@@ -39,6 +39,8 @@ pub struct TransportView {
     pub state: TransportStatus,
     pub desired_playing: bool,
     pub position_millis: u64,
+    pub position_observed_at_millis: u64,
+    pub playback_rate: f64,
     pub duration_millis: u64,
     pub can_seek: bool,
     pub buffering_percent: Option<u8>,
@@ -76,6 +78,7 @@ pub enum RemoteOutputProtocol {
     Upnp,
     GoogleCast,
     PlexCompanion,
+    RufinConnect,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -165,6 +168,12 @@ impl PlaybackSession {
                 state: self.status(),
                 desired_playing: self.desired_playing(),
                 position_millis: self.position_millis(),
+                position_observed_at_millis: self.position_observed_at_millis(),
+                playback_rate: if self.playback_output().is_local() {
+                    settings.playback_rate
+                } else {
+                    1.0
+                },
                 duration_millis: self.duration_millis(),
                 can_seek: self.can_seek(),
                 buffering_percent: self.buffering_percent(),

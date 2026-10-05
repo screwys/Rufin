@@ -26,7 +26,7 @@ pub struct ClockSample {
     pub local_period: String,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum TransportStatus {
     #[default]
     Stopped,
@@ -222,6 +222,7 @@ struct RunContext {
     started_at_unix_seconds: Option<i64>,
     local_period: Option<String>,
     last_monotonic_millis: Option<u64>,
+    position_observed_at_millis: u64,
     qualified: bool,
     last_progress_bucket: Option<u64>,
     desired_playing: bool,
@@ -242,6 +243,7 @@ impl RunContext {
             started_at_unix_seconds: None,
             local_period: None,
             last_monotonic_millis: None,
+            position_observed_at_millis: 0,
             qualified: false,
             last_progress_bucket: None,
             desired_playing: true,
@@ -407,6 +409,7 @@ impl PlaybackSession {
                 auto_dj: self.auto_dj_enabled,
                 auto_dj_refill_threshold: self.auto_dj_refill_threshold,
                 playback_rate: self.settings.playback_rate,
+                desired_playing: self.desired_playing(),
                 listen: self.current_run.as_ref().map(|run| crate::ContinuedListen {
                     play_id: run.play_id.clone(),
                     started_at_unix_seconds: run.started_at_unix_seconds,
@@ -474,7 +477,7 @@ impl PlaybackSession {
         self.settings.playback_rate = header.playback_rate;
         self.auto_dj_enabled = header.auto_dj;
         self.auto_dj_refill_threshold = header.auto_dj_refill_threshold;
-        let mut update = self.adopt_local(queue, stream, true)?;
+        let mut update = self.adopt_local(queue, stream, header.desired_playing)?;
         if let (Some(current), Some(listen)) = (self.current_run.as_mut(), header.listen) {
             current.play_id = listen.play_id;
             current.started_at_unix_seconds = listen.started_at_unix_seconds;
@@ -725,6 +728,17 @@ impl PlaybackSession {
 
     pub fn position_millis(&self) -> u64 {
         self.sequence.progress_millis()
+    }
+
+    pub fn position_observed_at_millis(&self) -> u64 {
+        if self.external.is_some() {
+            self.external_clock_millis
+        } else {
+            self.current_run
+                .as_ref()
+                .map(|run| run.position_observed_at_millis)
+                .unwrap_or_default()
+        }
     }
 
     pub fn duration_millis(&self) -> u64 {
@@ -1336,6 +1350,7 @@ impl PlaybackSession {
         };
         Ok(self.request_queue(
             library::QueueReadRequest::Capture {
+                context_title: batch.context_title,
                 input: Box::new(batch.input),
                 anchor_index: anchor,
                 random_start: batch.random_start.then_some(batch.shuffle_seed),
@@ -1619,6 +1634,7 @@ impl PlaybackSession {
     fn insert(&mut self, input: library::QueueInput, target: &QueueReorderTarget) -> SessionUpdate {
         self.request_queue(
             library::QueueReadRequest::Capture {
+                context_title: None,
                 input: Box::new(input),
                 anchor_index: 0,
                 random_start: None,
@@ -2174,6 +2190,8 @@ impl PlaybackSession {
         else {
             return SessionUpdate::default();
         };
+        let clock_changed = current.position_observed_at_millis != sample.monotonic_millis;
+        current.position_observed_at_millis = sample.monotonic_millis;
         current.advance_clock(sample.monotonic_millis);
         let playhead_millis = if current.duration_millis == 0 {
             millis
@@ -2186,7 +2204,7 @@ impl PlaybackSession {
         }
         self.sequence.set_progress_millis(playhead_millis);
         let mut update = SessionUpdate {
-            view_changed: changed,
+            view_changed: changed || clock_changed,
             ..Default::default()
         };
         self.emit_progress_facts(&mut update.effects);
@@ -2739,6 +2757,10 @@ impl PlaybackSession {
     }
 
     fn maybe_request_auto_dj(&mut self, effects: &mut Vec<SessionEffect>) {
+        if matches!(&self.playback_output, PlaybackOutput::Remote(output) if output.protocol == crate::RemoteOutputProtocol::RufinConnect)
+        {
+            return;
+        }
         let remaining = self.external.as_ref().map_or_else(
             || self.sequence.remaining_after_selected(),
             |external| {
@@ -2810,6 +2832,7 @@ mod orchestration_tests {
             .unwrap();
         let page = database
             .read_queue(library::QueueReadRequest::Capture {
+                context_title: None,
                 input: Box::new(Batch::new(items).input),
                 anchor_index: 0,
                 random_start: None,
@@ -3845,6 +3868,7 @@ mod orchestration_tests {
                             batch_item(
                                 100 + rank / 2,
                                 Provenance::Context {
+                                    context_title: None,
                                     context_id: "selected-collection".into(),
                                     source_rank: rank as usize,
                                 },
@@ -3927,6 +3951,7 @@ mod orchestration_tests {
                         batch_item(
                             rank as i64 + 1,
                             Provenance::Context {
+                                context_title: None,
                                 context_id: "collection".into(),
                                 source_rank: rank,
                             },
@@ -4658,6 +4683,7 @@ mod orchestration_tests {
             .unwrap();
         let page = db
             .read_queue(library::QueueReadRequest::Capture {
+                context_title: None,
                 input: Box::new(library::QueueInput::Collection {
                     collection: library::QueueCollection::Playlist(key),
                     folder: None,

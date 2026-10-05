@@ -40,11 +40,47 @@ impl PlexPlayback {
     pub(super) async fn continuation_snapshot(
         &self,
     ) -> Result<Option<playback::Continuation>, String> {
+        self.queue_snapshot(false).await
+    }
+
+    pub(super) async fn cast_queue_snapshot(
+        &self,
+    ) -> Result<Option<playback::Continuation>, String> {
+        self.queue_snapshot(true).await
+    }
+
+    async fn queue_snapshot(
+        &self,
+        include_stopped: bool,
+    ) -> Result<Option<playback::Continuation>, String> {
         let _guard = self.commands.lock().await;
         let timeline = self.current().await?;
         self.observe(timeline.clone(), false).await?;
-        let Some(mut snapshot) = self.playback.continuation().map_err(string_error)? else {
-            return Ok(None);
+        let mut snapshot = match self.playback.continuation().map_err(string_error)? {
+            Some(snapshot) => snapshot,
+            None if include_stopped => {
+                let queue = self.playback.handoff_snapshot().map_err(string_error)?.0;
+                let Some(current) = queue.current().cloned() else {
+                    return Ok(None);
+                };
+                let stored = self.settings.load().ui;
+                playback::Continuation {
+                    header: playback::ContinuationHeader {
+                        total: queue.entries.len(),
+                        current,
+                        position_millis: queue.progress_millis.max(0) as u64,
+                        repeat: queue.repeat_mode,
+                        shuffled: queue.shuffled,
+                        auto_dj: stored.auto_dj_enabled,
+                        auto_dj_refill_threshold: usize::from(stored.auto_dj_refill_threshold),
+                        playback_rate: 1.0,
+                        desired_playing: false,
+                        listen: None,
+                    },
+                    queue,
+                }
+            }
+            None => return Ok(None),
         };
         let items = self.all_items(&timeline, &self.cancelled).await?;
         let (_, context) = self.connection();
@@ -160,6 +196,7 @@ impl PlexPlayback {
     async fn insert(
         &self,
         input: library::QueueInput,
+        context_title: Option<Arc<library::QueueContextTitle>>,
         target: Option<playback::QueueReorderTarget>,
         placement: playback::QueuePlacement,
         anchor: usize,
@@ -169,6 +206,7 @@ impl PlexPlayback {
         let page = self
             .database
             .read_queue(library::QueueReadRequest::Capture {
+                context_title,
                 input: Box::new(input),
                 anchor_index: anchor,
                 random_start: None,
@@ -660,8 +698,15 @@ impl PlexPlayback {
                     .await?;
             }
             SessionCommand::Insert { input, target } => {
-                self.insert(input, Some(target), playback::QueuePlacement::Last, 0, None)
-                    .await?
+                self.insert(
+                    input,
+                    None,
+                    Some(target),
+                    playback::QueuePlacement::Last,
+                    0,
+                    None,
+                )
+                .await?
             }
             SessionCommand::Clear { include_current } => {
                 let timeline = self.current().await?;
@@ -678,6 +723,7 @@ impl PlexPlayback {
             SessionCommand::ApplyBatch { batch, placement } => {
                 self.insert(
                     batch.input().clone(),
+                    batch.context_title().cloned(),
                     None,
                     placement,
                     0,
@@ -1065,6 +1111,7 @@ impl PlaybackOwner {
                         provenance: playback::Provenance::AutoDj,
                     },
                     None,
+                    None,
                     playback::QueuePlacement::Last,
                     0,
                     None,
@@ -1099,6 +1146,7 @@ impl PlaybackOwner {
                         order: candidates.into(),
                         provenance: playback::Provenance::Radio,
                     },
+                    None,
                     None,
                     request.placement,
                     0,
@@ -1148,6 +1196,7 @@ impl PlaybackOwner {
                         order: candidates.into(),
                         provenance: playback::Provenance::Random,
                     },
+                    None,
                     None,
                     request.placement,
                     0,
@@ -1657,6 +1706,7 @@ impl PlaybackOwner {
             if let Err(error) = plex
                 .insert(
                     batch.input().clone(),
+                    batch.context_title().cloned(),
                     None,
                     placement,
                     anchor,

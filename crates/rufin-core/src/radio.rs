@@ -14,6 +14,27 @@ use crate::source::{SourceOwner, WeakActiveSource};
 
 const MANUAL_RADIO_COUNT: usize = 20;
 
+pub fn random_play_request(
+    settings: &crate::settings::RandomPlaySettings,
+    genre: Option<library::GenreKey>,
+    placement: playback::QueuePlacement,
+) -> RandomPlayRequest {
+    RandomPlayRequest {
+        placement,
+        requested: settings.limit,
+        criteria: library::RandomCriteria {
+            min_year: settings.min_year.map(i64::from),
+            max_year: settings.max_year.map(i64::from),
+            genre,
+            played: settings.played_filter,
+            require_media: false,
+            variation: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |duration| duration.as_nanos() as i64),
+        },
+    }
+}
+
 pub async fn queue_random(
     database: &Database,
     source: SourceKey,

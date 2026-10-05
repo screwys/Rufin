@@ -8,6 +8,12 @@
       </object>
     </child>
     <child type="suffix">
+      <object class="GtkButton" id="invite_device">
+        <property name="label" translatable="yes">Invite</property>
+        <property name="valign">center</property>
+      </object>
+    </child>
+    <child type="suffix">
       <object class="GtkButton" id="test_connection">
         <property name="icon-name">rufin-view-refresh-symbolic</property>
         <property name="tooltip-text" translatable="yes">Test connection</property>

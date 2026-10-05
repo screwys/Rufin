@@ -711,48 +711,20 @@ fn toggle_shuffle_shortcut(shell: &Shell) {
         return;
     };
     shell.products.playback.transport.set_shuffle(enabled);
-    let title = if enabled {
-        tr("Shuffle on")
-    } else {
-        tr("Shuffle off")
-    };
-    shell.control_feedback.show_control_feedback_toast(title);
 }
 
 fn cycle_repeat_shortcut(shell: &Shell) {
-    let Some(repeat_mode) = shell
-        .player_ui
-        .selected_playback()
-        .as_deref()
-        .map(|player| player.controls.repeat_mode)
-    else {
+    if shell.player_ui.selected_playback().is_none() {
         return;
-    };
-    let title = match repeat_mode {
-        playback::RepeatMode::Off => tr("Repeat all"),
-        playback::RepeatMode::All => tr("Repeat one"),
-        playback::RepeatMode::One => tr("Repeat off"),
-    };
+    }
     shell.products.playback.transport.cycle_repeat();
-    shell.control_feedback.show_control_feedback_toast(title);
 }
 
 fn toggle_auto_dj_shortcut(shell: &Shell) {
-    let Some(enabled) = shell
-        .player_ui
-        .selected_playback()
-        .as_deref()
-        .map(|player| !player.controls.auto_dj_enabled)
-    else {
+    if shell.player_ui.selected_playback().is_none() {
         return;
-    };
+    }
     shell.products.playback.transport.toggle_auto_dj();
-    let title = if enabled {
-        tr("Auto DJ on")
-    } else {
-        tr("Auto DJ off")
-    };
-    shell.control_feedback.show_control_feedback_toast(title);
 }
 
 pub(crate) fn toggle_mute_shortcut(shell: &Rc<Shell>) {

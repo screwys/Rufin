@@ -127,6 +127,18 @@
                         <child>
                           <object class="AdwPreferencesGroup" id="nearby_devices">
                             <property name="title" translatable="yes">Nearby devices</property>
+                            <property name="header-suffix">
+                              <object class="GtkButton" id="discover">
+                                <property name="icon-name">rufin-view-refresh-symbolic</property>
+                                <property name="tooltip-text" translatable="yes">Refresh</property>
+                                <property name="valign">center</property>
+                              </object>
+                            </property>
+                            <child>
+                              <object class="AdwActionRow" id="no_nearby_devices">
+                                <property name="title" translatable="yes">No network devices found</property>
+                              </object>
+                            </child>
                           </object>
                         </child>
                         <child>

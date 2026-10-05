@@ -25,3 +25,12 @@ locales/*/LC_MESSAGES/*.mo
 
 # additional
 .local/
+android/.gradle/
+android/.kotlin/
+android/.toolchains/
+android/local.properties
+android/keystore.properties
+android/*.jks
+android/*.keystore
+android/build/
+android/app/build/

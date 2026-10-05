@@ -7,11 +7,13 @@ use library::{PlaylistFile, PlaylistFormat, QueueInput, QueueItem, QueueProvenan
 
 pub async fn arguments(
     queue: &playback::QueueHandle,
+    database: &library::Database,
     local: Option<&sources::SourceConfiguration>,
     arguments: Vec<std::ffi::OsString>,
 ) -> Result<(), String> {
     files(
         queue,
+        database,
         local,
         arguments
             .into_iter()
@@ -23,11 +25,21 @@ pub async fn arguments(
 
 pub async fn files(
     queue: &playback::QueueHandle,
+    database: &library::Database,
     local: Option<&sources::SourceConfiguration>,
     files: Vec<gio::File>,
 ) -> Result<(), String> {
     let local = local.cloned();
+    let database = database.clone();
+    let runtime = tokio::runtime::Handle::current();
     let items = tokio::task::spawn_blocking(move || {
+        let document_roots = match local
+            .as_ref()
+            .and_then(|configuration| configuration.editable().ok())
+        {
+            Some(sources::EditableSource::Local { document_roots, .. }) => document_roots,
+            _ => Vec::new(),
+        };
         let client = reqwest::blocking::Client::new();
         let entries = files
             .into_iter()
@@ -65,6 +77,17 @@ pub async fn files(
                                 &entry.locator,
                                 path.parent().unwrap_or(Path::new(".")),
                             )
+                        } else if base.uri_scheme().as_deref() == Some("content")
+                            && url::Url::parse(&entry.locator).is_err()
+                        {
+                            match sources::resolve_document_relative(
+                                &base.uri(),
+                                &entry.locator,
+                                &document_roots,
+                            ) {
+                                Ok(entry) => Some(entry.uri),
+                                Err(error) => return Some(Err(error.to_string())),
+                            }
                         } else {
                             url::Url::parse(&base.uri())
                                 .and_then(|base| base.join(&entry.locator))
@@ -80,15 +103,38 @@ pub async fn files(
                             entry.album.unwrap_or_default(),
                             entry.duration_millis.unwrap_or_default(),
                         );
-                        Some((file, item))
+                        Some(Ok((file, item)))
                     })
-                    .collect::<Vec<_>>();
+                    .collect::<Result<Vec<_>, String>>()?;
                 playlists.push((identity, entries.into_iter()));
             } else {
-                let item = file
-                    .path()
-                    .and_then(|path| sources::read_local_queue_item(&path))
-                    .unwrap_or(item);
+                let metadata = if file.uri_scheme().as_deref() == Some("content") {
+                    runtime
+                        .block_on(sources::read_document_queue_item(&file.uri()))
+                        .ok()
+                        .flatten()
+                } else {
+                    file.path()
+                        .and_then(|path| sources::read_local_queue_item(&path))
+                };
+                let mut item = metadata.unwrap_or(item);
+                if file.uri_scheme().as_deref() == Some("content") {
+                    let uri = file.uri().to_string();
+                    let identity =
+                        sources::document_identity(&uri).map_err(|error| error.to_string())?;
+                    item.media_uri = library::document_media_uri(&identity);
+                    runtime
+                        .block_on(database.upsert_local_locator(&library::LocalLocatorWrite {
+                            source_id: None,
+                            media_uri: item.media_uri.clone(),
+                            origin: "import".into(),
+                            path: uri.clone(),
+                            root: uri.clone(),
+                            relative_path: display_name(&file),
+                            access_uri: uri,
+                        }))
+                        .map_err(|error| error.to_string())?;
+                }
                 items.push((item, QueueProvenance::Manual));
             }
         }
@@ -131,6 +177,21 @@ fn read_playlist(
                 mime,
                 Box::new(response),
             )
+        } else if file.uri_scheme().as_deref() == Some("content") {
+            let mime = sources::stat_document(&uri)
+                .map(|entry| entry.mime_type)
+                .unwrap_or_default();
+            // Sniff without making a seekable copy of a cloud-backed audio file.
+            let Ok(prefix) = sources::read_document_prefix(&uri, 8192) else {
+                return Ok(None);
+            };
+            if playlist_format(&prefix, &mime, file).is_none() {
+                return Ok(None);
+            }
+            match sources::open_document_input(&uri) {
+                Ok(input) => (file.clone(), mime, Box::new(input)),
+                Err(_) => return Ok(None),
+            }
         } else {
             match file.read(gio::Cancellable::NONE) {
                 Ok(input) => (file.clone(), String::new(), Box::new(input.into_read())),
@@ -206,9 +267,7 @@ fn playlist_format(bytes: &[u8], mime: &str, file: &gio::File) -> Option<Playlis
         | "audio/x-mp3-playlist" => Some(PlaylistFormat::M3u),
         "audio/x-scpls" | "audio/scpls" | "application/pls" => Some(PlaylistFormat::Pls),
         "application/xspf+xml" | "application/x-xspf+xml" => Some(PlaylistFormat::Xspf),
-        _ => file
-            .basename()
-            .and_then(|path| PlaylistFormat::from_path(&path)),
+        _ => PlaylistFormat::from_path(Path::new(&display_name(file))),
     }
 }
 
@@ -219,6 +278,11 @@ fn is_hls(bytes: &[u8]) -> bool {
 }
 
 fn display_name(file: &gio::File) -> String {
+    if file.uri_scheme().as_deref() == Some("content")
+        && let Ok(entry) = sources::stat_document(&file.uri())
+    {
+        return entry.name;
+    }
     file.basename()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| file.uri().to_string())

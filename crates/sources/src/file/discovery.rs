@@ -13,7 +13,10 @@ use gstreamer_pbutils::{Discoverer, DiscovererInfo, DiscovererResult};
 use crate::{ImageBytes, SourceError, SourceResult};
 
 mod process;
+pub use process::DiscoveryWorker;
 pub use process::run_worker;
+#[cfg(target_os = "android")]
+pub use process::{DiscoveryHost, DiscoverySession, install_discovery_host};
 
 const DISCOVERER_TIMEOUT_SECONDS: u64 = 1;
 const MAX_ATTACHMENT_COUNT: usize = 256;

@@ -3,6 +3,9 @@ pub mod app;
 mod connect;
 pub mod context_menu;
 pub mod layout;
+mod library_lists;
+mod pins;
+pub mod presentation;
 pub mod right_panel;
 mod secret_storage;
 pub use secret_storage::KeyringSecretStore;
@@ -278,6 +281,7 @@ fn default_home_sections() -> Vec<HomeSectionKind> {
 pub struct SettingsFile {
     revision: Arc<std::sync::atomic::AtomicU64>,
     sidebar: tokio::sync::watch::Sender<SidebarSettings>,
+    appearance: tokio::sync::watch::Sender<AppearancePreferences>,
     web_controller: tokio::sync::watch::Sender<crate::settings::ControllerSettings>,
     path: Option<PathBuf>,
     config_dir: PathBuf,
@@ -287,6 +291,25 @@ pub struct SettingsFile {
         async_channel::Sender<KeyringSecretStore>,
         async_channel::Receiver<KeyringSecretStore>,
     ),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppearancePreferences {
+    pub theme_preference: ThemePreference,
+    pub accent_preference: AccentPreference,
+    pub theme_accents: std::collections::BTreeMap<String, String>,
+    pub language: String,
+}
+
+impl From<&UiSettings> for AppearancePreferences {
+    fn from(settings: &UiSettings) -> Self {
+        Self {
+            theme_preference: settings.theme_preference.clone(),
+            accent_preference: settings.accent_preference,
+            theme_accents: settings.theme_accents.clone(),
+            language: settings.language.clone(),
+        }
+    }
 }
 
 impl SettingsFile {
@@ -313,6 +336,7 @@ impl SettingsFile {
         let file = Self {
             revision: Default::default(),
             sidebar: tokio::sync::watch::channel(value.ui.sidebar.clone()).0,
+            appearance: tokio::sync::watch::channel(AppearancePreferences::from(&value.ui)).0,
             web_controller: tokio::sync::watch::channel(value.ui.web_controller.clone()).0,
             config_dir: path
                 .parent()
@@ -345,6 +369,7 @@ impl SettingsFile {
             path: None,
             revision: Default::default(),
             sidebar: tokio::sync::watch::channel(value.ui.sidebar.clone()).0,
+            appearance: tokio::sync::watch::channel(AppearancePreferences::from(&value.ui)).0,
             web_controller: tokio::sync::watch::channel(value.ui.web_controller.clone()).0,
             config_dir,
             value: Arc::new(Mutex::new(value)),
@@ -408,6 +433,14 @@ impl SettingsFile {
         }
         next.ui.backup.schedule.hour = next.ui.backup.schedule.hour.min(23);
         next.ui.backup.schedule.weekday = next.ui.backup.schedule.weekday.min(6);
+        if next
+            == *self
+                .value
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+        {
+            return Ok(output);
+        }
         if let Some(path) = &self.path {
             write_settings(path, &next)?;
         }
@@ -499,6 +532,14 @@ impl SettingsFile {
     fn publish_changes(&self, stored: &StoredSettings) {
         self.revision
             .fetch_add(1, std::sync::atomic::Ordering::Release);
+        self.appearance.send_if_modified(|current| {
+            let next = AppearancePreferences::from(&stored.ui);
+            if *current == next {
+                return false;
+            }
+            *current = next;
+            true
+        });
         self.sidebar.send_if_modified(|current| {
             if *current == stored.ui.sidebar {
                 return false;
@@ -529,8 +570,238 @@ impl SettingsFile {
 }
 
 impl SettingsOwner {
+    pub fn appearance_changes(&self) -> tokio::sync::watch::Receiver<AppearancePreferences> {
+        self.file.appearance.subscribe()
+    }
+
+    pub fn set_theme(&self, theme: ThemePreference) -> Result<(), String> {
+        self.restore(
+            move |stored| {
+                stored.ui.theme_preference = theme;
+                Ok(())
+            },
+            false,
+        )
+    }
+
+    pub fn set_accent(&self, accent: AccentPreference) -> Result<(), String> {
+        self.restore(
+            move |stored| {
+                stored.ui.accent_preference = accent;
+                Ok(())
+            },
+            false,
+        )
+    }
+
+    pub fn set_theme_accent(&self, theme: String, accent: String) -> Result<(), String> {
+        self.restore(
+            move |stored| {
+                stored.ui.theme_accents.insert(theme, accent);
+                Ok(())
+            },
+            false,
+        )
+    }
+
+    pub fn set_language(&self, language: String) -> Result<(), String> {
+        self.restore(
+            move |stored| {
+                stored.ui.language = localization::sanitize_language_preference(&language);
+                Ok(())
+            },
+            false,
+        )
+    }
+
     pub fn load(&self) -> UiSettings {
         self.file.load().ui
+    }
+
+    pub fn visualizer_render_settings(&self) -> (u32, visualizer::VisualizerAppearance) {
+        let stored = self
+            .file
+            .value
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        (
+            stored.ui.visualizer.fps_limit,
+            stored.ui.visualizer.appearance.clone(),
+        )
+    }
+
+    pub fn set_equalizer_enabled(&self, enabled: bool) -> Result<(), String> {
+        self.restore(
+            move |stored| {
+                stored.ui.playback.equalizer.enabled = enabled;
+                Ok(())
+            },
+            false,
+        )
+    }
+
+    pub fn select_equalizer_preset(&self, preset: String) -> Result<(), String> {
+        self.update_preferences(move |ui| {
+            ui.playback.equalizer.select_preset(preset);
+            Ok(())
+        })
+    }
+
+    pub fn set_equalizer_band(&self, index: usize, value: f64) -> Result<(), String> {
+        self.update_preferences(move |ui| {
+            let equalizer = &mut ui.playback.equalizer;
+            let band = equalizer
+                .bands
+                .get_mut(index)
+                .ok_or_else(|| localization::tr("This isn't available"))?;
+            *band = value;
+            equalizer.mark_custom();
+            Ok(())
+        })
+    }
+
+    pub fn set_player_lyrics_preference(
+        &self,
+        field: String,
+        value: serde_json::Value,
+    ) -> Result<(), String> {
+        self.restore(
+            move |stored| {
+                stored
+                    .ui
+                    .lyrics
+                    .set_user_preference(field, value)
+                    .map_err(|error| error.to_string())
+            },
+            false,
+        )
+    }
+
+    pub fn suppress_fetched_lyrics(&self, media_uri: String) -> Result<(), String> {
+        self.restore(
+            move |stored| {
+                stored.ui.lyrics.suppress_auto_lyrics(&media_uri);
+                Ok(())
+            },
+            false,
+        )
+    }
+
+    pub fn set_visualizer_appearance(
+        &self,
+        value: visualizer::VisualizerAppearance,
+    ) -> Result<(), String> {
+        self.restore(
+            move |stored| {
+                stored.ui.visualizer.selected_preset = Some(stored.ui.visualizer.selected_preset());
+                stored.ui.visualizer.appearance = value;
+                Ok(())
+            },
+            false,
+        )
+    }
+
+    pub fn set_visualizer_appearance_field(
+        &self,
+        field: String,
+        value: serde_json::Value,
+    ) -> Result<(), String> {
+        self.restore(
+            move |stored| {
+                let mut appearance = serde_json::to_value(&stored.ui.visualizer.appearance)
+                    .map_err(|error| error.to_string())?;
+                appearance
+                    .as_object_mut()
+                    .expect("Visualizer appearance object")
+                    .insert(field, value);
+                stored.ui.visualizer.selected_preset = Some(stored.ui.visualizer.selected_preset());
+                stored.ui.visualizer.appearance =
+                    serde_json::from_value(appearance).map_err(|error| error.to_string())?;
+                Ok(())
+            },
+            false,
+        )
+    }
+
+    pub fn set_visualizer_frame_limit(&self, value: u32) -> Result<(), String> {
+        self.restore(
+            move |stored| {
+                stored.ui.visualizer.fps_limit = value;
+                Ok(())
+            },
+            false,
+        )
+    }
+
+    pub fn update_visualizer_preset(&self, slot: usize, save: bool) -> Result<(), String> {
+        self.restore(
+            move |stored| {
+                if save {
+                    stored.ui.visualizer.save_preset(slot);
+                } else {
+                    stored.ui.visualizer.select_preset(slot);
+                }
+                Ok(())
+            },
+            false,
+        )
+    }
+
+    pub fn set_activity_overview_field(
+        &self,
+        field: String,
+        value: serde_json::Value,
+    ) -> Result<(), String> {
+        self.restore(
+            move |stored| {
+                let settings = &mut stored.ui.activity_overview;
+                match field.as_str() {
+                    "autoplay_first_track" => {
+                        settings.autoplay_first_track =
+                            serde_json::from_value(value).map_err(|error| error.to_string())?
+                    }
+                    "dynamic_background" => {
+                        settings.dynamic_background =
+                            serde_json::from_value(value).map_err(|error| error.to_string())?
+                    }
+                    "background_image" => {
+                        settings.background_image =
+                            serde_json::from_value(value).map_err(|error| error.to_string())?
+                    }
+                    "tracks" => {
+                        settings.tracks =
+                            serde_json::from_value(value).map_err(|error| error.to_string())?
+                    }
+                    "artists" => {
+                        settings.artists =
+                            serde_json::from_value(value).map_err(|error| error.to_string())?
+                    }
+                    "albums" => {
+                        settings.albums =
+                            serde_json::from_value(value).map_err(|error| error.to_string())?
+                    }
+                    "genres" => {
+                        settings.genres =
+                            serde_json::from_value(value).map_err(|error| error.to_string())?
+                    }
+                    "result_count" => {
+                        settings.result_count =
+                            serde_json::from_value(value).map_err(|error| error.to_string())?
+                    }
+                    "show_comparison" => {
+                        settings.show_comparison =
+                            serde_json::from_value(value).map_err(|error| error.to_string())?
+                    }
+                    "show_rufin_in_headline" => {
+                        settings.show_rufin_in_headline =
+                            serde_json::from_value(value).map_err(|error| error.to_string())?
+                    }
+                    _ => return Err(localization::tr("This isn't available")),
+                }
+                Ok(())
+            },
+            false,
+        )
     }
 
     pub fn sidebar_changes(&self) -> tokio::sync::watch::Receiver<SidebarSettings> {
@@ -540,6 +811,47 @@ impl SettingsOwner {
     pub fn set_pinned(&self, pin: SidebarPin, pinned: bool) -> Result<bool, String> {
         self.file
             .update(|stored| Ok(stored.ui.sidebar.set_pinned(pin, pinned)))
+    }
+
+    pub fn set_route_visible(&self, item: SidebarRouteItem, visible: bool) -> Result<bool, String> {
+        self.file
+            .update(|stored| Ok(stored.ui.sidebar.set_route_visible(item, visible)))
+    }
+
+    pub fn move_route(&self, item: SidebarRouteItem, delta: isize) -> Result<bool, String> {
+        self.file
+            .update(|stored| Ok(stored.ui.sidebar.move_route(item, delta)))
+    }
+
+    pub fn remember_search_result(&self, result: app::RecentSearchResult) -> Result<bool, String> {
+        if self.file.load().ui.recent_search_results.first() == Some(&result) {
+            return Ok(false);
+        }
+        self.file
+            .update(|stored| Ok(stored.ui.remember_search_result(result)))
+    }
+
+    pub fn remove_search_result(
+        &self,
+        kind: app::RecentSearchKind,
+        media_uri: &str,
+    ) -> Result<bool, String> {
+        self.file.update(|stored| {
+            let previous = stored.ui.recent_search_results.len();
+            stored
+                .ui
+                .recent_search_results
+                .retain(|result| result.kind != kind || result.media_uri != media_uri);
+            Ok(previous != stored.ui.recent_search_results.len())
+        })
+    }
+
+    pub fn clear_search_results(&self) -> Result<bool, String> {
+        self.file.update(|stored| {
+            let changed = !stored.ui.recent_search_results.is_empty();
+            stored.ui.recent_search_results.clear();
+            Ok(changed)
+        })
     }
 
     pub fn reorder_pin(&self, moved: &SidebarPin, target: &SidebarPin) -> Result<bool, String> {
@@ -574,6 +886,70 @@ impl SettingsOwner {
 
     pub fn save(&self, settings: &UiSettings) -> Result<UiSettings, String> {
         self.save_ui(settings)
+    }
+
+    pub fn update_preferences(
+        &self,
+        edit: impl FnOnce(&mut UiSettings) -> Result<(), String>,
+    ) -> Result<(), String> {
+        self.restore(move |stored| edit(&mut stored.ui), false)
+    }
+
+    pub fn set_download_location(
+        &self,
+        source_id: SourceId,
+        location: Option<downloads::DownloadDirectory>,
+    ) -> Result<(), String> {
+        self.restore(
+            move |stored| {
+                stored.ui.set_download_location(source_id, location);
+                Ok(())
+            },
+            false,
+        )
+    }
+
+    pub fn set_download_rule(
+        &self,
+        source_id: SourceId,
+        rule: DownloadRule,
+        enabled: bool,
+    ) -> Result<(), String> {
+        self.restore(
+            move |stored| {
+                let mut rules = stored.ui.download_rules(&source_id);
+                rules.set(rule, enabled);
+                stored.ui.set_download_rules(source_id, rules);
+                Ok(())
+            },
+            false,
+        )
+    }
+
+    pub fn set_download_quality(
+        &self,
+        source_id: SourceId,
+        quality: playback::StreamQuality,
+    ) -> Result<(), String> {
+        self.restore(
+            move |stored| {
+                stored.ui.set_download_quality(source_id, quality);
+                Ok(())
+            },
+            false,
+        )
+    }
+
+    pub fn clear_download_rules(&self, source_id: SourceId) -> Result<(), String> {
+        self.restore(
+            move |stored| {
+                stored
+                    .ui
+                    .set_download_rules(source_id, DownloadRules::default());
+                Ok(())
+            },
+            false,
+        )
     }
 }
 

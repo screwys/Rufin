@@ -18,10 +18,19 @@ const QUEUE_PRIMARY_ARTIST_SQL: &str = "COALESCE(
      JOIN artists artist USING(artist_key)
      WHERE credit.album_key=track.album_key ORDER BY credit.position LIMIT 1))";
 
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct QueueContextTitle {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<Arc<str>>,
+    pub title: Arc<str>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum QueueProvenance {
     Context {
         context_id: Arc<str>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_title: Option<Arc<QueueContextTitle>>,
         source_rank: usize,
     },
     Manual,
@@ -213,6 +222,10 @@ pub enum QueueCollection {
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum QueueInput {
+    Captured {
+        entries: Arc<[QueueEntry]>,
+        anchor_index: usize,
+    },
     Choices(Arc<[Option<QueueChoice>]>),
     TrackSelection {
         query: QueueQuery,
@@ -296,11 +309,15 @@ pub enum QueueQuery {
     Tracks {
         source: SourceKey,
         favorites_only: bool,
+        #[serde(default)]
+        downloaded_only: bool,
         recursive: bool,
     },
     Collection {
         collection: QueueCollection,
         favorites_only: bool,
+        #[serde(default)]
+        downloaded_only: bool,
     },
     Smart {
         key: crate::SmartPlaylistKey,
@@ -319,11 +336,15 @@ pub enum QueueScope {
         source: SourceId,
         folder: Option<String>,
         favorites_only: bool,
+        #[serde(default)]
+        downloaded_only: bool,
         recursive: bool,
     },
     Collection {
         reference: crate::CollectionSourceReference,
         favorites_only: bool,
+        #[serde(default)]
+        downloaded_only: bool,
     },
     Playlist {
         reference: crate::CollectionSourceReference,
@@ -417,6 +438,16 @@ struct SavedQueue<E, C> {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
+enum SavedContext<S> {
+    Titled {
+        id: S,
+        title: Arc<QueueContextTitle>,
+    },
+    Legacy(S),
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
 enum SavedProvenance<P> {
     Context(usize, usize),
     Other(P),
@@ -424,7 +455,7 @@ enum SavedProvenance<P> {
 
 struct SavedEntries<'a> {
     entries: &'a [QueueEntry],
-    context_ids: &'a std::collections::HashMap<&'a str, usize>,
+    context_ids: &'a std::collections::HashMap<(&'a str, Option<&'a QueueContextTitle>), usize>,
 }
 
 impl serde::Serialize for SavedEntries<'_> {
@@ -433,8 +464,12 @@ impl serde::Serialize for SavedEntries<'_> {
             let provenance = match &entry.provenance {
                 QueueProvenance::Context {
                     context_id,
+                    context_title,
                     source_rank,
-                } => SavedProvenance::Context(self.context_ids[context_id.as_ref()], *source_rank),
+                } => SavedProvenance::Context(
+                    self.context_ids[&(context_id.as_ref(), context_title.as_deref())],
+                    *source_rank,
+                ),
                 other => SavedProvenance::Other(other),
             };
             (
@@ -451,11 +486,24 @@ fn encode_saved_queue(state: &QueueRestore) -> LibraryResult<String> {
     let mut contexts = Vec::new();
     let mut context_ids = std::collections::HashMap::new();
     for entry in state.entries.iter() {
-        if let QueueProvenance::Context { context_id, .. } = &entry.provenance {
-            context_ids.entry(context_id.as_ref()).or_insert_with(|| {
-                contexts.push(context_id.as_ref());
-                contexts.len() - 1
-            });
+        if let QueueProvenance::Context {
+            context_id,
+            context_title,
+            ..
+        } = &entry.provenance
+        {
+            context_ids
+                .entry((context_id.as_ref(), context_title.as_deref()))
+                .or_insert_with(|| {
+                    contexts.push(match context_title {
+                        Some(title) => SavedContext::Titled {
+                            id: context_id.as_ref(),
+                            title: title.clone(),
+                        },
+                        None => SavedContext::Legacy(context_id.as_ref()),
+                    });
+                    contexts.len() - 1
+                });
         }
     }
     Ok(serde_json::to_string(&SavedQueue {
@@ -478,7 +526,8 @@ fn decode_saved_queue(value: serde_json::Value) -> LibraryResult<QueueRestore> {
         SavedProvenance<QueueProvenance>,
         Option<Arc<str>>,
     );
-    let saved: SavedQueue<Vec<SavedEntry>, Vec<Arc<str>>> = serde_json::from_value(value)?;
+    let saved: SavedQueue<Vec<SavedEntry>, Vec<SavedContext<Arc<str>>>> =
+        serde_json::from_value(value)?;
     let entries = saved
         .entries
         .into_iter()
@@ -488,12 +537,19 @@ fn decode_saved_queue(value: serde_json::Value) -> LibraryResult<QueueRestore> {
                 media_uri,
                 playlist_entry_id,
                 provenance: match provenance {
-                    SavedProvenance::Context(context, source_rank) => QueueProvenance::Context {
-                        context_id: Arc::clone(saved.contexts.get(context).ok_or_else(|| {
+                    SavedProvenance::Context(context, source_rank) => {
+                        let (id, title) = match saved.contexts.get(context).ok_or_else(|| {
                             LibraryError::InvalidStore("saved Queue context is missing".into())
-                        })?),
-                        source_rank,
-                    },
+                        })? {
+                            SavedContext::Titled { id, title } => (id, Some(title.clone())),
+                            SavedContext::Legacy(id) => (id, None),
+                        };
+                        QueueProvenance::Context {
+                            context_id: id.clone(),
+                            context_title: title,
+                            source_rank,
+                        }
+                    }
                     SavedProvenance::Other(provenance) => provenance,
                 },
             })
@@ -510,6 +566,7 @@ fn decode_saved_queue(value: serde_json::Value) -> LibraryResult<QueueRestore> {
 pub enum QueueReadRequest {
     Capture {
         input: Box<QueueInput>,
+        context_title: Option<Arc<QueueContextTitle>>,
         anchor_index: usize,
         random_start: Option<u64>,
         shuffled: Option<u64>,
@@ -558,13 +615,13 @@ impl QueueInput {
         }
     }
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum QueuePlacement {
     Replace { anchor_index: usize },
     AfterCurrent,
     End,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum QueueReorderTarget {
     Before(OccurrenceId),
     After(OccurrenceId),
@@ -578,6 +635,7 @@ struct QueueOccurrenceRow {
     canonical_position: i64,
     provenance_kind: String,
     provenance_context_id: Option<String>,
+    provenance_context_title: Option<String>,
     provenance_source_rank: Option<i64>,
     #[sqlx(flatten)]
     item: QueueItem,
@@ -623,27 +681,40 @@ impl QueueRepeatMode {
 }
 
 impl QueueProvenance {
-    fn columns(&self) -> (&'static str, Option<&str>, Option<i64>) {
-        match self {
+    fn columns(&self) -> LibraryResult<(&'static str, Option<&str>, Option<String>, Option<i64>)> {
+        Ok(match self {
             Self::Context {
                 context_id,
+                context_title,
                 source_rank,
-            } => ("context", Some(context_id), Some(*source_rank as i64)),
-            Self::Manual => ("manual", None, None),
-            Self::Random => ("random", None, None),
-            Self::Radio => ("radio", None, None),
-            Self::AutoDj => ("auto-dj", None, None),
-            Self::Legacy => ("legacy", None, None),
-        }
+            } => (
+                "context",
+                Some(context_id),
+                context_title
+                    .as_deref()
+                    .map(serde_json::to_string)
+                    .transpose()?,
+                Some(*source_rank as i64),
+            ),
+            Self::Manual => ("manual", None, None, None),
+            Self::Random => ("random", None, None, None),
+            Self::Radio => ("radio", None, None, None),
+            Self::AutoDj => ("auto-dj", None, None, None),
+            Self::Legacy => ("legacy", None, None, None),
+        })
     }
 
     fn parse(
         kind: &str,
         context_id: Option<String>,
+        context_title: Option<String>,
         source_rank: Option<i64>,
     ) -> LibraryResult<Self> {
         match kind {
             "context" => Ok(Self::Context {
+                context_title: context_title
+                    .map(|value| serde_json::from_str(&value).map(Arc::new))
+                    .transpose()?,
                 context_id: context_id
                     .ok_or_else(|| {
                         LibraryError::InvalidStore("queue Context has no context ID".to_string())
@@ -835,6 +906,35 @@ impl Database {
 }
 
 impl Database {
+    pub async fn saved_queue_search_page(
+        &self,
+        filter: &str,
+        offset: u64,
+        limit: u32,
+    ) -> LibraryResult<(Vec<(usize, String)>, u64)> {
+        const MATCHES: &str = "WITH matches AS MATERIALIZED (
+            SELECT CAST(member.key AS INTEGER) member_index,
+                COALESCE(json_extract(member.value,'$[0]'),json_extract(member.value,'$.occurrence')) occurrence_id
+            FROM queue_saved, json_each(queue_saved.state,'$.entries') member
+            LEFT JOIN tracks track ON track.media_uri=COALESCE(json_extract(member.value,'$[1]'),json_extract(member.value,'$.media_uri'))
+            LEFT JOIN queue_occurrences occurrence ON occurrence.object_id=COALESCE(json_extract(member.value,'$[0]'),json_extract(member.value,'$.occurrence'))
+            WHERE instr(track.normalized_search,?1)>0 OR instr(lower(COALESCE(occurrence.title,track.title,'') || ' ' || COALESCE(occurrence.artist,track.display_artist,'') || ' ' || COALESCE(occurrence.album,track.display_album,'')),?1)>0
+        ) ";
+        let mut reader = self.acquire_reader().await?;
+        let mut transaction = reader.begin().await?;
+        let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("{MATCHES} SELECT count(*) FROM matches JOIN queue_order,json_each(queue_order.state) position ON CAST(position.value AS INTEGER)=matches.member_index")))
+            .bind(filter.trim().to_lowercase()).fetch_one(&mut *transaction).await?;
+        let rows = sqlx::query_as::<_, (i64, String)>(sqlx::AssertSqlSafe(format!("{MATCHES} SELECT matches.member_index,matches.occurrence_id FROM matches JOIN queue_order,json_each(queue_order.state) position ON CAST(position.value AS INTEGER)=matches.member_index ORDER BY CAST(position.key AS INTEGER) LIMIT ?2 OFFSET ?3")))
+            .bind(filter.trim().to_lowercase()).bind(i64::from(limit)).bind(offset.min(i64::MAX as u64) as i64)
+            .fetch_all(&mut *transaction).await?;
+        Ok((
+            rows.into_iter()
+                .map(|(index, id)| (index as usize, id))
+                .collect(),
+            total.max(0) as u64,
+        ))
+    }
+
     pub async fn queue_transfer_page(
         &self,
         queue: &QueueRestore,
@@ -986,18 +1086,49 @@ impl Database {
             .ok_or(LibraryError::WriterUnavailable)?
             .begin()
             .await?;
-        for offset in (0..queue.entries.len()).step_by(QUEUE_CONTEXT_LIMIT) {
-            let payload: String = sqlx::query_scalar(
-                "SELECT payload FROM queue_transfer_pages WHERE transfer=?1 AND page_offset=?2",
-            )
-            .bind(transfer)
-            .bind(offset as i64)
-            .fetch_one(&mut *transaction)
-            .await?;
-            let page: QueueTransferPage = serde_json::from_str(&payload)?;
-            persist_occurrence_page(&mut transaction, &page.occurrences, offset, true).await?;
-        }
+        persist_transfer_on(&mut transaction, transfer, queue.entries.len()).await?;
         save_queue_on(&mut transaction, queue).await?;
+        sqlx::query("DELETE FROM queue_transfer_pages WHERE transfer=?1")
+            .bind(transfer)
+            .execute(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// Import a captured input without replacing the currently playing queue.
+    pub async fn queue_input_from_transfer(
+        &self,
+        transfer: &str,
+        total: usize,
+        current: &OccurrenceId,
+    ) -> LibraryResult<QueueInput> {
+        let queue = self
+            .prepare_queue_transfer(transfer, total, current)
+            .await?;
+        self.import_queue_transfer_metadata(transfer, total).await?;
+        Ok(QueueInput::Captured {
+            entries: queue
+                .order
+                .iter()
+                .map(|index| queue.entries[*index as usize].clone())
+                .collect(),
+            anchor_index: queue.current_index.unwrap_or_default(),
+        })
+    }
+
+    pub async fn import_queue_transfer_metadata(
+        &self,
+        transfer: &str,
+        total: usize,
+    ) -> LibraryResult<()> {
+        let mut writer = self.writer().await?;
+        let mut transaction = writer
+            .as_mut()
+            .ok_or(LibraryError::WriterUnavailable)?
+            .begin()
+            .await?;
+        persist_transfer_on(&mut transaction, transfer, total).await?;
         sqlx::query("DELETE FROM queue_transfer_pages WHERE transfer=?1")
             .bind(transfer)
             .execute(&mut *transaction)
@@ -1010,6 +1141,7 @@ impl Database {
         match request {
             QueueReadRequest::Capture {
                 input,
+                context_title,
                 anchor_index,
                 random_start,
                 shuffled,
@@ -1030,6 +1162,15 @@ impl Database {
                     &mut anchor,
                 )
                 .await?;
+                if let Some(title) = context_title {
+                    for entry in &mut entries {
+                        if let QueueProvenance::Context { context_title, .. } =
+                            &mut entry.provenance
+                        {
+                            *context_title = Some(title.clone());
+                        }
+                    }
+                }
                 transaction.commit().await?;
                 drop(reader);
                 if let Some(seed) = shuffled {
@@ -1498,6 +1639,7 @@ async fn capture_input(
                     QueueInput::Query {
                         query: QueueQuery::Collection {
                             collection,
+                            downloaded_only: false,
                             favorites_only: false,
                         },
                         folder,
@@ -1542,6 +1684,13 @@ async fn capture_input(
         input => input,
     };
     match input {
+        QueueInput::Captured {
+            entries: captured,
+            anchor_index,
+        } => {
+            *anchor = Some(entries.len() + anchor_index);
+            entries.extend(captured.iter().cloned());
+        }
         QueueInput::Source {
             reference,
             context_id,
@@ -1558,6 +1707,7 @@ async fn capture_input(
                     identity,
                     QueueProvenance::Context {
                         context_id: context_id.clone(),
+                        context_title: None,
                         source_rank: rank,
                     },
                 );
@@ -1577,6 +1727,7 @@ async fn capture_input(
                         identity,
                         QueueProvenance::Context {
                             context_id: context_id.clone(),
+                            context_title: None,
                             source_rank: rank,
                         },
                     );
@@ -1637,6 +1788,7 @@ async fn capture_input(
                     None,
                     QueueProvenance::Context {
                         context_id: context_id.clone(),
+                        context_title: None,
                         source_rank: source_start + index,
                     },
                 );
@@ -1694,6 +1846,25 @@ async fn admit_snapshots(
     } else {
         persist_occurrence_page(connection, rows, 0, false).await
     }
+}
+
+async fn persist_transfer_on(
+    connection: &mut sqlx::SqliteConnection,
+    transfer: &str,
+    total: usize,
+) -> LibraryResult<()> {
+    for offset in (0..total).step_by(QUEUE_CONTEXT_LIMIT) {
+        let payload: String = sqlx::query_scalar(
+            "SELECT payload FROM queue_transfer_pages WHERE transfer=?1 AND page_offset=?2",
+        )
+        .bind(transfer)
+        .bind(offset as i64)
+        .fetch_one(&mut *connection)
+        .await?;
+        let page: QueueTransferPage = serde_json::from_str(&payload)?;
+        persist_occurrence_page(connection, &page.occurrences, offset, true).await?;
+    }
+    Ok(())
 }
 async fn playlist_identity(
     connection: &mut sqlx::SqliteConnection,
@@ -2114,7 +2285,7 @@ async fn persist_occurrence_page(
         let mut query = sqlx::QueryBuilder::<Sqlite>::new(
             "INSERT INTO queue_occurrences(
                  object_id,media_uri,position,traversal_position,
-                 provenance_kind,provenance_context_id,provenance_source_rank,
+                 provenance_kind,provenance_context_id,provenance_context_title,provenance_source_rank,
                  title,artist,album,album_display_artist,duration_millis,
                  disc_number,track_number,year,release_date,source_format,
                  musicbrainz_recording_id,musicbrainz_release_track_id,
@@ -2122,11 +2293,14 @@ async fn persist_occurrence_page(
                  primary_artist_musicbrainz_id,origin_source,origin_position,playlist_entry_id,received_from_connect
              )",
         );
+        let columns = occurrences
+            .iter()
+            .map(|occurrence| occurrence.provenance.columns())
+            .collect::<LibraryResult<Vec<_>>>()?;
         query.push_values(
-            occurrences.iter().enumerate(),
-            |mut row, (position, occurrence)| {
+            occurrences.iter().enumerate().zip(columns),
+            |mut row, ((position, occurrence), (kind, context, title, rank))| {
                 let item = &occurrence.item;
-                let (kind, context, rank) = occurrence.provenance.columns();
                 let position = (traversal_offset + page * QUEUE_CONTEXT_LIMIT + position) as i64;
                 row.push_bind(occurrence.occurrence.as_str())
                     .push_bind(&item.media_uri)
@@ -2134,6 +2308,7 @@ async fn persist_occurrence_page(
                     .push_bind(position)
                     .push_bind(kind)
                     .push_bind(context)
+                    .push_bind(title)
                     .push_bind(rank)
                     .push_bind(&item.title)
                     .push_bind(&item.artist)
@@ -2161,6 +2336,7 @@ async fn persist_occurrence_page(
                  position=excluded.position,traversal_position=excluded.traversal_position,
                  provenance_kind=excluded.provenance_kind,
                  provenance_context_id=excluded.provenance_context_id,
+                 provenance_context_title=excluded.provenance_context_title,
                  provenance_source_rank=excluded.provenance_source_rank",
         );
         query.build().execute(&mut *transaction).await?;
@@ -2170,8 +2346,8 @@ async fn persist_occurrence_page(
 async fn read_all_occurrences(
     connection: &mut sqlx::SqliteConnection,
 ) -> LibraryResult<Vec<Arc<QueueOccurrence>>> {
-    sqlx::query_as::<_,QueueOccurrenceRow>("SELECT occurrence.object_id,occurrence.media_uri,origin_source source_index,playlist_entry_id,COALESCE(origin_position,position) canonical_position,provenance_kind,provenance_context_id,provenance_source_rank,occurrence.title,occurrence.artist,occurrence.album,occurrence.album_display_artist,track.artwork_binding,occurrence.duration_millis,occurrence.disc_number,occurrence.track_number,occurrence.year,occurrence.release_date,occurrence.source_format,occurrence.musicbrainz_recording_id,occurrence.musicbrainz_release_track_id,occurrence.musicbrainz_album_id,occurrence.musicbrainz_release_group_id,occurrence.primary_artist_musicbrainz_id FROM queue_occurrences occurrence LEFT JOIN tracks track USING(media_uri) ORDER BY traversal_position")
-        .fetch_all(connection).await?.into_iter().map(|row|Ok(Arc::new(QueueOccurrence{occurrence:OccurrenceId::new(row.object_id),item:row.item,source_index:row.source_index.map(|i|i as usize),playlist_entry_id:row.playlist_entry_id,canonical_position:row.canonical_position as usize,provenance:QueueProvenance::parse(&row.provenance_kind,row.provenance_context_id,row.provenance_source_rank)?}))).collect()
+    sqlx::query_as::<_,QueueOccurrenceRow>("SELECT occurrence.object_id,occurrence.media_uri,origin_source source_index,playlist_entry_id,COALESCE(origin_position,position) canonical_position,provenance_kind,provenance_context_id,provenance_context_title,provenance_source_rank,occurrence.title,occurrence.artist,occurrence.album,occurrence.album_display_artist,track.artwork_binding,occurrence.duration_millis,occurrence.disc_number,occurrence.track_number,occurrence.year,occurrence.release_date,occurrence.source_format,occurrence.musicbrainz_recording_id,occurrence.musicbrainz_release_track_id,occurrence.musicbrainz_album_id,occurrence.musicbrainz_release_group_id,occurrence.primary_artist_musicbrainz_id FROM queue_occurrences occurrence LEFT JOIN tracks track USING(media_uri) ORDER BY traversal_position")
+        .fetch_all(connection).await?.into_iter().map(|row|Ok(Arc::new(QueueOccurrence{occurrence:OccurrenceId::new(row.object_id),item:row.item,source_index:row.source_index.map(|i|i as usize),playlist_entry_id:row.playlist_entry_id,canonical_position:row.canonical_position as usize,provenance:QueueProvenance::parse(&row.provenance_kind,row.provenance_context_id,row.provenance_context_title,row.provenance_source_rank)?}))).collect()
 }
 
 async fn read_occurrence(
@@ -2194,6 +2370,7 @@ async fn read_occurrence(
             provenance: QueueProvenance::parse(
                 &row.provenance_kind,
                 row.provenance_context_id,
+                row.provenance_context_title,
                 row.provenance_source_rank,
             )?,
         })
@@ -2201,7 +2378,7 @@ async fn read_occurrence(
     .transpose()
 }
 
-const OCCURRENCE_SELECT: &str = "SELECT occurrence.object_id,occurrence.media_uri,origin_source source_index,playlist_entry_id,COALESCE(origin_position,position) canonical_position,provenance_kind,provenance_context_id,provenance_source_rank,occurrence.title,occurrence.artist,occurrence.album,occurrence.album_display_artist,track.artwork_binding,occurrence.duration_millis,occurrence.disc_number,occurrence.track_number,occurrence.year,occurrence.release_date,occurrence.source_format,occurrence.musicbrainz_recording_id,occurrence.musicbrainz_release_track_id,occurrence.musicbrainz_album_id,occurrence.musicbrainz_release_group_id,occurrence.primary_artist_musicbrainz_id FROM queue_occurrences occurrence LEFT JOIN tracks track USING(media_uri)";
+const OCCURRENCE_SELECT: &str = "SELECT occurrence.object_id,occurrence.media_uri,origin_source source_index,playlist_entry_id,COALESCE(origin_position,position) canonical_position,provenance_kind,provenance_context_id,provenance_context_title,provenance_source_rank,occurrence.title,occurrence.artist,occurrence.album,occurrence.album_display_artist,track.artwork_binding,occurrence.duration_millis,occurrence.disc_number,occurrence.track_number,occurrence.year,occurrence.release_date,occurrence.source_format,occurrence.musicbrainz_recording_id,occurrence.musicbrainz_release_track_id,occurrence.musicbrainz_album_id,occurrence.musicbrainz_release_group_id,occurrence.primary_artist_musicbrainz_id FROM queue_occurrences occurrence LEFT JOIN tracks track USING(media_uri)";
 
 /// Fisher-Yates shuffle with SplitMix64, shared by queue capture and playback order.
 pub fn shuffle_order<T>(values: &mut [T], mut seed: u64) {

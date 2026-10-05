@@ -61,7 +61,8 @@ impl Database {
         let result = sqlx::query_as::<_, LyricsScalar>(
             "SELECT authority,role,language,script,cache_input_digest,lyrics,updated_at
              FROM lyrics_cache WHERE media_uri=?1 AND role=?2
-               AND language=?3 AND script=?4 AND cache_input_digest=?5
+               AND language=?3 AND script=?4
+               AND (authority='external' OR cache_input_digest=?5)
                AND authority=?6 LIMIT 1",
         )
         .bind(media_uri)

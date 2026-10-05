@@ -20,7 +20,13 @@ pub struct ContinuationHeader {
     pub auto_dj: bool,
     pub auto_dj_refill_threshold: usize,
     pub playback_rate: f64,
+    #[serde(default = "continuation_playing")]
+    pub desired_playing: bool,
     pub listen: Option<ContinuedListen>,
+}
+
+fn continuation_playing() -> bool {
+    true
 }
 
 /// Membership and resolved order share the player's compact, immutable arrays.

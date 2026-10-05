@@ -153,6 +153,7 @@ async fn source_members_on(
             source: id,
             folder,
             favorites_only,
+            downloaded_only,
             ..
         } => {
             let Some(key) = sqlx::query_scalar::<_, SourceKey>(
@@ -179,25 +180,30 @@ async fn source_members_on(
             } else {
                 None
             };
-            crate::tracks::track_query(
+            let mut query = crate::tracks::track_query(
                 key,
                 source.sort,
                 source.descending,
                 *favorites_only,
                 folder,
                 &source.filter,
-            )
+            );
+            if *downloaded_only {
+                crate::tracks::downloaded_filter(&mut query);
+            }
+            query
         }
         QueueScope::Collection {
             reference,
             favorites_only,
+            downloaded_only,
         } => {
             let Some((collection, folder)) =
                 crate::collections::resolve_collection_reference(connection, reference).await?
             else {
                 return Ok(Vec::new());
             };
-            crate::collections::playback_query(
+            let mut query = crate::collections::playback_query(
                 connection,
                 &collection,
                 folder,
@@ -206,7 +212,11 @@ async fn source_members_on(
                 source.descending,
                 *favorites_only,
             )
-            .await?
+            .await?;
+            if *downloaded_only {
+                crate::tracks::downloaded_filter(&mut query);
+            }
+            query
         }
         QueueScope::Playlist {
             reference, sort, ..
@@ -290,6 +300,7 @@ pub(crate) async fn canonical_query(
         QueueQuery::Tracks {
             source,
             favorites_only,
+            downloaded_only,
             recursive,
         } => {
             let Some(source) = sqlx::query_scalar::<_, String>(
@@ -319,12 +330,14 @@ pub(crate) async fn canonical_query(
                 source: SourceId::new(source),
                 folder,
                 favorites_only,
+                downloaded_only,
                 recursive,
             }
         }
         QueueQuery::Collection {
             collection,
             favorites_only,
+            downloaded_only,
         } => {
             let Some(reference) =
                 crate::collections::canonical_collection_on(connection, &collection, folder)
@@ -335,6 +348,7 @@ pub(crate) async fn canonical_query(
             QueueScope::Collection {
                 reference,
                 favorites_only,
+                downloaded_only,
             }
         }
         query @ (QueueQuery::Smart { .. } | QueueQuery::SmartDisplay { .. }) => {

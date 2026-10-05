@@ -24,6 +24,8 @@ on:
       - '!**/resources/**'
       - '!crates/gtk-*/**'
       - crates/gtk-*/Cargo.toml
+      - android/**
+      - .github/workflows/kotlin.yml
   workflow_dispatch:
 
 permissions:
@@ -57,7 +59,7 @@ jobs:
       - name: Classify changed paths
         id: select
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           HEAD_BRANCH: ${{ github.head_ref }}
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
@@ -74,6 +76,26 @@ jobs:
             done
           }
 
+          select_kotlin() {
+            case "$1" in
+              android/*|*.kt|*.kts|crates/rufin-android/*|crates/xtask/src/android.rs|crates/xtask/src/main.rs|crates/xtask/src/process.rs|crates/xtask/Cargo.toml|crates/app-identity/*|Cargo.toml|Cargo.lock|resources/icons/*|locales/*|.github/workflows/checks.yml|.github/workflows/kotlin.yml)
+                add_jobs kotlin
+                ;;
+              crates/rufin-core/src/lib.rs|crates/rufin-core/src/runtime/*|crates/rufin-core/src/route.rs|crates/rufin-core/src/route/*|crates/rufin-core/src/settings/*|crates/playback/src/view.rs|crates/library/src/lib.rs|crates/library/src/favorites.rs|crates/library/src/keys.rs|crates/library/src/queue.rs|crates/library/src/collections.rs|crates/library/src/tracks.rs|crates/sources/src/lib.rs|crates/sources/src/source.rs|crates/sources/src/config.rs|crates/rufin-connect/src/profile.rs|crates/rufin-connect/src/profile/*)
+                add_jobs kotlin
+                ;;
+              crates/rufin-core/Cargo.toml|crates/playback/Cargo.toml|crates/library/Cargo.toml|crates/sources/Cargo.toml|crates/rufin-connect/Cargo.toml|crates/secrets/Cargo.toml|crates/playback-gstreamer/Cargo.toml|crates/downloads/Cargo.toml|crates/localization/Cargo.toml|crates/lyrics/Cargo.toml|crates/artwork/Cargo.toml|crates/backup/Cargo.toml|crates/web/Cargo.toml)
+                add_jobs kotlin
+                ;;
+              crates/rufin-core/src/connect.rs|crates/rufin-core/src/connect/*|crates/rufin-core/src/metadata.rs|crates/rufin-core/src/metadata/*|crates/rufin-core/src/source/folders.rs|crates/sources/src/source/*|crates/downloads/src/lib.rs|crates/localization/src/lib.rs|crates/rufin-connect/src/dns.rs|crates/rufin-connect/src/dns/*|crates/secrets/src/android.rs|crates/sources/src/file/documents.rs)
+                add_jobs kotlin
+                ;;
+              crates/rufin-core/src/source/mod.rs|crates/rufin-core/src/playback.rs|crates/rufin-core/src/lyrics/mod.rs|crates/rufin-core/src/playlists.rs|crates/rufin-core/src/scrobbling.rs)
+                add_jobs kotlin
+                ;;
+            esac
+          }
+
           build_container_image=false
           check_workflows=false
           use_current_nix=false
@@ -81,11 +103,23 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             add_jobs "${package_jobs[@]}" aur_git container
             add_jobs source_checks "${workspace_jobs[@]}" cargo-deny
+            add_jobs kotlin
             build_container_image=true
             check_workflows=true
             use_current_nix=true
           elif [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-            add_jobs source_checks "${workspace_jobs[@]}"
+            git cat-file -e "${BASE_SHA}^{commit}"
+            git cat-file -e "${HEAD_SHA}^{commit}"
+            while IFS= read -r -d '' path; do
+              select_kotlin "$path"
+              case "$path" in
+                android/*|*.kt|*.kts|.github/workflows/kotlin.yml)
+                  ;;
+                *)
+                  add_jobs source_checks "${workspace_jobs[@]}"
+                  ;;
+              esac
+            done < <(git diff --name-only --no-renames -z "$BASE_SHA" "$HEAD_SHA")
           elif [[ "$HEAD_REPOSITORY" == "$GITHUB_REPOSITORY" && "$HEAD_BRANCH" == release/v* ]]; then
             # The release helper builds and verifies every package in the draft.
             echo "Release preparation defers checks to the draft release builds."
@@ -101,6 +135,7 @@ jobs:
             printf '  %q\n' "${changed_paths[@]}"
 
             for path in "${changed_paths[@]}"; do
+              select_kotlin "$path"
               case "$path" in
                 *.rs|*.ui|web/*.html|web/*.js|locales/*.pot|ast-grep/*|sgconfig.yml|Cargo.toml|*/Cargo.toml|Cargo.lock|.cargo/*|.github/workflows/checks.yml)
                   add_jobs source_checks
@@ -120,6 +155,11 @@ jobs:
               esac
 
               case "$path" in
+                android/*|*.kt|*.kts)
+                  ;;
+                packaging/linux/*)
+                  add_jobs source_checks
+                  ;;
                 Cargo.lock|Cargo.toml|*/Cargo.toml)
                   add_jobs "${workspace_jobs[@]}" cargo-deny
                   ;;
@@ -213,6 +253,14 @@ jobs:
       ref: ${{ github.event.pull_request.head.sha || github.sha }}
       package: rufin-bin
       publish: false
+
+  kotlin:
+    name: Kotlin
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.jobs), 'kotlin')
+    uses: ./.github/workflows/kotlin.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
   aur_git:
     name: AUR rufin-git
@@ -323,6 +371,9 @@ jobs:
 
       - name: Check translation template
         run: nix --accept-flake-config develop .#checks --command cargo run --locked -p xtask -- generate i18n-template --check
+
+      - name: Check Linux Cargo sources
+        run: nix --accept-flake-config develop .#checks --command cargo run --locked -p xtask -- generate flatpak-sources --check
 
       - name: Check RefCell borrows
         run: nix --accept-flake-config develop .#checks --command just _ast-grep
@@ -583,6 +634,7 @@ jobs:
     name: Required
     needs:
       - changes
+      - kotlin
       - aur_bin
       - aur_git
       - rpm

@@ -26,6 +26,8 @@ struct SavedLogins {
     lastfm_username: String,
     lastfm_api_key: String,
     librefm_username: String,
+    #[serde(default)]
+    listenbrainz_username: String,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -102,13 +104,14 @@ impl BackupOwner {
         &self,
         passphrase: Option<String>,
         scheduled: bool,
+        contents: Option<backup::BackupContents>,
     ) -> Result<tempfile::TempPath, String> {
         let stored = self.settings.load();
         if scheduled && stored.ui.backup.encrypt && passphrase.as_ref().is_none_or(|v| v.is_empty())
         {
             return Err("A password is required for encrypted backups".into());
         }
-        let contents = stored.ui.backup.contents;
+        let contents = contents.unwrap_or(stored.ui.backup.contents);
         let logins = if contents.saved_logins {
             let owner = self.clone();
             let snapshot = stored.clone();
@@ -172,14 +175,6 @@ impl BackupOwner {
         if !settings.enabled || settings.schedule.due_at(now()).is_none() {
             return Ok(());
         }
-        let directory = match settings.destination_uri.as_deref() {
-            Some(uri) => gio::File::for_uri(uri),
-            None => {
-                let path = self.default_directory();
-                fs::create_dir_all(&path).map_err(|e| e.to_string())?;
-                gio::File::for_path(path)
-            }
-        };
         let passphrase = if settings.encrypt {
             let stored = self.settings.load();
             let config_dir = self.settings.config_dir().to_path_buf();
@@ -193,9 +188,54 @@ impl BackupOwner {
         } else {
             None
         };
-        let output = self.export_now(passphrase, true).await?;
+        let output = self.export_now(passphrase, true, None).await?;
         let completed = now();
         let name = backup::backup_filename(Some(&settings.schedule.schedule_id), completed);
+        if let Some(uri) = settings
+            .destination_uri
+            .as_deref()
+            .filter(|uri| uri.starts_with("content://"))
+        {
+            let receipts_path = self.settings.config_dir().join("document-backups.json");
+            let mut receipts = document_backup_receipts(&receipts_path)?;
+            let bytes = fs::metadata(&output)
+                .map_err(|error| error.to_string())?
+                .len();
+            let document =
+                sources::create_document(uri, &name, "application/octet-stream", &output)
+                    .map_err(|error| error.to_string())?;
+            receipts.push(DocumentBackupReceipt {
+                schedule_id: settings.schedule.schedule_id.clone(),
+                destination_uri: uri.to_string(),
+                document_uri: document.uri,
+                bytes,
+            });
+            save_document_backup_receipts(&receipts_path, &receipts)?;
+            self.settings.update(|stored| {
+                if stored.ui.backup.schedule.schedule_id == settings.schedule.schedule_id {
+                    stored.ui.backup.schedule.last_successful_at = Some(completed);
+                }
+                Ok(())
+            })?;
+            return prune_document_backups(
+                &receipts_path,
+                receipts,
+                uri,
+                &settings.schedule.schedule_id,
+                settings.retention_count,
+            )
+            .map_err(|error| {
+                format!("Backup saved, but older backups could not be removed: {error}")
+            });
+        }
+        let directory = match settings.destination_uri.as_deref() {
+            Some(uri) => gio::File::for_uri(uri),
+            None => {
+                let path = self.default_directory();
+                fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+                gio::File::for_path(path)
+            }
+        };
         let destination = directory.child(&name);
         let pending = directory.child(format!(".{name}.partial"));
         let input = gio::File::for_path(&output)
@@ -335,7 +375,7 @@ impl BackupOwner {
         self.runtime.spawn_blocking(move || {
             let result = runtime.block_on(async {
                 let _lane = owner.lane.lock().await;
-                owner.export_now(passphrase, false).await
+                owner.export_now(passphrase, false, None).await
             });
             let _ = send.send_blocking(result);
         });
@@ -347,11 +387,37 @@ impl BackupOwner {
         passphrase: Option<String>,
         contents: backup::BackupContents,
     ) -> Receiver<Result<BackupPreview, String>> {
+        self.stage_input(
+            move || fs::File::open(path).map_err(|error| error.to_string()),
+            passphrase,
+            contents,
+        )
+    }
+
+    pub fn stage_document(
+        &self,
+        uri: String,
+        passphrase: Option<String>,
+        contents: backup::BackupContents,
+    ) -> Receiver<Result<BackupPreview, String>> {
+        self.stage_input(
+            move || sources::open_document_input(&uri).map_err(|error| error.to_string()),
+            passphrase,
+            contents,
+        )
+    }
+
+    fn stage_input<R: std::io::Read + Send + 'static>(
+        &self,
+        open: impl FnOnce() -> Result<R, String> + Send + 'static,
+        passphrase: Option<String>,
+        contents: backup::BackupContents,
+    ) -> Receiver<Result<BackupPreview, String>> {
         let (send, receive) = async_channel::bounded(1);
         let settings = self.settings.clone();
         self.runtime.spawn_blocking(move || {
             let result = (|| {
-                let input = fs::File::open(path).map_err(|e| e.to_string())?;
+                let input = open()?;
                 let staged = backup::stage_backup(input, passphrase.as_deref())
                     .map_err(|e| e.to_string())?;
                 let removed_sources = if contents.settings && staged.manifest.contents.settings {
@@ -368,6 +434,26 @@ impl BackupOwner {
                     removed_sources,
                 })
             })();
+            let _ = send.send_blocking(result);
+        });
+        receive
+    }
+
+    pub fn export_document(
+        &self,
+        uri: String,
+        passphrase: Option<String>,
+        contents: backup::BackupContents,
+    ) -> Receiver<Result<(), String>> {
+        let (send, receive) = async_channel::bounded(1);
+        let owner = self.clone();
+        let runtime = self.runtime.clone();
+        self.runtime.spawn_blocking(move || {
+            let result = runtime.block_on(async {
+                let _lane = owner.lane.lock().await;
+                let output = owner.export_now(passphrase, false, Some(contents)).await?;
+                sources::save_document(&uri, &output, None).map_err(|error| error.to_string())
+            });
             let _ = send.send_blocking(result);
         });
         receive
@@ -467,6 +553,7 @@ fn copy_scrobbling_logins(previous: &StoredSettings, incoming: &mut StoredSettin
     incoming.ui.lastfm_api_key = previous.ui.lastfm_api_key.clone();
     incoming.scrobbling.lastfm.username = previous.scrobbling.lastfm.username.clone();
     incoming.scrobbling.librefm.username = previous.scrobbling.librefm.username.clone();
+    incoming.scrobbling.listenbrainz.username = previous.scrobbling.listenbrainz.username.clone();
     for descriptor in scrobbling::secret_descriptors() {
         *descriptor.value_mut(&mut incoming.scrobbling) =
             descriptor.value(&previous.scrobbling).to_owned();
@@ -501,6 +588,89 @@ fn preserve_destination_settings(
     copy_scrobbling_logins(previous, incoming);
     Ok(())
 }
+#[derive(Serialize, Deserialize)]
+struct DocumentBackupReceipt {
+    schedule_id: String,
+    destination_uri: String,
+    document_uri: String,
+    bytes: u64,
+}
+
+fn document_backup_receipts(path: &std::path::Path) -> Result<Vec<DocumentBackupReceipt>, String> {
+    match fs::File::open(path) {
+        Ok(file) => serde_json::from_reader(file).map_err(|error| error.to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn save_document_backup_receipts(
+    path: &std::path::Path,
+    receipts: &[DocumentBackupReceipt],
+) -> Result<(), String> {
+    let mut file = tempfile::NamedTempFile::new_in(path.parent().unwrap())
+        .map_err(|error| error.to_string())?;
+    serde_json::to_writer(&mut file, receipts).map_err(|error| error.to_string())?;
+    file.as_file()
+        .sync_all()
+        .map_err(|error| error.to_string())?;
+    file.persist(path).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn prune_document_backups(
+    receipts_path: &std::path::Path,
+    mut receipts: Vec<DocumentBackupReceipt>,
+    directory: &str,
+    schedule_id: &str,
+    retention_count: u32,
+) -> Result<(), String> {
+    let mut offset = 0;
+    let mut owned = Vec::new();
+    let mut present = std::collections::BTreeSet::new();
+    let completed = receipts
+        .iter()
+        .filter(|receipt| {
+            receipt.schedule_id == schedule_id && receipt.destination_uri == directory
+        })
+        .map(|receipt| (receipt.document_uri.as_str(), receipt.bytes))
+        .collect::<std::collections::HashMap<_, _>>();
+    loop {
+        let page = sources::list_documents(directory, offset).map_err(|error| error.to_string())?;
+        for entry in page.entries {
+            let Some(&bytes) = completed.get(entry.uri.as_str()) else {
+                continue;
+            };
+            present.insert(entry.uri.clone());
+            if entry.directory {
+                continue;
+            }
+            // A failed creation has no receipt. A known short document cannot replace a completed backup.
+            if entry.size.is_some_and(|size| size != bytes) {
+                continue;
+            }
+            if let Some(timestamp) = backup::scheduled_backup_timestamp(&entry.name, schedule_id) {
+                owned.push((timestamp, entry.uri));
+            }
+        }
+        let Some(next) = page.next else {
+            break;
+        };
+        offset = next;
+    }
+    owned.sort_by(|a, b| b.0.cmp(&a.0));
+    for (_, uri) in owned.into_iter().skip(retention_count.max(1) as usize) {
+        sources::delete_document(&uri).map_err(|error| error.to_string())?;
+        present.remove(&uri);
+    }
+    receipts.retain(|receipt| {
+        receipt.schedule_id != schedule_id
+            || receipt.destination_uri != directory
+            || present.contains(&receipt.document_uri)
+    });
+    save_document_backup_receipts(receipts_path, &receipts)
+}
+
 fn prune_scheduled_backups(
     directory: &gio::File,
     schedule_id: &str,
@@ -569,6 +739,7 @@ fn saved_logins(stored: &StoredSettings, secrets: &dyn SecretStore) -> Result<Sa
         lastfm_username: stored.scrobbling.lastfm.username.clone(),
         lastfm_api_key: stored.ui.lastfm_api_key.clone(),
         librefm_username: stored.scrobbling.librefm.username.clone(),
+        listenbrainz_username: stored.scrobbling.listenbrainz.username.clone(),
         ..SavedLogins::default()
     };
     for source in stored.sources.connections() {
@@ -611,6 +782,7 @@ fn restore_logins(
     incoming.scrobbling.lastfm.username = logins.lastfm_username;
     incoming.ui.lastfm_api_key = logins.lastfm_api_key;
     incoming.scrobbling.librefm.username = logins.librefm_username;
+    incoming.scrobbling.listenbrainz.username = logins.listenbrainz_username;
     for (source_id, value) in logins.sources {
         let Some(source) = incoming
             .sources

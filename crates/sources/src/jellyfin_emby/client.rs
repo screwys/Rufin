@@ -585,6 +585,12 @@ impl JellyfinEmbySource {
             },
         )?;
         url.query_pairs_mut().append_pair("userId", &self.user_id);
+        tracing::info!(
+            service = self.kind.source_kind(),
+            favorite,
+            method = if favorite { "POST" } else { "DELETE" },
+            "Sending favorite request"
+        );
         if favorite {
             self.send_unit(self.client.post(url)).await
         } else {
@@ -597,6 +603,7 @@ impl JellyfinEmbySource {
         if self.kind == ServerKind::Emby {
             return Ok(());
         }
+        tracing::info!("Sending Jellyfin user rating request");
         let mut url = endpoint(
             &self.base_url,
             &format!("UserItems/{}/UserData", raw_item_id(object_id)),
@@ -747,6 +754,10 @@ impl JellyfinEmbySource {
             SourceReportPhase::QualifiedPlay => return Ok(()),
             SourceReportPhase::Ended => "Sessions/Playing/Stopped",
         };
+        if report.phase != SourceReportPhase::Progress {
+            tracing::info!(service = self.kind.source_kind(), run = report.run.get(),
+                phase = ?report.phase, "Sending playback report");
+        }
         let url = endpoint(&self.base_url, path)?;
         let mut body =
             serde_json::to_value(PlaybackReportDto::from_report(track_object_id, report))?;
@@ -1817,6 +1828,7 @@ mod tests {
                         source: source_key,
                         collection: None,
                         folder: None,
+                        downloaded_only: false,
                         favorites_only: false
                     },
                     "",

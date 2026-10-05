@@ -1267,7 +1267,7 @@ fn general_page(
     cast_network_row.add_suffix(&cast_network_dropdown);
     cast_network_row.set_activatable_widget(Some(&cast_network_dropdown));
 
-    let secret_storage_titles = [tr("Legacy"), tr("Secure storage")];
+    let secret_storage_titles = [tr("Legacy"), tr("System keyring")];
     let secret_storage_refs = secret_storage_titles
         .iter()
         .map(String::as_str)
@@ -1598,20 +1598,7 @@ fn sidebar_item_row(
         visible_shell
             .settings
             .update_app_settings("sidebar setting", |settings| {
-                let Some(stored) = settings
-                    .sidebar
-                    .route_items
-                    .iter_mut()
-                    .find(|stored| stored.item == entry.item)
-                else {
-                    return false;
-                };
-                if stored.visible == is_visible {
-                    return false;
-                }
-                stored.visible = is_visible;
-                settings.sidebar.sanitize();
-                true
+                settings.sidebar.set_route_visible(entry.item, is_visible)
             });
         (visible_shell.effects)(crate::Effect::SidebarChanged);
         if let Some(expander) = visible_expander.upgrade() {
@@ -1644,16 +1631,9 @@ fn sidebar_item_row(
         let changed = drop_shell
             .settings
             .update_app_settings("sidebar setting", |settings| {
-                let changed = reorder_sidebar_item_settings(
-                    &mut settings.sidebar.route_items,
-                    source_item,
-                    entry.item,
-                    after,
-                );
-                if changed {
-                    settings.sidebar.sanitize();
-                }
-                changed
+                settings
+                    .sidebar
+                    .reorder_route(source_item, entry.item, after)
             })
             .is_some();
         if changed {
@@ -1682,51 +1662,9 @@ fn move_sidebar_item(shell: &Rc<Preferences>, item: SidebarRouteItem, delta: isi
     shell
         .settings
         .update_app_settings("sidebar setting", |settings| {
-            let Some(index) = settings
-                .sidebar
-                .route_items
-                .iter()
-                .position(|entry| entry.item == item)
-            else {
-                return false;
-            };
-            let new_index = if delta < 0 {
-                index.saturating_sub(1)
-            } else {
-                (index + 1).min(settings.sidebar.route_items.len().saturating_sub(1))
-            };
-            if index == new_index {
-                return false;
-            }
-            settings.sidebar.route_items.swap(index, new_index);
-            settings.sidebar.sanitize();
-            true
+            settings.sidebar.move_route(item, delta)
         });
     (shell.effects)(crate::Effect::SidebarChanged);
-}
-fn reorder_sidebar_item_settings(
-    items: &mut Vec<SidebarRouteItemSettings>,
-    source: SidebarRouteItem,
-    target: SidebarRouteItem,
-    after: bool,
-) -> bool {
-    if source == target {
-        return false;
-    }
-    let before = items.clone();
-    let Some(source_index) = items.iter().position(|entry| entry.item == source) else {
-        return false;
-    };
-    let entry = items.remove(source_index);
-    let Some(mut target_index) = items.iter().position(|entry| entry.item == target) else {
-        items.insert(source_index.min(items.len()), entry);
-        return false;
-    };
-    if after {
-        target_index += 1;
-    }
-    items.insert(target_index.min(items.len()), entry);
-    *items != before
 }
 fn sidebar_route_item_subtitle(entry: &SidebarRouteItemSettings, position: usize) -> String {
     let state = visibility_position_subtitle(entry.visible, position);

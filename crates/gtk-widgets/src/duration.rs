@@ -1,21 +1,4 @@
-pub fn format_duration(seconds: u32) -> String {
-    let minutes = seconds / 60;
-    let seconds = seconds % 60;
-    format!("{minutes}:{seconds:02}")
-}
-
-pub fn format_duration_units(seconds: u32) -> String {
-    let hours = seconds / 3_600;
-    let minutes = (seconds % 3_600) / 60;
-    let seconds = seconds % 60;
-    if hours > 0 {
-        return format!("{hours}h {minutes}m {seconds}s");
-    }
-    if minutes > 0 {
-        return format!("{minutes}m {seconds}s");
-    }
-    format!("{seconds}s")
-}
+pub use rufin_core::settings::presentation::{format_duration, format_duration_units};
 
 #[cfg(test)]
 mod tests {

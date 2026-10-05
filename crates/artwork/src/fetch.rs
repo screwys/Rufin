@@ -107,7 +107,7 @@ impl FetchContext {
                     sources::LocalImageRef::File { path, .. }
                     | sources::LocalImageRef::Embedded { path, .. } => path,
                 };
-                let image = if !["http://", "https://", "smb://"]
+                let image = if !["http://", "https://", "smb://", "rufin-document://"]
                     .iter()
                     .any(|prefix| path.starts_with(prefix))
                 {

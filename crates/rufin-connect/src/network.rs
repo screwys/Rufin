@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
-    sync::{Arc, Weak},
+    sync::{Arc, OnceLock, Weak},
     time::Duration,
 };
 
@@ -27,15 +27,23 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     media::{MediaStore, MemberBlobs},
     pairing,
-    profile::{DocumentVersion, ProfileStore},
+    profile::{DocumentVersion, ProfileStore, SyncStream},
 };
 
 pub(crate) const RPC_PROTOCOL: &[u8] = b"rufin/connect/rpc/1";
 pub(crate) const PAIR_PROTOCOL: &[u8] = b"rufin/connect/pair/2";
+const INVITE_PROTOCOL: &[u8] = b"rufin/connect/invite/1";
 const SYNC_PROTOCOL: &[u8] = b"rufin/connect/sync/1";
 const MAX_FRAME: usize = 16 * 1024 * 1024;
 const SYNC_PAGE: usize = 64;
 const PROFILE_CLOSED: &[u8] = b"profile closed";
+
+static DNS_RESOLVER: OnceLock<fn() -> iroh::dns::DnsResolver> = OnceLock::new();
+
+/// Supply the platform's DNS resolver before creating Connect endpoints.
+pub fn install_dns_resolver(resolver: fn() -> iroh::dns::DnsResolver) {
+    let _ = DNS_RESOLVER.set(resolver);
+}
 
 // Device names are advertised nearby, not in the public address directory.
 #[derive(Debug)]
@@ -158,6 +166,7 @@ pub enum NetworkEvent {
         peer: String,
         name: String,
         emoji: [String; 7],
+        joining: bool,
     },
     PairingVerified {
         session: String,
@@ -187,6 +196,13 @@ pub enum NetworkEvent {
         profile: String,
         peer: String,
         active: bool,
+    },
+    CacheChanged {
+        profile: String,
+    },
+    Reachable {
+        profile: String,
+        peer: String,
     },
     Unavailable {
         profile: String,
@@ -231,6 +247,8 @@ struct SyncRequest {
     profile: String,
     after: i64,
     setup: bool,
+    #[serde(default)]
+    cache: bool,
     roster: Vec<u8>,
     addresses: Vec<EndpointAddr>,
 }
@@ -242,6 +260,8 @@ struct SyncPage {
     addresses: Vec<EndpointAddr>,
     #[serde(default)]
     acknowledgements: bool,
+    #[serde(default)]
+    cache_sync: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -285,6 +305,9 @@ impl ConnectNetwork {
             .secret_key(credentials.clone())
             .address_lookup(addresses.clone())
             .relay_mode(relay.clone());
+        if let Some(resolver) = DNS_RESOLVER.get() {
+            builder = builder.dns_resolver(resolver());
+        }
         let mut discovery_error = None;
         let discoveries = if config.nearby {
             match MdnsAddressLookup::builder()
@@ -310,14 +333,19 @@ impl ConnectNetwork {
             builder = builder.user_data_for_address_lookup(name);
         }
         let endpoint = builder.bind().await?;
+        let dns = endpoint.dns_resolver()?.clone();
         endpoint.address_lookup()?.add(CanonicalRelays(
-            PkarrResolver::n0_dns().build(endpoint.tls_config().clone()),
+            PkarrResolver::n0_dns()
+                .dns_resolver(dns.clone())
+                .build(endpoint.tls_config().clone()),
         ));
-        endpoint
-            .address_lookup()?
-            .add(CanonicalRelays(DnsAddressLookup::n0_dns().build()));
+        endpoint.address_lookup()?.add(CanonicalRelays(
+            DnsAddressLookup::n0_dns().dns_resolver(dns.clone()).build(),
+        ));
         endpoint.address_lookup()?.add(PublicAddressPublisher(
-            PkarrPublisher::n0_dns().build(credentials.clone(), endpoint.tls_config().clone()),
+            PkarrPublisher::n0_dns()
+                .dns_resolver(dns)
+                .build(credentials.clone(), endpoint.tls_config().clone()),
         ));
         let media = MediaStore::open(&config.media_directory, endpoint.clone()).await?;
         let (events, receiver) = mpsc::channel(64);
@@ -342,7 +370,8 @@ impl ConnectNetwork {
         let weak = Arc::downgrade(&network);
         let router = Router::builder(network.endpoint.clone())
             .accept(RPC_PROTOCOL, RpcProtocol(weak.clone()))
-            .accept(PAIR_PROTOCOL, pairing::PairProtocol(weak.clone()))
+            .accept(PAIR_PROTOCOL, pairing::PairProtocol(weak.clone(), false))
+            .accept(INVITE_PROTOCOL, pairing::PairProtocol(weak.clone(), true))
             .accept(SYNC_PROTOCOL, SyncProtocol(weak.clone()))
             .accept(
                 iroh_blobs::ALPN,
@@ -739,13 +768,25 @@ impl ConnectNetwork {
             self.profile.read().await.is_none(),
             "Leave the current Connect profile before joining another"
         );
+        self.start_pairing(invitation, true).await
+    }
+    pub async fn invite(self: &Arc<Self>, peer: &str) -> Result<()> {
+        self.current_profile().await?;
+        self.start_pairing(peer, false).await
+    }
+    async fn start_pairing(self: &Arc<Self>, invitation: &str, joining: bool) -> Result<()> {
         let peer: EndpointId = self.remember_peer(invitation).await?.parse()?;
         self.cancel_pairing().await;
         let network = self.clone();
         *self.pairing_task.lock().await = Some(tokio::spawn(async move {
-            match network.endpoint.connect(peer, PAIR_PROTOCOL).await {
+            let protocol = if joining {
+                PAIR_PROTOCOL
+            } else {
+                INVITE_PROTOCOL
+            };
+            match network.endpoint.connect(peer, protocol).await {
                 Ok(connection) => {
-                    let _ = pairing::run(network, connection, true).await;
+                    let _ = pairing::run(network, connection, joining, true).await;
                 }
                 Err(error) => {
                     let _ = network
@@ -780,6 +821,7 @@ impl ConnectNetwork {
     }
     pub async fn request(&self, peer: &str, body: Vec<u8>) -> Result<Vec<u8>> {
         let peer = peer.parse()?;
+        let profile = self.current_profile().await?;
         self.authorize(peer).await?;
         let conn = tokio::time::timeout(
             Duration::from_secs(30),
@@ -791,11 +833,19 @@ impl ConnectNetwork {
         write_frame(&mut send, &body).await?;
         send.finish()?;
         let response: Result<Vec<u8>, String> = read_frame(&mut recv).await?;
+        let _ = self
+            .events
+            .send(NetworkEvent::Reachable {
+                profile,
+                peer: peer.to_string(),
+            })
+            .await;
         conn.close(0u32.into(), b"complete");
         response.map_err(anyhow::Error::msg)
     }
-    pub async fn test_connection(&self, peer: &str, body: Vec<u8>) -> Result<String> {
+    pub async fn test_connection(&self, peer: &str, body: Vec<u8>) -> Result<(String, Vec<u8>)> {
         let peer = peer.parse()?;
+        let profile = self.current_profile().await?;
         self.authorize(peer).await?;
         tokio::time::timeout(Duration::from_secs(15), async {
             let conn = self.endpoint.connect(peer, RPC_PROTOCOL).await?;
@@ -803,7 +853,14 @@ impl ConnectNetwork {
             write_frame(&mut send, &body).await?;
             send.finish()?;
             let response: Result<Vec<u8>, String> = read_frame(&mut recv).await?;
-            response.map_err(anyhow::Error::msg)?;
+            let _ = self
+                .events
+                .send(NetworkEvent::Reachable {
+                    profile,
+                    peer: peer.to_string(),
+                })
+                .await;
+            let response = response.map_err(anyhow::Error::msg)?;
             let route = conn
                 .paths()
                 .iter()
@@ -830,7 +887,7 @@ impl ConnectNetwork {
                 .unwrap_or("Waiting for device")
                 .to_owned();
             conn.close(0u32.into(), b"connection test complete");
-            Ok(route)
+            Ok((route, response))
         })
         .await?
     }
@@ -901,19 +958,25 @@ impl ConnectNetwork {
             return Ok(());
         };
         let mut receiving = false;
+        let mut cache_supported = false;
         loop {
             // Check settings before every catalog page, even during initial catch-up.
-            for setup in [true, false] {
+            let mut more = false;
+            for stream in [SyncStream::Settings, SyncStream::Catalog, SyncStream::Cache] {
+                if stream == SyncStream::Cache && !cache_supported {
+                    continue;
+                }
                 loop {
                     self.authorize(peer).await?;
-                    let after = documents.sync_cursor(&peer.to_string(), setup).await?;
+                    let after = documents.sync_cursor_in(&peer.to_string(), stream).await?;
                     let (mut send, mut recv) = conn.open_bi().await?;
                     write_frame(
                         &mut send,
                         &SyncRequest {
                             profile: profile.id.clone(),
                             after,
-                            setup,
+                            setup: stream == SyncStream::Settings,
+                            cache: stream == SyncStream::Cache,
                             roster: self.roster(&profile.id).await?,
                             addresses: self.peer_addresses().await?,
                         },
@@ -923,6 +986,7 @@ impl ConnectNetwork {
                     let Some(page) = page else {
                         return Ok(());
                     };
+                    cache_supported = page.cache_sync;
                     if !self.merge_roster(&profile.id, &page.roster).await? {
                         return Ok(());
                     }
@@ -948,7 +1012,16 @@ impl ConnectNetwork {
                         ensure!(read as u64 == length, "Incomplete profile update");
                         updates.push(update);
                     }
-                    if documents.import_updates(&updates).await? && !receiving {
+                    let changed = documents.import_updates(&updates).await?;
+                    if changed && stream == SyncStream::Cache {
+                        let _ = self
+                            .events
+                            .send(NetworkEvent::CacheChanged {
+                                profile: profile.id.clone(),
+                            })
+                            .await;
+                    }
+                    if changed && stream != SyncStream::Cache && !receiving {
                         receiving = true;
                         let _ = self
                             .events
@@ -985,25 +1058,26 @@ impl ConnectNetwork {
                     let _: bool = read_frame(&mut recv).await?;
                     if let Some(last) = page.versions.last() {
                         documents
-                            .acknowledge_sync(&peer.to_string(), setup, last.revision)
+                            .acknowledge_sync_in(&peer.to_string(), stream, last.revision)
                             .await?;
                     }
-                    if page.versions.len() < SYNC_PAGE
-                        && !page
-                            .versions
-                            .last()
-                            .is_some_and(|version| version.name.starts_with("playlist_artwork:"))
-                    {
-                        if !setup {
-                            return Ok(());
-                        }
+                    let complete = page.versions.len() < SYNC_PAGE
+                        && !page.versions.last().is_some_and(|version| {
+                            version.name.starts_with("playlist_artwork:")
+                                || version.name.starts_with("cache_artwork:")
+                        });
+                    if complete {
                         break;
                     }
-                    if !setup {
+                    if stream != SyncStream::Settings {
+                        more = true;
                         break;
                     }
                     tokio::task::yield_now().await;
                 }
+            }
+            if !more {
+                return Ok(());
             }
             tokio::task::yield_now().await;
         }
@@ -1085,6 +1159,7 @@ impl ProtocolHandler for SyncProtocol {
                             roster,
                             addresses: Vec::new(),
                             acknowledgements: true,
+                            cache_sync: true,
                         }),
                     )
                     .await?;
@@ -1106,7 +1181,15 @@ impl ProtocolHandler for SyncProtocol {
                     return Ok(());
                 };
                 let versions = documents
-                    .changes_in(request.after, SYNC_PAGE, request.setup)
+                    .changes_in_stream(
+                        request.after,
+                        SYNC_PAGE,
+                        if request.cache {
+                            SyncStream::Cache
+                        } else {
+                            request.setup.into()
+                        },
+                    )
                     .await?;
                 let names = versions.iter().map(|v| v.name.clone()).collect::<Vec<_>>();
                 write_frame(
@@ -1116,6 +1199,7 @@ impl ProtocolHandler for SyncProtocol {
                         roster: network.roster(&profile.id).await?,
                         addresses: network.peer_addresses().await?,
                         acknowledgements: true,
+                        cache_sync: true,
                     }),
                 )
                 .await?;
@@ -1189,6 +1273,13 @@ impl ProtocolHandler for RpcProtocol {
             let (mut send, mut recv) = conn.accept_bi().await?;
             let body = read_frame(&mut recv).await?;
             network.authorize(peer).await?;
+            let _ = network
+                .events
+                .send(NetworkEvent::Reachable {
+                    profile: profile.clone(),
+                    peer: peer.to_string(),
+                })
+                .await;
             let (reply, answer) = oneshot::channel();
             network
                 .events

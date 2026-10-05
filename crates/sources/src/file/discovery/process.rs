@@ -1,6 +1,7 @@
 //! Persistent discovery subprocess. Only URIs and extracted facts cross this boundary.
 
 use std::io::{self, BufRead, BufReader, Read, Write};
+#[cfg(not(target_os = "android"))]
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 use serde::{Deserialize, Serialize};
@@ -31,12 +32,14 @@ pub(super) enum Reply {
     NotFound,
 }
 
+#[cfg(not(target_os = "android"))]
 pub(super) struct Client {
     child: Child,
     input: ChildStdin,
     output: BufReader<ChildStdout>,
 }
 
+#[cfg(not(target_os = "android"))]
 impl Client {
     pub(super) fn start(timeout_seconds: u64) -> io::Result<Self> {
         // Keep using the running build if an update replaced its executable on disk.
@@ -118,6 +121,7 @@ impl Client {
     }
 }
 
+#[cfg(not(target_os = "android"))]
 impl Drop for Client {
     fn drop(&mut self) {
         let _ = self.child.kill();
@@ -127,9 +131,7 @@ impl Drop for Client {
 
 /// Run Rufin's private discovery mode before starting the application runtime.
 pub fn run_worker(timeout_seconds: u64) -> io::Result<()> {
-    ensure_gstreamer_initialized().map_err(io::Error::other)?;
-    let discoverer =
-        Discoverer::new(gst::ClockTime::from_seconds(timeout_seconds)).map_err(io::Error::other)?;
+    let worker = DiscoveryWorker::new(timeout_seconds)?;
     let mut input = io::stdin().lock();
     let mut output = io::stdout().lock();
     let mut line = String::new();
@@ -138,8 +140,34 @@ pub fn run_worker(timeout_seconds: u64) -> io::Result<()> {
         if input.read_line(&mut line)? == 0 {
             return Ok(());
         }
-        let request: Request<'_> = serde_json::from_str(&line)?;
-        let info = discoverer.discover_uri(request.uri).ok();
+        worker.write_response(&line, &mut output)?;
+        output.flush()?;
+    }
+}
+
+/// Shared extraction used inside the desktop worker and Android discovery service.
+pub struct DiscoveryWorker {
+    discoverer: Discoverer,
+}
+
+impl DiscoveryWorker {
+    pub fn new(timeout_seconds: u64) -> io::Result<Self> {
+        ensure_gstreamer_initialized().map_err(io::Error::other)?;
+        Ok(Self {
+            discoverer: Discoverer::new(gst::ClockTime::from_seconds(timeout_seconds))
+                .map_err(io::Error::other)?,
+        })
+    }
+
+    pub fn request(&self, request: &str) -> io::Result<Vec<u8>> {
+        let mut output = Vec::new();
+        self.write_response(request, &mut output)?;
+        Ok(output)
+    }
+
+    fn write_response(&self, request: &str, mut output: impl Write) -> io::Result<()> {
+        let request: Request<'_> = serde_json::from_str(request)?;
+        let info = self.discoverer.discover_uri(request.uri).ok();
         let response = match (info, request.picture_index) {
             (Some(info), _) if info.result() == DiscovererResult::Timeout => Reply::TimedOut,
             (Some(info), Some(index)) => match image_from_info(&info, index) {
@@ -162,7 +190,67 @@ pub fn run_worker(timeout_seconds: u64) -> io::Result<()> {
         if let Reply::Image { bytes, .. } = response {
             output.write_all(&bytes)?;
         }
-        output.flush()?;
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "android")]
+pub trait DiscoverySession: Send {
+    fn request(&mut self, request: &str) -> io::Result<Vec<u8>>;
+}
+
+#[cfg(target_os = "android")]
+pub trait DiscoveryHost: Send + Sync {
+    fn start(&self, timeout_seconds: u64) -> io::Result<Box<dyn DiscoverySession>>;
+}
+
+#[cfg(target_os = "android")]
+static HOST: std::sync::OnceLock<std::sync::Arc<dyn DiscoveryHost>> = std::sync::OnceLock::new();
+
+#[cfg(target_os = "android")]
+pub fn install_discovery_host(host: std::sync::Arc<dyn DiscoveryHost>) {
+    let _ = HOST.set(host);
+}
+
+#[cfg(target_os = "android")]
+pub(super) struct Client {
+    session: Box<dyn DiscoverySession>,
+}
+
+#[cfg(target_os = "android")]
+impl Client {
+    pub(super) fn start(timeout_seconds: u64) -> io::Result<Self> {
+        let host = HOST
+            .get()
+            .ok_or_else(|| io::Error::other("Android discovery host is not initialized"))?;
+        Ok(Self {
+            session: host.start(timeout_seconds)?,
+        })
+    }
+
+    pub(super) fn request(&mut self, uri: &str, picture_index: Option<u32>) -> io::Result<Reply> {
+        let request = serde_json::to_string(&Request { uri, picture_index })?;
+        let response = self.session.request(&request)?;
+        let mut response = BufReader::new(response.as_slice());
+        let mut line = String::new();
+        if response.read_line(&mut line)? == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Discovery service exited before returning a result",
+            ));
+        }
+        let mut reply: Reply = serde_json::from_str(&line)?;
+        if matches!(reply, Reply::TimedOut) {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Media discovery timed out",
+            ));
+        }
+        if let Reply::Image { length, bytes, .. } = &mut reply {
+            bytes.resize(*length, 0);
+            response.read_exact(bytes)?;
+        }
+        Ok(reply)
     }
 }
 

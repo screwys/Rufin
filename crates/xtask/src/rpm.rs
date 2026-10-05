@@ -147,6 +147,48 @@ fn generate_srpm_inner(
             .arg(source_ref),
         "git archive",
     )?;
+    let staged_vendor = stage.join(vendor_name);
+    run(
+        Command::new("tar")
+            .args(["-xf"])
+            .arg(&raw_source)
+            .args(["-C"])
+            .arg(temp),
+        "tar",
+    )?;
+    let (manifest, lock) = crate::generate::linux_workspace(&source_tree)?;
+    fs::write(source_tree.join("Cargo.toml"), manifest)?;
+    fs::write(source_tree.join("Cargo.lock"), lock)?;
+    let timestamp_output = Command::new("git")
+        .current_dir(root)
+        .args([
+            "show",
+            "-s",
+            "--format=%ct",
+            &format!("{source_ref}^{{commit}}"),
+        ])
+        .output()?;
+    if !timestamp_output.status.success() {
+        return Err(format!("could not read the commit timestamp for {source_ref}").into());
+    }
+    let timestamp = String::from_utf8(timestamp_output.stdout)?;
+    run(
+        Command::new("tar")
+            .args([
+                "--sort=name",
+                &format!("--mtime=@{}", timestamp.trim()),
+                "--owner=0",
+                "--group=0",
+                "--numeric-owner",
+                "--format=gnu",
+                "-cf",
+            ])
+            .arg(&raw_source)
+            .args(["-C"])
+            .arg(temp)
+            .arg(format!("Rufin-{version}")),
+        "tar",
+    )?;
     run(
         Command::new("xz")
             .args(["--check=crc64", "--force", "--keep", "-9", "--threads=0"])
@@ -157,15 +199,6 @@ fn generate_srpm_inner(
     fs::rename(raw_source.with_extension("tar.xz"), &staged_source)?;
     set_archive_permissions(&staged_source)?;
 
-    let staged_vendor = stage.join(vendor_name);
-    run(
-        Command::new("tar")
-            .args(["-xf"])
-            .arg(&raw_source)
-            .args(["-C"])
-            .arg(temp),
-        "tar",
-    )?;
     let vendor_config = Command::new("cargo")
         .current_dir(&source_tree)
         .args(["vendor", "--locked", "--versioned-dirs", "cargo-vendor"])
@@ -182,19 +215,6 @@ fn generate_srpm_inner(
     #[cfg(unix)]
     clear_rust_source_executable_bits(&source_tree.join("cargo-vendor"))?;
 
-    let timestamp_output = Command::new("git")
-        .current_dir(root)
-        .args([
-            "show",
-            "-s",
-            "--format=%ct",
-            &format!("{source_ref}^{{commit}}"),
-        ])
-        .output()?;
-    if !timestamp_output.status.success() {
-        return Err(format!("could not read the commit timestamp for {source_ref}").into());
-    }
-    let timestamp = String::from_utf8(timestamp_output.stdout)?;
     run(
         Command::new("tar")
             .args([

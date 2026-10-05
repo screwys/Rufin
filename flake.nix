@@ -28,6 +28,12 @@
           commonArgs = {
             pname = "rufin";
             version = workspaceManifest.workspace.package.version;
+            cargoLock = ./packaging/linux/Cargo.lock;
+
+            postUnpack = ''
+              cp ${./packaging/linux/Cargo.toml} "$sourceRoot/Cargo.toml"
+              cp ${./packaging/linux/Cargo.lock} "$sourceRoot/Cargo.lock"
+            '';
 
             src = lib.fileset.toSource {
               root = ./.;

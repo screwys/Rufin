@@ -1,7 +1,9 @@
 use crate::Preferences;
 use adw::prelude::*;
 use gtk_widgets::popup::present_light_dismiss_dialog;
-use rufin_core::connect::{Action, Control, Encoding, Status, portable::Destination};
+use rufin_core::connect::{
+    Action, ActionError, Confirmation, Control, Encoding, Status, portable::Destination,
+};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -12,17 +14,21 @@ pub fn install(shell: &Rc<Preferences>) {
     let weak = Rc::downgrade(shell);
     let pairing = gtk::glib::spawn_future_local(async move {
         let mut previous = None;
+        let mut setting_up =
+            updates.borrow().settings.setup_pending || updates.borrow().settings.adopting;
         loop {
-            let session = updates
-                .borrow_and_update()
+            let state = updates.borrow_and_update().clone();
+            let session = state
                 .pairing
                 .as_ref()
                 .map(|pairing| pairing.session.clone());
-            if session.is_some() && session != previous {
+            let setup = state.connecting || state.settings.setup_pending || state.settings.adopting;
+            if (session.is_some() && session != previous) || (setup && !setting_up) {
                 let Some(shell) = weak.upgrade() else { return };
                 present(&shell);
             }
             previous = session;
+            setting_up = setup;
             if updates.changed().await.is_err() {
                 return;
             }
@@ -163,8 +169,16 @@ fn run(shell: &Rc<Preferences>, action: Action) {
 fn run_with_feedback(shell: &Rc<Preferences>, action: Action, button: Option<&gtk::Button>) {
     let button = button.map(|button| button.downgrade());
     let testing_connection = matches!(action, Action::TestConnection { .. });
-    let pending_import =
-        matches!(action, Action::Import { replace: false, .. }).then(|| action.clone());
+    let pending_replace = matches!(
+        action,
+        Action::Import { replace: false, .. }
+            | Action::Pair {
+                replace: false,
+                approve: true,
+                ..
+            }
+    )
+    .then(|| action.clone());
     let owner = shell.products.connect.clone();
     let result = shell
         .products
@@ -174,7 +188,7 @@ fn run_with_feedback(shell: &Rc<Preferences>, action: Action, button: Option<&gt
     gtk::glib::spawn_future_local(async move {
         let result = result
             .await
-            .map_err(|error| error.to_string())
+            .map_err(|error| ActionError::Failed(error.to_string()))
             .and_then(|result| result);
         if result.is_ok()
             && let Some(button) = button.and_then(|button| button.upgrade())
@@ -184,9 +198,14 @@ fn run_with_feedback(shell: &Rc<Preferences>, action: Action, button: Option<&gt
         if let Err(error) = result
             && let Some(shell) = weak.upgrade()
         {
-            if let Some(mut action) = pending_import
-                && error
-                    == "Connecting an existing profile will remove all data in this device, do you really want to continue?"
+            if let Some(mut action) = pending_replace
+                && matches!(
+                    error,
+                    ActionError::ConfirmationRequired {
+                        confirmation: Confirmation::ReplaceProfile,
+                        ..
+                    }
+                )
             {
                 let resource = crate::ui_resource::CONNECT_COMPONENTS_RESOURCE;
                 let builder = gtk_widgets::ui_resource::builder(resource);
@@ -199,7 +218,9 @@ fn run_with_feedback(shell: &Rc<Preferences>, action: Action, button: Option<&gt
                     .map(|dialog| dialog.upcast::<gtk::Widget>())
                     .unwrap_or_else(|| shell.window.clone().upcast());
                 if dialog.choose_future(Some(&parent)).await == "join" {
-                    if let Action::Import { replace, .. } = &mut action {
+                    if let Action::Import { replace, .. } | Action::Pair { replace, .. } =
+                        &mut action
+                    {
                         *replace = true;
                     }
                     run(&shell, action);
@@ -211,7 +232,7 @@ fn run_with_feedback(shell: &Rc<Preferences>, action: Action, button: Option<&gt
                 if testing_connection {
                     localization::tr("Connection test has failed")
                 } else {
-                    error
+                    error.to_string()
                 },
             );
         }
@@ -364,6 +385,7 @@ fn present(shell: &Rc<Preferences>) {
         feedback_label: gtk::Label, connection_error: adw::Banner,
         device_name: adw::EntryRow, media_status: gtk::Label,
         devices: adw::PreferencesGroup, nearby_devices: adw::PreferencesGroup,
+        no_nearby_devices: adw::ActionRow, verification: adw::PreferencesGroup,
         pair_name: gtk::Label, emoji: gtk::Label,
         peer: adw::EntryRow, nearby: adw::SwitchRow, relay: adw::EntryRow,
         relay_enabled: gtk::Switch,
@@ -374,7 +396,7 @@ fn present(shell: &Rc<Preferences>) {
         file: adw::EntryRow,
         folders: adw::PreferencesGroup,
         create: gtk::Button, copy_invitation: gtk::Button, join: gtk::Button,
-        approve: gtk::Button, reject: gtk::Button, refresh: gtk::Button,
+        approve: gtk::Button, reject: gtk::Button, refresh: gtk::Button, discover: gtk::Button,
         cancel_pairing: gtk::Button,
         import: gtk::Button, save_storage: gtk::Button, browse_file: gtk::Button,
 
@@ -382,6 +404,7 @@ fn present(shell: &Rc<Preferences>) {
         leave: gtk::Button, file_chooser: gtk::FileDialog,
         folder_chooser: gtk::FileDialog,
     });
+    let nearby_actions = Rc::new(RefCell::new(Vec::<(gtk::Button, gtk::Button)>::new()));
     *shell.state.connect_feedback.borrow_mut() = Some(
         gtk_widgets::feedback::ControlFeedbackState::new(&feedback_label, shell.settings.clone()),
     );
@@ -516,6 +539,10 @@ fn present(shell: &Rc<Preferences>) {
         let leave = leave.downgrade();
         let pairing = pairing.downgrade();
         let nearby_devices = nearby_devices.downgrade();
+        let no_nearby_devices = no_nearby_devices.downgrade();
+        let nearby_actions = nearby_actions.clone();
+        let access_description = verification.description();
+        let verification = verification.downgrade();
         let import = import.downgrade();
         let save_storage = save_storage.downgrade();
         let approve = approve.downgrade();
@@ -528,6 +555,7 @@ fn present(shell: &Rc<Preferences>) {
         let connecting_devices = membership_status_text.text();
         let approval_status = approval_status.downgrade();
         let title = page_title.downgrade();
+        let dialog = connect_dialog.downgrade();
         Rc::new(move || {
             let (Some(shell), Some(choice), Some(method)) =
                 (weak.upgrade(), choose_join.upgrade(), join_method.upgrade())
@@ -540,6 +568,9 @@ fn present(shell: &Rc<Preferences>) {
             let setup = state.settings.setup_pending;
             let joining = choice.is_active() && !established;
             let importing = joining && method.selected() == 1;
+            if let Some(dialog) = dialog.upgrade() {
+                dialog.set_can_close(!state.connecting && !setup && !state.settings.adopting);
+            }
             if let Some(title) = title.upgrade() {
                 title.set_subtitle(if (joining || setup) && !busy {
                     &state.profile_status
@@ -562,10 +593,7 @@ fn present(shell: &Rc<Preferences>) {
                 (&file_section, (profile_controls || importing) && !busy),
                 (&verify_section, state.pairing.is_some()),
                 (&connecting_section, state.connecting),
-                (
-                    &network_section,
-                    !busy && (profile_controls || (joining && !importing)),
-                ),
+                (&network_section, !busy && !importing),
                 (&media_section, profile_controls),
                 (
                     &devices_section,
@@ -580,15 +608,32 @@ fn present(shell: &Rc<Preferences>) {
                 group.set_visible(!importing);
             }
             if let Some(group) = nearby_devices.upgrade() {
-                group.set_visible(
-                    joining
-                        && !busy
-                        && !importing
-                        && state.devices.iter().any(|device| !device.enrolled),
+                group.set_visible(!busy && !setup && !importing && state.settings.nearby);
+            }
+            if let Some(row) = no_nearby_devices.upgrade() {
+                row.set_visible(!state.devices.iter().any(|device| !device.enrolled));
+            }
+            for (join, invite) in nearby_actions.borrow().iter() {
+                join.set_visible(joining);
+                invite.set_visible(!joining);
+            }
+            if let Some(group) = verification.upgrade() {
+                group.set_description(
+                    if state
+                        .pairing
+                        .as_ref()
+                        .is_some_and(|pairing| pairing.joining)
+                    {
+                        None
+                    } else {
+                        access_description.as_deref()
+                    },
                 );
             }
             if let Some(button) = leave.upgrade() {
-                button.set_visible(profile_controls);
+                button.set_visible(
+                    profile_controls && state.devices.iter().any(|device| device.enrolled),
+                );
             }
             if let Some(file) = file.upgrade() {
                 file.set_title(if importing {
@@ -683,7 +728,8 @@ fn present(shell: &Rc<Preferences>) {
         if button.is_active() {
             select();
             if let Some(shell) = weak.upgrade()
-                && !shell.products.connect.status().settings.enabled
+                && (!shell.products.connect.status().settings.enabled
+                    || shell.products.connect.status().settings.profile.is_none())
             {
                 run(&shell, Action::Enable { enabled: true });
             }
@@ -840,11 +886,7 @@ fn present(shell: &Rc<Preferences>) {
                     .folders
                     .get(&key)
                     .or_else(|| settings.folders.get(&source));
-                folder_mapping.set_text(
-                    &path
-                        .map(|path| path.to_string_lossy().into_owned())
-                        .unwrap_or_default(),
-                );
+                folder_mapping.set_text(&path.map(ToString::to_string).unwrap_or_default());
                 let weak = Rc::downgrade(&shell);
                 let id = root.id.clone();
                 let source_id = source.clone();
@@ -855,7 +897,9 @@ fn present(shell: &Rc<Preferences>) {
                             Action::Folder {
                                 source: source_id.clone(),
                                 root_id: Some(id.clone()),
-                                path: row.text().as_str().into(),
+                                path: downloads::DownloadDirectory::Native(
+                                    row.text().as_str().into(),
+                                ),
                             },
                         );
                     }
@@ -883,7 +927,7 @@ fn present(shell: &Rc<Preferences>) {
                                 Action::Folder {
                                     source,
                                     root_id: Some(root_id),
-                                    path,
+                                    path: downloads::DownloadDirectory::Native(path),
                                 },
                             );
                         }
@@ -935,6 +979,7 @@ fn present(shell: &Rc<Preferences>) {
     for (button, action) in [
         (create.clone(), Action::Enable { enabled: true }),
         (refresh, Action::Refresh),
+        (discover, Action::Discover),
         (cancel_pairing, Action::CancelPairing),
         (finish_setup, Action::FinishSetup),
     ] {
@@ -966,6 +1011,7 @@ fn present(shell: &Rc<Preferences>) {
                     Action::Pair {
                         session: pairing.session,
                         approve,
+                        replace: false,
                     },
                 );
             }
@@ -1186,7 +1232,7 @@ fn present(shell: &Rc<Preferences>) {
                         .spawn(async move { owner.execute(action).await })
                         .await
                         .map_err(|error| error.to_string())
-                        .and_then(|result| result);
+                        .and_then(|result| result.map_err(|error| error.to_string()));
                     applying.set(false);
                     update_storage();
                     match result {
@@ -1237,6 +1283,7 @@ fn present(shell: &Rc<Preferences>) {
                 return;
             };
             if state.completed_pairings != completed_pairings {
+                parent.set_can_close(true);
                 parent.close();
                 show_connected(&shell, &localization::tr("Connected"));
                 return;
@@ -1273,8 +1320,13 @@ fn present(shell: &Rc<Preferences>) {
             let message = state.media_status.as_deref();
             media_status.set_visible(message.is_some());
             media_status.set_text(&localization::tr(message.unwrap_or_default()));
-            create.set_visible(!state.settings.enabled);
-            copy_invitation.set_visible(state.invitation.is_some());
+            create.set_visible(
+                (!state.settings.enabled || state.settings.profile.is_none())
+                    && !state.connecting
+                    && state.pairing.is_none(),
+            );
+            copy_invitation
+                .set_visible(state.invitation.is_some() && state.settings.profile.is_some());
             if let Some(pairing) = &state.pairing {
                 pair_name.set_text(&pairing.name);
                 emoji.set_text(&pairing.emoji.join(" "));
@@ -1297,6 +1349,7 @@ fn present(shell: &Rc<Preferences>) {
                 for row in nearby_rows.borrow_mut().drain(..) {
                     nearby_devices.remove(&row);
                 }
+                nearby_actions.borrow_mut().clear();
                 render_devices(
                     &shell,
                     &parent,
@@ -1305,6 +1358,7 @@ fn present(shell: &Rc<Preferences>) {
                     &state,
                     &device_rows,
                     &nearby_rows,
+                    &nearby_actions,
                 );
                 previous_devices = Some(membership);
             }
@@ -1340,6 +1394,14 @@ fn present(shell: &Rc<Preferences>) {
         }
     });
     connect_dialog.connect_closed(move |_| task.abort());
+    let state = shell.products.connect.status();
+    if state.settings.enabled
+        && state.settings.profile.is_none()
+        && state.pairing.is_none()
+        && !state.connecting
+    {
+        run(shell, Action::Enable { enabled: true });
+    }
     present_light_dismiss_dialog(&connect_dialog, &shell.window);
 }
 
@@ -1418,11 +1480,12 @@ fn render_devices(
     state: &Status,
     rows: &RefCell<Vec<adw::ActionRow>>,
     nearby_rows: &RefCell<Vec<adw::ActionRow>>,
+    nearby_actions: &RefCell<Vec<(gtk::Button, gtk::Button)>>,
 ) {
     for device in &state.devices {
         let resource = crate::ui_resource::CONNECT_COMPONENTS_RESOURCE;
         let builder = gtk_widgets::ui_resource::builder(resource);
-        gtk_widgets::objects!(builder,resource,{device_row:adw::ActionRow,play:gtk::Button,pause:gtk::Button,remove:gtk::Button,join_device:gtk::Button,test_connection:gtk::Button});
+        gtk_widgets::objects!(builder,resource,{device_row:adw::ActionRow,play:gtk::Button,pause:gtk::Button,remove:gtk::Button,join_device:gtk::Button,invite_device:gtk::Button,test_connection:gtk::Button});
         device_row.set_title(&device.name);
         device_row.set_subtitle(&device.connection);
         if device.enrolled {
@@ -1437,6 +1500,7 @@ fn render_devices(
         remove.set_visible(device.enrolled);
         test_connection.set_visible(device.enrolled);
         join_device.set_visible(!device.enrolled);
+        invite_device.set_visible(!device.enrolled);
         let weak = Rc::downgrade(shell);
         let parent = parent.downgrade();
         let invitation = device.id.clone();
@@ -1446,6 +1510,12 @@ fn render_devices(
             }
         });
         for (button, action) in [
+            (
+                invite_device.clone(),
+                Action::Invite {
+                    peer: device.id.clone(),
+                },
+            ),
             (
                 play,
                 Action::Control {
@@ -1490,6 +1560,9 @@ fn render_devices(
         } else {
             nearby.add(&device_row);
             nearby_rows.borrow_mut().push(device_row);
+            nearby_actions
+                .borrow_mut()
+                .push((join_device, invite_device));
         }
     }
 }

@@ -1,5 +1,5 @@
 //! Device-local representations of shared collection entries.
-use crate::{Database, LibraryError, LibraryResult};
+use crate::{Database, LibraryError, LibraryResult, LocalMediaLocation};
 
 #[derive(Clone, Debug, sqlx::FromRow)]
 pub struct ConnectMediaFile {
@@ -112,7 +112,7 @@ mod tests {
 impl Database {
     pub async fn connect_local_media_page(&self, after: &str) -> LibraryResult<Vec<String>> {
         let mut reader = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar("SELECT media_uri FROM catalog.tracks WHERE media_uri>?1 AND media_uri>='file:' AND media_uri<'file;' UNION SELECT media_uri FROM catalog.tracks WHERE media_uri>?1 AND media_uri>='rufin:cue/' AND media_uri<'rufin:cue0' ORDER BY media_uri LIMIT ?2")
+        Ok(sqlx::query_scalar("SELECT media_uri FROM catalog.tracks t WHERE media_uri>?1 AND ((media_uri>='file:' AND media_uri<'file;') OR (media_uri>='rufin:cue/' AND media_uri<'rufin:cue0') OR (media_uri>='rufin:document/' AND media_uri<'rufin:document0') OR EXISTS(SELECT 1 FROM catalog.local_files f WHERE f.source_key=t.source_key AND f.path=t.source_path AND f.path LIKE 'rufin-document:%') OR EXISTS(SELECT 1 FROM main.local_locators l WHERE l.media_uri=t.media_uri AND l.origin IN ('local','import') AND l.access_uri LIKE 'content://%') OR EXISTS(SELECT 1 FROM connect_collection c WHERE c.media_uri=t.media_uri AND json_extract(c.payload,'$.local_media')=1)) ORDER BY media_uri LIMIT ?2")
             .bind(after).bind(crate::CONNECT_PAGE_SIZE as i64)
             .fetch_all(&mut *reader).await?)
     }
@@ -140,15 +140,49 @@ impl Database {
         let access_uri = url::Url::from_file_path(path)
             .map_err(|()| LibraryError::InvalidRequest("Media path must be absolute".into()))?
             .to_string();
+        self.connect_set_queue_access(
+            item,
+            path.to_string_lossy().into_owned(),
+            path.parent().unwrap_or(path).to_string_lossy().into_owned(),
+            access_uri,
+            i64::try_from(metadata.len()).unwrap_or(i64::MAX),
+        )
+        .await
+    }
+
+    pub async fn connect_set_queue_document(
+        &self,
+        item: &crate::QueueItem,
+        uri: &str,
+        size: Option<u64>,
+    ) -> LibraryResult<()> {
+        self.connect_set_queue_access(
+            item,
+            uri.into(),
+            uri.into(),
+            uri.into(),
+            size.and_then(|size| i64::try_from(size).ok()).unwrap_or(0),
+        )
+        .await
+    }
+
+    async fn connect_set_queue_access(
+        &self,
+        item: &crate::QueueItem,
+        path: String,
+        root: String,
+        access_uri: String,
+        size_bytes: i64,
+    ) -> LibraryResult<()> {
         self.upsert_local_access(
             None,
             &crate::LocalAccessWrite {
                 media_uri: item.media_uri.clone(),
                 origin: crate::LocalAccessOrigin::Download,
-                path: path.to_string_lossy().into_owned(),
-                root: path.parent().unwrap_or(path).to_string_lossy().into_owned(),
+                path,
+                root,
                 relative_path: String::new(),
-                size_bytes: i64::try_from(metadata.len()).unwrap_or(i64::MAX),
+                size_bytes,
                 mtime_ns: 0,
                 device_id: None,
                 inode: None,
@@ -171,18 +205,21 @@ impl Database {
         &self,
         uri: &str,
         resolve: impl Fn(std::path::PathBuf) -> std::path::PathBuf,
-    ) -> LibraryResult<Option<std::path::PathBuf>> {
+    ) -> LibraryResult<Option<LocalMediaLocation>> {
         let mut reader = self.acquire_reader().await?;
-        let access: Option<String> = sqlx::query_scalar("SELECT access_uri FROM local_locators WHERE media_uri=?1 AND origin IN ('local','import') LIMIT 1")
-            .bind(uri).fetch_optional(&mut *reader).await?;
+        let backing = crate::cue_media_parts(uri).map(|(_, backing, _, _)| backing);
+        let access: Option<String> = sqlx::query_scalar("SELECT access_uri FROM local_locators WHERE media_uri IN (?1,?2) AND origin IN ('local','import') ORDER BY media_uri=?1 DESC LIMIT 1")
+            .bind(uri).bind(backing.as_deref()).fetch_optional(&mut *reader).await?;
+        if let Some(uri) = access.as_ref().filter(|uri| uri.starts_with("content://")) {
+            return Ok(Some(LocalMediaLocation::Document(uri.clone())));
+        }
         if let Some(path) = access
             .and_then(|uri| crate::file_media_path(&uri))
             .map(&resolve)
             .filter(|path| path.is_file())
         {
-            return Ok(Some(path));
+            return Ok(Some(LocalMediaLocation::File(path)));
         }
-        let backing = crate::cue_media_parts(uri).map(|(_, backing, _, _)| backing);
         let native = crate::file_media_path(backing.as_deref().unwrap_or(uri)).is_some();
         // Native scans set source_path; Connect never copies it from another device.
         // Playlist imports keep that path without configuring a folder.
@@ -194,10 +231,14 @@ impl Database {
         .bind(native)
         .fetch_optional(&mut *reader)
         .await?;
+        if let Some(uri) = path.as_deref().and_then(crate::document_access_uri) {
+            return Ok(Some(LocalMediaLocation::Document(uri)));
+        }
         Ok(path
             .map(std::path::PathBuf::from)
             .map(resolve)
-            .filter(|path| path.is_file()))
+            .filter(|path| path.is_file())
+            .map(LocalMediaLocation::File))
     }
 
     pub async fn connect_media_files(&self, uri: &str) -> LibraryResult<Vec<ConnectMediaFile>> {
@@ -214,19 +255,21 @@ impl Database {
         let mut writer = self.writer().await?;
         let writer = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         sqlx::query(
-            "DELETE FROM local_locators WHERE media_uri=?1 AND access_uri=?2 AND origin='download' AND NOT EXISTS(SELECT 1 FROM connect_media_files WHERE media_uri=?1 AND path=?2 AND encoding<>?3)",
+            "DELETE FROM local_locators WHERE media_uri=?1 AND access_uri=?2 AND origin='download' AND NOT EXISTS(SELECT 1 FROM connect_media_files WHERE media_uri=?1 AND path=?2 AND (encoding,revision)<>(?3,?4))",
         )
         .bind(&file.media_uri)
         .bind(&file.path)
         .bind(&file.encoding)
+        .bind(&file.revision)
         .execute(&mut *writer)
         .await?;
         sqlx::query(
-            "DELETE FROM connect_media_files WHERE media_uri=?1 AND encoding=?2 AND path=?3",
+            "DELETE FROM connect_media_files WHERE media_uri=?1 AND encoding=?2 AND path=?3 AND revision=?4",
         )
         .bind(&file.media_uri)
         .bind(&file.encoding)
         .bind(&file.path)
+        .bind(&file.revision)
         .execute(writer)
         .await?;
         Ok(())
@@ -265,10 +308,10 @@ impl Database {
         encoding: &str,
         revision: &str,
     ) -> LibraryResult<Option<ConnectMediaFile>> {
-        let backing = crate::cue_media_parts(uri).map(|(_, backing, _, _)| backing);
+        let backing = self.connect_backing_id(uri).await?;
         let mut reader = self.acquire_reader().await?;
         Ok(sqlx::query_as("SELECT * FROM connect_media_files WHERE backing_uri=?1 AND encoding=?2 AND revision=?3 ORDER BY managed DESC LIMIT 1")
-            .bind(backing.as_deref().unwrap_or(uri)).bind(encoding).bind(revision)
+            .bind(backing).bind(encoding).bind(revision)
             .fetch_optional(&mut *reader).await?)
     }
 
@@ -284,12 +327,46 @@ impl Database {
     }
 
     pub async fn connect_save_media_file(&self, file: &ConnectMediaFile) -> LibraryResult<()> {
+        let backing = self.connect_backing_id(&file.media_uri).await?;
         let mut writer = self.writer().await?;
-        let backing = crate::cue_media_parts(&file.media_uri).map(|(_, backing, _, _)| backing);
         sqlx::query("INSERT INTO connect_media_files(media_uri,encoding,revision,path,managed,hash,backing_uri) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(media_uri,encoding) DO UPDATE SET revision=excluded.revision,path=excluded.path,managed=excluded.managed,hash=excluded.hash,backing_uri=excluded.backing_uri")
             .bind(&file.media_uri).bind(&file.encoding).bind(&file.revision).bind(&file.path).bind(file.managed).bind(&file.hash)
-            .bind(backing.as_deref().unwrap_or(&file.media_uri))
+            .bind(backing)
             .execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?).await?;
         Ok(())
+    }
+
+    pub async fn connect_backing_id(&self, uri: &str) -> LibraryResult<String> {
+        let reference = self.connect_track_reference(uri).await?;
+        Ok(reference
+            .as_ref()
+            .and_then(|value| value["backing_id"].as_str())
+            .map(str::to_owned)
+            .or_else(|| crate::cue_media_parts(uri).map(|(_, backing, _, _)| backing))
+            .unwrap_or_else(|| uri.to_string()))
+    }
+
+    pub async fn connect_document_backing_used(
+        &self,
+        uri: &str,
+        encoding: &str,
+        revision: &str,
+    ) -> LibraryResult<bool> {
+        let backing = self.connect_backing_id(uri).await?;
+        let mut reader = self.acquire_reader().await?;
+        Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM connect_media_files WHERE backing_uri=?1 AND encoding=?2 AND revision=?3 AND path LIKE 'content://%')")
+            .bind(backing).bind(encoding).bind(revision).fetch_one(&mut *reader).await?)
+    }
+
+    pub async fn connect_media_window(&self, uri: &str) -> LibraryResult<Option<(u64, u64)>> {
+        if let Some((_, _, start, end)) = crate::cue_media_parts(uri) {
+            return Ok(Some((start as u64, end as u64)));
+        }
+        let reference = self.connect_track_reference(uri).await?;
+        Ok(reference.as_ref().and_then(|value| {
+            let start = value["cue_start_millis"].as_u64()?;
+            let end = value["cue_end_millis"].as_u64()?;
+            (end > start).then_some((start, end))
+        }))
     }
 }

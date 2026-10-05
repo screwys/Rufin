@@ -37,9 +37,26 @@ fn flatpak_sources_command(args: Vec<String>) -> Result<()> {
 
 pub(crate) fn flatpak_sources(check: bool) -> Result<()> {
     let root = repo_root()?;
-    let lock_file = root.join("Cargo.lock");
     let sources_file = root.join("packaging/flatpak/cargo-sources.json");
-    let generated = generate_cargo_sources(&root, &read_to_string(&lock_file)?)?;
+    let (manifest, lock) = linux_workspace(&root)?;
+    if !check {
+        fs::create_dir_all(root.join("packaging/linux"))?;
+    }
+    for (name, contents) in [("Cargo.toml", &manifest), ("Cargo.lock", &lock)] {
+        let path = root.join("packaging/linux").join(name);
+        if check {
+            if read_to_string(&path)? != *contents {
+                return Err(format!(
+                    "{} is stale; run cargo run --locked -p xtask -- generate flatpak-sources",
+                    path.display()
+                )
+                .into());
+            }
+        } else {
+            write_string(&path, contents)?;
+        }
+    }
+    let generated = generate_cargo_sources(&root, &lock)?;
 
     if check {
         let current = read_to_string(&sources_file)?;
@@ -54,6 +71,65 @@ pub(crate) fn flatpak_sources(check: bool) -> Result<()> {
 
     write_string(&sources_file, &generated)?;
     Ok(())
+}
+
+/// Keep Cargo's complete offline resolution for the Linux application, including
+/// optional, development and other-target dependencies of its workspace crates.
+pub(crate) fn linux_workspace(root: &Path) -> Result<(String, String)> {
+    let manifest = read_to_string(&root.join("Cargo.toml"))?;
+    let members = "members = [\"crates/*\"]";
+    if !manifest.contains(members) {
+        return Err("Linux source generation requires the Rufin workspace member list".into());
+    }
+    let manifest = manifest.replacen(
+        members,
+        "members = [\"crates/rufin\"]\nexclude = [\"crates/rufin-android\", \"crates/xtask\"]",
+        1,
+    );
+    let temporary = tempfile::tempdir()?;
+    fs::write(temporary.path().join("Cargo.toml"), &manifest)?;
+    fs::copy(root.join("Cargo.lock"), temporary.path().join("Cargo.lock"))?;
+    // Only manifests and the lockfile are staged. Sources stay in the checkout.
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(root.join("crates"), temporary.path().join("crates"))?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        // Directory junctions do not require Windows symlink privileges.
+        let linked = Command::new("cmd")
+            .args(["/d", "/v:off", "/c"])
+            .raw_arg("mklink /J \"%RUFIN_CRATE_LINK%\" \"%RUFIN_CRATE_SOURCE%\"")
+            .env("RUFIN_CRATE_LINK", temporary.path().join("crates"))
+            .env("RUFIN_CRATE_SOURCE", root.join("crates"))
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .status()?;
+        if !linked.success() {
+            return Err("could not link crate sources for Linux source generation".into());
+        }
+    }
+    // Cargo prunes workspace entries while keeping external package versions.
+    let resolved = Command::new("cargo")
+        .current_dir(temporary.path())
+        .args(["update", "--workspace", "--offline", "--quiet"])
+        .stderr(Stdio::inherit())
+        .status()?;
+    if !resolved.success() {
+        return Err("cargo update failed while selecting Linux sources".into());
+    }
+    let fetched = Command::new("cargo")
+        .current_dir(temporary.path())
+        .args(["fetch", "--locked"])
+        .stderr(Stdio::inherit())
+        .status()?;
+    if !fetched.success() {
+        return Err("cargo fetch failed while preparing Linux sources".into());
+    }
+    Ok((
+        manifest,
+        read_to_string(&temporary.path().join("Cargo.lock"))?,
+    ))
 }
 
 #[derive(Clone, Default)]
@@ -104,6 +180,16 @@ fn generate_cargo_sources(root: &Path, lock: &str) -> Result<String> {
         if current.source.starts_with("git+") {
             git_packages.push(current.clone());
         }
+    }
+
+    for name in ["Cargo.toml", "Cargo.lock"] {
+        append_source(
+            &mut output,
+            serde_json::json!({
+                "type": "file", "path": format!("../linux/{name}"),
+                "dest-filename": name
+            }),
+        )?;
     }
 
     let config = if git_packages.is_empty() {

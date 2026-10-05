@@ -77,21 +77,28 @@ pub(super) fn bind(
     let status = web_status.downgrade();
     web_allow_remote.connect_active_notify(move |row| {
         if let (Some(shell), Some(status)) = (weak.upgrade(), status.upgrade()) {
-            save(&shell, &status, |config| {
-                config.address = match (config.address.is_ipv6(), row.is_active()) {
-                    (false, false) => std::net::Ipv4Addr::LOCALHOST.into(),
-                    (false, true) => std::net::Ipv4Addr::UNSPECIFIED.into(),
-                    (true, false) => std::net::Ipv6Addr::LOCALHOST.into(),
-                    (true, true) => std::net::Ipv6Addr::UNSPECIFIED.into(),
-                };
-            });
+            save(
+                &shell,
+                &status,
+                shell
+                    .settings
+                    .persistence
+                    .set_controller_remote(row.is_active()),
+            );
         }
     });
     let weak = Rc::downgrade(shell);
     let status = web_status.downgrade();
     web_port.connect_value_notify(move |row| {
         if let (Some(shell), Some(status)) = (weak.upgrade(), status.upgrade()) {
-            save(&shell, &status, |config| config.port = row.value() as u16);
+            save(
+                &shell,
+                &status,
+                shell
+                    .settings
+                    .persistence
+                    .set_controller_port(row.value() as u16),
+            );
         }
     });
 }
@@ -149,7 +156,14 @@ fn bind_controls(
     let status = web_status.downgrade();
     web_enabled.connect_active_notify(move |row| {
         if let (Some(shell), Some(status)) = (weak.upgrade(), status.upgrade()) {
-            save(&shell, &status, |config| config.enabled = row.is_active());
+            save(
+                &shell,
+                &status,
+                shell
+                    .settings
+                    .persistence
+                    .set_controller_enabled(row.is_active()),
+            );
             status.set_visible(shell.settings.persistence.load().web_controller.enabled);
         }
     });
@@ -354,15 +368,9 @@ pub(super) fn copy_action(button: &gtk::Widget, icon: &gtk::Image) -> impl Fn(&s
     }
 }
 
-fn save(
-    shell: &Preferences,
-    status: &adw::ActionRow,
-    update: impl FnOnce(&mut ControllerSettings),
-) {
-    let mut settings = shell.settings.persistence.load();
-    update(&mut settings.web_controller);
-    match shell.settings.persistence.save(&settings) {
-        Ok(settings) => *shell.settings.current.borrow_mut() = settings,
+fn save(shell: &Preferences, status: &adw::ActionRow, result: Result<ControllerSettings, String>) {
+    match result {
+        Ok(_) => *shell.settings.current.borrow_mut() = shell.settings.persistence.load(),
         Err(error) => status.set_subtitle(&error),
     }
 }

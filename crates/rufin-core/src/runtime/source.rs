@@ -58,6 +58,19 @@ pub struct ConfiguredSources {
     pub local_access: Arc<[SourceLocalAccessSummary]>,
 }
 
+impl ConfiguredSources {
+    pub fn half_stars_enabled(&self, media_uri: &str, source_id: Option<&str>) -> bool {
+        let uri_source = library::source_entity_parts(media_uri).map(|(source, _, _)| source);
+        let source_id = source_id
+            .or_else(|| uri_source.as_ref().map(SourceId::as_str))
+            .or_else(|| self.selected_source_id.as_ref().map(SourceId::as_str));
+        self.sources
+            .iter()
+            .find(|source| Some(source.id.as_str()) == source_id)
+            .is_some_and(|source| source.half_stars_enabled)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OpenSubsonicKind {
@@ -235,6 +248,44 @@ impl SourceOperation {
     }
 }
 
+pub fn source_progress_text(progress: &SourceProgress) -> String {
+    let subject = match progress.stage {
+        SourceProgressStage::Connecting => {
+            return localization::tr("Connecting to music server...");
+        }
+        SourceProgressStage::Albums => "albums",
+        SourceProgressStage::Tracks => "tracks",
+        SourceProgressStage::Artists => "artists",
+        SourceProgressStage::Genres => "genres",
+        SourceProgressStage::Playlists => "playlists",
+        SourceProgressStage::Home => "Home",
+        SourceProgressStage::Artwork => "artwork",
+        SourceProgressStage::Files => "files",
+        SourceProgressStage::Finalizing => return localization::tr("Preparing library..."),
+    };
+    match progress.total {
+        Some(total) => format!(
+            "Fetching {subject}, {}/{total} fetched...",
+            progress.completed
+        ),
+        None if progress.completed > 0 => {
+            format!("Fetching {subject}, {} fetched...", progress.completed)
+        }
+        None => format!("Fetching {subject}..."),
+    }
+}
+
+pub fn source_operation_text(operation: &SourceOperation) -> Option<String> {
+    match operation {
+        SourceOperation::Idle => None,
+        SourceOperation::Adding { progress } | SourceOperation::Refreshing { progress, .. } => {
+            Some(source_progress_text(progress))
+        }
+        SourceOperation::Switching { .. } => Some(localization::tr("Switching library...")),
+        SourceOperation::Failed { message, .. } => Some(message.clone()),
+    }
+}
+
 pub use sources::{DiscoveredServer, DiscoveryProvider};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -350,4 +401,32 @@ mod tests {
             .blocks_library()
         );
     }
+}
+
+pub fn source_kind_title(kind: &str) -> Option<&'static str> {
+    Some(match kind {
+        "jellyfin" => localization::msgid("Jellyfin"),
+        "emby" => localization::msgid("Emby"),
+        "plex" => localization::msgid("Plex"),
+        "navidrome" => localization::msgid("Navidrome"),
+        "subsonic" => localization::msgid("OpenSubsonic"),
+        "local" => localization::msgid("Local"),
+        "webdav" => localization::msgid("WebDAV"),
+        "smb" => localization::msgid("SMB / Samba"),
+        _ => return None,
+    })
+}
+
+pub fn source_kind_icon_name(kind: &str) -> Option<&'static str> {
+    Some(match kind {
+        "jellyfin" => "io.github.screwys.Rufin.source.jellyfin",
+        "emby" => "io.github.screwys.Rufin.source.emby",
+        "plex" => "io.github.screwys.Rufin.source.plex",
+        "navidrome" => "io.github.screwys.Rufin.source.navidrome",
+        "subsonic" => "io.github.screwys.Rufin.source.opensubsonic",
+        "local" => "io.github.screwys.Rufin-symbolic",
+        "webdav" => "io.github.screwys.Rufin.source.webdav",
+        "smb" => "io.github.screwys.Rufin.source.smb",
+        _ => return None,
+    })
 }

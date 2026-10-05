@@ -1,17 +1,4 @@
-use localization::msgid;
-pub fn source_kind_title(kind: &str) -> Option<&'static str> {
-    Some(match kind {
-        "jellyfin" => msgid("Jellyfin"),
-        "emby" => msgid("Emby"),
-        "plex" => msgid("Plex"),
-        "navidrome" => msgid("Navidrome"),
-        "subsonic" => msgid("OpenSubsonic"),
-        "local" => msgid("Local"),
-        "webdav" => msgid("WebDAV"),
-        "smb" => msgid("SMB / Samba"),
-        _ => return None,
-    })
-}
+pub use rufin_core::runtime::source::{source_kind_icon_name, source_kind_title};
 
 use adw::prelude::*;
 use app_identity::{DISPLAY_NAME, STABLE_APP_ID};
@@ -82,18 +69,4 @@ pub fn configure_ownership_toggle(
     };
     update(button);
     button.connect_toggled(update);
-}
-
-pub fn source_kind_icon_name(kind: &str) -> Option<&'static str> {
-    Some(match kind {
-        "jellyfin" => "io.github.screwys.Rufin.source.jellyfin",
-        "emby" => "io.github.screwys.Rufin.source.emby",
-        "plex" => "io.github.screwys.Rufin.source.plex",
-        "navidrome" => "io.github.screwys.Rufin.source.navidrome",
-        "subsonic" => "io.github.screwys.Rufin.source.opensubsonic",
-        "local" => "io.github.screwys.Rufin-symbolic",
-        "webdav" => "io.github.screwys.Rufin.source.webdav",
-        "smb" => "io.github.screwys.Rufin.source.smb",
-        _ => return None,
-    })
 }

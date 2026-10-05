@@ -116,6 +116,9 @@ pub enum SourceSetupInput {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SourceSettingsInput {
+    LocalDocuments {
+        roots: Vec<crate::DocumentRoot>,
+    },
     Files {
         name: String,
         settings: crate::FileSourceSettings,
@@ -168,6 +171,7 @@ pub enum EditableSource {
         source_id: SourceId,
         roots: Vec<PathBuf>,
         excluded_folders: Vec<PathBuf>,
+        document_roots: Vec<crate::DocumentRoot>,
     },
 }
 
@@ -233,6 +237,7 @@ impl SourceConfiguration {
             crate::file::local::LocalSourceConfig {
                 roots,
                 excluded_folders: Vec::new(),
+                document_roots: Vec::new(),
             }
             .into_payload(),
         ))
@@ -270,8 +275,13 @@ impl SourceConfiguration {
                 digest_part(&mut digest, settings.username.as_bytes());
             }
             crate::file::local::LOCAL_SOURCE_ID => {
-                for root in crate::file::local::LocalSourceConfig::from_configuration(self)?.roots {
+                let config = crate::file::local::LocalSourceConfig::from_configuration(self)?;
+                for root in config.roots {
                     digest_part(&mut digest, root.to_string_lossy().as_bytes());
+                }
+                for root in config.document_roots {
+                    digest_part(&mut digest, root.id.as_bytes());
+                    digest_part(&mut digest, root.uri.as_bytes());
                 }
             }
             "jellyfin" | "emby" => {
@@ -370,6 +380,7 @@ impl SourceConfiguration {
                     source_id: self.source_id.clone(),
                     roots: config.roots,
                     excluded_folders: config.excluded_folders,
+                    document_roots: config.document_roots,
                 })
             }
             kind => Err(SourceError::InvalidConfig(format!(
@@ -591,6 +602,17 @@ mod tests {
 }
 
 impl SourceConfiguration {
+    pub fn with_document_roots(&self, roots: Vec<crate::DocumentRoot>) -> SourceResult<Self> {
+        let mut config = crate::file::local::LocalSourceConfig::from_configuration(self)?;
+        config.document_roots = roots;
+        Ok(encode_provider_payload(
+            self.source_id.clone(),
+            self.kind.clone(),
+            self.name.clone(),
+            config.into_payload(),
+        ))
+    }
+
     pub fn recognize_media_locator(&self, locator: &str) -> Option<String> {
         let uri = url::Url::parse(locator).ok()?;
         let payload: serde_json::Value = serde_json::from_str(&self.provider_payload).ok()?;

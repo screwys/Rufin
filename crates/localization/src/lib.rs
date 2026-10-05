@@ -139,6 +139,10 @@ fn selected_language_preference(
 }
 
 pub fn language_options() -> Vec<LanguageOption> {
+    language_options_for(available_translation_language_ids())
+}
+
+pub fn language_options_for(ids: impl IntoIterator<Item = String>) -> Vec<LanguageOption> {
     let mut seen = BTreeSet::new();
     let mut options = vec![LanguageOption {
         id: default_language_preference(),
@@ -151,7 +155,7 @@ pub fn language_options() -> Vec<LanguageOption> {
     });
     seen.insert(ENGLISH_LANGUAGE_PREFERENCE.to_string());
 
-    for id in available_translation_language_ids() {
+    for id in ids {
         let id = sanitize_language_preference(&id);
         if id == SYSTEM_LANGUAGE_PREFERENCE || is_english_language(&id) || !seen.insert(id.clone())
         {

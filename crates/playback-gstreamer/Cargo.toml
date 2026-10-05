@@ -14,6 +14,7 @@ publish.workspace = true
 audio-processing.workspace = true
 gstreamer = { workspace = true, features = ["v1_26"] }
 gstreamer-audio = { workspace = true, features = ["v1_26"] }
+gstreamer-controller = { workspace = true, features = ["v1_26"] }
 playback.workspace = true
 tracing.workspace = true
 

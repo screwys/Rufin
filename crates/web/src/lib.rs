@@ -357,6 +357,7 @@ async fn queue_play(
                 library::QueueInput::Query {
                     query: library::QueueQuery::Collection {
                         collection,
+                        downloaded_only: false,
                         favorites_only: false,
                     },
                     folder,
@@ -439,6 +440,7 @@ async fn queue_play(
             library::QueueInput::Query {
                 query: library::QueueQuery::Tracks {
                     source,
+                    downloaded_only: false,
                     favorites_only: input.favorites,
                     recursive: true,
                 },

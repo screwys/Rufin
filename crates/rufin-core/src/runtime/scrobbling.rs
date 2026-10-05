@@ -47,6 +47,7 @@ impl Default for LibreFmPreferences {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ListenBrainzPreferences {
     pub enabled: bool,
+    pub username: String,
     pub user_token: String,
     pub now_playing_enabled: bool,
 }
@@ -55,6 +56,7 @@ impl Default for ListenBrainzPreferences {
     fn default() -> Self {
         Self {
             enabled: false,
+            username: String::new(),
             user_token: String::new(),
             now_playing_enabled: true,
         }

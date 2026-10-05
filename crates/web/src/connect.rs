@@ -44,7 +44,18 @@ async fn action(
         .execute(action)
         .await
         .map(axum::Json)
-        .map_err(|error| (StatusCode::BAD_REQUEST, axum::Json(json!({"error":error}))))
+        .map_err(|error| {
+            let confirmation = match &error {
+                rufin_core::connect::ActionError::ConfirmationRequired { confirmation, .. } => {
+                    Some(confirmation)
+                }
+                _ => None,
+            };
+            (
+                StatusCode::BAD_REQUEST,
+                axum::Json(json!({"error":error.to_string(), "confirmation":confirmation})),
+            )
+        })
 }
 
 async fn events(State(products): State<ProductHandles>) -> Response<Body> {

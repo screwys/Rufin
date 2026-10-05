@@ -1,5 +1,4 @@
 use std::cell::{Cell, RefCell};
-use std::path::Path;
 use std::time::Instant;
 
 use artwork::ArtworkBinding;
@@ -8,6 +7,7 @@ use playback::{CurrentMediaId, PlaybackView, RemoteOutput};
 
 use gtk_widgets::detail_links::DetailLinks;
 use localization::tr;
+use rufin_core::settings::presentation::audio_source_label;
 
 #[derive(Default)]
 pub struct PlaybackState {
@@ -73,33 +73,7 @@ fn now_playing_meta_parts(entry: Option<&playback::CurrentMedia>) -> Vec<String>
 }
 
 fn queue_entry_source_label(entry: &playback::CurrentMedia) -> Option<String> {
-    entry
-        .source_format
-        .as_deref()
-        .and_then(audio_source_label_from_format)
-        .or_else(|| audio_source_label_from_path(&entry.media_uri))
-}
-
-fn audio_source_label_from_path(path: &str) -> Option<String> {
-    let path = path.split(['?', '#']).next().unwrap_or(path);
-    let extension = Path::new(path).extension()?.to_str()?.trim();
-    audio_source_label_from_format(extension)
-}
-
-fn audio_source_label_from_format(value: &str) -> Option<String> {
-    let value = value
-        .rsplit('/')
-        .next()
-        .unwrap_or(value)
-        .trim()
-        .trim_start_matches('.');
-    if value.is_empty() {
-        return None;
-    }
-    Some(match value.to_ascii_lowercase().as_str() {
-        "mpeg" | "mpga" => "MP3".to_string(),
-        other => other.to_ascii_uppercase(),
-    })
+    audio_source_label(entry.source_format.as_deref(), Some(&entry.media_uri))
 }
 
 pub fn current_playback_track(player: Option<&PlaybackView>) -> Option<playback::QueueItem> {

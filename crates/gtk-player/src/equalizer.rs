@@ -4,92 +4,19 @@ use std::time::Duration;
 
 use gtk::prelude::*;
 use gtk::{gio, glib};
-use playback::{EQUALIZER_BAND_COUNT, EqualizerSettings};
+#[cfg(test)]
+use playback::equalizer_presets;
+use playback::{
+    EQUALIZER_BAND_COUNT, EQUALIZER_CUSTOM_PRESET as CUSTOM_PRESET, EqualizerSettings,
+    equalizer_band_label_parts, equalizer_band_title, equalizer_preset_names,
+    equalizer_selected_preset,
+};
 
 use localization::tr;
 
 pub const EQUALIZER_FALLBACK_COMMIT_DELAY_MS: u64 = 200;
 pub const EQUALIZER_BAND_SPACING: i32 = 6;
 pub const EQUALIZER_LABEL_HEIGHT: i32 = 50;
-pub const CUSTOM_PRESET: &str = "Custom";
-
-pub fn equalizer_band_title(index: usize) -> String {
-    const BANDS: [&str; EQUALIZER_BAND_COUNT] = [
-        "60 Hz", "170 Hz", "310 Hz", "600 Hz", "1 kHz", "3 kHz", "6 kHz", "12 kHz", "14 kHz",
-        "16 kHz",
-    ];
-    BANDS.get(index).copied().unwrap_or("Band").to_string()
-}
-
-pub fn equalizer_band_label_parts(index: usize) -> (String, String) {
-    let title = equalizer_band_title(index);
-    title
-        .split_once(' ')
-        .map(|(value, unit)| (value.to_string(), unit.to_string()))
-        .unwrap_or_else(|| (title, String::new()))
-}
-
-pub fn equalizer_presets() -> Vec<(&'static str, Vec<f64>)> {
-    vec![
-        ("Flat", vec![0.0; EQUALIZER_BAND_COUNT]),
-        (
-            "Classical",
-            vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -7.2, -7.2, -7.2, -9.6],
-        ),
-        (
-            "Club",
-            vec![0.0, 0.0, 3.2, 5.6, 5.6, 5.6, 3.2, 0.0, 0.0, 0.0],
-        ),
-        (
-            "Dance",
-            vec![9.6, 7.2, 2.4, 0.0, 0.0, -5.6, -7.2, -7.2, 0.0, 0.0],
-        ),
-        (
-            "Full Bass",
-            vec![9.6, 9.6, 9.6, 5.6, 1.6, -4.0, -8.0, -10.4, -11.2, -11.2],
-        ),
-        (
-            "Full Treble",
-            vec![-9.6, -9.6, -9.6, -4.0, 2.4, 11.2, 12.0, 12.0, 12.0, 12.0],
-        ),
-        (
-            "Laptop/Headphones",
-            vec![4.8, 11.2, 5.6, -3.2, -2.4, 1.6, 4.8, 9.6, 12.0, 12.0],
-        ),
-        (
-            "Rock",
-            vec![8.0, 4.8, -5.6, -8.0, -3.2, 4.0, 8.8, 11.2, 11.2, 11.2],
-        ),
-        (
-            "Pop",
-            vec![-1.6, 4.8, 7.2, 8.0, 5.6, 0.0, -2.4, -2.4, -1.6, -1.6],
-        ),
-        (
-            "Techno",
-            vec![8.0, 5.6, 0.0, -5.6, -4.8, 0.0, 8.0, 9.6, 9.6, 8.8],
-        ),
-    ]
-}
-
-pub fn equalizer_preset_names() -> Vec<&'static str> {
-    equalizer_presets()
-        .into_iter()
-        .map(|(name, _)| name)
-        .chain(std::iter::once(CUSTOM_PRESET))
-        .collect()
-}
-
-pub fn equalizer_selected_preset(equalizer: &EqualizerSettings) -> String {
-    if equalizer_preset_names()
-        .iter()
-        .any(|name| *name == equalizer.selected_preset)
-    {
-        equalizer.selected_preset.clone()
-    } else {
-        CUSTOM_PRESET.to_string()
-    }
-}
-
 pub fn equalizer_preset_title(name: &str) -> String {
     match name {
         "Custom" => tr("Custom"),
@@ -105,20 +32,6 @@ pub fn equalizer_preset_title(name: &str) -> String {
         "Techno" => tr("Techno"),
         _ => name.to_string(),
     }
-}
-
-pub fn equalizer_default_preset_bands(name: &str) -> Vec<f64> {
-    if name == CUSTOM_PRESET {
-        return vec![0.0; EQUALIZER_BAND_COUNT];
-    }
-    equalizer_presets()
-        .into_iter()
-        .find_map(|(preset, bands)| (preset == name).then_some(bands))
-        .unwrap_or_else(|| vec![0.0; EQUALIZER_BAND_COUNT])
-}
-
-pub fn equalizer_preset_bands(name: &str) -> Vec<f64> {
-    equalizer_default_preset_bands(name)
 }
 
 #[derive(Clone)]
@@ -210,8 +123,7 @@ impl EqualizerSurface {
                 return;
             };
             let mut settings = controls.settings();
-            settings.enabled = true;
-            settings.selected_preset = CUSTOM_PRESET.to_string();
+            settings.mark_custom();
             controls.set_settings(&settings);
             scale_changed(settings);
         });
@@ -237,10 +149,7 @@ impl EqualizerSurface {
                 return;
             };
             let mut settings = controls.settings();
-            settings.enabled = true;
-            settings.selected_preset = preset.clone();
-            settings.bands = equalizer_preset_bands(&preset);
-            settings.sanitize();
+            settings.select_preset(preset);
             controls.set_settings(&settings);
             preset_changed(settings);
         });
@@ -278,10 +187,7 @@ impl EqualizerSurface {
             };
             let preset = controls.reset_preset.borrow().clone();
             let mut settings = controls.settings();
-            settings.enabled = true;
-            settings.selected_preset = preset.clone();
-            settings.bands = equalizer_preset_bands(&preset);
-            settings.sanitize();
+            settings.select_preset(preset);
             controls.set_settings(&settings);
             changed(settings);
         });

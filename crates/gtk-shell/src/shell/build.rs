@@ -512,6 +512,7 @@ pub async fn build(
     app.connect_shutdown(move |_| {
         if let Some(shell) = weak.upgrade() {
             shell.web_controller.stop();
+            shell.products.scrobbling.shutdown();
             shell.close_activity();
             if let Err(error) = shell.products.release_updates.install_on_exit() {
                 tracing::warn!(%error, "could not start update on exit");
@@ -536,8 +537,13 @@ pub async fn build(
                 break;
             };
             let local = shell.products.settings.local_configuration();
-            if let Err(error) =
-                rufin_core::open::files(&shell.products.playback.queue, local.as_ref(), files).await
+            if let Err(error) = rufin_core::open::files(
+                &shell.products.playback.queue,
+                &shell.products.library,
+                local.as_ref(),
+                files,
+            )
+            .await
             {
                 shell.control_feedback.show_feedback_toast(error);
             }

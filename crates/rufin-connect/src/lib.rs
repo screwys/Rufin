@@ -5,4 +5,5 @@ pub mod pairing;
 pub mod profile;
 
 pub use iroh::SecretKey as Credentials;
+pub use iroh::dns;
 pub use network::{ConnectNetwork, NetworkConfig, NetworkEvent};

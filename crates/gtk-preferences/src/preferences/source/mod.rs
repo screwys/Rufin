@@ -4,8 +4,7 @@ use std::rc::Rc;
 use localization::{tr, trn_with};
 
 use rufin_core::runtime::source::{
-    ConfiguredSources, DiscoveredServer, DiscoveryStatus, SourceOperation, SourceProgress,
-    SourceProgressStage, SourceSummary,
+    ConfiguredSources, DiscoveredServer, DiscoveryStatus, SourceOperation, SourceSummary,
 };
 
 pub(super) mod excluded_folders;
@@ -113,40 +112,4 @@ pub fn folder_selected_text(count: u64) -> String {
         count,
         &[("count", label.as_str())],
     )
-}
-
-pub fn source_progress_text(progress: &SourceProgress) -> String {
-    let subject = match progress.stage {
-        SourceProgressStage::Connecting => return tr("Connecting to music server..."),
-        SourceProgressStage::Albums => "albums",
-        SourceProgressStage::Tracks => "tracks",
-        SourceProgressStage::Artists => "artists",
-        SourceProgressStage::Genres => "genres",
-        SourceProgressStage::Playlists => "playlists",
-        SourceProgressStage::Home => "Home",
-        SourceProgressStage::Artwork => "artwork",
-        SourceProgressStage::Files => "files",
-        SourceProgressStage::Finalizing => return tr("Preparing library..."),
-    };
-    match progress.total {
-        Some(total) => format!(
-            "Fetching {subject}, {}/{total} fetched...",
-            progress.completed
-        ),
-        None if progress.completed > 0 => {
-            format!("Fetching {subject}, {} fetched...", progress.completed)
-        }
-        None => format!("Fetching {subject}..."),
-    }
-}
-
-pub fn source_operation_text(operation: &SourceOperation) -> Option<String> {
-    match operation {
-        SourceOperation::Idle => None,
-        SourceOperation::Adding { progress } | SourceOperation::Refreshing { progress, .. } => {
-            Some(source_progress_text(progress))
-        }
-        SourceOperation::Switching { .. } => Some(tr("Switching library...")),
-        SourceOperation::Failed { message, .. } => Some(message.clone()),
-    }
 }

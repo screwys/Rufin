@@ -1,0 +1,71 @@
+name: Kotlin
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  kotlin:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@4c125117fe7c5aed11272ec4213f602f012f89f2 # v5
+        with:
+          cache-read-only: ${{ github.event_name != 'push' }}
+
+      - name: Install Android toolchains
+        run: |
+          set -euo pipefail
+          sdkmanager "platforms;android-37.2" "build-tools;36.1.0" "ndk;29.0.14206865"
+          rustup target add aarch64-linux-android
+
+      - name: Restore GStreamer SDK
+        id: gstreamer
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: android/.toolchains/gstreamer-1.28.7
+          key: gstreamer-android-arm64-1.28.7-fa914bcf8695af1c6fa1f81db2e8da019a0306a89c2c3e48659438e1654023da
+
+      - name: Download GStreamer SDK
+        if: steps.gstreamer.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/gstreamer-android.tar.xz"
+          curl --fail --location --silent --show-error \
+            https://gstreamer.freedesktop.org/data/pkg/android/1.28.7/gstreamer-1.0-android-universal-1.28.7.tar.xz \
+            --output "$archive"
+          printf '%s  %s\n' fa914bcf8695af1c6fa1f81db2e8da019a0306a89c2c3e48659438e1654023da "$archive" | sha256sum --check
+          mkdir -p android/.toolchains/gstreamer-1.28.7
+          tar -xf "$archive" -C android/.toolchains/gstreamer-1.28.7 --wildcards 'arm64/*'
+
+      - name: Restore Rust build cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: 'false'
+          workspaces: |
+            . -> android/build/rust
+            . -> target
+
+      - name: Check Kotlin
+        run: android/gradlew -p android -PandroidAbis=arm64-v8a lintDevelopmentDebug lintStableDebug testDevelopmentDebugUnitTest testStableDebugUnitTest
+
+      - name: Check optimized Android release
+        run: android/gradlew -p android -PandroidAbis=arm64-v8a assembleStableRelease lintStableRelease

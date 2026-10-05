@@ -52,6 +52,8 @@ prepare() {
   cd Rufin || return
 
   export CARGO_TARGET_DIR=target
+  cp packaging/linux/Cargo.toml Cargo.toml
+  cp packaging/linux/Cargo.lock Cargo.lock
   cargo fetch --locked --target "$(rustc -vV | sed -n 's/^host: //p')"
 }
 

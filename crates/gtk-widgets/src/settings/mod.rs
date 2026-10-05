@@ -58,28 +58,16 @@ impl SettingsState {
         key: rufin_core::settings::LibraryListKey,
         update: impl FnOnce(&mut rufin_core::settings::LibraryListSettings),
     ) -> bool {
-        use rufin_core::settings::LibraryListSettings;
-        self.update_app_settings("library list settings", |settings| {
-            if !settings.library_lists.iter().any(|entry| entry.key == key) {
-                settings
-                    .library_lists
-                    .push(rufin_core::settings::LibraryListSettingsEntry {
-                        key,
-                        settings: LibraryListSettings::for_key(key),
-                    });
+        match self.persistence.update_library_list_settings(key, update) {
+            Ok(Some(committed)) => {
+                *self.current.borrow_mut() = committed;
+                true
             }
-            if let Some(entry) = settings
-                .library_lists
-                .iter_mut()
-                .find(|entry| entry.key == key)
-            {
-                let previous = entry.settings.clone();
-                update(&mut entry.settings);
-                entry.settings.sanitize(key);
-                return entry.settings != previous;
+            Ok(None) => false,
+            Err(error) => {
+                warn!(%error, "failed to save library list settings");
+                false
             }
-            false
-        })
-        .is_some()
+        }
     }
 }

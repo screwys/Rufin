@@ -111,6 +111,7 @@ fn run_inner(arguments: impl Iterator<Item = std::ffi::OsString>) -> Result<(), 
                 let local = inputs.products.settings.local_configuration();
                 rufin_core::open::arguments(
                     &inputs.products.playback.queue,
+                    &inputs.products.library,
                     local.as_ref(),
                     files,
                 )
@@ -130,6 +131,7 @@ fn run_inner(arguments: impl Iterator<Item = std::ffi::OsString>) -> Result<(), 
             }
         });
         inputs.products.playback.transport.shutdown();
+        inputs.products.scrobbling.shutdown();
         result.map_err(|error| error.to_string())
     })
     .map_err(|error| error.to_string())?

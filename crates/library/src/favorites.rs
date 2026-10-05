@@ -216,7 +216,7 @@ impl Database {
             .fetch_one(&mut *transaction)
             .await?;
         if known {
-            publish_source_user_data(&mut transaction, target.kind(), |query| {
+            let changed = publish_source_user_data(&mut transaction, target.kind(), |query| {
                 query
                     .push("SELECT source_key,object_id,")
                     .push_bind(favorite)
@@ -227,6 +227,15 @@ impl Database {
                     .push_bind(target.media_uri());
             })
             .await?;
+            if changed {
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "UPDATE sources SET catalog_revision=catalog_revision+1 WHERE source_key=(SELECT source_key FROM {}s WHERE media_uri=?1)",
+                    target.kind()
+                )))
+                .bind(target.media_uri())
+                .execute(&mut *transaction)
+                .await?;
+            }
             update_favorite(&mut transaction, target, None).await?;
         }
         transaction.commit().await?;

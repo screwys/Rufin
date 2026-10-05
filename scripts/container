@@ -118,6 +118,8 @@ clean_project_state() {
     fi
     unmount_project_build_state
     rm -rf -- "${repo_root}/.local/build"
+    rm -rf -- "${repo_root}/android/build" "${repo_root}/android/app/build" \
+        "${repo_root}/android/.gradle" "${repo_root}/android/.kotlin"
 }
 
 prepare_docker_identity() {

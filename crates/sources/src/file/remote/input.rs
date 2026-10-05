@@ -20,6 +20,7 @@ use crate::{SourceError, SourceResult};
 pub(crate) enum FileInput {
     Smb(Arc<SmbClient>),
     WebDav(Arc<WebDavClient>),
+    Documents(Arc<crate::file::documents::DocumentAccess>),
 }
 
 pub(crate) struct FileInputServer {
@@ -97,6 +98,16 @@ impl FileInputServer {
         revision: &str,
         media_uri: &str,
     ) -> SourceResult<playback::ResolvedStream> {
+        if let FileInput::Documents(access) = &*self.input {
+            let access = Arc::clone(access);
+            let path_owned = path.to_owned();
+            let lease = tokio::task::spawn_blocking(move || access.open(&path_owned))
+                .await
+                .map_err(|error| SourceError::Other(error.to_string()))??;
+            // The decoder, preloader, and analysis consumers keep both owners alive.
+            let resource = Arc::new((Arc::clone(self), lease));
+            return Ok(self.stream(path, media_uri).with_resource(resource));
+        }
         let FileInput::WebDav(client) = &*self.input else {
             return Ok(self.stream(path, media_uri));
         };
@@ -172,6 +183,7 @@ async fn serve(
     let result = match input {
         FileInput::Smb(client) => smb_response(client, &path, &request).await,
         FileInput::WebDav(client) => dav_response(client, &path, &request).await,
+        FileInput::Documents(access) => document_response(access, &path, &request).await,
     };
     result.unwrap_or_else(|error| {
         empty(match error {
@@ -186,6 +198,85 @@ async fn serve(
             _ => StatusCode::BAD_GATEWAY,
         })
     })
+}
+
+async fn document_response(
+    access: &Arc<crate::file::documents::DocumentAccess>,
+    path: &str,
+    request: &Request<hyper::body::Incoming>,
+) -> SourceResult<Response<Body>> {
+    let access = Arc::clone(access);
+    let path = path.to_owned();
+    let lease = tokio::task::spawn_blocking(move || access.open(&path))
+        .await
+        .map_err(|error| SourceError::Other(error.to_string()))??;
+    let length = lease.length;
+    let (start, end, partial) = match request.headers().get(header::RANGE) {
+        Some(range) => match range
+            .to_str()
+            .ok()
+            .and_then(|value| byte_range(value, length))
+        {
+            Some((start, end)) => (start, end, true),
+            None => {
+                let mut response = empty(StatusCode::RANGE_NOT_SATISFIABLE);
+                response.headers_mut().insert(
+                    header::CONTENT_RANGE,
+                    format!("bytes */{length}").parse().unwrap(),
+                );
+                return Ok(response);
+            }
+        },
+        None => (0, length, false),
+    };
+    let mut response = empty(if partial {
+        StatusCode::PARTIAL_CONTENT
+    } else {
+        StatusCode::OK
+    });
+    response
+        .headers_mut()
+        .insert(header::CONTENT_LENGTH, (end - start).into());
+    response.headers_mut().insert(
+        header::ACCEPT_RANGES,
+        header::HeaderValue::from_static("bytes"),
+    );
+    if partial {
+        response.headers_mut().insert(
+            header::CONTENT_RANGE,
+            format!("bytes {start}-{}/{length}", end - 1)
+                .parse()
+                .unwrap(),
+        );
+    }
+    if request.method() != Method::HEAD && start < end {
+        let stream =
+            futures_util::stream::try_unfold((lease, start), move |(lease, offset)| async move {
+                if offset >= end {
+                    return Ok::<_, io::Error>(None);
+                }
+                let read_lease = Arc::clone(&lease);
+                let bytes = tokio::task::spawn_blocking(move || {
+                    read_lease.read(offset, (end - offset).min(65536) as u32)
+                })
+                .await
+                .map_err(io::Error::other)?
+                .map_err(io::Error::other)?;
+                if bytes.is_empty() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "Document ended before its reported length",
+                    ));
+                }
+                let count = bytes.len();
+                Ok(Some((
+                    Frame::data(Bytes::from(bytes)),
+                    (lease, offset + count as u64),
+                )))
+            });
+        *response.body_mut() = StreamBody::new(stream).boxed_unsync();
+    }
+    Ok(response)
 }
 
 async fn smb_response(

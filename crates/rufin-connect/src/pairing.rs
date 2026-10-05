@@ -40,11 +40,11 @@ struct Enrollment {
 }
 
 #[derive(Debug)]
-pub(crate) struct PairProtocol(pub Weak<ConnectNetwork>);
+pub(crate) struct PairProtocol(pub Weak<ConnectNetwork>, pub bool);
 impl ProtocolHandler for PairProtocol {
     async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
         if let Some(network) = self.0.upgrade() {
-            let _ = run(network, conn, false).await;
+            let _ = run(network, conn, self.1, false).await;
         }
         Ok(())
     }
@@ -54,12 +54,13 @@ pub(crate) async fn run(
     network: Arc<ConnectNetwork>,
     connection: Connection,
     joining: bool,
+    initiating: bool,
 ) -> Result<()> {
     let mut session = None;
     let result = tokio::time::timeout(Duration::from_secs(300), async {
         tokio::select! {
             biased;
-            result = exchange(network.clone(), &connection, joining, &mut session) => result,
+            result = exchange(network.clone(), &connection, joining, initiating, &mut session) => result,
             error = connection.closed() => Err(error).context("The other device ended pairing"),
         }
     })
@@ -88,6 +89,7 @@ async fn exchange(
     network: Arc<ConnectNetwork>,
     connection: &Connection,
     joining: bool,
+    initiating: bool,
     attempt: &mut Option<String>,
 ) -> Result<()> {
     if !joining {
@@ -106,7 +108,7 @@ async fn exchange(
         identity: network.identity(),
         commitment: blake3::hash(public.as_bytes()).to_hex().to_string(),
     };
-    let (mut send, mut recv) = if joining {
+    let (mut send, mut recv) = if initiating {
         connection.open_bi().await?
     } else {
         connection.accept_bi().await?
@@ -152,6 +154,7 @@ async fn exchange(
             peer: peer.to_string(),
             name: remote.name.clone(),
             emoji,
+            joining,
         })
         .await
         .map_err(|_| anyhow::anyhow!("Connect stopped"))?;

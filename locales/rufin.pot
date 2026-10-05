@@ -139,6 +139,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"Some changes were saved. Close this editor and reopen it to review the "
+"result."
+msgstr ""
+
+msgid ""
 "Temporary library storage is in use. Changes may be lost when Rufin closes."
 msgstr ""
 
@@ -194,6 +199,9 @@ msgstr ""
 
 msgid ""
 "You will need to reconnect through the clients you use with the new API key."
+msgstr ""
+
+msgid "(hold to shuffle)"
 msgstr ""
 
 msgid ". You only need to fill email and an application name parts"
@@ -280,6 +288,9 @@ msgstr ""
 msgid "Add a new source"
 msgstr ""
 
+msgid "Add a server to configure downloads."
+msgstr ""
+
 msgid "Add a title"
 msgstr ""
 
@@ -311,9 +322,6 @@ msgid "Add tracks when fewer than this many remain"
 msgstr ""
 
 msgid "Add"
-msgstr ""
-
-msgid "Added to favorites"
 msgstr ""
 
 msgid "Added to"
@@ -424,6 +432,9 @@ msgstr ""
 msgid "Approve sign-in in your browser"
 msgstr ""
 
+msgid "Approve"
+msgstr ""
+
 #, rust-format
 msgid "April {year}"
 msgstr ""
@@ -483,10 +494,7 @@ msgstr ""
 msgid "Authentication"
 msgstr ""
 
-msgid "Auto DJ off"
-msgstr ""
-
-msgid "Auto DJ on"
+msgid "Authorization timed out"
 msgstr ""
 
 msgid "Auto DJ refill threshold"
@@ -554,6 +562,9 @@ msgstr ""
 msgid "Blue"
 msgstr ""
 
+msgid "Browse"
+msgstr ""
+
 msgid "Cached"
 msgstr ""
 
@@ -614,9 +625,6 @@ msgstr ""
 msgid "Channels"
 msgstr ""
 
-msgid "Check for updates every"
-msgstr ""
-
 msgid "Check for updates"
 msgstr ""
 
@@ -648,6 +656,9 @@ msgid "Choose one or more folders to scan and play directly from this computer"
 msgstr ""
 
 msgid "Choose playback output"
+msgstr ""
+
+msgid "Choose whether to keep the completed downloads."
 msgstr ""
 
 msgid "Choose"
@@ -738,6 +749,9 @@ msgid "Compilation"
 msgstr ""
 
 msgid "Complete sign-in in your browser"
+msgstr ""
+
+msgid "Completed downloads will stay on this device."
 msgstr ""
 
 msgid "Composer sort"
@@ -883,6 +897,9 @@ msgstr ""
 msgid "Could not load this page"
 msgstr ""
 
+msgid "Could not open browser"
+msgstr ""
+
 #, rust-format
 msgid "Could not open file: {error}"
 msgstr ""
@@ -892,6 +909,9 @@ msgid "Could not open folder: {error}"
 msgstr ""
 
 msgid "Could not play this track"
+msgstr ""
+
+msgid "Could not read artwork"
 msgstr ""
 
 msgid "Could not receive live updates"
@@ -1059,6 +1079,9 @@ msgid "Disc {number}"
 msgstr ""
 
 msgid "Disc"
+msgstr ""
+
+msgid "Discard changes?"
 msgstr ""
 
 msgid "Discography"
@@ -1268,6 +1291,9 @@ msgstr ""
 msgid "Export playlist"
 msgstr ""
 
+msgid "Export to connection"
+msgstr ""
+
 msgid "Export your listening history in Rufin"
 msgstr ""
 
@@ -1332,6 +1358,10 @@ msgstr ""
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 
+#, rust-format
+msgid "Files received: {count}"
+msgstr ""
+
 msgid "Files"
 msgstr ""
 
@@ -1354,6 +1384,9 @@ msgid "Flat"
 msgstr ""
 
 msgid "Folder path"
+msgstr ""
+
+msgid "Folder"
 msgstr ""
 
 msgid "Folders"
@@ -1439,6 +1472,9 @@ msgid "Genre"
 msgstr ""
 
 msgid "Genres"
+msgstr ""
+
+msgid "Gestures"
 msgstr ""
 
 msgid "Get token"
@@ -1536,6 +1572,12 @@ msgid "Import Backup"
 msgstr ""
 
 msgid "Import Playlist"
+msgstr ""
+
+msgid "Import from connection"
+msgstr ""
+
+msgid "Import theme"
 msgstr ""
 
 msgid "Import"
@@ -1649,6 +1691,9 @@ msgstr ""
 msgid "Layout"
 msgstr ""
 
+msgid "Leave empty for an unencrypted archive."
+msgstr ""
+
 msgid "Leave the password empty to keep the saved credential"
 msgstr ""
 
@@ -1724,6 +1769,9 @@ msgstr ""
 msgid "Local file access configured"
 msgstr ""
 
+msgid "Local file access is required before these tags can be saved."
+msgstr ""
+
 msgid "Local file mapping is no longer available"
 msgstr ""
 
@@ -1752,6 +1800,12 @@ msgid "Local music folder"
 msgstr ""
 
 msgid "Local music folders"
+msgstr ""
+
+msgid "Local network permission is required for remote connections"
+msgstr ""
+
+msgid "Local network permission was denied"
 msgstr ""
 
 msgid "Local network"
@@ -1819,11 +1873,10 @@ msgstr ""
 msgid "Media available"
 msgstr ""
 
-#, rust-format
-msgid "Media transferring: {received} / {total} bytes"
+msgid "Menu"
 msgstr ""
 
-msgid "Menu"
+msgid "Metadata changed before it was saved. Reload it before trying again."
 msgstr ""
 
 msgid "Metadata editing is no longer available"
@@ -1833,6 +1886,9 @@ msgid "Metadata editing requires Local access"
 msgstr ""
 
 msgid "Metadata source"
+msgstr ""
+
+msgid "Metadata was saved, but refreshing the source failed."
 msgstr ""
 
 msgid "Metadata"
@@ -1866,6 +1922,9 @@ msgid "Moods"
 msgstr ""
 
 msgid "More actions"
+msgstr ""
+
+msgid "More"
 msgstr ""
 
 msgid "Most Played (Monthly)"
@@ -1910,10 +1969,16 @@ msgstr ""
 msgid "Music Folder"
 msgstr ""
 
+msgid "Music access permission was denied"
+msgstr ""
+
 msgid "Music folders on the Rufin machine"
 msgstr ""
 
 msgid "Music on this device"
+msgstr ""
+
+msgid "Music"
 msgstr ""
 
 msgid "MusicBrainz + Last.fm"
@@ -2003,6 +2068,9 @@ msgstr ""
 msgid "New download rule"
 msgstr ""
 
+msgid "New release is available"
+msgstr ""
+
 msgid "Newly added"
 msgstr ""
 
@@ -2036,6 +2104,9 @@ msgstr ""
 msgid "No cached server path yet"
 msgstr ""
 
+msgid "No downloads queued"
+msgstr ""
+
 msgid "No favorite albums yet"
 msgstr ""
 
@@ -2043,6 +2114,9 @@ msgid "No favorite artists yet"
 msgstr ""
 
 msgid "No favorites yet"
+msgstr ""
+
+msgid "No file connections"
 msgstr ""
 
 msgid "No file linked"
@@ -2175,6 +2249,9 @@ msgid "Off only for a server you control"
 msgstr ""
 
 msgid "Off"
+msgstr ""
+
+msgid "Offline"
 msgstr ""
 
 msgid "On this device"
@@ -2372,6 +2449,12 @@ msgstr ""
 msgid "Play playlist"
 msgstr ""
 
+msgid "Play radio later"
+msgstr ""
+
+msgid "Play radio next"
+msgstr ""
+
 msgid "Play radio"
 msgstr ""
 
@@ -2403,6 +2486,13 @@ msgid "Playback speed"
 msgstr ""
 
 msgid "Playback"
+msgstr ""
+
+#, rust-format
+msgid "Playing from {}"
+msgstr ""
+
+msgid "Playing from"
 msgstr ""
 
 msgid "Playing on this device"
@@ -2577,6 +2667,9 @@ msgstr ""
 msgid "Quit"
 msgstr ""
 
+msgid "Radio"
+msgstr ""
+
 msgid "Range selection"
 msgstr ""
 
@@ -2667,6 +2760,9 @@ msgstr ""
 msgid "Reload from file"
 msgstr ""
 
+msgid "Reload metadata to review the current values."
+msgstr ""
+
 msgid "Reload themes"
 msgstr ""
 
@@ -2736,13 +2832,13 @@ msgstr ""
 msgid "Remove"
 msgstr ""
 
-msgid "Removed from favorites"
-msgstr ""
-
 msgid "Removed from"
 msgstr ""
 
 msgid "Rename file"
+msgstr ""
+
+msgid "Reorder"
 msgstr ""
 
 msgid "Repeat all"
@@ -2899,6 +2995,9 @@ msgstr ""
 msgid "Saved"
 msgstr ""
 
+msgid "Saved..."
+msgstr ""
+
 msgid "Saves lyrics to your source"
 msgstr ""
 
@@ -2982,9 +3081,6 @@ msgid "Searching..."
 msgstr ""
 
 msgid "Secret storage"
-msgstr ""
-
-msgid "Secure storage"
 msgstr ""
 
 msgid "Seek Backward"
@@ -3112,6 +3208,9 @@ msgstr ""
 msgid "Show comparison"
 msgstr ""
 
+msgid "Show current lyrics line"
+msgstr ""
+
 msgid "Show downloaded badge"
 msgstr ""
 
@@ -3167,12 +3266,6 @@ msgid "Show/hide right sidebar"
 msgstr ""
 
 msgid "Showcase"
-msgstr ""
-
-msgid "Shuffle off"
-msgstr ""
-
-msgid "Shuffle on"
 msgstr ""
 
 msgid "Shuffle"
@@ -3269,6 +3362,9 @@ msgstr ""
 msgid "Source by position"
 msgstr ""
 
+msgid "Source setup is unavailable"
+msgstr ""
+
 msgid "Source to use for cover images and song/artist links"
 msgstr ""
 
@@ -3320,6 +3416,12 @@ msgstr ""
 msgid "Sunday"
 msgstr ""
 
+msgid "Swipe left"
+msgstr ""
+
+msgid "Swipe right"
+msgstr ""
+
 msgid "Switch Search/Favorites tabs"
 msgstr ""
 
@@ -3339,6 +3441,9 @@ msgid "System default"
 msgstr ""
 
 msgid "System flatpak:"
+msgstr ""
+
+msgid "System keyring"
 msgstr ""
 
 msgid "System"
@@ -3517,6 +3622,9 @@ msgstr ""
 msgid "Untitled"
 msgstr ""
 
+msgid "Update check interval"
+msgstr ""
+
 msgid "Update"
 msgstr ""
 
@@ -3556,6 +3664,9 @@ msgid "Use accent color"
 msgstr ""
 
 msgid "Use an existing connection?"
+msgstr ""
+
+msgid "Use current artwork"
 msgstr ""
 
 msgid "Use different layout below a threshold width"
@@ -3652,9 +3763,6 @@ msgid "Waiting for connection"
 msgstr ""
 
 msgid "Waiting for device"
-msgstr ""
-
-msgid "Waiting for media provider"
 msgstr ""
 
 msgid "Waiting for the other device to approve"
@@ -3768,6 +3876,10 @@ msgid "today"
 msgstr ""
 
 msgid "yesterday"
+msgstr ""
+
+#, rust-format
+msgid "{action} (Shuffle)"
 msgstr ""
 
 #, rust-format

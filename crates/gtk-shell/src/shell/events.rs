@@ -10,11 +10,11 @@ use tracing::warn;
 
 use crate::player::{now_playing_notification_can_send, now_playing_notification_should_withdraw};
 use crate::preferences::dialogs::release_notes::apply_release_update;
-use crate::preferences::source::source_progress_text;
 use crate::shell::playlist_picker::refresh_context_playlist_picker;
 use gtk_player::fullscreen::{FullscreenPlaybackRefresh, fullscreen_playback_refresh};
 use gtk_player::state::{NowPlayingPresentation, current_playback_media_id};
 use gtk_widgets::route::Route;
+use rufin_core::runtime::source::source_progress_text;
 use rufin_core::runtime::source::{
     ConfiguredSources, DiscoveryStatus, DiscoveryUpdate, LocalFolder, SourceOperation,
     SourceProgress,
@@ -1205,6 +1205,8 @@ mod tests {
                 state: TransportStatus::Stopped,
                 desired_playing: false,
                 position_millis: 0,
+                position_observed_at_millis: 0,
+                playback_rate: 1.0,
                 duration_millis: 0,
                 can_seek: false,
                 buffering_percent: None,

@@ -100,6 +100,36 @@ pub(crate) fn template(root: &Path) -> Result<String> {
     let mut catalog = Catalog::default();
     extract_rust(root, &mut catalog)?;
     extract_builder(root, &mut catalog)?;
+    let mut android_files = Vec::new();
+    collect_files_with_extension(
+        root,
+        &root.join("android/app/src/main/java"),
+        "kt",
+        &mut android_files,
+    )?;
+    for file in android_files {
+        for message in web_gettext::messages_for_calls(
+            &read_to_string(&file)?,
+            &[
+                "translate(",
+                "label(",
+                "PreferenceSwitch(",
+                "PreferenceSlider(",
+                "SourceTextField(",
+                "SourceSwitch(",
+                "SourceOptions(",
+            ],
+        ) {
+            let formatted = rust_format(&message);
+            catalog.insert(
+                None,
+                message,
+                None,
+                None,
+                formatted.then_some("rust-format"),
+            )?;
+        }
+    }
     let mut web_files = Vec::new();
     for extension in ["js", "html"] {
         collect_files_with_extension(root, &root.join("web"), extension, &mut web_files)?;

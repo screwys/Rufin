@@ -1,6 +1,6 @@
 //! Checks media locations for explicit cleanup commands.
 use super::{SourceOwner, string_error};
-use std::{collections::HashSet, path::PathBuf};
+use std::collections::HashSet;
 
 impl SourceOwner {
     pub(crate) async fn missing_media(&self, uris: &[String]) -> Result<HashSet<String>, String> {
@@ -21,7 +21,7 @@ impl SourceOwner {
             .into_iter()
             .collect();
         let paths = database
-            .local_media_paths(uris)
+            .local_media_locations(uris)
             .await
             .map_err(string_error)?;
         let shared: Vec<_> = paths.iter().map(|(_, _, shared)| *shared).collect();
@@ -32,7 +32,7 @@ impl SourceOwner {
         let native: Vec<_> = uris
             .iter()
             .enumerate()
-            .filter(|(index, uri)| native_media_path(uri).is_some() && !available[*index])
+            .filter(|(index, uri)| direct_local_media(uri) && !available[*index])
             .map(|(index, uri)| (index, uri.clone()))
             .collect();
         if !native.is_empty() {
@@ -56,7 +56,7 @@ impl SourceOwner {
             if available[index] {
                 continue;
             }
-            if native_media_path(uri).is_some() || catalog_missing.contains(uri) {
+            if direct_local_media(uri) || catalog_missing.contains(uri) {
                 missing.insert(uri.clone());
                 continue;
             }
@@ -90,7 +90,10 @@ impl SourceOwner {
     }
 }
 
-fn native_media_path(uri: &str) -> Option<PathBuf> {
+fn direct_local_media(uri: &str) -> bool {
     let backing = library::cue_media_parts(uri).map(|(_, backing, _, _)| backing);
-    library::file_media_path(backing.as_deref().unwrap_or(uri))
+    let backing = backing.as_deref().unwrap_or(uri);
+    library::file_media_path(backing).is_some()
+        || library::document_media_id(backing).is_some()
+        || backing.starts_with("content:")
 }

@@ -32,7 +32,7 @@
         </child>
         <child>
           <object class="AdwComboRow" id="release_check_interval_row">
-            <property name="title" translatable="yes">Check for updates every</property>
+            <property name="title" translatable="yes">Update check interval</property>
             <property name="model">
               <object class="GtkStringList">
                 <items>

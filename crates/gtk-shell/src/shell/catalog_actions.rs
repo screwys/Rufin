@@ -1,8 +1,7 @@
 use super::Shell;
-use gtk_widgets::media_drag::download_subject;
 use playback::QueuePlacement;
 use rufin_core::playback::PlaybackTarget;
-use std::{rc::Rc, sync::Arc};
+use std::rc::Rc;
 use tracing::warn;
 pub(crate) fn download(target: &PlaybackTarget, shell: &Shell) {
     let selected = shell.selected_library();
@@ -10,15 +9,19 @@ pub(crate) fn download(target: &PlaybackTarget, shell: &Shell) {
     let folder = selected
         .as_ref()
         .and_then(|selected| selected.music_folder_key);
-    let database = Arc::clone(&shell.products.library);
+    let result = shell
+        .products
+        .source
+        .download_target(target.clone(), scope, folder);
     let target = target.clone();
-    let source = shell.products.source.clone();
     shell.products.runtime.spawn(async move {
-        match target.resolve_media_uris(&database, scope, folder).await {
-            Ok(media_uris) => {
-                source.download_media(download_subject(&target), media_uris);
-            }
-            Err(error) => warn!(target = ?target, %error, "failed to identify download tracks"),
+        if let Err(error) = result
+            .recv()
+            .await
+            .map_err(|error| error.to_string())
+            .and_then(|result| result)
+        {
+            warn!(target = ?target, %error, "failed to identify download tracks");
         }
     });
 }
@@ -29,15 +32,19 @@ pub(crate) fn remove_download(target: &PlaybackTarget, shell: &Shell) {
     let folder = selected
         .as_ref()
         .and_then(|selected| selected.music_folder_key);
-    let database = Arc::clone(&shell.products.library);
+    let result = shell
+        .products
+        .source
+        .remove_download_target(target.clone(), scope, folder);
     let target = target.clone();
-    let downloads = shell.products.downloads.clone();
     shell.products.runtime.spawn(async move {
-        match target.resolve_media_uris(&database, scope, folder).await {
-            Ok(order) => downloads.remove(order, true),
-            Err(error) => {
-                warn!(target = ?target, %error, "failed to identify downloaded tracks")
-            }
+        if let Err(error) = result
+            .recv()
+            .await
+            .map_err(|error| error.to_string())
+            .and_then(|result| result)
+        {
+            warn!(target = ?target, %error, "failed to identify downloaded tracks");
         }
     });
 }

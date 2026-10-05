@@ -851,6 +851,7 @@ impl Shell {
                             source: source_key,
                             collection: None,
                             folder,
+                            downloaded_only: false,
                             favorites_only,
                         },
                         "",

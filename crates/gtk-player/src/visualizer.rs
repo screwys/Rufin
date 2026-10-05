@@ -3,31 +3,12 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::subclass::prelude::*;
-use rufin_core::settings::visualizer::{VisualizerAppearance, VisualizerStyle};
-
-pub const VISUALIZER_ZERO_THRESHOLD: f64 = 0.004;
-pub const VISUALIZER_TOP_GAP: f64 = 50.0;
-const VISUALIZER_REFERENCE_FRAME_MICROS: f64 = 1_000_000.0 / 60.0;
-const VISUALIZER_STALE_MICROS: i64 = 133_333;
-
-#[derive(Clone, Copy, Default)]
-struct Peak {
-    level: f64,
-    hold: f64,
-}
-
-impl Peak {
-    fn advance(&mut self, level: f64, elapsed: f64, hold: f64, fall: f64) {
-        if level >= self.level {
-            self.level = level;
-            self.hold = hold;
-        } else {
-            let falling = (elapsed - self.hold).max(0.0);
-            self.hold = (self.hold - elapsed).max(0.0);
-            self.level = (self.level - falling * fall).max(level);
-        }
-    }
-}
+use rufin_core::settings::visualizer::{
+    VISUALIZER_REFERENCE_FRAME_MICROS, VISUALIZER_STALE_MICROS, VisualizerAppearance,
+    VisualizerPeak as Peak, VisualizerStyle, visualizer_accent_gradient, visualizer_bar_levels,
+    visualizer_column_geometry, visualizer_lerp as lerp, visualizer_row_geometry,
+    visualizer_smoothed_level, visualizer_smoothing_weights,
+};
 
 pub struct VisualizerParts {
     pub sidebar_area: Visualizer,
@@ -336,28 +317,8 @@ fn rect(x: f64, y: f64, width: f64, height: f64) -> gtk::graphene::Rect {
     gtk::graphene::Rect::new(x as f32, y as f32, width as f32, height as f32)
 }
 
-pub fn visualizer_column_geometry(width: f64, level_count: usize, gap: f64) -> (usize, f64) {
-    let available_width = (width * 0.984).max(1.0);
-    let fitting_columns = ((available_width + gap) / (2.0 + gap)).floor() as usize;
-    let columns = level_count.min(fitting_columns.max(1)).max(1);
-    let cell =
-        ((available_width - gap * columns.saturating_sub(1) as f64) / columns as f64).max(2.0);
-    (columns, cell)
-}
-
-pub fn visualizer_row_geometry(height: f64, cell: f64, gap: f64) -> (usize, f64) {
-    let grid_height = (height - VISUALIZER_TOP_GAP).max(height * 0.64);
-    let rows = (((grid_height + gap) / (cell + gap)).floor() as usize).clamp(8, 32);
-    let row_height = ((grid_height - gap * rows.saturating_sub(1) as f64) / rows as f64).max(1.0);
-    (rows, row_height)
-}
-
 pub(super) fn accent_gradient(accent: gtk::gdk::RGBA) -> [[f32; 3]; 2] {
-    let base = [accent.red(), accent.green(), accent.blue()];
-    [
-        base.map(|value| value * 0.75),
-        base.map(|value| value + (1.0 - value) * 0.32),
-    ]
+    visualizer_accent_gradient([accent.red(), accent.green(), accent.blue()])
 }
 
 fn color(colors: [[f32; 3]; 2], mix: f64, alpha: f64) -> gtk::gdk::RGBA {
@@ -369,37 +330,6 @@ fn color(colors: [[f32; 3]; 2], mix: f64, alpha: f64) -> gtk::gdk::RGBA {
         color[2] as f32,
         alpha as f32,
     )
-}
-
-pub fn lerp(start: f64, end: f64, mix: f64) -> f64 {
-    start + (end - start) * mix
-}
-
-pub fn visualizer_bar_levels(levels: &[f64], columns: usize) -> Vec<f64> {
-    if columns == 0 || levels.is_empty() {
-        return Vec::new();
-    }
-    (0..columns)
-        .map(|column| {
-            let start = column * levels.len() / columns;
-            let end = ((column + 1) * levels.len() / columns).max(start + 1);
-            let mut total = 0.0;
-            let mut peak = 0.0_f64;
-            let mut count = 0;
-            for level in &levels[start..end.min(levels.len())] {
-                let level = level.clamp(0.0, 1.0);
-                total += level;
-                peak = peak.max(level);
-                count += 1;
-            }
-            let average = if count == 0 {
-                0.0
-            } else {
-                total / count as f64
-            };
-            average * 0.4 + peak * 0.6
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -574,8 +504,8 @@ impl crate::PlayerUi {
                 (now - last) as f64 / VISUALIZER_REFERENCE_FRAME_MICROS
             });
             let appearance = appearance.borrow();
-            let rise_weight = 1.0 - (1.0 - appearance.rise).powf(elapsed_frames);
-            let fall_weight = 1.0 - (1.0 - appearance.fall).powf(elapsed_frames);
+            let (rise_weight, fall_weight) =
+                visualizer_smoothing_weights(elapsed_frames, appearance.rise, appearance.fall);
             let next_generation = generation.get();
             if next_generation != seen_generation.get() || last_data_time.get().is_none() {
                 seen_generation.set(next_generation);
@@ -600,10 +530,7 @@ impl crate::PlayerUi {
                 } else {
                     fall_weight
                 };
-                let mut smoothed = next * weight + value * (1.0 - weight);
-                if next == 0.0 && smoothed < VISUALIZER_ZERO_THRESHOLD {
-                    smoothed = 0.0;
-                }
+                let smoothed = visualizer_smoothed_level(value, next, weight);
                 changed |= (smoothed - value).abs() > 0.0005;
                 current[index] = smoothed;
                 if appearance.peaks {

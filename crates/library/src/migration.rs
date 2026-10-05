@@ -9,6 +9,7 @@ use sqlx::{
 use std::collections::BTreeMap;
 use std::io::{Seek, Write};
 use std::path::Path;
+use std::sync::Arc;
 
 fn imported<T>(result: LibraryResult<T>, family: &str) -> LibraryResult<Option<T>> {
     match result {
@@ -673,6 +674,8 @@ async fn import_queue(
                 };
                 let provenance = match string(&row, "provenance_kind").as_deref() {
                     Some("context") => crate::QueueProvenance::Context {
+                        context_title: string(&row, "provenance_context_title")
+                            .map(|value| serde_json::from_str(&value).map(Arc::new)).transpose()?,
                         context_id: string(&row, "provenance_context_id")
                             .filter(|value| !value.is_empty())
                             .ok_or_else(|| LibraryError::InvalidStore("Queue context identity unreadable".into()))?

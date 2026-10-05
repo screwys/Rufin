@@ -20,14 +20,18 @@ impl ProfileStore {
         let mut transaction = connection.begin().await?;
         register_on(&mut transaction, members).await?;
         register_on(&mut transaction, &[peer.to_owned()]).await?;
-        for version in versions {
-            acknowledge_on(
-                &mut transaction,
-                peer,
-                &version.name,
-                &VersionVector::decode(&version.version)?,
-            )
-            .await?;
+        for page in versions.chunks(CONNECT_PAGE_SIZE) {
+            let page = page
+                .iter()
+                .map(|version| {
+                    Ok((
+                        peer.to_owned(),
+                        version.name.clone(),
+                        VersionVector::decode(&version.version)?,
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            acknowledge_page_on(&mut transaction, &page).await?;
         }
         transaction.commit().await?;
         Ok(())
@@ -178,34 +182,53 @@ pub(super) async fn register_on(
     Ok(())
 }
 
-pub(super) async fn acknowledge_on(
+pub(super) async fn acknowledge_page_on(
     connection: &mut SqliteConnection,
-    peer: &str,
-    name: &str,
-    version: &VersionVector,
+    versions: &[(String, String, VersionVector)],
 ) -> Result<()> {
-    let previous: Option<Vec<u8>> = sqlx::query_scalar(
-        "SELECT version FROM history_acknowledgements WHERE peer=?1 AND name=?2",
-    )
-    .bind(peer)
-    .bind(name)
-    .fetch_optional(&mut *connection)
-    .await?;
-    let mut acknowledged = previous
-        .as_deref()
-        .map(VersionVector::decode)
-        .transpose()?
-        .unwrap_or_default();
-    if acknowledged.includes_vv(version) {
-        return Ok(());
+    for page in versions.chunks(CONNECT_PAGE_SIZE) {
+        let mut query = QueryBuilder::<sqlx::Sqlite>::new("WITH requested(peer,name) AS (");
+        query.push_values(page, |mut values, (peer, name, _)| {
+            values.push_bind(peer).push_bind(name);
+        });
+        query.push(") SELECT DISTINCT h.peer,h.name,h.version FROM requested r JOIN history_acknowledgements h ON h.peer=r.peer AND h.name=r.name");
+        let mut acknowledged = BTreeMap::new();
+        for row in query.build().fetch_all(&mut *connection).await? {
+            acknowledged.insert(
+                (row.get::<String, _>(0), row.get::<String, _>(1)),
+                VersionVector::decode(&row.get::<Vec<u8>, _>(2))?,
+            );
+        }
+        let mut changed = BTreeSet::new();
+        for (peer, name, version) in page {
+            let key = (peer.clone(), name.clone());
+            let previous = acknowledged.entry(key.clone()).or_default();
+            if !previous.includes_vv(version) {
+                previous.merge(version);
+                changed.insert(key);
+            }
+        }
+        if changed.is_empty() {
+            continue;
+        }
+        let mut upsert = QueryBuilder::<sqlx::Sqlite>::new(
+            "INSERT INTO history_acknowledgements(peer,name,version) ",
+        );
+        upsert.push_values(&changed, |mut values, key| {
+            values
+                .push_bind(&key.0)
+                .push_bind(&key.1)
+                .push_bind(acknowledged[key].encode());
+        });
+        upsert.push(" ON CONFLICT(peer,name) DO UPDATE SET version=excluded.version");
+        upsert.build().execute(&mut *connection).await?;
+        let mut pending =
+            QueryBuilder::<sqlx::Sqlite>::new("INSERT OR IGNORE INTO history_pending(name) ");
+        pending.push_values(&changed, |mut values, (_, name)| {
+            values.push_bind(name);
+        });
+        pending.build().execute(&mut *connection).await?;
     }
-    acknowledged.merge(version);
-    sqlx::query("INSERT INTO history_acknowledgements VALUES(?1,?2,?3) ON CONFLICT(peer,name) DO UPDATE SET version=excluded.version")
-        .bind(peer).bind(name).bind(acknowledged.encode()).execute(&mut *connection).await?;
-    sqlx::query("INSERT OR IGNORE INTO history_pending VALUES(?1)")
-        .bind(name)
-        .execute(&mut *connection)
-        .await?;
     Ok(())
 }
 

@@ -24,6 +24,8 @@ mod queue;
 pub use connect_media::ConnectMediaFile;
 mod radio;
 mod scan;
+mod scroll_sections;
+pub use scroll_sections::ScrollSection;
 mod schema;
 mod search;
 mod smart_playlists;
@@ -54,13 +56,14 @@ pub use home::{
 pub use keys::{
     AlbumKey, ArtistKey, FolderKey, GenreKey, ListenKey, ListenOutboxKey, LocalAccessFileKey,
     LocalFileKey, MoodKey, PlaylistEntryKey, PlaylistKey, SmartPlaylistKey, SourceId, SourceKey,
-    TrackKey, cue_media_parts, cue_media_uri, file_media_path, normalize_direct_media_uri,
-    source_entity_parts, source_entity_uri,
+    TrackKey, cue_media_parts, cue_media_uri, document_access_uri, document_fragment_parts,
+    document_locator_fragment, document_locator_parts, document_media_id, document_media_uri,
+    file_media_path, normalize_direct_media_uri, source_entity_parts, source_entity_uri,
 };
 pub use local::{
     DownloadMetadata, LocalAccessOrigin, LocalAccessRow, LocalAccessWrite, LocalFileKind,
-    LocalFileRow, LocalFileState, LocalFileWrite, LocalLocatorWrite, MappingTrackRow,
-    ObservedMediaFile,
+    LocalFileRow, LocalFileState, LocalFileWrite, LocalLocatorWrite, LocalMediaLocation,
+    MappingTrackRow, ObservedMediaFile,
 };
 pub use loudness::{AlbumLoudnessWork, LoudnessMeasurement, R128TagWrite, TrackLoudnessWork};
 pub use lyrics::LyricsCacheRow;
@@ -74,10 +77,10 @@ pub use playlists::{
     PlaylistEntryWrite, PlaylistGenreLink, PlaylistIdentity, PlaylistRow, PlaylistSort,
 };
 pub use queue::{
-    OccurrenceId, QUEUE_CONTEXT_LIMIT, QueueChoice, QueueCollection, QueueEntry, QueueInput,
-    QueueItem, QueueOccurrence, QueuePageRow, QueuePlacement, QueueProvenance, QueueQuery,
-    QueueReadPage, QueueReadRequest, QueueReorderTarget, QueueRepeatMode, QueueRestore, QueueScope,
-    QueueSource, QueueTransferPage, queue_content_id, shuffle_order,
+    OccurrenceId, QUEUE_CONTEXT_LIMIT, QueueChoice, QueueCollection, QueueContextTitle, QueueEntry,
+    QueueInput, QueueItem, QueueOccurrence, QueuePageRow, QueuePlacement, QueueProvenance,
+    QueueQuery, QueueReadPage, QueueReadRequest, QueueReorderTarget, QueueRepeatMode, QueueRestore,
+    QueueScope, QueueSource, QueueTransferPage, queue_content_id, shuffle_order,
 };
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
 pub use scan::{

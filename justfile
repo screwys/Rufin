@@ -9,6 +9,10 @@ build target="" architecture="":
             Darwin|CYGWIN*|MINGW*|MSYS*) just _build-native-package ;; \
             *) scripts/container run default none just _build ;; \
         esac; \
+    elif [[ "{{ target }}" == "apk" && -z "{{ architecture }}" ]]; then \
+        cargo run --locked -p xtask -- android build stable; \
+    elif [[ "{{ target }}" == "apk-dev" && -z "{{ architecture }}" ]]; then \
+        cargo run --locked -p xtask -- android build development; \
     elif [[ "{{ target }}" == "headless" && -z "{{ architecture }}" ]]; then \
         scripts/container run default none just _build rufin-controller; \
     elif [[ "{{ target }}" == "arch" && -z "{{ architecture }}" ]]; then \
@@ -20,7 +24,15 @@ build target="" architecture="":
         scripts/container run packaging sandbox env FLATPAK_BWRAP=/usr/bin/bwrap \
             just _build-flatpak; \
     else \
-        echo "usage: just build [headless|arch|flatpak|rpm [arm]]" >&2; \
+        echo "usage: just build [headless|apk|apk-dev|arch|flatpak|rpm [arm]]" >&2; \
+        exit 2; \
+    fi
+
+install target:
+    @if [[ "{{ target }}" == "android" ]]; then \
+        cargo run --locked -p xtask -- android install; \
+    else \
+        echo "usage: just install android" >&2; \
         exit 2; \
     fi
 

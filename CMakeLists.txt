@@ -80,6 +80,7 @@ pkg_check_modules(RUFIN_GSTREAMER REQUIRED IMPORTED_TARGET
   gstreamer-1.0>=1.26
   gstreamer-app-1.0>=1.26
   gstreamer-audio-1.0>=1.26
+  gstreamer-controller-1.0>=1.26
   gstreamer-pbutils-1.0>=1.26
 )
 

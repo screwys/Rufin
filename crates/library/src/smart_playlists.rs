@@ -4,7 +4,7 @@
 use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqliteRow;
-use sqlx::{AssertSqlSafe, Connection, FromRow, Row, SqliteConnection};
+use sqlx::{AssertSqlSafe, Connection, FromRow, Row, Sqlite, SqliteConnection};
 
 use crate::{
     Database, FolderKey, LibraryError, LibraryResult, ReadCancellation, RouteSeedWindow,
@@ -634,6 +634,109 @@ async fn load_smart_playlist_rows(
 }
 
 impl Database {
+    pub async fn smart_playlist_section_positions(
+        &self,
+        source: Option<SourceKey>,
+        folder: Option<FolderKey>,
+        sort: SmartPlaylistListSort,
+        descending: bool,
+        filter: &str,
+        now: i64,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<crate::ScrollSection>> {
+        if sort != SmartPlaylistListSort::Title {
+            return Ok(Vec::new());
+        }
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        crate::scroll_sections::decode_sections(
+            load_smart_playlist_order::<String>(
+                &mut connection,
+                source,
+                folder,
+                sort,
+                descending,
+                filter,
+                now,
+                0,
+                usize::MAX,
+                true,
+            )
+            .await?,
+        )
+    }
+
+    pub async fn smart_track_section_positions(
+        &self,
+        source: Option<SourceKey>,
+        key: SmartPlaylistKey,
+        folder: Option<FolderKey>,
+        filter: &str,
+        sort: crate::TrackSort,
+        descending: bool,
+        now: i64,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<crate::ScrollSection>> {
+        if !crate::scroll_sections::text_sort(sort) {
+            return Ok(Vec::new());
+        }
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let input = smart_display_input(&mut connection, now, key).await?;
+        let order = smart_display_order(sort, descending);
+        let text = match sort {
+            crate::TrackSort::Title => "title",
+            crate::TrackSort::Artist => "artist",
+            crate::TrackSort::AlbumArtist => "sort_album_artist",
+            crate::TrackSort::Album => "album",
+            crate::TrackSort::Genre => "sort_genre",
+            _ => unreachable!(),
+        };
+        let filter = filter.trim().to_lowercase();
+        if filter.is_empty() {
+            let sql = smart_track_sql(
+                &input,
+                &format!("SELECT media_uri FROM smart_tracks ORDER BY {order}"),
+            );
+            return crate::scroll_sections::decode_sections(
+                sqlx::query_scalar(AssertSqlSafe(crate::scroll_sections::section_sql(
+                    &sql, text,
+                )))
+                .bind(source)
+                .bind(now)
+                .bind(folder)
+                .bind(serde_json::to_string(&[key.raw()])?)
+                .persistent(false)
+                .fetch_all(&mut *connection)
+                .await?,
+            );
+        }
+        let rows = smart_track_sql(&input, "SELECT * FROM smart_tracks");
+        let bucket = crate::scroll_sections::SECTION_BUCKET_SQL;
+        let sql = format!(
+            "WITH section_rows AS ({rows}), initials AS (
+             SELECT *,lower(substr({text},1,1)) initial,unicode(substr({text},1,1)) code FROM section_rows)
+             SELECT title,artist,album,coalesce(year,0) year,{bucket} section_title FROM initials ORDER BY {order}"
+        );
+        let mut records = sqlx::query(AssertSqlSafe(sql))
+            .bind(source)
+            .bind(now)
+            .bind(folder)
+            .bind(serde_json::to_string(&[key.raw()])?)
+            .persistent(false)
+            .fetch(&mut *connection);
+        let mut sections: Vec<crate::ScrollSection> = Vec::new();
+        let mut index = 0;
+        while let Some(row) = records.try_next().await? {
+            if !matches_smart_text(&row, &filter) {
+                continue;
+            }
+            let title: String = row.try_get("section_title")?;
+            if !sections.iter().any(|section| section.title == title) {
+                sections.push(crate::ScrollSection { title, index });
+            }
+            index += 1;
+        }
+        Ok(sections)
+    }
     pub async fn smart_playlist_count(
         &self,
         source: Option<SourceKey>,
@@ -712,71 +815,19 @@ impl Database {
     ) -> LibraryResult<Vec<SmartPlaylistRow>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let limit = limit.min(SMART_PLAYLIST_ROW_LIMIT);
-        let filter = filter.trim();
-        let keys = if let Some(order) =
-            smart_list_order(sort, descending).filter(|_| folder.is_none())
-        {
-            let sql = format!(
-                "SELECT smart_playlist_key FROM smart_playlists WHERE instr(normalized_name,lower(?1))>0 ORDER BY {order} LIMIT ?2 OFFSET ?3"
-            );
-            sqlx::query_scalar::<_, SmartPlaylistKey>(AssertSqlSafe(sql))
-                .bind(filter)
-                .bind(limit as i64)
-                .bind(offset.min(i64::MAX as usize) as i64)
-                .fetch_all(&mut *transaction)
-                .await?
-        } else {
-            let totals = matches!(
-                sort,
-                SmartPlaylistListSort::TrackCount | SmartPlaylistListSort::Duration
-            );
-            let policy = smart_policy_sql(
-                &mut transaction,
-                now,
-                None,
-                if totals {
-                    SmartOutput::Totals
-                } else {
-                    SmartOutput::Exists
-                },
-            )
-            .await?;
-            let join = if totals {
-                "LEFT JOIN selected USING(definition_key)"
-            } else {
-                ""
-            };
-            let admitted = if totals {
-                "track_count>0"
-            } else {
-                "EXISTS(SELECT 1 FROM selected WHERE selected.definition_key=definitions.definition_key)"
-            };
-            let column = match sort {
-                SmartPlaylistListSort::Position => "position",
-                SmartPlaylistListSort::Title => "normalized_name",
-                SmartPlaylistListSort::TrackCount => "track_count",
-                SmartPlaylistListSort::Duration => "duration_millis",
-            };
-            let direction = if descending { "DESC" } else { "ASC" };
-            let sql = format!(
-                "{policy} SELECT definition_key FROM definitions {join}
-                WHERE (current_scope=0 OR ?3 IS NULL OR {admitted})
-                  AND instr(normalized_name,lower(?5))>0
-                ORDER BY {column} {direction},position,definition_key LIMIT ?6 OFFSET ?7"
-            );
-            sqlx::query_scalar::<_, SmartPlaylistKey>(AssertSqlSafe(sql))
-                .persistent(false)
-                .bind(source)
-                .bind(now)
-                .bind(folder)
-                .bind(Option::<SmartPlaylistKey>::None)
-                .bind(filter)
-                .bind(limit as i64)
-                .bind(offset.min(i64::MAX as usize) as i64)
-                .fetch_all(&mut *transaction)
-                .await?
-        };
+        let keys = load_smart_playlist_order::<SmartPlaylistKey>(
+            &mut transaction,
+            source,
+            folder,
+            sort,
+            descending,
+            filter,
+            now,
+            offset,
+            limit,
+            false,
+        )
+        .await?;
         let rows = load_smart_playlist_rows(&mut transaction, source, &keys, folder, now).await?;
         transaction.commit().await?;
         Ok(rows)
@@ -2291,4 +2342,98 @@ pub(crate) async fn smart_sorted_uris_on(
         position += 1;
     }
     Ok(uris)
+}
+
+async fn load_smart_playlist_order<T>(
+    connection: &mut SqliteConnection,
+    source: Option<SourceKey>,
+    folder: Option<FolderKey>,
+    sort: SmartPlaylistListSort,
+    descending: bool,
+    filter: &str,
+    now: i64,
+    offset: usize,
+    limit: usize,
+    sections: bool,
+) -> LibraryResult<Vec<T>>
+where
+    for<'r> T: sqlx::Decode<'r, Sqlite> + sqlx::Type<Sqlite> + Send + Unpin,
+{
+    let limit = if sections {
+        usize::MAX
+    } else {
+        limit.min(SMART_PLAYLIST_ROW_LIMIT)
+    };
+    let filter = filter.trim();
+    let keys = if let Some(order) = smart_list_order(sort, descending).filter(|_| folder.is_none())
+    {
+        let sql = format!(
+            "SELECT smart_playlist_key FROM smart_playlists WHERE instr(normalized_name,lower(?1))>0 ORDER BY {order} LIMIT ?2 OFFSET ?3"
+        );
+        sqlx::query_scalar::<_, T>(AssertSqlSafe(if sections {
+            crate::scroll_sections::section_sql(&sql, "normalized_name")
+        } else {
+            sql
+        }))
+        .bind(filter)
+        .bind(if sections { i64::MAX } else { limit as i64 })
+        .bind(offset.min(i64::MAX as usize) as i64)
+        .fetch_all(&mut *connection)
+        .await?
+    } else {
+        let totals = matches!(
+            sort,
+            SmartPlaylistListSort::TrackCount | SmartPlaylistListSort::Duration
+        );
+        let policy = smart_policy_sql(
+            &mut *connection,
+            now,
+            None,
+            if totals {
+                SmartOutput::Totals
+            } else {
+                SmartOutput::Exists
+            },
+        )
+        .await?;
+        let join = if totals {
+            "LEFT JOIN selected USING(definition_key)"
+        } else {
+            ""
+        };
+        let admitted = if totals {
+            "track_count>0"
+        } else {
+            "EXISTS(SELECT 1 FROM selected WHERE selected.definition_key=definitions.definition_key)"
+        };
+        let column = match sort {
+            SmartPlaylistListSort::Position => "position",
+            SmartPlaylistListSort::Title => "normalized_name",
+            SmartPlaylistListSort::TrackCount => "track_count",
+            SmartPlaylistListSort::Duration => "duration_millis",
+        };
+        let direction = if descending { "DESC" } else { "ASC" };
+        let sql = format!(
+            "{policy} SELECT definition_key FROM definitions {join}
+                WHERE (current_scope=0 OR ?3 IS NULL OR {admitted})
+                  AND instr(normalized_name,lower(?5))>0
+                ORDER BY {column} {direction},position,definition_key LIMIT ?6 OFFSET ?7"
+        );
+        sqlx::query_scalar::<_, T>(AssertSqlSafe(if sections {
+            crate::scroll_sections::section_sql(&sql, "normalized_name")
+        } else {
+            sql
+        }))
+        .persistent(false)
+        .bind(source)
+        .bind(now)
+        .bind(folder)
+        .bind(Option::<SmartPlaylistKey>::None)
+        .bind(filter)
+        .bind(if sections { i64::MAX } else { limit as i64 })
+        .bind(offset.min(i64::MAX as usize) as i64)
+        .fetch_all(&mut *connection)
+        .await?
+    };
+    Ok(keys)
 }

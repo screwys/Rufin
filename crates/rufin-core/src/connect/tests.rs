@@ -56,7 +56,7 @@ fn cue_backing_file_reuse_and_removal() {
                 owner.status.send_modify(|status| {
                     status.settings.encoding = encoding;
                     status.settings.folders.clear();
-                    if mapped { status.settings.folders.insert(case.into(), folder.clone()); }
+                    if mapped { status.settings.folders.insert(case.into(), downloads::DownloadDirectory::Native(folder.clone())); }
                 });
                 let remote = url::Url::from_file_path(root.path().join(format!("remote-{case}.flac"))).unwrap().to_string();
                 let mut uris = Vec::new();
@@ -120,7 +120,7 @@ fn cue_concurrent_completion_and_revision_changes() {
                 std::fs::create_dir_all(&folder).unwrap();
                 let original = folder.join("album.flac");
                 if original_exists { std::fs::write(&original, b"old audio").unwrap(); }
-                owner.status.send_modify(|status| { status.settings.folders.insert("cue".into(), folder.clone()); });
+                owner.status.send_modify(|status| { status.settings.folders.insert("cue".into(), downloads::DownloadDirectory::Native(folder.clone())); });
                 let remote = url::Url::from_file_path(folder.join("remote.flac")).unwrap().to_string();
                 let mut uris = Vec::new();
                 for index in 0..3 {
@@ -215,6 +215,7 @@ fn cue_direct_continuation_transfers_one_file_without_enrollment() {
                 let queue = a
                     .database
                     .read_queue(library::QueueReadRequest::Capture {
+                        context_title: None,
                         input: Box::new(library::QueueInput::Items(vec![(
                             item.clone(),
                             library::QueueProvenance::Manual,
@@ -530,7 +531,7 @@ fn folder_exchange_preserves_disconnected_edits_without_rewriting_peer_files() {
             }
             a.exchange().await.unwrap();
             let before = a
-                .exchange_import(&session, folders[0].join(&names[0]))
+                .exchange_import(&session, folders[0].join(&names[0]), false)
                 .await
                 .unwrap();
             std::fs::copy(folders[0].join(&names[0]), folders[1].join(&names[0])).unwrap();
@@ -546,7 +547,7 @@ fn folder_exchange_preserves_disconnected_edits_without_rewriting_peer_files() {
             {}
             a.exchange().await.unwrap();
             let after = a
-                .exchange_import(&session, folders[0].join(&names[0]))
+                .exchange_import(&session, folders[0].join(&names[0]), false)
                 .await
                 .unwrap();
             let before =
@@ -716,6 +717,7 @@ async fn execute(owner: &Arc<ConnectOwner>, action: Action) -> Result<Status, St
     tokio::spawn(async move { owner.execute(action).await })
         .await
         .unwrap()
+        .map_err(|error| error.to_string())
 }
 
 // Finish the writes that background startup and pruning would otherwise race
@@ -816,6 +818,7 @@ async fn approve_pair(host: &Arc<ConnectOwner>, guest: &Arc<ConnectOwner>) {
             Action::Pair {
                 session: a.session.clone(),
                 approve: true,
+                replace: false,
             },
         )
         .await
@@ -834,6 +837,7 @@ async fn approve_pair(host: &Arc<ConnectOwner>, guest: &Arc<ConnectOwner>) {
         Action::Pair {
             session: b.session,
             approve: true,
+            replace: false,
         },
     )
     .await

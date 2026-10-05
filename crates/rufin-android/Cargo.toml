@@ -1,0 +1,52 @@
+[package]
+name = "rufin-android"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "rufin-bindgen"
+path = "src/bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+bindgen = ["uniffi/cli"]
+development = ["app-identity/development"]
+
+[dependencies]
+app-identity.workspace = true
+uniffi = "=0.32.1"
+
+[target.'cfg(target_os = "android")'.dependencies]
+backup.workspace = true
+artwork.workspace = true
+async-channel.workspace = true
+downloads.workspace = true
+glib.workspace = true
+gstreamer.workspace = true
+gstreamer-audio.workspace = true
+jni = "0.22.4"
+library.workspace = true
+localization.workspace = true
+lyrics.workspace = true
+playback.workspace = true
+playback-gstreamer.workspace = true
+pulldown-cmark = { workspace = true, features = ["html"] }
+rufin-core.workspace = true
+rufin-connect.workspace = true
+rustls-platform-verifier = "0.7.0"
+secrets.workspace = true
+serde_json.workspace = true
+sources.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+web.workspace = true
+
+[lints]
+workspace = true

@@ -66,7 +66,7 @@ async function api(path, method = "GET", data, signal = session?.signal) {
     throw Object.assign(new Error(
       result.error ||
         tr("Request failed ({status})", { status: response.status }),
-    ), { conflict: result.conflict === true });
+    ), { conflict: result.conflict === true, confirmation: result.confirmation });
   return result;
 }
 

@@ -1378,6 +1378,7 @@ mod tests {
                     source: source_key,
                     collection: None,
                     folder: None,
+                    downloaded_only: false,
                     favorites_only: false,
                 },
                 "",

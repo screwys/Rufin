@@ -126,6 +126,97 @@ pub fn import_source_playlist(
     receiver
 }
 
+pub fn import_document_playlist(
+    owner: &SourceOwner,
+    uri: String,
+    current: Option<SourceConfiguration>,
+) -> Receiver<Result<library::PlaylistImportReport, String>> {
+    crate::playlist_files::run(owner, move |owner| async move {
+        let roots = match owner
+            .shared
+            .settings
+            .local_configuration()
+            .as_ref()
+            .and_then(|configuration| configuration.editable().ok())
+        {
+            Some(sources::EditableSource::Local { document_roots, .. }) => document_roots,
+            _ => Vec::new(),
+        };
+        let (mut document, file, locators) = tokio::task::spawn_blocking(move || {
+            let file = sources::stat_document(&uri).map_err(string_error)?.name;
+            let input = sources::open_document_input(&uri).map_err(string_error)?;
+            let format = library::PlaylistFormat::from_path(std::path::Path::new(&file))
+                .ok_or("Unsupported playlist format")?;
+            let mut document = library::PlaylistFile::read_as(
+                std::io::BufReader::new(input),
+                std::path::Path::new(&uri),
+                format,
+            )
+            .map_err(string_error)?;
+            document.identity = None;
+            let mut locators = Vec::new();
+            for entry in &mut document.entries {
+                if url::Url::parse(&entry.locator).is_err()
+                    && !std::path::Path::new(&entry.locator).is_absolute()
+                    && !entry.locator.starts_with("\\\\")
+                {
+                    entry.locator =
+                        sources::resolve_document_relative(&uri, &entry.locator, &roots)
+                            .map_err(string_error)?
+                            .uri;
+                }
+                if entry.locator.starts_with("content:") {
+                    let identity =
+                        sources::document_identity(&entry.locator).map_err(string_error)?;
+                    let media_uri = library::document_media_uri(&identity);
+                    locators.push(library::LocalLocatorWrite {
+                        source_id: None,
+                        media_uri: media_uri.clone(),
+                        origin: "import".into(),
+                        path: entry.locator.clone(),
+                        root: entry.locator.clone(),
+                        relative_path: sources::stat_document(&entry.locator)
+                            .map_err(string_error)?
+                            .name,
+                        access_uri: entry.locator.clone(),
+                    });
+                    entry.locator = media_uri;
+                }
+            }
+            Ok::<_, String>((document, file, locators))
+        })
+        .await
+        .map_err(string_error)??;
+        for locator in locators {
+            owner
+                .shared
+                .database
+                .upsert_local_locator(&locator)
+                .await
+                .map_err(string_error)?;
+        }
+        let before = document.entries.len();
+        document.entries.retain(|entry| {
+            library::playlist_locator(&entry.locator, std::path::Path::new("."))
+                .and_then(|uri| library::file_media_path(&uri))
+                .is_none_or(|path| !sources::playlist_file_is_non_audio(&path))
+        });
+        document.skipped += (before - document.entries.len()) as u64;
+        let report = owner
+            .shared
+            .database
+            .import_playlist_document(document, std::path::Path::new(&file), None, |locator| {
+                current
+                    .as_ref()
+                    .and_then(|source| source.recognize_media_locator(locator))
+            })
+            .await
+            .map_err(string_error)?;
+        accept_playlist_result(&owner, None, Some(report.playlist), Ok((true, None))).await;
+        Ok(report)
+    })
+}
+
 pub fn export_playlist(
     owner: &SourceOwner,
     source_id: Option<SourceId>,

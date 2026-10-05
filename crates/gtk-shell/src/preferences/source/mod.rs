@@ -1,4 +1,2 @@
-pub use gtk_preferences::preferences::source::{
-    SourceState, source_operation_text, source_progress_text,
-};
+pub use gtk_preferences::preferences::source::SourceState;
 pub(crate) mod selector;

@@ -3811,6 +3811,32 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/gstreamer-controller/gstreamer-controller-0.25.2.crate",
+        "sha256": "2d8c72be029c50abb50fed29e83105364b5cbcdb48c4fbf608826cd69d31458d",
+        "dest": "cargo/vendor/gstreamer-controller-0.25.2"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"2d8c72be029c50abb50fed29e83105364b5cbcdb48c4fbf608826cd69d31458d\", \"files\": {}}",
+        "dest": "cargo/vendor/gstreamer-controller-0.25.2",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/gstreamer-controller-sys/gstreamer-controller-sys-0.25.4.crate",
+        "sha256": "6d00dcc3d8d6055c10b691cf44790be166dc6a00f2b6f1dab677d75748b7ed25",
+        "dest": "cargo/vendor/gstreamer-controller-sys-0.25.4"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"6d00dcc3d8d6055c10b691cf44790be166dc6a00f2b6f1dab677d75748b7ed25\", \"files\": {}}",
+        "dest": "cargo/vendor/gstreamer-controller-sys-0.25.4",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/gstreamer-pbutils/gstreamer-pbutils-0.25.4.crate",
         "sha256": "3b72d09000974d928f66735a0332fc89af5b12d5d6a5897da29c664718655b72",
         "dest": "cargo/vendor/gstreamer-pbutils-0.25.4"
@@ -12426,6 +12452,16 @@
         "contents": "{\"package\": \"90cb9383f9b45290407a1258b202d3f8f01db719eb60b4e4055c6375af4fc7c7\", \"files\": {}}",
         "dest": "cargo/vendor/zvariant_utils-3.5.0",
         "dest-filename": ".cargo-checksum.json"
+    },
+    {
+      "dest-filename": "Cargo.toml",
+      "path": "../linux/Cargo.toml",
+      "type": "file"
+    },
+    {
+      "dest-filename": "Cargo.lock",
+      "path": "../linux/Cargo.lock",
+      "type": "file"
     },
     {
         "type": "inline",

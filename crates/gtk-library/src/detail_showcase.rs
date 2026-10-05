@@ -18,7 +18,7 @@ use gtk_widgets::controls::{PLAY_LATER_ICON, PLAY_NEXT_ICON};
 use gtk_widgets::interactions::{ContextMenuOpen, RADIO_ICON};
 use gtk_widgets::layout::width_allocation_owner;
 use gtk_widgets::localization::bind_label_text_with;
-use localization::{msgid, tr};
+use localization::tr;
 
 use crate::route_layout::{detail_showcase_cover_only, detail_showcase_cover_size};
 use gtk_media_menus::media_menus::CollectionPlay;
@@ -676,39 +676,18 @@ pub fn fit_detail_text(label: &gtk::Label, text: &str) {
 
 pub fn album_external_links(shell: &Rc<CatalogUi>, album: &AlbumRow) -> Option<gtk::Widget> {
     let settings = shell.settings.current.borrow();
-    let link_settings = &settings.external_site_links;
-    if !settings.shows_external_site_links() {
-        return None;
-    }
-
-    let row = detail_external_link_row();
-    if link_settings.lastfm
-        && let Some(url) = lastfm_album_url(&album.display_artist, &album.title)
-    {
-        row.append(&detail_external_link_button(
-            shell,
-            "io.github.screwys.Rufin.external.lastfm",
-            msgid("Open on Last.fm"),
-            url,
-        ));
-    }
-    if link_settings.musicbrainz
-        && let Some(url) = musicbrainz_album_url(album)
-    {
-        row.append(&detail_external_link_button(
-            shell,
-            "io.github.screwys.Rufin.external.musicbrainz",
-            msgid("Open on MusicBrainz"),
-            url,
-        ));
-    }
-    if link_settings.server
-        && let Some(button) = detail_source_button(shell, &album.media_uri, false)
-    {
-        row.append(&button);
-    }
-
-    row.first_child().is_some().then(|| row.upcast())
+    let source = library::source_entity_parts(&album.media_uri)
+        .and_then(|(source_id, _, _)| shell.source.configuration(&source_id));
+    detail_external_links(
+        shell,
+        rufin_core::detail_links::album_external_links(
+            &settings.external_site_links,
+            source.as_ref(),
+            album,
+        ),
+        &album.media_uri,
+        false,
+    )
 }
 
 pub fn artist_external_links(
@@ -717,38 +696,39 @@ pub fn artist_external_links(
     album_artist: bool,
 ) -> Option<gtk::Widget> {
     let settings = shell.settings.current.borrow();
-    let link_settings = &settings.external_site_links;
-    if !settings.shows_external_site_links() {
-        return None;
-    }
+    let source = library::source_entity_parts(&artist.media_uri)
+        .and_then(|(source_id, _, _)| shell.source.configuration(&source_id));
+    detail_external_links(
+        shell,
+        rufin_core::detail_links::artist_external_links(
+            &settings.external_site_links,
+            source.as_ref(),
+            artist,
+        ),
+        &artist.media_uri,
+        album_artist,
+    )
+}
 
+fn detail_external_links(
+    shell: &Rc<CatalogUi>,
+    links: Vec<rufin_core::detail_links::DetailLink>,
+    media_uri: &str,
+    album_artist: bool,
+) -> Option<gtk::Widget> {
     let row = detail_external_link_row();
-    if link_settings.lastfm
-        && let Some(url) = lastfm_artist_url(&artist.name)
-    {
-        row.append(&detail_external_link_button(
-            shell,
-            "io.github.screwys.Rufin.external.lastfm",
-            msgid("Open on Last.fm"),
-            url,
-        ));
+    for link in links {
+        if let Some(url) = link.url {
+            row.append(&detail_external_link_button(
+                shell,
+                link.icon_name,
+                link.title,
+                url,
+            ));
+        } else if let Some(button) = detail_source_button(shell, media_uri, album_artist) {
+            row.append(&button);
+        }
     }
-    if link_settings.musicbrainz
-        && let Some(url) = musicbrainz_artist_url(artist)
-    {
-        row.append(&detail_external_link_button(
-            shell,
-            "io.github.screwys.Rufin.external.musicbrainz",
-            msgid("Open on MusicBrainz"),
-            url,
-        ));
-    }
-    if link_settings.server
-        && let Some(button) = detail_source_button(shell, &artist.media_uri, album_artist)
-    {
-        row.append(&button);
-    }
-
     row.first_child().is_some().then(|| row.upcast())
 }
 
@@ -826,72 +806,16 @@ fn detail_link_button(icon_name: &str, label: &str) -> gtk::Button {
     button
 }
 
-fn lastfm_album_url(artist: &str, album: &str) -> Option<String> {
-    let artist = clean_url_label(artist)?;
-    let album = clean_url_label(album)?;
-    Some(format!(
-        "https://www.last.fm/music/{}/{}",
-        percent_encode_path_segment(artist),
-        percent_encode_path_segment(album)
-    ))
-}
-
-fn lastfm_artist_url(artist: &str) -> Option<String> {
-    let artist = clean_url_label(artist)?;
-    Some(format!(
-        "https://www.last.fm/music/{}",
-        percent_encode_path_segment(artist)
-    ))
-}
-
-fn musicbrainz_album_url(album: &AlbumRow) -> Option<String> {
-    if let Some(group_id) = album
-        .musicbrainz_release_group_id
-        .as_deref()
-        .and_then(clean_url_label)
-    {
-        return Some(format!("https://musicbrainz.org/release-group/{group_id}"));
-    }
-    let release_id = album
-        .musicbrainz_release_id
-        .as_deref()
-        .and_then(clean_url_label)?;
-    Some(format!("https://musicbrainz.org/release/{release_id}"))
-}
-
-fn musicbrainz_artist_url(artist: &ArtistRow) -> Option<String> {
-    let artist_id = artist
-        .musicbrainz_artist_id
-        .as_deref()
-        .and_then(clean_url_label)?;
-    Some(format!("https://musicbrainz.org/artist/{artist_id}"))
-}
-
 fn detail_source_button(
     shell: &CatalogUi,
     media_uri: &str,
     album_artist: bool,
 ) -> Option<gtk::Button> {
-    let (source_id, kind, object_id) = library::source_entity_parts(media_uri)?;
+    let (source_id, _, _) = library::source_entity_parts(media_uri)?;
     let source = shell.source.configuration(&source_id)?;
-    let folder = matches!(source.kind.as_str(), "local" | "webdav" | "smb");
-    let label = match source.kind.as_str() {
-        "local" | "webdav" | "smb" => msgid("Open Folder"),
-        "jellyfin" => msgid("Open on Jellyfin"),
-        "emby" => msgid("Open on Emby"),
-        "plex" => msgid("Open on Plex"),
-        "navidrome" => msgid("Open on Navidrome"),
-        "subsonic" => msgid("Open on server"),
-        _ => return None,
-    };
-    let icon = if folder {
-        "rufin-document-open-symbolic"
-    } else {
-        gtk_widgets::source_labels::source_kind_icon_name(&source.kind)?
-    };
-    let button = detail_link_button(icon, label);
-    if !folder {
-        let uri = source.detail_web_url(&kind, &object_id).ok()?;
+    let link = rufin_core::detail_links::source_link(&source, media_uri)?;
+    let button = detail_link_button(link.icon_name, link.title);
+    if let Some(uri) = link.url {
         connect_web_link(&button, shell.window.clone(), uri);
         return Some(button);
     }
@@ -923,25 +847,4 @@ fn detail_source_button(
         });
     });
     Some(button)
-}
-
-fn clean_url_label(value: &str) -> Option<&str> {
-    let value = value.trim();
-    (!value.is_empty()).then_some(value)
-}
-
-fn percent_encode_path_segment(value: &str) -> String {
-    let mut encoded = String::new();
-    for byte in value.as_bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                encoded.push(*byte as char);
-            }
-            _ => {
-                encoded.push('%');
-                encoded.push_str(&format!("{byte:02X}"));
-            }
-        }
-    }
-    encoded
 }

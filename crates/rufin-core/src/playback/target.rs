@@ -13,6 +13,12 @@ pub enum PlaybackTarget {
     Mood(MoodKey),
     Playlist(PlaylistKey),
     SmartPlaylist(SmartPlaylistKey),
+    Folder {
+        source: library::SourceKey,
+        folder: Option<library::FolderKey>,
+        sort: library::TrackSort,
+        descending: bool,
+    },
     Contextual {
         target: Box<PlaybackTarget>,
         context_id: String,
@@ -20,6 +26,26 @@ pub enum PlaybackTarget {
 }
 
 impl PlaybackTarget {
+    pub fn download_subject(&self) -> downloads::DownloadSubject {
+        let title = match self {
+            Self::Track(_) => localization::tr("Track"),
+            Self::Album(_) | Self::AlbumKey(_) => localization::tr("Album"),
+            Self::Artist(_) | Self::AlbumArtist(_) | Self::ArtistKey(..) => {
+                localization::tr("Artist")
+            }
+            Self::Genre(_) => localization::tr("Genre"),
+            Self::Mood(_) => localization::tr("Mood"),
+            Self::Playlist(_) => localization::tr("Playlist"),
+            Self::SmartPlaylist(_) => localization::tr("Smart Playlist"),
+            Self::Folder { .. } => localization::tr("Folder"),
+            Self::Contextual { target, .. } => return target.download_subject(),
+        };
+        downloads::DownloadSubject::Prepared {
+            context_id: self.context_id(),
+            title: Some(title),
+        }
+    }
+
     pub fn in_context(self, context_id: impl Into<String>) -> Self {
         Self::Contextual {
             target: Box::new(self),
@@ -39,6 +65,7 @@ impl PlaybackTarget {
             Self::Mood(id) => format!("mood:{id}"),
             Self::Playlist(id) => format!("playlist:{id}"),
             Self::SmartPlaylist(id) => format!("smart-playlist:{id}"),
+            Self::Folder { source, folder, .. } => format!("folder:{source}:{folder:?}"),
             Self::Contextual { context_id, .. } => context_id.clone(),
         }
     }
@@ -71,6 +98,35 @@ impl PlaybackTarget {
                 .collection_media_uri_order(&collection, &cancellation)
                 .await
                 .map_err(|error| error.to_string()),
+            library::QueueInput::Query {
+                query:
+                    library::QueueQuery::Tracks {
+                        source,
+                        downloaded_only: false,
+                        favorites_only,
+                        ..
+                    },
+                folder,
+                filter,
+                sort,
+                descending,
+                ..
+            } => database
+                .query_track_media_uris(
+                    &library::TrackQuery {
+                        source,
+                        collection: None,
+                        folder,
+                        downloaded_only: false,
+                        favorites_only,
+                    },
+                    &filter,
+                    sort,
+                    descending,
+                    &cancellation,
+                )
+                .await
+                .map_err(|error| error.to_string()),
             library::QueueInput::Smart {
                 key,
                 source,
@@ -97,6 +153,28 @@ impl PlaybackTarget {
             target => target,
         };
         let context_id = self.context_id().into();
+        if let Self::Folder {
+            source,
+            folder,
+            sort,
+            descending,
+        } = target
+        {
+            return library::QueueInput::Query {
+                query: library::QueueQuery::Tracks {
+                    source: *source,
+                    downloaded_only: false,
+                    favorites_only: false,
+                    recursive: false,
+                },
+                folder: *folder,
+                filter: String::new(),
+                sort: *sort,
+                descending: *descending,
+                context_id,
+                anchor_uri: None,
+            };
+        }
         if let Self::SmartPlaylist(key) = target {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -130,7 +208,9 @@ impl PlaybackTarget {
                     source_start: 0,
                 };
             }
-            Self::SmartPlaylist(_) | Self::Contextual { .. } => unreachable!(),
+            Self::SmartPlaylist(_) | Self::Folder { .. } | Self::Contextual { .. } => {
+                unreachable!()
+            }
         };
         library::QueueInput::Collection {
             collection,

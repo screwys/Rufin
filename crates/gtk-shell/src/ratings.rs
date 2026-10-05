@@ -1,21 +1,10 @@
 use library::FavoriteTarget;
 impl crate::shell::Shell {
     pub(crate) fn half_stars_enabled(&self, media_uri: &str, source_id: Option<&str>) -> bool {
-        let configured = self.source.configured.borrow();
-        let uri_source = library::source_entity_parts(media_uri).map(|(source, _, _)| source);
-        let source_id = source_id
-            .or_else(|| uri_source.as_ref().map(sources::SourceId::as_str))
-            .or_else(|| {
-                configured
-                    .selected_source_id
-                    .as_ref()
-                    .map(sources::SourceId::as_str)
-            });
-        configured
-            .sources
-            .iter()
-            .find(|source| Some(source.id.as_str()) == source_id)
-            .is_some_and(|source| source.half_stars_enabled)
+        self.source
+            .configured
+            .borrow()
+            .half_stars_enabled(media_uri, source_id)
     }
 
     pub(crate) fn set_rating(&self, item: FavoriteTarget, rating: Option<u8>) {

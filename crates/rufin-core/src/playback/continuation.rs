@@ -9,7 +9,32 @@ pub(crate) struct PreparedContinuation {
 }
 
 impl PlaybackOwner {
+    pub(crate) async fn return_empty_local(&self) -> Result<(), String> {
+        let active = self.active().ok_or("Playback is unavailable")?;
+        let backend = (self.start_backend)()?;
+        if let Some(receiver) = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).take() {
+            receiver.cancel();
+        }
+        tokio::task::spawn_blocking(move || {
+            active
+                .playback
+                .replace_backend(playback::PlaybackOutput::Local, backend)
+        })
+        .await
+        .map_err(string_error)?
+        .map_err(string_error)?;
+        self.output
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .selected = playback::PlaybackOutput::Local;
+        Ok(())
+    }
+
     pub(crate) async fn queue_content_id(&self) -> Result<String, String> {
+        let receiver = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        if let Some(receiver) = receiver {
+            return Ok(receiver.content_id());
+        }
         let plex = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone();
         if let Some(plex) = plex {
             return Ok(plex.queue_content_id().await);
@@ -31,6 +56,10 @@ impl PlaybackOwner {
     }
 
     pub(crate) fn continuation_snapshot(&self) -> Result<Option<playback::Continuation>, String> {
+        let receiver = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        if let Some(receiver) = receiver {
+            return self.runtime.block_on(receiver.snapshot());
+        }
         let plex = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone();
         if let Some(plex) = plex {
             return self.runtime.block_on(plex.continuation_snapshot());
@@ -170,6 +199,10 @@ impl PlaybackOwner {
         &self,
         expected: playback::ContinuationHeader,
     ) -> Result<Option<playback::ContinuationHeader>, String> {
+        let receiver = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        if let Some(receiver) = receiver {
+            return self.runtime.block_on(receiver.stop_continuation(&expected));
+        }
         let plex = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone();
         if let Some(plex) = plex {
             return self.runtime.block_on(plex.stop_continuation(&expected));
@@ -221,6 +254,9 @@ impl PlaybackOwner {
             .await
             .map_err(string_error)?;
         let active = self.active().ok_or("Playback is unavailable")?;
+        if let Some(receiver) = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).take() {
+            receiver.cancel();
+        }
         let plex = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone();
         if let Some(plex) = plex {
             plex.stop_for_continuation().await?;
