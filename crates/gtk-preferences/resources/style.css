@@ -861,6 +861,11 @@ row.artist-search-result button.search-preview-play {
   background-color: color-mix(in srgb, currentColor 13%, transparent);
 }
 
+.album-grid > child:has(.collection-grid-empty),
+.album-grid > flowboxchild:has(.collection-grid-empty) {
+  background-color: transparent;
+}
+
 label.track-row-playing:not(.track-row-paused) {
   color: var(--accent-color);
 }
