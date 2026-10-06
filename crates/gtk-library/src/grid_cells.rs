@@ -340,6 +340,7 @@ where
             }
             FixedPageSlot::Empty => {
                 let spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                spacer.add_css_class("collection-grid-empty");
                 spacer.set_can_target(false);
                 spacer.set_focusable(false);
                 spacer.set_sensitive(false);
