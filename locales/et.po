@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.3.13\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-10-04 16:10+0000\n"
+"PO-Revision-Date: 2026-10-06 17:51+0000\n"
 "Last-Translator: Priit Jõerüüt <jrthwlate@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Estonian <https://hosted.weblate.org/projects/rufin/app/et/>\n"
 "Language: et\n"
@@ -193,6 +193,8 @@ msgid ""
 "Some changes were saved. Close this editor and reopen it to review the "
 "result."
 msgstr ""
+"Mõned muudatused on salvestatud. Tulemuse vaatamiseks sulge see vaade ja ava "
+"ta uuesti."
 
 msgid ""
 "Temporary library storage is in use. Changes may be lost when Rufin closes."
@@ -276,10 +278,8 @@ msgid ""
 msgstr ""
 "Pead looma uue API-võtmega uuesti ühenduse klientide kaudu, mida kasutad."
 
-#, fuzzy
-#| msgid "Play Next (shuffled)"
 msgid "(hold to shuffle)"
-msgstr "Esita järgmisena (segatuna)"
+msgstr "(segamiseks hoia all)"
 
 msgid ". You only need to fill email and an application name parts"
 msgstr ". Sa pead vaid sisestama e-posti aadressi ja rakenduse nime"
@@ -366,7 +366,7 @@ msgid "Add a new source"
 msgstr "Lisa uus allikas"
 
 msgid "Add a server to configure downloads."
-msgstr ""
+msgstr "Allalaadimiste seadistamiseks lisa server."
 
 msgid "Add a title"
 msgstr "Lisa pealkiri"
@@ -510,7 +510,7 @@ msgid "Approve sign-in in your browser"
 msgstr "Kinnita sisselogimine oma veebibrauseris"
 
 msgid "Approve"
-msgstr ""
+msgstr "Nõustu"
 
 msgid "April {year}"
 msgstr "Aprill {year}"
@@ -570,7 +570,7 @@ msgid "Authentication"
 msgstr "Autentimine"
 
 msgid "Authorization timed out"
-msgstr ""
+msgstr "Autentimine aegus"
 
 msgid "Auto DJ refill threshold"
 msgstr "Automaatse diskori muusika täiendamise lävend"
@@ -636,7 +636,7 @@ msgid "Blue"
 msgstr "Sinine"
 
 msgid "Browse"
-msgstr ""
+msgstr "Sirvi"
 
 msgid "Cached"
 msgstr "Puhverdatud"
@@ -733,7 +733,7 @@ msgid "Choose playback output"
 msgstr "Vali taasesituse väljund"
 
 msgid "Choose whether to keep the completed downloads."
-msgstr ""
+msgstr "Vali, kas soovid allalaaditus sisu alles jätta."
 
 msgid "Choose"
 msgstr "Vali"
@@ -826,7 +826,7 @@ msgid "Complete sign-in in your browser"
 msgstr "Lõpeta sisselogimine veebibrauseris"
 
 msgid "Completed downloads will stay on this device."
-msgstr ""
+msgstr "Allalaaditud sisu jääb siia seadmesse."
 
 msgid "Composer sort"
 msgstr "Heliloojate järjestus"
@@ -966,10 +966,8 @@ msgstr "Seotud lugude laadimine ei õnnestunud"
 msgid "Could not load this page"
 msgstr "Selle lehe laadimine ei õnnestunud"
 
-#, fuzzy
-#| msgid "Could not open file: {error}"
 msgid "Could not open browser"
-msgstr "Faili avamine ei õnnestunud: {error}"
+msgstr "Brauseri avamine ei õnnestunud"
 
 msgid "Could not open file: {error}"
 msgstr "Faili avamine ei õnnestunud: {error}"
@@ -980,10 +978,8 @@ msgstr "Kausta avamine ei õnnestunud: {error}"
 msgid "Could not play this track"
 msgstr "Selle loo esitamine ei õnnestunud"
 
-#, fuzzy
-#| msgid "Could not load related tracks"
 msgid "Could not read artwork"
-msgstr "Seotud lugude laadimine ei õnnestunud"
+msgstr "Kaanepiltide lugemine ei õnnestunud"
 
 msgid "Could not receive live updates"
 msgstr "Reaalajas uuenduste laadimine ei õnnestunud"
@@ -1148,10 +1144,8 @@ msgstr "Plaat {number}"
 msgid "Disc"
 msgstr "Plaat"
 
-#, fuzzy
-#| msgid "Unsaved changes."
 msgid "Discard changes?"
-msgstr "Muudatused on salvestamata."
+msgstr "Kas loobud muudatustest?"
 
 msgid "Discography"
 msgstr "Diskograafia"
@@ -1360,10 +1354,8 @@ msgstr "Ekspordivorming"
 msgid "Export playlist"
 msgstr "Ekspordi esitusloend"
 
-#, fuzzy
-#| msgid "Choose connection"
 msgid "Export to connection"
-msgstr "Vali ühendus"
+msgstr "Ekspordi ühendusse"
 
 msgid "Export your listening history in Rufin"
 msgstr "Ekspordi Rufinist oma kuulamiste ajalugu"
@@ -1430,10 +1422,8 @@ msgstr ""
 "Selleks peavad failides olema meeleolu/BPM-i sildid. Jellyfinis vastav tugi "
 "puudub"
 
-#, fuzzy
-#| msgid "Selected items: {count}"
 msgid "Files received: {count}"
-msgstr "Valitud objekte: {count}"
+msgstr "Vastuvõetud faile: {count}"
 
 msgid "Files"
 msgstr "Failid"
@@ -1459,10 +1449,8 @@ msgstr "Ühetasane"
 msgid "Folder path"
 msgstr "Kausta asukoht"
 
-#, fuzzy
-#| msgid "Folders"
 msgid "Folder"
-msgstr "Kaustad"
+msgstr "Kaust"
 
 msgid "Folders"
 msgstr "Kaustad"
@@ -1551,7 +1539,7 @@ msgid "Genres"
 msgstr "Žanrid"
 
 msgid "Gestures"
-msgstr ""
+msgstr "Viiped"
 
 msgid "Get token"
 msgstr "Vormista endale tunnusluba"
@@ -1651,15 +1639,11 @@ msgstr "Impordi varukoopia"
 msgid "Import Playlist"
 msgstr "Impordi esitusloend"
 
-#, fuzzy
-#| msgid "Waiting for connection"
 msgid "Import from connection"
-msgstr "Oota ühenduse teket"
+msgstr "Impordi ühendusest"
 
-#, fuzzy
-#| msgid "Import"
 msgid "Import theme"
-msgstr "Import"
+msgstr "Impordi kujundus"
 
 msgid "Import"
 msgstr "Import"
@@ -1772,13 +1756,8 @@ msgstr "Last.fm"
 msgid "Layout"
 msgstr "Paigutus"
 
-#, fuzzy
-#| msgid ""
-#| "For this import or export only. Leave empty for an unencrypted archive."
 msgid "Leave empty for an unencrypted archive."
-msgstr ""
-"Vaid selle importimise või eksportimise jaoks. Krüptimata arhiivi jaoks jäta "
-"tühjaks."
+msgstr "Krüptimata arhiivi jaoks jäta tühjaks."
 
 msgid "Leave the password empty to keep the saved credential"
 msgstr "Salvestatud salasõna säilitamiseks jäta väli tühjaks"
@@ -1857,6 +1836,7 @@ msgstr "Ligipääs kohalikele failidele on seadistatud"
 
 msgid "Local file access is required before these tags can be saved."
 msgstr ""
+"Enne nende siltide salvestamist on vajalik ligipääs kohalikele failidele."
 
 msgid "Local file mapping is no longer available"
 msgstr "Kohalike failide vastendus pole enam saadaval"
@@ -1889,10 +1869,10 @@ msgid "Local music folders"
 msgstr "Kohalikud muusikakaustad"
 
 msgid "Local network permission is required for remote connections"
-msgstr ""
+msgstr "Kaugühenduste kasutamiseks on vajalik ligipääs kohtvõrgule"
 
 msgid "Local network permission was denied"
-msgstr ""
+msgstr "Ligipääs kohtvõrgule pole lubatud"
 
 msgid "Local network"
 msgstr "Kohtvõrk"
@@ -1962,6 +1942,8 @@ msgstr "Menüü"
 
 msgid "Metadata changed before it was saved. Reload it before trying again."
 msgstr ""
+"Metateave muutus enne salvestamist. Enne uuesti proovimist laadi ta veel "
+"kord."
 
 msgid "Metadata editing is no longer available"
 msgstr "Metateabe muutmine pole enam saadaval"
@@ -1974,6 +1956,7 @@ msgstr "Metateabe allikas"
 
 msgid "Metadata was saved, but refreshing the source failed."
 msgstr ""
+"Metateave on salvestatud, aga andmeallika sisu uuendamine ei õnnestunud."
 
 msgid "Metadata"
 msgstr "Metateave"
@@ -2009,7 +1992,7 @@ msgid "More actions"
 msgstr "Veel toiminguid"
 
 msgid "More"
-msgstr ""
+msgstr "Veel"
 
 msgid "Most Played (Monthly)"
 msgstr "Enimesitatud (igakuiselt)"
@@ -2054,7 +2037,7 @@ msgid "Music Folder"
 msgstr "Muusikafailide kaust"
 
 msgid "Music access permission was denied"
-msgstr ""
+msgstr "Ligipääs muusikale on keelatud"
 
 msgid "Music folders on the Rufin machine"
 msgstr "Muusikakaustad arvutis, kus Rufin asub"
@@ -2062,10 +2045,8 @@ msgstr "Muusikakaustad arvutis, kus Rufin asub"
 msgid "Music on this device"
 msgstr "Muusika selles seadmes"
 
-#, fuzzy
-#| msgid "My music"
 msgid "Music"
-msgstr "Minu muusika"
+msgstr "Muusika"
 
 msgid "MusicBrainz + Last.fm"
 msgstr "MusicBrainz + Last.fm"
@@ -2156,10 +2137,8 @@ msgstr "Uus nutikas esitusloend"
 msgid "New download rule"
 msgstr "Uus allalaadimisreegel"
 
-#, fuzzy
-#| msgid "No network address available"
 msgid "New release is available"
-msgstr "Ühtegi võrguaadressi ei leidu"
+msgstr "Rakenduse uus versioon on saadaval"
 
 msgid "Newly added"
 msgstr "Äsjalisatud"
@@ -2194,10 +2173,8 @@ msgstr "Ühtegi kaanepilti ei leidu"
 msgid "No cached server path yet"
 msgstr "Serveri puhverdatud asukoht pole veel saadaval"
 
-#, fuzzy
-#| msgid "Download queued"
 msgid "No downloads queued"
-msgstr "Allalaadimine on lisatud järjekorda"
+msgstr "Ühtegi allalaadimist pole järjekorras"
 
 msgid "No favorite albums yet"
 msgstr "Lemmikalbumeid veel pole"
@@ -2208,10 +2185,8 @@ msgstr "Lemmikesitajaid veel pole"
 msgid "No favorites yet"
 msgstr "Lemmikuid veel pole"
 
-#, fuzzy
-#| msgid "File connections"
 msgid "No file connections"
-msgstr "Failiühendused"
+msgstr "Pole failiühendusi"
 
 msgid "No file linked"
 msgstr "Ühtegi faili pole seotud"
@@ -2343,7 +2318,7 @@ msgid "Off"
 msgstr "Väljas"
 
 msgid "Offline"
-msgstr ""
+msgstr "Pole võrgus"
 
 msgid "On this device"
 msgstr "Selles seadmes"
@@ -2542,15 +2517,11 @@ msgstr "Kuula meeleolu alusel"
 msgid "Play playlist"
 msgstr "Kuula esitusloendit"
 
-#, fuzzy
-#| msgid "Play radio"
 msgid "Play radio later"
-msgstr "Esita raadiorežiimis"
+msgstr "Esita hiljem raadiorežiimis"
 
-#, fuzzy
-#| msgid "Play radio"
 msgid "Play radio next"
-msgstr "Esita raadiorežiimis"
+msgstr "Esita järgmiseks raadiorežiimis"
 
 msgid "Play radio"
 msgstr "Esita raadiorežiimis"
@@ -2585,15 +2556,11 @@ msgstr "Taasesituse kiirus"
 msgid "Playback"
 msgstr "Taasesitus"
 
-#, fuzzy
-#| msgid "Playing on {device}"
 msgid "Playing from {}"
-msgstr "Esitamisel seadmes: {device}"
+msgstr "Esitamisel seadmest {}"
 
-#, fuzzy
-#| msgid "Play random"
 msgid "Playing from"
-msgstr "Esita juhuslikult"
+msgstr "Esitamisel seadmest"
 
 msgid "Playing on this device"
 msgstr "Esitamisel selles seadmes"
@@ -2767,7 +2734,7 @@ msgid "Quit"
 msgstr "Välju"
 
 msgid "Radio"
-msgstr ""
+msgstr "Raadio"
 
 msgid "Range selection"
 msgstr "Vahemiku valik"
@@ -2860,7 +2827,7 @@ msgid "Reload from file"
 msgstr "Laadi failist uuesti"
 
 msgid "Reload metadata to review the current values."
-msgstr ""
+msgstr "Praeguste väärtuste ülevaatamiseks laadi metateave uuesti."
 
 msgid "Reload themes"
 msgstr "Laadi kujundused uuesti"
@@ -2937,10 +2904,8 @@ msgstr "Eemaldatud asukohast"
 msgid "Rename file"
 msgstr "Muuda failinime"
 
-#, fuzzy
-#| msgid "Row borders"
 msgid "Reorder"
-msgstr "Ridade ääred"
+msgstr "Muuda järjestust"
 
 msgid "Repeat all"
 msgstr "Korda kõiki"
@@ -3094,10 +3059,8 @@ msgstr "Salvestatud asukohta"
 msgid "Saved"
 msgstr "Salvestatud"
 
-#, fuzzy
-#| msgid "Saved"
 msgid "Saved..."
-msgstr "Salvestatud"
+msgstr "Salvestatud..."
 
 msgid "Saves lyrics to your source"
 msgstr "Salvestab laulusõnad sinu andmeallikasse"
@@ -3303,10 +3266,8 @@ msgstr "Näita kaanepilte"
 msgid "Show comparison"
 msgstr "Näita võrdlust"
 
-#, fuzzy
-#| msgid "Show lyrics"
 msgid "Show current lyrics line"
-msgstr "Vaata laulusõnu"
+msgstr "Näita laulusõnade hetkel esitamisel rida"
 
 msgid "Show downloaded badge"
 msgstr "Näita allalaaditud märki"
@@ -3458,10 +3419,8 @@ msgstr "Järjestus"
 msgid "Source by position"
 msgstr "Allikas asukoha alusel"
 
-#, fuzzy
-#| msgid "Search is unavailable"
 msgid "Source setup is unavailable"
-msgstr "Otsing pole saadaval"
+msgstr "Allika seadistus pole saadaval"
 
 msgid "Source to use for cover images and song/artist links"
 msgstr "Allikas kaanepiltide ning lugude ja esitajate linkide jaoks"
@@ -3516,12 +3475,10 @@ msgid "Sunday"
 msgstr "Pühapäev"
 
 msgid "Swipe left"
-msgstr ""
+msgstr "Viipa vasakule"
 
-#, fuzzy
-#| msgid "Copyright"
 msgid "Swipe right"
-msgstr "Autoriõigused"
+msgstr "Viipa paremale"
 
 msgid "Switch Search/Favorites tabs"
 msgstr "Vaheta otsingute ja lemmikute vahekaardid"
@@ -3544,10 +3501,8 @@ msgstr "Süsteemi vaikeseadistus"
 msgid "System flatpak:"
 msgstr "Süsteemi flatpak:"
 
-#, fuzzy
-#| msgid "System"
 msgid "System keyring"
-msgstr "Süsteem"
+msgstr "Süsteemi võtmelaegas"
 
 msgid "System"
 msgstr "Süsteem"
@@ -3726,7 +3681,7 @@ msgid "Untitled"
 msgstr "Ilma pealkirjata"
 
 msgid "Update check interval"
-msgstr ""
+msgstr "Uuenduste olemasolu kontrolli välp"
 
 msgid "Update"
 msgstr "Uuenda"
@@ -3767,10 +3722,8 @@ msgstr "Kasuta aktsentvärvi"
 msgid "Use an existing connection?"
 msgstr "Kas kasutad olemasolevat ühendust?"
 
-#, fuzzy
-#| msgid "Current artwork"
 msgid "Use current artwork"
-msgstr "Praegune kaanepilt"
+msgstr "Kasuta praegust kaanepilti"
 
 msgid "Use different layout below a threshold width"
 msgstr ""
@@ -3985,10 +3938,8 @@ msgstr "täna"
 msgid "yesterday"
 msgstr "eile"
 
-#, fuzzy
-#| msgid "Play (shuffled)"
 msgid "{action} (Shuffle)"
-msgstr "Esita (segatuna)"
+msgstr "{action} (segatuna)"
 
 msgid "{count} album"
 msgid_plural "{count} albums"
