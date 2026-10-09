@@ -741,6 +741,7 @@ impl PlayerPipeline {
     }
 
     pub(super) fn stop(&mut self) {
+        let retired = self.has_session();
         if let Some(handler_id) = self.about_to_finish_id.take() {
             self.native
                 .as_ref()
@@ -764,6 +765,9 @@ impl PlayerPipeline {
         self.live.set(false);
         if let Some(graph) = self.audio_graph.as_mut() {
             graph.clear_stream();
+        }
+        if retired {
+            process_memory::request_reclaim();
         }
     }
 

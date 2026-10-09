@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 use rufin_core::{app, diagnostics::Diagnostics, paths};
 
+pub use process_memory::configure_allocator;
+
 pub fn discovery_worker_argument() -> Option<ExitCode> {
     let mut arguments = std::env::args_os().skip(1);
     if arguments.next().as_deref() != Some(std::ffi::OsStr::new("--discovery-worker")) {

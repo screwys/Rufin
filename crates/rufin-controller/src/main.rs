@@ -1,6 +1,13 @@
+use std::io::{self, Write};
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    if !rufin_controller::configure_allocator() {
+        let _ = writeln!(
+            io::stderr().lock(),
+            "Could not apply all system allocator settings"
+        );
+    }
     if let Some(result) = rufin_controller::discovery_worker_argument() {
         return result;
     }

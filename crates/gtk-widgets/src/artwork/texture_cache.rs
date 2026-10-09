@@ -133,11 +133,15 @@ impl TextureCache {
     }
 
     fn evict_to_limits(&mut self) {
+        let previous_bytes = self.bytes;
         while self.entries.len() > self.max_textures || self.bytes > self.max_bytes {
             let Some(key) = self.order.first().map(|access| access.key.clone()) else {
                 break;
             };
             self.remove(&key);
+        }
+        if self.bytes < previous_bytes {
+            process_memory::request_reclaim();
         }
     }
 

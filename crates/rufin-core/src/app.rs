@@ -91,6 +91,7 @@ where
     if let Err(error) = library.ensure_default_smart_playlists().await {
         warn!(%error, "could not initialize default Smart playlists; startup will continue");
     }
+    diagnostics.install_library(&library, runtime.clone());
     let scrobbling_library = library.as_ref().clone();
     let scrobbling_runtime = runtime.clone();
     let scrobbling_settings = stored.scrobbling_runtime_settings();

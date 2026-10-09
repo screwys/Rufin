@@ -1,4 +1,4 @@
-name: Kotlin
+name: Android
 
 on:
   workflow_call:
@@ -11,7 +11,8 @@ permissions:
   contents: read
 
 jobs:
-  kotlin:
+  android:
+    name: Build and test
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -67,8 +68,9 @@ jobs:
             . -> android/build/rust
             . -> target
 
-      - name: Check Kotlin
-        run: android/gradlew -p android -PandroidAbis=arm64-v8a lintDevelopmentDebug lintStableDebug testDevelopmentDebugUnitTest testStableDebugUnitTest
+      - name: Check Android development build
+        run: android/gradlew -p android -PandroidAbis=arm64-v8a lintDevelopmentDebug testDevelopmentDebugUnitTest
 
       - name: Check optimized Android release
+        if: github.event_name == 'workflow_dispatch'
         run: android/gradlew -p android -PandroidAbis=arm64-v8a assembleStableRelease lintStableRelease

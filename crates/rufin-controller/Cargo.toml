@@ -21,6 +21,7 @@ web.workspace = true
 sources.workspace = true
 playback.workspace = true
 playback-gstreamer.workspace = true
+process-memory.workspace = true
 tokio = { workspace = true, features = ["signal"] }
 
 [lints]
