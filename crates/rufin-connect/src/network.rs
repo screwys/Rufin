@@ -100,6 +100,14 @@ fn canonical_address(mut address: EndpointAddr) -> EndpointAddr {
     address
 }
 
+pub(crate) fn peer_address(addresses: &MemoryLookup, peer: EndpointId) -> EndpointAddr {
+    // An in-flight lookup can predate a newly learned address. Supply known routes directly.
+    addresses
+        .get_endpoint_info(peer)
+        .map(EndpointAddr::from)
+        .unwrap_or_else(|| peer.into())
+}
+
 // DNS permits a trailing dot, but Iroh keys relay connections by the URL.
 // Normalize lookup results too, so one server cannot receive two connections
 // claiming the same device identity.
@@ -347,7 +355,8 @@ impl ConnectNetwork {
                 .dns_resolver(dns)
                 .build(credentials.clone(), endpoint.tls_config().clone()),
         ));
-        let media = MediaStore::open(&config.media_directory, endpoint.clone()).await?;
+        let media =
+            MediaStore::open(&config.media_directory, endpoint.clone(), addresses.clone()).await?;
         let (events, receiver) = mpsc::channel(64);
         let network = Arc::new(Self {
             endpoint,
@@ -784,7 +793,11 @@ impl ConnectNetwork {
             } else {
                 INVITE_PROTOCOL
             };
-            match network.endpoint.connect(peer, protocol).await {
+            match network
+                .endpoint
+                .connect(peer_address(&network.addresses, peer), protocol)
+                .await
+            {
                 Ok(connection) => {
                     let _ = pairing::run(network, connection, joining, true).await;
                 }
@@ -825,7 +838,8 @@ impl ConnectNetwork {
         self.authorize(peer).await?;
         let conn = tokio::time::timeout(
             Duration::from_secs(30),
-            self.endpoint.connect(peer, RPC_PROTOCOL),
+            self.endpoint
+                .connect(peer_address(&self.addresses, peer), RPC_PROTOCOL),
         )
         .await
         .context("Device is unreachable")??;
@@ -848,7 +862,10 @@ impl ConnectNetwork {
         let profile = self.current_profile().await?;
         self.authorize(peer).await?;
         tokio::time::timeout(Duration::from_secs(15), async {
-            let conn = self.endpoint.connect(peer, RPC_PROTOCOL).await?;
+            let conn = self
+                .endpoint
+                .connect(peer_address(&self.addresses, peer), RPC_PROTOCOL)
+                .await?;
             let (mut send, mut recv) = conn.open_bi().await?;
             write_frame(&mut send, &body).await?;
             send.finish()?;
@@ -899,7 +916,7 @@ impl ConnectNetwork {
         let conn = tokio::select! {
             biased;
             _ = profile.stop.cancelled() => return Ok(()),
-            result = tokio::time::timeout(Duration::from_secs(30), self.endpoint.connect(peer, SYNC_PROTOCOL)) => result??,
+            result = tokio::time::timeout(Duration::from_secs(30), self.endpoint.connect(peer_address(&self.addresses, peer), SYNC_PROTOCOL)) => result??,
         };
         let result = tokio::select! {
             biased;

@@ -1,5 +1,5 @@
 //! Transfer existing media files using Iroh's verified range protocol.
-use crate::network::ConnectNetwork;
+use crate::network::{ConnectNetwork, peer_address};
 use anyhow::{Context, Result, bail};
 use bao_tree::{
     BaoTree, ChunkNum, ChunkRanges,
@@ -11,6 +11,7 @@ use bao_tree::{
 };
 use iroh::{
     Endpoint, EndpointId,
+    address_lookup::memory::MemoryLookup,
     endpoint::{Connection, SendStream},
     protocol::{AcceptError, ProtocolHandler},
 };
@@ -44,6 +45,7 @@ pub struct MediaStore {
     index: SqlitePool,
     directory: PathBuf,
     endpoint: Endpoint,
+    addresses: MemoryLookup,
     downloads: Arc<Mutex<HashMap<Hash, Weak<Mutex<()>>>>>,
     snapshots: Arc<Mutex<HashMap<String, Arc<Snapshot>>>>,
 }
@@ -55,7 +57,11 @@ fn file_uri(path: &Path) -> Result<String> {
 }
 
 impl MediaStore {
-    pub(crate) async fn open(path: &Path, endpoint: Endpoint) -> Result<Self> {
+    pub(crate) async fn open(
+        path: &Path,
+        endpoint: Endpoint,
+        addresses: MemoryLookup,
+    ) -> Result<Self> {
         tokio::fs::create_dir_all(path).await?;
         let index = SqlitePool::connect_with(
             SqliteConnectOptions::new()
@@ -71,6 +77,7 @@ impl MediaStore {
             index,
             directory: path.to_owned(),
             endpoint,
+            addresses,
             downloads: Arc::default(),
             snapshots: Arc::default(),
         })
@@ -230,7 +237,7 @@ impl MediaStore {
         let (mut content, size) = tokio::select! {
             _ = cancel.cancelled() => bail!("Transfer cancelled"),
             result = async {
-                let connection = self.endpoint.connect(peer, iroh_blobs::ALPN).await?;
+                let connection = self.endpoint.connect(peer_address(&self.addresses, peer), iroh_blobs::ALPN).await?;
                 let connected = fsm::start(connection, request, Default::default()).next().await?;
                 let fsm::ConnectedNext::StartRoot(start) = connected.next().await? else { bail!("Missing media response") };
                 Ok::<_, anyhow::Error>(start.next().next().await?)
