@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-30 14:52+0000\n"
+"PO-Revision-Date: 2026-10-08 10:51+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
 "Language: ru\n"
@@ -16,7 +16,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
 "n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
-"X-Generator: Weblate 2026.10.dev0\n"
+"X-Generator: Weblate 2026.10.1.dev0\n"
 
 msgid ""
 "A Japanese dictionary is downloaded for furigana and romaji readings. This "
@@ -104,13 +104,7 @@ msgstr ""
 "Служба секретных ключей не найдена. Rufin будет использовать файл для "
 "хранения учетных данных. Отмена не сохранит учетные данные."
 
-#, fuzzy, python-brace-format
-#| msgid ""
-#| "No secret service found. You might have a secret service but the portal "
-#| "can be broken, you can check <a href=\"https://github.com/screwys/Rufin/"
-#| "issues/1055#issuecomment-5637922622\">this issue</a> to fix it, otherwise "
-#| "Rufin will use a file to store its credentials. Cancelling will not save "
-#| "credentials at all."
+#, python-brace-format
 msgid ""
 "No secret service found. You might have a secret service but the portal can "
 "be broken, you can check {link_start}this issue{link_end} to fix it, "
@@ -118,10 +112,10 @@ msgid ""
 "not save credentials at all."
 msgstr ""
 "Служба секретных ключей не найдена. Возможно, у вас установлена служба "
-"секретных ключей, но она не работает. Вы можете проверить <a href=\"https://"
-"github.com/screwys/Rufin/issues/1055#issuecomment-5637922622\">этот вопрос</"
-"a>, чтобы исправить проблему, иначе Rufin будет использовать файл для "
-"хранения учетных данных. Отмена не сохранит учетные данные."
+"секретных ключей, но она не работает, вы можете проверить {link_start}эту "
+"проблему{link_end}, чтобы исправить её, в противном случае Rufin будет "
+"использовать файл для хранения своих учётных данных. Отмена не сохранит "
+"учётные данные."
 
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
@@ -195,6 +189,13 @@ msgstr ""
 "Rufin рассчитает недостающие метаданные EBU R128 для всей библиотеки. Это "
 "может потребовать значительных вычислительных ресурсов, заряда батареи и "
 "пропускной способности сети в течение длительного времени."
+
+msgid ""
+"Some changes were saved. Close this editor and reopen it to review the "
+"result."
+msgstr ""
+"Некоторые изменения сохранены. Закройте этот редактор и откройте его снова, "
+"чтобы просмотреть результат."
 
 msgid ""
 "Temporary library storage is in use. Changes may be lost when Rufin closes."
@@ -279,6 +280,9 @@ msgid ""
 msgstr ""
 "Вам потребуется повторно подключиться через используемые вами приложения, "
 "используя новый ключ API."
+
+msgid "(hold to shuffle)"
+msgstr "(удерживайте, чтобы перемешать)"
 
 msgid ". You only need to fill email and an application name parts"
 msgstr ""
@@ -366,6 +370,9 @@ msgstr "Добавьте источник музыки, чтобы начать 
 msgid "Add a new source"
 msgstr "Новый источник"
 
+msgid "Add a server to configure downloads."
+msgstr "Добавьте сервер для настройки загрузок."
+
 msgid "Add a title"
 msgstr "Добавить название"
 
@@ -399,9 +406,6 @@ msgstr ""
 
 msgid "Add"
 msgstr "Добавить"
-
-msgid "Added to favorites"
-msgstr "Добавлено в избранное"
 
 msgid "Added to"
 msgstr "Добавлено в"
@@ -511,6 +515,9 @@ msgstr "Применяется..."
 msgid "Approve sign-in in your browser"
 msgstr "Подтвердить вход в системе в вашем браузере"
 
+msgid "Approve"
+msgstr "Одобрить"
+
 msgid "April {year}"
 msgstr "Апрель {year}"
 
@@ -568,11 +575,8 @@ msgstr "Август {year}"
 msgid "Authentication"
 msgstr "Аутентификация"
 
-msgid "Auto DJ off"
-msgstr "Авто-DJ выключен"
-
-msgid "Auto DJ on"
-msgstr "Авто-DJ включен"
+msgid "Authorization timed out"
+msgstr "Время ожидания авторизации истекло"
 
 msgid "Auto DJ refill threshold"
 msgstr "Порог автоматического пополнения плейлиста \"Авто-DJ\""
@@ -637,6 +641,9 @@ msgstr "Битрейт"
 msgid "Blue"
 msgstr "Синий"
 
+msgid "Browse"
+msgstr "Обзор"
+
 msgid "Cached"
 msgstr "Кэшировано"
 
@@ -699,9 +706,6 @@ msgstr ""
 msgid "Channels"
 msgstr "Каналы"
 
-msgid "Check for updates every"
-msgstr "Проверять обновления каждые"
-
 msgid "Check for updates"
 msgstr "Проверить обновления"
 
@@ -736,6 +740,9 @@ msgstr ""
 
 msgid "Choose playback output"
 msgstr "Выбрать устройство воспроизведения"
+
+msgid "Choose whether to keep the completed downloads."
+msgstr "Выберите, следует ли сохранить завершенные загрузки."
 
 msgid "Choose"
 msgstr "Выбрать"
@@ -826,6 +833,9 @@ msgstr "Подборка"
 
 msgid "Complete sign-in in your browser"
 msgstr "Завершите вход в систему в вашем браузере"
+
+msgid "Completed downloads will stay on this device."
+msgstr "Завершенные загрузки останутся на этом устройстве."
 
 msgid "Composer sort"
 msgstr "Сортировка по композитору"
@@ -965,6 +975,9 @@ msgstr "Не удалось загрузить похожие треки"
 msgid "Could not load this page"
 msgstr "Не удалось загрузить эту страницу"
 
+msgid "Could not open browser"
+msgstr "Не удалось открыть браузер"
+
 msgid "Could not open file: {error}"
 msgstr "Не удалось открыть файл: {error}"
 
@@ -973,6 +986,9 @@ msgstr "Не удалось открыть папку: {error}"
 
 msgid "Could not play this track"
 msgstr "Не удалось воспроизвести этот трек"
+
+msgid "Could not read artwork"
+msgstr "Не удалось прочитать обложку"
 
 msgid "Could not receive live updates"
 msgstr "Не удалось получить обновления в режиме реального времени"
@@ -1136,6 +1152,9 @@ msgstr "Диск {number}"
 
 msgid "Disc"
 msgstr "Диск"
+
+msgid "Discard changes?"
+msgstr "Отменить изменения?"
 
 msgid "Discography"
 msgstr "Дискография"
@@ -1344,6 +1363,9 @@ msgstr "Формат экспорта"
 msgid "Export playlist"
 msgstr "Экспортировать плейлист"
 
+msgid "Export to connection"
+msgstr "Экспорт в подключение"
+
 msgid "Export your listening history in Rufin"
 msgstr "Экспортируйте историю прослушиваний в Rufin"
 
@@ -1411,6 +1433,9 @@ msgstr ""
 "Для файлов необходимо указать теги «Настроение» и «BPM». Не поддерживается "
 "для Jellyfin"
 
+msgid "Files received: {count}"
+msgstr "Получено файлов: {count}"
+
 msgid "Files"
 msgstr "Файлы"
 
@@ -1434,6 +1459,9 @@ msgstr "Плоский"
 
 msgid "Folder path"
 msgstr "Путь к папке"
+
+msgid "Folder"
+msgstr "Папка"
 
 msgid "Folders"
 msgstr "Папки"
@@ -1520,6 +1548,9 @@ msgstr "Жанр"
 
 msgid "Genres"
 msgstr "Жанры"
+
+msgid "Gestures"
+msgstr "Жесты"
 
 msgid "Get token"
 msgstr "Получить токен"
@@ -1618,6 +1649,12 @@ msgstr "Импортировать резервную копию"
 
 msgid "Import Playlist"
 msgstr "Импортировать плейлист"
+
+msgid "Import from connection"
+msgstr "Импорт из подключения"
+
+msgid "Import theme"
+msgstr "Импортировать тему"
 
 msgid "Import"
 msgstr "Импорт"
@@ -1730,6 +1767,9 @@ msgstr "Last.fm"
 msgid "Layout"
 msgstr "Макет"
 
+msgid "Leave empty for an unencrypted archive."
+msgstr "Оставьте пустым для незашифрованного архива."
+
 msgid "Leave the password empty to keep the saved credential"
 msgstr "Оставьте поле пароля пустым, чтобы сохранить введенные учетные данные"
 
@@ -1805,6 +1845,9 @@ msgstr "Префикс для Локального Источника"
 msgid "Local file access configured"
 msgstr "Доступ к локальным файлам настроен"
 
+msgid "Local file access is required before these tags can be saved."
+msgstr "Для сохранения этих тегов требуется доступ к локальным файлам."
+
 msgid "Local file mapping is no longer available"
 msgstr "Сопоставление локальных файлов больше не доступно"
 
@@ -1840,6 +1883,12 @@ msgstr "Локальная папка с музыкой"
 
 msgid "Local music folders"
 msgstr "Локальный источник, папки с музыкой"
+
+msgid "Local network permission is required for remote connections"
+msgstr "Для удалённых подключений требуется разрешение локальной сети"
+
+msgid "Local network permission was denied"
+msgstr "Доступ к локальной сети был отклонен"
 
 msgid "Local network"
 msgstr "Локальная сеть"
@@ -1904,11 +1953,13 @@ msgstr "Май {year}"
 msgid "Media available"
 msgstr "Доступные медиафайлы"
 
-msgid "Media transferring: {received} / {total} bytes"
-msgstr "Передача данных: {received} / {total} байт"
-
 msgid "Menu"
 msgstr "Меню"
+
+msgid "Metadata changed before it was saved. Reload it before trying again."
+msgstr ""
+"Метаданные были изменены до сохранения. Перезагрузите их, прежде чем "
+"повторить попытку."
 
 msgid "Metadata editing is no longer available"
 msgstr "Редактирование метаданных больше недоступно"
@@ -1918,6 +1969,9 @@ msgstr "Для редактирования метаданных требует�
 
 msgid "Metadata source"
 msgstr "Источник метаданных"
+
+msgid "Metadata was saved, but refreshing the source failed."
+msgstr "Метаданные были сохранены, но обновление источника не удалось."
 
 msgid "Metadata"
 msgstr "Метаданные"
@@ -1951,6 +2005,9 @@ msgstr "Настроения"
 
 msgid "More actions"
 msgstr "Другие действия"
+
+msgid "More"
+msgstr "Дополнительно"
 
 msgid "Most Played (Monthly)"
 msgstr "Самые воспроизводимые (За месяц)"
@@ -1994,11 +2051,17 @@ msgstr "Несколько значений"
 msgid "Music Folder"
 msgstr "Папка с музыкой"
 
+msgid "Music access permission was denied"
+msgstr "Разрешение на доступ к музыке было отклонено"
+
 msgid "Music folders on the Rufin machine"
 msgstr "Папки с музыкой на устройстве с Rufin"
 
 msgid "Music on this device"
 msgstr "Музыка на этом устройстве"
+
+msgid "Music"
+msgstr "Музыка"
 
 msgid "MusicBrainz + Last.fm"
 msgstr "MusicBrainz и Last.fm"
@@ -2089,6 +2152,9 @@ msgstr "Новый умный плейлист"
 msgid "New download rule"
 msgstr "Новое правило загрузки"
 
+msgid "New release is available"
+msgstr "Доступна новая версия"
+
 msgid "Newly added"
 msgstr "Недавно добавленные"
 
@@ -2122,6 +2188,9 @@ msgstr "Обложка не найдена"
 msgid "No cached server path yet"
 msgstr "Пока нет кэшированных путей к серверу"
 
+msgid "No downloads queued"
+msgstr "Нет загрузок в очереди"
+
 msgid "No favorite albums yet"
 msgstr "Пока нет избранных альбомов"
 
@@ -2130,6 +2199,9 @@ msgstr "Пока нет избранных артистов"
 
 msgid "No favorites yet"
 msgstr "Пока нет избранных"
+
+msgid "No file connections"
+msgstr "Нет подключений к файлам"
 
 msgid "No file linked"
 msgstr "Файл не привязан"
@@ -2259,6 +2331,9 @@ msgstr "Отключайте только для сервера, которым 
 
 msgid "Off"
 msgstr "Выкл."
+
+msgid "Offline"
+msgstr "Оффлайн"
 
 msgid "On this device"
 msgstr "На этом устройстве"
@@ -2459,6 +2534,12 @@ msgstr "Воспроизвести настроение"
 msgid "Play playlist"
 msgstr "Воспроизвести плейлист"
 
+msgid "Play radio later"
+msgstr "Воспроизвести радио позже"
+
+msgid "Play radio next"
+msgstr "Воспроизвести радио следующим"
+
 msgid "Play radio"
 msgstr "Воспроизвести радио"
 
@@ -2491,6 +2572,12 @@ msgstr "Скорость воспроизведения"
 
 msgid "Playback"
 msgstr "Плеер"
+
+msgid "Playing from {}"
+msgstr "Воспроизведение с {}"
+
+msgid "Playing from"
+msgstr "Воспроизведение с"
 
 msgid "Playing on this device"
 msgstr "Играет на этом устройстве"
@@ -2665,6 +2752,9 @@ msgstr "Закрыть Rufin"
 msgid "Quit"
 msgstr "Выход"
 
+msgid "Radio"
+msgstr "Радио"
+
 msgid "Range selection"
 msgstr "Выбор диапазона"
 
@@ -2755,6 +2845,9 @@ msgstr "Выпуск"
 msgid "Reload from file"
 msgstr "Перезагрузить из файла"
 
+msgid "Reload metadata to review the current values."
+msgstr "Перезагрузите метаданные, чтобы просмотреть текущие значения."
+
 msgid "Reload themes"
 msgstr "Перезагрузить темы"
 
@@ -2824,14 +2917,14 @@ msgstr "Удалить недоступные треки"
 msgid "Remove"
 msgstr "Удалить"
 
-msgid "Removed from favorites"
-msgstr "Удалено из избранного"
-
 msgid "Removed from"
 msgstr "Удалено из"
 
 msgid "Rename file"
 msgstr "Переименовать файл"
+
+msgid "Reorder"
+msgstr "Изменить порядок"
 
 msgid "Repeat all"
 msgstr "Повторять все"
@@ -2991,6 +3084,9 @@ msgstr "Сохранено в"
 msgid "Saved"
 msgstr "Сохранено"
 
+msgid "Saved..."
+msgstr "Сохранено..."
+
 msgid "Saves lyrics to your source"
 msgstr "Сохраняет текст песни в источнике"
 
@@ -3074,9 +3170,6 @@ msgstr "Выполняется поиск..."
 
 msgid "Secret storage"
 msgstr "Скрытое хранилище"
-
-msgid "Secure storage"
-msgstr "Безопасное хранилище"
 
 msgid "Seek Backward"
 msgstr "Перемотать назад"
@@ -3198,6 +3291,9 @@ msgstr "Показать обложку"
 msgid "Show comparison"
 msgstr "Показать сравнение"
 
+msgid "Show current lyrics line"
+msgstr "Показать текущую строку текста"
+
 msgid "Show downloaded badge"
 msgstr "Показывать значок \"Загружено\""
 
@@ -3255,12 +3351,6 @@ msgstr "Показать/скрыть правую боковую панель"
 
 msgid "Showcase"
 msgstr "Демонстрация"
-
-msgid "Shuffle off"
-msgstr "Перемешивание Выкл"
-
-msgid "Shuffle on"
-msgstr "Перемешивание Вкл"
 
 msgid "Shuffle"
 msgstr "Перемешать"
@@ -3355,6 +3445,9 @@ msgstr "Сортировать"
 msgid "Source by position"
 msgstr "Источник по позиции"
 
+msgid "Source setup is unavailable"
+msgstr "Настройка источника недоступна"
+
 msgid "Source to use for cover images and song/artist links"
 msgstr "Источник для обложек и ссылок на песни/исполнителей"
 
@@ -3408,6 +3501,12 @@ msgstr "Стиль"
 msgid "Sunday"
 msgstr "Воскресенье"
 
+msgid "Swipe left"
+msgstr "Свайп влево"
+
+msgid "Swipe right"
+msgstr "Свайп вправо"
+
 msgid "Switch Search/Favorites tabs"
 msgstr "Переключить вкладки «Поиск» и «Избранное»"
 
@@ -3428,6 +3527,9 @@ msgstr "Системные настройки"
 
 msgid "System flatpak:"
 msgstr "Система Flatpak:"
+
+msgid "System keyring"
+msgstr "Системная связка ключей"
 
 msgid "System"
 msgstr "Система"
@@ -3607,6 +3709,9 @@ msgstr "Звук включен"
 msgid "Untitled"
 msgstr "Без названия"
 
+msgid "Update check interval"
+msgstr "Интервал проверки обновлений"
+
 msgid "Update"
 msgstr "Обновить"
 
@@ -3645,6 +3750,9 @@ msgstr "Использовать акцентный цвет"
 
 msgid "Use an existing connection?"
 msgstr "Использовать существующее подключение?"
+
+msgid "Use current artwork"
+msgstr "Использовать текущее художественное оформление"
 
 msgid "Use different layout below a threshold width"
 msgstr ""
@@ -3745,9 +3853,6 @@ msgstr "Ожидание подключения"
 
 msgid "Waiting for device"
 msgstr "Ожидание подключения устройства"
-
-msgid "Waiting for media provider"
-msgstr "Ожидание загрузки от провайдера"
 
 msgid "Waiting for the other device to approve"
 msgstr "Ожидание подтверждения от другого устройства"
@@ -3859,6 +3964,9 @@ msgstr "сегодня"
 
 msgid "yesterday"
 msgstr "вчера"
+
+msgid "{action} (Shuffle)"
+msgstr "{action} (Перемешать)"
 
 msgid "{count} album"
 msgid_plural "{count} albums"
@@ -4000,6 +4108,36 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Added to favorites"
+#~ msgstr "Добавлено в избранное"
+
+#~ msgid "Auto DJ off"
+#~ msgstr "Авто-DJ выключен"
+
+#~ msgid "Auto DJ on"
+#~ msgstr "Авто-DJ включен"
+
+#~ msgid "Check for updates every"
+#~ msgstr "Проверять обновления каждые"
+
+#~ msgid "Media transferring: {received} / {total} bytes"
+#~ msgstr "Передача данных: {received} / {total} байт"
+
+#~ msgid "Removed from favorites"
+#~ msgstr "Удалено из избранного"
+
+#~ msgid "Secure storage"
+#~ msgstr "Безопасное хранилище"
+
+#~ msgid "Shuffle off"
+#~ msgstr "Перемешивание Выкл"
+
+#~ msgid "Shuffle on"
+#~ msgstr "Перемешивание Вкл"
+
+#~ msgid "Waiting for media provider"
+#~ msgstr "Ожидание загрузки от провайдера"
 
 #~ msgid "Sponsor"
 #~ msgstr "Поддержать"
@@ -4591,9 +4729,6 @@ msgstr "Добро пожаловать в программу установки
 #~ msgstr ""
 #~ "Введите запрос в поле поиска на боковой панели, чтобы выполнить поиск в "
 #~ "локальном кэше"
-
-#~ msgid "Unsaved changes."
-#~ msgstr "Несохраненные изменения."
 
 #~ msgid "Use remote lyric providers when server lyrics are unavailable"
 #~ msgstr ""
