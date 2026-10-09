@@ -291,6 +291,7 @@ dependencies = [
  "library",
  "md-5 0.10.6",
  "metadata-lookup",
+ "process-memory",
  "serde_json",
  "sources",
  "tempfile",
@@ -3491,6 +3492,7 @@ dependencies = [
  "library",
  "localization",
  "playback",
+ "process-memory",
  "proptest",
  "rufin-core",
  "serde",
@@ -4935,7 +4937,9 @@ dependencies = [
  "blake3",
  "chrono",
  "futures-util",
+ "libsqlite3-sys",
  "percent-encoding",
+ "process-memory",
  "proptest",
  "regex",
  "roxmltree 0.21.1",
@@ -6948,6 +6952,7 @@ dependencies = [
  "gstreamer-controller",
  "library",
  "playback",
+ "process-memory",
  "tempfile",
  "tracing",
 ]
@@ -7246,6 +7251,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "process-memory"
+version = "0.16.6"
+dependencies = [
+ "libc",
+ "tracing",
 ]
 
 [[package]]
@@ -8036,6 +8049,7 @@ dependencies = [
  "localization",
  "playback",
  "playback-gstreamer",
+ "process-memory",
  "rufin-core",
  "sources",
  "tokio",

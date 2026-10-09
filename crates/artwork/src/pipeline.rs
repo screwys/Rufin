@@ -586,14 +586,16 @@ fn source_epoch(state: &State, binding: &ArtworkBinding) -> u64 {
 }
 
 fn run_worker(shared: Arc<Shared>, foreground_reserved: bool) {
+    let mut completed_work = false;
     loop {
-        let work = next_work(&shared, foreground_reserved);
+        let work = next_work(&shared, foreground_reserved, &mut completed_work);
         let resolution = resolve(&shared, &work);
         finish(&shared, work, resolution);
+        completed_work = true;
     }
 }
 
-fn next_work(shared: &Shared, foreground_reserved: bool) -> Work {
+fn next_work(shared: &Shared, foreground_reserved: bool, completed_work: &mut bool) -> Work {
     let mut state = lock_state(shared);
     loop {
         let key = state.foreground.pop_front().or_else(|| {
@@ -621,6 +623,13 @@ fn next_work(shared: &Shared, foreground_reserved: bool) -> Work {
                 request,
                 decode,
             };
+        }
+        if *completed_work {
+            *completed_work = false;
+            drop(state);
+            process_memory::request_reclaim();
+            state = lock_state(shared);
+            continue;
         }
         state = shared
             .wake
@@ -961,7 +970,7 @@ mod tests {
             state: Mutex::new(state),
             wake: Condvar::new(),
         };
-        let work = next_work(&shared, false);
+        let work = next_work(&shared, false, &mut false);
         let resolution = resolve(&shared, &work);
         finish(&shared, work, resolution);
         assert!(matches!(

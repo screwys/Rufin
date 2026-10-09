@@ -5,7 +5,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::sync::{
-    Arc, Condvar, Mutex,
+    Arc, Condvar, Mutex, Weak,
     atomic::{AtomicBool, Ordering},
 };
 
@@ -169,6 +169,7 @@ pub struct Diagnostics {
     output: Arc<DiagnosticState>,
     filter: FilterHandle,
     debug_enabled: AtomicBool,
+    library: Mutex<Option<(Weak<library::Database>, tokio::runtime::Handle)>>,
 }
 
 impl Diagnostics {
@@ -206,6 +207,7 @@ impl Diagnostics {
                 output,
                 filter: filter_handle,
                 debug_enabled: AtomicBool::new(debug_enabled),
+                library: Mutex::new(None),
             }),
             StderrGuard {
                 _persistent: persistent,
@@ -224,9 +226,33 @@ impl Diagnostics {
         self.filter
             .reload(profile_filter(enabled))
             .map_err(|error| format!("could not change debug logging: {error}"))?;
-        self.debug_enabled.store(enabled, Ordering::Relaxed);
+        let was_enabled = self.debug_enabled.swap(enabled, Ordering::Relaxed);
         tracing::info!(debug = enabled, "diagnostic logging changed");
+        if enabled && !was_enabled {
+            self.log_library_memory();
+        }
         Ok(())
+    }
+
+    pub(crate) fn install_library(
+        &self,
+        library: &Arc<library::Database>,
+        runtime: tokio::runtime::Handle,
+    ) {
+        *self.library.lock().unwrap_or_else(|p| p.into_inner()) =
+            Some((Arc::downgrade(library), runtime));
+        if self.debug_enabled() {
+            self.log_library_memory();
+        }
+    }
+
+    fn log_library_memory(&self) {
+        let library = self.library.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some((library, runtime)) = library.as_ref()
+            && let Some(library) = library.upgrade()
+        {
+            runtime.spawn(async move { library.log_memory_usage().await });
+        }
     }
 
     pub fn snapshot(&self) -> String {

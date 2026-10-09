@@ -80,6 +80,41 @@ pub struct Database {
 }
 
 impl Database {
+    /// Logs current SQLite bytes for the writer and one idle connection per read pool.
+    /// Busy connections are skipped; samples include main, temp, and attached databases.
+    pub async fn log_memory_usage(&self) {
+        if let Ok(mut writer) = self.inner.writer.try_lock()
+            && let Some(connection) = writer.as_mut()
+        {
+            log_connection_memory(connection, "writer").await;
+        } else {
+            tracing::debug!(
+                connection = "writer",
+                sampled = false,
+                "SQLite memory sample"
+            );
+        }
+
+        for (role, pool) in [
+            ("reader", &self.inner.readers),
+            ("export_reader", &self.inner.export_readers),
+        ] {
+            let mut connection = pool.try_acquire();
+            let connections = pool.size();
+            let sampled_connections = if let Some(connection) = connection.as_mut() {
+                u32::from(log_connection_memory(connection, role).await)
+            } else {
+                0
+            };
+            tracing::debug!(
+                connection = role,
+                connections,
+                sampled_connections,
+                "SQLite pool sample coverage"
+            );
+        }
+    }
+
     pub fn set_distinct_track_covers(&self, enabled: bool) {
         self.inner
             .distinct_track_covers
@@ -413,6 +448,60 @@ impl Database {
         self.writer_failed();
         Ok(())
     }
+}
+
+async fn log_connection_memory(connection: &mut SqliteConnection, role: &str) -> bool {
+    match connection_memory(connection).await {
+        Ok([cache_bytes, schema_bytes, statement_bytes]) => {
+            tracing::debug!(
+                connection = role,
+                sampled = true,
+                cache_bytes,
+                schema_bytes,
+                statement_bytes,
+                "SQLite approximate current memory"
+            );
+            true
+        }
+        Err(error) => {
+            tracing::debug!(connection = role, sampled = false, %error, "could not sample SQLite memory");
+            false
+        }
+    }
+}
+
+#[allow(unsafe_code)]
+async fn connection_memory(connection: &mut SqliteConnection) -> Result<[i64; 3], sqlx::Error> {
+    let mut handle = connection.lock_handle().await?;
+    let mut bytes = [0; 3];
+    for (operation, current) in [
+        libsqlite3_sys::SQLITE_DBSTATUS_CACHE_USED,
+        libsqlite3_sys::SQLITE_DBSTATUS_SCHEMA_USED,
+        libsqlite3_sys::SQLITE_DBSTATUS_STMT_USED,
+    ]
+    .into_iter()
+    .zip(&mut bytes)
+    {
+        // These counters have no high-water value. Leave all SQLite counters unchanged.
+        let mut highwater = 0;
+        // SAFETY: the SQLx guard keeps this handle live and excludes its worker's FFI calls.
+        // Both output pointers refer to writable i64 values for the duration of the call.
+        let result = unsafe {
+            libsqlite3_sys::sqlite3_db_status64(
+                handle.as_raw_handle().as_ptr(),
+                operation,
+                current,
+                &mut highwater,
+                0,
+            )
+        };
+        if result != libsqlite3_sys::SQLITE_OK {
+            return Err(sqlx::Error::Protocol(format!(
+                "SQLite memory counter {operation} failed with code {result}"
+            )));
+        }
+    }
+    Ok(bytes)
 }
 
 pub(crate) async fn open_writer(path: &Path) -> LibraryResult<SqliteConnection> {

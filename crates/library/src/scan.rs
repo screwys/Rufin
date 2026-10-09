@@ -2154,6 +2154,9 @@ impl Scan {
         drop(writer);
         self.database.release_scan(self.token);
         cleanup?;
+        if !self.point_update {
+            process_memory::request_reclaim();
+        }
         result
     }
 
@@ -2864,6 +2867,7 @@ impl Database {
 
 impl Drop for Scan {
     fn drop(&mut self) {
+        let reclaim = !self.point_update;
         if let Some(mut writer) = self.batch_writer.take() {
             let database = self.database.clone();
             let token = self.token;
@@ -2873,7 +2877,11 @@ impl Drop for Scan {
                         let _ = sqlx::query("ROLLBACK").execute(&mut *connection).await;
                         let _ = clear_staging(connection).await;
                     }
+                    drop(writer);
                     database.release_scan(token);
+                    if reclaim {
+                        process_memory::request_reclaim();
+                    }
                 });
             } else {
                 self.database.release_scan(self.token);
@@ -2894,6 +2902,9 @@ impl Drop for Scan {
                     }
                 }
                 database.release_scan(token);
+                if reclaim {
+                    process_memory::request_reclaim();
+                }
             });
         } else {
             self.database.release_scan(self.token);
