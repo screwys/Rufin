@@ -210,20 +210,27 @@ mod tests {
         gdk::MemoryTexture::new(1, 1, gdk::MemoryFormat::R8g8b8a8, &bytes, 4).upcast()
     }
 
-    fn keys() -> [ArtworkKey; 24] {
-        let root = tempfile::tempdir().unwrap();
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let artwork = artwork::Artwork::new(root.path(), runtime.handle().clone()).unwrap();
-        std::array::from_fn(|index| {
-            let binding = sources::native_artwork_binding(
-                "texture-test",
-                &sources::NativeImageRef::new(index.to_string(), None),
-            )
-            .unwrap();
-            artwork.key(
-                &artwork::ArtworkRequest::new(artwork::ArtworkBinding::opaque(&binding), 32, 32)
+    fn keys() -> &'static [ArtworkKey; 24] {
+        static KEYS: std::sync::OnceLock<[ArtworkKey; 24]> = std::sync::OnceLock::new();
+        KEYS.get_or_init(|| {
+            let root = tempfile::tempdir().unwrap();
+            let runtime = tokio::runtime::Runtime::new().unwrap();
+            let artwork = artwork::Artwork::new(root.path(), runtime.handle().clone()).unwrap();
+            std::array::from_fn(|index| {
+                let binding = sources::native_artwork_binding(
+                    "texture-test",
+                    &sources::NativeImageRef::new(index.to_string(), None),
+                )
+                .unwrap();
+                artwork.key(
+                    &artwork::ArtworkRequest::new(
+                        artwork::ArtworkBinding::opaque(&binding),
+                        32,
+                        32,
+                    )
                     .cache_only(),
-            )
+                )
+            })
         })
     }
 
