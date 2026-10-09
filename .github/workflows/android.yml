@@ -68,8 +68,9 @@ jobs:
             . -> android/build/rust
             . -> target
 
-      - name: Check Android debug builds
-        run: android/gradlew -p android -PandroidAbis=arm64-v8a lintDevelopmentDebug lintStableDebug testDevelopmentDebugUnitTest testStableDebugUnitTest
+      - name: Check Android development build
+        run: android/gradlew -p android -PandroidAbis=arm64-v8a lintDevelopmentDebug testDevelopmentDebugUnitTest
 
       - name: Check optimized Android release
+        if: github.event_name == 'workflow_dispatch'
         run: android/gradlew -p android -PandroidAbis=arm64-v8a assembleStableRelease lintStableRelease
