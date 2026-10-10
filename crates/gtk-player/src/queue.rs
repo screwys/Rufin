@@ -100,13 +100,15 @@ impl QueueState {
                 selection.unselect_item(position);
             }
         }
-        if self
-            .window
-            .borrow()
-            .iter()
-            .map(|row| &row.position)
-            .ne(rows.iter().map(|row| &row.position))
-        {
+        let current_appeared = self.current.borrow().is_some_and(|current| {
+            !self
+                .window
+                .borrow()
+                .iter()
+                .any(|row| row.position == current)
+                && rows.iter().any(|row| row.position == current)
+        });
+        if current_appeared {
             for pending in &self.reveal_current {
                 pending.set(true);
             }
@@ -811,13 +813,28 @@ fn build_queue_table(
 
     let activate = shell.playback_handles.queue.clone();
     let activate_model = model.clone();
-    table.connect_activate(move |_, position| {
+    table.connect_activate(move |table, position| {
         let Some(object) = activate_model
             .item(position)
             .and_then(|item| item.downcast::<SparseObjectItem>().ok())
         else {
             return;
         };
+        table.scroll_to(position, None, gtk::ListScrollFlags::FOCUS, None);
+        if let Some(focus) = table.root().and_then(|root| root.focus())
+            && focus.is_ancestor(table)
+            && let Some(bounds) = focus.compute_bounds(table)
+            && let Some(adjustment) = table.vadjustment()
+        {
+            let page = adjustment.page_size();
+            let viewport_top = f64::from(table.height()) - page;
+            let center = f64::from(bounds.y() + bounds.height() / 2.0);
+            let maximum = (adjustment.upper() - page).max(adjustment.lower());
+            adjustment.set_value(
+                (adjustment.value() + center - viewport_top - page / 2.0)
+                    .clamp(adjustment.lower(), maximum),
+            );
+        }
         let position = object
             .value::<Arc<QueuePageRow>>()
             .expect("Queue row")
@@ -1533,7 +1550,7 @@ mod tests {
     }
 
     #[test]
-    fn expanding_the_queue_reveals_the_same_playing_position_again() {
+    fn changing_the_queue_window_keeps_the_playing_row_without_another_reveal() {
         let state = QueueState::new();
         let current = row(10, "Playing");
         let generation = state.begin();
@@ -1548,9 +1565,21 @@ mod tests {
         window.push(current);
         let generation = state.begin();
         assert!(state.accept(generation, window));
-        assert!(state.reveal_current[0].get());
-        assert!(state.reveal_current[1].get());
-        let updated = state.model.item(10).unwrap();
-        assert_eq!(object, updated);
+        assert!(!state.reveal_current[0].get());
+        assert!(!state.reveal_current[1].get());
+        assert_eq!(object, state.model.item(10).unwrap());
+
+        let mut window = state
+            .window
+            .borrow()
+            .iter()
+            .map(|row| (**row).clone())
+            .collect::<Vec<_>>();
+        window.extend((11..16).map(|i| row(i, "Upcoming")));
+        let generation = state.begin();
+        assert!(state.accept(generation, window));
+        assert!(!state.reveal_current[0].get());
+        assert!(!state.reveal_current[1].get());
+        assert_eq!(object, state.model.item(10).unwrap());
     }
 }
