@@ -247,7 +247,7 @@ CREATE INDEX IF NOT EXISTS local_locators_precedence_idx ON local_locators(media
 "#;
 pub(crate) const CATALOG_SCHEMA: &str = r#"PRAGMA application_id = 1381320270;
 
-PRAGMA user_version = 53;
+PRAGMA user_version = 55;
 
 CREATE TABLE IF NOT EXISTS sources (
     source_key INTEGER PRIMARY KEY,
@@ -256,7 +256,8 @@ CREATE TABLE IF NOT EXISTS sources (
     artwork_digest BLOB NOT NULL CHECK (length(artwork_digest) = 32),
     distinct_track_covers INTEGER NOT NULL DEFAULT 0 CHECK (distinct_track_covers IN (0,1)),
     catalog_revision INTEGER NOT NULL DEFAULT 0 CHECK (catalog_revision >= 0),
-    catalog_complete INTEGER NOT NULL DEFAULT 0 CHECK (catalog_complete IN (0,1))
+    catalog_complete INTEGER NOT NULL DEFAULT 0 CHECK (catalog_complete IN (0,1)),
+    track_count INTEGER NOT NULL DEFAULT 0 CHECK (track_count >= 0)
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS albums (
@@ -294,6 +295,7 @@ CREATE TABLE IF NOT EXISTS albums (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS albums_artist_order_idx ON albums(source_key,(album_artist_sort IS NULL),album_artist_sort,(year IS NULL),year,sort_text,album_key);
+CREATE INDEX IF NOT EXISTS albums_artist_desc_order_idx ON albums(source_key,(album_artist_sort IS NULL),album_artist_sort DESC,(year IS NULL),year,sort_text,album_key);
 CREATE INDEX IF NOT EXISTS albums_year_order_idx ON albums(source_key,year,sort_text,album_key);
 CREATE INDEX IF NOT EXISTS albums_order_idx ON albums(source_key, sort_text, album_key);
 CREATE INDEX IF NOT EXISTS albums_source_favorites_idx ON albums(source_key, object_id) WHERE source_favorite=1;
@@ -314,6 +316,9 @@ CREATE TABLE IF NOT EXISTS tracks (
     display_album TEXT NOT NULL,
     display_artist TEXT NOT NULL,
     sort_text TEXT NOT NULL,
+    sort_album_artist TEXT,
+    sort_album_year INTEGER,
+    sort_album TEXT NOT NULL DEFAULT '',
     duration_millis INTEGER NOT NULL CHECK (duration_millis >= 0),
     disc_number INTEGER NOT NULL DEFAULT 0 CHECK (disc_number >= 0),
     track_number INTEGER NOT NULL DEFAULT 0 CHECK (track_number >= 0),
@@ -369,6 +374,12 @@ CREATE INDEX IF NOT EXISTS tracks_artwork_idx ON tracks(source_key, artwork_bind
 
 CREATE INDEX IF NOT EXISTS tracks_source_album_order_idx ON tracks(source_key,album_key,disc_number,track_number,sort_text,track_key);
 CREATE INDEX IF NOT EXISTS tracks_album_order_idx ON tracks(album_key,disc_number,track_number,sort_text,track_key);
+CREATE INDEX IF NOT EXISTS tracks_artist_sort_asc_idx ON tracks(source_key,display_artist,(sort_album_year IS NULL),sort_album_year,sort_album,(album_key IS NULL),album_key,disc_number,track_number,sort_text,track_key);
+CREATE INDEX IF NOT EXISTS tracks_artist_sort_desc_idx ON tracks(source_key,display_artist DESC,(sort_album_year IS NULL),sort_album_year,sort_album,(album_key IS NULL),album_key,disc_number,track_number,sort_text,track_key);
+CREATE INDEX IF NOT EXISTS tracks_album_artist_sort_asc_idx ON tracks(source_key,(sort_album_artist IS NULL),sort_album_artist,(sort_album_year IS NULL),sort_album_year,sort_album,(album_key IS NULL),album_key,disc_number,track_number,sort_text,track_key);
+CREATE INDEX IF NOT EXISTS tracks_album_artist_sort_desc_idx ON tracks(source_key,(sort_album_artist IS NULL),sort_album_artist DESC,(sort_album_year IS NULL),sort_album_year,sort_album,(album_key IS NULL),album_key,disc_number,track_number,sort_text,track_key);
+CREATE INDEX IF NOT EXISTS tracks_album_sort_asc_idx ON tracks(source_key,sort_album,(album_key IS NULL),album_key,disc_number,track_number,sort_text,track_key);
+CREATE INDEX IF NOT EXISTS tracks_album_sort_desc_idx ON tracks(source_key,sort_album DESC,(album_key IS NULL),album_key,disc_number,track_number,sort_text,track_key);
 
 CREATE TABLE IF NOT EXISTS artists (
     artist_key INTEGER PRIMARY KEY,
@@ -679,6 +690,39 @@ CREATE TRIGGER IF NOT EXISTS album_artist_name AFTER UPDATE OF sort_text ON arti
       AND NEW.artist_key=(SELECT artist_key FROM album_artists WHERE album_key=albums.album_key ORDER BY position LIMIT 1);
 END;
 
+CREATE TRIGGER IF NOT EXISTS track_sort_insert AFTER INSERT ON tracks BEGIN
+    UPDATE tracks SET sort_album_artist=album.album_artist_sort,sort_album_year=album.year,
+        sort_album=COALESCE(album.sort_text,NEW.display_album)
+    FROM (SELECT 1) LEFT JOIN albums album ON album.album_key=NEW.album_key
+    WHERE track_key=NEW.track_key AND (tracks.sort_album_artist,tracks.sort_album_year,tracks.sort_album)
+        IS NOT (album.album_artist_sort,album.year,COALESCE(album.sort_text,NEW.display_album));
+END;
+CREATE TRIGGER IF NOT EXISTS track_sort_update AFTER UPDATE OF album_key,display_album ON tracks
+WHEN (OLD.album_key,OLD.display_album) IS NOT (NEW.album_key,NEW.display_album) BEGIN
+    UPDATE tracks SET sort_album_artist=album.album_artist_sort,sort_album_year=album.year,
+        sort_album=COALESCE(album.sort_text,NEW.display_album)
+    FROM (SELECT 1) LEFT JOIN albums album ON album.album_key=NEW.album_key
+    WHERE track_key=NEW.track_key AND (tracks.sort_album_artist,tracks.sort_album_year,tracks.sort_album)
+        IS NOT (album.album_artist_sort,album.year,COALESCE(album.sort_text,NEW.display_album));
+END;
+CREATE TRIGGER IF NOT EXISTS album_track_sort_update AFTER UPDATE OF album_artist_sort,year,sort_text ON albums
+WHEN (OLD.album_artist_sort,OLD.year,OLD.sort_text) IS NOT (NEW.album_artist_sort,NEW.year,NEW.sort_text) BEGIN
+    UPDATE tracks SET sort_album_artist=NEW.album_artist_sort,sort_album_year=NEW.year,sort_album=NEW.sort_text
+    WHERE album_key=NEW.album_key AND (sort_album_artist,sort_album_year,sort_album)
+        IS NOT (NEW.album_artist_sort,NEW.year,NEW.sort_text);
+END;
+CREATE TRIGGER IF NOT EXISTS source_track_insert AFTER INSERT ON tracks BEGIN
+    UPDATE sources SET track_count=track_count+1 WHERE source_key=NEW.source_key;
+END;
+CREATE TRIGGER IF NOT EXISTS source_track_delete AFTER DELETE ON tracks BEGIN
+    UPDATE sources SET track_count=track_count-1 WHERE source_key=OLD.source_key;
+END;
+CREATE TRIGGER IF NOT EXISTS source_track_update AFTER UPDATE OF source_key ON tracks
+WHEN OLD.source_key IS NOT NEW.source_key BEGIN
+    UPDATE sources SET track_count=track_count-1 WHERE source_key=OLD.source_key;
+    UPDATE sources SET track_count=track_count+1 WHERE source_key=NEW.source_key;
+END;
+
 "#;
 
 macro_rules! metadata_upsert {
@@ -858,6 +902,10 @@ pub(crate) async fn initialize_catalog(connection: &mut SqliteConnection) -> Lib
 }
 
 async fn initialize(connection: &mut SqliteConnection, schema: &'static str) -> LibraryResult<()> {
+    let upgrade_source_track_count =
+        schema == CATALOG_SCHEMA && pragma(connection, "user_version").await? < 55;
+    let upgrade_track_sort =
+        schema == CATALOG_SCHEMA && pragma(connection, "user_version").await? < 54;
     let upgrade_album_sort =
         schema == CATALOG_SCHEMA && pragma(connection, "user_version").await? < 53;
     let upgrade_catalog_complete =
@@ -921,6 +969,19 @@ async fn initialize(connection: &mut SqliteConnection, schema: &'static str) -> 
         sqlx::raw_sql("DROP INDEX IF EXISTS tracks_album_idx;
             DROP INDEX IF EXISTS tracks_album_source_order_idx;
             UPDATE albums SET album_artist_sort=(SELECT artist.sort_text FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=albums.album_key ORDER BY credit.position LIMIT 1);")
+            .execute(&mut *transaction).await?;
+    }
+    if upgrade_track_sort {
+        sqlx::query("UPDATE tracks SET (sort_album_artist,sort_album_year,sort_album)=(
+            SELECT album.album_artist_sort,album.year,COALESCE(album.sort_text,tracks.display_album)
+            FROM (SELECT 1) LEFT JOIN albums album ON album.album_key=tracks.album_key)
+            WHERE (sort_album_artist,sort_album_year,sort_album) IS NOT (
+                SELECT album.album_artist_sort,album.year,COALESCE(album.sort_text,tracks.display_album)
+                FROM (SELECT 1) LEFT JOIN albums album ON album.album_key=tracks.album_key)")
+            .execute(&mut *transaction).await?;
+    }
+    if upgrade_source_track_count {
+        sqlx::query("UPDATE sources SET track_count=(SELECT count(*) FROM tracks WHERE tracks.source_key=sources.source_key)")
             .execute(&mut *transaction).await?;
     }
     if upgrade_catalog_complete {

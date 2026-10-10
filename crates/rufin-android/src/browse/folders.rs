@@ -259,7 +259,17 @@ impl AndroidBrowseQuery {
                 Ok((
                     folders,
                     self.database
-                        .track_count(source, *folder, false, &self.filter, &cancel)
+                        .track_count(
+                            &library::TrackQuery {
+                                source,
+                                collection: None,
+                                folder: *folder,
+                                favorites_only: false,
+                                downloaded_only: false,
+                            },
+                            &self.filter,
+                            &cancel,
+                        )
                         .await?,
                 ))
             }

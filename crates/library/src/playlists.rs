@@ -1740,14 +1740,6 @@ pub(crate) fn playlist_query(
             .from
             .push_str(" LEFT JOIN tracks track ON track.media_uri=entry.media_uri");
     }
-    if matches!(
-        sort,
-        TrackSort::Artist | TrackSort::AlbumArtist | TrackSort::Album
-    ) {
-        query
-            .from
-            .push_str(" LEFT JOIN albums album ON album.album_key=track.album_key");
-    }
     if sort != TrackSort::Position {
         query.order.push("entry.position ASC".into());
     }

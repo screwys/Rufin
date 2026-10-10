@@ -441,7 +441,7 @@ impl AndroidBrowseQuery {
                         unreachable!("Folder count is handled before source count")
                     }
                     _ if self.downloaded() => {
-                        db.query_tracks_count(
+                        db.track_count(
                             &library::TrackQuery {
                                 source: self.selected().source_key,
                                 folder,
@@ -467,9 +467,13 @@ impl AndroidBrowseQuery {
                         }
                         None => {
                             db.track_count(
-                                self.selected().source_key,
-                                folder,
-                                self.favorites(),
+                                &library::TrackQuery {
+                                    source: self.selected().source_key,
+                                    collection: None,
+                                    folder,
+                                    favorites_only: self.favorites(),
+                                    downloaded_only: false,
+                                },
                                 filter,
                                 &cancel,
                             )

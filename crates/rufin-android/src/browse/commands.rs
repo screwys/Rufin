@@ -94,7 +94,7 @@ impl AndroidLibrary {
                             .map_err(error)?;
                         let downloaded = if let Some(source) = source {
                             database
-                                .query_tracks_count(
+                                .track_count(
                                     &library::TrackQuery {
                                         source,
                                         collection: Some(collection),
@@ -177,11 +177,21 @@ impl AndroidLibrary {
                             ),
                             FolderProjection::Cached(folder) => (
                                 database
-                                    .track_count(source, *folder, false, "", &cancel)
+                                    .track_count(
+                                        &library::TrackQuery {
+                                            source,
+                                            collection: None,
+                                            folder: *folder,
+                                            favorites_only: false,
+                                            downloaded_only: false,
+                                        },
+                                        "",
+                                        &cancel,
+                                    )
                                     .await
                                     .map_err(error)?,
                                 database
-                                    .query_tracks_count(
+                                    .track_count(
                                         &library::TrackQuery {
                                             source,
                                             collection: None,

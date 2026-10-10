@@ -49,9 +49,9 @@ impl TrackSort {
                 "key" if playlist && self == Self::Position => "entry.position".into(),
                 "key" => "track.track_key".into(),
                 "artist_sort" => "track.display_artist".into(),
-                "album_artist_sort" => "album.album_artist_sort".into(),
-                "album_sort" => "COALESCE(album.sort_text,track.display_album)".into(),
-                "album_year" => "album.year".into(),
+                "album_artist_sort" => "track.sort_album_artist".into(),
+                "album_sort" => "track.sort_album".into(),
+                "album_year" => "track.sort_album_year".into(),
                 _ => format!("track.{field}"),
             };
             if !playlist { return column; }
@@ -119,19 +119,23 @@ impl TrackSort {
         fields
             .into_iter()
             .enumerate()
-            .map(|(index, field)| {
+            .flat_map(|(index, field)| {
                 let direction =
                     if descending && (index == 0 || (self == Self::TrackNumber && index == 1)) {
                         "DESC"
                     } else {
                         "ASC"
                     };
+                let column = column(field);
+                if matches!(field, "album_artist_sort" | "album_year" | "album_key") {
+                    return vec![
+                        format!("({column} IS NULL) ASC"),
+                        format!("{column} {direction}"),
+                    ];
+                }
                 let nulls = if matches!(
                     field,
-                    "album_artist_sort"
-                        | "album_year"
-                        | "album_key"
-                        | "year"
+                    "year"
                         | "release_date"
                         | "date_added"
                         | "last_played"
@@ -143,7 +147,7 @@ impl TrackSort {
                 } else {
                     ""
                 };
-                format!("{} {direction}{nulls}", column(field))
+                vec![format!("{column} {direction}{nulls}")]
             })
             .collect()
     }
@@ -341,6 +345,44 @@ impl TrackQuery {
         query
     }
 
+    async fn count_on(
+        &self,
+        filter: &str,
+        connection: &mut SqliteConnection,
+    ) -> LibraryResult<i64> {
+        if self.collection.is_none()
+            && self.folder.is_none()
+            && !self.favorites_only
+            && !self.downloaded_only
+            && filter.trim().is_empty()
+        {
+            return Ok(sqlx::query_scalar(
+                "SELECT COALESCE((SELECT track_count FROM sources WHERE source_key=?1),0)",
+            )
+            .bind(self.source)
+            .fetch_one(connection)
+            .await?);
+        }
+        let query = Self {
+            favorites_only: false,
+            ..self.clone()
+        }
+        .sql(filter, TrackSort::Title, false);
+        Ok(if self.favorites_only {
+            // Source and locally added favorites are disjoint sets.
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT (SELECT count(*) FROM tracks track WHERE {} AND track.source_favorite=1
+                    AND COALESCE((SELECT favorite FROM user_media_state state WHERE state.media_uri=track.media_uri),1)=1)
+                 + (SELECT count(*) FROM user_media_state state CROSS JOIN tracks track ON track.media_uri=state.media_uri
+                    WHERE state.favorite=1 AND track.source_favorite=0 AND {})",
+                query.predicate, query.predicate
+            )))
+            .fetch_one(connection).await?
+        } else {
+            query.count(connection).await?
+        })
+    }
+
     pub fn queue_query(&self) -> crate::QueueQuery {
         match &self.collection {
             Some(collection) => crate::QueueQuery::Collection {
@@ -415,32 +457,6 @@ impl Database {
             _ => unreachable!("track selection input"),
         }
     }
-    pub async fn track_count(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        favorites_only: bool,
-        filter: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<i64> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let query = track_query(source, TrackSort::Title, false, false, folder, filter);
-        Ok(if favorites_only {
-            // Use the existing source-favorite index, then add locally favorited
-            // tracks which are not source favorites. The sets do not overlap.
-            sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-                "SELECT (SELECT count(*) FROM tracks track WHERE {} AND track.source_favorite=1
-                    AND COALESCE((SELECT favorite FROM user_media_state state WHERE state.media_uri=track.media_uri),1)=1)
-                 + (SELECT count(*) FROM user_media_state state CROSS JOIN tracks track ON track.media_uri=state.media_uri
-                    WHERE state.favorite=1 AND track.source_favorite=0 AND {})",
-                query.predicate, query.predicate
-            )))
-            .fetch_one(&mut *connection).await?
-        } else {
-            query.count(&mut connection).await?
-        })
-    }
-
     /// Reads one page without materializing the source's full track order.
     #[allow(clippy::too_many_arguments)]
     pub async fn track_page(
@@ -473,17 +489,14 @@ impl Database {
         .await
     }
 
-    pub async fn query_tracks_count(
+    pub async fn track_count(
         &self,
         query: &TrackQuery,
         filter: &str,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<i64> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        query
-            .sql(filter, TrackSort::Title, false)
-            .count(&mut connection)
-            .await
+        query.count_on(filter, &mut connection).await
     }
 
     pub async fn query_tracks_page(
@@ -734,11 +747,7 @@ impl Database {
     ) -> LibraryResult<TrackRoutePage> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let count = query
-            .sql(filter, TrackSort::Title, false)
-            .count(&mut transaction)
-            .await?
-            .max(0) as usize;
+        let count = query.count_on(filter, &mut transaction).await?.max(0) as usize;
         let sql = query.sql(filter, sort, descending);
         let range = window.range(count);
         let disc_sections = if matches!(
@@ -1070,14 +1079,6 @@ pub(crate) fn track_query(
         uri: "track.media_uri".into(),
         entry_key: "NULL".into(),
     };
-    if matches!(
-        sort,
-        TrackSort::Artist | TrackSort::AlbumArtist | TrackSort::Album
-    ) {
-        query
-            .from
-            .push_str(" LEFT JOIN albums album ON album.album_key=track.album_key");
-    }
     track_filter(&mut query, folder, filter, favorites_only);
 
     query
@@ -1240,6 +1241,61 @@ mod tests {
             assert_eq!(row.artists[0].artist_key, artist);
             assert_eq!(row.genres.len(), 1);
             assert_eq!(row.genres[0].genre_key, genre);
+        }
+        let album = sqlx::query_scalar::<_, AlbumKey>("INSERT INTO albums(source_key,object_id,media_uri,title,normalized_title,display_artist,sort_text,year) VALUES(?1,'album','album:one','Album','album','Artist','album',2000) RETURNING album_key")
+            .bind(source).fetch_one(&mut connection).await.unwrap();
+        sqlx::query("INSERT INTO album_artists VALUES(?1,?2,0)")
+            .bind(album)
+            .bind(artist)
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE tracks SET album_key=?1 WHERE track_number<128")
+            .bind(album)
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        for sort in [TrackSort::Artist, TrackSort::AlbumArtist, TrackSort::Album] {
+            for descending in [false, true] {
+                let query = track_query(source, sort, descending, false, None, "");
+                let plan =
+                    sqlx::query_as::<_, (i64, i64, i64, String)>(sqlx::AssertSqlSafe(format!(
+                        "EXPLAIN QUERY PLAN {} LIMIT 48",
+                        query.select("track.track_key")
+                    )))
+                    .fetch_all(&mut connection)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|row| row.3)
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                assert!(
+                    !plan.contains("TEMP B-TREE"),
+                    "{sort:?}, descending={descending}: {plan}"
+                );
+                if sort == TrackSort::AlbumArtist {
+                    let sections = crate::scroll_sections::decode_sections(
+                        sqlx::query_scalar(sqlx::AssertSqlSafe(
+                            crate::scroll_sections::section_sql(
+                                &query.select("track.track_key"),
+                                crate::scroll_sections::order_text(&query.order[0]),
+                            ),
+                        ))
+                        .fetch_all(&mut connection)
+                        .await
+                        .unwrap(),
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        sections
+                            .iter()
+                            .map(|section| (section.title.as_str(), section.index))
+                            .collect::<Vec<_>>(),
+                        [("A", 0), ("#", 128)]
+                    );
+                }
+            }
         }
     }
 

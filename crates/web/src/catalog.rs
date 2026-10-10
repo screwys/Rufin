@@ -34,7 +34,17 @@ pub(super) async fn page_total(
     let count = match kind {
         "tracks" => {
             database
-                .track_count(required_source()?, folder, favorites, filter, &cancel)
+                .track_count(
+                    &library::TrackQuery {
+                        source: required_source()?,
+                        collection: None,
+                        folder,
+                        favorites_only: favorites,
+                        downloaded_only: false,
+                    },
+                    filter,
+                    &cancel,
+                )
                 .await
         }
         "albums" => {

@@ -171,8 +171,12 @@ pub(crate) fn text_sort(sort: crate::TrackSort) -> bool {
 
 pub(crate) fn order_text(order: &str) -> &str {
     let order = order.strip_suffix(" NULLS LAST").unwrap_or(order);
-    order
+    let order = order
         .strip_suffix(" ASC")
         .or_else(|| order.strip_suffix(" DESC"))
+        .unwrap_or(order);
+    order
+        .strip_prefix('(')
+        .and_then(|value| value.strip_suffix(" IS NULL)"))
         .unwrap_or(order)
 }
