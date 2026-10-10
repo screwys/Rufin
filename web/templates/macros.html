@@ -45,3 +45,21 @@
   <button type="button" data-step="1" aria-label="{{ localization::tr("Increase") }}"{% if disabled %} disabled{% endif %}>{% call icon("add") %}{% endcall %}</button>
 </div>
 {% endmacro %}
+
+{% macro track_sort_options(selected) %}
+<option value="title" {% if selected == "title" %}selected{% endif %}>{{ localization::tr("Title") }}</option>
+<option value="artist" {% if selected == "artist" %}selected{% endif %}>{{ localization::tr("Artist") }}</option>
+<option value="album_artist" {% if selected == "album_artist" %}selected{% endif %}>{{ localization::tr("Album artist") }}</option>
+<option value="album" {% if selected == "album" %}selected{% endif %}>{{ localization::tr("Album") }}</option>
+<option value="track_number" {% if selected == "track_number" %}selected{% endif %}>{{ localization::tr("Track number") }}</option>
+<option value="year" {% if selected == "year" %}selected{% endif %}>{{ localization::tr("Year") }}</option>
+<option value="release_date" {% if selected == "release_date" %}selected{% endif %}>{{ localization::tr("Release date") }}</option>
+<option value="date_added" {% if selected == "date_added" %}selected{% endif %}>{{ localization::tr("Date added") }}</option>
+<option value="last_played" {% if selected == "last_played" %}selected{% endif %}>{{ localization::tr("Last played") }}</option>
+<option value="play_count" {% if selected == "play_count" %}selected{% endif %}>{{ localization::tr("Plays") }}</option>
+<option value="rating" {% if selected == "rating" %}selected{% endif %}>{{ localization::tr("Rating") }}</option>
+<option value="genre" {% if selected == "genre" %}selected{% endif %}>{{ localization::tr("Genre") }}</option>
+<option value="bpm" {% if selected == "bpm" %}selected{% endif %}>{{ localization::tr("BPM") }}</option>
+<option value="duration" {% if selected == "duration" %}selected{% endif %}>{{ localization::tr("Duration") }}</option>
+<option value="favorite" {% if selected == "favorite" %}selected{% endif %}>{{ localization::tr("Favorite") }}</option>
+{% endmacro %}

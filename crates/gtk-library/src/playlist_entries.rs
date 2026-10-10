@@ -770,7 +770,7 @@ fn install_playlist_entry_drag(
             .library_list(LibraryListKey::PlaylistTracks);
         let after = after
             != (settings.descending
-                && settings.sort_key.playlist_entry_sort() == library::PlaylistEntrySort::Position);
+                && settings.sort_key.track_sort() == library::TrackSort::Position);
         let database = Arc::clone(&selected.database);
         let task = selected.runtime.spawn(async move {
             database

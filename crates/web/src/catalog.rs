@@ -527,17 +527,22 @@ pub(super) async fn smart_tracks_data(
     };
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 48)?.min(256);
+    let id = key(parameters, "id")?;
+    let filter = parameters.get("q").map(String::as_str).unwrap_or("");
+    let cancellation = ReadCancellation::new();
     let rows = products
         .library
         .smart_playlist_track_page(
             source,
-            key(parameters, "id")?,
+            id,
             folder,
-            parameters.get("q").map(String::as_str).unwrap_or(""),
+            filter,
+            smart_track_sort(parameters.get("sort").map(String::as_str))?,
+            boolean(parameters, "descending")?,
             now(),
             offset,
             limit,
-            &ReadCancellation::new(),
+            &cancellation,
         )
         .await
         .map_err(internal)?;

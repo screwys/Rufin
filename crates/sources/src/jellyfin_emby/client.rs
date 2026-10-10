@@ -1245,7 +1245,7 @@ mod tests {
             .playlist_detail_page(
                 key,
                 None,
-                library::PlaylistEntrySort::Position,
+                library::TrackSort::Position,
                 false,
                 library::RouteSeedWindow::top(),
                 &cancellation,

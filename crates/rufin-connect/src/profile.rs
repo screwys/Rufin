@@ -2481,7 +2481,7 @@ mod tests {
                 .playlist_entries_page(
                     key,
                     None,
-                    library::PlaylistEntrySort::Position,
+                    library::TrackSort::Position,
                     false,
                     "",
                     0,

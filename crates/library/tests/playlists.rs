@@ -1,4 +1,4 @@
-use library::{FavoriteTarget, PlaylistEntrySort, PlaylistSort, ReadCancellation};
+use library::{FavoriteTarget, PlaylistSort, ReadCancellation, TrackSort};
 
 use super::support::{connection, fixture};
 
@@ -263,14 +263,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     let cancel = ReadCancellation::new();
     let initial = fixture
         .database
-        .playlist_entry_order(
-            playlist,
-            None,
-            PlaylistEntrySort::Position,
-            false,
-            "",
-            &cancel,
-        )
+        .playlist_entry_order(playlist, None, TrackSort::Position, false, "", &cancel)
         .await
         .expect("initial Playlist order");
     let rows = fixture
@@ -311,14 +304,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     );
     let added = fixture
         .database
-        .playlist_entry_order(
-            playlist,
-            None,
-            PlaylistEntrySort::Position,
-            false,
-            "",
-            &cancel,
-        )
+        .playlist_entry_order(playlist, None, TrackSort::Position, false, "", &cancel)
         .await
         .expect("added Playlist order");
     assert!(
@@ -330,14 +316,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     );
     let moved = fixture
         .database
-        .playlist_entry_order(
-            playlist,
-            None,
-            PlaylistEntrySort::Position,
-            false,
-            "",
-            &cancel,
-        )
+        .playlist_entry_order(playlist, None, TrackSort::Position, false, "", &cancel)
         .await
         .expect("moved Playlist order");
     assert_eq!(moved[0], added[4]);
@@ -362,14 +341,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     assert_eq!(
         fixture
             .database
-            .playlist_entry_order(
-                playlist,
-                None,
-                PlaylistEntrySort::Position,
-                false,
-                "",
-                &cancel
-            )
+            .playlist_entry_order(playlist, None, TrackSort::Position, false, "", &cancel)
             .await
             .expect("complete Playlist order")
             .len(),
@@ -377,14 +349,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     );
     let entries = fixture
         .database
-        .playlist_entry_order(
-            playlist,
-            None,
-            PlaylistEntrySort::Position,
-            false,
-            "",
-            &cancel,
-        )
+        .playlist_entry_order(playlist, None, TrackSort::Position, false, "", &cancel)
         .await
         .unwrap();
     let state = super::support::resolve_queue(
@@ -456,7 +421,7 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
         .playlist_entry_order(
             playlist,
             None,
-            PlaylistEntrySort::Position,
+            TrackSort::Position,
             false,
             "",
             &ReadCancellation::new(),

@@ -73,8 +73,8 @@ pub use playlist_format::{
 };
 pub use playlist_links::{ObservedPlaylistFile, PlaylistFileLink};
 pub use playlists::{
-    PlaylistDetailPage, PlaylistEntryRemovals, PlaylistEntryRow, PlaylistEntrySort,
-    PlaylistEntryWrite, PlaylistGenreLink, PlaylistIdentity, PlaylistRow, PlaylistSort,
+    PlaylistDetailPage, PlaylistEntryRemovals, PlaylistEntryRow, PlaylistEntryWrite,
+    PlaylistGenreLink, PlaylistIdentity, PlaylistRow, PlaylistSort,
 };
 pub use queue::{
     QUEUE_CONTEXT_LIMIT, QueueChoice, QueueCollection, QueueContextTitle, QueueEntry, QueueInput,

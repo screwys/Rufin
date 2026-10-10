@@ -1,7 +1,7 @@
 //! Shared ordering and bounded reads for source projections.
 use crate::{
-    FolderKey, LibraryResult, PlaylistEntryKey, PlaylistEntrySort, PlaylistKey, QueueCollection,
-    QueueQuery, QueueScope, QueueSource, SourceId, SourceKey, TrackSort,
+    FolderKey, LibraryResult, PlaylistEntryKey, PlaylistKey, QueueCollection, QueueQuery,
+    QueueScope, QueueSource, SourceId, SourceKey, TrackSort,
 };
 use sqlx::SqliteConnection;
 pub(crate) fn quote(value: &str) -> String {
@@ -386,7 +386,7 @@ pub(crate) async fn canonical_playlist_query(
     key: PlaylistKey,
     folder: Option<FolderKey>,
     filter: String,
-    sort: PlaylistEntrySort,
+    sort: TrackSort,
     descending: bool,
     anchor_entry: Option<PlaylistEntryKey>,
     anchor_uri: Option<String>,

@@ -1037,7 +1037,7 @@ impl Shell {
                     .playlist_detail_page(
                         key,
                         None,
-                        settings.sort_key.playlist_entry_sort(),
+                        settings.sort_key.track_sort(),
                         settings.descending,
                         window,
                         &cancellation,

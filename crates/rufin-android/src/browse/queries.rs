@@ -209,7 +209,7 @@ impl AndroidBrowseQuery {
                         db.playlist_track_section_positions(
                             *key,
                             folder,
-                            sort.playlist_entry_sort(),
+                            sort.track_sort(),
                             descending,
                             filter,
                             &cancel,
@@ -723,7 +723,7 @@ impl AndroidBrowseQuery {
                         .playlist_entries_page(
                             key,
                             folder,
-                            self.sort.playlist_entry_sort(),
+                            self.sort.track_sort(),
                             self.descending,
                             &self.filter,
                             usize::try_from(index).map_err(error)?,
@@ -742,7 +742,7 @@ impl AndroidBrowseQuery {
                         key,
                         folder,
                         filter: self.filter.clone(),
-                        sort: self.sort.playlist_entry_sort(),
+                        sort: self.sort.track_sort(),
                         descending: self.descending,
                         context_id: context,
                         anchor_entry,

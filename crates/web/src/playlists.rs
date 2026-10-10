@@ -1,5 +1,5 @@
 use super::*;
-use library::{PlaylistEntryKey, PlaylistEntrySort, PlaylistKey, PlaylistSort};
+use library::{PlaylistEntryKey, PlaylistKey, PlaylistSort};
 
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -63,16 +63,6 @@ async fn selected_uris(
         .resolve_media_uris(&products.library, source, folder)
         .await
         .map_err(bad_request)
-}
-
-pub(super) fn entry_sort(value: &str) -> Result<PlaylistEntrySort, Error> {
-    match value {
-        "position" => Ok(PlaylistEntrySort::Position),
-        "title" => Ok(PlaylistEntrySort::Title),
-        "artist" => Ok(PlaylistEntrySort::Artist),
-        "album" => Ok(PlaylistEntrySort::Album),
-        _ => Err(bad_request("Unknown playlist entry sort")),
-    }
 }
 
 pub(super) fn routes() -> Router<ProductHandles> {
@@ -393,7 +383,7 @@ pub(super) async fn entries_data(
 ) -> Result<Value, Error> {
     let cancellation = library::ReadCancellation::new();
     let id = key(parameters, "id")?;
-    let sort = entry_sort(
+    let sort = track_sort(
         parameters
             .get("sort")
             .map(String::as_str)

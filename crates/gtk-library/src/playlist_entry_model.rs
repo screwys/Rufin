@@ -57,7 +57,7 @@ impl PlaylistEntryModel {
                         .playlist_entries_page(
                             playlist_key,
                             None,
-                            request.settings.sort_key.playlist_entry_sort(),
+                            request.settings.sort_key.track_sort(),
                             request.settings.descending,
                             &request.query,
                             range.start,
@@ -109,7 +109,7 @@ impl PlaylistEntryModel {
         library::QueueInput::PlaylistSelection {
             key: self.inner.playlist_key,
             filter: applied.query.clone(),
-            sort: applied.settings.sort_key.playlist_entry_sort(),
+            sort: applied.settings.sort_key.track_sort(),
             descending: applied.settings.descending,
             ranges: gtk_widgets::selection::selected_ranges(positions),
             context_id: format!("playlist-selection:{}", self.inner.playlist_key).into(),
@@ -257,7 +257,7 @@ impl PlaylistEntryModel {
                     key: self.inner.playlist_key,
                     folder: None,
                     filter: applied.query.clone(),
-                    sort: applied.settings.sort_key.playlist_entry_sort(),
+                    sort: applied.settings.sort_key.track_sort(),
                     descending: applied.settings.descending,
                     context_id: self.visible_context_id().into(),
                     anchor_entry: row.as_ref().map(|row| row.playlist_entry_key),

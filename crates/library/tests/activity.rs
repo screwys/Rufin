@@ -356,7 +356,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         .playlist_entry_order(
             playlist,
             None,
-            library::PlaylistEntrySort::Position,
+            library::TrackSort::Position,
             false,
             "",
             &cancel,

@@ -840,6 +840,8 @@ impl Database {
         key: SmartPlaylistKey,
         folder: Option<FolderKey>,
         filter: &str,
+        sort: Option<crate::TrackSort>,
+        descending: bool,
         now: i64,
         offset: usize,
         limit: usize,
@@ -847,16 +849,33 @@ impl Database {
     ) -> LibraryResult<Vec<SmartPlaylistTrackRow>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let uris = smart_uri_page(
-            &mut transaction,
-            source,
-            key,
-            folder,
-            filter,
-            now,
-            Some((offset, limit.min(256))),
-        )
-        .await?;
+        let uris = if let Some(sort) = sort {
+            smart_sorted_uris_on(
+                &mut transaction,
+                source,
+                key,
+                folder,
+                filter,
+                sort,
+                descending,
+                now,
+                Some(std::slice::from_ref(
+                    &(offset..offset.saturating_add(limit.min(256))),
+                )),
+            )
+            .await?
+        } else {
+            smart_uri_page(
+                &mut transaction,
+                source,
+                key,
+                folder,
+                filter,
+                now,
+                Some((offset, limit.min(256))),
+            )
+            .await?
+        };
         let rows = load_smart_track_rows(&mut transaction, &uris).await?;
         transaction.commit().await?;
         Ok(rows)
@@ -1209,40 +1228,6 @@ impl Database {
         };
         load_smart_track_rows(&mut connection, media_uris).await
     }
-
-    pub async fn smart_playlist_sorted_track_page(
-        &self,
-        source: Option<SourceKey>,
-        key: SmartPlaylistKey,
-        folder: Option<FolderKey>,
-        filter: &str,
-        sort: crate::TrackSort,
-        descending: bool,
-        now: i64,
-        offset: usize,
-        limit: usize,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<SmartPlaylistTrackRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let uris = smart_sorted_uris_on(
-            &mut transaction,
-            source,
-            key,
-            folder,
-            filter,
-            sort,
-            descending,
-            now,
-            Some(std::slice::from_ref(
-                &(offset..offset.saturating_add(limit.min(256))),
-            )),
-        )
-        .await?;
-        let rows = load_smart_track_rows(&mut transaction, &uris).await?;
-        transaction.commit().await?;
-        Ok(rows)
-    }
 }
 
 async fn load_smart_track_rows(
@@ -1254,7 +1239,7 @@ async fn load_smart_track_rows(
         "SELECT media_uri,title,artist,album,album_media_uri,artists,album_artists,
                 album_display_artist,artwork_binding,duration_millis,disc_number,track_number,
                 year,release_date,date_added,source_format,source_path,source_name,audio_properties,musicbrainz_recording_id,
-                musicbrainz_release_track_id,bpm,genre,play_count,last_played,favorite,rating,is_downloaded
+                musicbrainz_release_track_id,bpm,genre,play_count,last_played,favorite,rating/10 rating,is_downloaded
          FROM smart_tracks ORDER BY position",
     );
     sqlx::query(AssertSqlSafe(sql))
@@ -1286,18 +1271,18 @@ fn smart_track_sql(input: &str, projection: &str) -> String {
     };
     format!(
         "WITH input AS NOT MATERIALIZED ({input}), smart_tracks AS NOT MATERIALIZED (
-         SELECT {links} requested.key position,requested.value media_uri,COALESCE(track.title,{title},requested.value) title,
+         SELECT {links} track.track_key sort_key,requested.key position,requested.value media_uri,COALESCE(track.title,{title},requested.value) title,
                 COALESCE(track.display_artist,{artist},'') artist,COALESCE(track.display_album,{album},'') album,
                 COALESCE(album.display_artist,{album_artist}) album_display_artist,
                 COALESCE(track.sort_text,lower({title}),requested.value) sort_text,
                 COALESCE(track.display_artist,{artist},'') artist_sort,
-                COALESCE(album_artist.sort_text,lower({album_artist})) album_artist_sort,
+                COALESCE(album.album_artist_sort,lower({album_artist})) album_artist_sort,
                 COALESCE(album.sort_text,track.display_album,{album},'') album_sort,
-                album.year album_year,track.album_key,
+                COALESCE(album.year,{year}) album_year,track.album_key,
                 (SELECT genre.sort_text FROM track_genres credit JOIN genres genre USING(genre_key) WHERE credit.track_key=track.track_key ORDER BY credit.position LIMIT 1) sort_genre,
                 track.artwork_binding,COALESCE(track.duration_millis,{duration},0) duration_millis,
-                COALESCE(track.disc_number,{disc_number},0) disc_number,
-                COALESCE(track.track_number,{track_number},0) track_number,
+                COALESCE(track.disc_number,{disc_number}) disc_number,
+                COALESCE(track.track_number,{track_number}) track_number,
                 COALESCE(track.year,{year}) year,track.date_added,track.bpm,
                 COALESCE(track.release_date,{release_date}) release_date,
                 COALESCE(track.source_format,{source_format}) source_format,
@@ -1306,14 +1291,13 @@ fn smart_track_sql(input: &str, projection: &str) -> String {
                 COALESCE(track.audio_properties,'{{}}') audio_properties,track.source_path,(SELECT display_name FROM sources WHERE source_key=track.source_key) source_name,
                 COALESCE((SELECT group_concat(genre.name,', ') FROM track_genres credit JOIN genres genre USING(genre_key) WHERE credit.track_key=track.track_key),'') genre,
                 COALESCE(state.favorite,track.source_favorite,0) favorite,
-                COALESCE(state.rating,track.source_rating)/10 rating,
-                COALESCE(track.local_play_count,(SELECT count(*) FROM listens played WHERE played.media_uri=requested.value)) play_count,
+                COALESCE(state.rating,track.source_rating) rating,
+                COALESCE(track.local_play_count,(SELECT count(*) FROM listens played WHERE played.media_uri=requested.value))+COALESCE((SELECT baseline.play_count FROM activity_baseline baseline WHERE baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track'),0) play_count,
                 (SELECT max(played_at) FROM (SELECT baseline.last_played_at played_at FROM activity_baseline baseline WHERE baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track' UNION ALL SELECT max(started_at) FROM listens played WHERE played.media_uri=requested.value)) last_played,
                 EXISTS(SELECT 1 FROM local_access_files downloaded WHERE downloaded.media_uri=requested.value AND downloaded.origin='download') is_downloaded
          FROM input requested
          LEFT JOIN tracks track ON track.media_uri=requested.value
          LEFT JOIN albums album USING(album_key)
-         LEFT JOIN artists album_artist ON album_artist.artist_key=track.album_artist_key
          LEFT JOIN main.playlist_entries entry ON entry.playlist_entry_key=(
              SELECT playlist_entry_key FROM main.playlist_entries WHERE track.track_key IS NULL AND media_uri=requested.value
              ORDER BY title IS NULL,snapshot_at DESC,playlist_entry_key DESC LIMIT 1)
@@ -2222,12 +2206,13 @@ async fn smart_uri_page(
 }
 
 fn smart_display_order(sort: crate::TrackSort, descending: bool) -> String {
-    sort.order_by(descending, |field| match field {
-        "key" => "media_uri".into(),
+    let mut order = sort.order_by(descending, |field| match field {
+        "key" => "sort_key".into(),
         "genre" => "sort_genre".into(),
         _ => field.to_string(),
-    })
-    .join(",")
+    });
+    order.push("media_uri ASC".into());
+    order.join(",")
 }
 
 async fn smart_display_input(

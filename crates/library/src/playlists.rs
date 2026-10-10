@@ -7,7 +7,7 @@ use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 
 use crate::{
     Database, FolderKey, LibraryError, LibraryResult, PlaylistEntryKey, PlaylistKey,
-    ReadCancellation, RouteSeedWindow, SourceKey,
+    ReadCancellation, RouteSeedWindow, SourceKey, TrackSort,
 };
 
 const PLAYLIST_ROW_LIMIT: usize = 128;
@@ -63,13 +63,6 @@ pub enum PlaylistSort {
     Title,
     TrackCount,
     Duration,
-}
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum PlaylistEntrySort {
-    Position,
-    Title,
-    Artist,
-    Album,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -208,12 +201,12 @@ impl Database {
         &self,
         playlist: PlaylistKey,
         folder: Option<FolderKey>,
-        sort: PlaylistEntrySort,
+        sort: TrackSort,
         descending: bool,
         filter: &str,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<crate::ScrollSection>> {
-        if sort == PlaylistEntrySort::Position {
+        if !crate::scroll_sections::text_sort(sort) {
             return Ok(Vec::new());
         }
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
@@ -262,7 +255,7 @@ impl Database {
     ) -> LibraryResult<i64> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         Ok(
-            playlist_query(playlist, folder, PlaylistEntrySort::Position, false, filter)
+            playlist_query(playlist, folder, TrackSort::Position, false, filter)
                 .count(&mut connection)
                 .await?,
         )
@@ -444,7 +437,7 @@ impl Database {
         &self,
         playlist: PlaylistKey,
         folder: Option<FolderKey>,
-        sort: PlaylistEntrySort,
+        sort: TrackSort,
         descending: bool,
         filter: &str,
         offset: usize,
@@ -495,7 +488,7 @@ impl Database {
         &self,
         playlist: PlaylistKey,
         folder: Option<FolderKey>,
-        sort: PlaylistEntrySort,
+        sort: TrackSort,
         descending: bool,
         filter: &str,
         cancellation: &ReadCancellation,
@@ -509,7 +502,7 @@ impl Database {
         &self,
         playlist: PlaylistKey,
         folder: Option<FolderKey>,
-        sort: PlaylistEntrySort,
+        sort: TrackSort,
         descending: bool,
         window: RouteSeedWindow,
         cancellation: &ReadCancellation,
@@ -520,8 +513,11 @@ impl Database {
             .await?
             .pop();
         let page = if let Some(summary) = summary {
+            let count = playlist_query(playlist, folder, TrackSort::Position, false, "")
+                .count(&mut transaction)
+                .await?
+                .max(0) as usize;
             let query = playlist_query(playlist, folder, sort, descending, "");
-            let count = query.count(&mut transaction).await?.max(0) as usize;
             let range = window.range(count);
             let first_row_position = range.start;
             let keys = crate::source_window::selected_values_on(
@@ -549,7 +545,7 @@ impl Database {
         connection: &mut SqliteConnection,
         playlist: PlaylistKey,
         folder: Option<FolderKey>,
-        sort: PlaylistEntrySort,
+        sort: TrackSort,
         descending: bool,
         filter: &str,
     ) -> LibraryResult<Vec<PlaylistEntryKey>> {
@@ -1326,6 +1322,16 @@ mod point_projection_tests {
             .unwrap();
             let order: Vec<i64> = sqlx::query_scalar("SELECT playlist_entry_key FROM playlist_entries WHERE playlist_key=-1 ORDER BY position,playlist_entry_key")
                 .fetch_all(&mut *connection).await.unwrap();
+            for sort in [TrackSort::Artist, TrackSort::AlbumArtist] {
+                let query = playlist_query(PlaylistKey::from_raw(-1), None, sort, false, "");
+                let ordered = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(
+                    query.select(&query.entry_key),
+                ))
+                .fetch_all(&mut *connection)
+                .await
+                .unwrap();
+                assert_eq!(ordered.len(), 15);
+            }
             connection
                 .lock_handle()
                 .await
@@ -1433,7 +1439,7 @@ pub(crate) async fn load_playlist_entry_rows(
                                 WHERE baseline.source_key=track.source_key
                                   AND baseline.track_object_id=track.object_id
                                   AND baseline.period='lifetime' AND baseline.item_kind='track'),0)
-                        +(SELECT count(*) FROM listens listen WHERE listen.media_uri=entry.media_uri) play_count,
+                        +COALESCE(track.local_play_count,(SELECT count(*) FROM listens listen WHERE listen.media_uri=entry.media_uri)) play_count,
                       (SELECT max(value) FROM (
                          SELECT baseline.last_played_at value FROM activity_baseline baseline
                          WHERE baseline.source_key=track.source_key
@@ -1694,7 +1700,7 @@ pub(crate) async fn import_playlists_jsonl_on(
 pub(crate) fn playlist_query(
     key: PlaylistKey,
     folder: Option<FolderKey>,
-    sort: PlaylistEntrySort,
+    sort: TrackSort,
     descending: bool,
     filter: &str,
 ) -> crate::source_window::SourceQuery {
@@ -1726,27 +1732,31 @@ pub(crate) fn playlist_query(
             "entry.playlist_entry_key"
         }
         .into(),
-        order: vec![format!(
-            "{} {}",
-            match sort {
-                PlaylistEntrySort::Position => "entry.position",
-                PlaylistEntrySort::Title => "lower(entry.title)",
-                PlaylistEntrySort::Artist => "lower(entry.artist)",
-                PlaylistEntrySort::Album => "lower(entry.album)",
-            },
-            if descending { "DESC" } else { "ASC" },
-        )],
+        order: sort.order_terms(descending, true),
     };
-    if sort != PlaylistEntrySort::Position {
+    let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
+    if sort != TrackSort::Position || !filter.is_empty() {
+        query
+            .from
+            .push_str(" LEFT JOIN tracks track ON track.media_uri=entry.media_uri");
+    }
+    if matches!(
+        sort,
+        TrackSort::Artist | TrackSort::AlbumArtist | TrackSort::Album
+    ) {
+        query
+            .from
+            .push_str(" LEFT JOIN albums album ON album.album_key=track.album_key");
+    }
+    if sort != TrackSort::Position {
         query.order.push("entry.position ASC".into());
     }
     if let Some(folder) = folder {
         query.predicate.push_str(&format!(" AND (playlist.source_key IS NULL OR EXISTS(SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.media_uri=entry.media_uri AND scope.folder_key={}))",folder.raw()));
     }
-    let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
     if !filter.is_empty() {
         let filter = crate::source_window::quote(&filter);
-        query.predicate.push_str(&format!(" AND (instr(lower(entry.title||' '||entry.artist||' '||entry.album),{filter})>0 OR CAST(entry.year AS TEXT)={filter})"));
+        query.predicate.push_str(&format!(" AND (instr(lower(COALESCE(track.title,entry.title,'')||' '||COALESCE(track.display_artist,entry.artist,'')||' '||COALESCE(track.display_album,entry.album,'')),{filter})>0 OR CAST(COALESCE(track.year,entry.year) AS TEXT)={filter})"));
     }
     query
 }

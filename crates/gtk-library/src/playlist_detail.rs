@@ -187,12 +187,12 @@ impl CatalogUi {
                 let database = rows_database.clone();
                 Box::pin(async move {
                     database
-                        .smart_playlist_sorted_track_page(
+                        .smart_playlist_track_page(
                             source,
                             key,
                             folder,
                             &request.query,
-                            request.settings.sort_key.track_sort(),
+                            Some(request.settings.sort_key.track_sort()),
                             request.settings.descending,
                             SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
@@ -329,7 +329,7 @@ impl CatalogUi {
                         .playlist_entries_page(
                             key,
                             None,
-                            request.settings.sort_key.playlist_entry_sort(),
+                            request.settings.sort_key.track_sort(),
                             request.settings.descending,
                             &request.query,
                             request.first_row_position.min(count),
@@ -743,12 +743,12 @@ async fn prepare_smart_playlist_projection(
     let seed = window.range(count);
     let first_row_position = seed.start;
     let first_rows = database
-        .smart_playlist_sorted_track_page(
+        .smart_playlist_track_page(
             source,
             key,
             folder,
             &request.query,
-            request.settings.sort_key.track_sort(),
+            Some(request.settings.sort_key.track_sort()),
             request.settings.descending,
             now,
             seed.start,

@@ -247,7 +247,7 @@ CREATE INDEX IF NOT EXISTS local_locators_precedence_idx ON local_locators(media
 "#;
 pub(crate) const CATALOG_SCHEMA: &str = r#"PRAGMA application_id = 1381320270;
 
-PRAGMA user_version = 52;
+PRAGMA user_version = 53;
 
 CREATE TABLE IF NOT EXISTS sources (
     source_key INTEGER PRIMARY KEY,
@@ -309,7 +309,6 @@ CREATE TABLE IF NOT EXISTS tracks (
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
     object_id TEXT NOT NULL CHECK (object_id <> ''),
     album_key INTEGER REFERENCES albums ON DELETE SET NULL,
-    album_artist_key INTEGER REFERENCES artists ON DELETE SET NULL,
     title TEXT NOT NULL,
     normalized_search TEXT NOT NULL,
     display_album TEXT NOT NULL,
@@ -370,7 +369,6 @@ CREATE INDEX IF NOT EXISTS tracks_artwork_idx ON tracks(source_key, artwork_bind
 
 CREATE INDEX IF NOT EXISTS tracks_source_album_order_idx ON tracks(source_key,album_key,disc_number,track_number,sort_text,track_key);
 CREATE INDEX IF NOT EXISTS tracks_album_order_idx ON tracks(album_key,disc_number,track_number,sort_text,track_key);
-CREATE INDEX IF NOT EXISTS tracks_album_artist_idx ON tracks(album_artist_key);
 
 CREATE TABLE IF NOT EXISTS artists (
     artist_key INTEGER PRIMARY KEY,
@@ -661,18 +659,12 @@ CREATE TRIGGER IF NOT EXISTS album_artist_insert AFTER INSERT ON album_artists B
     FROM (SELECT (SELECT artist.sort_text FROM album_artists relation JOIN artists artist USING(artist_key)
         WHERE relation.album_key=NEW.album_key ORDER BY relation.position LIMIT 1) sort_text) credit
     WHERE album_key=NEW.album_key AND album_artist_sort IS NOT credit.sort_text;
-    UPDATE tracks SET album_artist_key=credit.artist_key
-    FROM (SELECT (SELECT artist_key FROM album_artists WHERE album_key=NEW.album_key ORDER BY position LIMIT 1) artist_key) credit
-    WHERE album_key=NEW.album_key AND album_artist_key IS NOT credit.artist_key;
 END;
 CREATE TRIGGER IF NOT EXISTS album_artist_delete AFTER DELETE ON album_artists BEGIN
     UPDATE albums SET album_artist_sort=credit.sort_text
     FROM (SELECT (SELECT artist.sort_text FROM album_artists relation JOIN artists artist USING(artist_key)
         WHERE relation.album_key=OLD.album_key ORDER BY relation.position LIMIT 1) sort_text) credit
     WHERE album_key=OLD.album_key AND album_artist_sort IS NOT credit.sort_text;
-    UPDATE tracks SET album_artist_key=credit.artist_key
-    FROM (SELECT (SELECT artist_key FROM album_artists WHERE album_key=OLD.album_key ORDER BY position LIMIT 1) artist_key) credit
-    WHERE album_key=OLD.album_key AND album_artist_key IS NOT credit.artist_key;
 END;
 CREATE TRIGGER IF NOT EXISTS album_artist_update AFTER UPDATE OF artist_key,album_key,position ON album_artists BEGIN
     UPDATE albums SET album_artist_sort=(SELECT artist.sort_text FROM album_artists credit JOIN artists artist USING(artist_key)
@@ -680,24 +672,11 @@ CREATE TRIGGER IF NOT EXISTS album_artist_update AFTER UPDATE OF artist_key,albu
     WHERE album_key IN (OLD.album_key,NEW.album_key) AND album_artist_sort IS NOT (
         SELECT artist.sort_text FROM album_artists credit JOIN artists artist USING(artist_key)
         WHERE credit.album_key=albums.album_key ORDER BY credit.position LIMIT 1);
-    UPDATE tracks SET album_artist_key=(SELECT artist_key FROM album_artists WHERE album_key=tracks.album_key ORDER BY position LIMIT 1)
-    WHERE album_key IN (OLD.album_key,NEW.album_key) AND album_artist_key IS NOT (
-        SELECT artist_key FROM album_artists WHERE album_key=tracks.album_key ORDER BY position LIMIT 1);
 END;
 CREATE TRIGGER IF NOT EXISTS album_artist_name AFTER UPDATE OF sort_text ON artists WHEN OLD.sort_text IS NOT NEW.sort_text BEGIN
     UPDATE albums SET album_artist_sort=NEW.sort_text
     WHERE album_key IN (SELECT album_key FROM album_artists WHERE artist_key=NEW.artist_key)
       AND NEW.artist_key=(SELECT artist_key FROM album_artists WHERE album_key=albums.album_key ORDER BY position LIMIT 1);
-END;
-CREATE TRIGGER IF NOT EXISTS track_album_artist_insert AFTER INSERT ON tracks WHEN NEW.album_key IS NOT NULL BEGIN
-    UPDATE tracks SET album_artist_key=credit.artist_key
-    FROM (SELECT (SELECT artist_key FROM album_artists WHERE album_key=NEW.album_key ORDER BY position LIMIT 1) artist_key) credit
-    WHERE track_key=NEW.track_key AND album_artist_key IS NOT credit.artist_key;
-END;
-CREATE TRIGGER IF NOT EXISTS track_album_artist_update AFTER UPDATE OF album_key ON tracks WHEN OLD.album_key IS NOT NEW.album_key BEGIN
-    UPDATE tracks SET album_artist_key=credit.artist_key
-    FROM (SELECT (SELECT artist_key FROM album_artists WHERE album_key=NEW.album_key ORDER BY position LIMIT 1) artist_key) credit
-    WHERE track_key=NEW.track_key AND album_artist_key IS NOT credit.artist_key;
 END;
 
 "#;
@@ -880,7 +859,7 @@ pub(crate) async fn initialize_catalog(connection: &mut SqliteConnection) -> Lib
 
 async fn initialize(connection: &mut SqliteConnection, schema: &'static str) -> LibraryResult<()> {
     let upgrade_album_sort =
-        schema == CATALOG_SCHEMA && pragma(connection, "user_version").await? < 52;
+        schema == CATALOG_SCHEMA && pragma(connection, "user_version").await? < 53;
     let upgrade_catalog_complete =
         schema == CATALOG_SCHEMA && pragma(connection, "user_version").await? < 50;
     let upgrade_artist_artwork =
@@ -921,12 +900,27 @@ async fn initialize(connection: &mut SqliteConnection, schema: &'static str) -> 
             .await?;
         }
     }
+    if upgrade_album_sort {
+        sqlx::raw_sql(
+            "DROP TRIGGER IF EXISTS album_artist_insert;
+            DROP TRIGGER IF EXISTS album_artist_delete;
+            DROP TRIGGER IF EXISTS album_artist_update;
+            DROP TRIGGER IF EXISTS track_album_artist_insert;
+            DROP TRIGGER IF EXISTS track_album_artist_update;
+            DROP INDEX IF EXISTS tracks_album_artist_idx;",
+        )
+        .execute(&mut *transaction)
+        .await?;
+        if sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM pragma_table_info('tracks') WHERE name='album_artist_key')")
+            .fetch_one(&mut *transaction).await? {
+            sqlx::raw_sql("ALTER TABLE tracks DROP COLUMN album_artist_key").execute(&mut *transaction).await?;
+        }
+    }
     sqlx::raw_sql(schema).execute(&mut *transaction).await?;
     if upgrade_album_sort {
         sqlx::raw_sql("DROP INDEX IF EXISTS tracks_album_idx;
             DROP INDEX IF EXISTS tracks_album_source_order_idx;
-            UPDATE albums SET album_artist_sort=(SELECT artist.sort_text FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=albums.album_key ORDER BY credit.position LIMIT 1);
-            UPDATE tracks SET album_artist_key=(SELECT artist_key FROM album_artists WHERE album_key=tracks.album_key ORDER BY position LIMIT 1);")
+            UPDATE albums SET album_artist_sort=(SELECT artist.sort_text FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=albums.album_key ORDER BY credit.position LIMIT 1);")
             .execute(&mut *transaction).await?;
     }
     if upgrade_catalog_complete {

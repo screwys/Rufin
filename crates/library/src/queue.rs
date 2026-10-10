@@ -212,7 +212,7 @@ pub enum QueueInput {
         key: crate::PlaylistKey,
         folder: Option<crate::FolderKey>,
         filter: String,
-        sort: crate::PlaylistEntrySort,
+        sort: crate::TrackSort,
         descending: bool,
         context_id: Arc<str>,
         anchor_entry: Option<crate::PlaylistEntryKey>,
@@ -221,7 +221,7 @@ pub enum QueueInput {
     PlaylistSelection {
         key: crate::PlaylistKey,
         filter: String,
-        sort: crate::PlaylistEntrySort,
+        sort: crate::TrackSort,
         descending: bool,
         ranges: Vec<std::ops::Range<usize>>,
         context_id: Arc<str>,
@@ -312,7 +312,7 @@ pub enum QueueScope {
     },
     Playlist {
         reference: crate::CollectionSourceReference,
-        sort: crate::PlaylistEntrySort,
+        sort: crate::TrackSort,
         anchor_entry: Option<String>,
     },
     Smart {
@@ -1399,7 +1399,7 @@ async fn capture_input(
                     key,
                     folder,
                     filter: String::new(),
-                    sort: crate::PlaylistEntrySort::Position,
+                    sort: crate::TrackSort::Position,
                     descending: false,
                     context_id,
                     anchor_entry: None,

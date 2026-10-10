@@ -379,7 +379,7 @@ async fn queue_play(
                     folder,
                     context_id: "api".into(),
                     filter: input.q,
-                    sort: playlists::entry_sort(input.sort.as_deref().unwrap_or("position"))?,
+                    sort: track_sort(input.sort.as_deref().unwrap_or("position"))?,
                     descending: input.descending,
                     anchor_entry: input.anchor_entry,
                     anchor_uri: input.anchor_uri,
@@ -394,6 +394,9 @@ async fn queue_play(
                 anchor_uri: Option<String>,
                 #[serde(default)]
                 q: String,
+                sort: Option<String>,
+                #[serde(default)]
+                descending: bool,
             }
             let input: Smart = serde_json::from_value(input.selection).map_err(bad_request)?;
             let source = if let Some(source) = input.source {
@@ -405,16 +408,24 @@ async fn queue_play(
             } else {
                 None
             };
+            let sort = smart_track_sort(input.sort.as_deref())?;
             library::QueueInput::Query {
-                query: library::QueueQuery::Smart {
-                    key: input.id,
-                    source,
-                    now: catalog::now(),
+                query: if sort.is_some() {
+                    library::QueueQuery::SmartDisplay {
+                        key: input.id,
+                        source,
+                    }
+                } else {
+                    library::QueueQuery::Smart {
+                        key: input.id,
+                        source,
+                        now: catalog::now(),
+                    }
                 },
                 folder,
                 filter: input.q,
-                sort: library::TrackSort::Title,
-                descending: false,
+                sort: sort.unwrap_or(library::TrackSort::Title),
+                descending: input.descending,
                 context_id: "api".into(),
                 anchor_uri: input.anchor_uri,
             }
@@ -673,6 +684,7 @@ fn boolean(parameters: &HashMap<String, String>, key: &str) -> Result<bool, Erro
 fn track_sort(value: &str) -> Result<library::TrackSort, Error> {
     use library::TrackSort::*;
     match value {
+        "position" => Ok(Position),
         "title" => Ok(Title),
         "track_number" => Ok(TrackNumber),
         "artist" => Ok(Artist),
@@ -689,6 +701,14 @@ fn track_sort(value: &str) -> Result<library::TrackSort, Error> {
         "duration" => Ok(Duration),
         "favorite" => Ok(Favorite),
         _ => Err(bad_request("Unknown track sort")),
+    }
+}
+
+fn smart_track_sort(value: Option<&str>) -> Result<Option<library::TrackSort>, Error> {
+    match value {
+        None | Some("definition") => Ok(None),
+        Some("position") => Err(bad_request("Unknown smart playlist track sort")),
+        Some(value) => track_sort(value).map(Some),
     }
 }
 

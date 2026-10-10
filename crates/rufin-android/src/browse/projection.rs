@@ -492,7 +492,7 @@ impl AndroidBrowseQuery {
                 .playlist_entries_page(
                     *key,
                     folder,
-                    sort.playlist_entry_sort(),
+                    sort.track_sort(),
                     descending,
                     filter,
                     offset,
@@ -537,12 +537,12 @@ impl AndroidBrowseQuery {
                 })
                 .collect()),
             Route::SmartPlaylistDetail(key) => Ok(db
-                .smart_playlist_sorted_track_page(
+                .smart_playlist_track_page(
                     selected_source,
                     *key,
                     folder,
                     filter,
-                    sort.track_sort(),
+                    Some(sort.track_sort()),
                     descending,
                     self.now,
                     offset,

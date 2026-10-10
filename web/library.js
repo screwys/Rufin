@@ -301,15 +301,8 @@ function navigate(next, selected = null) {
 }
 
 function setSort() {
-  const tracks = [
-    ["title", tr("Title")],
-    ["artist", tr("Artist")],
-    ["album_artist", tr("Album artist")],
-    ["album", tr("Album")],
-    ["track_number", tr("Track number")],
-    ["year", tr("Year")],
-    ["duration", tr("Duration")],
-  ];
+  const tracks = [...$("track-sort-options").content.querySelectorAll("option")]
+    .map((option) => [option.value, option.textContent]);
   const lists = {
     albums: [
       ["title", tr("Title")],
@@ -336,23 +329,16 @@ function setSort() {
       ["duration", tr("Duration")],
     ],
   };
-  const options = detail
-    ? route === "smart-playlists"
-      ? [["definition", tr("Playlist order")]]
-      : route === "playlists"
-        ? [
-            ["position", tr("Playlist order")],
-            ["title", tr("Title")],
-            ["artist", tr("Artist")],
-            ["album", tr("Album")],
-          ]
-        : tracks
-    : lists[route] || tracks;
+  const playlistOrder = {
+    playlists: "position",
+    "smart-playlists": "definition",
+  }[route];
+  const options = detail && playlistOrder
+    ? [[playlistOrder, tr("Playlist order")], ...tracks]
+    : detail ? tracks : lists[route] || tracks;
   $("sort").replaceChildren(
     ...options.map(([value, label]) => new Option(label, value)),
   );
-  $("sort").hidden = $("descending").hidden =
-    route === "smart-playlists" && !!detail;
   if (route === "albums" && detail) $("sort").value = "track_number";
 }
 
@@ -419,6 +405,7 @@ async function loadView(initial = false, knownTotal = null) {
     sources.find((item) => item.id === state.source)?.name || tr("Library");
   $("back").hidden = !detail;
   $("library-toolbar").hidden = ["sources", "home"].includes(route);
+  $("descending").hidden = $("sort").value === "definition";
   $("play-collection").hidden =
     route === "sources" ||
     (["playlists", "albums", "artists", "smart-playlists"].includes(route)
@@ -714,17 +701,8 @@ function playUris(uris, mode = "replace") {
 }
 
 function playCollection(track = null) {
-  if (route === "smart-playlists" && detail)
-    return api("/queue/smart-playlist", "POST", {
-      id: detail.id,
-      source: state.source || null,
-      folder: state.selectedLibrary,
-      q: $("search").value,
-      mode: "replace",
-      anchor_uri: track?.uri || null,
-    });
   const options = {
-    source: state.source,
+    source: state.source || null,
     q: $("search").value,
     sort: $("sort").value,
     descending: $("descending").getAttribute("aria-pressed") === "true",
@@ -733,9 +711,9 @@ function playCollection(track = null) {
     favorites: route === "favorites",
     folder: state.selectedLibrary,
   };
-  if (detail && ["albums", "artists", "playlists", "genres"].includes(route))
+  if (detail && ["albums", "artists", "playlists", "smart-playlists", "genres"].includes(route))
     return api(
-      `/queue/${{ albums: "album", artists: "artist", playlists: "playlist", genres: "genre" }[route]}`,
+      `/queue/${{ albums: "album", artists: "artist", playlists: "playlist", "smart-playlists": "smart-playlist", genres: "genre" }[route]}`,
       "POST",
       {
         ...options,

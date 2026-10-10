@@ -917,7 +917,7 @@ mod tests {
             .playlist_entry_order(
                 first.playlist,
                 None,
-                crate::PlaylistEntrySort::Position,
+                crate::TrackSort::Position,
                 false,
                 "",
                 &crate::ReadCancellation::new(),
@@ -940,7 +940,7 @@ mod tests {
                 .playlist_entry_order(
                     first.playlist,
                     None,
-                    crate::PlaylistEntrySort::Position,
+                    crate::TrackSort::Position,
                     false,
                     "",
                     &crate::ReadCancellation::new()
@@ -965,7 +965,7 @@ mod tests {
                 .playlist_entry_order(
                     first.playlist,
                     None,
-                    crate::PlaylistEntrySort::Position,
+                    crate::TrackSort::Position,
                     false,
                     "",
                     &crate::ReadCancellation::new()
@@ -1226,7 +1226,7 @@ mod tests {
                 .playlist_entries_page(
                     second.playlist,
                     None,
-                    crate::PlaylistEntrySort::Position,
+                    crate::TrackSort::Position,
                     false,
                     "",
                     0,
@@ -1532,7 +1532,7 @@ mod tests {
             .playlist_entries_page(
                 report.playlist,
                 None,
-                crate::PlaylistEntrySort::Position,
+                crate::TrackSort::Position,
                 false,
                 "",
                 0,

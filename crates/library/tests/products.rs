@@ -185,6 +185,8 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                 all,
                 None,
                 "",
+                None,
+                false,
                 1000,
                 offset,
                 1,
@@ -203,6 +205,8 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
             limited,
             None,
             "Beta",
+            None,
+            false,
             1000,
             0,
             10,
@@ -225,6 +229,8 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
             all,
             None,
             "i\u{307}st",
+            None,
+            false,
             1000,
             0,
             10,
@@ -269,7 +275,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
 
 #[tokio::test]
 async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
-    use library::{AlbumSort, PlaylistEntrySort, PlaylistSort};
+    use library::{AlbumSort, PlaylistSort, TrackSort};
     let fixture = fixture().await;
     let database = &fixture.database;
     let cancel = ReadCancellation::new();
@@ -503,10 +509,22 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
         }
     }
     for sort in [
-        PlaylistEntrySort::Position,
-        PlaylistEntrySort::Title,
-        PlaylistEntrySort::Artist,
-        PlaylistEntrySort::Album,
+        TrackSort::Position,
+        TrackSort::Title,
+        TrackSort::Artist,
+        TrackSort::Album,
+        TrackSort::AlbumArtist,
+        TrackSort::TrackNumber,
+        TrackSort::Year,
+        TrackSort::ReleaseDate,
+        TrackSort::DateAdded,
+        TrackSort::LastPlayed,
+        TrackSort::PlayCount,
+        TrackSort::UserRating,
+        TrackSort::Genre,
+        TrackSort::Bpm,
+        TrackSort::Duration,
+        TrackSort::Favorite,
     ] {
         for descending in [false, true] {
             for filter in ["", "alpha"] {
@@ -932,8 +950,8 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
     let mut raw = connection(&fixture.path).await;
     let mut uris = Vec::new();
     for index in 0..11 {
-        let uri = format!("test:toolbar:{index:02}");
-        sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,album_key,title,normalized_search,display_artist,display_album,sort_text,duration_millis,disc_number,track_number,year,release_date,date_added,bpm,source_rating,source_favorite) VALUES(?1,?2,?2,?3,?4,?4,?5,'Toolbar album',?4,?6,1,?7,?8,'2026-01-01','2026-01-01',?9,?10,?11)")
+        let uri = format!("test:toolbar:{:02}", 10 - index);
+        sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,album_key,title,normalized_search,display_artist,display_album,sort_text,duration_millis,disc_number,track_number,year,release_date,date_added,bpm,source_rating,source_favorite) VALUES(?1,?2,?2,?3,?4,lower(?4),?5,'Toolbar album',?4,?6,1,?7,?8,'2026-01-01','2026-01-01',?9,?10,?11)")
             .bind(fixture.source).bind(&uri).bind(fixture.albums[0])
             .bind(format!("Toolbar {index:02}{}", if index == 9 { " İstanbul" } else { "" }))
             .bind(format!("Artist {:02}", 10-index)).bind(1000+index).bind(index)
@@ -943,6 +961,12 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
             .bind(&uri).bind(100+index).execute(&mut raw).await.unwrap();
         uris.push(uri);
     }
+    let playlist = database
+        .create_playlist(None, "Toolbar order", &uris)
+        .await
+        .unwrap()
+        .unwrap()
+        .0;
     let mut definition = SmartPlaylistDefinition {
         match_all: vec![SmartPlaylistRule {
             field: SmartPlaylistRuleField::Title,
@@ -979,19 +1003,53 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         TrackSort::Favorite,
     ] {
         let ascending = database
-            .smart_playlist_sorted_track_page(None, key, None, "", sort, false, 500, 0, 64, &cancel)
+            .smart_playlist_track_page(None, key, None, "", Some(sort), false, 500, 0, 64, &cancel)
             .await
             .unwrap()
             .into_iter()
             .map(|row| row.media_uri)
             .collect::<Vec<_>>();
         let descending = database
-            .smart_playlist_sorted_track_page(None, key, None, "", sort, true, 500, 0, 64, &cancel)
+            .smart_playlist_track_page(None, key, None, "", Some(sort), true, 500, 0, 64, &cancel)
             .await
             .unwrap()
             .into_iter()
             .map(|row| row.media_uri)
             .collect::<Vec<_>>();
+        for (reverse, expected) in [(false, &ascending), (true, &descending)] {
+            let tracks = database
+                .track_page(
+                    fixture.source,
+                    None,
+                    false,
+                    "Toolbar",
+                    sort,
+                    reverse,
+                    0,
+                    64,
+                    &cancel,
+                )
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|row| row.media_uri)
+                .collect::<Vec<_>>();
+            let entries = database
+                .playlist_entries_page(playlist, None, sort, reverse, "", 0, 64, &cancel)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|row| row.media_uri)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                &tracks, expected,
+                "tracks and smart: {sort:?}, descending={reverse}"
+            );
+            assert_eq!(
+                &entries, expected,
+                "saved and smart: {sort:?}, descending={reverse}"
+            );
+        }
         assert_eq!(ascending.len(), 11, "{sort:?}");
         let expected_descending = match sort {
             TrackSort::AlbumArtist
@@ -1032,12 +1090,12 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         ("", uris.clone()),
     ] {
         let order = database
-            .smart_playlist_sorted_track_page(
+            .smart_playlist_track_page(
                 None,
                 key,
                 None,
                 query,
-                TrackSort::Title,
+                Some(TrackSort::Title),
                 false,
                 500,
                 0,
@@ -1070,12 +1128,12 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         .unwrap();
     assert_eq!(limited, members[..3]);
     let order = database
-        .smart_playlist_sorted_track_page(
+        .smart_playlist_track_page(
             None,
             key,
             None,
             "",
-            TrackSort::TrackNumber,
+            Some(TrackSort::TrackNumber),
             false,
             500,
             0,
@@ -1100,12 +1158,12 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         .unwrap();
     for descending in [false, true] {
         let order = database
-            .smart_playlist_sorted_track_page(
+            .smart_playlist_track_page(
                 None,
                 key,
                 None,
                 "",
-                TrackSort::LastPlayed,
+                Some(TrackSort::LastPlayed),
                 descending,
                 500,
                 0,
@@ -1127,6 +1185,62 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
             .last_played,
         None
     );
+    sqlx::query("UPDATE tracks SET title='Toolbar Intro',sort_text='toolbar intro',normalized_search='toolbar intro' WHERE media_uri IN (?1,?2)")
+        .bind(&uris[0]).bind(&uris[1]).execute(&mut raw).await.unwrap();
+    let tracks = database
+        .track_page(
+            fixture.source,
+            None,
+            false,
+            "Toolbar Intro",
+            TrackSort::Title,
+            false,
+            0,
+            64,
+            &cancel,
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.media_uri)
+        .collect::<Vec<_>>();
+    let entries = database
+        .playlist_entries_page(
+            playlist,
+            None,
+            TrackSort::Title,
+            false,
+            "Toolbar Intro",
+            0,
+            64,
+            &cancel,
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.media_uri)
+        .collect::<Vec<_>>();
+    let smart = database
+        .smart_playlist_track_page(
+            None,
+            key,
+            None,
+            "Toolbar Intro",
+            Some(TrackSort::Title),
+            false,
+            500,
+            0,
+            64,
+            &cancel,
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.media_uri)
+        .collect::<Vec<_>>();
+    assert_eq!(tracks, uris[..2]);
+    assert_eq!(entries, tracks);
+    assert_eq!(smart, tracks);
 }
 
 #[tokio::test]
@@ -1162,7 +1276,7 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
         .playlist_entry_order(
             playlist,
             None,
-            library::PlaylistEntrySort::Position,
+            library::TrackSort::Position,
             false,
             "",
             &cancel,
@@ -1313,7 +1427,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                 .playlist_detail_page(
                     global,
                     folder,
-                    library::PlaylistEntrySort::Position,
+                    library::TrackSort::Position,
                     false,
                     RouteSeedWindow::top(),
                     &cancel,
@@ -1334,12 +1448,12 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                 .pop()
                 .unwrap();
             let rows = database
-                .smart_playlist_sorted_track_page(
+                .smart_playlist_track_page(
                     source,
                     smart,
                     folder,
                     "",
-                    library::TrackSort::Title,
+                    Some(library::TrackSort::Title),
                     false,
                     500,
                     0,
@@ -1420,7 +1534,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
         .playlist_entry_order(
             current,
             Some(empty_folder),
-            library::PlaylistEntrySort::Position,
+            library::TrackSort::Position,
             false,
             "",
             &cancel,
@@ -1435,7 +1549,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
         .playlist_entry_order(
             current,
             None,
-            library::PlaylistEntrySort::Position,
+            library::TrackSort::Position,
             false,
             "",
             &cancel,

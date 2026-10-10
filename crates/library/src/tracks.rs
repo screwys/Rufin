@@ -14,6 +14,7 @@ const TRACK_ROW_LIMIT: usize = 256;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum TrackSort {
+    Position,
     Title,
     TrackNumber,
     Artist,
@@ -32,27 +33,54 @@ pub enum TrackSort {
 }
 
 impl TrackSort {
-    pub(crate) const fn uses_activity(self) -> bool {
-        matches!(self, Self::LastPlayed | Self::PlayCount)
-    }
-
-    pub(crate) fn order_terms(self, descending: bool) -> Vec<String> {
-        self.order_by(descending, |field| match field {
-            "rating" => "COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_rating)".into(),
-            "favorite" => "COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_favorite)".into(),
-            "genre" => "(SELECT genre.sort_text FROM track_genres relation JOIN genres genre USING(genre_key) WHERE relation.track_key=track.track_key ORDER BY relation.position LIMIT 1)".into(),
-            "last_played" | "play_count" => format!("activity.{field}"),
-            "key" => "track.track_key".into(),
-            "artist_sort" => "track.display_artist".into(),
-            "album_artist_sort" => "album_artist.sort_text".into(),
-            "album_sort" => "COALESCE(album.sort_text,track.display_album)".into(),
-            "album_year" => "album.year".into(),
-            _ => format!("track.{field}"),
+    pub(crate) fn order_terms(self, descending: bool, playlist: bool) -> Vec<String> {
+        let uri = if playlist {
+            "entry.media_uri"
+        } else {
+            "track.media_uri"
+        };
+        self.order_by(descending, |field| {
+            let column = match field {
+                "rating" => format!("COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri={uri}),track.source_rating)"),
+                "favorite" => format!("COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri={uri}),track.source_favorite,0)"),
+                "genre" => "(SELECT genre.sort_text FROM track_genres relation JOIN genres genre USING(genre_key) WHERE relation.track_key=track.track_key ORDER BY relation.position LIMIT 1)".into(),
+                "play_count" => format!("{}+COALESCE((SELECT play_count FROM activity_baseline baseline WHERE baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track'),0)", if playlist { format!("COALESCE(track.local_play_count,(SELECT count(*) FROM listens WHERE media_uri={uri}))") } else { "track.local_play_count".into() }),
+                "last_played" => format!("(SELECT max(value) FROM (SELECT max(started_at) value FROM listens WHERE media_uri={uri} UNION ALL SELECT last_played_at FROM activity_baseline baseline WHERE baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track'))"),
+                "key" if playlist && self == Self::Position => "entry.position".into(),
+                "key" => "track.track_key".into(),
+                "artist_sort" => "track.display_artist".into(),
+                "album_artist_sort" => "album.album_artist_sort".into(),
+                "album_sort" => "COALESCE(album.sort_text,track.display_album)".into(),
+                "album_year" => "album.year".into(),
+                _ => format!("track.{field}"),
+            };
+            if !playlist { return column; }
+            let captured = match field {
+                "sort_text" => "lower(entry.title)",
+                "artist_sort" => "entry.artist",
+                "album_artist_sort" => "lower(entry.album_display_artist)",
+                "album_sort" => "entry.album",
+                "album_year" | "year" => "entry.year",
+                "duration_millis" => "entry.duration_millis",
+                "disc_number" => "entry.disc_number",
+                "track_number" => "entry.track_number",
+                "release_date" => "entry.release_date",
+                _ => return column,
+            };
+            format!("COALESCE({column},{captured})")
         })
     }
 
     pub(crate) fn order_by(self, descending: bool, column: impl Fn(&str) -> String) -> Vec<String> {
+        if self == Self::Position {
+            return vec![format!(
+                "{} {}",
+                column("key"),
+                if descending { "DESC" } else { "ASC" }
+            )];
+        }
         let field = match self {
+            Self::Position => unreachable!(),
             Self::Title => "sort_text",
             Self::TrackNumber => "disc_number",
             Self::Artist => "artist_sort",
@@ -1038,7 +1066,7 @@ pub(crate) fn track_query(
     let mut query = crate::source_window::SourceQuery {
         from: "tracks track".into(),
         predicate: format!("track.source_key={}", source.raw()),
-        order: sort.order_terms(descending),
+        order: sort.order_terms(descending, false),
         uri: "track.media_uri".into(),
         entry_key: "NULL".into(),
     };
@@ -1050,18 +1078,8 @@ pub(crate) fn track_query(
             .from
             .push_str(" LEFT JOIN albums album ON album.album_key=track.album_key");
     }
-    if sort == TrackSort::AlbumArtist {
-        query.from.push_str(
-            " LEFT JOIN artists album_artist ON album_artist.artist_key=track.album_artist_key",
-        );
-    }
     track_filter(&mut query, folder, filter, favorites_only);
-    if sort.uses_activity() {
-        for field in &mut query.order {
-            *field=field.replace("activity.play_count","(track.local_play_count+COALESCE((SELECT play_count FROM activity_baseline baseline WHERE baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track'),0))")
-                .replace("activity.last_played","(SELECT max(value) FROM (SELECT max(started_at) value FROM listens WHERE media_uri=track.media_uri UNION ALL SELECT last_played_at FROM activity_baseline baseline WHERE baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track'))");
-        }
-    }
+
     query
 }
 

@@ -276,7 +276,7 @@ mod tests {
             .playlist_entry_order(
                 playlist,
                 None,
-                crate::PlaylistEntrySort::Position,
+                crate::TrackSort::Position,
                 false,
                 "",
                 &crate::ReadCancellation::default(),

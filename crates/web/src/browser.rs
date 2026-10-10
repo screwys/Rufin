@@ -737,6 +737,7 @@ impl Page {
             .unwrap_or(match self.view() {
                 "album" => "track_number",
                 "playlist" => "position",
+                "smart-playlist" => "definition",
                 _ => "title",
             })
     }

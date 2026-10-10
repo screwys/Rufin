@@ -446,6 +446,7 @@ pub enum LibraryField {
 impl LibraryField {
     pub fn track_sort(self) -> library::TrackSort {
         match self {
+            Self::RowIndex => library::TrackSort::Position,
             Self::TrackNumber => library::TrackSort::TrackNumber,
             Self::Artist => library::TrackSort::Artist,
             Self::AlbumArtist => library::TrackSort::AlbumArtist,
@@ -460,8 +461,7 @@ impl LibraryField {
             Self::Bpm => library::TrackSort::Bpm,
             Self::Duration => library::TrackSort::Duration,
             Self::Favorite => library::TrackSort::Favorite,
-            Self::RowIndex
-            | Self::Image
+            Self::Image
             | Self::Title
             | Self::TitleMerged
             | Self::DiscNumber
@@ -512,15 +512,6 @@ impl LibraryField {
             Self::SongCount => library::PlaylistSort::TrackCount,
             Self::Duration => library::PlaylistSort::Duration,
             _ => library::PlaylistSort::Title,
-        }
-    }
-
-    pub fn playlist_entry_sort(self) -> library::PlaylistEntrySort {
-        match self {
-            Self::Artist => library::PlaylistEntrySort::Artist,
-            Self::Album => library::PlaylistEntrySort::Album,
-            Self::Title | Self::TitleMerged => library::PlaylistEntrySort::Title,
-            _ => library::PlaylistEntrySort::Position,
         }
     }
 
@@ -1136,6 +1127,24 @@ pub fn available_grid_fields(key: LibraryListKey) -> &'static [LibraryField] {
 }
 
 pub fn available_sort_fields(key: LibraryListKey) -> &'static [LibraryField] {
+    const TRACK_SORT_FIELDS: &[LibraryField] = &[
+        LibraryField::RowIndex,
+        LibraryField::TrackNumber,
+        LibraryField::Title,
+        LibraryField::Artist,
+        LibraryField::AlbumArtist,
+        LibraryField::Album,
+        LibraryField::Year,
+        LibraryField::ReleaseDate,
+        LibraryField::DateAdded,
+        LibraryField::LastPlayed,
+        LibraryField::PlayCount,
+        LibraryField::UserRating,
+        LibraryField::Genre,
+        LibraryField::Bpm,
+        LibraryField::Duration,
+        LibraryField::Favorite,
+    ];
     match key {
         LibraryListKey::Queue | LibraryListKey::FullscreenTracks => &[LibraryField::RowIndex],
         LibraryListKey::Albums | LibraryListKey::ArtistAlbums => &[
@@ -1182,12 +1191,7 @@ pub fn available_sort_fields(key: LibraryListKey) -> &'static [LibraryField] {
             LibraryField::SongCount,
             LibraryField::Duration,
         ],
-        LibraryListKey::PlaylistTracks => &[
-            LibraryField::RowIndex,
-            LibraryField::Title,
-            LibraryField::Artist,
-            LibraryField::Album,
-        ],
+        LibraryListKey::PlaylistTracks => TRACK_SORT_FIELDS,
         LibraryListKey::History => &[LibraryField::LastPlayed],
         LibraryListKey::Tracks
         | LibraryListKey::Folders
@@ -1196,23 +1200,7 @@ pub fn available_sort_fields(key: LibraryListKey) -> &'static [LibraryField] {
         | LibraryListKey::ArtistTracks
         | LibraryListKey::GenreTracks
         | LibraryListKey::MoodTracks
-        | LibraryListKey::SmartPlaylistTracks => &[
-            LibraryField::TrackNumber,
-            LibraryField::Title,
-            LibraryField::Artist,
-            LibraryField::AlbumArtist,
-            LibraryField::Album,
-            LibraryField::Year,
-            LibraryField::ReleaseDate,
-            LibraryField::DateAdded,
-            LibraryField::LastPlayed,
-            LibraryField::PlayCount,
-            LibraryField::UserRating,
-            LibraryField::Genre,
-            LibraryField::Bpm,
-            LibraryField::Duration,
-            LibraryField::Favorite,
-        ],
+        | LibraryListKey::SmartPlaylistTracks => &TRACK_SORT_FIELDS[1..],
     }
 }
 fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {

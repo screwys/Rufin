@@ -152,10 +152,15 @@
             aria-label="{{ localization::tr("Search library") }}"
           />
           <noscript><button class="without-js" type="submit">{{ localization::tr("Search") }}</button></noscript>
+          <template id="track-sort-options">{% call m::track_sort_options("") %}{% endcall %}</template>
           <select id="sort" name="sort" aria-label="{{ localization::tr("Sort by") }}">
-            <option value="title" {% if page.sort() == "title" %}selected{% endif %}>{{ localization::tr("Title") }}</option>
-            {% if page.view() == "album" %}<option value="track_number" {% if page.sort() == "track_number" %}selected{% endif %}>{{ localization::tr("Track number") }}</option>{% endif %}
             {% if page.view() == "playlist" %}<option value="position" {% if page.sort() == "position" %}selected{% endif %}>{{ localization::tr("Position") }}</option>{% endif %}
+            {% if page.view() == "smart-playlist" %}<option value="definition" {% if page.sort() == "definition" %}selected{% endif %}>{{ localization::tr("Playlist order") }}</option>{% endif %}
+            {% if page.view() == "tracks" || page.view() == "favorites" || page.view() == "album" || page.view() == "artist" || page.view() == "genre" || page.view() == "playlist" || page.view() == "smart-playlist" %}
+            {% call m::track_sort_options(page.sort()) %}{% endcall %}
+            {% else %}
+            <option value="title" {% if page.sort() == "title" %}selected{% endif %}>{{ localization::tr("Title") }}</option>
+            {% endif %}
           </select>
           <button
             class="icon-button"
@@ -163,6 +168,7 @@
             title="{{ localization::tr("Change sort order") }}"
             aria-label="{{ localization::tr("Change sort order") }}"
             aria-pressed="{{ page.descending() }}"
+            {% if page.sort() == "definition" %}hidden{% endif %}
           >
             <span class="icon" data-icon="sort-ascending"></span>
           </button>

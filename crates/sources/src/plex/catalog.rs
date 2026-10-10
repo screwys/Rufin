@@ -704,7 +704,7 @@ pub(super) mod tests {
             .playlist_entry_order(
                 playlist_key,
                 None,
-                library::PlaylistEntrySort::Position,
+                library::TrackSort::Position,
                 false,
                 "",
                 &cancellation,

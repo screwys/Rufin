@@ -874,13 +874,7 @@ impl Database {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let query = if let C::Playlist(key) = collection {
-            crate::playlists::playlist_query(
-                *key,
-                None,
-                crate::PlaylistEntrySort::Position,
-                false,
-                "",
-            )
+            crate::playlists::playlist_query(*key, None, crate::TrackSort::Position, false, "")
         } else {
             let Some(source) = collection_source_on(&mut transaction, collection).await? else {
                 transaction.commit().await?;
@@ -2210,7 +2204,7 @@ pub(crate) async fn playback_query(
         return Ok(crate::playlists::playlist_query(
             *key,
             folder,
-            crate::PlaylistEntrySort::Position,
+            crate::TrackSort::Position,
             descending,
             filter,
         ));
