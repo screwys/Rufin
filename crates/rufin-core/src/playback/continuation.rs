@@ -89,17 +89,14 @@ impl PlaybackOwner {
                 )
             })
             .collect::<Vec<_>>();
-        let page = self
+        let rows = self
             .database
-            .read_queue(library::QueueReadRequest::Hydrate {
-                entries: entries.clone(),
-            })
+            .queue_rows_for_entries(&entries, &ReadCancellation::new())
             .await
             .map_err(string_error)?;
-        let page = self.import_missing_plex_queue_rows(entries, page).await?;
         Ok(library::QueueTransferPage {
             offset,
-            rows: page.rows.into_iter().map(|row| (*row).clone()).collect(),
+            rows: rows.into_iter().map(|row| (*row).clone()).collect(),
             order: snapshot.queue.order[offset..end].to_vec(),
         })
     }
@@ -241,10 +238,11 @@ impl PlaybackOwner {
     pub(super) async fn commit_continuation(
         &self,
         prepared: PreparedContinuation,
+        failed_queue_save: &mut Option<library::QueueUpdate>,
     ) -> Result<(), String> {
         // Queue persistence has one writer. Older local saves complete before
         // transferred metadata becomes the active queue.
-        save_pending_queue(&self.database, &self.pending_queue)
+        save_pending_queue(&self.database, &self.pending_queue, failed_queue_save)
             .await
             .map_err(string_error)?;
         let active = self.active().ok_or("Playback is unavailable")?;
@@ -266,7 +264,7 @@ impl PlaybackOwner {
         .await
         .map_err(string_error)?
         .map_err(string_error)?;
-        save_pending_queue(&self.database, &self.pending_queue)
+        save_pending_queue(&self.database, &self.pending_queue, failed_queue_save)
             .await
             .map_err(string_error)?;
         self.output

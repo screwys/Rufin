@@ -14,7 +14,7 @@ use gtk_widgets::{
 };
 use library::QueuePageRow;
 use localization::tr;
-use playback::{QueueReorderRequest, QueueReorderTarget};
+use playback::{QueueReorderRequest, QueueReorderTarget, QueueSelection};
 use rufin_core::settings::layout::{LibraryField, LibraryListKey, LibraryListSettings};
 use std::{
     cell::{Cell, RefCell},
@@ -77,29 +77,6 @@ impl QueueState {
         if self.generation.get() != generation {
             return false;
         }
-        let selection = self.selection.borrow().as_ref().cloned();
-        if let Some(selection) = selection {
-            let replaced = self
-                .rows
-                .borrow()
-                .iter()
-                .enumerate()
-                .filter(|(position, previous)| {
-                    selection.is_selected(*position as u32)
-                        && !rows.iter().any(|row| {
-                            row.position == previous.position
-                                && row.media_uri == previous.media_uri
-                                && row.playlist_entry_id == previous.playlist_entry_id
-                                && row.provenance == previous.provenance
-                                && row.received_from_connect == previous.received_from_connect
-                        })
-                })
-                .map(|(position, _)| position as u32)
-                .collect::<Vec<_>>();
-            for position in replaced {
-                selection.unselect_item(position);
-            }
-        }
         let current_appeared = self.current.borrow().is_some_and(|current| {
             !self
                 .window
@@ -136,12 +113,10 @@ impl QueueState {
     pub fn apply_filter(&self) {
         let filter = self.filter.borrow().clone();
         let rows = filter_queue_window(&self.window.borrow(), &filter);
-        let selected = self.selection.borrow().as_ref().map(|selection| {
-            queue_rows_at_positions(&self.rows.borrow(), &selection.selection())
-                .into_iter()
-                .map(|row| row.position)
-                .collect::<Vec<_>>()
-        });
+        let selected =
+            self.selection.borrow().as_ref().map(|selection| {
+                queue_rows_at_positions(&self.rows.borrow(), &selection.selection())
+            });
         let previous = (0..self.model.n_items())
             .map(|position| {
                 self.model
@@ -206,7 +181,19 @@ impl QueueState {
             let selection = self.selection.borrow().as_ref().cloned().unwrap();
             let positions = gtk::Bitset::new_empty();
             for (position, row) in self.rows.borrow().iter().enumerate() {
-                if selected.contains(&row.position) {
+                if selected.iter().any(|previous| {
+                    match (row.occurrence_id, previous.occurrence_id) {
+                        (Some(id), Some(previous)) => id == previous,
+                        (None, None) => {
+                            row.position == previous.position
+                                && row.media_uri == previous.media_uri
+                                && row.playlist_entry_id == previous.playlist_entry_id
+                                && row.provenance == previous.provenance
+                                && row.received_from_connect == previous.received_from_connect
+                        }
+                        _ => false,
+                    }
+                }) {
                     positions.add(position as u32);
                 }
             }
@@ -258,23 +245,10 @@ impl QueueState {
         })
     }
 
-    pub fn selected_media_uris(&self) -> Option<Arc<[String]>> {
+    pub fn selected_rows(&self) -> Option<QueueSelectionSnapshot> {
         let positions = self.selection.borrow().as_ref()?.selection();
         let rows = queue_rows_at_positions(&self.rows.borrow(), &positions);
-        let media_uris = rows
-            .into_iter()
-            .map(|row| row.media_uri.clone())
-            .collect::<Vec<_>>();
-        (!media_uris.is_empty()).then(|| media_uris.into())
-    }
-
-    pub fn selected_positions(&self) -> Option<Arc<[usize]>> {
-        let positions = self.selection.borrow().as_ref()?.selection();
-        let positions = queue_rows_at_positions(&self.rows.borrow(), &positions)
-            .into_iter()
-            .map(|row| row.position)
-            .collect::<Vec<_>>();
-        (!positions.is_empty()).then(|| positions.into())
+        (!rows.is_empty()).then(|| QueueSelectionSnapshot::new(rows))
     }
 }
 
@@ -288,24 +262,24 @@ impl Drop for QueueState {
 
 #[derive(Clone)]
 pub struct QueueSelectionSnapshot {
-    pub positions: Arc<[usize]>,
+    pub selection: QueueSelection,
     pub media_uris: Arc<[String]>,
 }
 
 impl QueueSelectionSnapshot {
     pub fn new(rows: Vec<Arc<QueuePageRow>>) -> Self {
-        let positions = rows
-            .iter()
-            .map(|row| row.position)
-            .collect::<Vec<_>>()
-            .into();
+        let selection = if let Some(ids) = rows.iter().map(|row| row.occurrence_id).collect() {
+            QueueSelection::Occurrences(ids)
+        } else {
+            QueueSelection::Positions(rows.iter().map(|row| row.position).collect())
+        };
         let media_uris = rows
             .iter()
             .map(|row| row.media_uri.clone())
             .collect::<Vec<_>>()
             .into();
         Self {
-            positions,
+            selection,
             media_uris,
         }
     }
@@ -384,7 +358,7 @@ fn install_queue_row_interactions(
             .and_then(|tile| tile.drag_paintable_source().paintable());
         drag_preview.prepare(row.title.clone(), artwork);
         Some(media_drag_content_provider(MediaDragSource::Queue {
-            positions: selection.positions,
+            selection: selection.selection,
             media_uris: selection.media_uris,
         }))
     });
@@ -398,13 +372,13 @@ fn install_queue_row_interactions(
     let media_item = item.downgrade();
     let media_root = root.downgrade();
     media_drop.connect_drop(move |_, value, _, y| {
-        let Some(position) = queue_row_from_item(&media_item).map(|row| row.position) else {
+        let Some(row) = queue_row_from_item(&media_item) else {
             return false;
         };
         let Some(root) = media_root.upgrade() else {
             return false;
         };
-        let queue_target = queue_row_drop_target(position, y, root.height());
+        let queue_target = queue_row_drop_target(&row, y, root.height());
         enqueue_media_drop(&media_shell, value, queue_target)
     });
     gtk_widgets::media_drag::style_order_drop_target(&media_drop, true, |_| true);
@@ -430,11 +404,12 @@ fn install_queue_row_interactions(
     );
 }
 
-fn queue_row_drop_target(position: usize, y: f64, height: i32) -> QueueReorderTarget {
-    if y < f64::from(height) / 2.0 {
-        QueueReorderTarget::Before(position)
-    } else {
-        QueueReorderTarget::After(position)
+fn queue_row_drop_target(row: &QueuePageRow, y: f64, height: i32) -> QueueReorderTarget {
+    match (row.occurrence_id, y < f64::from(height) / 2.0) {
+        (Some(id), true) => QueueReorderTarget::BeforeOccurrence(id),
+        (Some(id), false) => QueueReorderTarget::AfterOccurrence(id),
+        (None, true) => QueueReorderTarget::Before(row.position),
+        (None, false) => QueueReorderTarget::After(row.position),
     }
 }
 
@@ -450,21 +425,28 @@ fn enqueue_media_drop(
         return false;
     };
     let queue = shell.playback_handles.queue.clone();
-    if let MediaDragSource::Queue { positions, .. } = source {
-        if matches!(&target, QueueReorderTarget::Before(position) | QueueReorderTarget::After(position) if positions.contains(position))
-        {
+    if let MediaDragSource::Queue { selection, .. } = source {
+        let within_selection = match (&selection, &target) {
+            (
+                QueueSelection::Positions(positions),
+                QueueReorderTarget::Before(position) | QueueReorderTarget::After(position),
+            ) => positions.contains(position),
+            (
+                QueueSelection::Occurrences(ids),
+                QueueReorderTarget::BeforeOccurrence(id) | QueueReorderTarget::AfterOccurrence(id),
+            ) => ids.contains(id),
+            _ => false,
+        };
+        if within_selection {
             return true;
         }
-        let selection = shell
-            .selected_queue()
-            .and_then(|state| state.selection.borrow().as_ref().cloned());
-        if let Some(selection) = selection {
+        if matches!(&selection, QueueSelection::Positions(_))
+            && let Some(state) = shell.selected_queue()
+            && let Some(selection) = state.selection.borrow().as_ref()
+        {
             selection.unselect_all();
         }
-        queue.reorder(QueueReorderRequest {
-            positions: positions.to_vec(),
-            target,
-        });
+        queue.reorder(QueueReorderRequest { selection, target });
         return true;
     }
     shell.runtime.spawn(async move {
@@ -835,12 +817,12 @@ fn build_queue_table(
                     .clamp(adjustment.lower(), maximum),
             );
         }
-        let position = object
-            .value::<Arc<QueuePageRow>>()
-            .expect("Queue row")
-            .position;
+        let row = object.value::<Arc<QueuePageRow>>().expect("Queue row");
         let activate = activate.clone();
-        glib::idle_add_local_once(move || activate.activate(position));
+        glib::idle_add_local_once(move || match row.occurrence_id {
+            Some(id) => activate.activate_occurrence(id),
+            None => activate.activate(row.position),
+        });
     });
 
     let end_drop = gtk::DropTarget::new(
@@ -1479,6 +1461,7 @@ mod tests {
     fn row(position: usize, title: &str) -> QueuePageRow {
         QueuePageRow {
             entry: Arc::new(library::QueueRow {
+                occurrence_id: None,
                 position,
                 item: library::QueueItem::direct(
                     format!("https://example.test/{position}"),

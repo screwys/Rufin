@@ -7,6 +7,7 @@ use super::support::{connection, fixture, persist_queue};
 
 fn queue_row(item: QueueItem, position: usize) -> QueueRow {
     QueueRow {
+        occurrence_id: None,
         received_from_connect: false,
         item,
         position,
@@ -20,9 +21,9 @@ async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue
     let fixture = fixture().await;
     let database = &fixture.database;
     let captured = database
-        .read_queue(library::QueueReadRequest::Capture {
+        .read_queue(library::QueueReadRequest {
             context_title: None,
-            input: Box::new(library::QueueInput::Items(
+            input: library::QueueInput::Items(
                 (0..205)
                     .map(|index| {
                         (
@@ -37,7 +38,7 @@ async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue
                         )
                     })
                     .collect(),
-            )),
+            ),
             anchor_index: 0,
             random_start: None,
             shuffled: None,
@@ -324,7 +325,11 @@ async fn occurrence_media_and_progress_follow_the_exact_uri() {
     for position in 0..occurrences.len() {
         fixture
             .database
-            .persist_queue_progress(Some(position), (position as i64 + 1) * 1_000)
+            .apply_queue_update(&library::QueueUpdate {
+                current_index: Some(position),
+                progress_millis: (position as i64 + 1) * 1_000,
+                ..Default::default()
+            })
             .await
             .expect("persist progress");
         let restored = fixture
@@ -422,9 +427,9 @@ async fn source_items(
     seed: Option<u64>,
 ) -> Vec<QueueItem> {
     let page = database
-        .read_queue(library::QueueReadRequest::Capture {
+        .read_queue(library::QueueReadRequest {
             context_title: None,
-            input: Box::new(input),
+            input: input,
             anchor_index: 0,
             random_start: None,
             shuffled: None,
@@ -438,12 +443,13 @@ async fn source_items(
     let mut items = Vec::new();
     for chunk in entries.chunks(100) {
         let page = database
-            .read_queue(library::QueueReadRequest::Hydrate {
-                entries: chunk.iter().cloned().enumerate().collect(),
-            })
+            .queue_rows_for_entries(
+                &chunk.iter().cloned().enumerate().collect::<Vec<_>>(),
+                &ReadCancellation::new(),
+            )
             .await
             .unwrap();
-        items.extend(page.rows.into_iter().map(|row| row.item.clone()));
+        items.extend(page.into_iter().map(|row| row.item.clone()));
     }
     items
 }
@@ -533,8 +539,8 @@ async fn source_playlist_preserves_duplicate_members_with_shared_uri_metadata() 
         };
         let page = fixture
             .database
-            .read_queue(library::QueueReadRequest::Capture {
-                input: Box::new(input.clone()),
+            .read_queue(library::QueueReadRequest {
+                input: input.clone(),
                 context_title: None,
                 anchor_index: 0,
                 random_start: None,
@@ -593,6 +599,10 @@ async fn saved_queue_keeps_compact_choices_and_reads_only_the_window() {
     .await;
     state.progress_millis = 42000;
     state.repeat_mode = QueueRepeatMode::All;
+    state.ids = (1..=state.entries.len() as u64).collect();
+    for row in &mut state.rows {
+        std::sync::Arc::make_mut(row).occurrence_id = Some(state.ids[row.position]);
+    }
     fixture.database.save_queue(&state).await.unwrap();
     let restored = fixture.database.restore_queue().await.unwrap();
     assert_eq!(restored, state);
@@ -729,12 +739,12 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
         assert_eq!(source_members, [6, 7]);
         fixture
             .database
-            .read_queue(library::QueueReadRequest::Capture {
+            .read_queue(library::QueueReadRequest {
                 context_title: None,
-                input: Box::new(library::QueueInput::Items(vec![(
+                input: library::QueueInput::Items(vec![(
                     unavailable.clone(),
                     QueueProvenance::Manual,
-                )])),
+                )]),
                 anchor_index: 0,
                 random_start: None,
                 shuffled: None,
@@ -768,6 +778,7 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
         assert_eq!(target.database.restore_queue().await.unwrap(), restored);
     }
     state.entries = state.entries[..6].to_vec().into();
+    state.ids = state.ids[..6].to_vec().into();
     state.order = state
         .order
         .iter()
@@ -786,13 +797,16 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
             .unwrap(),
         1
     );
-    let membership: String = sqlx::query_scalar("SELECT state FROM queue_saved")
+    let membership: String = sqlx::query_scalar("SELECT json_group_array(json_object('id',entry_id,'uri',media_uri,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
         .fetch_one(&mut raw)
         .await
         .unwrap();
     fixture
         .database
-        .persist_queue_settings(None, 0, QueueRepeatMode::One, false)
+        .apply_queue_update(&library::QueueUpdate {
+            repeat_mode: QueueRepeatMode::One,
+            ..Default::default()
+        })
         .await
         .unwrap();
     let stopped = fixture.database.restore_queue().await.unwrap();
@@ -802,7 +816,7 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
     assert_eq!(stopped.repeat_mode, QueueRepeatMode::One);
     assert!(!stopped.shuffled);
     assert_eq!(
-        sqlx::query_scalar::<_, String>("SELECT state FROM queue_saved")
+        sqlx::query_scalar::<_, String>("SELECT json_group_array(json_object('id',entry_id,'uri',media_uri,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
             .fetch_one(&mut raw)
             .await
             .unwrap(),
@@ -933,9 +947,9 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
     for activation in 0..12 {
         let page = fixture
             .database
-            .read_queue(library::QueueReadRequest::Capture {
+            .read_queue(library::QueueReadRequest {
                 context_title: None,
-                input: Box::new(library::QueueInput::Items(
+                input: library::QueueInput::Items(
                     (0..2)
                         .map(|index| {
                             (
@@ -950,7 +964,7 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
                             )
                         })
                         .collect(),
-                )),
+                ),
                 anchor_index: 0,
                 random_start: None,
                 shuffled: None,
@@ -975,7 +989,7 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
             .unwrap(),
         24
     );
-    let membership: String = sqlx::query_scalar("SELECT state FROM queue_saved")
+    let membership: String = sqlx::query_scalar("SELECT json_group_array(json_object('id',entry_id,'uri',media_uri,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
         .fetch_one(&mut raw)
         .await
         .unwrap();
@@ -986,9 +1000,28 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
 
     latest.progress_millis = 1234;
     latest.repeat_mode = QueueRepeatMode::All;
-    fixture.database.save_queue_order(&latest).await.unwrap();
+    fixture
+        .database
+        .apply_queue_update(&library::QueueUpdate {
+            order: Some(library::QueueOrderUpdate {
+                rows: latest
+                    .order
+                    .iter()
+                    .enumerate()
+                    .map(|(position, index)| (position, *index as u64 + 1))
+                    .collect(),
+                total: latest.order.len(),
+            }),
+            current_index: latest.current_index,
+            progress_millis: latest.progress_millis,
+            repeat_mode: latest.repeat_mode,
+            shuffled: latest.shuffled,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
     assert_eq!(
-        sqlx::query_scalar::<_, String>("SELECT state FROM queue_saved")
+        sqlx::query_scalar::<_, String>("SELECT json_group_array(json_object('id',entry_id,'uri',media_uri,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
             .fetch_one(&mut raw)
             .await
             .unwrap(),
@@ -1070,9 +1103,9 @@ async fn repeated_large_source_starts_resolve_only_the_selected_window() {
     for activation in 0..6_u64 {
         let page = fixture
             .database
-            .read_queue(library::QueueReadRequest::Capture {
+            .read_queue(library::QueueReadRequest {
                 context_title: None,
-                input: Box::new(library::QueueInput::Query {
+                input: library::QueueInput::Query {
                     query: library::QueueQuery::Tracks {
                         source: fixture.source,
                         downloaded_only: false,
@@ -1085,7 +1118,7 @@ async fn repeated_large_source_starts_resolve_only_the_selected_window() {
                     descending: false,
                     context_id: "bulk".into(),
                     anchor_uri: None,
-                }),
+                },
                 anchor_index: 0,
                 random_start: Some(activation * 7919),
                 shuffled: None,
@@ -1099,21 +1132,22 @@ async fn repeated_large_source_starts_resolve_only_the_selected_window() {
         order.rotate_left(page.current_index);
         let projection = fixture
             .database
-            .read_queue(library::QueueReadRequest::Hydrate {
-                entries: order
+            .queue_rows_for_entries(
+                &order
                     .iter()
                     .take(100)
                     .enumerate()
                     .map(|(position, index)| (position, page.entries[*index as usize].clone()))
-                    .collect(),
-            })
+                    .collect::<Vec<_>>(),
+                &ReadCancellation::new(),
+            )
             .await
             .unwrap();
-        assert_eq!(projection.rows.len(), 100);
+        assert_eq!(projection.len(), 100);
         let mut state = library::QueueRestore {
             entries: page.entries.into(),
             order: order.into(),
-            rows: projection.rows,
+            rows: projection,
             current_index: Some(0),
             shuffled: true,
             ..Default::default()
@@ -1126,16 +1160,35 @@ async fn repeated_large_source_starts_resolve_only_the_selected_window() {
                 .unwrap(),
             0
         );
-        let membership: String = sqlx::query_scalar("SELECT state FROM queue_saved")
+        let membership: String = sqlx::query_scalar("SELECT json_group_array(json_object('id',entry_id,'uri',media_uri,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
             .fetch_one(&mut raw)
             .await
             .unwrap();
         let mut order = state.order.to_vec();
         order[1..].reverse();
         state.order = order.into();
-        fixture.database.save_queue_order(&state).await.unwrap();
+        fixture
+            .database
+            .apply_queue_update(&library::QueueUpdate {
+                order: Some(library::QueueOrderUpdate {
+                    rows: state
+                        .order
+                        .iter()
+                        .enumerate()
+                        .map(|(position, index)| (position, *index as u64 + 1))
+                        .collect(),
+                    total: state.order.len(),
+                }),
+                current_index: state.current_index,
+                progress_millis: state.progress_millis,
+                repeat_mode: state.repeat_mode,
+                shuffled: state.shuffled,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         assert_eq!(
-            sqlx::query_scalar::<_, String>("SELECT state FROM queue_saved")
+            sqlx::query_scalar::<_, String>("SELECT json_group_array(json_object('id',entry_id,'uri',media_uri,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
                 .fetch_one(&mut raw)
                 .await
                 .unwrap(),

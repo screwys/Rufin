@@ -1822,8 +1822,8 @@ fn fallback_candidates(definitions: &[(i64, SmartPlaylistDefinition)]) -> String
         "requested AS MATERIALIZED (
             SELECT media_uri FROM playlist_entries entry
             WHERE NOT EXISTS(SELECT 1 FROM tracks WHERE media_uri=entry.media_uri)
-            UNION SELECT json_extract(member.value,'$[0]') FROM queue_saved,json_each(queue_saved.state,'$.entries') member
-            WHERE NOT EXISTS(SELECT 1 FROM tracks WHERE media_uri=json_extract(member.value,'$[0]'))
+            UNION SELECT member.media_uri FROM queue_entries member
+            WHERE NOT EXISTS(SELECT 1 FROM tracks WHERE media_uri=member.media_uri)
             UNION SELECT media_uri FROM listens listen WHERE {played}
               AND NOT EXISTS(SELECT 1 FROM tracks WHERE media_uri=listen.media_uri)
             UNION SELECT media_uri FROM local_access_files access WHERE origin='download'

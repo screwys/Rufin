@@ -1957,6 +1957,7 @@ mod tests {
                 media: Arc::new(CurrentMedia {
                     id: media_id.clone(),
                     row: Arc::new(library::QueueRow {
+                        occurrence_id: None,
                         item: library::QueueItem::direct(
                             media_uri, title, "Artist", "Album", 3_000,
                         ),

@@ -232,6 +232,10 @@ impl Database {
                 writer.close().await?;
                 return Err(error);
             }
+            if let Err(error) = crate::queue::migrate_queue_storage(&mut writer).await {
+                writer.close().await?;
+                return Err(error);
+            }
             Ok(writer)
         }
         let (writer, fresh_start) = match open_store(path).await {

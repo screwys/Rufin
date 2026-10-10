@@ -50,7 +50,7 @@ pub(crate) fn present_queue_track_context_menu(
     target: &gtk::Widget,
     shell: &Rc<Shell>,
     media: library::QueueItem,
-    queue_position: usize,
+    queue_entry: (usize, Option<u64>),
     position: Option<(f64, f64)>,
 ) {
     present_playback_media_menu(
@@ -60,6 +60,6 @@ pub(crate) fn present_queue_track_context_menu(
         Some(media),
         position,
         None,
-        Some(queue_position),
+        Some(queue_entry),
     );
 }

@@ -1,6 +1,5 @@
 use super::super::{
     PlaybackStoreWork,
-    queue::{QueuePersistence, QueuePersistenceKind},
     state::tests::{IdleBackend, seeded},
 };
 use super::*;
@@ -281,15 +280,15 @@ async fn persistence_coalesces_latest_queue_metadata() {
         .await
         .unwrap();
     let page = database
-        .read_queue(library::QueueReadRequest::Capture {
+        .read_queue(library::QueueReadRequest {
             context_title: None,
-            input: Box::new(library::QueueInput::Uris {
+            input: library::QueueInput::Uris {
                 order: (1..=4)
                     .map(|key| format!("https://example.test/{key}"))
                     .collect(),
                 context_id: "test".into(),
                 source_start: 0,
-            }),
+            },
             anchor_index: 0,
             random_start: None,
             shuffled: None,
@@ -297,14 +296,14 @@ async fn persistence_coalesces_latest_queue_metadata() {
         .await
         .unwrap();
     let mut sequence = Sequence::new();
-    sequence.add_page(page, library::QueueReorderTarget::End, true, None, &mut []);
-    let mut pending = QueuePersistence::capture(&sequence, QueuePersistenceKind::Membership);
+    sequence.add_page(page, library::QueueReorderTarget::End, true, None);
+    let mut pending = sequence.take_persistence().unwrap();
     sequence.set_repeat_mode(RepeatMode::All);
     sequence.set_progress_millis(42000);
-    sequence.shuffle(true, 7, &mut []);
-    let newer = QueuePersistence::capture(&sequence, QueuePersistenceKind::Membership);
+    sequence.shuffle(true, 7);
+    let newer = sequence.take_persistence().unwrap();
     pending.coalesce(newer);
-    assert_eq!(pending.progress_millis(), 42000);
-    assert_eq!(pending.repeat_mode(), RepeatMode::All);
-    assert!(pending.shuffled());
+    assert_eq!(pending.progress_millis, 42000);
+    assert_eq!(pending.repeat_mode, RepeatMode::All);
+    assert!(pending.shuffled);
 }

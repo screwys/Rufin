@@ -14,14 +14,32 @@ pub(crate) async fn pragma(
 }
 pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA application_id = 1381320270;
 
-PRAGMA user_version = 46;
+PRAGMA user_version = 47;
 
 CREATE TABLE IF NOT EXISTS source_ids (source_key INTEGER PRIMARY KEY, object_id TEXT NOT NULL UNIQUE CHECK(object_id<>'')) STRICT;
 
-CREATE TABLE IF NOT EXISTS queue_saved (
-    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
-    state TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS queue_contexts (
+    context_key INTEGER PRIMARY KEY,
+    context TEXT NOT NULL UNIQUE
 ) STRICT;
+
+CREATE TABLE IF NOT EXISTS queue_entries (
+    entry_id INTEGER PRIMARY KEY,
+    media_uri TEXT NOT NULL,
+    playlist_entry_id TEXT,
+    provenance TEXT,
+    context_key INTEGER REFERENCES queue_contexts,
+    source_rank INTEGER,
+    received_from_connect INTEGER NOT NULL DEFAULT 0
+) STRICT;
+CREATE INDEX IF NOT EXISTS queue_entries_uri_idx ON queue_entries(media_uri);
+CREATE INDEX IF NOT EXISTS queue_entries_context_idx ON queue_entries(context_key) WHERE context_key IS NOT NULL;
+CREATE TABLE IF NOT EXISTS queue_positions (
+    order_kind INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    entry_id INTEGER NOT NULL,
+    PRIMARY KEY(order_kind,position)
+) STRICT, WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS playlists (
     playlist_key INTEGER PRIMARY KEY,
@@ -172,11 +190,6 @@ CREATE TABLE IF NOT EXISTS queue_state (
     progress_millis INTEGER NOT NULL DEFAULT 0 CHECK (progress_millis >= 0),
     repeat_mode TEXT NOT NULL DEFAULT 'none' CHECK (repeat_mode IN ('none', 'one', 'all')),
     shuffled INTEGER NOT NULL DEFAULT 0 CHECK (shuffled IN (0, 1))
-) STRICT;
-
-CREATE TABLE IF NOT EXISTS queue_order (
-    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-    state TEXT NOT NULL
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS queue_transfer_pages (

@@ -182,6 +182,13 @@ impl Playback {
     pub(crate) fn play(&self, request: PlayRequest) -> PlaybackResult<()> {
         self.request(move |player, sample| Ok(player.play(request, sample)?))
     }
+    pub(crate) fn page_entries(
+        &self,
+        offset: usize,
+        limit: usize,
+    ) -> PlaybackResult<(Vec<(usize, Option<u64>, library::QueueEntry)>, usize)> {
+        self.request(move |player, _| Ok(player.page_entries(offset, limit)))
+    }
     pub(crate) fn queue_content_id(&self) -> PlaybackResult<String> {
         self.request(|player, _| Ok(player.sequence().content_id().to_owned()))
     }

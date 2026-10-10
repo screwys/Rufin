@@ -115,15 +115,15 @@ fn present_catalog_track_menu(
     position: Option<(f64, f64)>,
     popover_position: Option<gtk::PositionType>,
     playback_media: Option<library::QueueItem>,
-    queue_position: Option<usize>,
+    queue_entry: Option<(usize, Option<u64>)>,
 ) {
-    let action_group = if queue_position.is_some() {
+    let action_group = if queue_entry.is_some() {
         "queue"
     } else {
         "track"
     };
     let surface = ContextMenuSurface::new(target, action_group, position);
-    if queue_position.is_some() {
+    if queue_entry.is_some() {
         surface.append_fixed_action(msgid("Remove from Queue"), "remove-from-queue", REMOVE_ICON);
     }
     surface.append_play_actions(&menus.settings.current.borrow().context_menu);
@@ -197,22 +197,8 @@ fn present_catalog_track_menu(
     if let Some(position) = popover_position {
         surface.popover().set_position(position);
     }
-    if let Some(queue_position) = queue_position {
-        let queue = menus.queue.clone();
-        surface.add_action("remove-from-queue", move || queue.remove(queue_position));
-        let queue = menus.queue.clone();
-        surface.add_action("play", move || queue.activate(queue_position));
-        let queue = menus.queue.clone();
-        surface.add_action("play-next", move || {
-            queue.move_after_current(queue_position)
-        });
-        let queue = menus.queue.clone();
-        surface.add_action("play-last", move || {
-            queue.reorder(playback::QueueReorderRequest {
-                positions: vec![queue_position],
-                target: playback::QueueReorderTarget::End,
-            });
-        });
+    if let Some((position, occurrence_id)) = queue_entry {
+        install_queue_entry_actions(&surface, menus, position, occurrence_id);
     }
     surface.popup(&menus.settings.current.borrow().context_menu);
 }
@@ -224,7 +210,7 @@ pub fn present_playback_media_menu(
     media: Option<library::QueueItem>,
     position: Option<(f64, f64)>,
     popover_position: Option<gtk::PositionType>,
-    queue_position: Option<usize>,
+    queue_entry: Option<(usize, Option<u64>)>,
 ) {
     let database = Arc::clone(&menus.library);
     let runtime = menus.runtime.clone();
@@ -265,7 +251,7 @@ pub fn present_playback_media_menu(
                 position,
                 popover_position,
                 media,
-                queue_position,
+                queue_entry,
             );
         } else if let Some(media) = media {
             present_direct_playback_media_menu(
@@ -276,7 +262,7 @@ pub fn present_playback_media_menu(
                 downloaded,
                 position,
                 popover_position,
-                queue_position,
+                queue_entry,
             );
         }
     });
@@ -290,15 +276,15 @@ fn present_direct_playback_media_menu(
     downloaded: bool,
     position: Option<(f64, f64)>,
     popover_position: Option<gtk::PositionType>,
-    queue_position: Option<usize>,
+    queue_entry: Option<(usize, Option<u64>)>,
 ) {
-    let action_group = if queue_position.is_some() {
+    let action_group = if queue_entry.is_some() {
         "queue"
     } else {
         "track"
     };
     let surface = ContextMenuSurface::new(target, action_group, position);
-    if queue_position.is_some() {
+    if queue_entry.is_some() {
         surface.append_fixed_action(msgid("Remove from Queue"), "remove-from-queue", REMOVE_ICON);
     }
     surface.append_play_actions(&menus.settings.current.borrow().context_menu);
@@ -354,24 +340,44 @@ fn present_direct_playback_media_menu(
         surface.popover().set_position(position);
     }
     install_live_track_playback_actions(&surface, menus, media);
-    if let Some(queue_position) = queue_position {
-        let queue = menus.queue.clone();
-        surface.add_action("remove-from-queue", move || queue.remove(queue_position));
-        let queue = menus.queue.clone();
-        surface.add_action("play", move || queue.activate(queue_position));
-        let queue = menus.queue.clone();
-        surface.add_action("play-next", move || {
-            queue.move_after_current(queue_position)
-        });
-        let queue = menus.queue.clone();
-        surface.add_action("play-last", move || {
-            queue.reorder(playback::QueueReorderRequest {
-                positions: vec![queue_position],
-                target: playback::QueueReorderTarget::End,
-            });
-        });
+    if let Some((position, occurrence_id)) = queue_entry {
+        install_queue_entry_actions(&surface, menus, position, occurrence_id);
     }
     surface.popup(&menus.settings.current.borrow().context_menu);
+}
+
+fn install_queue_entry_actions(
+    surface: &ContextMenuSurface,
+    menus: &MediaMenus,
+    position: usize,
+    occurrence_id: Option<u64>,
+) {
+    let selection = match occurrence_id {
+        Some(id) => playback::QueueSelection::Occurrences(vec![id]),
+        None => playback::QueueSelection::Positions(vec![position]),
+    };
+    let remove = selection.clone();
+    let queue = menus.queue.clone();
+    surface.add_action("remove-from-queue", move || {
+        queue.remove_many(remove.clone())
+    });
+    let queue = menus.queue.clone();
+    surface.add_action("play", move || match occurrence_id {
+        Some(id) => queue.activate_occurrence(id),
+        None => queue.activate(position),
+    });
+    let queue = menus.queue.clone();
+    surface.add_action("play-next", move || match occurrence_id {
+        Some(id) => queue.move_occurrence_after_current(id),
+        None => queue.move_after_current(position),
+    });
+    let queue = menus.queue.clone();
+    surface.add_action("play-last", move || {
+        queue.reorder(playback::QueueReorderRequest {
+            selection: selection.clone(),
+            target: playback::QueueReorderTarget::End,
+        });
+    });
 }
 
 fn install_track_navigation(

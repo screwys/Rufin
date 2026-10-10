@@ -296,9 +296,9 @@ pub async fn resolve_queue(
     anchor_index: usize,
 ) -> library::QueueRestore {
     let mut page = database
-        .read_queue(library::QueueReadRequest::Capture {
+        .read_queue(library::QueueReadRequest {
             context_title: None,
-            input: Box::new(input),
+            input: input,
             anchor_index,
             random_start: None,
             shuffled: None,
@@ -307,19 +307,19 @@ pub async fn resolve_queue(
         .unwrap();
     let start = page.current_index.saturating_sub(10);
     page.rows = database
-        .read_queue(library::QueueReadRequest::Hydrate {
-            entries: page
+        .queue_rows_for_entries(
+            &page
                 .entries
                 .iter()
                 .cloned()
                 .enumerate()
                 .skip(start)
                 .take(100)
-                .collect(),
-        })
+                .collect::<Vec<_>>(),
+            &library::ReadCancellation::new(),
+        )
         .await
-        .unwrap()
-        .rows;
+        .unwrap();
     library::QueueRestore {
         current_index: (!page.entries.is_empty()).then_some(page.current_index),
         order: (0..page.entries.len() as u32).collect(),

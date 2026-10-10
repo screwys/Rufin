@@ -752,7 +752,7 @@ impl Database {
             .ok_or(LibraryError::WriterUnavailable)?
             .begin()
             .await?;
-        sqlx::raw_sql("UPDATE connect_capture SET applying=1; DELETE FROM main.playlists; DELETE FROM smart_playlists; DELETE FROM user_media_state; DELETE FROM favorite_outbox; DELETE FROM listens; DELETE FROM legacy_activity; DELETE FROM local_locators; DELETE FROM connect_media_files; DELETE FROM catalog.sources; DELETE FROM main.source_ids; DELETE FROM queue_occurrences; DELETE FROM queue_state; DELETE FROM queue_order; DELETE FROM queue_saved; DELETE FROM queue_transfer_pages; DELETE FROM connect_collection; DELETE FROM connect_roots; DELETE FROM connect_changes; UPDATE connect_seed SET complete=1; UPDATE connect_capture SET applying=0;").execute(&mut *transaction).await?;
+        sqlx::raw_sql("UPDATE connect_capture SET applying=1; DELETE FROM main.playlists; DELETE FROM smart_playlists; DELETE FROM user_media_state; DELETE FROM favorite_outbox; DELETE FROM listens; DELETE FROM legacy_activity; DELETE FROM local_locators; DELETE FROM connect_media_files; DELETE FROM catalog.sources; DELETE FROM main.source_ids; DELETE FROM queue_occurrences; DELETE FROM queue_state; DELETE FROM queue_positions; DELETE FROM queue_entries; DELETE FROM queue_contexts; DELETE FROM queue_transfer_pages; DELETE FROM connect_collection; DELETE FROM connect_roots; DELETE FROM connect_changes; UPDATE connect_seed SET complete=1; UPDATE connect_capture SET applying=0;").execute(&mut *transaction).await?;
         transaction.commit().await?;
         Ok(())
     }

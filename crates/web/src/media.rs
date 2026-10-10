@@ -329,7 +329,7 @@ pub(super) async fn reorder(
     let queue = products.playback.queue.clone();
     tokio::task::spawn_blocking(move || {
         queue.reorder(playback::QueueReorderRequest {
-            positions: input.positions,
+            selection: playback::QueueSelection::Positions(input.positions),
             target: queue_drop_target(input.before, input.after),
         })
     })

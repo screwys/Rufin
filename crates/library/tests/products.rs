@@ -767,9 +767,12 @@ async fn radio_fills_short_album_and_track_seeds_from_the_selected_source() {
     }
     sqlx::query("INSERT INTO queue_occurrences(media_uri,title,artist,album,duration_millis) VALUES(?1,'Beta','Artist A','Album A',1000)")
         .bind(&fixture.track_uris[1]).execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO queue_saved(singleton,state) VALUES(1,json_object('entries',json_array(json_array(?1,'Manual',NULL,json('false'))),'contexts',json_array())) ON CONFLICT(singleton) DO UPDATE SET state=json_insert(state,'$.entries[#]',json_array(?1,'Manual',NULL,json('false')))")
-        .bind(&fixture.track_uris[1]).execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO queue_order(singleton,state) SELECT 1,json_group_array(CAST(member.key AS INTEGER)) FROM queue_saved,json_each(state,'$.entries') member WHERE true ON CONFLICT(singleton) DO UPDATE SET state=excluded.state")
+    sqlx::query("INSERT INTO queue_entries(media_uri,provenance) VALUES(?1,'\"Manual\"')")
+        .bind(&fixture.track_uris[1])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO queue_positions(order_kind,position,entry_id) SELECT kind,row_number() OVER(PARTITION BY kind ORDER BY entry_id)-1,entry_id FROM queue_entries CROSS JOIN (SELECT 0 kind UNION ALL SELECT 1) WHERE true ON CONFLICT(order_kind,position) DO UPDATE SET entry_id=excluded.entry_id")
         .execute(&mut raw).await.unwrap();
     for seed in [
         RadioSeed::Album(fixture.albums[0]),
@@ -832,9 +835,12 @@ async fn radio_resolves_playlist_ownership_and_filters_native_recommendations() 
         .unwrap();
     sqlx::query("INSERT INTO queue_occurrences(media_uri,title,artist,album,duration_millis) VALUES(?1,'Beta','Artist A','Album A',1000)")
         .bind(&fixture.track_uris[1]).execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO queue_saved(singleton,state) VALUES(1,json_object('entries',json_array(json_array(?1,'Manual',NULL,json('false'))),'contexts',json_array())) ON CONFLICT(singleton) DO UPDATE SET state=json_insert(state,'$.entries[#]',json_array(?1,'Manual',NULL,json('false')))")
-        .bind(&fixture.track_uris[1]).execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO queue_order(singleton,state) SELECT 1,json_group_array(CAST(member.key AS INTEGER)) FROM queue_saved,json_each(state,'$.entries') member WHERE true ON CONFLICT(singleton) DO UPDATE SET state=excluded.state")
+    sqlx::query("INSERT INTO queue_entries(media_uri,provenance) VALUES(?1,'\"Manual\"')")
+        .bind(&fixture.track_uris[1])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO queue_positions(order_kind,position,entry_id) SELECT kind,row_number() OVER(PARTITION BY kind ORDER BY entry_id)-1,entry_id FROM queue_entries CROSS JOIN (SELECT 0 kind UNION ALL SELECT 1) WHERE true ON CONFLICT(order_kind,position) DO UPDATE SET entry_id=excluded.entry_id")
         .execute(&mut raw).await.unwrap();
     for (seed, object_id) in [
         (RadioSeed::Playlist(native), Some("native")),
@@ -1378,9 +1384,12 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
         .bind(uri).execute(&mut raw).await.unwrap();
     sqlx::query("INSERT INTO queue_occurrences(media_uri,title,artist,album,duration_millis) VALUES(?1,'Queue title','Artist','Album',42000)")
         .bind(uri).execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO queue_saved(singleton,state) VALUES(1,json_object('entries',json_array(json_array(?1,'Manual',NULL,json('false'))),'contexts',json_array())) ON CONFLICT(singleton) DO UPDATE SET state=json_insert(state,'$.entries[#]',json_array(?1,'Manual',NULL,json('false')))")
-        .bind(uri).execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO queue_order(singleton,state) SELECT 1,json_group_array(CAST(member.key AS INTEGER)) FROM queue_saved,json_each(state,'$.entries') member WHERE true ON CONFLICT(singleton) DO UPDATE SET state=excluded.state")
+    sqlx::query("INSERT INTO queue_entries(media_uri,provenance) VALUES(?1,'\"Manual\"')")
+        .bind(uri)
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO queue_positions(order_kind,position,entry_id) SELECT kind,row_number() OVER(PARTITION BY kind ORDER BY entry_id)-1,entry_id FROM queue_entries CROSS JOIN (SELECT 0 kind UNION ALL SELECT 1) WHERE true ON CONFLICT(order_kind,position) DO UPDATE SET entry_id=excluded.entry_id")
         .execute(&mut raw).await.unwrap();
 
     // Neither a different Current nor its folder changes A(uri). A later catalog
@@ -2532,9 +2541,12 @@ async fn all_smart_playlists_admit_direct_media_while_current_is_an_exact_subset
         .execute(&mut raw)
         .await
         .expect("retain direct media in Queue");
-    sqlx::query("INSERT INTO queue_saved(singleton,state) VALUES(1,json_object('entries',json_array(json_array(?1,'Manual',NULL,json('false'))),'contexts',json_array())) ON CONFLICT(singleton) DO UPDATE SET state=json_insert(state,'$.entries[#]',json_array(?1,'Manual',NULL,json('false')))")
-        .bind(&direct).execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO queue_order(singleton,state) SELECT 1,json_group_array(CAST(member.key AS INTEGER)) FROM queue_saved,json_each(state,'$.entries') member WHERE true ON CONFLICT(singleton) DO UPDATE SET state=excluded.state")
+    sqlx::query("INSERT INTO queue_entries(media_uri,provenance) VALUES(?1,'\"Manual\"')")
+        .bind(&direct)
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO queue_positions(order_kind,position,entry_id) SELECT kind,row_number() OVER(PARTITION BY kind ORDER BY entry_id)-1,entry_id FROM queue_entries CROSS JOIN (SELECT 0 kind UNION ALL SELECT 1) WHERE true ON CONFLICT(order_kind,position) DO UPDATE SET entry_id=excluded.entry_id")
         .execute(&mut raw).await.unwrap();
     drop(raw);
     let (playlist, _) = fixture
@@ -2689,15 +2701,21 @@ async fn smart_visible_window_keeps_uri_order_and_latest_snapshot_without_rechec
     let mut raw = connection(&fixture.path).await;
     sqlx::query("INSERT INTO queue_occurrences(media_uri,title,artist,album,duration_millis,snapshot_at) VALUES(?1,'Latest snapshot','Artist','Album',42000,300)")
         .bind(&direct).execute(&mut raw).await.expect("retain Queue snapshot");
-    sqlx::query("INSERT INTO queue_saved(singleton,state) VALUES(1,json_object('entries',json_array(json_array(?1,'Manual',NULL,json('false'))),'contexts',json_array())) ON CONFLICT(singleton) DO UPDATE SET state=json_insert(state,'$.entries[#]',json_array(?1,'Manual',NULL,json('false')))")
-        .bind(&direct).execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO queue_order(singleton,state) SELECT 1,json_group_array(CAST(member.key AS INTEGER)) FROM queue_saved,json_each(state,'$.entries') member WHERE true ON CONFLICT(singleton) DO UPDATE SET state=excluded.state")
+    sqlx::query("INSERT INTO queue_entries(media_uri,provenance) VALUES(?1,'\"Manual\"')")
+        .bind(&direct)
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO queue_positions(order_kind,position,entry_id) SELECT kind,row_number() OVER(PARTITION BY kind ORDER BY entry_id)-1,entry_id FROM queue_entries CROSS JOIN (SELECT 0 kind UNION ALL SELECT 1) WHERE true ON CONFLICT(order_kind,position) DO UPDATE SET entry_id=excluded.entry_id")
         .execute(&mut raw).await.unwrap();
     sqlx::query("INSERT INTO queue_occurrences(media_uri,title,artist,album,duration_millis,snapshot_at) VALUES(?1,'Saved Alpha','Artist','Album',42000,999)")
         .bind(&fixture.track_uris[0]).execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO queue_saved(singleton,state) VALUES(1,json_object('entries',json_array(json_array(?1,'Manual',NULL,json('false'))),'contexts',json_array())) ON CONFLICT(singleton) DO UPDATE SET state=json_insert(state,'$.entries[#]',json_array(?1,'Manual',NULL,json('false')))")
-        .bind(&fixture.track_uris[0]).execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO queue_order(singleton,state) SELECT 1,json_group_array(CAST(member.key AS INTEGER)) FROM queue_saved,json_each(state,'$.entries') member WHERE true ON CONFLICT(singleton) DO UPDATE SET state=excluded.state")
+    sqlx::query("INSERT INTO queue_entries(media_uri,provenance) VALUES(?1,'\"Manual\"')")
+        .bind(&fixture.track_uris[0])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO queue_positions(order_kind,position,entry_id) SELECT kind,row_number() OVER(PARTITION BY kind ORDER BY entry_id)-1,entry_id FROM queue_entries CROSS JOIN (SELECT 0 kind UNION ALL SELECT 1) WHERE true ON CONFLICT(order_kind,position) DO UPDATE SET entry_id=excluded.entry_id")
         .execute(&mut raw).await.unwrap();
     sqlx::query("INSERT INTO listens(media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped) VALUES(?1,'Old snapshot','Artist','Album',100,'1970-01',42000,42000,0)")
         .bind(&direct).execute(&mut raw).await.expect("retain historical snapshot");
@@ -2869,9 +2887,12 @@ async fn all_includes_retained_queue_and_activity_without_a_cached_source() {
     let mut raw = connection(&fixture.path).await;
     sqlx::query("INSERT INTO queue_occurrences(media_uri,title,artist,album,duration_millis) VALUES(?1,'Queued','Artist','Album',1000)")
         .bind(&queue_uri).execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO queue_saved(singleton,state) VALUES(1,json_object('entries',json_array(json_array(?1,'Manual',NULL,json('false'))),'contexts',json_array())) ON CONFLICT(singleton) DO UPDATE SET state=json_insert(state,'$.entries[#]',json_array(?1,'Manual',NULL,json('false')))")
-        .bind(&queue_uri).execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO queue_order(singleton,state) SELECT 1,json_group_array(CAST(member.key AS INTEGER)) FROM queue_saved,json_each(state,'$.entries') member WHERE true ON CONFLICT(singleton) DO UPDATE SET state=excluded.state")
+    sqlx::query("INSERT INTO queue_entries(media_uri,provenance) VALUES(?1,'\"Manual\"')")
+        .bind(&queue_uri)
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO queue_positions(order_kind,position,entry_id) SELECT kind,row_number() OVER(PARTITION BY kind ORDER BY entry_id)-1,entry_id FROM queue_entries CROSS JOIN (SELECT 0 kind UNION ALL SELECT 1) WHERE true ON CONFLICT(order_kind,position) DO UPDATE SET entry_id=excluded.entry_id")
         .execute(&mut raw).await.unwrap();
     sqlx::query("INSERT INTO listens(external_id,source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis) VALUES('retained','absent',?1,'Listened','Artist','Album',1,'1970-01',1000,1000)")
         .bind(&listen_uri).execute(&mut raw).await.unwrap();
@@ -3643,9 +3664,12 @@ async fn home_search_and_radio_results_stay_bounded() {
     assert_eq!(radio.len(), 3);
     sqlx::query("INSERT INTO queue_occurrences(media_uri,title,artist,album,duration_millis) VALUES(?1,'Track 0','Artist','Album',1000)")
         .bind(&fixture.track_uris[0]).execute(&mut raw).await.expect("persist complete Radio queue exclusion");
-    sqlx::query("INSERT INTO queue_saved(singleton,state) VALUES(1,json_object('entries',json_array(json_array(?1,'Manual',NULL,json('false'))),'contexts',json_array())) ON CONFLICT(singleton) DO UPDATE SET state=json_insert(state,'$.entries[#]',json_array(?1,'Manual',NULL,json('false')))")
-        .bind(&fixture.track_uris[0]).execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO queue_order(singleton,state) SELECT 1,json_group_array(CAST(member.key AS INTEGER)) FROM queue_saved,json_each(state,'$.entries') member WHERE true ON CONFLICT(singleton) DO UPDATE SET state=excluded.state")
+    sqlx::query("INSERT INTO queue_entries(media_uri,provenance) VALUES(?1,'\"Manual\"')")
+        .bind(&fixture.track_uris[0])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO queue_positions(order_kind,position,entry_id) SELECT kind,row_number() OVER(PARTITION BY kind ORDER BY entry_id)-1,entry_id FROM queue_entries CROSS JOIN (SELECT 0 kind UNION ALL SELECT 1) WHERE true ON CONFLICT(order_kind,position) DO UPDATE SET entry_id=excluded.entry_id")
         .execute(&mut raw).await.unwrap();
     assert_eq!(
         fixture

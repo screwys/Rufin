@@ -494,7 +494,7 @@ impl Database {
                       WHERE track.media_uri=requested.value AND track.source_path LIKE 'rufin-document:%')),
                 EXISTS(SELECT 1 FROM connect_collection WHERE media_uri=requested.value),
                 EXISTS(SELECT 1 FROM main.playlist_entries WHERE media_uri=requested.value)
-                    OR requested.value IN (SELECT json_extract(member.value,'$[0]') FROM queue_saved,json_each(queue_saved.state,'$.entries') member WHERE NOT json_extract(member.value,'$[3]'))
+                    OR requested.value IN (SELECT media_uri FROM queue_entries WHERE NOT received_from_connect)
              FROM json_each(?1) requested",
         )
         .bind(serde_json::to_string(uris)?)

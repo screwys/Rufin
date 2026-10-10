@@ -2724,12 +2724,16 @@ impl ConnectOwner {
                     Control::Activate { position } => {
                         playback::QueueCommandPort::activate(playback.as_ref(), position)
                     }
-                    Control::Remove { positions } => {
-                        playback::QueueCommandPort::remove_many(playback.as_ref(), positions)
-                    }
+                    Control::Remove { positions } => playback::QueueCommandPort::remove_many(
+                        playback.as_ref(),
+                        playback::QueueSelection::Positions(positions),
+                    ),
                     Control::Reorder { positions, target } => playback::QueueCommandPort::reorder(
                         playback.as_ref(),
-                        playback::QueueReorderRequest { positions, target },
+                        playback::QueueReorderRequest {
+                            selection: playback::QueueSelection::Positions(positions),
+                            target,
+                        },
                     ),
                     Control::MoveNext { position } => {
                         playback::QueueCommandPort::move_after_current(playback.as_ref(), position)

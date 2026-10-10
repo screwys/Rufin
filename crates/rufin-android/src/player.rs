@@ -1407,7 +1407,7 @@ impl AndroidPlayer {
             .playback
             .queue
             .reorder(playback::QueueReorderRequest {
-                positions: vec![position as usize],
+                selection: playback::QueueSelection::Positions(vec![position as usize]),
                 target: target_position.map_or(library::QueueReorderTarget::End, |id| {
                     if after {
                         library::QueueReorderTarget::After(id as usize)

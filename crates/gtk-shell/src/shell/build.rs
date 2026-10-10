@@ -413,7 +413,7 @@ pub async fn build(
                             target,
                             &shell,
                             row.entry.item.clone(),
-                            row.position,
+                            (row.position, row.occurrence_id),
                             position,
                         );
                     }

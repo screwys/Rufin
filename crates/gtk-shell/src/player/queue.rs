@@ -7,8 +7,9 @@ use gtk_widgets::{
     interactions::ContextMenuSurface,
 };
 use localization::msgid;
+use playback::QueueSelection;
 use rufin_core::settings::ContextMenuItem;
-use std::{rc::Rc, sync::Arc};
+use std::rc::Rc;
 
 pub(crate) fn connect_queue_playlist_button(shell: &Rc<Shell>) {
     let weak = Rc::downgrade(shell);
@@ -52,15 +53,21 @@ pub(crate) fn present_queue_selection_context_menu(
     surface.append_configurable_action(ContextMenuItem::Play, msgid("Play"), "play", PLAY_ICON);
     append_context_menu_picker_media_uris(&surface, shell, selection.media_uris.iter().cloned());
     let queue = shell.products.playback.queue.clone();
-    let remove = Arc::clone(&selection.positions);
+    let remove = selection.selection.clone();
     surface.add_action("remove-from-queue", move || {
-        queue.remove_many(remove.to_vec())
+        queue.remove_many(remove.clone())
     });
     let queue = shell.products.playback.queue.clone();
-    let play = selection.positions.first().cloned();
-    surface.add_action_enabled("play", play.is_some(), move || {
-        if let Some(play) = play.as_ref() {
-            queue.activate(*play);
+    surface.add_action("play", move || match &selection.selection {
+        QueueSelection::Occurrences(ids) => {
+            if let Some(id) = ids.first() {
+                queue.activate_occurrence(*id);
+            }
+        }
+        QueueSelection::Positions(positions) => {
+            if let Some(position) = positions.first() {
+                queue.activate(*position);
+            }
         }
     });
     surface.popup(&shell.settings.current.borrow().context_menu);

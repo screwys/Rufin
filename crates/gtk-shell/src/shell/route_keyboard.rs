@@ -11,7 +11,7 @@ use gtk_media_menus::media_menus::{
 };
 use gtk_player::outputs::{select_next_audio_output, select_previous_audio_output};
 use gtk_widgets::selection::TrackSelectionSnapshot;
-use playback::QueuePlacement;
+use playback::{QueuePlacement, QueueSelection};
 use std::rc::Rc;
 #[derive(Clone, Copy)]
 enum SelectionShortcut {
@@ -161,21 +161,20 @@ impl Shell {
             let Some(queue) = self.player_ui.selected_queue() else {
                 return false;
             };
+            let Some(selection) = queue.selected_rows() else {
+                return false;
+            };
             match shortcut {
-                SelectionShortcut::Play(_) => {
-                    let Some(position) = queue
-                        .selected_positions()
-                        .and_then(|positions| positions.first().cloned())
-                    else {
-                        return false;
-                    };
-                    self.products.playback.queue.activate(position);
-                }
+                SelectionShortcut::Play(_) => match selection.selection {
+                    QueueSelection::Occurrences(ids) => {
+                        self.products.playback.queue.activate_occurrence(ids[0]);
+                    }
+                    QueueSelection::Positions(positions) => {
+                        self.products.playback.queue.activate(positions[0]);
+                    }
+                },
                 SelectionShortcut::AddToPlaylist => {
-                    let Some(media_uris) = queue.selected_media_uris() else {
-                        return false;
-                    };
-                    present_playlist_picker_media_uris(self, media_uris.iter().cloned());
+                    present_playlist_picker_media_uris(self, selection.media_uris.iter().cloned());
                 }
                 SelectionShortcut::Download => return false,
                 SelectionShortcut::Delete => unreachable!(),
@@ -217,14 +216,17 @@ impl Shell {
 
     fn remove_focused_selection(self: &Rc<Self>, focus: Option<&gtk::Widget>) -> bool {
         if self.queue_selection_focused(focus) {
-            let Some(positions) = self
+            let Some(selection) = self
                 .player_ui
                 .selected_queue()
-                .and_then(|queue| queue.selected_positions())
+                .and_then(|queue| queue.selected_rows())
             else {
                 return false;
             };
-            self.products.playback.queue.remove_many(positions.to_vec());
+            self.products
+                .playback
+                .queue
+                .remove_many(selection.selection);
             return true;
         }
         self.current_playlist_entry_selection_snapshot()

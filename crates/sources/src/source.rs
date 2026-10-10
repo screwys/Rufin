@@ -706,16 +706,6 @@ impl Source {
     pub async fn plex_delegation_token(&self) -> SourceResult<String> {
         self.plex_companion_source()?.delegation_token().await
     }
-    pub async fn plex_import_items(
-        &self,
-        database: &Database,
-        rating_keys: &[String],
-    ) -> SourceResult<()> {
-        self.plex_companion_source()?;
-        self.apply_items(database, rating_keys.to_vec(), Vec::new())
-            .await?;
-        Ok(())
-    }
     pub async fn plex_queue_window(
         &self,
         queue_id: u64,

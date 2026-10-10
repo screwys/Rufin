@@ -936,7 +936,7 @@ async fn schema_43_fixture_relocates_and_migrates_every_core_durable_family_and_
             .fetch_one(&mut reader)
             .await
             .expect("read migrated version"),
-        46
+        47
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>(
@@ -1195,7 +1195,7 @@ async fn schema_43_malformed_listen_keeps_valid_siblings_and_preserves_input() {
             .fetch_one(&mut reader)
             .await
             .expect("read rebuilt schema version"),
-        46
+        47
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>("SELECT external_id FROM listens ORDER BY listen_key")
@@ -1243,7 +1243,7 @@ async fn fresh_schema_has_exact_table_inventory() {
             .fetch_one(&mut reader)
             .await
             .expect("read final schema version"),
-        46
+        47
     );
     let tables = sqlx::query_scalar::<_, String>(
         "SELECT name FROM sqlite_schema
@@ -1274,9 +1274,10 @@ async fn fresh_schema_has_exact_table_inventory() {
             "playlist_file_links",
             "playlist_file_settings",
             "playlists",
+            "queue_contexts",
+            "queue_entries",
             "queue_occurrences",
-            "queue_order",
-            "queue_saved",
+            "queue_positions",
             "queue_state",
             "queue_transfer_pages",
             "smart_playlists",
@@ -1426,12 +1427,12 @@ async fn schema_40_store_migrates_into_current_schema() {
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>(
-            "SELECT json_extract(member.value,'$[1]') FROM queue_saved,json_each(state,'$.entries') member ORDER BY CAST(member.key AS INTEGER)"
+            "SELECT coalesce(json_extract(provenance,'$'),json_array(context_key,source_rank)) FROM queue_positions position JOIN queue_entries entry USING(entry_id) WHERE order_kind=0 ORDER BY position"
         )
         .fetch_all(&mut reader)
         .await
         .unwrap(),
-        ["AutoDj", "[0,7]"]
+        ["AutoDj", "[1,7]"]
     );
     assert_eq!(
         sqlx::query_as::<_, (Option<i64>, i64)>(
@@ -1498,7 +1499,7 @@ async fn schema_39_store_runs_the_committed_chain_into_current_schema() {
             .fetch_one(&mut reader)
             .await
             .expect("read current schema version"),
-        46
+        47
     );
     let definition = sqlx::query_scalar::<_, String>(
         "SELECT definition_json FROM smart_playlists WHERE object_id='smart-list'",
@@ -1539,7 +1540,7 @@ async fn released_migration_ignores_unused_catalog_damage() {
             .fetch_one(&mut restored)
             .await
             .expect("read repaired schema version"),
-        46
+        47
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sources")
@@ -2272,7 +2273,7 @@ async fn legacy_local_cue_queue_uses_the_same_identity_as_favorites() {
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>(
-            "SELECT json_extract(member.value,'$[0]') FROM queue_saved,json_each(state,'$.entries') member ORDER BY CAST(member.key AS INTEGER)"
+            "SELECT entry.media_uri FROM queue_positions position JOIN queue_entries entry USING(entry_id) WHERE order_kind=0 ORDER BY position"
         )
         .fetch_all(&mut raw)
         .await

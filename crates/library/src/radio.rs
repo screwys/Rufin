@@ -112,7 +112,7 @@ impl Database {
             row.push_bind(id).push_bind(position as i64);
         });
         query.push(") SELECT track.media_uri FROM requested JOIN tracks track ON track.object_id=requested.object_id WHERE track.source_key=").push_bind(source)
-            .push(" AND track.media_uri NOT IN (SELECT json_extract(queued.value,'$[0]') FROM queue_saved,json_each(queue_saved.state,'$.entries') queued)");
+            .push(" AND track.media_uri NOT IN (SELECT media_uri FROM queue_entries)");
         match seed {
             RadioSeed::Track(uri) => {
                 query.push(" AND track.media_uri<>").push_bind(uri);
@@ -246,7 +246,7 @@ impl Database {
                     SELECT 1 FROM album_genres WHERE album_key=track.album_key AND genre_key IN seed_genres
                 ))");
             }
-            query.push(" AND track.media_uri NOT IN (SELECT json_extract(queued.value,'$[0]') FROM queue_saved,json_each(queue_saved.state,'$.entries') queued)");
+            query.push(" AND track.media_uri NOT IN (SELECT media_uri FROM queue_entries)");
             if !extra_excluded.is_empty() || !result.is_empty() {
                 query.push(" AND track.media_uri NOT IN (");
                 let mut separated = query.separated(",");
@@ -378,7 +378,7 @@ impl Database {
                  SELECT 1 FROM listens WHERE media_uri=track.media_uri
                     ))))",
                 );
-            query.push(" AND track.media_uri NOT IN (SELECT json_extract(queued.value,'$[0]') FROM queue_saved,json_each(queue_saved.state,'$.entries') queued)");
+            query.push(" AND track.media_uri NOT IN (SELECT media_uri FROM queue_entries)");
             if !extra_excluded.is_empty() {
                 query.push(" AND track.media_uri NOT IN (");
                 let mut separated = query.separated(",");

@@ -37,9 +37,9 @@ pub(in crate::playback) async fn seeded(
         .await
         .unwrap();
     let page = database
-        .read_queue(library::QueueReadRequest::Capture {
+        .read_queue(library::QueueReadRequest {
             context_title: None,
-            input: Box::new(Batch::new(items).input),
+            input: Batch::new(items).input,
             anchor_index: 0,
             random_start: None,
             shuffled: None,
@@ -47,9 +47,17 @@ pub(in crate::playback) async fn seeded(
         .await
         .unwrap();
     let mut sequence = Sequence::new();
-    sequence.add_page(page, library::QueueReorderTarget::End, true, None, &mut []);
+    sequence.add_page(page, library::QueueReorderTarget::End, true, None);
     if let Some(request) = sequence.read_request() {
-        sequence.hydrate(database.read_queue(request).await.unwrap());
+        let uris = request
+            .iter()
+            .map(|(_, entry)| entry.media_uri.to_string())
+            .collect::<Vec<_>>();
+        let items = database
+            .queue_items_for_uris(&uris, &library::ReadCancellation::new())
+            .await
+            .unwrap();
+        sequence.hydrate(request.into_iter().map(|(id, _)| id).zip(items).collect());
     }
     database.save_queue(&sequence.snapshot()).await.unwrap();
     let runtime = tokio::runtime::Handle::current();
@@ -131,7 +139,7 @@ async fn finish_queue(
     sample: &ClockSample,
 ) {
     session.publish(sample);
-    while session.pending_queue.is_some() {
+    while session.pending_queue.is_some() || session.pending_hydration.is_some() {
         let message = inbox
             .recv_timeout(std::time::Duration::from_secs(5))
             .unwrap();
@@ -208,7 +216,7 @@ async fn continuation_preserves_positions_order_and_one_listen_across_devices() 
         batch_item(2, Provenance::Manual),
     ])
     .await;
-    sequence.shuffle(true, 19, &mut []);
+    sequence.shuffle(true, 19);
     sequence.set_repeat_mode(RepeatMode::All);
     sequence.set_selected_duration(0);
     let mut source = Player::new(
@@ -771,7 +779,7 @@ async fn refill_preserves_live_progress_and_prepared_positions() {
     }
     session.hydrate_queue();
     assert!(
-        session.pending_queue.is_some(),
+        session.pending_hydration.is_some(),
         "replenish after retained history grows"
     );
     assert!(!session.view().queue_loading);
@@ -842,9 +850,9 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
             first = Some((
                 session.pending_queue.as_ref().unwrap().0,
                 database
-                    .read_queue(library::QueueReadRequest::Capture {
+                    .read_queue(library::QueueReadRequest {
                         context_title: None,
-                        input: Box::new(input),
+                        input: input,
                         anchor_index: 0,
                         random_start: None,
                         shuffled: None,
@@ -862,6 +870,67 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
     finish_queue(&mut session, &inbox, &sample).await;
     assert_eq!(session.current_run(), None);
     assert_eq!(session.sequence.selected().unwrap().title, "latest");
+
+    session
+        .handle_command(
+            Command::ApplyBatch {
+                batch: Batch::new(
+                    (0..240)
+                        .map(|index| batch_item(index, Provenance::Manual))
+                        .collect(),
+                ),
+                placement: Placement::Now,
+            },
+            &sample,
+        )
+        .unwrap();
+    finish_queue(&mut session, &inbox, &sample).await;
+    session
+        .handle_command(Command::Activate(239), &sample)
+        .unwrap();
+    session.publish(&sample);
+    assert!(session.pending_hydration.is_some());
+    session.handle_command(Command::Stop, &sample).unwrap();
+    finish_queue(&mut session, &inbox, &sample).await;
+    assert_eq!(session.current_run(), None);
+    assert_eq!(session.sequence.selected_index(), Some(239));
+
+    session
+        .handle_command(Command::Activate(0), &sample)
+        .unwrap();
+    session.publish(&sample);
+    assert!(session.pending_hydration.is_some());
+    let old_id = session.sequence.id_at(0).unwrap();
+    let old_item = database
+        .queue_items_for_uris(
+            &["https://example.test/track-0".into()],
+            &library::ReadCancellation::new(),
+        )
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    session
+        .handle_command(
+            Command::ApplyBatch {
+                batch: Batch::new(vec![batch_item(999, Provenance::Manual)]),
+                placement: Placement::Now,
+            },
+            &sample,
+        )
+        .unwrap();
+    session.complete_queue_metadata(Ok(vec![(old_id, old_item)]), &sample);
+    assert_eq!(
+        session.current_run(),
+        None,
+        "late metadata must not start the superseded selection"
+    );
+    finish_queue(&mut session, &inbox, &sample).await;
+    assert_eq!(
+        session.sequence.selected().unwrap().media_uri,
+        "https://example.test/track-999"
+    );
+    assert!(session.current_run().is_some());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1482,7 +1551,7 @@ async fn gapless_preparation_resolves_exactly_the_next_position() {
     let plan = session.next_plan.as_ref().unwrap();
     let next_run = plan.next_run;
     let next_identifier = session.play_id(next_run);
-    assert_eq!(plan.position, Some(1));
+    assert_eq!(Some(plan.occurrence), session.sequence.id_at(1));
     assert_eq!(
         plan.request.media_uri,
         library::source_entity_uri(&source_id, "track", "plex:track:2")
@@ -1799,10 +1868,7 @@ async fn receiver_observation_keeps_global_queue_facts_without_commands_or_dupli
             .any(|command| matches!(command, BackendCommand::Start { .. }))
     );
     assert_eq!(session.view().transport.state, TransportStatus::Paused);
-    assert_eq!(
-        session.take_queue_persistence(),
-        Some(QueuePersistenceKind::Membership)
-    );
+    assert!(session.take_queue_persistence().unwrap().replace);
     assert_eq!(
         session.view().transport.current.unwrap().row.position,
         selected
@@ -2141,20 +2207,20 @@ async fn repeat_wraps_when_source_exhaustion_is_discovered_after_a_full_page() {
         .unwrap()
         .unwrap();
     let page = db
-        .read_queue(library::QueueReadRequest::Capture {
+        .read_queue(library::QueueReadRequest {
             context_title: None,
-            input: Box::new(library::QueueInput::Collection {
+            input: library::QueueInput::Collection {
                 collection: library::QueueCollection::Playlist(key),
                 folder: None,
                 context_id: "source".into(),
-            }),
+            },
             anchor_index: 0,
             random_start: None,
             shuffled: None,
         })
         .await
         .unwrap();
-    sequence.add_page(page, QueueReorderTarget::End, true, None, &mut []);
+    sequence.add_page(page, QueueReorderTarget::End, true, None);
     let mut session = Player::new(
         sequence,
         "repeat",
@@ -2212,7 +2278,7 @@ async fn removing_the_visible_window_continues_with_the_unbuffered_source() {
         .iter()
         .map(|row| row.position.clone())
         .collect::<Vec<_>>();
-    session.remove_many(&ids, &sample);
+    session.remove_many(&playback::QueueSelection::Positions(ids), &sample);
     finish_queue(&mut session, &inbox, &sample).await;
     assert_eq!(
         session.sequence.selected().unwrap().media_uri,

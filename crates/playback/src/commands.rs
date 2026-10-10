@@ -188,8 +188,14 @@ impl PlayRequest {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum QueueSelection {
+    Positions(Vec<usize>),
+    Occurrences(Vec<u64>),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueueReorderRequest {
-    pub positions: Vec<usize>,
+    pub selection: QueueSelection,
     pub target: QueueReorderTarget,
 }
 
@@ -236,9 +242,11 @@ pub trait QueueCommandPort: Send + Sync {
     fn play(&self, request: PlayRequest);
     fn insert(&self, input: library::QueueInput, target: QueueReorderTarget);
     fn remove(&self, position: usize);
-    fn remove_many(&self, positions: Vec<usize>);
+    fn remove_many(&self, selection: QueueSelection);
     fn activate(&self, position: usize);
+    fn activate_occurrence(&self, occurrence_id: u64);
     fn move_after_current(&self, position: usize);
+    fn move_occurrence_after_current(&self, occurrence_id: u64);
     fn reorder(&self, request: QueueReorderRequest);
     fn clear(&self, include_current: bool);
 }
@@ -397,9 +405,9 @@ mod tests {
             false,
         );
         let page = database
-            .read_queue(library::QueueReadRequest::Capture {
+            .read_queue(library::QueueReadRequest {
                 context_title: None,
-                input: Box::new(request.batch.input.clone()),
+                input: request.batch.input.clone(),
                 anchor_index: 0,
                 random_start: None,
                 shuffled: None,

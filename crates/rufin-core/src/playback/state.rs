@@ -1,14 +1,14 @@
 use super::{
     PlaybackOwner,
     actor::{PlaybackError, WeakPlayback},
-    queue::{QueuePersistence, QueuePersistenceKind, Sequence, SequenceError},
+    queue::{OccurrenceId, Sequence, SequenceError},
 };
-use playback::QueueReorderTarget;
 use playback::{
     BackendFailure, ControlsView, CurrentMedia, CurrentMediaId, PlaybackBackend, PlaybackNotice,
     PlaybackProjection, PlaybackView, PositionDiscontinuity, SourceReportFact, SourceReportPhase,
     TransportStatus, TransportView,
 };
+use playback::{QueueReorderTarget, QueueSelection};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Weak};
 use tokio::task::JoinHandle;
@@ -71,11 +71,12 @@ pub enum Command {
         placement: Placement,
     },
     Activate(usize),
+    ActivateOccurrence(u64),
     Remove(usize),
-    RemoveMany(Vec<usize>),
+    RemoveMany(QueueSelection),
     Forget(Vec<String>),
     Reorder {
-        positions: Vec<usize>,
+        selection: QueueSelection,
         target: playback::QueueReorderTarget,
     },
     Insert {
@@ -83,6 +84,7 @@ pub enum Command {
         target: playback::QueueReorderTarget,
     },
     MoveAfterCurrent(usize),
+    MoveOccurrenceAfterCurrent(u64),
     Clear {
         include_current: bool,
     },
@@ -109,6 +111,31 @@ pub enum Command {
     SetVisualizerEnabled(bool),
     StreamInputsChanged,
     CatalogChanged,
+}
+
+impl Command {
+    pub(super) fn addresses_occurrence(&self) -> bool {
+        matches!(
+            self,
+            Self::ActivateOccurrence(_)
+                | Self::MoveOccurrenceAfterCurrent(_)
+                | Self::RemoveMany(QueueSelection::Occurrences(_))
+                | Self::Reorder {
+                    selection: QueueSelection::Occurrences(_),
+                    ..
+                }
+                | Self::Reorder {
+                    target: QueueReorderTarget::BeforeOccurrence(_)
+                        | QueueReorderTarget::AfterOccurrence(_),
+                    ..
+                }
+                | Self::Insert {
+                    target: QueueReorderTarget::BeforeOccurrence(_)
+                        | QueueReorderTarget::AfterOccurrence(_),
+                    ..
+                }
+        )
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -175,7 +202,7 @@ enum NextResolution {
 struct NextPlan {
     current_run: RunId,
     next_run: RunId,
-    position: Option<usize>,
+    occurrence: OccurrenceId,
     request: StreamRequest,
     transition: NextTransition,
     resolution: NextResolution,
@@ -195,9 +222,6 @@ enum QueueCompletion {
     Insert {
         target: QueueReorderTarget,
     },
-    Hydrate {
-        revision: u64,
-    },
 }
 
 pub(super) struct Player {
@@ -213,6 +237,7 @@ pub(super) struct Player {
     external_clock_millis: u64,
     sequence: Sequence,
     pending_queue: Option<(u64, QueueCompletion, JoinHandle<()>)>,
+    pending_hydration: Option<JoinHandle<()>>,
     queue_loading: bool,
     next_queue_request: u64,
     queue_transport: Option<TransportStatus>,
@@ -268,6 +293,7 @@ impl Player {
             external_clock_millis: 0,
             sequence,
             pending_queue: None,
+            pending_hydration: None,
             queue_loading: false,
             next_queue_request: 1,
             queue_transport: None,
@@ -303,6 +329,27 @@ impl Player {
 
     pub(super) fn sequence(&self) -> &Sequence {
         &self.sequence
+    }
+
+    pub(super) fn page_entries(
+        &self,
+        offset: usize,
+        limit: usize,
+    ) -> (Vec<(usize, Option<u64>, library::QueueEntry)>, usize) {
+        let rows = self
+            .sequence
+            .page_entries(offset, limit)
+            .into_iter()
+            .map(|(position, entry)| {
+                let id = self
+                    .external
+                    .is_none()
+                    .then(|| self.sequence.id_at(position).map(|id| id.0))
+                    .flatten();
+                (position, id, entry)
+            })
+            .collect();
+        (rows, self.sequence.total())
     }
 
     pub(super) fn continuation(&mut self, sample: &ClockSample) -> Option<playback::Continuation> {
@@ -375,7 +422,8 @@ impl Player {
         queue.progress_millis = header.position_millis.min(i64::MAX as u64) as i64;
         queue.repeat_mode = header.repeat;
         queue.shuffled = header.shuffled;
-        let sequence = Sequence::from_window(queue, self.sequence.revision() + 1)?;
+        let sequence =
+            Sequence::from_window(queue, self.sequence.revision() + 1, self.sequence.next_id())?;
         if sequence.selected().is_none() {
             return Err(SequenceError::MissingSelectedEntry.into());
         }
@@ -411,7 +459,9 @@ impl Player {
 
     pub(super) fn handoff_snapshot(&self) -> (library::QueueRestore, Option<SourceReportFact>) {
         if self.external.is_some() {
-            return (self.sequence.snapshot(), None);
+            let mut queue = self.sequence.snapshot();
+            queue.ids = Arc::from([]);
+            return (queue, None);
         }
         let restored = self.sequence.selected().map(|entry| {
             let run = RunId::new(self.next_run_number);
@@ -473,7 +523,9 @@ impl Player {
         let sequence = observation
             .queue
             .take()
-            .map(|queue| Sequence::from_window(queue, self.sequence.revision() + 1))
+            .map(|queue| {
+                Sequence::from_window(queue, self.sequence.revision() + 1, self.sequence.next_id())
+            })
             .transpose()?;
 
         if self.external.is_none() {
@@ -542,7 +594,8 @@ impl Player {
         playing: bool,
         backend: Box<dyn PlaybackBackend>,
     ) -> Result<(), PlaybackError> {
-        let sequence = Sequence::from_window(queue, self.sequence.revision() + 1)?;
+        let sequence =
+            Sequence::from_window(queue, self.sequence.revision() + 1, self.sequence.next_id())?;
         if sequence.selected().is_none() {
             return Err(SequenceError::MissingSelectedEntry.into());
         }
@@ -576,7 +629,7 @@ impl Player {
             self.sequence.persist_state();
         }
     }
-    pub(super) fn take_queue_persistence(&mut self) -> Option<QueuePersistenceKind> {
+    pub(super) fn take_queue_persistence(&mut self) -> Option<library::QueueUpdate> {
         let dirty = self.sequence.take_persistence();
         if self.external.is_some() { None } else { dirty }
     }
@@ -854,6 +907,9 @@ impl Player {
         command: Command,
         sample: &ClockSample,
     ) -> Result<(), SequenceError> {
+        if self.external.is_some() && command.addresses_occurrence() {
+            return Ok(());
+        }
         if self.pending_queue.is_some()
             && matches!(
                 &command,
@@ -877,12 +933,24 @@ impl Player {
             } => self.observe_external(output, observation, sample),
             Command::ApplyBatch { batch, placement } => self.apply_batch(batch, placement, sample),
             Command::Activate(position) => Ok(self.activate(&position, sample)),
+            Command::ActivateOccurrence(id) => Ok({
+                if let Some(position) = self.sequence.index_of(OccurrenceId(id)) {
+                    self.activate_index(position, sample);
+                }
+            }),
             Command::Remove(position) => Ok(self.remove(&position, sample)),
-            Command::RemoveMany(positions) => Ok(self.remove_many(&positions, sample)),
+            Command::RemoveMany(selection) => Ok(self.remove_many(&selection, sample)),
             Command::Forget(positions) => Ok(self.forget(&positions, sample)),
-            Command::Reorder { positions, target } => Ok(self.reorder(&positions, &target, sample)),
+            Command::Reorder { selection, target } => Ok(self.reorder(&selection, &target, sample)),
             Command::Insert { input, target } => Ok(self.insert(input, &target)),
             Command::MoveAfterCurrent(position) => Ok(self.move_after_current(&position, sample)),
+            Command::MoveOccurrenceAfterCurrent(id) => Ok({
+                let target = self
+                    .sequence
+                    .selected_index()
+                    .map_or(QueueReorderTarget::End, QueueReorderTarget::After);
+                self.reorder(&QueueSelection::Occurrences(vec![id]), &target, sample);
+            }),
             Command::Clear { include_current } => Ok(self.clear(include_current, sample)),
             Command::PlayPause => Ok(self.play_pause()),
             Command::Play => Ok(self.set_playing(true)),
@@ -939,9 +1007,7 @@ impl Player {
         }) else {
             return;
         };
-        stream.row = plan
-            .position
-            .and_then(|position| self.sequence.at(position).cloned());
+        stream.row = self.sequence.at_id(plan.occurrence).cloned();
         plan.resolution = NextResolution::Ready(stream.clone());
 
         if self.current_run.as_ref().is_some_and(|current| {
@@ -1227,18 +1293,21 @@ impl Player {
             batch.input.clear_anchor();
         }
         let target = match placement {
-            Placement::AfterCurrent => self
-                .sequence
-                .selected()
-                .map_or(QueueReorderTarget::End, |row| {
-                    QueueReorderTarget::After(row.position.clone())
-                }),
+            Placement::AfterCurrent => {
+                self.sequence
+                    .selected()
+                    .map_or(QueueReorderTarget::End, |row| {
+                        QueueReorderTarget::AfterOccurrence(
+                            row.occurrence_id.expect("local queue entry"),
+                        )
+                    })
+            }
             _ => QueueReorderTarget::End,
         };
         Ok(self.request_queue(
-            library::QueueReadRequest::Capture {
+            library::QueueReadRequest {
                 context_title: batch.context_title,
-                input: Box::new(batch.input),
+                input: batch.input,
                 anchor_index: anchor,
                 random_start: batch.random_start.then_some(batch.shuffle_seed),
                 shuffled: batch.shuffled.then_some(batch.shuffle_seed),
@@ -1264,29 +1333,88 @@ impl Player {
     fn request_queue(&mut self, request: library::QueueReadRequest, completion: QueueCompletion) {
         let id = self.next_queue_request;
         self.next_queue_request = id.wrapping_add(1);
-        self.queue_loading |= !matches!(completion, QueueCompletion::Hydrate { .. });
+        self.queue_loading = true;
         self.cancel_queue_read();
-        let task = self.owner().read_queue(self.playback.clone(), id, request);
+        let owner = self.owner();
+        let database = owner.database.clone();
+        let playback = self.playback.clone();
+        let task = owner.runtime.spawn(async move {
+            let result = database
+                .read_queue(request)
+                .await
+                .map_err(super::string_error);
+            playback.post(move |player, sample| {
+                if let Err(error) = player.complete_queue(id, result, sample) {
+                    player.report_error(error.to_string());
+                }
+            });
+        });
         self.pending_queue = Some((id, completion, task));
         self.dirty = true;
     }
 
     pub(super) fn hydrate_queue(&mut self) {
-        // Receiver observations already contain a hydrated, centered window. Local
-        // hydration would trim its leading rows and move the visible selection.
-        if self.external.is_some() || self.pending_queue.is_some() {
+        if self.external.is_some()
+            || self.pending_queue.is_some()
+            || self.pending_hydration.is_some()
+        {
             return;
         }
-        let Some(request) = self.sequence.read_request() else {
+        let Some(entries) = self.sequence.read_request() else {
             self.queue_loading = false;
             return;
         };
-        self.request_queue(
-            request,
-            QueueCompletion::Hydrate {
-                revision: self.sequence.revision(),
-            },
-        );
+        let owner = self.owner();
+        let database = owner.database.clone();
+        let playback = self.playback.clone();
+        self.pending_hydration = Some(owner.runtime.spawn(async move {
+            let uris = entries
+                .iter()
+                .map(|(_, entry)| entry.media_uri.to_string())
+                .collect::<Vec<_>>();
+            let result = database
+                .queue_items_for_uris(&uris, &library::ReadCancellation::new())
+                .await
+                .map(|items| entries.into_iter().map(|(id, _)| id).zip(items).collect())
+                .map_err(super::string_error);
+            playback.post(move |player, sample| player.complete_queue_metadata(result, sample));
+        }));
+    }
+
+    fn complete_queue_metadata(
+        &mut self,
+        result: Result<Vec<(OccurrenceId, QueueItem)>, String>,
+        _sample: &ClockSample,
+    ) {
+        self.pending_hydration = None;
+        if self.external.is_some() {
+            return;
+        }
+        match result {
+            Ok(rows) => self.sequence.hydrate(rows),
+            Err(error) => self.report_error(error),
+        }
+        self.dirty = true;
+        if matches!(
+            self.pending_queue,
+            Some((_, QueueCompletion::Replace { .. }, _))
+        ) {
+            return;
+        }
+        if self.current_run.is_none()
+            && self.queue_transport != Some(TransportStatus::Stopped)
+            && !self.restored_paused
+        {
+            self.begin_selected_run();
+            if self.queue_transport == Some(TransportStatus::Paused) {
+                self.set_playing(false);
+            }
+        } else {
+            self.replan_next_if_changed();
+        }
+        if self.sequence.selected().is_some() {
+            self.queue_transport = None;
+        }
     }
 
     fn finish_queue_run(&mut self, sample: &ClockSample, reason: RunEndReason) {
@@ -1296,41 +1424,8 @@ impl Player {
         self.finish_current(reason, sample);
     }
 
-    fn edit_queue(&mut self, edit: impl FnOnce(&mut Sequence, &mut [Option<usize>])) {
-        if matches!(
-            self.pending_queue,
-            Some((_, QueueCompletion::Hydrate { .. }, _))
-        ) {
-            self.cancel_queue_read();
-        }
-        let target = match &self.pending_queue {
-            Some((
-                _,
-                QueueCompletion::Insert {
-                    target: QueueReorderTarget::Before(i) | QueueReorderTarget::After(i),
-                },
-                _,
-            )) => Some(*i),
-            _ => None,
-        };
-        let mut positions = [
-            self.next_plan.as_ref().and_then(|plan| plan.position),
-            target,
-        ];
-        edit(&mut self.sequence, &mut positions);
-        if let Some(plan) = self.next_plan.as_mut() {
-            plan.position = positions[0];
-            if let NextResolution::Ready(stream) = &mut plan.resolution {
-                stream.row = plan.position.and_then(|i| self.sequence.at(i).cloned());
-            }
-        }
-        if let Some((_, QueueCompletion::Insert { target }, _)) = &mut self.pending_queue {
-            *target = match (&*target, positions[1]) {
-                (QueueReorderTarget::Before(_), Some(i)) => QueueReorderTarget::Before(i),
-                (QueueReorderTarget::After(_), Some(i)) => QueueReorderTarget::After(i),
-                _ => QueueReorderTarget::End,
-            };
-        }
+    fn edit_queue(&mut self, edit: impl FnOnce(&mut Sequence)) {
+        edit(&mut self.sequence);
         if let (Some(run), Some(row)) = (self.current_run.as_mut(), self.sequence.selected()) {
             run.row = row.clone();
             if let Some(stream) = &mut run.resolved_stream {
@@ -1394,25 +1489,6 @@ impl Player {
                 self.dirty = true;
             }
             Ok(page) => match completion {
-                QueueCompletion::Hydrate { revision } => {
-                    if revision == self.sequence.revision() {
-                        self.sequence.hydrate(page);
-                    } else {
-                        self.sequence.need_metadata();
-                    }
-                    self.dirty = true;
-                    if self.current_run.is_none()
-                        && self.queue_transport != Some(TransportStatus::Stopped)
-                        && !self.restored_paused
-                    {
-                        self.begin_selected_run();
-                        if self.queue_transport == Some(TransportStatus::Paused) {
-                            self.set_playing(false);
-                        }
-                    } else {
-                        self.replan_next_if_changed();
-                    }
-                }
                 QueueCompletion::Replace { seed, random_start } => {
                     self.finish_queue_run(sample, RunEndReason::ManualSkip);
                     self.sequence.add_page(
@@ -1420,7 +1496,6 @@ impl Player {
                         QueueReorderTarget::End,
                         true,
                         if random_start { None } else { seed },
-                        &mut [],
                     );
                     if random_start {
                         self.sequence.random_start(seed.unwrap_or(0));
@@ -1432,9 +1507,7 @@ impl Player {
                     let advance =
                         self.auto_dj_waiting_for_continuation && self.current_run.is_none();
                     let had_current = self.sequence.selected_index().is_some();
-                    self.edit_queue(|sequence, pending| {
-                        sequence.add_page(page, target, false, None, pending)
-                    });
+                    self.edit_queue(|sequence| sequence.add_page(page, target, false, None));
                     if advance {
                         self.sequence.advance_index(false);
                         self.auto_dj_waiting_for_continuation = false;
@@ -1498,19 +1571,24 @@ impl Player {
     }
 
     fn remove(&mut self, id: &usize, sample: &ClockSample) {
-        self.remove_many(std::slice::from_ref(id), sample)
+        self.remove_many(&QueueSelection::Positions(vec![*id]), sample)
     }
-    fn remove_many(&mut self, ids: &[usize], sample: &ClockSample) {
-        let previous = self.sequence.selected_index();
-        if previous.as_ref().is_some_and(|id| ids.contains(id)) {
-            self.finish_queue_run(sample, RunEndReason::ManualSkip)
+    fn remove_many(&mut self, selection: &QueueSelection, sample: &ClockSample) {
+        let previous = self
+            .sequence
+            .selected_index()
+            .and_then(|i| self.sequence.id_at(i));
+        let removing_current = previous.is_some_and(|id| match selection {
+            QueueSelection::Positions(positions) => positions
+                .iter()
+                .any(|&i| self.sequence.id_at(i) == Some(id)),
+            QueueSelection::Occurrences(ids) => ids.contains(&id.0),
+        });
+        if removing_current {
+            self.finish_queue_run(sample, RunEndReason::ManualSkip);
         }
-        self.edit_queue(|sequence, pending| sequence.remove(ids, pending));
-        self.changed_queue(
-            previous.is_some_and(|position| ids.contains(&position)),
-            false,
-            sample,
-        );
+        self.edit_queue(|sequence| sequence.remove(selection));
+        self.changed_queue(removing_current, false, sample);
     }
     fn forget(&mut self, uris: &[String], sample: &ClockSample) {
         let uris = uris
@@ -1528,28 +1606,47 @@ impl Player {
         if previous.as_ref().is_some_and(|id| ids.contains(id)) {
             self.finish_queue_run(sample, RunEndReason::Stopped)
         }
-        self.edit_queue(|sequence, pending| sequence.remove(&ids, pending));
+        self.edit_queue(|sequence| sequence.remove(&QueueSelection::Positions(ids.clone())));
         self.changed_queue(
             previous.is_some_and(|position| ids.contains(&position)),
             true,
             sample,
         );
     }
-    fn reorder(&mut self, ids: &[usize], target: &QueueReorderTarget, sample: &ClockSample) {
-        self.edit_queue(|sequence, pending| sequence.reorder(ids, target, pending));
+    fn reorder(
+        &mut self,
+        selection: &QueueSelection,
+        target: &QueueReorderTarget,
+        sample: &ClockSample,
+    ) {
+        self.edit_queue(|sequence| sequence.reorder(selection, target));
         self.changed_queue(false, false, sample)
     }
     fn insert(&mut self, input: library::QueueInput, target: &QueueReorderTarget) {
         self.request_queue(
-            library::QueueReadRequest::Capture {
+            library::QueueReadRequest {
                 context_title: None,
-                input: Box::new(input),
+                input: input,
                 anchor_index: 0,
                 random_start: None,
                 shuffled: None,
             },
             QueueCompletion::Insert {
-                target: target.clone(),
+                target: match target {
+                    QueueReorderTarget::Before(i) => self
+                        .sequence
+                        .id_at(*i)
+                        .map_or(QueueReorderTarget::End, |id| {
+                            QueueReorderTarget::BeforeOccurrence(id.0)
+                        }),
+                    QueueReorderTarget::After(i) => self
+                        .sequence
+                        .id_at(*i)
+                        .map_or(QueueReorderTarget::End, |id| {
+                            QueueReorderTarget::AfterOccurrence(id.0)
+                        }),
+                    target => target.clone(),
+                },
             },
         )
     }
@@ -1558,9 +1655,9 @@ impl Player {
             .sequence
             .selected()
             .map_or(QueueReorderTarget::End, |row| {
-                QueueReorderTarget::After(row.position.clone())
+                QueueReorderTarget::AfterOccurrence(row.occurrence_id.expect("local queue entry"))
             });
-        self.reorder(std::slice::from_ref(id), &target, sample)
+        self.reorder(&QueueSelection::Positions(vec![*id]), &target, sample)
     }
     fn clear(&mut self, include_current: bool, sample: &ClockSample) {
         let previous = self.sequence.selected_index();
@@ -1571,7 +1668,7 @@ impl Player {
         self.queue_loading = false;
         self.deferred_queue.clear();
         let removing_current = include_current || self.current_run.is_none();
-        self.edit_queue(|sequence, pending| sequence.clear(removing_current, pending));
+        self.edit_queue(|sequence| sequence.clear(removing_current));
         self.changed_queue(removing_current && previous.is_some(), true, sample);
     }
 
@@ -1584,7 +1681,7 @@ impl Player {
     }
 
     fn set_playing(&mut self, desired_playing: bool) {
-        if self.pending_queue.is_some() {
+        if self.pending_queue.is_some() || self.pending_hydration.is_some() {
             self.queue_transport = Some(if desired_playing {
                 TransportStatus::Playing
             } else {
@@ -1670,7 +1767,7 @@ impl Player {
 
     fn stop(&mut self, sample: &ClockSample, reset_position: bool) {
         self.failed_run = None;
-        if self.pending_queue.is_some() {
+        if self.pending_queue.is_some() || self.pending_hydration.is_some() {
             self.queue_transport = Some(TransportStatus::Stopped);
         }
         let Some(run) = self.current_run.as_ref() else {
@@ -1723,7 +1820,8 @@ impl Player {
             self.maybe_request_auto_dj();
             return;
         };
-        self.next_plan = reserved.filter(|plan| plan.position == Some(next_position));
+        self.next_plan =
+            reserved.filter(|plan| Some(plan.occurrence) == self.sequence.id_at(next_position));
         self.promote_or_begin(next_position, true);
     }
 
@@ -1847,7 +1945,7 @@ impl Player {
         if self.sequence.shuffle_enabled() == enabled {
             return;
         }
-        self.edit_queue(|sequence, pending| sequence.shuffle(enabled, seed, pending));
+        self.edit_queue(|sequence| sequence.shuffle(enabled, seed));
         self.dirty = true;
         self.replan_next_if_changed();
     }
@@ -2094,7 +2192,8 @@ impl Player {
         self.finish_current(RunEndReason::Completed, sample);
         let next = self.sequence.advance_index(true);
         if let Some(next) = next {
-            self.next_plan = reserved.filter(|plan| plan.position == Some(next));
+            self.next_plan =
+                reserved.filter(|plan| Some(plan.occurrence) == self.sequence.id_at(next));
             self.promote_or_begin(next, desired_playing);
         } else {
             self.auto_dj_waiting_for_continuation = true;
@@ -2124,7 +2223,11 @@ impl Player {
             self.accept_ended(old_run, sample);
             return;
         }
-        let Some(position) = self.next_plan.as_ref().and_then(|plan| plan.position) else {
+        let Some(position) = self
+            .next_plan
+            .as_ref()
+            .and_then(|plan| self.sequence.index_of(plan.occurrence))
+        else {
             return;
         };
         let transitioned_stream = self.next_plan.as_ref().and_then(|plan| {
@@ -2153,7 +2256,7 @@ impl Player {
         let plan = self
             .next_plan
             .take()
-            .filter(|plan| plan.position == Some(position));
+            .filter(|plan| Some(plan.occurrence) == self.sequence.id_at(position));
         let Some(plan) = plan else {
             self.begin_selected_run();
             if !desired_playing && let Some(current) = self.current_run.as_mut() {
@@ -2237,11 +2340,11 @@ impl Player {
             return;
         };
         let current_run = current.id;
-        let current_position = current.row.position;
+        let current_occurrence = current.row.occurrence_id;
         let Some(_) = self
             .sequence
             .selected()
-            .filter(|entry| entry.position == current_position)
+            .filter(|entry| entry.occurrence_id == current_occurrence)
         else {
             self.next_plan = None;
             return;
@@ -2265,7 +2368,7 @@ impl Player {
         if !force
             && self.next_plan.as_ref().is_some_and(|plan| {
                 plan.current_run == current_run
-                    && plan.position == Some(next.position)
+                    && Some(plan.occurrence.0) == next.occurrence_id
                     && plan.request == request
                     && plan.transition == transition
             })
@@ -2282,7 +2385,7 @@ impl Player {
         self.next_plan = Some(NextPlan {
             current_run,
             next_run,
-            position: Some(next.position),
+            occurrence: OccurrenceId(next.occurrence_id.expect("local queue entry")),
             request: request.clone(),
             transition,
             resolution: NextResolution::Resolving,
@@ -2583,8 +2686,10 @@ impl Player {
         let offset = self.external_queue_extent().map_or(0, |(_, offset)| offset);
         let projected_row = |row: &Arc<QueueRow>| {
             let mut row = row.clone();
-            if offset != 0 {
-                Arc::make_mut(&mut row).position += offset;
+            if self.external.is_some() {
+                let row = Arc::make_mut(&mut row);
+                row.position += offset;
+                row.occurrence_id = None;
             }
             row
         };
@@ -2721,9 +2826,8 @@ impl Player {
             }
         });
         let persistence = self.take_queue_persistence();
-        if let Some(kind) = persistence {
-            self.owner()
-                .save_queue(QueuePersistence::capture(&self.sequence, kind));
+        if let Some(update) = persistence {
+            self.owner().save_queue(update);
         }
         let current_media_changed = std::mem::take(&mut self.current_media_changed);
         if current_media_changed && self.current_run.is_some() {
@@ -2777,6 +2881,9 @@ impl Player {
 
     pub(super) fn shutdown_backend(&mut self) -> Result<(), playback::BackendError> {
         self.cancel_queue_read();
+        if let Some(task) = self.pending_hydration.take() {
+            task.abort();
+        }
         for (_, task) in self.stream_tasks.drain() {
             task.abort();
         }
@@ -2787,6 +2894,9 @@ impl Player {
 impl Drop for Player {
     fn drop(&mut self) {
         self.cancel_queue_read();
+        if let Some(task) = self.pending_hydration.take() {
+            task.abort();
+        }
         for (_, task) in self.stream_tasks.drain() {
             task.abort();
         }

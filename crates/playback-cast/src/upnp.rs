@@ -1843,6 +1843,7 @@ mod tests {
 
     fn test_row() -> playback::QueueRow {
         playback::QueueRow {
+            occurrence_id: None,
             position: 0,
             received_from_connect: false,
             playlist_entry_id: None,

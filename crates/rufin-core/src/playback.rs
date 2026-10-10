@@ -24,13 +24,14 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use crate::runtime::VisualizerPublication;
 use actor::{Playback, WeakPlayback};
 use async_channel::{Receiver, Sender as EventSender, TrySendError};
+use library::QueueUpdate;
 use library::{Database, ListenWrite, ReadCancellation};
 use playback::{
     PlayRequest, PlaybackBackend, PlaybackProjection, PreparedStream, QueueCommandPort,
     QueueReorderRequest, RadioCommandPort, RadioPlayRequest, RandomPlayRequest, RepeatMode, RunId,
     StreamRequest, TransportCommandPort,
 };
-use queue::{QueuePersistence, QueuePersistenceKind, Sequence};
+use queue::Sequence;
 use scrobbling::Scrobbler;
 use state::{AutoDjRequest, ClockSample, Command};
 use tracing::{debug, warn};
@@ -62,7 +63,7 @@ pub(crate) struct PlaybackOwner {
     source: Mutex<std::sync::Weak<SourceOwner>>,
     connect: Mutex<std::sync::Weak<crate::connect::ConnectOwner>>,
     active: Mutex<Option<Playback>>,
-    pending_queue: Mutex<Option<QueuePersistence>>,
+    pending_queue: Mutex<Option<QueueUpdate>>,
     store_sender: async_channel::Sender<PlaybackStoreWork>,
     monotonic_origin: Instant,
     start_backend: Box<dyn Fn() -> Result<Box<dyn PlaybackBackend>, String> + Send + Sync>,
@@ -89,9 +90,9 @@ enum PlaybackStoreWork {
 }
 
 fn enqueue_queue_save(
-    pending: &Mutex<Option<QueuePersistence>>,
+    pending: &Mutex<Option<QueueUpdate>>,
     sender: &async_channel::Sender<PlaybackStoreWork>,
-    update: QueuePersistence,
+    update: QueueUpdate,
 ) {
     let mut pending = pending.lock().unwrap_or_else(|p| p.into_inner());
     if let Some(current) = pending.as_mut() {
@@ -104,24 +105,23 @@ fn enqueue_queue_save(
 
 async fn save_pending_queue(
     database: &Database,
-    pending: &Mutex<Option<QueuePersistence>>,
+    pending: &Mutex<Option<QueueUpdate>>,
+    failed: &mut Option<QueueUpdate>,
 ) -> library::LibraryResult<()> {
-    let state = pending.lock().unwrap_or_else(|p| p.into_inner()).take();
-    let Some(state) = state else { return Ok(()) };
-    match state.kind() {
-        QueuePersistenceKind::Membership => database.save_queue(state.state()).await,
-        QueuePersistenceKind::Order => database.save_queue_order(state.state()).await,
-        QueuePersistenceKind::State => {
-            database
-                .persist_queue_settings(
-                    state.current(),
-                    state.progress_millis() as i64,
-                    state.repeat_mode(),
-                    state.shuffled(),
-                )
-                .await
+    let pending = pending.lock().unwrap_or_else(|p| p.into_inner()).take();
+    let update = match (failed.take(), pending) {
+        (Some(mut older), Some(newer)) => {
+            older.coalesce(newer);
+            older
         }
+        (Some(update), None) | (None, Some(update)) => update,
+        (None, None) => return Ok(()),
+    };
+    if let Err(error) = database.apply_queue_update(&update).await {
+        *failed = Some(update);
+        return Err(error);
     }
+    Ok(())
 }
 
 impl PlaybackOwner {
@@ -185,9 +185,10 @@ impl PlaybackOwner {
         });
         let weak = Arc::downgrade(&owner);
         owner.runtime.spawn(async move {
+            let mut failed_queue_save = None;
             while let Ok(work) = store_receiver.recv().await {
                 let Some(owner) = weak.upgrade() else { break };
-                owner.consume_store(work).await;
+                owner.consume_store(work, &mut failed_queue_save).await;
             }
         });
         owner
@@ -212,7 +213,7 @@ impl PlaybackOwner {
                     restore.repeat_mode = stored.ui.repeat_mode;
                     restore.shuffled = stored.ui.shuffle_enabled;
                 }
-                Sequence::from_window(restore, 0).map_err(string_error)
+                Sequence::from_window(restore, 0, 0).map_err(string_error)
             }
             Err(error) => Err(string_error(error)),
         }.unwrap_or_else(|error| {
@@ -309,7 +310,7 @@ impl PlaybackOwner {
         }
     }
 
-    fn save_queue(&self, state: QueuePersistence) {
+    fn save_queue(&self, state: QueueUpdate) {
         enqueue_queue_save(&self.pending_queue, &self.store_sender, state);
     }
 
@@ -321,14 +322,20 @@ impl PlaybackOwner {
         });
     }
 
-    async fn consume_store(&self, work: PlaybackStoreWork) {
+    async fn consume_store(
+        &self,
+        work: PlaybackStoreWork,
+        failed_queue_save: &mut Option<QueueUpdate>,
+    ) {
         match work {
             PlaybackStoreWork::Continue { prepared, reply } => {
-                let _ = reply.send(self.commit_continuation(*prepared).await);
+                let _ = reply.send(self.commit_continuation(*prepared, failed_queue_save).await);
             }
             PlaybackStoreWork::Activity(activity) => self.store_activity(*activity).await,
             PlaybackStoreWork::Flush(reply) => {
-                if let Err(error) = save_pending_queue(&self.database, &self.pending_queue).await {
+                if let Err(error) =
+                    save_pending_queue(&self.database, &self.pending_queue, failed_queue_save).await
+                {
                     warn!(%error, "could not persist Queue");
                 }
                 let _ = reply.send(());
@@ -346,42 +353,13 @@ impl PlaybackOwner {
                 });
             }
             PlaybackStoreWork::Settings => {
-                if let Err(error) = save_pending_queue(&self.database, &self.pending_queue).await {
+                if let Err(error) =
+                    save_pending_queue(&self.database, &self.pending_queue, failed_queue_save).await
+                {
                     warn!(%error, "could not persist Queue");
                 }
             }
         }
-    }
-
-    fn read_queue(
-        self: &Arc<Self>,
-        playback: WeakPlayback,
-        id: u64,
-        request: library::QueueReadRequest,
-    ) -> tokio::task::JoinHandle<()> {
-        let owner = Arc::clone(self);
-        self.runtime.spawn(async move {
-            let hydrate_entries = match &request {
-                library::QueueReadRequest::Hydrate { entries } => Some(entries.clone()),
-                _ => None,
-            };
-            let result = owner
-                .database
-                .read_queue(request)
-                .await
-                .map_err(string_error);
-            let result = match (hydrate_entries, result) {
-                (Some(entries), Ok(page)) => {
-                    owner.import_missing_plex_queue_rows(entries, page).await
-                }
-                (_, result) => result,
-            };
-            playback.post(move |player, sample| {
-                if let Err(error) = player.complete_queue(id, result, sample) {
-                    player.report_error(error.to_string());
-                }
-            });
-        })
     }
 
     fn refresh_artwork(&self, playback: WeakPlayback, media_uris: Vec<String>) {
@@ -642,13 +620,16 @@ impl PlaybackOwner {
         })
     }
     fn send(&self, command: Command) {
-        let command = match self.send_rufin(command) {
-            Some(command) => command,
-            None => return,
-        };
-        let command = match self.send_plex(command) {
-            Some(command) => command,
-            None => return,
+        let command = if command.addresses_occurrence() {
+            command
+        } else {
+            let Some(command) = self.send_rufin(command) else {
+                return;
+            };
+            let Some(command) = self.send_plex(command) else {
+                return;
+            };
+            command
         };
         if let Some(active) = self.active() {
             if let Err(error) = active.command(command) {
@@ -808,18 +789,24 @@ impl QueueCommandPort for PlaybackOwner {
     fn remove(&self, position: usize) {
         self.send(Command::Remove(position));
     }
-    fn remove_many(&self, positions: Vec<usize>) {
-        self.send(Command::RemoveMany(positions));
+    fn remove_many(&self, selection: playback::QueueSelection) {
+        self.send(Command::RemoveMany(selection));
     }
     fn activate(&self, position: usize) {
         self.send(Command::Activate(position));
+    }
+    fn activate_occurrence(&self, id: u64) {
+        self.send(Command::ActivateOccurrence(id));
+    }
+    fn move_occurrence_after_current(&self, id: u64) {
+        self.send(Command::MoveOccurrenceAfterCurrent(id));
     }
     fn move_after_current(&self, position: usize) {
         self.send(Command::MoveAfterCurrent(position));
     }
     fn reorder(&self, request: QueueReorderRequest) {
         self.send(Command::Reorder {
-            positions: request.positions,
+            selection: request.selection,
             target: request.target,
         });
     }
@@ -1318,6 +1305,7 @@ mod tests {
 
     fn test_occurrence(source_format: &str) -> playback::QueueRow {
         playback::QueueRow {
+            occurrence_id: None,
             item: test_media(source_format),
             position: 0,
             received_from_connect: false,

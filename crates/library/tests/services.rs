@@ -1090,6 +1090,7 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
         &fixture.database,
         fixture.source,
         &[QueueRow {
+            occurrence_id: None,
             playlist_entry_id: None,
             received_from_connect: false,
             item: queue_media,

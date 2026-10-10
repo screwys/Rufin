@@ -78,9 +78,9 @@ pub use playlists::{
 };
 pub use queue::{
     QUEUE_CONTEXT_LIMIT, QueueChoice, QueueCollection, QueueContextTitle, QueueEntry, QueueInput,
-    QueueItem, QueuePageRow, QueuePlacement, QueueProvenance, QueueQuery, QueueReadPage,
-    QueueReadRequest, QueueReorderTarget, QueueRepeatMode, QueueRestore, QueueRow, QueueScope,
-    QueueSource, QueueTransferPage, queue_content_id, shuffle_order,
+    QueueItem, QueueOrderUpdate, QueuePageRow, QueuePlacement, QueueProvenance, QueueQuery,
+    QueueReadPage, QueueReadRequest, QueueReorderTarget, QueueRepeatMode, QueueRestore, QueueRow,
+    QueueScope, QueueSource, QueueTransferPage, QueueUpdate, queue_content_id, shuffle_order,
 };
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
 pub use scan::{

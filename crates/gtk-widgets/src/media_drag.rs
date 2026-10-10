@@ -305,7 +305,7 @@ pub enum MediaDragSource {
     PlaylistEntries(PlaylistEntrySelectionSnapshot),
     MediaUris(std::sync::Arc<[String]>),
     Queue {
-        positions: std::sync::Arc<[usize]>,
+        selection: playback::QueueSelection,
         media_uris: std::sync::Arc<[String]>,
     },
 }

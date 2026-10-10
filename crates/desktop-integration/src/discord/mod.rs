@@ -432,6 +432,7 @@ pub(crate) mod tests {
                 media_uri: media_uri.into(),
             },
             row: Arc::new(QueueRow {
+                occurrence_id: None,
                 position: 0,
                 item: QueueItem {
                     media_uri: library::source_entity_uri(

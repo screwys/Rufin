@@ -1,4 +1,5 @@
 //! Native Companion crossings. PMS owns its queue; observations enter the existing session.
+use library::ReadCancellation;
 #[cfg(test)]
 mod tests;
 use super::*;
@@ -35,7 +36,7 @@ impl PlexPlayback {
         let queue = self.queue.lock().await;
         match queue.as_ref() {
             Some(queue) => format!("plex:{}:{}:{}", context.source_id, queue.id, queue.version),
-            None => library::queue_content_id(&[], &[]),
+            None => library::queue_content_id([]),
         }
     }
 
@@ -94,6 +95,7 @@ impl PlexPlayback {
                 provenance: playback::Provenance::Manual,
             })
             .collect();
+        snapshot.queue.ids = Arc::from([]);
         snapshot.queue.order = (0..items.len() as u32).collect();
         let current = items
             .iter()
@@ -215,9 +217,9 @@ impl PlexPlayback {
         self.current().await?;
         let page = self
             .database
-            .read_queue(library::QueueReadRequest::Capture {
+            .read_queue(library::QueueReadRequest {
                 context_title,
-                input: Box::new(input),
+                input: input,
                 anchor_index: anchor,
                 random_start: None,
                 shuffled,
@@ -347,6 +349,10 @@ impl PlexPlayback {
                         PlexQueuePlacement::After(id)
                     }
                 }
+                Some(
+                    playback::QueueReorderTarget::BeforeOccurrence(_)
+                    | playback::QueueReorderTarget::AfterOccurrence(_),
+                ) => return Ok(()),
                 Some(playback::QueueReorderTarget::End) => PlexQueuePlacement::End,
                 None if placement == playback::QueuePlacement::Next => PlexQueuePlacement::Next,
                 None => PlexQueuePlacement::End,
@@ -542,7 +548,6 @@ impl PlexPlayback {
         window: &PlexQueueWindow,
         timeline: &Timeline,
     ) -> Result<library::QueueRestore, String> {
-        let (source, _) = self.connection();
         let entries: Vec<_> = window
             .items
             .iter()
@@ -553,36 +558,19 @@ impl PlexPlayback {
                 provenance: playback::Provenance::Manual,
             })
             .collect();
-        let mut page = self
+        let rows = self
             .database
-            .read_queue(library::QueueReadRequest::Hydrate {
-                entries: entries.iter().cloned().enumerate().collect(),
-            })
+            .queue_rows_for_entries(
+                &entries.iter().cloned().enumerate().collect::<Vec<_>>(),
+                &ReadCancellation::new(),
+            )
             .await
             .map_err(string_error)?;
-        if page.rows.len() != entries.len() {
-            let keys = window
-                .items
-                .iter()
-                .filter(|item| !page.rows.iter().any(|row| row.media_uri == item.media_uri))
-                .map(|item| item.rating_key.clone())
-                .collect::<Vec<_>>();
-            source
-                .plex_import_items(&self.database, &keys)
-                .await
-                .map_err(string_error)?;
-            page = self
-                .database
-                .read_queue(library::QueueReadRequest::Hydrate {
-                    entries: entries.iter().cloned().enumerate().collect(),
-                })
-                .await
-                .map_err(string_error)?;
-        }
         Ok(library::QueueRestore {
             order: (0..entries.len() as u32).collect(),
             entries: entries.into(),
-            rows: page.rows,
+            rows,
+            ids: Arc::from([]),
             current_index: window
                 .items
                 .iter()
@@ -652,8 +640,13 @@ impl PlexPlayback {
                 self.control(move |client| client.skip_to(&key, id)).await?;
             }
             Command::Remove(position) => self.remove(&[position]).await?,
-            Command::RemoveMany(positions) => self.remove(&positions).await?,
-            Command::Reorder { positions, target } => self.reorder(&positions, &target).await?,
+            Command::RemoveMany(playback::QueueSelection::Positions(positions)) => {
+                self.remove(&positions).await?
+            }
+            Command::Reorder {
+                selection: playback::QueueSelection::Positions(positions),
+                target,
+            } => self.reorder(&positions, &target).await?,
             Command::MoveAfterCurrent(position) => {
                 let timeline = self.current().await?;
                 let queue_id = timeline
@@ -847,6 +840,8 @@ impl PlexPlayback {
             .ok_or("The Plex player has no queue")?;
         let moving = self.items_at(&timeline, positions).await?;
         let mut after = match target {
+            playback::QueueReorderTarget::BeforeOccurrence(_)
+            | playback::QueueReorderTarget::AfterOccurrence(_) => return Ok(()),
             playback::QueueReorderTarget::After(position) => {
                 Some(self.items_at(&timeline, &[*position]).await?[0].occurrence_id)
             }
@@ -1035,57 +1030,6 @@ fn repeat(timeline: &Timeline) -> RepeatMode {
 }
 
 impl PlaybackOwner {
-    /// A pulled native queue retains all lightweight memberships. Resolve only
-    /// the missing Plex metadata requested by the existing local queue window.
-    pub(super) async fn import_missing_plex_queue_rows(
-        &self,
-        entries: Vec<(usize, library::QueueEntry)>,
-        page: library::QueueReadPage,
-    ) -> Result<library::QueueReadPage, String> {
-        let mut missing = std::collections::BTreeMap::<String, Vec<String>>::new();
-        for (_, entry) in &entries {
-            if page
-                .rows
-                .iter()
-                .any(|row| row.media_uri == entry.media_uri.as_ref())
-            {
-                continue;
-            }
-            if let Some((source, kind, key)) = library::source_entity_parts(&entry.media_uri)
-                && kind == "track"
-                && let Some(key) = key.strip_prefix("plex:track:")
-            {
-                missing
-                    .entry(source.to_string())
-                    .or_default()
-                    .push(key.to_owned());
-            }
-        }
-        if missing.is_empty() {
-            return Ok(page);
-        }
-        for (id, mut keys) in missing {
-            keys.sort_unstable();
-            keys.dedup();
-            let owner = self
-                .source_owner()
-                .ok_or("The Plex source is unavailable")?;
-            let source =
-                tokio::task::spawn_blocking(move || owner.client(&sources::SourceId::new(id)))
-                    .await
-                    .map_err(string_error)?
-                    .map_err(string_error)?;
-            source
-                .plex_import_items(&self.database, &keys)
-                .await
-                .map_err(string_error)?;
-        }
-        self.database
-            .read_queue(library::QueueReadRequest::Hydrate { entries })
-            .await
-            .map_err(string_error)
-    }
-
     pub(super) fn request_plex_auto_dj(&self, request: &AutoDjRequest) -> bool {
         let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return false;
@@ -1557,6 +1501,7 @@ impl PlaybackOwner {
                     provenance: playback::Provenance::Manual,
                 })
                 .collect();
+            queue.ids = Arc::from([]);
             queue.order = (0..queue.entries.len() as u32).collect();
             queue.current_index = Some(selected);
             for row in &mut queue.rows {

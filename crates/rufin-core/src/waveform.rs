@@ -429,6 +429,7 @@ mod tests {
         let media = Arc::new(CurrentMedia {
             id: media_id.clone(),
             row: Arc::new(playback::QueueRow {
+                occurrence_id: None,
                 item: playback::QueueItem::direct(
                     library::source_entity_uri(&sources::SourceId::new("remote"), "track", "track"),
                     "Track",

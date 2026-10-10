@@ -80,6 +80,7 @@ impl RufinPlayback {
             }
         }
         let restore = changed.then(|| library::QueueRestore {
+            ids: Arc::from([]),
             entries: state
                 .rows
                 .iter()
@@ -172,8 +173,8 @@ impl RufinPlayback {
     ) -> Result<(), String> {
         let page = self
             .database
-            .read_queue(library::QueueReadRequest::Capture {
-                input: Box::new(input),
+            .read_queue(library::QueueReadRequest {
+                input: input,
                 context_title: title,
                 anchor_index: anchor,
                 random_start: None,
@@ -295,36 +296,45 @@ impl PlaybackOwner {
                 window_offset: 0,
             });
         };
-        let queue = active.handoff_snapshot().map_err(string_error)?.0;
-        let (positions, total) = if filter.trim().is_empty() {
-            let start = (offset as usize).min(queue.order.len());
-            let end = start.saturating_add(limit as usize).min(queue.order.len());
-            ((start..end).collect::<Vec<_>>(), queue.order.len() as u64)
+        let (requested, total) = if filter.trim().is_empty() {
+            let (entries, total) = active
+                .page_entries(offset as usize, limit as usize)
+                .map_err(string_error)?;
+            (entries, total as u64)
         } else {
-            self.database
+            let queue = active.handoff_snapshot().map_err(string_error)?.0;
+            let (positions, total) = self
+                .database
                 .queue_search_page(&queue, &filter, offset, limit)
                 .await
-                .map_err(string_error)?
+                .map_err(string_error)?;
+            let entries = positions
+                .into_iter()
+                .map(|position| {
+                    let index = queue.order[position] as usize;
+                    (
+                        position,
+                        queue.ids.get(index).copied(),
+                        queue.entries[index].clone(),
+                    )
+                })
+                .collect();
+            (entries, total)
         };
-        let entries = positions
-            .into_iter()
-            .map(|position| {
-                (
-                    position,
-                    queue.entries[queue.order[position] as usize].clone(),
-                )
-            })
+        let entries = requested
+            .iter()
+            .map(|(position, _, entry)| (*position, entry.clone()))
             .collect::<Vec<_>>();
-        let page = self
+        let mut rows = self
             .database
-            .read_queue(library::QueueReadRequest::Hydrate {
-                entries: entries.clone(),
-            })
+            .queue_rows_for_entries(&entries, &ReadCancellation::new())
             .await
             .map_err(string_error)?;
-        let page = self.import_missing_plex_queue_rows(entries, page).await?;
+        for (row, (_, id, _)) in rows.iter_mut().zip(requested) {
+            Arc::make_mut(row).occurrence_id = id;
+        }
         Ok(playback::QueuePage {
-            rows: page.rows,
+            rows,
             total,
             window_offset: offset.min(total),
         })
@@ -720,8 +730,13 @@ impl PlaybackOwner {
             Command::Remove(position) => Control::Remove {
                 positions: vec![position],
             },
-            Command::RemoveMany(positions) => Control::Remove { positions },
-            Command::Reorder { positions, target } => Control::Reorder { positions, target },
+            Command::RemoveMany(playback::QueueSelection::Positions(positions)) => {
+                Control::Remove { positions }
+            }
+            Command::Reorder {
+                selection: playback::QueueSelection::Positions(positions),
+                target,
+            } => Control::Reorder { positions, target },
             Command::MoveAfterCurrent(position) => Control::MoveNext { position },
             Command::Clear { include_current } => Control::Clear { include_current },
             command => return Some(command),
