@@ -135,7 +135,7 @@ type LyricsSearchResults = Option<(playback::CurrentMediaId, Vec<lyrics::LyricsS
 
 #[derive(uniffi::Record)]
 pub struct AndroidWaveform {
-    pub occurrence_id: Option<String>,
+    pub media_uri: Option<String>,
     pub media_run: Option<u64>,
     pub peaks: Vec<f64>,
 }
@@ -178,7 +178,7 @@ pub struct AndroidOutputChoices {
 
 #[derive(uniffi::Record)]
 pub struct AndroidQueueRow {
-    pub occurrence_id: String,
+    pub position: u64,
     pub media_uri: String,
     pub title: String,
     pub artist: String,
@@ -194,7 +194,7 @@ pub struct AndroidQueuePage {
     pub total: u64,
     pub window_offset: u64,
     pub window_count: u64,
-    pub current_occurrence: Option<String>,
+    pub current_index: Option<u64>,
     pub rows: Vec<AndroidQueueRow>,
 }
 
@@ -213,7 +213,7 @@ impl AndroidPlayer {
     pub async fn next_waveform(&self) -> Result<AndroidWaveform, AndroidError> {
         let frame = self.waveform.lock().await.recv().await.map_err(error)?;
         Ok(AndroidWaveform {
-            occurrence_id: frame.media_id.as_ref().map(|id| id.occurrence.to_string()),
+            media_uri: frame.media_id.as_ref().map(|id| id.media_uri.to_string()),
             media_run: frame
                 .media_id
                 .as_ref()
@@ -433,7 +433,7 @@ impl AndroidLyricsOperationSubscription {
 }
 
 fn media_token(id: &playback::CurrentMediaId) -> String {
-    serde_json::json!({"occurrence": id.occurrence.to_string(), "run": id.run.map(playback::RunId::get)}).to_string()
+    serde_json::json!({"media_uri": id.media_uri.to_string(), "run": id.run.map(playback::RunId::get)}).to_string()
 }
 
 #[uniffi::export]
@@ -1346,7 +1346,7 @@ impl AndroidPlayer {
                 total: 0,
                 window_offset: 0,
                 window_count: 0,
-                current_occurrence: None,
+                current_index: None,
                 rows: Vec::new(),
             });
         };
@@ -1377,15 +1377,11 @@ impl AndroidPlayer {
             total: view.queue.total as u64,
             window_offset: window_offset as u64,
             window_count: total,
-            current_occurrence: view
-                .queue
-                .current_occurrence
-                .as_ref()
-                .map(ToString::to_string),
+            current_index: view.queue.current_index.map(|position| position as u64),
             rows: rows
                 .into_iter()
                 .map(|row| AndroidQueueRow {
-                    occurrence_id: row.occurrence.to_string(),
+                    position: row.position as u64,
                     media_uri: row.media_uri.clone(),
                     title: row.title.clone(),
                     artist: row.artist.clone(),
@@ -1398,36 +1394,25 @@ impl AndroidPlayer {
         })
     }
 
-    pub fn activate_queue(&self, occurrence_id: String) {
-        self.products
-            .playback
-            .queue
-            .activate(library::OccurrenceId::new(occurrence_id));
+    pub fn activate_queue(&self, position: u64) {
+        self.products.playback.queue.activate(position as usize);
     }
 
-    pub fn remove_queue(&self, occurrence_id: String) {
-        self.products
-            .playback
-            .queue
-            .remove(library::OccurrenceId::new(occurrence_id));
+    pub fn remove_queue(&self, position: u64) {
+        self.products.playback.queue.remove(position as usize);
     }
 
-    pub fn move_queue(
-        &self,
-        occurrence_id: String,
-        target_occurrence: Option<String>,
-        after: bool,
-    ) {
+    pub fn move_queue(&self, position: u64, target_position: Option<u64>, after: bool) {
         self.products
             .playback
             .queue
             .reorder(playback::QueueReorderRequest {
-                occurrences: vec![library::OccurrenceId::new(occurrence_id)],
-                target: target_occurrence.map_or(library::QueueReorderTarget::End, |id| {
+                positions: vec![position as usize],
+                target: target_position.map_or(library::QueueReorderTarget::End, |id| {
                     if after {
-                        library::QueueReorderTarget::After(library::OccurrenceId::new(id))
+                        library::QueueReorderTarget::After(id as usize)
                     } else {
-                        library::QueueReorderTarget::Before(library::OccurrenceId::new(id))
+                        library::QueueReorderTarget::Before(id as usize)
                     }
                 }),
             });
@@ -1798,7 +1783,7 @@ impl AndroidLyricsSnapshot {
 pub struct AndroidLyricsState {
     pub snapshot: Option<Arc<AndroidLyricsSnapshot>>,
     pub current_media_token: Option<String>,
-    pub occurrence_id: Option<String>,
+    pub media_uri: Option<String>,
     pub media_run: Option<u64>,
     pub media_token: Option<String>,
     pub writable: bool,
@@ -1843,7 +1828,7 @@ fn project_lyrics(
     let mut state = AndroidLyricsState {
         snapshot: None,
         current_media_token: None,
-        occurrence_id: None,
+        media_uri: None,
         media_run: None,
         media_token: None,
         writable: false,
@@ -1858,7 +1843,7 @@ fn project_lyrics(
         CurrentLyrics::Loading { media_id } => {
             state.media_run = media_id.run.map(playback::RunId::get);
             state.media_token = Some(media_token(&media_id));
-            state.occurrence_id = Some(media_id.occurrence.to_string());
+            state.media_uri = Some(media_id.media_uri.to_string());
             state.loading = true;
         }
         CurrentLyrics::Ready {
@@ -1867,7 +1852,7 @@ fn project_lyrics(
             state.media_run = media_id.run.map(playback::RunId::get);
             state.media_token = Some(media_token(&media_id));
             state.writable = handle.current_writable(&media_id);
-            state.occurrence_id = Some(media_id.occurrence.to_string());
+            state.media_uri = Some(media_id.media_uri.to_string());
             match content {
                 Some(CurrentLyricsContent::Instrumental) => state.instrumental = true,
                 Some(CurrentLyricsContent::Document {

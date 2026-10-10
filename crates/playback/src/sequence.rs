@@ -1,5 +1,5 @@
 //! Complete lightweight playback membership, order, and nearby resolved metadata.
-use crate::{OccurrenceId, Provenance, QueueItem, QueueOccurrence, RepeatMode};
+use crate::{Provenance, QueueItem, QueueRow, RepeatMode};
 pub use library::{QueuePlacement as Placement, QueueReorderTarget};
 use std::sync::{Arc, OnceLock};
 use thiserror::Error;
@@ -103,8 +103,8 @@ impl Batch {
 
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum SequenceError {
-    #[error("the selected playback occurrence is missing")]
-    MissingSelectedOccurrence,
+    #[error("the selected playback entry is missing")]
+    MissingSelectedEntry,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -118,7 +118,7 @@ pub enum QueuePersistenceKind {
 pub struct Sequence {
     members: Arc<[library::QueueEntry]>,
     order: Arc<[u32]>,
-    rows: Vec<Arc<QueueOccurrence>>,
+    rows: Vec<Arc<QueueRow>>,
     selected_index: Option<usize>,
     repeat_mode: RepeatMode,
     shuffle_enabled: bool,
@@ -153,7 +153,7 @@ impl Sequence {
         let sequence = Self {
             members: window.entries,
             order: window.order,
-            rows: window.occurrences,
+            rows: window.rows,
             selected_index: window.current_index,
             repeat_mode: window.repeat_mode,
             shuffle_enabled: window.shuffled,
@@ -167,7 +167,7 @@ impl Sequence {
             .selected_index
             .is_some_and(|i| sequence.entry_at(i).is_none())
         {
-            return Err(SequenceError::MissingSelectedOccurrence);
+            return Err(SequenceError::MissingSelectedEntry);
         }
         Ok(sequence)
     }
@@ -175,12 +175,11 @@ impl Sequence {
         library::QueueRestore {
             entries: self.members.clone(),
             order: self.order.clone(),
-            occurrences: self.rows.clone(),
+            rows: self.rows.clone(),
             current_index: self.selected_index,
             progress_millis: self.progress_millis as i64,
             repeat_mode: self.repeat_mode,
             shuffled: self.shuffle_enabled,
-            next_id: 0,
         }
     }
     fn changed(&mut self, kind: QueuePersistenceKind) {
@@ -197,46 +196,20 @@ impl Sequence {
     pub(crate) fn entry_at(&self, index: usize) -> Option<&library::QueueEntry> {
         self.members.get(*self.order.get(index)? as usize)
     }
-    pub(crate) fn member_at(&self, index: usize, occurrence: &str) -> Option<&library::QueueEntry> {
-        self.members
-            .get(index)
-            .filter(|entry| entry.occurrence.as_str() == occurrence)
-    }
-    pub(crate) fn selected_id(&self) -> Option<&OccurrenceId> {
-        Some(&self.entry_at(self.selected_index?)?.occurrence)
-    }
-    pub fn entries(&self) -> &[Arc<QueueOccurrence>] {
+    pub fn entries(&self) -> &[Arc<QueueRow>] {
         &self.rows
     }
     pub fn total(&self) -> usize {
         self.order.len()
     }
-    pub fn at(&self, index: usize) -> Option<&Arc<QueueOccurrence>> {
-        self.occurrence(&self.entry_at(index)?.occurrence)
+    pub fn at(&self, index: usize) -> Option<&Arc<QueueRow>> {
+        self.rows.iter().find(|row| row.position == index)
     }
-    pub fn selected(&self) -> Option<&Arc<QueueOccurrence>> {
+    pub fn selected(&self) -> Option<&Arc<QueueRow>> {
         self.at(self.selected_index?)
     }
     pub fn selected_index(&self) -> Option<usize> {
         self.selected_index
-    }
-    pub fn occurrence(&self, id: &OccurrenceId) -> Option<&Arc<QueueOccurrence>> {
-        self.rows.iter().find(|row| &row.occurrence == id)
-    }
-    pub fn occurrence_index(&self, id: &OccurrenceId) -> Option<usize> {
-        if let Some(current) = self.selected_index {
-            for i in [current, current + 1] {
-                if self
-                    .entry_at(i)
-                    .is_some_and(|entry| &entry.occurrence == id)
-                {
-                    return Some(i);
-                }
-            }
-        }
-        self.order
-            .iter()
-            .position(|&i| &self.members[i as usize].occurrence == id)
     }
     pub fn context_index(&self, context_id: &str, uri: &str, rank: usize) -> Option<usize> {
         self.order.iter().position(|&i| { let e = &self.members[i as usize];
@@ -268,11 +241,11 @@ impl Sequence {
         self.progress_millis = value;
     }
     pub(crate) fn set_selected_duration(&mut self, millis: u64) {
-        let selected = self.selected_id().cloned();
+        let selected = self.selected_index;
         if let Some(row) = self
             .rows
             .iter_mut()
-            .find(|row| Some(&row.occurrence) == selected.as_ref())
+            .find(|row| Some(row.position) == selected)
         {
             Arc::make_mut(row).item.duration_millis = millis.min(i64::MAX as u64) as i64;
         }
@@ -300,7 +273,7 @@ impl Sequence {
     pub(crate) fn next_index_eos(&self) -> Option<usize> {
         self.next_index(true)
     }
-    pub fn peek_next_eos(&self) -> Option<&Arc<QueueOccurrence>> {
+    pub fn peek_next_eos(&self) -> Option<&Arc<QueueRow>> {
         self.at(self.next_index_eos()?)
     }
     pub fn previous_index(&self) -> Option<usize> {
@@ -311,19 +284,15 @@ impl Sequence {
             current.checked_sub(1)
         }
     }
-    pub fn peek_previous(&self) -> Option<&Arc<QueueOccurrence>> {
+    pub fn peek_previous(&self) -> Option<&Arc<QueueRow>> {
         self.at(self.previous_index()?)
     }
-    pub fn upcoming(&self, limit: usize) -> Vec<&Arc<QueueOccurrence>> {
+    pub fn upcoming(&self, limit: usize) -> Vec<&Arc<QueueRow>> {
         let start = self.selected_index.map_or(0, |i| i + 1);
         (start..self.total())
             .take(limit)
             .filter_map(|i| self.at(i))
             .collect()
-    }
-    pub fn activate(&mut self, id: &OccurrenceId) -> bool {
-        self.occurrence_index(id)
-            .is_some_and(|i| self.activate_index(i))
     }
     pub(crate) fn activate_index(&mut self, index: usize) -> bool {
         if index >= self.total() || self.selected_index == Some(index) {
@@ -334,16 +303,17 @@ impl Sequence {
         self.window_dirty = true;
         true
     }
-    pub(crate) fn activate_backend(&mut self, id: &OccurrenceId) -> bool {
-        let Some(i) = self.occurrence_index(id) else {
+    pub(crate) fn activate_backend(&mut self, index: usize) -> bool {
+        if index >= self.total() {
             return false;
-        };
-        self.selected_index = Some(i);
+        }
+        self.selected_index = Some(index);
         self.progress_millis = 0;
         self.window_dirty = true;
         true
     }
     pub(crate) fn start_next_pass(&mut self) {
+        let old = self.order.clone();
         let order = Arc::make_mut(&mut self.order);
         for (i, entry) in order.iter_mut().enumerate() {
             *entry = i as u32;
@@ -351,6 +321,8 @@ impl Sequence {
         if self.shuffle_enabled {
             library::shuffle_order(order, self.revision.wrapping_add(1));
         }
+        let positions = inverse_order(order);
+        self.remap_positions(|position| Some(positions[old[position] as usize]), &mut []);
         self.selected_index = None;
         self.changed(QueuePersistenceKind::Order);
     }
@@ -365,24 +337,44 @@ impl Sequence {
         self.window_dirty = true;
         Some(index)
     }
-    pub fn advance_manual(&mut self) -> Option<&Arc<QueueOccurrence>> {
+    pub fn advance_manual(&mut self) -> Option<&Arc<QueueRow>> {
         let i = self.advance_index(false)?;
         self.at(i)
     }
-    pub fn advance_eos(&mut self) -> Option<&Arc<QueueOccurrence>> {
+    pub fn advance_eos(&mut self) -> Option<&Arc<QueueRow>> {
         let i = self.advance_index(true)?;
         self.at(i)
     }
-    pub fn previous(&mut self) -> Option<&Arc<QueueOccurrence>> {
+    pub fn previous(&mut self) -> Option<&Arc<QueueRow>> {
         let i = self.previous_index()?;
         self.activate_index(i);
         self.at(i)
     }
-    pub(crate) fn shuffle(&mut self, enabled: bool, seed: u64) {
+    fn remap_positions(
+        &mut self,
+        map: impl Fn(usize) -> Option<usize>,
+        pending: &mut [Option<usize>],
+    ) {
+        self.selected_index = self.selected_index.and_then(&map);
+        for position in pending {
+            *position = position.and_then(&map);
+        }
+        self.rows.retain_mut(|row| {
+            let Some(position) = map(row.position) else {
+                return false;
+            };
+            if row.position != position {
+                Arc::make_mut(row).position = position;
+            }
+            true
+        });
+    }
+    pub(crate) fn shuffle(&mut self, enabled: bool, seed: u64, pending: &mut [Option<usize>]) {
         if self.shuffle_enabled == enabled {
             return;
         }
         self.shuffle_enabled = enabled;
+        let old = self.order.clone();
         let start = self.selected_index.map_or(0, |i| i + 1);
         let remaining = &mut Arc::make_mut(&mut self.order)[start..];
         if enabled {
@@ -390,15 +382,20 @@ impl Sequence {
         } else {
             remaining.sort_unstable();
         }
+        let positions = inverse_order(&self.order);
+        self.remap_positions(|position| Some(positions[old[position] as usize]), pending);
         self.changed(QueuePersistenceKind::Order);
     }
     pub(crate) fn random_start(&mut self, seed: u64) {
         self.shuffle_enabled = true;
+        let old = self.order.clone();
         if let Some(selected) = self.selected_index {
             let order = Arc::make_mut(&mut self.order);
             order.swap(0, selected);
             library::shuffle_order(&mut order[1..], seed);
         }
+        let positions = inverse_order(&self.order);
+        self.remap_positions(|position| Some(positions[old[position] as usize]), &mut []);
         self.selected_index = (!self.order.is_empty()).then_some(0);
         self.trim_rows();
         self.content_id.take();
@@ -409,22 +406,36 @@ impl Sequence {
         target: QueueReorderTarget,
         replacing: bool,
         seed: Option<u64>,
+        pending: &mut [Option<usize>],
     ) {
         if replacing {
             self.members = page.entries.into();
             self.order = (0..self.members.len() as u32).collect::<Vec<_>>().into();
-            self.rows = page.occurrences;
+            self.rows = page.rows;
             self.selected_index = (!self.members.is_empty()).then_some(page.current_index);
+            pending.fill(None);
             self.progress_millis = 0;
             self.shuffle_enabled = false;
             if let Some(seed) = seed {
-                self.shuffle(true, seed);
+                self.shuffle(true, seed, pending);
             }
         } else {
-            let current = self.selected_id().cloned();
-            let at = self.target(&target, self.order.iter().copied());
-            let canonical_at = self.target(&target, 0..self.members.len() as u32);
+            let at = self.target(&target);
+            let canonical_at = match target {
+                QueueReorderTarget::Before(position) => {
+                    self.order.get(position).map(|i| *i as usize)
+                }
+                QueueReorderTarget::After(position) => {
+                    self.order.get(position).map(|i| *i as usize + 1)
+                }
+                QueueReorderTarget::End => None,
+            }
+            .unwrap_or(self.members.len());
             let count = page.entries.len();
+            self.remap_positions(
+                |position| Some(position + if position >= at { count } else { 0 }),
+                pending,
+            );
             let mut members = self.members.to_vec();
             members.splice(canonical_at..canonical_at, page.entries);
             let mut order = self.order.to_vec();
@@ -439,120 +450,153 @@ impl Sequence {
             );
             self.members = members.into();
             self.order = order.into();
-            self.rows.extend(page.occurrences);
-            self.keep_selected(current, at);
+            self.rows.extend(page.rows.into_iter().map(|mut row| {
+                Arc::make_mut(&mut row).position += at;
+                row
+            }));
+            if self.selected_index.is_none() && !self.order.is_empty() {
+                self.selected_index = Some(at);
+            }
         }
         self.trim_rows();
         self.changed(QueuePersistenceKind::Membership);
     }
-    fn target(
-        &self,
-        target: &QueueReorderTarget,
-        mut order: impl ExactSizeIterator<Item = u32>,
-    ) -> usize {
-        let end = order.len();
+    fn target(&self, target: &QueueReorderTarget) -> usize {
         match target {
-            QueueReorderTarget::End => end,
-            QueueReorderTarget::Before(id) | QueueReorderTarget::After(id) => order
-                .position(|i| &self.members[i as usize].occurrence == id)
-                .map_or(end, |i| {
-                    i + usize::from(matches!(target, QueueReorderTarget::After(_)))
-                }),
+            QueueReorderTarget::End => self.total(),
+            QueueReorderTarget::Before(position) => (*position).min(self.total()),
+            QueueReorderTarget::After(position) => position.saturating_add(1).min(self.total()),
         }
     }
-    fn keep_selected(&mut self, id: Option<OccurrenceId>, fallback: usize) {
-        self.selected_index = id
-            .and_then(|id| self.occurrence_index(&id))
-            .or_else(|| (!self.order.is_empty()).then(|| fallback.min(self.order.len() - 1)));
-    }
-    pub(crate) fn remove(&mut self, ids: &[OccurrenceId]) {
-        let ids = ids.iter().collect::<std::collections::HashSet<_>>();
-        let current = self.selected_id().cloned();
-        let at = self.selected_index.unwrap_or(0);
+    pub(crate) fn remove(&mut self, positions: &[usize], pending: &mut [Option<usize>]) {
+        let mut removed = positions
+            .iter()
+            .copied()
+            .filter(|i| *i < self.total())
+            .collect::<Vec<_>>();
+        removed.sort_unstable();
+        removed.dedup();
+        if removed.is_empty() {
+            return;
+        }
+        let current = self.selected_index.unwrap_or(0);
+        let members_to_remove = removed
+            .iter()
+            .map(|i| self.order[*i])
+            .collect::<std::collections::HashSet<_>>();
+        self.remap_positions(
+            |position| {
+                let before = removed.partition_point(|i| *i < position);
+                (removed.get(before) != Some(&position)).then_some(position - before)
+            },
+            pending,
+        );
         let mut remap = vec![None; self.members.len()];
         let members = self
             .members
             .iter()
             .enumerate()
-            .filter_map(|(i, e)| {
-                if ids.contains(&e.occurrence) {
-                    None
-                } else {
-                    Some((i, e.clone()))
-                }
-            })
+            .filter(|(i, _)| !members_to_remove.contains(&(*i as u32)))
             .enumerate()
-            .map(|(next, (old, e))| {
-                remap[old] = Some(next as u32);
-                e
+            .map(|(new, (old, member))| {
+                remap[old] = Some(new as u32);
+                member.clone()
             })
             .collect::<Vec<_>>();
         self.order = self
             .order
             .iter()
-            .filter_map(|&i| remap[i as usize])
+            .filter_map(|i| remap[*i as usize])
             .collect::<Vec<_>>()
             .into();
         self.members = members.into();
-        self.rows.retain(|r| !ids.contains(&r.occurrence));
-        self.keep_selected(current, at);
+        if self.selected_index.is_none() && !self.order.is_empty() {
+            self.selected_index =
+                Some((current - removed.partition_point(|i| *i < current)).min(self.total() - 1));
+            self.progress_millis = 0;
+        }
         self.changed(QueuePersistenceKind::Membership);
     }
-    pub(crate) fn reorder(&mut self, ids: &[OccurrenceId], target: &QueueReorderTarget) {
-        if matches!(target, QueueReorderTarget::Before(id) | QueueReorderTarget::After(id) if ids.contains(id))
+    pub(crate) fn reorder(
+        &mut self,
+        positions: &[usize],
+        target: &QueueReorderTarget,
+        pending: &mut [Option<usize>],
+    ) {
+        if matches!(target, QueueReorderTarget::Before(i) | QueueReorderTarget::After(i) if positions.contains(i))
         {
             return;
         }
-        let current = self.selected_id().cloned();
-        let ids = ids.iter().collect::<std::collections::HashSet<_>>();
-        let moving = self
-            .order
+        let mut moving = positions
             .iter()
             .copied()
-            .filter(|&i| ids.contains(&self.members[i as usize].occurrence))
+            .filter(|i| *i < self.total())
+            .collect::<Vec<_>>();
+        moving.sort_unstable();
+        moving.dedup();
+        if moving.is_empty() {
+            return;
+        }
+        let target_at = self.target(target);
+        let at = target_at - moving.partition_point(|i| *i < target_at);
+        let moving_set = moving
+            .iter()
+            .copied()
+            .collect::<std::collections::HashSet<_>>();
+        let mut display = (0..self.total())
+            .filter(|i| !moving_set.contains(i))
+            .collect::<Vec<_>>();
+        display.splice(at..at, moving.iter().copied());
+        let mut remap = vec![0; display.len()];
+        for (new, old) in display.iter().enumerate() {
+            remap[*old] = new;
+        }
+        self.remap_positions(|position| Some(remap[position]), pending);
+        let moving = moving
+            .into_iter()
+            .map(|i| self.order[i])
             .collect::<Vec<_>>();
         let moving_set = moving
             .iter()
             .copied()
             .collect::<std::collections::HashSet<_>>();
-        let mut order = self
-            .order
-            .iter()
-            .copied()
-            .filter(|i| !moving_set.contains(i))
-            .collect::<Vec<_>>();
-        let at = self.target(target, order.iter().copied());
-        order.splice(at..at, moving.iter().copied());
+        let target_member = match target {
+            QueueReorderTarget::Before(i) | QueueReorderTarget::After(i) => {
+                self.order.get(*i).copied()
+            }
+            QueueReorderTarget::End => None,
+        };
         let mut ordinary = (0..self.members.len() as u32)
             .filter(|i| !moving_set.contains(i))
             .collect::<Vec<_>>();
-        let at = self.target(target, ordinary.iter().copied());
+        let at = target_member
+            .and_then(|member| ordinary.iter().position(|i| *i == member))
+            .map_or(ordinary.len(), |i| {
+                i + usize::from(matches!(target, QueueReorderTarget::After(_)))
+            });
         ordinary.splice(at..at, moving);
-        let mut remap = vec![0; ordinary.len()];
+        let canonical_positions = inverse_order(&ordinary);
         let members = ordinary
-            .into_iter()
-            .enumerate()
-            .map(|(new, old)| {
-                remap[old as usize] = new as u32;
-                self.members[old as usize].clone()
-            })
+            .iter()
+            .map(|i| self.members[*i as usize].clone())
             .collect::<Vec<_>>();
-        self.order = order
+        self.order = display
             .into_iter()
-            .map(|i| remap[i as usize])
+            .map(|i| canonical_positions[self.order[i] as usize] as u32)
             .collect::<Vec<_>>()
             .into();
         self.members = members.into();
-        self.keep_selected(current, 0);
         self.changed(QueuePersistenceKind::Membership);
     }
-    pub(crate) fn clear(&mut self, include_current: bool) {
-        let member = (!include_current)
-            .then(|| self.entry_at(self.selected_index?).cloned())
-            .flatten();
+    pub(crate) fn clear(&mut self, include_current: bool, pending: &mut [Option<usize>]) {
+        let selected = self.selected_index.filter(|_| !include_current);
+        let member = selected.and_then(|i| self.entry_at(i).cloned());
+        self.remap_positions(
+            |position| (Some(position) == selected).then_some(0),
+            pending,
+        );
         self.members = member.into_iter().collect::<Vec<_>>().into();
         self.order = (0..self.members.len() as u32).collect::<Vec<_>>().into();
-        self.selected_index = (!self.members.is_empty()).then_some(0);
         self.trim_rows();
         self.changed(QueuePersistenceKind::Membership);
     }
@@ -561,13 +605,9 @@ impl Sequence {
         start..(start + library::QUEUE_CONTEXT_LIMIT).min(self.total())
     }
     fn trim_rows(&mut self) {
-        let ids = self
-            .window_range()
-            .filter_map(|i| self.entry_at(i).map(|e| e.occurrence.clone()))
-            .collect::<Vec<_>>();
-        self.rows.retain(|r| ids.contains(&r.occurrence));
-        self.rows
-            .sort_by_key(|r| ids.iter().position(|id| id == &r.occurrence));
+        let range = self.window_range();
+        self.rows.retain(|row| range.contains(&row.position));
+        self.rows.sort_by_key(|row| row.position);
     }
     pub(crate) fn read_request(&mut self) -> Option<library::QueueReadRequest> {
         if !std::mem::take(&mut self.window_dirty) {
@@ -576,15 +616,14 @@ impl Sequence {
         self.trim_rows();
         let entries = self
             .window_range()
-            .filter_map(|i| self.entry_at(i))
-            .filter(|e| self.occurrence(&e.occurrence).is_none())
-            .cloned()
+            .filter(|i| self.at(*i).is_none())
+            .filter_map(|i| self.entry_at(i).cloned().map(|entry| (i, entry)))
             .collect::<Vec<_>>();
         (!entries.is_empty()).then_some(library::QueueReadRequest::Hydrate { entries })
     }
     pub(crate) fn hydrate(&mut self, page: library::QueueReadPage) {
-        for row in page.occurrences {
-            if self.occurrence(&row.occurrence).is_none() {
+        for row in page.rows {
+            if self.at(row.position).is_none() {
                 self.rows.push(row);
             }
         }
@@ -610,6 +649,14 @@ impl Sequence {
         changed
     }
 }
+fn inverse_order(order: &[u32]) -> Vec<usize> {
+    let mut positions = vec![0; order.len()];
+    for (position, member) in order.iter().enumerate() {
+        positions[*member as usize] = position;
+    }
+    positions
+}
+
 impl Default for Sequence {
     fn default() -> Self {
         Self::new()
@@ -623,22 +670,21 @@ mod tests {
     fn page(start: usize, count: usize) -> library::QueueReadPage {
         let entries = (start..start + count)
             .map(|i| library::QueueEntry {
-                occurrence: OccurrenceId::new(format!("entry:{i}")),
+                received_from_connect: false,
                 media_uri: format!("https://example.test/{}", i / 2).into(),
                 playlist_entry_id: Some(format!("appearance:{i}").into()),
                 provenance: Provenance::Manual,
             })
             .collect::<Vec<_>>();
-        let occurrences = entries
+        let rows = entries
             .iter()
             .take(100)
             .enumerate()
             .map(|(i, e)| {
-                Arc::new(QueueOccurrence {
-                    occurrence: e.occurrence.clone(),
+                Arc::new(QueueRow {
+                    position: i,
+                    received_from_connect: false,
                     item: QueueItem::direct(e.media_uri.as_ref(), format!("{i}"), "", "", 1000),
-                    canonical_position: i,
-                    source_index: None,
                     playlist_entry_id: e.playlist_entry_id.as_deref().map(str::to_owned),
                     provenance: e.provenance.clone(),
                 })
@@ -646,13 +692,13 @@ mod tests {
             .collect();
         library::QueueReadPage {
             entries,
-            occurrences,
+            rows,
             current_index: 0,
         }
     }
     fn sequence(count: usize) -> Sequence {
         let mut s = Sequence::new();
-        s.add_page(page(0, count), QueueReorderTarget::End, true, None);
+        s.add_page(page(0, count), QueueReorderTarget::End, true, None, &mut []);
         s.take_persistence();
         s
     }
@@ -666,16 +712,13 @@ mod tests {
         assert_eq!(queue.content_id(), original);
         let restored = Sequence::from_window(queue.snapshot(), 0).unwrap();
         assert_eq!(restored.content_id(), original);
-        queue.reorder(
-            &[OccurrenceId::from("entry:3")],
-            &QueueReorderTarget::Before(OccurrenceId::from("entry:0")),
-        );
+        queue.reorder(&[3], &QueueReorderTarget::Before(0), &mut []);
         assert_ne!(queue.content_id(), original);
         assert_eq!(
             queue.content_id(),
             library::queue_content_id(&queue.members, &queue.order)
         );
-        queue.add_page(page(8, 1), QueueReorderTarget::End, false, None);
+        queue.add_page(page(8, 1), QueueReorderTarget::End, false, None, &mut []);
         assert_eq!(
             queue.content_id(),
             library::queue_content_id(&queue.members, &queue.order)
@@ -689,17 +732,21 @@ mod tests {
     #[test]
     fn restored_membership_hydrates_a_later_duplicate_on_navigation() {
         let mut s = Sequence::from_window(sequence(10_000).snapshot(), 1).unwrap();
-        let selected = OccurrenceId::new("entry:9999");
+        let selected = 9999;
         assert!(s.activate_index(9999));
-        assert_eq!(s.selected_id(), Some(&selected));
+        assert_eq!(s.selected_index(), Some(selected));
         assert!(s.selected().is_none());
         let Some(library::QueueReadRequest::Hydrate { entries }) = s.read_request() else {
             panic!("later membership needs nearby metadata");
         };
         assert!(entries.len() <= library::QUEUE_CONTEXT_LIMIT);
-        assert!(entries.iter().any(|entry| entry.occurrence == selected));
-        s.hydrate(page(9989, 11));
-        assert_eq!(s.selected().unwrap().occurrence, selected);
+        assert!(entries.iter().any(|(position, _)| *position == selected));
+        let mut hydrated = page(9989, 11);
+        for row in &mut hydrated.rows {
+            Arc::make_mut(row).position += 9989;
+        }
+        s.hydrate(hydrated);
+        assert_eq!(s.selected().unwrap().position, selected);
         assert_eq!(s.total(), 10_000);
         assert!(s.entries().len() <= library::QUEUE_CONTEXT_LIMIT);
     }
@@ -711,7 +758,7 @@ mod tests {
         assert_eq!(s.entries().len(), 100);
         let membership = s.members.clone();
         let current = s.selected().unwrap().clone();
-        s.shuffle(true, 17);
+        s.shuffle(true, 17, &mut []);
         assert!(Arc::ptr_eq(&membership, &s.members));
         assert!(Arc::ptr_eq(&current, s.selected().unwrap()));
         assert_eq!(s.take_persistence(), Some(QueuePersistenceKind::Order));
@@ -719,20 +766,20 @@ mod tests {
             panic!("nearby metadata");
         };
         assert!(entries.len() <= 99);
-        s.shuffle(false, 17);
+        s.shuffle(false, 17, &mut []);
         assert_eq!(&*s.order, &(0..10_000).collect::<Vec<u32>>());
     }
     #[test]
     fn toggles_keep_history_and_repeat_resets_only_order() {
         let mut s = sequence(10);
         s.activate_index(2);
-        s.shuffle(true, 3);
+        s.shuffle(true, 3, &mut []);
         s.advance_index(false);
         let history = s.order[..4].to_vec();
-        let current = s.selected_id().cloned();
-        s.shuffle(false, 0);
+        let current = s.selected_index();
+        s.shuffle(false, 0, &mut []);
         assert_eq!(s.order[..4], history);
-        assert_eq!(s.selected_id(), current.as_ref());
+        assert_eq!(s.selected_index(), current);
         assert!(s.order[4..].windows(2).all(|w| w[0] < w[1]));
         s.set_repeat_mode(RepeatMode::All);
         s.activate_index(9);
@@ -748,34 +795,54 @@ mod tests {
         assert_eq!(s.take_persistence(), None);
     }
     #[test]
-    fn additions_edits_duplicates_and_restore_keep_occurrence_identity() {
+    fn additions_edits_duplicates_and_restore_keep_selected_entry() {
         let mut s = sequence(101);
-        s.add_page(page(1000, 1), QueueReorderTarget::End, false, None);
-        assert_eq!(s.entry_at(100).unwrap().occurrence.as_str(), "entry:100");
-        assert_eq!(s.entry_at(101).unwrap().occurrence.as_str(), "entry:1000");
+        s.add_page(page(1000, 1), QueueReorderTarget::End, false, None, &mut []);
+        assert_eq!(
+            s.entry_at(100).unwrap().playlist_entry_id.as_deref(),
+            Some("appearance:100")
+        );
+        assert_eq!(
+            s.entry_at(101).unwrap().playlist_entry_id.as_deref(),
+            Some("appearance:1000")
+        );
         s.activate_index(3);
-        let current = s.selected_id().unwrap().clone();
+        let current = s.entry_at(3).unwrap().clone();
         s.set_progress_millis(42000);
-        s.shuffle(true, 4);
+        let mut pending = [Some(4)];
+        s.shuffle(true, 4, &mut pending);
+        let prepared = s.entry_at(pending[0].unwrap()).unwrap().clone();
         s.add_page(
             page(2000, 1),
-            QueueReorderTarget::After(current.clone()),
+            QueueReorderTarget::After(3),
             false,
             None,
+            &mut pending,
         );
-        assert_eq!(s.entry_at(4).unwrap().occurrence.as_str(), "entry:2000");
-        s.remove(&[OccurrenceId::from("entry:0")]);
-        assert!(s.occurrence_index(&OccurrenceId::from("entry:1")).is_some());
-        s.reorder(
-            &[OccurrenceId::from("entry:1000")],
-            &QueueReorderTarget::Before(OccurrenceId::from("entry:2000")),
+        assert_eq!(
+            s.entry_at(4).unwrap().playlist_entry_id.as_deref(),
+            Some("appearance:2000")
         );
-        s.shuffle(false, 0);
-        assert_eq!(s.selected_id(), Some(&current));
+        s.remove(&[0], &mut pending);
+        assert_eq!(s.selected_index(), Some(2));
+        let moving = s
+            .order
+            .iter()
+            .position(|i| {
+                s.members[*i as usize].playlist_entry_id.as_deref() == Some("appearance:1000")
+            })
+            .unwrap();
+        s.reorder(&[moving], &QueueReorderTarget::Before(3), &mut pending);
+        s.shuffle(false, 0, &mut pending);
+        assert_eq!(s.entry_at(s.selected_index().unwrap()), Some(&current));
+        assert_eq!(s.entry_at(pending[0].unwrap()), Some(&prepared));
         assert_eq!(s.progress_millis(), 42000);
         let restored = Sequence::from_window(s.snapshot(), s.revision()).unwrap();
         assert_eq!(restored.order, s.order);
         assert_eq!(restored.members, s.members);
-        assert_eq!(restored.selected_id(), Some(&current));
+        assert_eq!(
+            restored.entry_at(restored.selected_index().unwrap()),
+            Some(&current)
+        );
     }
 }

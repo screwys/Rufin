@@ -213,12 +213,12 @@
         </div>
         <ol id="queue" aria-label="{{ localization::tr("Queue") }}">
           {% for row in page.queue %}
-          <li class="queue-row" data-id="{{ row.id }}">
+          <li class="queue-row" data-position="{{ row.position }}">
             <span class="number">{{ loop.index }}</span>
             <form class="queue-track" method="post" action="/api/queue/activate">
               <input type="hidden" name="csrf" value="{{ page.csrf }}" />
               <input type="hidden" name="return" value="{{ page.current() }}" />
-              <input type="hidden" name="id" value="{{ row.id }}" />
+              <input type="hidden" name="position" value="{{ row.position }}" />
               <button class="queue-select" formaction="/api/queue/activate"><strong>{{ row.title }}</strong></button>
               <span class="metadata-link queue-artist">{{ row.artist }}</span>
             </form>
@@ -241,7 +241,7 @@
       <form id="current-track-form" data-enhanced-form method="post" action="/api/queue/activate" hidden>
         <input type="hidden" name="csrf" value="{{ page.csrf }}" />
         <input type="hidden" name="return" value="{{ page.current() }}" />
-        <input type="hidden" name="id" value="{{ page.current_id() }}" />
+        <input type="hidden" name="position" value="{{ page.current_position() }}" />
         <input type="hidden" name="payload" value="{{ page.current_selection() }}" />
       </form>
       <footer class="player" aria-label="{{ localization::tr("Playback controls") }}">
@@ -574,7 +574,7 @@
     >
       <button class="menu-item" role="menuitem" form="current-track-form" formaction="/api/queue/activate">{{ localization::tr("Play") }}</button>
       <button class="menu-item" role="menuitem" form="current-track-form" formaction="/api/queue/next">{{ localization::tr("Play Next") }}</button>
-      <button class="menu-item" role="menuitem" form="current-track-form" formaction="/api/queue/reorder" name="payload" value='{"ids":["{{ page.current_id() }}"]}'>{{ localization::tr("Play Later") }}</button>
+      <button class="menu-item" role="menuitem" form="current-track-form" formaction="/api/queue/reorder" name="payload" value='{"positions":[{{ page.current_position() }}]}'>{{ localization::tr("Play Later") }}</button>
       <button class="menu-item" role="menuitem" form="current-track-form" formaction="/api/favorite">{% if page.current_favorite %}{{ localization::tr("Remove from Favorites") }}{% else %}{{ localization::tr("Add to Favorites") }}{% endif %}</button>
       <button class="menu-item" role="menuitem" form="current-track-form" formaction="/api/queue/item">{{ localization::tr("Remove from Queue") }}</button>
     </div>

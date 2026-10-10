@@ -827,7 +827,7 @@ impl ConnectOwner {
         id: &str,
         uri: &str,
         encoding: Encoding,
-        occurrence: Option<&library::OccurrenceId>,
+        position: Option<usize>,
     ) -> Result<serde_json::Value, String> {
         let session = self.active().await?;
         let mut reference = self
@@ -835,34 +835,48 @@ impl ConnectOwner {
             .connect_track_reference(uri)
             .await
             .map_err(error)?;
-        if raw_document_reference(uri) && occurrence.is_some() {
+        if raw_document_reference(uri) && position.is_some() {
             reference = None;
         }
-        // A direct item is authorized by its captured queue occurrence or a private locator.
+        // Direct media must belong to the captured or current queue.
         let direct = if reference.is_none() {
-            let current = occurrence
-                .cloned()
+            let captured = self
+                .transfers
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .get(peer)
+                .filter(|(started, _)| started.elapsed() < Duration::from_secs(300))
+                .map(|(_, snapshot)| snapshot.queue.clone());
+            let queue = match captured {
+                Some(queue) => queue,
+                None => {
+                    let playback = Arc::clone(&self.playback);
+                    tokio::task::spawn_blocking(move || {
+                        playback::QueueCommandPort::snapshot(playback.as_ref())
+                    })
+                    .await
+                    .map_err(error)??
+                }
+            };
+            let entry = position
+                .and_then(|position| queue.order.get(position))
+                .and_then(|member| queue.entries.get(*member as usize))
+                .filter(|entry| entry.media_uri.as_ref() == uri)
                 .or_else(|| {
-                    self.transfers
-                        .lock()
-                        .unwrap_or_else(|p| p.into_inner())
-                        .get(peer)
-                        .filter(|(started, _)| started.elapsed() < Duration::from_secs(300))
-                        .map(|(_, snapshot)| snapshot.header.current.clone())
+                    queue
+                        .entries
+                        .iter()
+                        .find(|entry| entry.media_uri.as_ref() == uri)
                 })
-                .ok_or("The track is not in this profile")?;
+                .ok_or("The requested track is not the captured playback")?;
+            let received = entry.received_from_connect;
             let item = self
                 .database
-                .queue_item_for_occurrence(&current)
+                .queue_items_for_uris(&[uri.to_owned()], &library::ReadCancellation::new())
                 .await
                 .map_err(error)?
-                .filter(|item| item.media_uri == uri)
-                .ok_or("The requested track is not the captured playback")?;
-            let received = self
-                .database
-                .connect_received_occurrence(&current)
-                .await
-                .map_err(error)?;
+                .pop()
+                .ok_or("The requested track is unavailable")?;
             if received && raw_document_reference(uri) {
                 return Err(
                     "The source device did not provide a portable document identity".into(),
@@ -1321,7 +1335,7 @@ impl ConnectOwner {
         &self,
         peer: &str,
         item: &library::QueueItem,
-        occurrence: &library::OccurrenceId,
+        position: usize,
     ) -> Result<(), String> {
         if raw_document_reference(&item.media_uri) {
             return Err("The source device did not provide a portable document identity".into());
@@ -1329,7 +1343,7 @@ impl ConnectOwner {
         let encoding = self.status().settings.encoding;
         let cancel = CancellationToken::new();
         let offer = self
-            .request_media(peer, &item.media_uri, encoding, &cancel, Some(occurrence))
+            .request_media(peer, &item.media_uri, encoding, &cancel, Some(position))
             .await
             .map_err(error)?;
         let destination = self.media_path(
@@ -1382,7 +1396,7 @@ impl ConnectOwner {
         uri: &str,
         encoding: Encoding,
         cancel: &CancellationToken,
-        occurrence: Option<&library::OccurrenceId>,
+        position: Option<usize>,
     ) -> sources::SourceResult<OfferedMedia> {
         use sources::SourceError;
         let mut nonce = [0u8; 16];
@@ -1392,8 +1406,8 @@ impl ConnectOwner {
         self.publish_media_received();
         let offer = tokio::select! {
             offer = async {
-                if local { self.serve_media(peer, &id, uri, encoding, occurrence).await.map_err(SourceError::Other) }
-                else { self.request(peer, Request::Media { id: id.clone(), uri: uri.into(), encoding, occurrence: occurrence.cloned() }).await.map_err(SourceError::Network) }
+                if local { self.serve_media(peer, &id, uri, encoding, position).await.map_err(SourceError::Other) }
+                else { self.request(peer, Request::Media { id: id.clone(), uri: uri.into(), encoding, position }).await.map_err(SourceError::Network) }
             } => offer?,
             _ = cancel.cancelled() => {
                 if local { self.cancel_serving(peer, &id); }
@@ -1460,14 +1474,10 @@ impl ConnectOwner {
     /// Fetch a missing file or resolve a file reference received from another device.
     pub(crate) async fn fetch_playback_file(
         &self,
-        occurrence: &library::QueueOccurrence,
+        occurrence: &library::QueueRow,
     ) -> Result<Option<LocalMediaLocation>, String> {
         let uri = &occurrence.media_uri;
-        let received = self
-            .database
-            .connect_received_occurrence(&occurrence.occurrence)
-            .await
-            .map_err(error)?;
+        let received = occurrence.received_from_connect;
         if received && raw_document_reference(uri) {
             return Err("The source device did not provide a portable document identity".into());
         }
@@ -1531,11 +1541,7 @@ impl ConnectOwner {
                     }
                     _ => {
                         match self
-                            .fetch_direct_continuation(
-                                &peer,
-                                &occurrence.item,
-                                &occurrence.occurrence,
-                            )
+                            .fetch_direct_continuation(&peer, &occurrence.item, occurrence.position)
                             .await
                         {
                             Ok(()) => {

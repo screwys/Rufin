@@ -420,15 +420,15 @@ mod tests {
         let database = library::Database::open(directory.path().join("library.db"))
             .await
             .expect("database");
-        let occurrence = playback::OccurrenceId::new("current");
+        let media_uri =
+            library::source_entity_uri(&sources::SourceId::new("remote"), "track", "track");
         let media_id = CurrentMediaId {
             run: None,
-            occurrence: occurrence.clone(),
+            media_uri: media_uri.clone().into(),
         };
         let media = Arc::new(CurrentMedia {
             id: media_id.clone(),
-            occurrence: Arc::new(playback::QueueOccurrence {
-                occurrence,
+            row: Arc::new(playback::QueueRow {
                 item: playback::QueueItem::direct(
                     library::source_entity_uri(&sources::SourceId::new("remote"), "track", "track"),
                     "Track",
@@ -436,8 +436,8 @@ mod tests {
                     "Album",
                     0,
                 ),
-                canonical_position: 0,
-                source_index: None,
+                position: 0,
+                received_from_connect: false,
                 playlist_entry_id: None,
                 provenance: playback::Provenance::Manual,
             }),

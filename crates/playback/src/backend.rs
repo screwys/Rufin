@@ -219,7 +219,7 @@ pub enum NextTransition {
 pub struct PreparedStream {
     pub stream: Box<ResolvedStream>,
     pub loudness: TrackLoudness,
-    pub occurrence: Option<std::sync::Arc<crate::QueueOccurrence>>,
+    pub row: Option<std::sync::Arc<crate::QueueRow>>,
     pub artwork_path: Option<Arc<PathBuf>>,
     pub allows_preloading: bool,
 }
@@ -229,7 +229,7 @@ impl PreparedStream {
         Self {
             stream: Box::new(stream),
             loudness,
-            occurrence: None,
+            row: None,
             artwork_path: None,
             allows_preloading: true,
         }
@@ -240,12 +240,12 @@ impl PreparedStream {
         self
     }
 
-    pub fn with_occurrence(
+    pub fn with_row(
         mut self,
-        occurrence: std::sync::Arc<crate::QueueOccurrence>,
+        row: std::sync::Arc<crate::QueueRow>,
         content_type: Option<String>,
     ) -> Self {
-        self.occurrence = Some(occurrence);
+        self.row = Some(row);
         if self.stream.content_type.is_none() {
             self.stream.content_type = content_type;
         }

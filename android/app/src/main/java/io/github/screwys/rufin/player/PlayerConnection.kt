@@ -45,7 +45,7 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         private set
     var lyricsOffset by mutableLongStateOf(0L)
     private var sourceDocument: AndroidLyricsDocument? = null
-    private var sourceOccurrence: String? = null
+    private var sourceMediaUri: String? = null
     internal var visualizerObservedAt = SystemClock.elapsedRealtimeNanos()
         private set
     var playback by mutableStateOf<AndroidPlaybackState?>(null)
@@ -66,7 +66,7 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     internal var bridge by mutableStateOf<AndroidPlayer?>(null)
         private set
     val service get() = connection.service
-    val currentLyrics get() = lyrics?.takeIf { it.occurrenceId != null && it.occurrenceId == playback?.occurrenceId }
+    val currentLyrics get() = lyrics?.takeIf { it.mediaUri != null && it.mediaUri == playback?.mediaUri && it.mediaRun == playback?.mediaRun }
     val lyricsToken get() = lyrics?.currentMediaToken
     private fun showFeedback(message: String?) {
         message?.let { connection.showFeedback(it, control = true) }
@@ -113,8 +113,8 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                         launch {
                             while (isActive) {
                                 val raw = lyricSubscription.next()
-                                if (raw.occurrenceId != sourceOccurrence || raw.document != sourceDocument) lyricsOffset = 0L
-                                sourceOccurrence = raw.occurrenceId
+                                if (raw.mediaUri != sourceMediaUri || raw.document != sourceDocument) lyricsOffset = 0L
+                                sourceMediaUri = raw.mediaUri
                                 sourceDocument = raw.document
                                 refreshLyrics(player)
                             }
@@ -150,7 +150,7 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                         }
                         launch {
                             service.playback.collect {
-                                val changed = it?.occurrenceId != playback?.occurrenceId || it?.mediaRun != playback?.mediaRun
+                                val changed = it?.mediaUri != playback?.mediaUri || it?.mediaRun != playback?.mediaRun
                                 val identity = it?.artworkIdentity?.toList()
                                 it?.let { state -> artworkCache.updateRevision(state.artworkRevision) }
                                 if (identity != null && identity != playback?.artworkIdentity?.toList())
@@ -301,11 +301,11 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         }
     }
     internal fun projectedFavorite(uri: String, fallback: Boolean) = connection.projectedFavorite("track", uri, fallback)
-    fun activateQueue(id: String) = action { bridge?.activateQueue(id) }
-    fun removeQueue(id: String) = action { bridge?.removeQueue(id) }
-    suspend fun moveQueue(id: String, target: String?, after: Boolean = false) {
+    fun activateQueue(position: ULong) = action { bridge?.activateQueue(position) }
+    fun removeQueue(position: ULong) = action { bridge?.removeQueue(position) }
+    suspend fun moveQueue(position: ULong, target: ULong?, after: Boolean = false) {
         val current = bridge ?: return
-        withContext(Dispatchers.IO) { current.moveQueue(id, target, after) }
+        withContext(Dispatchers.IO) { current.moveQueue(position, target, after) }
     }
     fun clearQueue(includeCurrent: Boolean) = action { bridge?.clearQueue(includeCurrent) }
     fun visualizer(enabled: Boolean) = action { bridge?.setVisualizerEnabled(enabled) }

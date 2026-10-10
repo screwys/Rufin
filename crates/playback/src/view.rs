@@ -1,36 +1,35 @@
 use std::sync::Arc;
 
 use crate::sequence::Sequence;
-use crate::{OccurrenceId, PlaybackSession, QueueOccurrence, RepeatMode, RunId, TransportStatus};
+use crate::{PlaybackSession, QueueRow, RepeatMode, RunId, TransportStatus};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueueSummaryView {
     pub revision: u64,
     pub total: usize,
-    pub current_occurrence: Option<OccurrenceId>,
     pub current_index: Option<usize>,
-    pub next_occurrence: Option<OccurrenceId>,
+    pub next_index: Option<usize>,
     pub can_next: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CurrentMedia {
     pub id: CurrentMediaId,
-    pub occurrence: Arc<QueueOccurrence>,
+    pub row: Arc<QueueRow>,
 }
 
 impl std::ops::Deref for CurrentMedia {
-    type Target = QueueOccurrence;
+    type Target = QueueRow;
 
     fn deref(&self) -> &Self::Target {
-        &self.occurrence
+        &self.row
     }
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct CurrentMediaId {
     pub run: Option<RunId>,
-    pub occurrence: OccurrenceId,
+    pub media_uri: Arc<str>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -106,7 +105,7 @@ pub struct PlaybackView {
     pub queue_loading: bool,
     pub queue: QueueSummaryView,
     /// Retained history, current, and upcoming rows in the bounded playback window.
-    pub queue_window: Vec<Arc<QueueOccurrence>>,
+    pub queue_window: Vec<Arc<QueueRow>>,
     pub transport: TransportView,
     pub controls: ControlsView,
 }
@@ -130,11 +129,8 @@ impl Sequence {
         QueueSummaryView {
             revision: self.revision(),
             total: self.total(),
-            current_occurrence: self.selected_id().cloned(),
             current_index: self.selected_index(),
-            next_occurrence: next_index
-                .and_then(|index| self.entry_at(index))
-                .map(|entry| entry.occurrence.clone()),
+            next_index: next_index.filter(|index| *index < self.total()),
             can_next: self.next_index(false).is_some(),
         }
     }
@@ -145,24 +141,37 @@ impl PlaybackSession {
         let sequence = self.sequence();
         let settings = self.settings();
         let mut summary = sequence.summary();
+        let offset = self.external_queue_extent().map_or(0, |(_, offset)| offset);
+        let projected_row = |row: &Arc<QueueRow>| {
+            let mut row = row.clone();
+            if offset != 0 {
+                Arc::make_mut(&mut row).position += offset;
+            }
+            row
+        };
         if let Some((total, offset)) = self.external_queue_extent() {
             summary.total = total;
             summary.current_index = summary.current_index.map(|index| index + offset);
+            summary.next_index = summary.next_index.map(|index| index + offset);
             summary.can_next = summary.current_index.is_some_and(|index| index + 1 < total)
                 || sequence.repeat_mode() != RepeatMode::Off;
         }
         PlaybackView {
             queue_loading: self.queue_loading(),
             queue: summary,
-            queue_window: sequence.entries().to_vec(),
+            queue_window: sequence.entries().iter().map(projected_row).collect(),
             transport: TransportView {
                 current: sequence.selected().map(|entry| {
                     Arc::new(CurrentMedia {
                         id: CurrentMediaId {
                             run: self.current_run(),
-                            occurrence: entry.occurrence.clone(),
+                            media_uri: sequence
+                                .entry_at(entry.position)
+                                .expect("current queue member")
+                                .media_uri
+                                .clone(),
                         },
-                        occurrence: entry.clone(),
+                        row: projected_row(entry),
                     })
                 }),
                 state: self.status(),

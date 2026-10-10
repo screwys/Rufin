@@ -52,15 +52,15 @@ pub(crate) fn present_queue_selection_context_menu(
     surface.append_configurable_action(ContextMenuItem::Play, msgid("Play"), "play", PLAY_ICON);
     append_context_menu_picker_media_uris(&surface, shell, selection.media_uris.iter().cloned());
     let queue = shell.products.playback.queue.clone();
-    let remove = Arc::clone(&selection.occurrences);
+    let remove = Arc::clone(&selection.positions);
     surface.add_action("remove-from-queue", move || {
         queue.remove_many(remove.to_vec())
     });
     let queue = shell.products.playback.queue.clone();
-    let play = selection.occurrences.first().cloned();
+    let play = selection.positions.first().cloned();
     surface.add_action_enabled("play", play.is_some(), move || {
         if let Some(play) = play.as_ref() {
-            queue.activate(play.clone());
+            queue.activate(*play);
         }
     });
     surface.popup(&shell.settings.current.borrow().context_menu);

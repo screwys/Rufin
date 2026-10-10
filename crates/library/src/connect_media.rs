@@ -117,19 +117,6 @@ impl Database {
             .fetch_all(&mut *reader).await?)
     }
 
-    pub async fn connect_received_occurrence(
-        &self,
-        id: &crate::OccurrenceId,
-    ) -> LibraryResult<bool> {
-        let mut reader = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar(
-            "SELECT received_from_connect FROM queue_occurrences WHERE object_id=?1",
-        )
-        .bind(id.as_str())
-        .fetch_optional(&mut *reader)
-        .await?
-        .unwrap_or(false))
-    }
     /// A transferred direct queue file has local access without catalog enrollment.
     pub async fn connect_set_queue_file(
         &self,

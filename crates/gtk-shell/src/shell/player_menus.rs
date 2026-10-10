@@ -49,17 +49,17 @@ pub(crate) fn present_current_track_context_menu(
 pub(crate) fn present_queue_track_context_menu(
     target: &gtk::Widget,
     shell: &Rc<Shell>,
-    media_uri: String,
-    occurrence: playback::OccurrenceId,
+    media: library::QueueItem,
+    queue_position: usize,
     position: Option<(f64, f64)>,
 ) {
     present_playback_media_menu(
         target,
         &shell.media_menus,
-        media_uri,
-        None,
+        media.media_uri.clone(),
+        Some(media),
         position,
         None,
-        Some(occurrence),
+        Some(queue_position),
     );
 }

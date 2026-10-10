@@ -77,10 +77,10 @@ pub use playlists::{
     PlaylistEntryWrite, PlaylistGenreLink, PlaylistIdentity, PlaylistRow, PlaylistSort,
 };
 pub use queue::{
-    OccurrenceId, QUEUE_CONTEXT_LIMIT, QueueChoice, QueueCollection, QueueContextTitle, QueueEntry,
-    QueueInput, QueueItem, QueueOccurrence, QueuePageRow, QueuePlacement, QueueProvenance,
-    QueueQuery, QueueReadPage, QueueReadRequest, QueueReorderTarget, QueueRepeatMode, QueueRestore,
-    QueueScope, QueueSource, QueueTransferPage, queue_content_id, shuffle_order,
+    QUEUE_CONTEXT_LIMIT, QueueChoice, QueueCollection, QueueContextTitle, QueueEntry, QueueInput,
+    QueueItem, QueuePageRow, QueuePlacement, QueueProvenance, QueueQuery, QueueReadPage,
+    QueueReadRequest, QueueReorderTarget, QueueRepeatMode, QueueRestore, QueueRow, QueueScope,
+    QueueSource, QueueTransferPage, queue_content_id, shuffle_order,
 };
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
 pub use scan::{

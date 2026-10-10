@@ -69,7 +69,7 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
     val translation = LocalTranslationRevision.current
     val revision by remember(player) { derivedStateOf { player.playback?.queueRevision } }
     val output by remember(player) { derivedStateOf { player.playback?.let { it.outputKind to it.outputId } } }
-    val currentOccurrence by remember(player) { derivedStateOf { player.playback?.occurrenceId } }
+    val currentIndex by remember(player) { derivedStateOf { player.playback?.queueIndex } }
     var searchVisible by remember { mutableStateOf(false) }
     var search by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf("") }
@@ -80,14 +80,14 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
     var metadataEditor by remember { mutableStateOf<BrowseItem?>(null) }
     var create by remember { mutableStateOf(false) }
     var clear by remember { mutableStateOf(false) }
-    var dragged by remember { mutableStateOf<String?>(null) }
+    var dragged by remember { mutableStateOf<ULong?>(null) }
     var dragIndex by remember { mutableIntStateOf(0) }
     var dragOrigin by remember { mutableIntStateOf(0) }
     var dragTop by remember { mutableFloatStateOf(0f) }
     var dragHeight by remember { mutableIntStateOf(0) }
     var dragDistance by remember { mutableFloatStateOf(0f) }
     var dragRow by remember { mutableStateOf<AndroidQueueRow?>(null) }
-    var released by remember { mutableStateOf<String?>(null) }
+    var released by remember { mutableStateOf<ULong?>(null) }
     val releaseOffset = remember { Animatable(0f) }
     var dragScroll by remember { mutableFloatStateOf(0f) }
     var initialized by remember { mutableStateOf(false) }
@@ -169,8 +169,8 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
     fun finishDrag() {
         val id = dragged
         val after = dragIndex > dragOrigin
-        val target = rowAt(dragIndex + if (after) -1 else 1)?.occurrenceId
-        val top = list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id }?.offset ?: 0
+        val target = rowAt(dragIndex + if (after) -1 else 1)?.position
+        val top = list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id?.toLong() }?.offset ?: 0
         val offset = dragTop + dragDistance - top
         val moved = dragOrigin != dragIndex
         dragScroll = 0f
@@ -209,12 +209,12 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
                 verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 if (first == null) item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
                 else if (count == 0) item { Text(translate("Your queue is empty."), Modifier.padding(24.dp)) }
-                items(count, key = { index -> rowAt(index)?.occurrenceId ?: "queue:$index" }) { index ->
+                items(count, key = { index -> rowAt(index)?.position?.toLong() ?: "queue:$index" }) { index ->
                     val row = rowAt(index)
                     if (row == null) Spacer(Modifier.height(72.dp))
                     else {
-                        val isDragging = dragged == row.occurrenceId && released != row.occurrenceId
-                        val isReleased = released == row.occurrenceId
+                        val isDragging = dragged == row.position && released != row.position
+                        val isReleased = released == row.position
                         val placement = if (reduceMotion || isDragging || isReleased) Modifier
                             else Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)
                         val dismiss = rememberSwipeToDismissBoxState()
@@ -229,7 +229,13 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
                                 } else if (isReleased) releaseOffset.value else 0f
                             }) {
                             SwipeToDismissBox(state = dismiss, gesturesEnabled = dragged == null,
-                                onDismiss = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); player.removeQueue(row.occurrenceId) },
+                                onDismiss = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    scope.launch {
+                                        dismiss.snapTo(SwipeToDismissBoxValue.Settled)
+                                        player.removeQueue(row.position)
+                                    }
+                                },
                                 backgroundContent = {
                                     Box(Modifier.fillMaxSize().clip(shape).background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 20.dp)) {
                                         RufinIcon("rufin-user-trash-symbolic", translate("Remove from Queue"), Modifier.size(24.dp)
@@ -238,7 +244,7 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
                                     }
                                 }) {
                                 Surface(shape = shape, shadowElevation = if (isDragging) 8.dp else 0.dp) {
-                                    val current = row.occurrenceId == currentOccurrence
+                                    val current = row.position == currentIndex
                                     ListItem(headlineContent = {
                                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                             if (current && player.playback?.desiredPlaying == true) PlayingIndicator()
@@ -251,11 +257,11 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
                                         leadingContent = { QueueSheetCover(row, player) },
                                         trailingContent = {
                                             Box(Modifier.size(40.dp).semantics { contentDescription = translate("Reorder") }
-                                                .pointerInput(row.occurrenceId) {
+                                                .pointerInput(row) {
                                                     detectDragGestures(onDragStart = {
-                                                        val info = list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == row.occurrenceId }
+                                                        val info = list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == row.position.toLong() }
                                                         if (info != null) {
-                                                            dragged = row.occurrenceId; dragIndex = info.index; dragOrigin = info.index
+                                                            dragged = row.position; dragIndex = info.index; dragOrigin = info.index
                                                             dragTop = info.offset.toFloat(); dragHeight = info.size
                                                             dragDistance = 0f; dragRow = row; released = null
                                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -278,7 +284,7 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
                                             containerColor = if (current) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surfaceContainerLow,
                                             headlineColor = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface),
                                         modifier = Modifier.combinedClickable(onClick = {
-                                            player.activateQueue(row.occurrenceId); close()
+                                            player.activateQueue(row.position); close()
                                         }, onLongClick = { openMenu(row) }))
                                 }
                             }
@@ -315,7 +321,7 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
                     try {
                         val requested = !favorite
                         val result = player.queueFavorite(row.mediaUri, requested)
-                        if (result != null && selected?.occurrenceId == row.occurrenceId &&
+                        if (result != null && selected?.position == row.position && selected?.mediaUri == row.mediaUri &&
                             player.projectedFavorite(row.mediaUri, requested) == requested)
                             selected = selected?.copy(favorite = result)
                     }
@@ -328,8 +334,8 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
                     BottomSheetDefaults.DragHandle(Modifier.align(Alignment.CenterHorizontally))
                     CompactMediaMenuHeader(row.artworkIdentity, listOf(row.artist, row.album).filter(String::isNotBlank).joinToString(" · "),
                         favorite, player, toggleFavorite) { Text(row.title, Modifier.fillMaxWidth().rufinMarquee(), maxLines = 1, style = MaterialTheme.typography.bodyLarge) }
-                    QueueSheetAction("rufin-media-playback-start-symbolic", "Play") { player.activateQueue(row.occurrenceId); selected = null; close() }
-                    QueueSheetAction("rufin-user-trash-symbolic", "Remove from Queue") { player.removeQueue(row.occurrenceId); selected = null }
+                    QueueSheetAction("rufin-media-playback-start-symbolic", "Play") { player.activateQueue(row.position); selected = null; close() }
+                    QueueSheetAction("rufin-user-trash-symbolic", "Remove from Queue") { player.removeQueue(row.position); selected = null }
                 }
             }
         }
@@ -337,11 +343,11 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
     menu?.let { (row, item) ->
         BrowseMenuSheet(player.model, player.model.browse, item, player, { menu = null },
             { playlist = item; menu = null }, { metadataEditor = item; menu = null },
-            onRemove = { player.removeQueue(row.occurrenceId); menu = null },
+            onRemove = { player.removeQueue(row.position); menu = null },
             onNavigate = { route, title, source -> menu = null; close(); onNavigate(route, title, source) },
             onPlayNow = { shuffled -> player.model.runAction {
                 if (shuffled) withContext(Dispatchers.IO) { player.service?.setShuffle(true) }
-                player.activateQueue(row.occurrenceId); close()
+                player.activateQueue(row.position); close()
             } })
     }
     playlist?.let { item -> PlaylistPickerSheet(player.model, player.model.browse, item, player) { playlist = null } }

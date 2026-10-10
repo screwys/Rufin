@@ -1315,9 +1315,7 @@ fn smart_track_sql(input: &str, projection: &str) -> String {
          LEFT JOIN catalog.native_playlist_entries native ON native.playlist_entry_key=(
              SELECT playlist_entry_key FROM catalog.native_playlist_entries WHERE track.track_key IS NULL AND media_uri=requested.value
              ORDER BY title IS NULL,snapshot_at DESC,playlist_entry_key ASC LIMIT 1)
-         LEFT JOIN queue_occurrences occurrence ON occurrence.queue_occurrence_key=(
-             SELECT queue_occurrence_key FROM queue_occurrences WHERE track.track_key IS NULL AND media_uri=requested.value
-             ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1)
+         LEFT JOIN queue_occurrences occurrence ON track.track_key IS NULL AND occurrence.media_uri=requested.value
          LEFT JOIN listens listen ON listen.listen_key=(
              SELECT listen_key FROM listens WHERE track.track_key IS NULL AND media_uri=requested.value ORDER BY started_at DESC,listen_key DESC LIMIT 1)
          LEFT JOIN main.local_locators locator ON track.track_key IS NULL
@@ -1835,8 +1833,8 @@ fn fallback_candidates(definitions: &[(i64, SmartPlaylistDefinition)]) -> String
         "requested AS MATERIALIZED (
             SELECT media_uri FROM playlist_entries entry
             WHERE NOT EXISTS(SELECT 1 FROM tracks WHERE media_uri=entry.media_uri)
-            UNION SELECT media_uri FROM queue_occurrences occurrence
-            WHERE NOT EXISTS(SELECT 1 FROM tracks WHERE media_uri=occurrence.media_uri)
+            UNION SELECT json_extract(member.value,'$[0]') FROM queue_saved,json_each(queue_saved.state,'$.entries') member
+            WHERE NOT EXISTS(SELECT 1 FROM tracks WHERE media_uri=json_extract(member.value,'$[0]'))
             UNION SELECT media_uri FROM listens listen WHERE {played}
               AND NOT EXISTS(SELECT 1 FROM tracks WHERE media_uri=listen.media_uri)
             UNION SELECT media_uri FROM local_access_files access WHERE origin='download'

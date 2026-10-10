@@ -1949,21 +1949,19 @@ mod tests {
         .into_iter()
         .enumerate()
         {
-            let occurrence = library::OccurrenceId::new(index.to_string());
             let media_id = CurrentMediaId {
                 run: None,
-                occurrence: occurrence.clone(),
+                media_uri: media_uri.as_str().into(),
             };
             service.set_current(Some(LyricsContext {
                 media: Arc::new(CurrentMedia {
                     id: media_id.clone(),
-                    occurrence: Arc::new(library::QueueOccurrence {
-                        occurrence,
+                    row: Arc::new(library::QueueRow {
                         item: library::QueueItem::direct(
                             media_uri, title, "Artist", "Album", 3_000,
                         ),
-                        canonical_position: 0,
-                        source_index: None,
+                        position: index,
+                        received_from_connect: false,
                         playlist_entry_id: None,
                         provenance: playback::Provenance::Manual,
                     }),

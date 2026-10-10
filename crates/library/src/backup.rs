@@ -336,8 +336,8 @@ mod tests {
         source
             .save_queue(&crate::QueueRestore {
                 entries: (0..250)
-                    .map(|index| crate::QueueEntry {
-                        occurrence: format!("backup:{index}").into(),
+                    .map(|_| crate::QueueEntry {
+                        received_from_connect: false,
                         media_uri: "https://example.test/song".into(),
                         playlist_entry_id: None,
                         provenance: crate::QueueProvenance::Manual,

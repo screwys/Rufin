@@ -1,7 +1,7 @@
 use library::{
     ListenDeliveryTarget, ListenWrite, LocalAccessWrite, LocalFileKind, LocalFileState,
-    LocalFileWrite, LoudnessMeasurement, OccurrenceId, QueueOccurrence, QueueProvenance,
-    QueueRepeatMode, ReadCancellation,
+    LocalFileWrite, LoudnessMeasurement, QueueProvenance, QueueRepeatMode, QueueRow,
+    ReadCancellation,
 };
 
 use super::support::{connection, fixture, persist_queue};
@@ -1088,15 +1088,14 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
     persist_queue(
         &fixture.database,
         fixture.source,
-        &[QueueOccurrence {
-            source_index: None,
+        &[QueueRow {
             playlist_entry_id: None,
-            occurrence: OccurrenceId::new("remove-queue"),
+            received_from_connect: false,
             item: queue_media,
-            canonical_position: 0,
+            position: 0,
             provenance: QueueProvenance::Manual,
         }],
-        Some("remove-queue"),
+        Some(0),
         0,
         QueueRepeatMode::Off,
         false,

@@ -677,7 +677,7 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
                 .collect::<Vec<_>>(),
             order.iter().map(String::as_str).collect::<Vec<_>>()
         );
-        assert!(state.occurrences.len() <= 100);
+        assert!(state.rows.len() <= 100);
     }
     assert_eq!(
         fixture

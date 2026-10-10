@@ -80,7 +80,7 @@ pub(crate) fn request_auto_dj(
         let candidates = radio_candidates(
             &database,
             source_owner,
-            RadioSeed::Track(request.seed_media_uri),
+            RadioSeed::Track(request.seed_media_uri.clone()),
             request.requested_count,
             &ReadCancellation::new(),
         )
@@ -92,14 +92,19 @@ pub(crate) fn request_auto_dj(
                     .await
                     .unwrap_or_default();
                 let _ = playback.complete_auto_dj_candidates(
-                    request.seed_occurrence,
+                    request.seed_run,
+                    request.seed_media_uri,
                     media,
                     request.requested_count,
                     random_u64(),
                 );
             }
             Err(error) => {
-                let _ = playback.auto_dj_unavailable(request.seed_occurrence, Some(error));
+                let _ = playback.auto_dj_unavailable(
+                    request.seed_run,
+                    request.seed_media_uri,
+                    Some(error),
+                );
             }
         }
     });

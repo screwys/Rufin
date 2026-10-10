@@ -17,7 +17,6 @@ pub struct RouteCurrentTrackContext {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RouteCurrentTrack {
     pub media_uri: String,
-    pub occurrence: playback::OccurrenceId,
     pub context: Option<RouteCurrentTrackContext>,
     pub paused: bool,
 }
@@ -41,7 +40,6 @@ pub fn route_current_track(player: Option<&playback::PlaybackView>) -> Option<Ro
     };
     Some(RouteCurrentTrack {
         media_uri: entry.media_uri.clone(),
-        occurrence: entry.id.occurrence.clone(),
         context,
         paused: player.transport.effective_state() == TransportStatus::Paused,
     })

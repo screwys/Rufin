@@ -13,7 +13,7 @@
     "GET /api/pins": "Read shared sidebar pins and their resolved items in saved order.",
     "POST /api/pins": "Set a pin with {pin,pinned}. Pin is Album {source_id,album_id}, Artist {source_id,artist_id,album_artist}, Genre {source_id,genre_id}, Playlist {source_id,playlist_id}, or SmartPlaylist {playlist_id}, wrapped in its type name. IDs are object_id values, not numeric database keys; omit source_id for a local playlist.",
     "PATCH /api/pins": "Reorder with {moved,target}, each a pin identity. Uses the desktop drag order: before when moving upward, after when moving downward.",
-    "Queue drop position": "POST /api/queue and its collection routes accept mode insert with before or after (queue occurrence ID). Omit both to insert at the end. Uses the desktop drop operation without starting playback. POST /api/queue/reorder also accepts before or after.",
+    "Queue drop position": "POST /api/queue and its collection routes accept mode insert with before or after (zero-based queue position). Omit both to insert at the end. Uses the desktop drop operation without starting playback. POST /api/queue/reorder also accepts before or after.",
     "GET /api/playback/events": "Follow playback changes",
     "POST /api/playback/play": {},
     "POST /api/playback/pause": {},
@@ -148,20 +148,20 @@
     "POST /api/favorite": "Set favorite with {kind: track, album or artist, uri, favorite: true or false}. Returns the effective favorite state.",
     "POST /api/queue/radio": "Play radio with {kind: track, uri} or {kind: album, artist, album_artist or playlist, id}.",
     "POST /api/queue/activate": {
-      "id": "queue track ID"
+      "position": 0
     },
-    "POST /api/queue/item": "Remove a queue occurrence with {id}, including from a browser form.",
-    "DELETE /api/queue/item?id=...": "Remove a track from the queue",
+    "POST /api/queue/item": "Remove a queue row with {position}, including from a browser form.",
+    "DELETE /api/queue/item?position=...": "Remove a track from the queue",
     "GET /api/lyrics": "Lyrics for the current track, with line and word timings when available.",
     "POST /api/lyrics": "Load lyrics for the current track using your lyrics settings.",
-    "GET /api/lyrics/events": "Follow lyrics updates. The id matches the current queue track ID.",
+    "GET /api/lyrics/events": "Follow lyrics updates. The media_uri and run match the current playback media.",
     "GET /api/artwork?uri=...": "Track or album cover as PNG. Add original=true for the original format, including animation. Returns 404 if unavailable.",
     "POST /api/queue/reorder": {
-      "ids": ["queue track ID"],
-      "before": "queue track ID, or null for the end"
+      "positions": [0],
+      "before": "zero-based queue position, or null for the end"
     },
     "POST /api/queue/next": {
-      "id": "queue track ID"
+      "position": 0
     },
     "GET /api/events": "Follow playback, source progress and lyrics together on one connection.",
     "GET /api/artists?source=...": "Browse artists. Use offset, limit (up to 128), q, sort, descending, favorites and album_artists.",

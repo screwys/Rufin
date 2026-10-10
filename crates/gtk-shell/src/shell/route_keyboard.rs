@@ -163,13 +163,13 @@ impl Shell {
             };
             match shortcut {
                 SelectionShortcut::Play(_) => {
-                    let Some(occurrence) = queue
-                        .selected_occurrences()
-                        .and_then(|occurrences| occurrences.first().cloned())
+                    let Some(position) = queue
+                        .selected_positions()
+                        .and_then(|positions| positions.first().cloned())
                     else {
                         return false;
                     };
-                    self.products.playback.queue.activate(occurrence);
+                    self.products.playback.queue.activate(position);
                 }
                 SelectionShortcut::AddToPlaylist => {
                     let Some(media_uris) = queue.selected_media_uris() else {
@@ -217,17 +217,14 @@ impl Shell {
 
     fn remove_focused_selection(self: &Rc<Self>, focus: Option<&gtk::Widget>) -> bool {
         if self.queue_selection_focused(focus) {
-            let Some(occurrences) = self
+            let Some(positions) = self
                 .player_ui
                 .selected_queue()
-                .and_then(|queue| queue.selected_occurrences())
+                .and_then(|queue| queue.selected_positions())
             else {
                 return false;
             };
-            self.products
-                .playback
-                .queue
-                .remove_many(occurrences.to_vec());
+            self.products.playback.queue.remove_many(positions.to_vec());
             return true;
         }
         self.current_playlist_entry_selection_snapshot()

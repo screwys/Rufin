@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use library::{
     AlbumKey, ArtistKey, Database, FolderKey, GenreKey, HomeEntryInput, HomeEntryKind, MoodKey,
-    QueueOccurrence, QueueRepeatMode, Scan, ScanOutcome, SourceKey, TrackKey,
+    QueueRepeatMode, QueueRow, Scan, ScanOutcome, SourceKey, TrackKey,
 };
 use sqlx::Connection;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
@@ -27,17 +27,34 @@ pub struct Fixture {
 pub async fn persist_queue(
     database: &Database,
     source: SourceKey,
-    occurrences: &[QueueOccurrence],
-    current: Option<&str>,
+    occurrences: &[QueueRow],
+    current: Option<usize>,
     progress_millis: i64,
     repeat_mode: QueueRepeatMode,
     shuffled: bool,
 ) {
     let _ = source;
-    let mut output=serde_json::to_vec(&serde_json::json!({"version":1,"current_occurrence":current,"progress_millis":progress_millis,"repeat_mode":repeat_mode,"shuffled":shuffled})).unwrap();
+    let state = library::QueueRestore {
+        entries: occurrences
+            .iter()
+            .map(|row| library::QueueEntry {
+                media_uri: row.media_uri.clone().into(),
+                playlist_entry_id: row.playlist_entry_id.clone().map(Into::into),
+                provenance: row.provenance.clone(),
+                received_from_connect: row.received_from_connect,
+            })
+            .collect(),
+        order: (0..occurrences.len() as u32).collect(),
+        current_index: current,
+        progress_millis,
+        repeat_mode,
+        shuffled,
+        ..Default::default()
+    };
+    let mut output = serde_json::to_vec(&serde_json::json!({"version":4,"queue":state})).unwrap();
     output.push(b'\n');
-    for occurrence in occurrences {
-        serde_json::to_writer(&mut output, occurrence).unwrap();
+    for row in occurrences {
+        serde_json::to_writer(&mut output, &row.item).unwrap();
         output.push(b'\n');
     }
     database
@@ -289,18 +306,25 @@ pub async fn resolve_queue(
         .await
         .unwrap();
     let start = page.current_index.saturating_sub(10);
-    page.occurrences = database
+    page.rows = database
         .read_queue(library::QueueReadRequest::Hydrate {
-            entries: page.entries[start..page.entries.len().min(start + 100)].to_vec(),
+            entries: page
+                .entries
+                .iter()
+                .cloned()
+                .enumerate()
+                .skip(start)
+                .take(100)
+                .collect(),
         })
         .await
         .unwrap()
-        .occurrences;
+        .rows;
     library::QueueRestore {
         current_index: (!page.entries.is_empty()).then_some(page.current_index),
         order: (0..page.entries.len() as u32).collect(),
         entries: page.entries.into(),
-        occurrences: page.occurrences,
+        rows: page.rows,
         ..Default::default()
     }
 }

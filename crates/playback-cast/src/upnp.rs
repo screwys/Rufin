@@ -141,7 +141,7 @@ impl QueuedMedia {
             .map(|end| end.saturating_sub(stream.start_millis()))
             .or_else(|| {
                 stream
-                    .occurrence
+                    .row
                     .as_ref()
                     .and_then(|occurrence| u64::try_from(occurrence.item.duration_millis).ok())
             });
@@ -1054,7 +1054,7 @@ fn parse_upnp_time(value: &str) -> Option<u64> {
 }
 
 fn didl_metadata(stream: &PreparedStream, media: &PublishedResource) -> String {
-    let Some(occurrence) = stream.occurrence.as_ref() else {
+    let Some(occurrence) = stream.row.as_ref() else {
         return String::new();
     };
     let track = &occurrence.item;
@@ -1182,7 +1182,7 @@ mod tests {
         let stream = PreparedStream::from(playback::ResolvedStream::new(
             Url::from_file_path(path).expect("track URL").to_string(),
         ))
-        .with_occurrence(test_occurrence().into(), Some("audio/mpeg".to_string()));
+        .with_row(test_row().into(), Some("audio/mpeg".to_string()));
         (directory, stream)
     }
 
@@ -1308,7 +1308,7 @@ mod tests {
         let stream = PreparedStream::from(playback::ResolvedStream::new(
             Url::from_file_path(path).expect("track URL").to_string(),
         ))
-        .with_occurrence(test_occurrence().into(), Some("audio/flac".to_string()));
+        .with_row(test_row().into(), Some("audio/flac".to_string()));
         let relay =
             RelayServer::start(address, Arc::new(AtomicBool::new(false)), None).expect("relay");
         let mut controller = UpnpController::new(device).expect("controller");
@@ -1816,7 +1816,7 @@ mod tests {
     #[test]
     fn didl_metadata_carries_standard_music_facts_artwork_and_resource() {
         let stream = PreparedStream::from(playback::ResolvedStream::new("file:///track.flac"))
-            .with_occurrence(test_occurrence().into(), Some("audio/flac".to_string()));
+            .with_row(test_row().into(), Some("audio/flac".to_string()));
         let media = PublishedResource {
             uri: "http://192.0.2.10:4000/media".to_string(),
             content_type: "audio/flac".to_string(),
@@ -1841,11 +1841,10 @@ mod tests {
         assert!(metadata.contains("DLNA.ORG_OP=01;DLNA.ORG_CI=0"));
     }
 
-    fn test_occurrence() -> playback::QueueOccurrence {
-        playback::QueueOccurrence {
-            occurrence: playback::OccurrenceId::new("test-occurrence"),
-            canonical_position: 0,
-            source_index: None,
+    fn test_row() -> playback::QueueRow {
+        playback::QueueRow {
+            position: 0,
+            received_from_connect: false,
             playlist_entry_id: None,
             provenance: playback::Provenance::Manual,
             item: playback::QueueItem {

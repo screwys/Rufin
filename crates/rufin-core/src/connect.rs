@@ -315,17 +315,17 @@ pub enum Control {
         enabled: bool,
     },
     Activate {
-        occurrence: library::OccurrenceId,
+        position: usize,
     },
     Remove {
-        occurrences: Vec<library::OccurrenceId>,
+        positions: Vec<usize>,
     },
     Reorder {
-        occurrences: Vec<library::OccurrenceId>,
+        positions: Vec<usize>,
         target: library::QueueReorderTarget,
     },
     MoveNext {
-        occurrence: library::OccurrenceId,
+        position: usize,
     },
     Clear {
         include_current: bool,
@@ -373,7 +373,7 @@ enum Request {
         id: String,
         uri: String,
         encoding: Encoding,
-        occurrence: Option<library::OccurrenceId>,
+        position: Option<usize>,
     },
     CancelMedia {
         id: String,
@@ -2721,27 +2721,18 @@ impl ConnectOwner {
                     Control::Repeat { mode } => playback.set_repeat(mode),
                     Control::Shuffle { enabled } => playback.set_shuffle(enabled),
                     Control::AutoDj { enabled } => playback.send_cast_auto_dj(enabled),
-                    Control::Activate { occurrence } => {
-                        playback::QueueCommandPort::activate(playback.as_ref(), occurrence)
+                    Control::Activate { position } => {
+                        playback::QueueCommandPort::activate(playback.as_ref(), position)
                     }
-                    Control::Remove { occurrences } => {
-                        playback::QueueCommandPort::remove_many(playback.as_ref(), occurrences)
+                    Control::Remove { positions } => {
+                        playback::QueueCommandPort::remove_many(playback.as_ref(), positions)
                     }
-                    Control::Reorder {
-                        occurrences,
-                        target,
-                    } => playback::QueueCommandPort::reorder(
+                    Control::Reorder { positions, target } => playback::QueueCommandPort::reorder(
                         playback.as_ref(),
-                        playback::QueueReorderRequest {
-                            occurrences,
-                            target,
-                        },
+                        playback::QueueReorderRequest { positions, target },
                     ),
-                    Control::MoveNext { occurrence } => {
-                        playback::QueueCommandPort::move_after_current(
-                            playback.as_ref(),
-                            occurrence,
-                        )
+                    Control::MoveNext { position } => {
+                        playback::QueueCommandPort::move_after_current(playback.as_ref(), position)
                     }
                     Control::Clear { include_current } => {
                         playback::QueueCommandPort::clear(playback.as_ref(), include_current)
@@ -2755,9 +2746,9 @@ impl ConnectOwner {
                 id,
                 uri,
                 encoding,
-                occurrence,
+                position,
             } => {
-                self.serve_media(peer, &id, &uri, encoding, occurrence.as_ref())
+                self.serve_media(peer, &id, &uri, encoding, position)
                     .await?
             }
             Request::CancelMedia { id } => {
@@ -2800,17 +2791,13 @@ impl ConnectOwner {
                 let page: library::QueueTransferPage =
                     serde_json::from_value(self.request(peer, Request::Queue { offset }).await?)
                         .map_err(error)?;
-                if page.occurrences.is_empty() {
+                if page.rows.is_empty() {
                     return Err("The source queue changed during continuation".into());
                 }
-                if let Some(row) = page
-                    .occurrences
-                    .iter()
-                    .find(|row| row.occurrence == header.current)
-                {
+                if let Some(row) = page.rows.iter().find(|row| row.position == header.current) {
                     current = Some(row.item.clone());
                 }
-                offset += page.occurrences.len();
+                offset += page.rows.len();
                 self.playback
                     .stage_continuation_page(&transfer, &page)
                     .await?;
@@ -2846,7 +2833,7 @@ impl ConnectOwner {
                         .await
                         .map_err(error)?;
                 } else {
-                    self.fetch_direct_continuation(peer, &current, &header.current)
+                    self.fetch_direct_continuation(peer, &current, header.current)
                         .await?;
                 }
             }

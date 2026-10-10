@@ -358,16 +358,16 @@ private fun PlayerSourceInfo(player: PlayerConnection) {
 @OptIn(ExperimentalMaterial3Api::class)
 private fun PlayerProgress(player: PlayerConnection) {
     val current = player.playback ?: return
-    var seeking by remember(current.occurrenceId, current.mediaRun) { mutableStateOf<Float?>(null) }
-    var dragging by remember(current.occurrenceId, current.mediaRun) { mutableStateOf(false) }
-    var committed by remember(current.occurrenceId, current.mediaRun) { mutableStateOf<AndroidPlaybackState?>(null) }
-    var position by remember(current.occurrenceId, current.mediaRun) { mutableStateOf(current.positionMillis) }
+    var seeking by remember(current.mediaUri, current.mediaRun) { mutableStateOf<Float?>(null) }
+    var dragging by remember(current.mediaUri, current.mediaRun) { mutableStateOf(false) }
+    var committed by remember(current.mediaUri, current.mediaRun) { mutableStateOf<AndroidPlaybackState?>(null) }
+    var position by remember(current.mediaUri, current.mediaRun) { mutableStateOf(current.positionMillis) }
     val playing = current.positionAdvancing
     val interpolate = playing && !LocalReduceMotion.current
     val duration = current.durationMillis.toFloat()
     val translation = LocalTranslationRevision.current
     val positionLabel = remember(translation) { translate("Playback position") }
-    LaunchedEffect(player, current.occurrenceId, current.mediaRun, interpolate) {
+    LaunchedEffect(player, current.mediaUri, current.mediaRun, interpolate) {
         if (interpolate) while (true) {
             withFrameNanos { }
             position = player.positionNow()
@@ -383,7 +383,7 @@ private fun PlayerProgress(player: PlayerConnection) {
         }
     }
     val displayedPosition = seeking?.toLong()?.toULong() ?: if (interpolate) position else current.positionMillis
-    val waveform = player.waveform?.takeIf { it.occurrenceId == current.occurrenceId }?.peaks.orEmpty()
+    val waveform = player.waveform?.takeIf { it.mediaUri == current.mediaUri && it.mediaRun == current.mediaRun }?.peaks.orEmpty()
     val activeWaveform = MaterialTheme.colorScheme.primary
     val inactiveWaveform = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
     val thumbWidth = if (waveform.isEmpty()) 14.dp else 2.dp

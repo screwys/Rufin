@@ -34,7 +34,7 @@ internal class RufinPlayer(private val service: RufinService) : SimpleBasePlayer
         if (value?.positionObservedAtMillis != playback?.positionObservedAtMillis ||
             value?.positionMillis != playback?.positionMillis || value?.positionAdvancing != playback?.positionAdvancing ||
             value?.playbackRate != playback?.playbackRate ||
-            value?.occurrenceId != playback?.occurrenceId || value?.mediaRun != playback?.mediaRun ||
+            value?.mediaUri != playback?.mediaUri || value?.mediaRun != playback?.mediaRun ||
             value?.outputId != playback?.outputId || value?.outputKind != playback?.outputKind) {
             positionObservedAt = SystemClock.elapsedRealtime()
         }

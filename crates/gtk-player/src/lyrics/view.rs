@@ -274,7 +274,7 @@ impl LyricsPane {
         };
         // A new playback run of the same queue item keeps the same lyrics and scroll extent.
         let matches_current =
-            current_media.map(|media| &media.occurrence) == media_id.map(|media| &media.occurrence);
+            current_media.map(|media| &media.media_uri) == media_id.map(|media| &media.media_uri);
         let (document, pronunciation) = match content {
             Some(CurrentLyricsContent::Document {
                 document,

@@ -244,11 +244,11 @@ pub(super) async fn play_next(
 ) -> Result<Response<Body>, Error> {
     #[derive(Deserialize)]
     struct Input {
-        id: playback::OccurrenceId,
+        position: usize,
     }
     let input: Input = body(request).await?;
     let queue = products.playback.queue.clone();
-    tokio::task::spawn_blocking(move || queue.move_after_current(input.id))
+    tokio::task::spawn_blocking(move || queue.move_after_current(input.position))
         .await
         .map_err(internal)?;
     Ok(accepted())
@@ -309,7 +309,8 @@ pub(super) fn lyrics_json(current: &CurrentLyrics, settings: &lyrics::Settings) 
         },
     };
     if let CurrentLyrics::Loading { media_id } | CurrentLyrics::Ready { media_id, .. } = current {
-        value["id"] = json!(media_id.occurrence);
+        value["media_uri"] = json!(media_id.media_uri);
+        value["run"] = json!(media_id.run.map(playback::RunId::get));
     }
     value
 }
@@ -320,15 +321,15 @@ pub(super) async fn reorder(
 ) -> Result<Response<Body>, Error> {
     #[derive(Deserialize)]
     struct Input {
-        ids: Vec<playback::OccurrenceId>,
-        before: Option<playback::OccurrenceId>,
-        after: Option<playback::OccurrenceId>,
+        positions: Vec<usize>,
+        before: Option<usize>,
+        after: Option<usize>,
     }
     let input: Input = body(request).await?;
     let queue = products.playback.queue.clone();
     tokio::task::spawn_blocking(move || {
         queue.reorder(playback::QueueReorderRequest {
-            occurrences: input.ids,
+            positions: input.positions,
             target: queue_drop_target(input.before, input.after),
         })
     })

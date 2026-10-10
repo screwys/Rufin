@@ -412,8 +412,8 @@ pub async fn build(
                         crate::shell::player_menus::present_queue_track_context_menu(
                             target,
                             &shell,
-                            row.media_uri.clone(),
-                            row.occurrence.clone(),
+                            row.entry.item.clone(),
+                            row.position,
                             position,
                         );
                     }

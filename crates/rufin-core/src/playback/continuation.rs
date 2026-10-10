@@ -81,10 +81,18 @@ impl PlaybackOwner {
             .min(snapshot.queue.entries.len());
         let entries = snapshot
             .queue
-            .entries
+            .order
             .get(offset..end)
             .ok_or("Queue transfer offset is out of range")?
-            .to_vec();
+            .iter()
+            .enumerate()
+            .map(|(index, member)| {
+                (
+                    offset + index,
+                    snapshot.queue.entries[*member as usize].clone(),
+                )
+            })
+            .collect::<Vec<_>>();
         let page = self
             .database
             .read_queue(library::QueueReadRequest::Hydrate {
@@ -95,16 +103,7 @@ impl PlaybackOwner {
         let page = self.import_missing_plex_queue_rows(entries, page).await?;
         Ok(library::QueueTransferPage {
             offset,
-            occurrences: page
-                .occurrences
-                .into_iter()
-                .enumerate()
-                .map(|(index, row)| {
-                    let mut row = (*row).clone();
-                    row.canonical_position = offset + index;
-                    row
-                })
-                .collect(),
+            rows: page.rows.into_iter().map(|row| (*row).clone()).collect(),
             order: snapshot.queue.order[offset..end].to_vec(),
         })
     }
@@ -134,14 +133,14 @@ impl PlaybackOwner {
     ) -> Result<PreparedContinuation, String> {
         let mut queue = self
             .database
-            .prepare_queue_transfer(&transfer, header.total, &header.current)
+            .prepare_queue_transfer(&transfer, header.total, header.current)
             .await
             .map_err(string_error)?;
         queue.progress_millis = header.position_millis.min(i64::MAX as u64) as i64;
         queue.repeat_mode = header.repeat;
         queue.shuffled = header.shuffled;
         let occurrence = queue
-            .occurrences
+            .rows
             .first()
             .cloned()
             .ok_or("The current track is unavailable")?;

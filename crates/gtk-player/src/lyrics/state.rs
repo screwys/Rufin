@@ -424,7 +424,7 @@ impl SelectedLyricsState {
             CurrentLyrics::Loading { media_id: previous }
             | CurrentLyrics::Ready {
                 media_id: previous, ..
-            } => media_id.map(|media| &media.occurrence) != Some(&previous.occurrence),
+            } => media_id.map(|media| &media.media_uri) != Some(&previous.media_uri),
             CurrentLyrics::Cleared => media_id.is_some(),
         };
         if document_changed || media_changed {

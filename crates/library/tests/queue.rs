@@ -1,20 +1,15 @@
 use library::{
-    OccurrenceId, QueueItem, QueueOccurrence, QueueProvenance, QueueRepeatMode, ReadCancellation,
+    QueueItem, QueueProvenance, QueueRepeatMode, QueueRow, ReadCancellation,
     SmartPlaylistDefinition, TrackSort,
 };
 
 use super::support::{connection, fixture, persist_queue};
 
-fn occurrence(
-    object_id: impl Into<String>,
-    item: QueueItem,
-    canonical_position: usize,
-) -> QueueOccurrence {
-    QueueOccurrence {
-        occurrence: OccurrenceId::new(object_id),
+fn queue_row(item: QueueItem, position: usize) -> QueueRow {
+    QueueRow {
+        received_from_connect: false,
         item,
-        canonical_position,
-        source_index: None,
+        position,
         playlist_entry_id: None,
         provenance: QueueProvenance::Manual,
     }
@@ -52,7 +47,7 @@ async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue
     let queue = library::QueueRestore {
         order: (0..205u32).rev().collect(),
         entries: captured.entries.into(),
-        occurrences: captured.occurrences,
+        rows: captured.rows,
         current_index: Some(12),
         progress_millis: 42_000,
         repeat_mode: QueueRepeatMode::All,
@@ -66,7 +61,7 @@ async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue
         .unwrap();
     for offset in (0..205).step_by(library::QUEUE_CONTEXT_LIMIT) {
         let page = database.queue_transfer_page(&queue, offset).await.unwrap();
-        assert!(page.occurrences.len() <= library::QUEUE_CONTEXT_LIMIT);
+        assert!(page.rows.len() <= library::QUEUE_CONTEXT_LIMIT);
         receiver
             .stage_queue_transfer_page("transfer", &page)
             .await
@@ -79,13 +74,32 @@ async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue
         assert!(receiver.restore_queue().await.unwrap().entries.is_empty());
     }
     let mut prepared = receiver
-        .prepare_queue_transfer("transfer", 205, queue.current().unwrap())
+        .prepare_queue_transfer("transfer", 205, queue.current_index.unwrap())
         .await
         .unwrap();
-    assert_eq!(prepared.entries, queue.entries);
+    assert_eq!(
+        prepared
+            .entries
+            .iter()
+            .map(|entry| (
+                &entry.media_uri,
+                &entry.playlist_entry_id,
+                &entry.provenance
+            ))
+            .collect::<Vec<_>>(),
+        queue
+            .entries
+            .iter()
+            .map(|entry| (
+                &entry.media_uri,
+                &entry.playlist_entry_id,
+                &entry.provenance
+            ))
+            .collect::<Vec<_>>()
+    );
     assert_eq!(prepared.order, queue.order);
-    assert_eq!(prepared.current(), queue.current());
-    assert_eq!(prepared.occurrences.len(), 1);
+    assert_eq!(prepared.current_index, queue.current_index);
+    assert_eq!(prepared.rows.len(), 1);
     prepared.progress_millis = queue.progress_millis;
     prepared.repeat_mode = queue.repeat_mode;
     prepared.shuffled = queue.shuffled;
@@ -94,34 +108,37 @@ async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue
         .await
         .unwrap();
     let restored = receiver.restore_queue().await.unwrap();
-    assert_eq!(restored.entries, queue.entries);
+    assert_eq!(restored.entries, prepared.entries);
     assert_eq!(restored.order, queue.order);
-    assert_eq!(restored.current(), queue.current());
+    assert_eq!(restored.current_index, queue.current_index);
     assert_eq!(restored.progress_millis, 42_000);
     assert_eq!(restored.repeat_mode, QueueRepeatMode::All);
     assert!(restored.shuffled);
-    assert!(restored.occurrences.len() <= library::QUEUE_CONTEXT_LIMIT);
+    assert!(restored.rows.len() <= library::QUEUE_CONTEXT_LIMIT);
     assert!(
-        receiver
-            .connect_received_occurrence(queue.current().unwrap())
-            .await
-            .unwrap()
+        restored
+            .entries
+            .iter()
+            .all(|entry| entry.received_from_connect)
     );
     assert!(
-        !database
-            .connect_received_occurrence(queue.current().unwrap())
-            .await
-            .unwrap()
+        queue
+            .entries
+            .iter()
+            .all(|entry| !entry.received_from_connect)
     );
     receiver.save_queue(&restored).await.unwrap();
     assert!(
         receiver
-            .connect_received_occurrence(queue.current().unwrap())
+            .restore_queue()
             .await
             .unwrap()
+            .entries
+            .iter()
+            .all(|entry| entry.received_from_connect)
     );
     let final_page = receiver.queue_transfer_page(&restored, 200).await.unwrap();
-    assert_eq!(final_page.occurrences[4].title, "Occurrence 204");
+    assert_eq!(final_page.rows[4].title, "Occurrence 204");
 }
 
 #[tokio::test]
@@ -145,7 +162,7 @@ async fn continuation_uses_local_artwork_before_starting_the_current_track() {
     item.artwork_binding = Some(vec![1, 2, 3]);
     let page = library::QueueTransferPage {
         offset: 0,
-        occurrences: vec![occurrence("current", item, 0)],
+        rows: vec![queue_row(item, 0)],
         order: vec![0],
     };
     fixture
@@ -155,14 +172,14 @@ async fn continuation_uses_local_artwork_before_starting_the_current_track() {
         .unwrap();
     let prepared = fixture
         .database
-        .prepare_queue_transfer("artwork", 1, &OccurrenceId::from("current"))
+        .prepare_queue_transfer("artwork", 1, 0)
         .await
         .unwrap();
     assert_eq!(
-        prepared.occurrences[0].artwork_binding.as_ref(),
+        prepared.rows[0].artwork_binding.as_ref(),
         Some(&local_binding)
     );
-    assert_eq!(prepared.occurrences[0].title, "Transferred title");
+    assert_eq!(prepared.rows[0].title, "Transferred title");
 }
 
 #[tokio::test]
@@ -170,8 +187,7 @@ async fn interrupted_or_invalid_continuation_retains_saved_queue() {
     let fixture = fixture().await;
     let database = &fixture.database;
     let before = database.restore_queue().await.unwrap();
-    let row = occurrence(
-        "first",
+    let row = queue_row(
         QueueItem::direct(
             "https://example.test/track",
             "Track",
@@ -183,7 +199,7 @@ async fn interrupted_or_invalid_continuation_retains_saved_queue() {
     );
     let page = library::QueueTransferPage {
         offset: 0,
-        occurrences: vec![row],
+        rows: vec![row],
         order: vec![99],
     };
     database
@@ -192,13 +208,13 @@ async fn interrupted_or_invalid_continuation_retains_saved_queue() {
         .unwrap();
     assert!(
         database
-            .prepare_queue_transfer("incomplete", 101, &OccurrenceId::from("first"))
+            .prepare_queue_transfer("incomplete", 101, 0)
             .await
             .is_err()
     );
     assert!(
         database
-            .prepare_queue_transfer("incomplete", 1, &OccurrenceId::from("first"))
+            .prepare_queue_transfer("incomplete", 1, 0)
             .await
             .is_err()
     );
@@ -229,15 +245,15 @@ async fn queue_restores_uri_owned_duplicates_state_and_unavailable_media() {
     unavailable.artwork_binding = Some(b"saved-art".to_vec());
 
     let occurrences = vec![
-        occurrence("offline", unavailable, 2),
-        occurrence("first", media[0].clone(), 0),
-        occurrence("duplicate", media[0].clone(), 1),
+        queue_row(unavailable, 2),
+        queue_row(media[0].clone(), 0),
+        queue_row(media[0].clone(), 1),
     ];
     persist_queue(
         &fixture.database,
         fixture.source,
         &occurrences,
-        Some("offline"),
+        Some(0),
         1_500,
         QueueRepeatMode::All,
         true,
@@ -251,29 +267,26 @@ async fn queue_restores_uri_owned_duplicates_state_and_unavailable_media() {
         .expect("restore Queue");
     assert_eq!(
         restored
-            .occurrences
+            .rows
             .iter()
-            .map(|row| row.occurrence.as_str())
+            .map(|row| row.position)
             .collect::<Vec<_>>(),
-        ["offline", "first", "duplicate"]
+        [0, 1, 2]
     );
-    assert_eq!(
-        restored.current().map(OccurrenceId::as_str),
-        Some("offline")
-    );
+    assert_eq!(restored.current_index, Some(0));
     assert_eq!(restored.progress_millis, 1_500);
     assert_eq!(restored.repeat_mode, QueueRepeatMode::All);
     assert!(restored.shuffled);
-    assert_eq!(restored.occurrences[0].title, "Offline");
-    assert_eq!(restored.occurrences[0].artwork_binding.as_deref(), None);
+    assert_eq!(restored.rows[0].title, "Offline");
+    assert_eq!(restored.rows[0].artwork_binding.as_deref(), None);
 
     let page = fixture
         .database
-        .prepared_queue_page(&restored.occurrences)
+        .prepared_queue_page(&restored.rows)
         .await
         .unwrap();
     assert_eq!(page[1].media_uri, page[2].media_uri);
-    assert_ne!(page[1].occurrence, page[2].occurrence);
+    assert_ne!(page[1].position, page[2].position);
     assert_eq!(
         page[1].artwork_binding.as_deref(),
         Some(b"shared-art".as_slice())
@@ -295,23 +308,23 @@ async fn occurrence_media_and_progress_follow_the_exact_uri() {
     let occurrences = media
         .into_iter()
         .enumerate()
-        .map(|(position, media)| occurrence(format!("transition-{position}"), media, position))
+        .map(|(position, media)| queue_row(media, position))
         .collect::<Vec<_>>();
     persist_queue(
         &fixture.database,
         fixture.source,
         &occurrences,
-        Some("transition-0"),
+        Some(0),
         0,
         QueueRepeatMode::Off,
         false,
     )
     .await;
 
-    for (position, occurrence) in occurrences.iter().enumerate() {
+    for position in 0..occurrences.len() {
         fixture
             .database
-            .persist_queue_progress(Some(&occurrence.occurrence), (position as i64 + 1) * 1_000)
+            .persist_queue_progress(Some(position), (position as i64 + 1) * 1_000)
             .await
             .expect("persist progress");
         let restored = fixture
@@ -320,9 +333,9 @@ async fn occurrence_media_and_progress_follow_the_exact_uri() {
             .await
             .expect("restore progress");
         let restored_occurrence = restored
-            .occurrences
+            .rows
             .iter()
-            .find(|candidate| candidate.occurrence == occurrence.occurrence)
+            .find(|candidate| candidate.position == position)
             .expect("restore occurrence");
         assert_eq!(
             restored_occurrence.media_uri,
@@ -332,10 +345,7 @@ async fn occurrence_media_and_progress_follow_the_exact_uri() {
             restored_occurrence.title,
             ["Alpha", "Beta", "Gamma"][position]
         );
-        assert_eq!(
-            restored.current().map(OccurrenceId::as_str),
-            Some(occurrence.occurrence.as_str())
-        );
+        assert_eq!(restored.current_index, Some(position));
         assert_eq!(restored.progress_millis, (position as i64 + 1) * 1_000);
     }
 }
@@ -429,11 +439,11 @@ async fn source_items(
     for chunk in entries.chunks(100) {
         let page = database
             .read_queue(library::QueueReadRequest::Hydrate {
-                entries: chunk.to_vec(),
+                entries: chunk.iter().cloned().enumerate().collect(),
             })
             .await
             .unwrap();
-        items.extend(page.occurrences.into_iter().map(|row| row.item.clone()));
+        items.extend(page.rows.into_iter().map(|row| row.item.clone()));
     }
     items
 }
@@ -507,7 +517,7 @@ async fn source_membership_matches_track_view_sort_filter_and_null_order() {
 }
 
 #[tokio::test]
-async fn source_playlist_preserves_duplicate_snapshots_across_metadata_order() {
+async fn source_playlist_preserves_duplicate_members_with_shared_uri_metadata() {
     let fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
     sqlx::query("INSERT INTO main.playlists(playlist_key,object_id,name,position) VALUES(100,'duplicates','Duplicates',0)").execute(&mut raw).await.unwrap();
@@ -521,30 +531,53 @@ async fn source_playlist_preserves_duplicate_snapshots_across_metadata_order() {
             folder: None,
             context_id: "duplicates".into(),
         };
+        let page = fixture
+            .database
+            .read_queue(library::QueueReadRequest::Capture {
+                input: Box::new(input.clone()),
+                context_title: None,
+                anchor_index: 0,
+                random_start: None,
+                shuffled: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(page.entries.len(), 140);
+        assert_eq!(
+            page.entries
+                .iter()
+                .filter_map(|entry| entry.playlist_entry_id.as_ref())
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            140
+        );
         let items = source_items(&fixture.database, input, seed).await;
         assert_eq!(items.len(), 140);
-        let mut positions = items
-            .iter()
-            .map(|item| {
-                let position = item
-                    .title
-                    .strip_prefix("Occurrence ")
-                    .unwrap()
-                    .parse::<i64>()
-                    .unwrap();
-                assert_eq!(item.duration_millis, position * 1000);
-                position
-            })
-            .collect::<Vec<_>>();
-        if seed.is_some() {
-            positions.sort_unstable();
-        }
-        assert_eq!(positions, (0..140).collect::<Vec<_>>());
+        assert!(items.iter().all(|item| item == &items[0]));
+        let rank = items[0]
+            .title
+            .strip_prefix("Occurrence ")
+            .unwrap()
+            .parse::<i64>()
+            .unwrap();
+        assert_eq!(items[0].duration_millis, rank * 1000);
+        let queue = library::QueueRestore {
+            order: (0..page.entries.len() as u32).rev().collect(),
+            entries: page.entries.into(),
+            ..Default::default()
+        };
+        let (positions, count) = fixture
+            .database
+            .queue_search_page(&queue, &items[0].title, 100, 40)
+            .await
+            .unwrap();
+        assert_eq!(positions, (100..140).collect::<Vec<_>>());
+        assert_eq!(count, 140);
     }
 }
 
 #[tokio::test]
-async fn saved_queue_contains_only_the_window_and_retains_compact_explicit_choices() {
+async fn saved_queue_keeps_compact_choices_and_reads_only_the_window() {
     let fixture = fixture().await;
     let mut state = super::support::resolve_queue(
         &fixture.database,
@@ -569,17 +602,17 @@ async fn saved_queue_contains_only_the_window_and_retains_compact_explicit_choic
             .fetch_one(&mut raw)
             .await
             .unwrap(),
-        100
+        0
     );
     assert_eq!(restored.entries.len(), 500);
     let rows = fixture
         .database
-        .prepared_queue_page(&restored.occurrences)
+        .prepared_queue_page(&restored.rows)
         .await
         .unwrap();
-    assert_eq!(rows.len(), restored.occurrences.len());
-    for (row, occurrence) in rows.iter().zip(&restored.occurrences) {
-        assert_eq!(row.occurrence, occurrence.occurrence);
+    assert_eq!(rows.len(), restored.rows.len());
+    for (row, occurrence) in rows.iter().zip(&restored.rows) {
+        assert_eq!(row.position, occurrence.position);
         assert_eq!(row.title, occurrence.title);
     }
     let mut exported = Vec::new();
@@ -643,7 +676,7 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
     .into_iter()
     .enumerate()
     .map(|(index, provenance)| {
-        let mut row = occurrence(format!("queue:shared:{index}"), unavailable.clone(), index);
+        let mut row = queue_row(unavailable.clone(), index);
         row.provenance = provenance;
         row.playlist_entry_id =
             (index % 2 == 0).then(|| format!("[\"playlist\",\"entry-{index}\"]"));
@@ -654,7 +687,7 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
         &fixture.database,
         fixture.source,
         &rows,
-        Some("queue:shared:4"),
+        Some(4),
         42000,
         QueueRepeatMode::All,
         true,
@@ -671,41 +704,29 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
     .into();
     state.entries = entries.into();
     state.order = vec![2, 1, 0, 3, 4, 5, 7, 6].into();
-    state.next_id = 987;
+
     let mut raw = connection(&fixture.path).await;
-    for compact in [false, true] {
+    {
         fixture.database.save_queue(&state).await.unwrap();
-        if !compact {
-            sqlx::query("UPDATE queue_saved SET state=?1")
-                .bind(serde_json::to_string(&state).unwrap())
-                .execute(&mut raw)
-                .await
-                .unwrap();
-            sqlx::raw_sql("DELETE FROM queue_order;DELETE FROM queue_state")
-                .execute(&mut raw)
-                .await
-                .unwrap();
-        }
         let restored = fixture.database.restore_queue().await.unwrap();
         assert_eq!(restored.entries, state.entries);
         assert_eq!(restored.order, state.order);
-        assert_eq!(restored.current(), state.current());
-        assert_eq!(restored.next_id, state.next_id);
+        assert_eq!(restored.current_index, state.current_index);
         assert_eq!(restored.progress_millis, 42000);
         assert_eq!(restored.repeat_mode, QueueRepeatMode::All);
         assert!(restored.shuffled);
-        for restored in &restored.occurrences {
+        for restored in &restored.rows {
             if restored.media_uri == unavailable.media_uri {
                 assert_eq!(restored.item, unavailable);
             }
         }
         let mut source_members = fixture
             .database
-            .queue_occurrences_for_source(fixture.source)
+            .queue_positions_for_source(&state, fixture.source)
             .await
             .unwrap();
         source_members.sort();
-        assert_eq!(source_members, ["queue:shared:6", "queue:shared:7"]);
+        assert_eq!(source_members, [6, 7]);
         fixture
             .database
             .read_queue(library::QueueReadRequest::Capture {
@@ -720,30 +741,21 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
             })
             .await
             .unwrap();
-        fixture
-            .database
-            .discard_queue_capture("queue:")
-            .await
-            .unwrap();
         let retained: Vec<String> =
-            sqlx::query_scalar("SELECT object_id FROM queue_occurrences ORDER BY object_id")
+            sqlx::query_scalar("SELECT media_uri FROM queue_occurrences ORDER BY media_uri")
                 .fetch_all(&mut raw)
                 .await
                 .unwrap();
-        assert_eq!(
-            retained,
-            rows.iter()
-                .map(|row| row.occurrence.to_string())
-                .collect::<Vec<_>>()
-        );
+        assert_eq!(retained, [unavailable.media_uri.clone()]);
         let mut exported = Vec::new();
         fixture
             .database
             .export_queue_jsonl(&mut exported)
             .await
             .unwrap();
-        let header: serde_json::Value = serde_json::from_slice(&exported).unwrap();
-        assert_eq!(header["version"], 3);
+        let header: serde_json::Value =
+            serde_json::from_slice(exported.split(|byte| *byte == b'\n').next().unwrap()).unwrap();
+        assert_eq!(header["version"], 4);
         let exported_state: library::QueueRestore =
             serde_json::from_value(header["queue"].clone()).unwrap();
         assert_eq!(exported_state.entries, state.entries);
@@ -766,13 +778,13 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
     let removed = fixture.database.restore_queue().await.unwrap();
     assert_eq!(removed.entries, state.entries);
     assert_eq!(removed.order, state.order);
-    assert_eq!(removed.current(), state.current());
+    assert_eq!(removed.current_index, state.current_index);
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM queue_occurrences")
             .fetch_one(&mut raw)
             .await
             .unwrap(),
-        6
+        1
     );
     let membership: String = sqlx::query_scalar("SELECT state FROM queue_saved")
         .fetch_one(&mut raw)
@@ -785,7 +797,7 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
         .unwrap();
     let stopped = fixture.database.restore_queue().await.unwrap();
     assert_eq!(stopped.entries, state.entries);
-    assert_eq!(stopped.current(), None);
+    assert_eq!(stopped.current_index, None);
     assert_eq!(stopped.progress_millis, 0);
     assert_eq!(stopped.repeat_mode, QueueRepeatMode::One);
     assert!(!stopped.shuffled);
@@ -799,12 +811,11 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
 }
 
 #[tokio::test]
-async fn imported_snapshot_batches_keep_order_and_existing_fallback_facts() {
+async fn imported_metadata_batches_keep_member_order_and_native_playlist_ids() {
     let fixture = fixture().await;
     let mut rows = (0..205)
         .map(|index| {
-            let mut row = occurrence(
-                format!("snapshot:{index}"),
+            let mut row = queue_row(
                 QueueItem::direct(
                     format!("https://example.test/duplicate/{}", index % 3),
                     format!("Saved title {index}"),
@@ -812,9 +823,8 @@ async fn imported_snapshot_batches_keep_order_and_existing_fallback_facts() {
                     "Album",
                     index as i64,
                 ),
-                500 + index,
+                index,
             );
-            row.source_index = Some(index % 2);
             row.playlist_entry_id = Some(format!("[null,\"playlist\",\"entry-{index}\"]"));
             row.provenance = QueueProvenance::Context {
                 context_title: None,
@@ -828,7 +838,7 @@ async fn imported_snapshot_batches_keep_order_and_existing_fallback_facts() {
         &fixture.database,
         fixture.source,
         &rows,
-        Some("snapshot:150"),
+        Some(150),
         900,
         QueueRepeatMode::All,
         true,
@@ -840,26 +850,25 @@ async fn imported_snapshot_batches_keep_order_and_existing_fallback_facts() {
         .export_queue_jsonl(&mut exported)
         .await
         .unwrap();
-    let value: serde_json::Value = serde_json::from_slice(&exported).unwrap();
-    assert_eq!(
-        serde_json::from_value::<Vec<QueueOccurrence>>(value["snapshots"].clone()).unwrap(),
-        rows
-    );
-
-    let original = rows.clone();
+    let records = String::from_utf8(exported).unwrap();
+    let metadata = records
+        .lines()
+        .skip(1)
+        .map(|line| serde_json::from_str::<QueueItem>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(metadata.len(), 3);
+    assert!(metadata.iter().any(|item| item.title == "Saved title 204"));
     rows.reverse();
-    for row in &mut rows {
+    for (position, row) in rows.iter_mut().enumerate() {
+        row.position = position;
         row.item.title = "Changed supplied metadata".into();
-        row.canonical_position = 9000;
-        row.source_index = None;
-        row.playlist_entry_id = None;
         row.provenance = QueueProvenance::Radio;
     }
     persist_queue(
         &fixture.database,
         fixture.source,
         &rows,
-        Some("snapshot:150"),
+        Some(54),
         1200,
         QueueRepeatMode::One,
         false,
@@ -870,66 +879,37 @@ async fn imported_snapshot_batches_keep_order_and_existing_fallback_facts() {
         restored
             .entries
             .iter()
-            .map(|entry| &entry.occurrence)
+            .map(|entry| (entry.media_uri.as_ref(), entry.playlist_entry_id.as_deref()))
             .collect::<Vec<_>>(),
-        rows.iter().map(|row| &row.occurrence).collect::<Vec<_>>()
+        rows.iter()
+            .map(|row| (row.media_uri.as_str(), row.playlist_entry_id.as_deref()))
+            .collect::<Vec<_>>()
     );
-    assert_eq!(restored.current().unwrap().as_str(), "snapshot:150");
+    assert_eq!(restored.current_index, Some(54));
     assert_eq!(restored.progress_millis, 1200);
-    exported.clear();
-    fixture
-        .database
-        .export_queue_jsonl(&mut exported)
-        .await
-        .unwrap();
-    let value: serde_json::Value = serde_json::from_slice(&exported).unwrap();
-    let snapshots: Vec<QueueOccurrence> =
-        serde_json::from_value(value["snapshots"].clone()).unwrap();
-    let expected = original
-        .into_iter()
-        .rev()
-        .map(|mut row| {
-            row.provenance = QueueProvenance::Radio;
-            row
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(snapshots, expected);
+    assert!(
+        restored
+            .rows
+            .iter()
+            .all(|row| row.title == "Changed supplied metadata")
+    );
 }
 
 #[tokio::test]
 async fn installed_cursor_queue_retains_displaced_entries_and_play_last() {
     let fixture = fixture().await;
-    let row = |id: &str, uri: &str, source| library::QueueOccurrence {
-        occurrence: id.into(),
-        item: QueueItem::direct(uri, uri, "", "", 1000),
-        canonical_position: 0,
-        source_index: Some(source),
-        playlist_entry_id: None,
-        provenance: library::QueueProvenance::Manual,
-    };
-    super::support::persist_queue(
-        &fixture.database,
-        fixture.source,
-        &[row("old-a", "a", 0), row("old-x", "x", 1)],
-        Some("old-a"),
-        42000,
-        QueueRepeatMode::All,
-        false,
-    )
-    .await;
+    let row = |id: &str, uri: &str, source| serde_json::json!({"occurrence":id,"item":QueueItem::direct(uri,uri,"","",1000),"canonical_position":0,"source_index":source,"playlist_entry_id":null,"provenance":"Manual"});
+    let rows = vec![row("old-a", "a", 0), row("old-x", "x", 1)];
     let choice = |uri: &str, origin: Option<(usize, usize)>| serde_json::json!({"origin":origin,"media_uri":uri,"fallback":null,"provenance":"Manual"});
     let instruction = |choices: Vec<serde_json::Value>, repeat| serde_json::json!({"input":{"Choices":choices},"repeat":repeat,"seed":null});
-    let saved = serde_json::json!({"occurrences":[],"current_index":0,"progress_millis":42000,"repeat_mode":"All","shuffled":false,"next_id":20,
+    let saved = serde_json::json!({"occurrences":rows,"current_index":0,"progress_millis":42000,"repeat_mode":"All","shuffled":false,"next_id":20,
         "sources":[instruction(vec![choice("a",None),choice("b",None),choice("c",None),choice("d",None)],true),instruction(vec![choice("x",None)],true),instruction(vec![choice("b",Some((0,1))),choice("c",Some((0,2)))],false),instruction(vec![choice("z",None)],true)],
         "pending":[{"source":2,"offset":0},{"source":0,"offset":3},{"source":3,"offset":0}]});
-    let mut raw = connection(&fixture.path).await;
-    sqlx::query("UPDATE queue_saved SET state=?1")
-        .bind(saved.to_string())
-        .execute(&mut raw)
-        .await
-        .unwrap();
-    sqlx::query("DELETE FROM queue_order")
-        .execute(&mut raw)
+    fixture
+        .database
+        .import_queue_jsonl(std::io::Cursor::new(
+            serde_json::to_vec(&serde_json::json!({"version":2,"queue":saved})).unwrap(),
+        ))
         .await
         .unwrap();
     let restored = fixture.database.restore_queue().await.unwrap();
@@ -941,13 +921,13 @@ async fn installed_cursor_queue_retains_displaced_entries_and_play_last() {
             .collect::<Vec<_>>(),
         ["a", "x", "b", "c", "d", "z"]
     );
-    assert_eq!(restored.current().unwrap().as_str(), "old-a");
+    assert_eq!(restored.current_index, Some(0));
     assert_eq!(restored.progress_millis, 42000);
     assert_eq!(restored.repeat_mode, QueueRepeatMode::All);
 }
 
 #[tokio::test]
-async fn coalesced_replacements_retire_snapshots_without_rewriting_them_on_order_changes() {
+async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes() {
     let fixture = fixture().await;
     let mut latest = library::QueueRestore::default();
     for activation in 0..12 {
@@ -977,11 +957,11 @@ async fn coalesced_replacements_retire_snapshots_without_rewriting_them_on_order
             })
             .await
             .unwrap();
-        assert_eq!(page.occurrences.len(), 1);
+        assert_eq!(page.rows.len(), 1);
         latest = library::QueueRestore {
             entries: page.entries.into(),
             order: vec![0, 1].into(),
-            occurrences: page.occurrences,
+            rows: page.rows,
             current_index: Some(0),
             ..Default::default()
         };
@@ -993,7 +973,7 @@ async fn coalesced_replacements_retire_snapshots_without_rewriting_them_on_order
             .fetch_one(&mut raw)
             .await
             .unwrap(),
-        2
+        24
     );
     let membership: String = sqlx::query_scalar("SELECT state FROM queue_saved")
         .fetch_one(&mut raw)
@@ -1003,7 +983,7 @@ async fn coalesced_replacements_retire_snapshots_without_rewriting_them_on_order
     latest.order = vec![1, 0].into();
     latest.current_index = Some(1);
     latest.shuffled = true;
-    latest.next_id = 37;
+
     latest.progress_millis = 1234;
     latest.repeat_mode = QueueRepeatMode::All;
     fixture.database.save_queue_order(&latest).await.unwrap();
@@ -1025,8 +1005,7 @@ async fn coalesced_replacements_retire_snapshots_without_rewriting_them_on_order
     let restored = fixture.database.restore_queue().await.unwrap();
     assert_eq!(restored.entries, latest.entries);
     assert_eq!(restored.order, latest.order);
-    assert_eq!(restored.current(), latest.current());
-    assert_eq!(restored.next_id, latest.next_id);
+    assert_eq!(restored.current_index, latest.current_index);
     assert_eq!(restored.progress_millis, latest.progress_millis);
     assert_eq!(restored.repeat_mode, latest.repeat_mode);
     assert_eq!(restored.shuffled, latest.shuffled);
@@ -1042,29 +1021,8 @@ async fn installed_shuffled_source_keeps_its_exact_pending_order() {
         .iter()
         .take(2)
         .enumerate()
-        .map(|(index, uri)| library::QueueOccurrence {
-            occurrence: format!("old:{index}").into(),
-            item: QueueItem::direct(uri.clone(), uri.clone(), "", "", 1000),
-            canonical_position: index,
-            source_index: Some(0),
-            playlist_entry_id: None,
-            provenance: library::QueueProvenance::Context {
-                context_title: None,
-                context_id: "source".into(),
-                source_rank: index,
-            },
-        })
+        .map(|(index, uri)| serde_json::json!({"occurrence":format!("old:{index}"),"item":QueueItem::direct(uri.clone(),uri.clone(),"","",1000),"canonical_position":index,"source_index":0,"playlist_entry_id":null,"provenance":{"Context":{"context_id":"source","context_title":null,"source_rank":index}}}))
         .collect::<Vec<_>>();
-    super::support::persist_queue(
-        &fixture.database,
-        fixture.source,
-        &rows,
-        Some("old:1"),
-        42,
-        QueueRepeatMode::All,
-        true,
-    )
-    .await;
     let reference = library::QueueSource {
         scope: library::QueueScope::Tracks {
             source: library::SourceId::new("source"),
@@ -1078,16 +1036,14 @@ async fn installed_shuffled_source_keeps_its_exact_pending_order() {
         descending: false,
         anchor_uri: None,
     };
-    let saved = serde_json::json!({"occurrences":[],"current_index":1,"progress_millis":42,"repeat_mode":"All","shuffled":true,"next_id":20,
+    let saved = serde_json::json!({"occurrences":rows,"current_index":1,"progress_millis":42,"repeat_mode":"All","shuffled":true,"next_id":20,
         "sources":[{"input":library::QueueInput::Source {reference,context_id:"source".into()},"repeat":true,"seed":seed}],
         "pending":[{"source":0,"offset":2,"seed":seed}]});
-    sqlx::query("UPDATE queue_saved SET state=?1")
-        .bind(saved.to_string())
-        .execute(&mut raw)
-        .await
-        .unwrap();
-    sqlx::query("DELETE FROM queue_order")
-        .execute(&mut raw)
+    fixture
+        .database
+        .import_queue_jsonl(std::io::Cursor::new(
+            serde_json::to_vec(&serde_json::json!({"version":2,"queue":saved})).unwrap(),
+        ))
         .await
         .unwrap();
     let restored = fixture.database.restore_queue().await.unwrap();
@@ -1099,7 +1055,7 @@ async fn installed_shuffled_source_keeps_its_exact_pending_order() {
             .collect::<Vec<_>>(),
         ordered
     );
-    assert_eq!(restored.current().unwrap().as_str(), "old:1");
+    assert_eq!(restored.current_index, Some(1));
     assert_eq!(restored.progress_millis, 42);
 }
 
@@ -1137,11 +1093,8 @@ async fn repeated_large_source_starts_resolve_only_the_selected_window() {
             .await
             .unwrap();
         assert_eq!(page.entries.len(), 20000);
-        assert_eq!(page.occurrences.len(), 1);
-        assert_eq!(
-            page.occurrences[0].occurrence,
-            page.entries[page.current_index].occurrence
-        );
+        assert_eq!(page.rows.len(), 1);
+        assert_eq!(page.rows[0].position, page.current_index);
         let mut order = (0..20000_u32).collect::<Vec<_>>();
         order.rotate_left(page.current_index);
         let projection = fixture
@@ -1150,16 +1103,17 @@ async fn repeated_large_source_starts_resolve_only_the_selected_window() {
                 entries: order
                     .iter()
                     .take(100)
-                    .map(|index| page.entries[*index as usize].clone())
+                    .enumerate()
+                    .map(|(position, index)| (position, page.entries[*index as usize].clone()))
                     .collect(),
             })
             .await
             .unwrap();
-        assert_eq!(projection.occurrences.len(), 100);
+        assert_eq!(projection.rows.len(), 100);
         let mut state = library::QueueRestore {
             entries: page.entries.into(),
             order: order.into(),
-            occurrences: projection.occurrences,
+            rows: projection.rows,
             current_index: Some(0),
             shuffled: true,
             ..Default::default()
@@ -1170,7 +1124,7 @@ async fn repeated_large_source_starts_resolve_only_the_selected_window() {
                 .fetch_one(&mut raw)
                 .await
                 .unwrap(),
-            100
+            0
         );
         let membership: String = sqlx::query_scalar("SELECT state FROM queue_saved")
             .fetch_one(&mut raw)

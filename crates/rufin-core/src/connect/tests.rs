@@ -212,27 +212,40 @@ fn cue_direct_continuation_transfers_one_file_without_enrollment() {
                 let mut item =
                     library::QueueItem::direct(&uri, "Cue track", "Artist", "Album", 1000);
                 item.source_format = Some("flac".into());
-                let queue = a
-                    .database
-                    .read_queue(library::QueueReadRequest::Capture {
-                        context_title: None,
-                        input: Box::new(library::QueueInput::Items(vec![(
+                host.products
+                    .playback
+                    .queue
+                    .play(playback::PlayRequest::ordered(
+                        library::QueueInput::Items(vec![(
                             item.clone(),
                             library::QueueProvenance::Manual,
-                        )])),
-                        anchor_index: 0,
-                        random_start: None,
-                        shuffled: None,
-                    })
-                    .await
-                    .unwrap();
-                b.fetch_direct_continuation(
-                    &a.status().identity.unwrap(),
-                    &item,
-                    &queue.entries[0].occurrence,
-                )
+                        )]),
+                        0,
+                        library::QueuePlacement::Now,
+                        false,
+                    ));
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    loop {
+                        let queue = host.products.playback.queue.clone();
+                        let saved = tokio::task::spawn_blocking(move || queue.snapshot())
+                            .await
+                            .unwrap()
+                            .unwrap();
+                        if saved
+                            .entries
+                            .first()
+                            .is_some_and(|entry| entry.media_uri.as_ref() == uri)
+                        {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                })
                 .await
                 .unwrap();
+                b.fetch_direct_continuation(&a.status().identity.unwrap(), &item, 0)
+                    .await
+                    .unwrap();
                 assert!(
                     b.database
                         .connect_track_reference(&uri)

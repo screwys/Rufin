@@ -1,9 +1,6 @@
 //! Reads released source-scoped user facts; catalog rows are consulted only for referenced locators.
 use super::{has_table, imported, integer, string};
-use crate::{
-    Database, LibraryError, LibraryResult, OccurrenceId, QueueItem, QueueOccurrence,
-    QueueProvenance, SourceId,
-};
+use crate::{Database, LibraryError, LibraryResult, QueueItem, QueueProvenance, SourceId};
 use futures_util::TryStreamExt;
 use sqlx::{SqliteConnection, sqlite::SqliteRow};
 use std::io::{Seek, Write};
@@ -587,10 +584,10 @@ async fn queue(
                         .ok()
                 })
                 .unwrap_or(QueueProvenance::Legacy);
-            let occurrence = QueueOccurrence {
+            let occurrence = crate::queue::LegacyQueueRow {
                 source_index: None,
                 playlist_entry_id: None,
-                occurrence: OccurrenceId::new(id),
+                occurrence: id,
                 item,
                 canonical_position: integer(&row, "canonical_position").unwrap_or(0) as usize,
                 provenance,

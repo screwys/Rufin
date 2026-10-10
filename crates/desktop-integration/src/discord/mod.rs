@@ -414,9 +414,8 @@ pub(crate) mod tests {
     use std::sync::Arc;
 
     use playback::{
-        ControlsView, CurrentMedia, CurrentMediaId, OccurrenceId, PlaybackView, Provenance,
-        QueueItem, QueueOccurrence, QueueSummaryView, RepeatMode, RunId, TransportStatus,
-        TransportView,
+        ControlsView, CurrentMedia, CurrentMediaId, PlaybackView, Provenance, QueueItem, QueueRow,
+        QueueSummaryView, RepeatMode, RunId, TransportStatus, TransportView,
     };
 
     pub(crate) fn test_view(
@@ -425,14 +424,15 @@ pub(crate) mod tests {
         state: TransportStatus,
         position_millis: u64,
     ) -> PlaybackView {
-        let occurrence = OccurrenceId::new(format!("presence:{run}"));
+        let media_uri =
+            library::source_entity_uri(&library::SourceId::new("source"), "track", "track");
         let current = Arc::new(CurrentMedia {
             id: CurrentMediaId {
                 run: Some(RunId::new(run)),
-                occurrence: occurrence.clone(),
+                media_uri: media_uri.into(),
             },
-            occurrence: Arc::new(QueueOccurrence {
-                occurrence: occurrence.clone(),
+            row: Arc::new(QueueRow {
+                position: 0,
                 item: QueueItem {
                     media_uri: library::source_entity_uri(
                         &library::SourceId::new("source"),
@@ -456,8 +456,7 @@ pub(crate) mod tests {
                     musicbrainz_release_group_id: Some("release-group-id".to_string()),
                     primary_artist_musicbrainz_id: Some("artist-id".to_string()),
                 },
-                canonical_position: 0,
-                source_index: None,
+                received_from_connect: false,
                 playlist_entry_id: None,
                 provenance: Provenance::Manual,
             }),
@@ -468,9 +467,8 @@ pub(crate) mod tests {
             queue: QueueSummaryView {
                 revision: run,
                 total: 1,
-                current_occurrence: Some(occurrence),
                 current_index: Some(0),
-                next_occurrence: None,
+                next_index: None,
                 can_next: false,
             },
             transport: TransportView {

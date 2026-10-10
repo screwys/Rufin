@@ -601,7 +601,7 @@ async fn icon(
 }
 
 struct QueueRow {
-    pub id: String,
+    pub position: u64,
     pub title: String,
     pub artist: String,
 }
@@ -677,8 +677,11 @@ impl Page {
             )
     }
 
-    pub fn current_id(&self) -> &str {
-        self.controls["current"]["id"].as_str().unwrap_or_default()
+    pub fn current_position(&self) -> String {
+        self.controls["current"]["position"]
+            .as_u64()
+            .map(|position| position.to_string())
+            .unwrap_or_default()
     }
     pub fn has_current(&self) -> bool {
         !self.controls["current"].is_null()
@@ -863,7 +866,7 @@ async fn index(
             .into_iter()
             .flatten()
             .map(|row| QueueRow {
-                id: row["id"].as_str().unwrap_or_default().into(),
+                position: row["position"].as_u64().unwrap_or_default(),
                 title: row["track"]["title"].as_str().unwrap_or_default().into(),
                 artist: row["track"]["artist"].as_str().unwrap_or_default().into(),
             })

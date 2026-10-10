@@ -35,7 +35,8 @@ function showPlayback(value) {
   if (
     seekPreview != null &&
     !seeking &&
-    (value?.current?.id !== state.currentId ||
+    (value?.current?.media_uri !== state.currentMediaUri ||
+      value?.current?.run !== state.currentRun ||
       !value?.can_seek ||
       Math.abs((value?.position_ms || 0) - seekPreview) <= 1500 ||
       value?.error)
@@ -82,8 +83,12 @@ function showPlayback(value) {
   $("seek").max = Math.max(1, value?.duration_ms || 0);
   $("seek").disabled = !track || !value.can_seek;
   $("duration").textContent = time(value?.duration_ms);
-  if (state.currentId !== (value?.current?.id || null)) {
-    state.currentId = value?.current?.id || null;
+  if (
+    state.currentMediaUri !== (value?.current?.media_uri ?? null) ||
+    state.currentRun !== (value?.current?.run ?? null)
+  ) {
+    state.currentMediaUri = value?.current?.media_uri ?? null;
+    state.currentRun = value?.current?.run ?? null;
     $("current-favorite").disabled = !track;
     $("current-favorite").dataset.favoriteUri = track?.uri || "";
     if (!track) showFavorite($("current-favorite"), false);
@@ -94,12 +99,14 @@ function showPlayback(value) {
     coverRequest = new AbortController();
     if (!track) $("mini-cover").replaceChildren(icon("cover-fallback"));
     if (track) {
-      const id = state.currentId;
+      const mediaUri = state.currentMediaUri;
+      const mediaRun = state.currentRun;
       currentFavoriteRequest = (async () => {
         const metadata = await api(
           `/media?${new URLSearchParams({ uri: track.uri })}`,
         );
-        if (state.currentId !== id) return;
+        if (state.currentMediaUri !== mediaUri || state.currentRun !== mediaRun)
+          return;
         showFavorite($("current-favorite"), metadata.favorite);
       })();
       run(() => currentFavoriteRequest);
@@ -138,7 +145,11 @@ function showPlayback(value) {
 }
 
 function showLyrics(value) {
-  if (value.id && value.id !== state.currentId) return;
+  if (
+    value.media_uri &&
+    (value.media_uri !== state.currentMediaUri || value.run !== state.currentRun)
+  )
+    return;
   lyricsDocument = value.document || null;
   activeLine = -1;
   $("lyrics").replaceChildren();
@@ -360,11 +371,13 @@ function init() {
       volumeEditing = false;
     });
   $("current-favorite").addEventListener("click", () => {
-    const id = state.currentId;
+    const mediaUri = state.currentMediaUri;
+    const mediaRun = state.currentRun;
     if (state.playback?.current?.track)
       run(async () => {
         await currentFavoriteRequest;
-        if (state.currentId !== id) return;
+        if (state.currentMediaUri !== mediaUri || state.currentRun !== mediaRun)
+          return;
         await setFavorite([
           {
             ...state.playback.current.track,

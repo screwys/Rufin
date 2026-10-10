@@ -63,22 +63,20 @@ fn queue_load_confirmation_waits_through_stop_and_the_wrong_duplicate() {
 }
 
 #[test]
-fn plex_queue_admission_retains_occurrences_and_rejects_mixed_sources() {
+fn plex_queue_admission_retains_duplicates_and_rejects_mixed_sources() {
     let source = sources::SourceId::new("plex-test");
-    let entry = |index, source: &sources::SourceId| library::QueueEntry {
-        occurrence: OccurrenceId::new(format!("local:{index}")),
+    let entry = |source: &sources::SourceId| library::QueueEntry {
+        received_from_connect: false,
         media_uri: library::source_entity_uri(source, "track", "plex:track:42").into(),
         playlist_entry_id: None,
         provenance: playback::Provenance::Manual,
     };
-    let entries = vec![entry(0, &source), entry(1, &source), entry(2, &source)];
+    let entries = vec![entry(&source), entry(&source), entry(&source)];
     assert_eq!(queue_keys(&entries, &source).unwrap(), ["42", "42", "42"]);
     let mut mixed = entries.clone();
-    mixed.push(entry(3, &sources::SourceId::new("another-profile")));
+    mixed.push(entry(&sources::SourceId::new("another-profile")));
     assert!(queue_keys(&mixed, &source).is_err());
     assert_eq!(entries.len(), 3);
-    assert_eq!(plex_occurrence(&occurrence(7, 18)), Some(18));
-    assert_eq!(plex_occurrence(&OccurrenceId::new("local:18")), None);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -253,14 +251,6 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         assert!(plex.resolve_timeline_source(&timeline).await.is_err());
         assert_eq!(plex.connection().1.source_id.as_str(), "preferred");
     }
-    assert_ne!(
-        receiver_occurrence(&first.source_id, 7, 1),
-        receiver_occurrence(&sources::SourceId::new("preferred"), 7, 1)
-    );
-    assert_eq!(
-        plex_occurrence(&receiver_occurrence(&first.source_id, 7, 1)),
-        Some(1)
-    );
     // The receiver endpoint refuses connections. Returning to Rufin must still work.
     plex.observe(stopped_timeline(), false).await.unwrap();
     let plex = Arc::new(plex);

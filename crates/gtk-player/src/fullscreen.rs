@@ -1125,9 +1125,8 @@ fn update_fullscreen_meta_row(row: &gtk::FlowBox, parts: &[String]) {
 mod playback_refresh_tests {
     use super::*;
     use playback::{
-        ControlsView, CurrentMedia, CurrentMediaId, OccurrenceId, PlaybackOutput, Provenance,
-        QueueItem, QueueOccurrence, QueueSummaryView, RepeatMode, RunId, TransportStatus,
-        TransportView,
+        ControlsView, CurrentMedia, CurrentMediaId, PlaybackOutput, Provenance, QueueItem,
+        QueueRow, QueueSummaryView, RepeatMode, RunId, TransportStatus, TransportView,
     };
     use std::sync::Arc;
 
@@ -1166,14 +1165,15 @@ mod playback_refresh_tests {
     }
 
     fn current_media(title: &str, _source: library::SourceKey) -> CurrentMedia {
-        let occurrence = OccurrenceId::new(format!("queue:{title}"));
+        let media_uri =
+            library::source_entity_uri(&library::SourceId::new("source"), "track", title);
         CurrentMedia {
             id: CurrentMediaId {
                 run: Some(RunId::new(1)),
-                occurrence: occurrence.clone(),
+                media_uri: media_uri.into(),
             },
-            occurrence: Arc::new(QueueOccurrence {
-                occurrence,
+            row: Arc::new(QueueRow {
+                position: 0,
                 item: QueueItem {
                     media_uri: library::source_entity_uri(
                         &library::SourceId::new("source"),
@@ -1197,8 +1197,7 @@ mod playback_refresh_tests {
                     musicbrainz_release_group_id: None,
                     primary_artist_musicbrainz_id: None,
                 },
-                canonical_position: 0,
-                source_index: None,
+                received_from_connect: false,
                 playlist_entry_id: None,
                 provenance: Provenance::Manual,
             }),
@@ -1210,16 +1209,14 @@ mod playback_refresh_tests {
         current: Option<CurrentMedia>,
         position_millis: u64,
     ) -> PlaybackView {
-        let current_occurrence = current.as_ref().map(|media| media.id.occurrence.clone());
         PlaybackView {
             queue_loading: false,
             queue_window: Vec::new(),
             queue: QueueSummaryView {
                 revision: 1,
                 total: usize::from(current.is_some()),
-                current_occurrence,
                 current_index: current.as_ref().map(|_| 0),
-                next_occurrence: None,
+                next_index: None,
                 can_next: false,
             },
             transport: TransportView {

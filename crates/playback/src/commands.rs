@@ -3,8 +3,8 @@ use std::sync::Arc;
 use library::{RadioSeed, RandomCriteria};
 
 use crate::{
-    AudioOutput, Batch, BatchItem, CastNetwork, OccurrenceId, Placement, PlaybackOutput,
-    Provenance, QueueItem, QueueReorderTarget, RemoteOutput, RepeatMode,
+    AudioOutput, Batch, BatchItem, CastNetwork, Placement, PlaybackOutput, Provenance, QueueItem,
+    QueueReorderTarget, RemoteOutput, RepeatMode,
 };
 
 pub type QueuePlacement = Placement;
@@ -92,7 +92,7 @@ impl PlayRequest {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueueReorderRequest {
-    pub occurrences: Vec<OccurrenceId>,
+    pub positions: Vec<usize>,
     pub target: QueueReorderTarget,
 }
 
@@ -138,17 +138,17 @@ pub trait QueueCommandPort: Send + Sync {
     fn media_uris(&self) -> Result<Vec<String>, String>;
     fn play(&self, request: PlayRequest);
     fn insert(&self, input: library::QueueInput, target: QueueReorderTarget);
-    fn remove(&self, occurrence: OccurrenceId);
-    fn remove_many(&self, occurrences: Vec<OccurrenceId>);
-    fn activate(&self, occurrence: OccurrenceId);
-    fn move_after_current(&self, occurrence: OccurrenceId);
+    fn remove(&self, position: usize);
+    fn remove_many(&self, positions: Vec<usize>);
+    fn activate(&self, position: usize);
+    fn move_after_current(&self, position: usize);
     fn reorder(&self, request: QueueReorderRequest);
     fn clear(&self, include_current: bool);
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct QueuePage {
-    pub rows: Vec<Arc<crate::QueueOccurrence>>,
+    pub rows: Vec<Arc<crate::QueueRow>>,
     pub total: u64,
     pub window_offset: u64,
 }
@@ -281,7 +281,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn collection_occurrences_share_one_context_identity() {
+    async fn collection_positions_share_one_context_identity() {
         let directory = tempfile::tempdir().unwrap();
         let database = library::Database::open(directory.path().join("queue.sqlite3"))
             .await

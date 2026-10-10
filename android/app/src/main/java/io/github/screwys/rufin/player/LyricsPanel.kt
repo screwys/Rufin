@@ -122,8 +122,8 @@ internal fun CurrentLyricsPreview(player: PlayerConnection) {
     val current = player.currentLyrics
     val document = current?.document
     val snapshot = current?.snapshot
-    var active by remember(current?.occurrenceId, document) { mutableStateOf<Int?>(null) }
-    var highlights by remember(current?.occurrenceId, document) { mutableStateOf<List<AndroidLyricsHighlight>>(emptyList()) }
+    var active by remember(current?.mediaUri, current?.mediaRun, document) { mutableStateOf<Int?>(null) }
+    var highlights by remember(current?.mediaUri, current?.mediaRun, document) { mutableStateOf<List<AndroidLyricsHighlight>>(emptyList()) }
     val preferences = player.settings?.lyrics?.let { remember(it) { JSONObject(it) } }
     val karaoke = preferences?.optBoolean("karaoke_mode") == true
     val reduceMotion = LocalReduceMotion.current
@@ -230,7 +230,7 @@ private fun LyricsDocumentView(player: PlayerConnection, current: AndroidLyricsS
             followRevision++
         }
     }
-    LaunchedEffect(current.occurrenceId) { hadDrag = false; pausedUntil = 0 }
+    LaunchedEffect(current.mediaUri, current.mediaRun) { hadDrag = false; pausedUntil = 0 }
     LaunchedEffect(snapshot, document, karaoke, player.lyricsOffset) {
         while (true) {
             val position = player.positionNow()

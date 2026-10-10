@@ -46,8 +46,8 @@ impl QueuePersistence {
     pub const fn revision(&self) -> u64 {
         self.revision
     }
-    pub fn current(&self) -> Option<&crate::OccurrenceId> {
-        self.state.current()
+    pub fn current(&self) -> Option<usize> {
+        self.state.current_index
     }
     pub fn progress_millis(&self) -> u64 {
         self.state.progress_millis.max(0) as u64
@@ -143,12 +143,6 @@ type Reply<T> = SyncSender<PlaybackResult<T>>;
 type Clock = Arc<dyn Fn() -> ClockSample + Send + Sync>;
 
 enum RuntimeCommand {
-    QueueMembers {
-        offset: usize,
-        limit: usize,
-        matches: Option<Vec<(usize, String)>>,
-        reply: Reply<(Vec<library::QueueEntry>, usize, usize)>,
-    },
     QueueContentId {
         reply: Reply<String>,
     },
@@ -220,14 +214,16 @@ enum RuntimeCommand {
         reply: Reply<()>,
     },
     CompleteAutoDj {
-        seed_occurrence: crate::OccurrenceId,
+        seed_run: Option<RunId>,
+        seed_media_uri: String,
         candidates: Vec<QueueItem>,
         requested_count: usize,
         shuffle_seed: u64,
         reply: Reply<bool>,
     },
     AutoDjUnavailable {
-        seed_occurrence: crate::OccurrenceId,
+        seed_run: Option<RunId>,
+        seed_media_uri: String,
         error: Option<String>,
         reply: Reply<bool>,
     },
@@ -266,19 +262,6 @@ enum PlaybackOutput {
 /// backend polling cadence, and ordered output worker; callers cannot mutate
 /// the session or drive the backend through a second path.
 impl Playback {
-    pub fn queue_members(
-        &self,
-        offset: usize,
-        limit: usize,
-        matches: Option<Vec<(usize, String)>>,
-    ) -> PlaybackResult<(Vec<library::QueueEntry>, usize, usize)> {
-        self.request(|reply| RuntimeCommand::QueueMembers {
-            offset,
-            limit,
-            matches,
-            reply,
-        })
-    }
     pub fn queue_content_id(&self) -> PlaybackResult<String> {
         self.request(|reply| RuntimeCommand::QueueContentId { reply })
     }
@@ -479,13 +462,15 @@ impl Playback {
     #[allow(clippy::too_many_arguments)]
     pub fn complete_auto_dj_candidates(
         &self,
-        seed_occurrence: crate::OccurrenceId,
+        seed_run: Option<RunId>,
+        seed_media_uri: String,
         candidates: Vec<QueueItem>,
         requested_count: usize,
         shuffle_seed: u64,
     ) -> PlaybackResult<bool> {
         self.request(|reply| RuntimeCommand::CompleteAutoDj {
-            seed_occurrence,
+            seed_run,
+            seed_media_uri,
             candidates,
             requested_count,
             shuffle_seed,
@@ -495,11 +480,13 @@ impl Playback {
 
     pub fn auto_dj_unavailable(
         &self,
-        seed_occurrence: crate::OccurrenceId,
+        seed_run: Option<RunId>,
+        seed_media_uri: String,
         error: Option<String>,
     ) -> PlaybackResult<bool> {
         self.request(|reply| RuntimeCommand::AutoDjUnavailable {
-            seed_occurrence,
+            seed_run,
+            seed_media_uri,
             error,
             reply,
         })
@@ -612,30 +599,6 @@ fn apply_runtime_command(
 ) -> bool {
     let sample = clock();
     match command {
-        RuntimeCommand::QueueMembers {
-            offset,
-            limit,
-            matches,
-            reply,
-        } => {
-            let sequence = runtime.session.sequence();
-            let window_offset = runtime
-                .session
-                .external_queue_extent()
-                .map_or(0, |(_, offset)| offset);
-            let entries = match matches {
-                Some(matches) => matches
-                    .into_iter()
-                    .take(limit.min(library::QUEUE_CONTEXT_LIMIT))
-                    .filter_map(|(index, id)| sequence.member_at(index, &id).cloned())
-                    .collect(),
-                None => (offset.saturating_sub(window_offset)..sequence.total())
-                    .take(limit.min(library::QUEUE_CONTEXT_LIMIT))
-                    .filter_map(|index| sequence.entry_at(index).cloned())
-                    .collect(),
-            };
-            let _ = reply.send(Ok((entries, sequence.total(), window_offset)));
-        }
         RuntimeCommand::QueueContentId { reply } => {
             let _ = reply.send(Ok(runtime.session.sequence().content_id().to_owned()));
         }
@@ -788,7 +751,8 @@ fn apply_runtime_command(
             reply_update(runtime.resolve_stream(run, stream, &sample), outputs, reply);
         }
         RuntimeCommand::CompleteAutoDj {
-            seed_occurrence,
+            seed_run,
+            seed_media_uri,
             candidates,
             requested_count,
             shuffle_seed,
@@ -796,7 +760,8 @@ fn apply_runtime_command(
         } => {
             let value = runtime
                 .complete_auto_dj_candidates(
-                    &seed_occurrence,
+                    seed_run,
+                    &seed_media_uri,
                     candidates,
                     requested_count,
                     shuffle_seed,
@@ -806,12 +771,13 @@ fn apply_runtime_command(
             let _ = reply.send(value);
         }
         RuntimeCommand::AutoDjUnavailable {
-            seed_occurrence,
+            seed_run,
+            seed_media_uri,
             error,
             reply,
         } => {
             let value = runtime
-                .auto_dj_unavailable(&seed_occurrence, error, &sample)
+                .auto_dj_unavailable(seed_run, &seed_media_uri, error, &sample)
                 .and_then(|update| publish_optional_update(outputs, update));
             let _ = reply.send(value);
         }
@@ -1030,7 +996,7 @@ mod persistence_tests {
                 .await
                 .unwrap();
             let mut sequence = Sequence::new();
-            sequence.add_page(page, library::QueueReorderTarget::End, true, None);
+            sequence.add_page(page, library::QueueReorderTarget::End, true, None, &mut []);
             let mut runtime = PlaybackRuntime::new(
                 sequence,
                 "failure-feedback",
@@ -1153,32 +1119,30 @@ mod persistence_tests {
         replace_queue(&playback, "first", 150);
         let mut pending = published_queue_snapshot(&playback, &updates, &database).await;
         assert_eq!(pending.state().entries.len(), 150);
-        assert!(pending.state().occurrences.len() <= library::QUEUE_CONTEXT_LIMIT);
+        assert!(pending.state().rows.len() <= library::QUEUE_CONTEXT_LIMIT);
         database.save_queue(pending.state()).await.unwrap();
         let restored = database.restore_queue().await.unwrap();
-        assert_eq!(restored.occurrences.len(), library::QUEUE_CONTEXT_LIMIT);
+        assert_eq!(restored.rows.len(), library::QUEUE_CONTEXT_LIMIT);
 
         replace_queue(&playback, "replacement", 3);
         pending.coalesce(published_queue_snapshot(&playback, &updates, &database).await);
         database.save_queue(pending.state()).await.unwrap();
         let restored = database.restore_queue().await.unwrap();
-        assert_eq!(restored.occurrences.len(), 3);
+        assert_eq!(restored.rows.len(), 3);
         assert!(
             restored
-                .occurrences
+                .rows
                 .iter()
                 .all(|row| row.media_uri.contains("/replacement/"))
         );
         assert_eq!(restored.current_index, Some(0));
 
         playback
-            .command(SessionCommand::Remove(
-                restored.occurrences[2].occurrence.clone(),
-            ))
+            .command(SessionCommand::Remove(restored.rows[2].position.clone()))
             .unwrap();
         let snapshot = published_queue_snapshot(&playback, &updates, &database).await;
         database.save_queue(snapshot.state()).await.unwrap();
-        assert_eq!(database.restore_queue().await.unwrap().occurrences.len(), 2);
+        assert_eq!(database.restore_queue().await.unwrap().rows.len(), 2);
 
         playback
             .command(SessionCommand::SetShuffle {
@@ -1203,7 +1167,7 @@ mod persistence_tests {
         let snapshot = published_queue_snapshot(&playback, &updates, &database).await;
         database.save_queue(snapshot.state()).await.unwrap();
         let restored = database.restore_queue().await.unwrap();
-        assert!(restored.occurrences.is_empty());
+        assert!(restored.rows.is_empty());
         playback.shutdown().unwrap();
     }
 
@@ -1230,12 +1194,12 @@ mod persistence_tests {
             .await
             .unwrap();
         let mut sequence = Sequence::new();
-        sequence.add_page(page, library::QueueReorderTarget::End, true, None);
+        sequence.add_page(page, library::QueueReorderTarget::End, true, None, &mut []);
         let mut pending =
             QueuePersistence::capture(&sequence, crate::QueuePersistenceKind::Membership);
         sequence.set_repeat_mode(crate::RepeatMode::All);
         sequence.set_progress_millis(42000);
-        sequence.shuffle(true, 7);
+        sequence.shuffle(true, 7, &mut []);
         let newer = QueuePersistence::capture(&sequence, crate::QueuePersistenceKind::Membership);
         pending.coalesce(newer);
         assert_eq!(pending.revision(), 3);
@@ -1382,7 +1346,8 @@ impl PlaybackRuntime {
 
     fn complete_auto_dj_candidates(
         &mut self,
-        seed_occurrence: &crate::OccurrenceId,
+        seed_run: Option<RunId>,
+        seed_media_uri: &str,
         candidates: Vec<QueueItem>,
         requested_count: usize,
         shuffle_seed: u64,
@@ -1391,7 +1356,8 @@ impl PlaybackRuntime {
         let update = self
             .session
             .complete_auto_dj_candidates(
-                seed_occurrence,
+                seed_run,
+                seed_media_uri,
                 candidates,
                 requested_count,
                 shuffle_seed,
@@ -1404,13 +1370,14 @@ impl PlaybackRuntime {
 
     fn auto_dj_unavailable(
         &mut self,
-        seed_occurrence: &crate::OccurrenceId,
+        seed_run: Option<RunId>,
+        seed_media_uri: &str,
         error: Option<String>,
         sample: &ClockSample,
     ) -> PlaybackResult<Option<PlaybackUpdate>> {
         let update = self
             .session
-            .auto_dj_unavailable(seed_occurrence, error)
+            .auto_dj_unavailable(seed_run, seed_media_uri, error)
             .map(|update| self.finish(update, sample))
             .transpose()?;
         Ok(update)

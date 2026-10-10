@@ -167,7 +167,7 @@ CREATE INDEX IF NOT EXISTS listen_outbox_due_idx ON listen_outbox(next_attempt_a
 
 CREATE TABLE IF NOT EXISTS queue_state (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-    current_occurrence_id TEXT,
+    current_index INTEGER,
     progress_millis INTEGER NOT NULL DEFAULT 0 CHECK (progress_millis >= 0),
     repeat_mode TEXT NOT NULL DEFAULT 'none' CHECK (repeat_mode IN ('none', 'one', 'all')),
     shuffled INTEGER NOT NULL DEFAULT 0 CHECK (shuffled IN (0, 1))
@@ -203,21 +203,8 @@ CREATE INDEX IF NOT EXISTS connect_media_files_missing_backing_idx ON connect_me
 
 CREATE TABLE IF NOT EXISTS queue_occurrences (
     queue_occurrence_key INTEGER PRIMARY KEY,
-    received_from_connect INTEGER NOT NULL DEFAULT 0,
-    object_id TEXT NOT NULL CHECK (object_id <> ''),
-    media_uri TEXT NOT NULL CHECK (media_uri <> ''),
+    media_uri TEXT NOT NULL UNIQUE CHECK (media_uri <> ''),
     snapshot_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    position INTEGER NOT NULL CHECK (position >= 0),
-    traversal_position INTEGER NOT NULL CHECK (traversal_position >= 0),
-    origin_source INTEGER,
-    origin_position INTEGER,
-    playlist_entry_id TEXT,
-    provenance_kind TEXT NOT NULL CHECK (
-        provenance_kind IN ('context', 'manual', 'random', 'radio', 'auto-dj', 'legacy')
-    ),
-    provenance_context_id TEXT,
-    provenance_context_title TEXT,
-    provenance_source_rank INTEGER,
     title TEXT NOT NULL,
     artist TEXT NOT NULL,
     album TEXT NOT NULL,
@@ -232,33 +219,8 @@ CREATE TABLE IF NOT EXISTS queue_occurrences (
     musicbrainz_release_track_id TEXT,
     musicbrainz_album_id TEXT,
     musicbrainz_release_group_id TEXT,
-    primary_artist_musicbrainz_id TEXT,
-    CHECK (disc_number IS NULL OR disc_number >= 0),
-    CHECK (track_number IS NULL OR track_number >= 0),
-    CHECK (
-        musicbrainz_recording_id IS NULL OR musicbrainz_recording_id <> ''
-    ),
-    CHECK (
-        (
-            provenance_kind = 'context'
-            AND provenance_context_id IS NOT NULL
-            AND provenance_context_id <> ''
-            AND provenance_source_rank IS NOT NULL
-            AND provenance_source_rank >= 0
-        )
-        OR (
-            provenance_kind <> 'context'
-            AND provenance_context_id IS NULL
-            AND provenance_source_rank IS NULL
-        )
-    ),
-    UNIQUE (object_id)
+    primary_artist_musicbrainz_id TEXT
 ) STRICT;
-
-DROP INDEX IF EXISTS queue_occurrences_page_idx;
-DROP INDEX IF EXISTS queue_occurrences_traversal_idx;
-
-CREATE INDEX IF NOT EXISTS queue_occurrences_media_idx ON queue_occurrences(media_uri,snapshot_at DESC,queue_occurrence_key DESC);
 
 CREATE TABLE IF NOT EXISTS local_locators (
     local_access_file_key INTEGER PRIMARY KEY,
@@ -272,7 +234,6 @@ CREATE TABLE IF NOT EXISTS local_locators (
 CREATE INDEX IF NOT EXISTS local_locators_source_idx ON local_locators(source_key,origin);
 CREATE INDEX IF NOT EXISTS local_locators_access_idx ON local_locators(media_uri,origin,local_access_file_key);
 
-CREATE INDEX IF NOT EXISTS queue_occurrences_context_idx ON queue_occurrences(provenance_context_id,provenance_source_rank,media_uri);
 
 CREATE TABLE IF NOT EXISTS legacy_activity (
     source_id TEXT NOT NULL, period TEXT NOT NULL, item_kind TEXT NOT NULL,
@@ -690,8 +651,138 @@ CREATE TABLE IF NOT EXISTS local_access_metadata (
 CREATE INDEX IF NOT EXISTS local_access_match_uri_idx ON local_access_metadata(normalized_title,normalized_album,normalized_artist,disc_number,track_number,duration_millis,access_uri);
 "#;
 
+macro_rules! metadata_upsert {
+    ($insert:literal) => {
+        concat!($insert, "
+        ON CONFLICT(media_uri) DO UPDATE SET snapshot_at=excluded.snapshot_at,
+            title=COALESCE(excluded.title,queue_occurrences.title),
+            artist=COALESCE(excluded.artist,queue_occurrences.artist),
+            album=COALESCE(excluded.album,queue_occurrences.album),
+            album_display_artist=COALESCE(excluded.album_display_artist,queue_occurrences.album_display_artist),
+            duration_millis=COALESCE(excluded.duration_millis,queue_occurrences.duration_millis),
+            disc_number=COALESCE(excluded.disc_number,queue_occurrences.disc_number),
+            track_number=COALESCE(excluded.track_number,queue_occurrences.track_number),
+            year=COALESCE(excluded.year,queue_occurrences.year),
+            release_date=COALESCE(excluded.release_date,queue_occurrences.release_date),
+            source_format=COALESCE(excluded.source_format,queue_occurrences.source_format),
+            musicbrainz_recording_id=COALESCE(excluded.musicbrainz_recording_id,queue_occurrences.musicbrainz_recording_id),
+            musicbrainz_release_track_id=COALESCE(excluded.musicbrainz_release_track_id,queue_occurrences.musicbrainz_release_track_id),
+            musicbrainz_album_id=COALESCE(excluded.musicbrainz_album_id,queue_occurrences.musicbrainz_album_id),
+            musicbrainz_release_group_id=COALESCE(excluded.musicbrainz_release_group_id,queue_occurrences.musicbrainz_release_group_id),
+            primary_artist_musicbrainz_id=COALESCE(excluded.primary_artist_musicbrainz_id,queue_occurrences.primary_artist_musicbrainz_id)")
+    };
+}
+pub(crate) use metadata_upsert;
+
+pub(crate) async fn preserve_saved_metadata(
+    connection: &mut sqlx::SqliteConnection,
+) -> LibraryResult<()> {
+    sqlx::query(self::metadata_upsert!("INSERT INTO queue_occurrences(
+            media_uri,title,artist,album,
+            album_display_artist,duration_millis,disc_number,track_number,
+            year,release_date,source_format,musicbrainz_recording_id,
+            musicbrainz_release_track_id,musicbrainz_album_id,musicbrainz_release_group_id,primary_artist_musicbrainz_id)
+        SELECT json_extract(item.value,'$.media_uri'),
+            json_extract(item.value,'$.title'),
+            json_extract(item.value,'$.artist'),
+            json_extract(item.value,'$.album'),
+            json_extract(item.value,'$.album_display_artist'),
+            json_extract(item.value,'$.duration_millis'),
+            json_extract(item.value,'$.disc_number'),
+            json_extract(item.value,'$.track_number'),
+            json_extract(item.value,'$.year'),
+            json_extract(item.value,'$.release_date'),
+            json_extract(item.value,'$.source_format'),
+            json_extract(item.value,'$.musicbrainz_recording_id'),
+            json_extract(item.value,'$.musicbrainz_release_track_id'),
+            json_extract(item.value,'$.musicbrainz_album_id'),
+            json_extract(item.value,'$.musicbrainz_release_group_id'),
+            json_extract(item.value,'$.primary_artist_musicbrainz_id')
+        FROM queue_saved,json_tree(queue_saved.state) item
+        WHERE item.type='object'
+            AND json_type(item.value,'$.media_uri')='text'
+            AND json_type(item.value,'$.title')='text'"))
+        .execute(connection).await?;
+    Ok(())
+}
+
+async fn migrate_queue_metadata(connection: &mut SqliteConnection) -> LibraryResult<()> {
+    let old: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pragma_table_info('queue_occurrences') WHERE name='object_id')")
+        .fetch_one(&mut *connection).await?;
+    if !old {
+        return Ok(());
+    }
+    let mut transaction = connection.begin().await?;
+    sqlx::query("ALTER TABLE queue_occurrences RENAME TO queue_metadata_legacy")
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::raw_sql(
+        r#"CREATE TABLE IF NOT EXISTS queue_occurrences (
+    queue_occurrence_key INTEGER PRIMARY KEY,
+    media_uri TEXT NOT NULL UNIQUE CHECK (media_uri <> ''),
+    snapshot_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    title TEXT NOT NULL,
+    artist TEXT NOT NULL,
+    album TEXT NOT NULL,
+    album_display_artist TEXT,
+    duration_millis INTEGER NOT NULL CHECK (duration_millis >= 0),
+    disc_number INTEGER,
+    track_number INTEGER,
+    year INTEGER,
+    release_date TEXT,
+    source_format TEXT,
+    musicbrainz_recording_id TEXT,
+    musicbrainz_release_track_id TEXT,
+    musicbrainz_album_id TEXT,
+    musicbrainz_release_group_id TEXT,
+    primary_artist_musicbrainz_id TEXT
+) STRICT;
+
+"#,
+    )
+    .execute(&mut *transaction)
+    .await?;
+    preserve_saved_metadata(&mut transaction).await?;
+    sqlx::query(self::metadata_upsert!("INSERT INTO queue_occurrences(media_uri,snapshot_at,title,artist,album,album_display_artist,duration_millis,disc_number,track_number,year,release_date,source_format,musicbrainz_recording_id,musicbrainz_release_track_id,musicbrainz_album_id,musicbrainz_release_group_id,primary_artist_musicbrainz_id)
+        SELECT media_uri,
+            (SELECT snapshot_at FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND snapshot_at IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
+            (SELECT title FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND title IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
+            (SELECT artist FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND artist IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
+            (SELECT album FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND album IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
+            (SELECT album_display_artist FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND album_display_artist IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
+            (SELECT duration_millis FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND duration_millis IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
+            (SELECT disc_number FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND disc_number IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
+            (SELECT track_number FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND track_number IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
+            (SELECT year FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND year IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
+            (SELECT release_date FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND release_date IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
+            (SELECT source_format FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND source_format IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
+            (SELECT musicbrainz_recording_id FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND musicbrainz_recording_id IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
+            (SELECT musicbrainz_release_track_id FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND musicbrainz_release_track_id IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
+            (SELECT musicbrainz_album_id FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND musicbrainz_album_id IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
+            (SELECT musicbrainz_release_group_id FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND musicbrainz_release_group_id IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
+            (SELECT primary_artist_musicbrainz_id FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND primary_artist_musicbrainz_id IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1)
+        FROM (SELECT DISTINCT media_uri FROM queue_metadata_legacy) uris WHERE true"))
+        .execute(&mut *transaction).await?;
+    // Metadata survives the one-time reset of the former occurrence-based queue.
+    sqlx::raw_sql("DROP TABLE queue_metadata_legacy;
+        DELETE FROM queue_saved;
+        DELETE FROM queue_order;
+        DELETE FROM queue_transfer_pages;
+        ALTER TABLE queue_state RENAME TO queue_state_legacy;
+        CREATE TABLE queue_state(singleton INTEGER PRIMARY KEY CHECK(singleton=1),current_index INTEGER,progress_millis INTEGER NOT NULL DEFAULT 0 CHECK(progress_millis>=0),repeat_mode TEXT NOT NULL DEFAULT 'none' CHECK(repeat_mode IN ('none','one','all')),shuffled INTEGER NOT NULL DEFAULT 0 CHECK(shuffled IN (0,1))) STRICT;
+        INSERT INTO queue_state(singleton,repeat_mode,shuffled) SELECT singleton,repeat_mode,shuffled FROM queue_state_legacy;
+        DROP TABLE queue_state_legacy;
+        DROP TABLE IF EXISTS queue_membership;
+        DROP TABLE IF EXISTS queue_sets;
+        DROP TABLE IF EXISTS collection_members;")
+        .execute(&mut *transaction).await?;
+    transaction.commit().await?;
+    Ok(())
+}
+
 pub(crate) async fn initialize_durable(connection: &mut SqliteConnection) -> LibraryResult<()> {
     initialize(connection, STORE_SCHEMA).await?;
+    migrate_queue_metadata(connection).await?;
     loop {
         let files: Vec<(String, String)> = sqlx::query_as(
             "SELECT media_uri,encoding FROM connect_media_files WHERE backing_uri IS NULL LIMIT 128",

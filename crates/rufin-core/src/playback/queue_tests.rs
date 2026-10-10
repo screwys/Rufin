@@ -92,7 +92,6 @@ async fn next_snapshot(
 fn assert_restored_state(restored: &QueueRestore, expected: &QueueRestore) {
     assert_eq!(restored.entries, expected.entries);
     assert_eq!(restored.order, expected.order);
-    assert_eq!(restored.current(), expected.current());
     assert_eq!(restored.current_index, expected.current_index);
     assert_eq!(restored.progress_millis, expected.progress_millis);
     assert_eq!(restored.repeat_mode, expected.repeat_mode);
@@ -115,7 +114,7 @@ async fn paused_queue_writer_retains_only_latest_membership_and_one_wakeup() {
         replace_queue(&playback, replacement, 512);
         let snapshot = next_snapshot(&playback, &updates, &database).await;
         assert_eq!(snapshot.kind(), QueuePersistenceKind::Membership);
-        let remove = snapshot.state().entries.last().unwrap().occurrence.clone();
+        let remove = snapshot.state().order.len() - 1;
         retired_memberships.push(Arc::downgrade(&snapshot.state().entries));
         retired_orders.push(Arc::downgrade(&snapshot.state().order));
         enqueue_queue_save(&pending, &sender, snapshot);

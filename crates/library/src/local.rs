@@ -479,7 +479,7 @@ impl Database {
                       WHERE track.media_uri=requested.value AND track.source_path LIKE 'rufin-document:%')),
                 EXISTS(SELECT 1 FROM connect_collection WHERE media_uri=requested.value),
                 EXISTS(SELECT 1 FROM main.playlist_entries WHERE media_uri=requested.value)
-                    OR EXISTS(SELECT 1 FROM queue_occurrences WHERE media_uri=requested.value AND NOT received_from_connect)
+                    OR requested.value IN (SELECT json_extract(member.value,'$[0]') FROM queue_saved,json_each(queue_saved.state,'$.entries') member WHERE NOT json_extract(member.value,'$[3]'))
              FROM json_each(?1) requested",
         )
         .bind(serde_json::to_string(uris)?)
@@ -537,14 +537,19 @@ impl Database {
     pub async fn file_media_is_remote(
         &self,
         media_uri: &str,
-        occurrence: &crate::OccurrenceId,
+        received_from_connect: bool,
     ) -> LibraryResult<bool> {
         let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar("SELECT
+        Ok(sqlx::query_scalar(
+            "SELECT
             NOT EXISTS(SELECT 1 FROM tracks WHERE media_uri=?1 AND source_path IS NOT NULL)
             AND (EXISTS(SELECT 1 FROM connect_collection WHERE media_uri=?1)
-                OR EXISTS(SELECT 1 FROM queue_occurrences WHERE object_id=?2 AND received_from_connect))")
-            .bind(media_uri).bind(occurrence.as_str()).fetch_one(&mut *connection).await?)
+                OR ?2)",
+        )
+        .bind(media_uri)
+        .bind(received_from_connect)
+        .fetch_one(&mut *connection)
+        .await?)
     }
 
     pub async fn observed_media_file(

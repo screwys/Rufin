@@ -192,13 +192,15 @@ async fn queue_state(
 
 fn queue_json(state: Option<&playback::PlaybackView>, limit: usize) -> Value {
     state.map(|state| {
-        let current=state.queue_window.iter().position(|row|Some(&row.occurrence)==state.queue.current_occurrence.as_ref()).unwrap_or(0);
-        let start=current.saturating_sub(limit/2).min(state.queue_window.len().saturating_sub(limit));
-        let offset=state.queue.current_index.unwrap_or(0).saturating_sub(current)+start;
+        let current = state.queue_window.iter().position(|row| Some(row.position) == state.queue.current_index).unwrap_or(0);
+        let start = current.saturating_sub(limit / 2).min(state.queue_window.len().saturating_sub(limit));
+        let rows = state.queue_window.iter().skip(start).take(limit);
+        let offset = rows.clone().next().map_or(0, |row| row.position);
         json!({
-                "total":state.queue.total,"current_index":state.queue.current_index,"current_id":state.queue.current_occurrence,"loading":state.queue_loading,
-                "offset":offset,"window":state.queue_window.iter().skip(start).take(limit).map(|row| json!({"id":row.occurrence,"track":track_json(&row.item)})).collect::<Vec<_>>()
-            })}).unwrap_or(json!({"total":0,"current_index":null,"current_id":null,"loading":false,"offset":0,"window":[]}))
+            "total": state.queue.total, "current_index": state.queue.current_index, "loading": state.queue_loading,
+            "offset": offset, "window": rows.map(|row| json!({"position": row.position, "track": track_json(&row.item)})).collect::<Vec<_>>()
+        })
+    }).unwrap_or(json!({"total": 0, "current_index": null, "loading": false, "offset": 0, "window": []}))
 }
 
 async fn queue_play(
@@ -219,8 +221,8 @@ async fn queue_play(
     #[derive(Deserialize)]
     struct Input {
         mode: String,
-        before: Option<playback::OccurrenceId>,
-        after: Option<playback::OccurrenceId>,
+        before: Option<usize>,
+        after: Option<usize>,
         #[serde(flatten)]
         selection: Value,
     }
@@ -472,10 +474,7 @@ async fn queue_play(
     Ok(accepted())
 }
 
-fn queue_drop_target(
-    before: Option<playback::OccurrenceId>,
-    after: Option<playback::OccurrenceId>,
-) -> playback::QueueReorderTarget {
+fn queue_drop_target(before: Option<usize>, after: Option<usize>) -> playback::QueueReorderTarget {
     match (before, after) {
         (Some(id), _) => playback::QueueReorderTarget::Before(id),
         (_, Some(id)) => playback::QueueReorderTarget::After(id),
@@ -498,12 +497,9 @@ async fn queue_activate(
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
     let products = &products;
-    let input: Identifier = body(request).await?;
-    if input.id.is_empty() {
-        return Err(bad_request("id is required"));
-    }
+    let input: QueuePosition = body(request).await?;
     let queue = products.playback.queue.clone();
-    tokio::task::spawn_blocking(move || queue.activate(playback::OccurrenceId::new(input.id)))
+    tokio::task::spawn_blocking(move || queue.activate(input.position))
         .await
         .map_err(internal)?;
     Ok(accepted())
@@ -516,13 +512,15 @@ async fn queue_remove(
 ) -> Result<Response<Body>, Error> {
     let products = &products;
     let parameters = &parameters;
-    let id = if request.method() == hyper::Method::POST {
-        body::<Identifier>(request).await?.id
+    let position = if request.method() == hyper::Method::POST {
+        body::<QueuePosition>(request).await?.position
     } else {
-        required(&parameters, "id")?.to_owned()
+        required(&parameters, "position")?
+            .parse::<usize>()
+            .map_err(bad_request)?
     };
     let queue = products.playback.queue.clone();
-    tokio::task::spawn_blocking(move || queue.remove(playback::OccurrenceId::new(id)))
+    tokio::task::spawn_blocking(move || queue.remove(position))
         .await
         .map_err(internal)?;
     Ok(accepted())
@@ -605,6 +603,11 @@ struct Identifier {
     id: String,
 }
 
+#[derive(Deserialize)]
+struct QueuePosition {
+    position: usize,
+}
+
 async fn body<T: serde::de::DeserializeOwned>(mut request: Request<Body>) -> Result<T, Error> {
     if let Some(SubmittedForm(fields)) = request.extensions_mut().remove::<SubmittedForm>() {
         let mut value = match fields.get("payload") {
@@ -620,7 +623,10 @@ async fn body<T: serde::de::DeserializeOwned>(mut request: Request<Body>) -> Res
             if matches!(name.as_str(), "csrf" | "return" | "payload") {
                 continue;
             }
-            value[name] = if matches!(name.as_str(), "volume" | "position_ms") {
+            value[name] = if matches!(
+                name.as_str(),
+                "volume" | "position_ms" | "position" | "before" | "after"
+            ) {
                 match serde_json::from_str(text) {
                     Ok(value) => value,
                     Err(error) => return Err(bad_request(error)),
@@ -709,7 +715,7 @@ fn playback_json(state: Option<&playback::PlaybackView>) -> Value {
     };
     json!({
         "state":status,"position_ms":state.transport.position_millis,"duration_ms":state.transport.duration_millis,"can_seek":state.transport.can_seek,
-        "current":state.transport.current.as_ref().map(|current| json!({"id":current.occurrence.occurrence,"track":track_json(&current.item)})),
+        "current":state.transport.current.as_ref().map(|current| json!({"position":state.queue.current_index,"media_uri":current.id.media_uri,"run":current.id.run.map(playback::RunId::get),"track":track_json(&current.item)})),
         "volume":state.controls.volume,"muted":state.controls.muted,"shuffle":state.controls.shuffle_enabled,"auto_dj":state.controls.auto_dj_enabled,
         "repeat":match state.controls.repeat_mode {playback::RepeatMode::Off=>"off",playback::RepeatMode::One=>"one",playback::RepeatMode::All=>"all"},
         "queue_total":state.queue.total,"queue_loading":state.queue_loading,"error":state.transport.error,

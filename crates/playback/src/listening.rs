@@ -13,7 +13,7 @@ pub struct ContinuedListen {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ContinuationHeader {
     pub total: usize,
-    pub current: crate::OccurrenceId,
+    pub current: usize,
     pub position_millis: u64,
     pub repeat: crate::RepeatMode,
     pub shuffled: bool,

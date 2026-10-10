@@ -397,13 +397,10 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     )
     .await;
     assert_eq!(state.entries.len(), 523);
-    assert!(state.occurrences.len() <= 100);
-    assert_eq!(state.occurrences[3].media_uri, fixture.track_uris[3]);
-    assert_eq!(state.occurrences[95].media_uri, fixture.track_uris[3]);
-    assert_ne!(
-        state.occurrences[3].occurrence,
-        state.occurrences[95].occurrence
-    );
+    assert!(state.rows.len() <= 100);
+    assert_eq!(state.rows[3].media_uri, fixture.track_uris[3]);
+    assert_eq!(state.rows[95].media_uri, fixture.track_uris[3]);
+    assert_ne!(state.rows[3].position, state.rows[95].position);
 }
 
 #[tokio::test]
@@ -482,8 +479,8 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
         Default::default(),
     )
     .await;
-    assert_eq!(playback.occurrences[1].title, "Beta");
-    assert_eq!(playback.occurrences[1].media_uri, fixture.track_uris[1]);
+    assert_eq!(playback.rows[1].title, "Beta");
+    assert_eq!(playback.rows[1].media_uri, fixture.track_uris[1]);
 
     assert_eq!(
         fixture

@@ -50,19 +50,14 @@ impl RufinPlayback {
             return Ok(());
         }
         let previous = self.playback.projection().map_err(string_error)?.view;
-        let current = previous
-            .transport
-            .current
-            .as_ref()
-            .map(|media| &media.id.occurrence);
         let changed = *self.revision.lock().unwrap_or_else(|p| p.into_inner())
             != Some(state.revision)
-            || current != state.current.as_ref()
+            || previous.queue.current_index != state.current
             || previous
                 .queue_window
                 .iter()
-                .map(|row| &row.occurrence)
-                .ne(state.rows.iter().map(|row| &row.occurrence));
+                .map(|row| (&row.media_uri, row.position))
+                .ne(state.rows.iter().map(|row| (&row.media_uri, row.position)));
         if changed {
             let uris = state
                 .rows
@@ -85,22 +80,28 @@ impl RufinPlayback {
                 .rows
                 .iter()
                 .map(|row| library::QueueEntry {
-                    occurrence: row.occurrence.clone(),
                     media_uri: row.media_uri.clone().into(),
                     playlist_entry_id: row.playlist_entry_id.clone().map(Into::into),
                     provenance: row.provenance.clone(),
+                    received_from_connect: row.received_from_connect,
                 })
                 .collect(),
             order: (0..state.rows.len() as u32).collect(),
             current_index: state
                 .current
-                .as_ref()
-                .and_then(|current| state.rows.iter().position(|row| &row.occurrence == current)),
-            occurrences: state.rows.iter().cloned().map(Arc::new).collect(),
+                .and_then(|position| position.checked_sub(state.offset)),
+            rows: state
+                .rows
+                .iter()
+                .cloned()
+                .map(|mut row| {
+                    row.position -= state.offset;
+                    Arc::new(row)
+                })
+                .collect(),
             progress_millis: state.position.min(i64::MAX as u64) as i64,
             repeat_mode: state.repeat,
             shuffled: state.shuffle,
-            next_id: 0,
         });
         self.playback
             .observe_external(
@@ -179,15 +180,10 @@ impl RufinPlayback {
         if page.entries.is_empty() {
             return Ok(());
         }
-        let namespace = page.entries[0]
-            .occurrence
-            .as_str()
-            .rsplit_once(':')
-            .map(|(prefix, _)| format!("{prefix}:"));
         let queue = library::QueueRestore {
             order: (0..page.entries.len() as u32).collect(),
             entries: page.entries.into(),
-            occurrences: page.occurrences,
+            rows: page.rows,
             current_index: Some(page.current_index),
             ..Default::default()
         };
@@ -195,9 +191,6 @@ impl RufinPlayback {
             .connection()?
             .send_cast_input(&self.peer, queue, placement, target)
             .await;
-        if let Some(namespace) = namespace {
-            let _ = self.database.discard_queue_capture(&namespace).await;
-        }
         result?;
         self.refresh().await
     }
@@ -236,7 +229,7 @@ impl PlaybackOwner {
             .enumerate()
             .map(|(index, row)| {
                 let mut row = (*row).clone();
-                row.canonical_position = offset + index;
+                row.position = offset + index;
                 row
             })
             .collect();
@@ -244,7 +237,7 @@ impl PlaybackOwner {
             revision: view.queue.revision,
             total: view.queue.total,
             offset,
-            current: view.queue.current_occurrence,
+            current: view.queue.current_index,
             rows,
             state: view.transport.effective_state(),
             position: view.transport.position_millis,
@@ -298,24 +291,26 @@ impl PlaybackOwner {
                 window_offset: 0,
             });
         };
-        let (matches, filtered_total) = if filter.trim().is_empty() {
-            (None, None)
+        let queue = active.playback.handoff_snapshot().map_err(string_error)?.0;
+        let (positions, total) = if filter.trim().is_empty() {
+            let start = (offset as usize).min(queue.order.len());
+            let end = start.saturating_add(limit as usize).min(queue.order.len());
+            ((start..end).collect::<Vec<_>>(), queue.order.len() as u64)
         } else {
-            let (matches, total) = self
-                .database
-                .saved_queue_search_page(&filter, offset, limit)
+            self.database
+                .queue_search_page(&queue, &filter, offset, limit)
                 .await
-                .map_err(string_error)?;
-            (Some(matches), Some(total))
+                .map_err(string_error)?
         };
-        let (entries, total, window_offset) = active
-            .playback
-            .queue_members(
-                offset.min(usize::MAX as u64) as usize,
-                limit as usize,
-                matches,
-            )
-            .map_err(string_error)?;
+        let entries = positions
+            .into_iter()
+            .map(|position| {
+                (
+                    position,
+                    queue.entries[queue.order[position] as usize].clone(),
+                )
+            })
+            .collect::<Vec<_>>();
         let page = self
             .database
             .read_queue(library::QueueReadRequest::Hydrate {
@@ -325,9 +320,9 @@ impl PlaybackOwner {
             .map_err(string_error)?;
         let page = self.import_missing_plex_queue_rows(entries, page).await?;
         Ok(playback::QueuePage {
-            rows: page.occurrences,
-            total: filtered_total.unwrap_or(total as u64),
-            window_offset: window_offset as u64,
+            rows: page.rows,
+            total,
+            window_offset: offset.min(total),
         })
     }
 
@@ -347,13 +342,10 @@ impl PlaybackOwner {
             return Ok(Some(snapshot));
         }
         let queue = active.playback.handoff_snapshot().map_err(string_error)?.0;
-        let Some(current) = queue.current().cloned().or_else(|| {
-            queue
-                .order
-                .first()
-                .and_then(|index| queue.entries.get(*index as usize))
-                .map(|entry| entry.occurrence.clone())
-        }) else {
+        let Some(current) = queue
+            .current_index
+            .or_else(|| (!queue.entries.is_empty()).then_some(0))
+        else {
             return Ok(None);
         };
         let settings = self.settings.load().ui;
@@ -737,21 +729,13 @@ impl PlaybackOwner {
             SessionCommand::SetRepeat(mode) => Control::Repeat { mode },
             SessionCommand::SetShuffle { enabled, .. } => Control::Shuffle { enabled },
             SessionCommand::SetAutoDj { enabled, .. } => Control::AutoDj { enabled },
-            SessionCommand::Activate(occurrence) => Control::Activate { occurrence },
-            SessionCommand::Remove(occurrence) => Control::Remove {
-                occurrences: vec![occurrence],
+            SessionCommand::Activate(position) => Control::Activate { position },
+            SessionCommand::Remove(position) => Control::Remove {
+                positions: vec![position],
             },
-            SessionCommand::RemoveMany(occurrences) | SessionCommand::Forget(occurrences) => {
-                Control::Remove { occurrences }
-            }
-            SessionCommand::Reorder {
-                occurrences,
-                target,
-            } => Control::Reorder {
-                occurrences,
-                target,
-            },
-            SessionCommand::MoveAfterCurrent(occurrence) => Control::MoveNext { occurrence },
+            SessionCommand::RemoveMany(positions) => Control::Remove { positions },
+            SessionCommand::Reorder { positions, target } => Control::Reorder { positions, target },
+            SessionCommand::MoveAfterCurrent(position) => Control::MoveNext { position },
             SessionCommand::Clear { include_current } => Control::Clear { include_current },
             command => return Some(command),
         };

@@ -28,7 +28,6 @@ class RufinPlayerTest {
         operationFailures = emptyList(),
         mediaUri = "file:///test/track.wav",
         mediaRun = 1UL,
-        occurrenceId = "first",
         artworkIdentity = null,
         artworkRevision = 0UL,
         favorite = false,

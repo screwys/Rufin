@@ -514,8 +514,8 @@ impl PlayerUi {
         drop(lyrics);
         if dialog.media_id != media_id {
             debug!(
-                dialog_occurrence = %dialog.media_id.occurrence,
-                response_occurrence = %media_id.occurrence,
+                dialog_media_uri = %dialog.media_id.media_uri,
+                response_media_uri = %media_id.media_uri,
                 "ignored lyric search response for another track"
             );
             return;
@@ -652,8 +652,8 @@ impl PlayerUi {
         drop(lyrics);
         if dialog.media_id != media_id {
             debug!(
-                dialog_occurrence = %dialog.media_id.occurrence,
-                response_occurrence = %media_id.occurrence,
+                dialog_media_uri = %dialog.media_id.media_uri,
+                response_media_uri = %media_id.media_uri,
                 "ignored lyric search failure for another track"
             );
             return;

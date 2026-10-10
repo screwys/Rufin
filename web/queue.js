@@ -22,6 +22,9 @@ let rendered = "";
 const savedQueueLimit = Number(localStorage.getItem("rufin-queue-limit"));
 
 function showQueue(value) {
+  const previous = latestQueue?.window.find((row) => row.position === queueSelection);
+  const selected = value?.window.find((row) => row.position === queueSelection);
+  if (previous?.track.uri !== selected?.track.uri) queueSelection = null;
   latestQueue = value;
   if (!value) {
     rendered = "";
@@ -45,20 +48,28 @@ function showQueue(value) {
   const existing = [...$("queue").children];
   const hideRows =
     result.loading &&
-    !existing.some((node) => node.dataset.id === result.current_id);
+    !existing.some(
+      (node) => Number(node.dataset.position) === result.current_index,
+    );
   $("queue").style.visibility = hideRows ? "hidden" : "";
   $("queue-count").style.visibility = result.loading ? "hidden" : "";
   if (result.loading) {
     for (const node of existing)
-      node.classList.toggle("current", node.dataset.id === result.current_id);
+      node.classList.toggle(
+        "current",
+        Number(node.dataset.position) === result.current_index,
+      );
     return;
   }
   $("queue-count").textContent = result.total;
   const key = JSON.stringify([result.offset, result.window]);
   if (rendered === key) {
     for (const [index, node] of existing.entries()) {
-      const current = node.dataset.id === result.current_id;
+      const current = Number(node.dataset.position) === result.current_index;
       node.classList.toggle("current", current);
+      const selected = Number(node.dataset.position) === queueSelection;
+      node.classList.toggle("selected", selected);
+      node.querySelector(".queue-select")?.setAttribute("aria-pressed", String(selected));
       const number = node.querySelector(".number");
       if (number)
         number.textContent = current ? "▶" : String(result.offset + index + 1);
@@ -73,18 +84,24 @@ function showQueue(value) {
   }
   for (const [index, row] of result.window.entries()) {
     const li = el("li", "queue-row");
-    li.dataset.id = row.id;
+    li.dataset.position = row.position;
     li.draggable = true;
-    li.classList.toggle("current", row.id === result.current_id);
+    li.classList.toggle("current", row.position === result.current_index);
     const open = button(
       tr("Select {title}", { title: row.track.title }),
       () => {
-        queueSelection = row.id;
+        queueSelection = row.position;
         document.querySelectorAll(".queue-row").forEach((item) => {
-          item.classList.toggle("selected", item.dataset.id === row.id);
+          item.classList.toggle(
+            "selected",
+            Number(item.dataset.position) === row.position,
+          );
           item
             .querySelector(".queue-select")
-            .setAttribute("aria-pressed", String(item.dataset.id === row.id));
+            .setAttribute(
+              "aria-pressed",
+              String(Number(item.dataset.position) === row.position),
+            );
         });
       },
       null,
@@ -99,16 +116,16 @@ function showQueue(value) {
       "metadata-link queue-artist",
     );
     metadata.append(open, artist);
-    open.setAttribute("aria-pressed", String(queueSelection === row.id));
-    li.classList.toggle("selected", queueSelection === row.id);
+    open.setAttribute("aria-pressed", String(queueSelection === row.position));
+    li.classList.toggle("selected", queueSelection === row.position);
     open.addEventListener("dblclick", () =>
-      run(() => api("/queue/activate", "POST", { id: row.id })),
+      run(() => api("/queue/activate", "POST", { position: row.position })),
     );
     open.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
         event.stopPropagation();
-        run(() => api("/queue/activate", "POST", { id: row.id }));
+        run(() => api("/queue/activate", "POST", { position: row.position }));
       }
     });
     const showActions = (anchor, event) => showQueueMenu(row, anchor, event);
@@ -124,7 +141,7 @@ function showQueue(value) {
       el(
         "span",
         "number",
-        row.id === result.current_id
+        row.position === result.current_index
           ? "▶"
           : String((result.offset || 0) + index + 1),
       ),
@@ -133,7 +150,10 @@ function showQueue(value) {
     );
     bindDrag(
       li,
-      () => ({ ...mediaSelection("track", row.track), queueIds: [row.id] }),
+      () => ({
+        ...mediaSelection("track", row.track),
+        queuePositions: [row.position],
+      }),
       false,
     );
     li.addEventListener("dragover", (event) => {
@@ -150,8 +170,8 @@ function showQueue(value) {
       const rect = li.getBoundingClientRect();
       dropMedia(
         event.clientY < rect.top + rect.height / 2
-          ? { before: row.id }
-          : { after: row.id },
+          ? { before: row.position }
+          : { after: row.position },
       );
     });
     $("queue").append(li);
@@ -166,12 +186,12 @@ async function showQueueMenu(row, anchor, event) {
   const destination = await goToMenu(track, "track", metadata);
   showMenu(
     [
-      [tr("Play"), () => api("/queue/activate", "POST", { id: row.id })],
-      [tr("Play Next"), () => api("/queue/next", "POST", { id: row.id })],
+      [tr("Play"), () => api("/queue/activate", "POST", { position: row.position })],
+      [tr("Play Next"), () => api("/queue/next", "POST", { position: row.position })],
       [
         tr("Play Later"),
         () =>
-          api("/queue/reorder", "POST", { ids: [row.id], before: null }),
+          api("/queue/reorder", "POST", { positions: [row.position], before: null }),
       ],
       radioMenu(track),
       null,
@@ -187,7 +207,7 @@ async function showQueueMenu(row, anchor, event) {
         tr("Remove from Queue"),
         () =>
           api(
-            `/queue/item?${new URLSearchParams({ id: row.id })}`,
+            `/queue/item?${new URLSearchParams({ position: row.position })}`,
             "DELETE",
           ),
       ],
@@ -223,12 +243,14 @@ function dropMedia(position) {
   const payload = draggedMedia();
   run(async () => {
     const media = await payload;
-    if (media.queueIds) {
-      if (!media.queueIds.includes(position.before || position.after))
+    if (media.queuePositions) {
+      if (!media.queuePositions.includes(position.before ?? position.after)) {
+        queueSelection = null;
         await api("/queue/reorder", "POST", {
-          ids: media.queueIds,
+          positions: media.queuePositions,
           ...position,
         });
+      }
     } else await queueMedia(media, "insert", position);
   });
 }

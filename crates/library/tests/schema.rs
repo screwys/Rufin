@@ -85,7 +85,7 @@ async fn missing_columns_are_repaired_from_declarations_before_indexes() {
         DROP INDEX main.playlist_entries_media_idx;
         ALTER TABLE main.playlist_entries DROP COLUMN title;
         ALTER TABLE main.playlist_entries ADD COLUMN newer_field TEXT;
-        ALTER TABLE main.queue_occurrences DROP COLUMN origin_position;
+        ALTER TABLE main.queue_occurrences DROP COLUMN musicbrainz_album_id;
         INSERT INTO main.queue_state(singleton) VALUES(1);
         ALTER TABLE main.queue_state DROP COLUMN repeat_mode;
         ALTER TABLE catalog.albums DROP COLUMN source_rating;
@@ -169,7 +169,7 @@ async fn missing_columns_are_repaired_from_declarations_before_indexes() {
         1
     );
     sqlx::raw_sql(
-        "SELECT origin_position FROM main.queue_occurrences;
+        "SELECT musicbrainz_album_id FROM main.queue_occurrences;
         SELECT section_title FROM catalog.home_entries;
         SELECT revision FROM catalog.local_files;",
     )
@@ -1062,14 +1062,13 @@ async fn schema_43_fixture_relocates_and_migrates_every_core_durable_family_and_
         ]
     );
     assert_eq!(
-        sqlx::query_as::<_, (String, i64, String, i64)>(
-            "SELECT occurrence.object_id,state.progress_millis,state.repeat_mode,state.shuffled
-             FROM queue_occurrences occurrence CROSS JOIN queue_state state"
+        sqlx::query_as::<_, (i64, i64, String, i64)>(
+            "SELECT current_index,progress_millis,repeat_mode,shuffled FROM queue_state"
         )
         .fetch_one(&mut reader)
         .await
         .expect("read selected global Queue"),
-        ("queue-b".to_string(), 222, "one".to_string(), 1)
+        (0, 222, "one".to_string(), 1)
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM local_access_files")
@@ -1427,21 +1426,21 @@ async fn schema_40_store_migrates_into_current_schema() {
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>(
-            "SELECT object_id FROM queue_occurrences ORDER BY traversal_position"
+            "SELECT json_extract(member.value,'$[1]') FROM queue_saved,json_each(state,'$.entries') member ORDER BY CAST(member.key AS INTEGER)"
         )
         .fetch_all(&mut reader)
         .await
         .unwrap(),
-        ["occ-auto", "occ-context"]
+        ["AutoDj", "[0,7]"]
     );
     assert_eq!(
-        sqlx::query_as::<_, (Option<String>, i64)>(
-            "SELECT current_occurrence_id,progress_millis FROM queue_state"
+        sqlx::query_as::<_, (Option<i64>, i64)>(
+            "SELECT current_index,progress_millis FROM queue_state"
         )
         .fetch_one(&mut reader)
         .await
         .unwrap(),
-        (Some("occ-context".into()), 1200)
+        (Some(1), 1200)
     );
     for table in [
         "tracks",
@@ -2273,7 +2272,7 @@ async fn legacy_local_cue_queue_uses_the_same_identity_as_favorites() {
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>(
-            "SELECT media_uri FROM queue_occurrences ORDER BY position"
+            "SELECT json_extract(member.value,'$[0]') FROM queue_saved,json_each(state,'$.entries') member ORDER BY CAST(member.key AS INTEGER)"
         )
         .fetch_all(&mut raw)
         .await

@@ -14,7 +14,7 @@ use gtk_widgets::{
 };
 use library::QueuePageRow;
 use localization::tr;
-use playback::{OccurrenceId, QueueReorderRequest, QueueReorderTarget};
+use playback::{QueueReorderRequest, QueueReorderTarget};
 use rufin_core::settings::layout::{LibraryField, LibraryListKey, LibraryListSettings};
 use std::{
     cell::{Cell, RefCell},
@@ -32,7 +32,7 @@ pub struct QueueState {
     pub selection: RefCell<Option<gtk::MultiSelection>>,
     pub filter: RefCell<String>,
     pub generation: Cell<u64>,
-    pub current: RefCell<Option<OccurrenceId>>,
+    pub current: RefCell<Option<usize>>,
     pub render_queued: Cell<bool>,
     reveal_current: [Cell<bool>; 2],
     hydration: RefCell<Option<tokio::task::AbortHandle>>,
@@ -77,12 +77,35 @@ impl QueueState {
         if self.generation.get() != generation {
             return false;
         }
+        let selection = self.selection.borrow().as_ref().cloned();
+        if let Some(selection) = selection {
+            let replaced = self
+                .rows
+                .borrow()
+                .iter()
+                .enumerate()
+                .filter(|(position, previous)| {
+                    selection.is_selected(*position as u32)
+                        && !rows.iter().any(|row| {
+                            row.position == previous.position
+                                && row.media_uri == previous.media_uri
+                                && row.playlist_entry_id == previous.playlist_entry_id
+                                && row.provenance == previous.provenance
+                                && row.received_from_connect == previous.received_from_connect
+                        })
+                })
+                .map(|(position, _)| position as u32)
+                .collect::<Vec<_>>();
+            for position in replaced {
+                selection.unselect_item(position);
+            }
+        }
         if self
             .window
             .borrow()
             .iter()
-            .map(|row| &row.occurrence)
-            .ne(rows.iter().map(|row| &row.occurrence))
+            .map(|row| &row.position)
+            .ne(rows.iter().map(|row| &row.position))
         {
             for pending in &self.reveal_current {
                 pending.set(true);
@@ -92,13 +115,13 @@ impl QueueState {
             .window
             .take()
             .into_iter()
-            .map(|row| (row.occurrence.clone(), row))
+            .map(|row| (row.position, row))
             .collect::<HashMap<_, _>>();
         self.window.replace(
             rows.into_iter()
                 .map(|row| {
                     previous
-                        .remove(&row.occurrence)
+                        .remove(&row.position)
                         .filter(|previous| previous.as_ref() == &row)
                         .unwrap_or_else(|| Arc::new(row))
                 })
@@ -114,7 +137,7 @@ impl QueueState {
         let selected = self.selection.borrow().as_ref().map(|selection| {
             queue_rows_at_positions(&self.rows.borrow(), &selection.selection())
                 .into_iter()
-                .map(|row| row.occurrence.clone())
+                .map(|row| row.position)
                 .collect::<Vec<_>>()
         });
         let previous = (0..self.model.n_items())
@@ -129,16 +152,16 @@ impl QueueState {
             .iter()
             .map(|object| {
                 let row = object.value::<Arc<QueuePageRow>>().expect("Queue row");
-                (row.occurrence.clone(), object.clone())
+                (row.position, object.clone())
             })
             .collect::<HashMap<_, _>>();
         let reserved = rows
             .iter()
-            .map(|row| existing.remove(&row.occurrence))
+            .map(|row| existing.remove(&row.position))
             .collect::<Vec<_>>();
         let mut retired = previous.iter().filter(|object| {
             let row = object.value::<Arc<QueuePageRow>>().expect("Queue row");
-            existing.contains_key(&row.occurrence)
+            existing.contains_key(&row.position)
         });
         let objects = rows
             .iter()
@@ -181,7 +204,7 @@ impl QueueState {
             let selection = self.selection.borrow().as_ref().cloned().unwrap();
             let positions = gtk::Bitset::new_empty();
             for (position, row) in self.rows.borrow().iter().enumerate() {
-                if selected.contains(&row.occurrence) {
+                if selected.contains(&row.position) {
                     positions.add(position as u32);
                 }
             }
@@ -189,10 +212,10 @@ impl QueueState {
         }
     }
 
-    pub fn update_current(&self, current: Option<OccurrenceId>) -> bool {
-        let previous = self.current.replace(current.clone());
+    pub fn update_current(&self, current: Option<usize>) -> bool {
+        let previous = self.current.replace(current);
         let changed = previous != current;
-        for occurrence in [previous.filter(|_| changed), current]
+        for position in [previous.filter(|_| changed), current]
             .into_iter()
             .flatten()
         {
@@ -201,7 +224,7 @@ impl QueueState {
                 .borrow()
                 .iter()
                 .enumerate()
-                .find(|(_, row)| row.occurrence == occurrence)
+                .find(|(_, row)| row.position == position)
                 .map(|(position, row)| (position, row.clone()));
             if let Some((position, row)) = row {
                 let object = self
@@ -215,19 +238,19 @@ impl QueueState {
         changed
     }
 
-    pub fn selected_rows_for(&self, clicked: &OccurrenceId) -> Option<QueueSelectionSnapshot> {
+    pub fn selected_rows_for(&self, clicked: &usize) -> Option<QueueSelectionSnapshot> {
         let positions = self.selection.borrow().as_ref()?.selection();
         let rows = queue_rows_at_positions(&self.rows.borrow(), &positions);
-        (rows.len() > 1 && rows.iter().any(|row| &row.occurrence == clicked))
+        (rows.len() > 1 && rows.iter().any(|row| &row.position == clicked))
             .then(|| QueueSelectionSnapshot::new(rows))
     }
 
-    pub fn dragged_rows_for(&self, clicked: &OccurrenceId) -> Option<QueueSelectionSnapshot> {
+    pub fn dragged_rows_for(&self, clicked: &usize) -> Option<QueueSelectionSnapshot> {
         self.selected_rows_for(clicked).or_else(|| {
             self.rows
                 .borrow()
                 .iter()
-                .find(|row| &row.occurrence == clicked)
+                .find(|row| &row.position == clicked)
                 .cloned()
                 .map(|row| QueueSelectionSnapshot::new(vec![row]))
         })
@@ -243,13 +266,13 @@ impl QueueState {
         (!media_uris.is_empty()).then(|| media_uris.into())
     }
 
-    pub fn selected_occurrences(&self) -> Option<Arc<[OccurrenceId]>> {
+    pub fn selected_positions(&self) -> Option<Arc<[usize]>> {
         let positions = self.selection.borrow().as_ref()?.selection();
-        let occurrences = queue_rows_at_positions(&self.rows.borrow(), &positions)
+        let positions = queue_rows_at_positions(&self.rows.borrow(), &positions)
             .into_iter()
-            .map(|row| row.occurrence.clone())
+            .map(|row| row.position)
             .collect::<Vec<_>>();
-        (!occurrences.is_empty()).then(|| occurrences.into())
+        (!positions.is_empty()).then(|| positions.into())
     }
 }
 
@@ -263,15 +286,15 @@ impl Drop for QueueState {
 
 #[derive(Clone)]
 pub struct QueueSelectionSnapshot {
-    pub occurrences: Arc<[OccurrenceId]>,
+    pub positions: Arc<[usize]>,
     pub media_uris: Arc<[String]>,
 }
 
 impl QueueSelectionSnapshot {
     pub fn new(rows: Vec<Arc<QueuePageRow>>) -> Self {
-        let occurrences = rows
+        let positions = rows
             .iter()
-            .map(|row| row.occurrence.clone())
+            .map(|row| row.position)
             .collect::<Vec<_>>()
             .into();
         let media_uris = rows
@@ -280,7 +303,7 @@ impl QueueSelectionSnapshot {
             .collect::<Vec<_>>()
             .into();
         Self {
-            occurrences,
+            positions,
             media_uris,
         }
     }
@@ -351,15 +374,15 @@ fn install_queue_row_interactions(
         drag_preview.clear();
         let shell = source_shell.upgrade()?;
         let row = queue_row_from_item(&source_item)?;
-        let occurrence = row.occurrence.clone();
-        let selection = shell.selected_queue()?.dragged_rows_for(&occurrence)?;
+        let position = row.position;
+        let selection = shell.selected_queue()?.dragged_rows_for(&position)?;
         let artwork = weak_cover
             .as_ref()
             .and_then(|weak| weak.upgrade())
             .and_then(|tile| tile.drag_paintable_source().paintable());
         drag_preview.prepare(row.title.clone(), artwork);
         Some(media_drag_content_provider(MediaDragSource::Queue {
-            occurrences: selection.occurrences,
+            positions: selection.positions,
             media_uris: selection.media_uris,
         }))
     });
@@ -373,14 +396,13 @@ fn install_queue_row_interactions(
     let media_item = item.downgrade();
     let media_root = root.downgrade();
     media_drop.connect_drop(move |_, value, _, y| {
-        let Some(occurrence) = queue_row_from_item(&media_item).map(|row| row.occurrence.clone())
-        else {
+        let Some(position) = queue_row_from_item(&media_item).map(|row| row.position) else {
             return false;
         };
         let Some(root) = media_root.upgrade() else {
             return false;
         };
-        let queue_target = queue_row_drop_target(occurrence, y, root.height());
+        let queue_target = queue_row_drop_target(position, y, root.height());
         enqueue_media_drop(&media_shell, value, queue_target)
     });
     gtk_widgets::media_drag::style_order_drop_target(&media_drop, true, |_| true);
@@ -397,20 +419,20 @@ fn install_queue_row_interactions(
             let Some(row) = queue_row_from_item(&context_item) else {
                 return;
             };
-            let occurrence = row.occurrence.clone();
+            let queue_position = row.position;
             let selection = shell
                 .selected_queue()
-                .and_then(|queue| queue.selected_rows_for(&occurrence));
+                .and_then(|queue| queue.selected_rows_for(&queue_position));
             (shell.open_queue_menu)(target, row.as_ref().clone(), selection, position);
         }),
     );
 }
 
-fn queue_row_drop_target(occurrence: OccurrenceId, y: f64, height: i32) -> QueueReorderTarget {
+fn queue_row_drop_target(position: usize, y: f64, height: i32) -> QueueReorderTarget {
     if y < f64::from(height) / 2.0 {
-        QueueReorderTarget::Before(occurrence)
+        QueueReorderTarget::Before(position)
     } else {
-        QueueReorderTarget::After(occurrence)
+        QueueReorderTarget::After(position)
     }
 }
 
@@ -426,9 +448,19 @@ fn enqueue_media_drop(
         return false;
     };
     let queue = shell.playback_handles.queue.clone();
-    if let MediaDragSource::Queue { occurrences, .. } = source {
+    if let MediaDragSource::Queue { positions, .. } = source {
+        if matches!(&target, QueueReorderTarget::Before(position) | QueueReorderTarget::After(position) if positions.contains(position))
+        {
+            return true;
+        }
+        let selection = shell
+            .selected_queue()
+            .and_then(|state| state.selection.borrow().as_ref().cloned());
+        if let Some(selection) = selection {
+            selection.unselect_all();
+        }
         queue.reorder(QueueReorderRequest {
-            occurrences: occurrences.to_vec(),
+            positions: positions.to_vec(),
             target,
         });
         return true;
@@ -480,7 +512,7 @@ fn queue_index_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
                 .as_ref()
                 .zip(player.as_ref())
                 .is_some_and(|(row, player)| {
-                    player.queue.current_occurrence.as_ref() == Some(&row.occurrence)
+                    player.queue.current_index.as_ref() == Some(&row.position)
                 });
             let paused = player
                 .as_ref()
@@ -549,8 +581,8 @@ fn queue_title_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
         let current = shell
             .selected_playback()
             .as_deref()
-            .and_then(|player| player.queue.current_occurrence.clone());
-        let is_current = current.as_ref() == Some(&row.occurrence);
+            .and_then(|player| player.queue.current_index);
+        let is_current = current.as_ref() == Some(&row.position);
         let title = cell.title();
         title.set_text(&row.title);
         let paused = shell
@@ -786,13 +818,12 @@ fn build_queue_table(
         else {
             return;
         };
-        let occurrence = object
+        let position = object
             .value::<Arc<QueuePageRow>>()
             .expect("Queue row")
-            .occurrence
-            .clone();
+            .position;
         let activate = activate.clone();
-        glib::idle_add_local_once(move || activate.activate(occurrence));
+        glib::idle_add_local_once(move || activate.activate(position));
     });
 
     let end_drop = gtk::DropTarget::new(
@@ -1061,7 +1092,7 @@ impl crate::PlayerUi {
         let current = self
             .selected_playback()
             .as_deref()
-            .and_then(|player| player.queue.current_occurrence.clone());
+            .and_then(|player| player.queue.current_index);
         let Some(queue) = self.selected_queue() else {
             clear_queue_panel_children(&self.right_panel.queue_panel);
             clear_queue_panel_children(&self.views.fullscreen_player.queue_panel);
@@ -1187,11 +1218,11 @@ impl crate::PlayerUi {
     fn queue_has_current(&self) -> bool {
         let current = self
             .selected_playback()
-            .and_then(|player| player.queue.current_occurrence.clone());
+            .and_then(|player| player.queue.current_index);
         self.selected_queue().is_some_and(|queue| {
             let rows = queue.window.borrow();
             current.as_ref().map_or(!rows.is_empty(), |current| {
-                rows.iter().any(|row| &row.occurrence == current)
+                rows.iter().any(|row| &row.position == current)
             })
         })
     }
@@ -1205,7 +1236,7 @@ impl crate::PlayerUi {
         if !pending.get() {
             return;
         }
-        let Some(occurrence) = queue.current.borrow().clone() else {
+        let Some(position) = *queue.current.borrow() else {
             pending.set(false);
             self.set_queue_loading(fullscreen, false);
             return;
@@ -1214,7 +1245,7 @@ impl crate::PlayerUi {
             .rows
             .borrow()
             .iter()
-            .position(|row| row.occurrence == occurrence)
+            .position(|row| row.position == position)
         else {
             pending.set(false);
             self.set_queue_loading(fullscreen, loading);
@@ -1428,19 +1459,18 @@ pub fn connect_queue_panel_controls(shell: &Rc<crate::PlayerUi>) {
 mod tests {
     use super::*;
 
-    fn row(id: &str, title: &str) -> QueuePageRow {
+    fn row(position: usize, title: &str) -> QueuePageRow {
         QueuePageRow {
-            entry: Arc::new(library::QueueOccurrence {
-                occurrence: OccurrenceId::new(id),
+            entry: Arc::new(library::QueueRow {
+                position,
                 item: library::QueueItem::direct(
-                    format!("https://example.test/{id}"),
+                    format!("https://example.test/{position}"),
                     title,
                     "",
                     "",
                     0,
                 ),
-                canonical_position: 0,
-                source_index: None,
+                received_from_connect: false,
                 playlist_entry_id: None,
                 provenance: library::QueueProvenance::Manual,
             }),
@@ -1455,11 +1485,11 @@ mod tests {
     #[test]
     fn queue_search_filters_the_retained_window_and_keeps_duplicate_entries() {
         let state = QueueState::new();
-        let mut first = row("one", "Été [live]");
+        let mut first = row(0, "Été [live]");
         Arc::make_mut(&mut first.entry).item.artist = "Artist".to_string();
         let mut second = first.clone();
-        Arc::make_mut(&mut second.entry).occurrence = OccurrenceId::new("two");
-        let mut third = row("three", "Other");
+        Arc::make_mut(&mut second.entry).position = 1;
+        let mut third = row(2, "Other");
         Arc::make_mut(&mut third.entry).item.album = "Summer".to_string();
         let generation = state.begin();
         assert!(state.accept(
@@ -1497,27 +1527,25 @@ mod tests {
         let state = QueueState::new();
         let stale = state.begin();
         let current = state.begin();
-        assert!(state.accept(current, vec![row("new", "New")]));
-        assert!(!state.accept(stale, vec![row("old", "Old")]));
-        assert_eq!(state.rows.borrow()[0].occurrence, OccurrenceId::new("new"));
+        assert!(state.accept(current, vec![row(1, "New")]));
+        assert!(!state.accept(stale, vec![row(0, "Old")]));
+        assert_eq!(state.rows.borrow()[0].position, 1);
     }
 
     #[test]
-    fn expanding_the_queue_reveals_the_same_playing_occurrence_again() {
+    fn expanding_the_queue_reveals_the_same_playing_position_again() {
         let state = QueueState::new();
-        let current = row("playing", "Playing");
+        let current = row(10, "Playing");
         let generation = state.begin();
         assert!(state.accept(generation, vec![current.clone()]));
-        state.update_current(Some(current.occurrence.clone()));
+        state.update_current(Some(current.position));
         let object = state.model.item(0).unwrap();
         for pending in &state.reveal_current {
             pending.set(false);
         }
 
-        let mut window = (0..10)
-            .map(|i| row(&format!("previous-{i}"), "Previous"))
-            .collect::<Vec<_>>();
-        window.push(current.clone());
+        let mut window = (0..10).map(|i| row(i, "Previous")).collect::<Vec<_>>();
+        window.push(current);
         let generation = state.begin();
         assert!(state.accept(generation, window));
         assert!(state.reveal_current[0].get());

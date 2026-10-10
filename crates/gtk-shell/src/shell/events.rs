@@ -747,8 +747,8 @@ fn finish_playback_projection(
         media_controls_static_state_changed(previous_player.as_ref(), &next_player);
     let previous_queue_current = previous_player
         .as_ref()
-        .and_then(|player| player.queue.current_occurrence.as_ref());
-    let next_queue_current = next_player.queue.current_occurrence.as_ref();
+        .and_then(|player| player.queue.current_index.as_ref());
+    let next_queue_current = next_player.queue.current_index.as_ref();
     let queue_panel_changed = queue_panel_refresh_needed(
         queue_window_changed,
         previous_queue_current,
@@ -898,8 +898,8 @@ fn show_local_folder_recovery(shell: &Rc<Shell>, folder: String) {
 
 fn queue_panel_refresh_needed(
     page_changed: bool,
-    previous_current: Option<&playback::OccurrenceId>,
-    next_current: Option<&playback::OccurrenceId>,
+    previous_current: Option<&usize>,
+    next_current: Option<&usize>,
 ) -> bool {
     page_changed || previous_current != next_current
 }
@@ -930,7 +930,7 @@ fn media_controls_static_state_changed(
             || previous.controls.shuffle_enabled != next.controls.shuffle_enabled
             || previous.controls.auto_dj_enabled != next.controls.auto_dj_enabled
             || previous.controls.volume != next.controls.volume
-            || previous.queue.next_occurrence != next.queue.next_occurrence
+            || previous.queue.next_index != next.queue.next_index
             || previous.queue.can_next != next.queue.can_next
     })
 }
@@ -1102,8 +1102,8 @@ mod tests {
 
     #[test]
     fn queue_panel_refresh_ignores_unchanged_playback_ticks() {
-        let current = playback::OccurrenceId::new("current");
-        let next = playback::OccurrenceId::new("next");
+        let current = 0;
+        let next = 1;
 
         assert!(!queue_panel_refresh_needed(
             false,
@@ -1177,7 +1177,7 @@ mod tests {
         ));
 
         let mut queue_change = tick.clone();
-        queue_change.queue.next_occurrence = Some(playback::OccurrenceId::new("next"));
+        queue_change.queue.next_index = Some(1);
         assert!(bottom_player_can_update_position_only(
             Some(&tick),
             &queue_change
@@ -1195,9 +1195,8 @@ mod tests {
             queue: QueueSummaryView {
                 revision: 0,
                 total: 0,
-                current_occurrence: None,
                 current_index: None,
-                next_occurrence: None,
+                next_index: None,
                 can_next: false,
             },
             transport: TransportView {

@@ -44,7 +44,6 @@ pub struct AndroidPlaybackState {
     pub operation_failures: Vec<String>,
     pub media_uri: Option<String>,
     pub media_run: Option<u64>,
-    pub occurrence_id: Option<String>,
     pub artwork_identity: Option<Vec<u8>>,
     pub artwork_revision: u64,
     pub favorite: bool,
@@ -91,7 +90,6 @@ impl AndroidPlaybackState {
             operation_failures: Vec::new(),
             media_uri: None,
             media_run: None,
-            occurrence_id: None,
             artwork_identity: None,
             artwork_revision: 0,
             favorite: false,
@@ -152,7 +150,6 @@ impl From<&PlaybackView> for AndroidPlaybackState {
             operation_failures: Vec::new(),
             media_uri: current.map(|media| media.media_uri.clone()),
             media_run: current.and_then(|media| media.id.run.map(playback::RunId::get)),
-            occurrence_id: current.map(|media| media.occurrence.occurrence.to_string()),
             artwork_identity: current.and_then(|media| media.artwork_binding.clone()),
             artwork_revision: 0,
             favorite: false,
@@ -336,10 +333,10 @@ impl AndroidPlaybackSubscription {
             let uri = &current.media_uri;
             if changes.current_facts.is_none() {
                 let database = self.database.clone();
-                let occurrence = std::sync::Arc::clone(&current.occurrence);
+                let row = std::sync::Arc::clone(&current.row);
                 let row = self
                     .runtime
-                    .spawn(async move { database.prepared_queue_page(&[occurrence]).await })
+                    .spawn(async move { database.prepared_queue_page(&[row]).await })
                     .await
                     .map_err(error)?
                     .map_err(error)?

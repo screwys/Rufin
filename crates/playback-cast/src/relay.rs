@@ -317,7 +317,7 @@ fn stream_duration_millis(stream: &PreparedStream) -> Option<u64> {
         .map(|end| end.saturating_sub(stream.start_millis()))
         .or_else(|| {
             stream
-                .occurrence
+                .row
                 .as_ref()
                 .and_then(|occurrence| u64::try_from(occurrence.item.duration_millis).ok())
         })

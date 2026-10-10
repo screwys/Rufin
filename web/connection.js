@@ -119,7 +119,8 @@ function disconnect() {
   for (const url of coverUrls.values()) URL.revokeObjectURL(url);
   coverUrls.clear();
   state.playback = null;
-  state.currentId = null;
+  state.currentMediaUri = null;
+  state.currentRun = null;
   showQueue(null);
   for (const id of ["content", "queue", "lyrics"]) $(id).replaceChildren();
   $("app").inert = true;
@@ -301,7 +302,8 @@ const state = {
   visibleItems: [],
   source: "",
   playback: null,
-  currentId: null,
+  currentMediaUri: null,
+  currentRun: null,
   selectedLibrary: null,
   randomSource: null,
 };

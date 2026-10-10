@@ -361,9 +361,7 @@ mod freedesktop {
                 .and_then(|media| media.id.run),
             track_id: playback
                 .and_then(|playback| playback.transport.current.as_ref())
-                .map_or(MprisTrackId::NO_TRACK, |media| {
-                    mpris_track_id(media.id.occurrence.as_str())
-                }),
+                .map_or(MprisTrackId::NO_TRACK, |media| mpris_track_id(&media.id)),
             playback_status: playback.map_or(PlaybackStatus::Stopped, |playback| {
                 mpris_playback_status(playback.transport.effective_state())
             }),
@@ -389,7 +387,7 @@ mod freedesktop {
             return Metadata::builder().trackid(MprisTrackId::NO_TRACK).build();
         };
         let mut builder = Metadata::builder()
-            .trackid(mpris_track_id(entry.id.occurrence.as_str()))
+            .trackid(mpris_track_id(&entry.id))
             .title(entry.title.clone())
             .artist([entry.artist.clone()])
             .album(entry.album.clone())
@@ -402,13 +400,16 @@ mod freedesktop {
         builder.build()
     }
 
-    fn mpris_track_id(occurrence: &str) -> MprisTrackId {
-        let mut encoded = String::with_capacity(occurrence.len() * 2);
-        for byte in occurrence.as_bytes() {
+    fn mpris_track_id(media: &playback::CurrentMediaId) -> MprisTrackId {
+        let mut encoded = String::with_capacity(media.media_uri.len() * 2);
+        for byte in media.media_uri.as_bytes() {
             let _written = write!(&mut encoded, "{byte:02x}");
         }
-        MprisTrackId::try_from(format!("/io/github/screwys/Rufin/track/{encoded}"))
-            .unwrap_or(MprisTrackId::NO_TRACK)
+        MprisTrackId::try_from(format!(
+            "/io/github/screwys/Rufin/track/{}/{encoded}",
+            media.run.map_or(0, playback::RunId::get)
+        ))
+        .unwrap_or(MprisTrackId::NO_TRACK)
     }
 
     #[cfg(test)]
@@ -418,7 +419,7 @@ mod freedesktop {
     ) -> bool {
         playback
             .and_then(|playback| playback.transport.current.as_ref())
-            .is_some_and(|entry| &mpris_track_id(entry.id.occurrence.as_str()) == track_id)
+            .is_some_and(|entry| &mpris_track_id(&entry.id) == track_id)
     }
 
     fn mpris_time(position_millis: u64) -> Time {
@@ -458,21 +459,26 @@ mod freedesktop {
             mpris_set_position_matches, mpris_time, mpris_track_id, repeat_mode_from_mpris,
         };
         use crate::discord::tests::test_view;
-        use playback::OccurrenceId;
-        use std::sync::Arc;
+        use playback::{CurrentMediaId, RunId};
 
         #[test]
-        fn mpris_occurrence_paths_distinguish_duplicate_tracks_and_guard_set_position() {
-            let first = OccurrenceId::new("occurrence:first");
-            let second = OccurrenceId::new("occurrence:second");
-            let first_id = mpris_track_id(first.as_str());
-            let second_id = mpris_track_id(second.as_str());
+        fn mpris_run_paths_distinguish_duplicate_tracks_and_guard_set_position() {
+            let playback = test_view(1, "Album", TransportStatus::Playing, 1_000);
+            let first = playback
+                .transport
+                .current
+                .as_ref()
+                .expect("current media")
+                .id
+                .clone();
+            let second = CurrentMediaId {
+                run: Some(RunId::new(2)),
+                media_uri: first.media_uri.clone(),
+            };
+            let first_id = mpris_track_id(&first);
+            let second_id = mpris_track_id(&second);
             assert_ne!(first_id, second_id);
 
-            let mut playback = test_view(1, "Album", TransportStatus::Playing, 1_000);
-            Arc::make_mut(playback.transport.current.as_mut().expect("current media"))
-                .id
-                .occurrence = first;
             assert!(mpris_set_position_matches(Some(&playback), &first_id));
             assert!(!mpris_set_position_matches(Some(&playback), &second_id));
         }
@@ -491,12 +497,12 @@ mod freedesktop {
             assert!(!exhausted.can_go_next);
             assert!(exhausted.can_go_previous);
 
-            playback.queue.next_occurrence = Some(OccurrenceId::new("occurrence:next"));
+            playback.queue.next_index = Some(1);
             playback.queue.can_next = true;
             let with_next = mpris_desired_state(Some(&playback), None);
             assert!(with_next.can_go_next);
 
-            playback.queue.next_occurrence = None;
+            playback.queue.next_index = None;
             assert!(mpris_desired_state(Some(&playback), None).can_go_next);
         }
 
