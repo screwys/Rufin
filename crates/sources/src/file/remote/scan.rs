@@ -59,11 +59,17 @@ impl FileSource {
         copy: &super::metadata::WorkingFile,
     ) -> SourceResult<library::ScanOutcome> {
         let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
-        self.stage_saved_file(&mut scan, media_uri, copy).await?;
-        crate::file::artwork::ArtworkFiles::Remote(self)
-            .stage(database, &mut scan, &|| false)
-            .await?;
-        scan.finish().await.map_err(Into::into)
+        let result = async {
+            self.stage_saved_file(&mut scan, media_uri, copy).await?;
+            crate::file::artwork::ArtworkFiles::Remote(self)
+                .stage(database, &mut scan, &|| false)
+                .await?;
+            Ok(())
+        }
+        .await;
+        crate::finish_scan(scan, result)
+            .await
+            .map(|(_, outcome)| outcome)
     }
 
     pub(crate) async fn stage_saved_file(
@@ -302,13 +308,9 @@ impl FileSource {
                 break;
             }
             after = observations.last().map(|file| file.path.clone());
-            let candidates = if let Some(source) = scan.existing_source() {
-                database
-                    .local_file_reuse_candidates(source, &observations, &ReadCancellation::new())
-                    .await?
-            } else {
-                vec![]
-            };
+            let candidates = database
+                .local_file_reuse_candidates(scan.source(), &observations, &ReadCancellation::new())
+                .await?;
             let dependencies = scan
                 .local_dependency_paths(
                     &observations
@@ -384,12 +386,15 @@ impl FileSource {
                 let renamed = if let Some((old, new)) = rename
                     && let Some(suffix) = file.path.strip_prefix(new)
                     && (suffix.is_empty() || suffix.starts_with('/'))
-                    && let Some(source) = scan.existing_source()
                 {
                     let mut from = file.clone();
                     from.path = format!("{old}{suffix}");
                     database
-                        .local_file_reuse_candidates(source, &[from], &ReadCancellation::new())
+                        .local_file_reuse_candidates(
+                            scan.source(),
+                            &[from],
+                            &ReadCancellation::new(),
+                        )
                         .await?
                 } else {
                     vec![]
@@ -482,9 +487,7 @@ impl FileSource {
         let FileInput::WebDav(client) = input.input() else {
             return Ok(false);
         };
-        let Some(source) = scan.existing_source() else {
-            return Ok(false);
-        };
+        let source = scan.source();
         let Some(file) = scan.local_inventory_files(&[path.into()]).await?.pop() else {
             return Ok(false);
         };

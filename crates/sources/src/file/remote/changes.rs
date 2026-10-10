@@ -158,70 +158,76 @@ impl FileSource {
             .map(|(old, new)| Ok::<_, SourceError>((self.location(old)?, self.location(new)?)))
             .transpose()?;
         let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
-        for page in seeds.chunks(128) {
-            scan.write_local_component_paths(page).await?;
-        }
-        // The same inventory dependency expansion used by Local includes CUE backing files.
-        // Prefixes include old directory contents even when a moved directory no longer exists.
-        let prefixes = seeds
-            .iter()
-            .map(|path| format!("{}/", path.trim_end_matches('/')))
-            .collect::<Vec<_>>();
-        for page in prefixes.chunks(128) {
-            scan.expand_local_artwork_prefixes(source, page, &[])
-                .await?;
-        }
-        let mut image_directories = Vec::new();
-        for path in &paths {
-            if crate::file::artwork::supported_image(std::path::Path::new(path)) {
-                let parent = path.rsplit_once('/').map_or("", |(parent, _)| parent);
-                let prefix = format!("{}/", self.location(parent)?.trim_end_matches('/'));
-                if !image_directories.contains(&prefix) {
-                    image_directories.push(prefix);
+        let result = async {
+            for page in seeds.chunks(128) {
+                scan.write_local_component_paths(page).await?;
+            }
+            // The same inventory dependency expansion used by Local includes CUE backing files.
+            // Prefixes include old directory contents even when a moved directory no longer exists.
+            let prefixes = seeds
+                .iter()
+                .map(|path| format!("{}/", path.trim_end_matches('/')))
+                .collect::<Vec<_>>();
+            for page in prefixes.chunks(128) {
+                scan.expand_local_artwork_prefixes(source, page, &[])
+                    .await?;
+            }
+            let mut image_directories = Vec::new();
+            for path in &paths {
+                if crate::file::artwork::supported_image(std::path::Path::new(path)) {
+                    let parent = path.rsplit_once('/').map_or("", |(parent, _)| parent);
+                    let prefix = format!("{}/", self.location(parent)?.trim_end_matches('/'));
+                    if !image_directories.contains(&prefix) {
+                        image_directories.push(prefix);
+                    }
                 }
             }
-        }
-        for page in image_directories.chunks(128) {
-            scan.expand_local_artwork_prefixes(source, &[], page)
-                .await?;
-        }
-        scan.expand_local_component(source).await?;
-        scan.remove_local_component_tracks(source).await?;
-        let mut after = None;
-        loop {
-            let page = scan
-                .local_component_path_page(after.as_deref(), 128)
-                .await?;
-            if page.is_empty() {
-                break;
+            for page in image_directories.chunks(128) {
+                scan.expand_local_artwork_prefixes(source, &[], page)
+                    .await?;
             }
-            after = page.last().cloned();
-            for path in &page {
-                match self.stat(&input, &self.relative(path)?).await {
-                    Ok(file) => scan.write_local_files(&[(file, vec![])]).await?,
-                    Err(SourceError::NotFound) => {}
-                    Err(error) => return Err(error),
+            scan.expand_local_component(source).await?;
+            let mut after = None;
+            loop {
+                let page = scan
+                    .local_component_path_page(after.as_deref(), 128)
+                    .await?;
+                if page.is_empty() {
+                    break;
                 }
+                after = page.last().cloned();
+                for path in &page {
+                    match self.stat(&input, &self.relative(path)?).await {
+                        Ok(file) => scan.write_local_files(&[(file, vec![])]).await?,
+                        Err(SourceError::NotFound) => {}
+                        Err(error) => return Err(error),
+                    }
+                }
+                scan.remove_local_file_paths(&page).await?;
             }
-            scan.remove_local_file_paths(&page).await?;
-        }
-        let mut after = None;
-        loop {
-            let page = scan
-                .local_inventory_path_page(LocalFileKind::Directory, after.as_deref(), false, 1)
+            let mut after = None;
+            loop {
+                let page = scan
+                    .local_inventory_path_page(LocalFileKind::Directory, after.as_deref(), false, 1)
+                    .await?;
+                let Some(directory) = page.into_iter().next() else {
+                    break;
+                };
+                self.list_directory(&input, &mut scan, &self.relative(&directory)?, &|| false)
+                    .await?;
+                after = Some(directory);
+            }
+            self.stage_files(database, &mut scan, &|_| {}, &|| false, rename.as_ref())
                 .await?;
-            let Some(directory) = page.into_iter().next() else {
-                break;
-            };
-            self.list_directory(&input, &mut scan, &self.relative(&directory)?, &|| false)
+            scan.remove_local_component_tracks(source).await?;
+            crate::file::artwork::ArtworkFiles::Remote(self)
+                .stage(database, &mut scan, &|| false)
                 .await?;
-            after = Some(directory);
+            Ok(())
         }
-        self.stage_files(database, &mut scan, &|_| {}, &|| false, rename.as_ref())
-            .await?;
-        crate::file::artwork::ArtworkFiles::Remote(self)
-            .stage(database, &mut scan, &|| false)
-            .await?;
-        Ok(scan.finish().await?)
+        .await;
+        crate::finish_scan(scan, result)
+            .await
+            .map(|(_, outcome)| outcome)
     }
 }

@@ -1222,7 +1222,7 @@ async fn saved_source_opens_from_cache_without_starting_a_scan() {
 }
 
 #[tokio::test]
-async fn failed_and_stale_publications_are_atomic() {
+async fn completed_batches_survive_later_failure_and_interleaved_changes() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
     let database = Database::open(&path).await.expect("open Library Store");
@@ -1235,6 +1235,23 @@ async fn failed_and_stale_publications_are_atomic() {
     let mut failed = Scan::begin(&database, "source-two", "Two", "two", None)
         .await
         .expect("begin failed scan");
+    failed.begin_batch().await.expect("begin first batch");
+    failed
+        .write_genre("kept", "Kept", "kept", Some("kept"), None)
+        .await
+        .expect("write a useful record");
+    failed.finish_batch().await.expect("commit first batch");
+    failed.begin_batch().await.expect("begin later batch");
+    failed
+        .write_genre(
+            "rolled-back",
+            "Rolled back",
+            "rolled back",
+            Some("rolled back"),
+            None,
+        )
+        .await
+        .expect("write before the invalid record");
     failed
         .write_track(
             "",
@@ -1271,10 +1288,66 @@ async fn failed_and_stale_publications_are_atomic() {
             &library::AudioProperties::default(),
         )
         .await
-        .expect_err("empty identity fails staging");
-    assert_eq!(
+        .expect_err("empty identity fails the current batch");
+    assert!(matches!(
         failed.finish().await.expect("finish failed scan"),
-        ScanOutcome::Failed
+        ScanOutcome::Changed(_)
+    ));
+    let mut outside = connection(&path).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT object_id FROM genres WHERE source_key=(SELECT source_key FROM sources WHERE object_id='source-two') ORDER BY object_id",
+        )
+        .fetch_all(&mut outside)
+        .await
+        .expect("read completed records after failure"),
+        vec!["kept"]
+    );
+
+    let mut cancelled = Scan::begin_items(&database, "source-two")
+        .await
+        .expect("begin cancelled update");
+    cancelled
+        .begin_batch()
+        .await
+        .expect("begin completed batch");
+    cancelled
+        .write_genre(
+            "also-kept",
+            "Also kept",
+            "also kept",
+            Some("also kept"),
+            None,
+        )
+        .await
+        .expect("write before cancellation");
+    cancelled
+        .finish_batch()
+        .await
+        .expect("commit before cancellation");
+    cancelled
+        .begin_batch()
+        .await
+        .expect("begin interrupted batch");
+    cancelled
+        .write_genre(
+            "cancelled",
+            "Cancelled",
+            "cancelled",
+            Some("cancelled"),
+            None,
+        )
+        .await
+        .expect("write interrupted record");
+    drop(cancelled);
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT object_id FROM genres WHERE source_key=(SELECT source_key FROM sources WHERE object_id='source-two') ORDER BY object_id",
+        )
+        .fetch_all(&mut outside)
+        .await
+        .expect("read completed records after cancellation"),
+        vec!["also-kept", "kept"]
     );
 
     let mut oversized = Scan::begin(&database, "source-three", "Three", "three", None)
@@ -1349,16 +1422,55 @@ async fn failed_and_stale_publications_are_atomic() {
     assert_eq!(song.album, "Missing");
     assert!(song.album_key.is_none());
 
-    let stale = Scan::begin(
-        &database,
-        "source-one",
-        "Source One",
-        "source one",
-        Some(Freshness::new(b"later".to_vec()).expect("freshness")),
-    )
-    .await
-    .expect("begin stale scan");
-    let mut outside = connection(&path).await;
+    sqlx::query("INSERT INTO replay_gain_measurements(source_key,entity_kind,entity_key,analysis_key,gain_db) SELECT source_key,'album',album_key,loudness_analysis_key,-6.0 FROM albums WHERE source_key=?1 AND object_id='album-one'")
+        .bind(first.source.raw()).execute(&mut outside).await.expect("seed known album gain");
+    let mut interleaved = Scan::begin_items(&database, "source-one")
+        .await
+        .expect("begin update alongside a favorite change");
+    interleaved
+        .write_genre(
+            "new-genre",
+            "New genre",
+            "new genre",
+            Some("new genre"),
+            None,
+        )
+        .await
+        .expect("write newly acquired metadata");
+    interleaved
+        .write_album(
+            "album-one",
+            "Album One",
+            "album one",
+            "Artist One",
+            "album one",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("read the first file of an album without its dates");
+    interleaved
+        .write_album_relations(&[], &[("album-one", "new-genre")], &[("album-one", "Live")])
+        .await
+        .expect("read one file's album credits");
+    interleaved.incomplete();
+    let favorite = library::FavoriteTarget::Track(library::source_entity_uri(
+        &library::SourceId::new("source-one"),
+        "track",
+        "track-one",
+    ));
+    database
+        .set_favorite(&favorite, true)
+        .await
+        .expect("favorite during acquisition");
     sqlx::query(
         "UPDATE sources SET catalog_revision=catalog_revision+1
          WHERE source_key=(SELECT source_key FROM sources WHERE object_id='source-one')",
@@ -1366,9 +1478,40 @@ async fn failed_and_stale_publications_are_atomic() {
     .execute(&mut outside)
     .await
     .expect("advance accepted revision");
+    assert!(matches!(
+        interleaved.finish().await.expect("finish valid update"),
+        ScanOutcome::Changed(_)
+    ));
+    assert!(
+        database
+            .favorite(&favorite)
+            .await
+            .expect("read retained favorite")
+    );
     assert_eq!(
-        stale.finish().await.expect("finish stale scan"),
-        ScanOutcome::Stale
+        sqlx::query_as::<_, (i64, String)>(
+            "SELECT year,release_date FROM albums WHERE source_key=?1 AND object_id='album-one'"
+        )
+        .bind(first.source.raw())
+        .fetch_one(&mut outside)
+        .await
+        .expect("keep unread album dates"),
+        (2025, "2025-01-01".into())
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, f64>("SELECT gain_db FROM replay_gain_measurements WHERE source_key=?1 AND entity_kind='album'")
+            .bind(first.source.raw()).fetch_one(&mut outside).await.expect("keep unread album gain"),
+        -6.0
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT genre.object_id FROM album_genres relation JOIN albums album USING(album_key) JOIN genres genre USING(genre_key) WHERE album.source_key=?1 ORDER BY relation.position")
+            .bind(first.source.raw()).fetch_all(&mut outside).await.expect("keep known genres and append observed ones"),
+        ["genre-one", "new-genre"]
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT release_type FROM album_release_types relation JOIN albums album USING(album_key) WHERE album.source_key=?1 ORDER BY position")
+            .bind(first.source.raw()).fetch_all(&mut outside).await.expect("keep known release types"),
+        ["Album", "Live"]
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
@@ -1378,7 +1521,7 @@ async fn failed_and_stale_publications_are_atomic() {
         .fetch_one(&mut outside)
         .await
         .expect("read revision"),
-        (first.catalog_revision + 1) as i64
+        (first.catalog_revision + 2) as i64
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
@@ -1386,7 +1529,25 @@ async fn failed_and_stale_publications_are_atomic() {
         )
         .fetch_one(&mut outside)
         .await
-        .expect("count rejected sources"),
+        .expect("count sources with completed records"),
+        1
+    );
+    let removed = Scan::begin_items(&database, "source-one")
+        .await
+        .expect("begin update before source removal");
+    database
+        .remove_source(&library::SourceId::new("source-one"))
+        .await
+        .expect("remove source during acquisition");
+    assert_eq!(
+        removed.finish().await.expect("finish removed source"),
+        ScanOutcome::Stale
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sources WHERE object_id='source-one'")
+            .fetch_one(&mut outside)
+            .await
+            .expect("source stays removed"),
         0
     );
 }

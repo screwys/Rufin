@@ -3,7 +3,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use sqlx::pool::PoolConnection;
@@ -66,8 +66,7 @@ struct DatabaseInner {
     export_readers: SqlitePool,
     export_read: tokio::sync::Mutex<()>,
     general_read: Arc<Semaphore>,
-    active_scan: AtomicU64,
-    next_scan: AtomicU64,
+    acquisition: Arc<Mutex<()>>,
     distinct_track_covers: AtomicBool,
     _temporary_catalog: Option<tempfile::TempDir>,
 }
@@ -258,8 +257,7 @@ impl Database {
                 export_readers,
                 export_read: tokio::sync::Mutex::new(()),
                 general_read: Arc::new(Semaphore::new(1)),
-                active_scan: AtomicU64::new(0),
-                next_scan: AtomicU64::new(1),
+                acquisition: Arc::new(Mutex::new(())),
                 distinct_track_covers: AtomicBool::new(false),
                 _temporary_catalog: temporary_catalog,
             }),
@@ -379,28 +377,12 @@ impl Database {
         Ok((permit, self.inner.export_readers.acquire().await?))
     }
 
-    pub(crate) fn begin_scan(&self) -> LibraryResult<u64> {
-        let token = self.inner.next_scan.fetch_add(1, Ordering::Relaxed);
+    pub(crate) fn acquire_scan(&self) -> LibraryResult<tokio::sync::OwnedMutexGuard<()>> {
         self.inner
-            .active_scan
-            .compare_exchange(0, token, Ordering::AcqRel, Ordering::Acquire)
-            .map_err(|_| LibraryError::ScanInProgress)?;
-        Ok(token)
-    }
-
-    pub(crate) fn scan_is_current(&self, token: u64) -> bool {
-        self.inner.active_scan.load(Ordering::Acquire) == token
-    }
-
-    pub(crate) fn release_scan(&self, token: u64) {
-        let _ =
-            self.inner
-                .active_scan
-                .compare_exchange(token, 0, Ordering::AcqRel, Ordering::Acquire);
-    }
-
-    pub(crate) fn writer_failed(&self) {
-        self.inner.active_scan.store(0, Ordering::Release);
+            .acquisition
+            .clone()
+            .try_lock_owned()
+            .map_err(|_| LibraryError::ScanInProgress)
     }
 
     #[cfg(test)]
@@ -414,7 +396,6 @@ impl Database {
         if let Some(connection) = writer.take() {
             connection.close().await?;
         }
-        self.writer_failed();
         Ok(())
     }
 }

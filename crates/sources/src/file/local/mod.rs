@@ -232,11 +232,17 @@ impl LocalSource {
         playlist: library::PlaylistKey,
     ) -> SourceResult<library::ScanOutcome> {
         let mut scan = library::Scan::begin_local_items(database, source_id).await?;
-        scan::stage_imported_paths(database, self, &mut scan, Some(playlist)).await?;
-        crate::file::artwork::ArtworkFiles::Local
-            .stage(database, &mut scan, &|| false)
-            .await?;
-        Ok(scan.finish().await?)
+        let result = async {
+            scan::stage_imported_paths(database, self, &mut scan, Some(playlist)).await?;
+            crate::file::artwork::ArtworkFiles::Local
+                .stage(database, &mut scan, &|| false)
+                .await?;
+            Ok(())
+        }
+        .await;
+        crate::finish_scan(scan, result)
+            .await
+            .map(|(_, outcome)| outcome)
     }
 
     pub(crate) async fn publish_metadata_paths(
@@ -281,9 +287,12 @@ impl LocalSource {
         if !self.documents.is_empty() {
             let mut scan =
                 library::Scan::begin(database, source_id, "Local", "local", None).await?;
-            self.stage_catalog(database, &mut scan, progress, cancelled, true)
-                .await?;
-            return scan.finish().await.map_err(Into::into);
+            let result = self
+                .stage_catalog(database, &mut scan, progress, cancelled, true)
+                .await;
+            return crate::finish_scan(scan, result)
+                .await
+                .map(|(_, outcome)| outcome);
         }
         scan::catch_up(database, source, source_id, self, progress, cancelled).await
     }

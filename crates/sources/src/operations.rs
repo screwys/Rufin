@@ -339,6 +339,18 @@ impl ArtworkEditing {
     }
 }
 
+pub(crate) fn metadata_refresh_error(error: crate::SourceError) -> SourceMetadataError {
+    match error {
+        crate::SourceError::IncompleteScan { outcome, error } => {
+            SourceMetadataError::PartiallySaved {
+                message: error.to_string(),
+                outcome: Some(outcome),
+            }
+        }
+        error => SourceMetadataError::SavedRefreshFailed(error.to_string()),
+    }
+}
+
 pub(crate) fn finish_metadata_save(
     result: Result<(), SourceMetadataError>,
     refresh: Result<library::ScanOutcome, SourceMetadataError>,
@@ -347,7 +359,8 @@ pub(crate) fn finish_metadata_save(
     let message = match result {
         Ok(()) => {
             return refresh.map_err(|error| match error {
-                SourceMetadataError::SavedRefreshFailed(_) => error,
+                SourceMetadataError::SavedRefreshFailed(_)
+                | SourceMetadataError::PartiallySaved { .. } => error,
                 error => SourceMetadataError::SavedRefreshFailed(error.to_string()),
             });
         }
@@ -357,6 +370,13 @@ pub(crate) fn finish_metadata_save(
     };
     let (message, outcome) = match refresh {
         Ok(outcome) => (message, Some(outcome)),
+        Err(SourceMetadataError::PartiallySaved {
+            message: refresh_error,
+            outcome,
+        }) => (
+            format!("{message}. Source refresh also failed: {refresh_error}"),
+            outcome,
+        ),
         Err(error) => (
             format!("{message}. Source refresh also failed: {error}"),
             None,

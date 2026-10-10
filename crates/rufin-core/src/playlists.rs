@@ -6,7 +6,7 @@ use async_channel::Receiver;
 use library::{
     Database, FolderKey, PlaylistEntryKey, PlaylistKey, ReadCancellation, ScanOutcome, SourceKey,
 };
-use sources::{Source, SourceConfiguration, SourceId};
+use sources::{Source, SourceConfiguration, SourceError, SourceId};
 use std::{
     future::Future,
     path::PathBuf,
@@ -370,13 +370,12 @@ pub fn create_playlist(
                     let (playlist, object_id) = playlist.unzip();
                     (playlist.is_some(), None, playlist, object_id)
                 })
-                .map_err(string_error),
+                .map_err(SourceError::from),
             Ok(PlaylistOwner::Server(source, key)) => {
                 async {
                     let (changed, outcome, object_id) = source
                         .create_playlist(&owner.shared.database, key, &name, &media_uris, public)
-                        .await
-                        .map_err(string_error)?;
+                        .await?;
                     let playlist = if let Some(id) = object_id.as_deref() {
                         match owner
                             .shared
@@ -397,7 +396,7 @@ pub fn create_playlist(
                 }
                 .await
             }
-            Err(error) => Err(error),
+            Err(error) => Err(SourceError::Other(error)),
         };
         let reply = match result {
             Ok((changed, outcome, playlist, object_id)) => {
@@ -405,8 +404,9 @@ pub fn create_playlist(
                 Ok(object_id)
             }
             Err(error) => {
-                owner.shared.warn_nonfatal(&error);
-                Err(error)
+                let message = error.to_string();
+                accept_playlist_result(&owner, source_key, None, Err(error)).await;
+                Err(message)
             }
         };
         let _ = sender.send(reply).await;
@@ -596,7 +596,7 @@ pub(crate) async fn update_playlist_on(
         Ok((changed, outcome)) => Ok((*changed, *outcome)),
         Err(sources::SourceMetadataError::PartiallySaved { outcome, .. }) => Ok((true, *outcome)),
         Err(sources::SourceMetadataError::SavedRefreshFailed(_)) => Ok((true, None)),
-        Err(error) => Err(error.to_string()),
+        Err(error) => Err(SourceError::Other(error.to_string())),
     };
     if publication.as_ref().is_ok_and(|(changed, _)| *changed)
         && let Some(binding) = previous
@@ -632,17 +632,20 @@ pub fn delete_playlist(
 ) -> Receiver<Result<bool, String>> {
     let operation_owner = owner.clone();
     playlist_change(&owner, playlist, move |target, database| async move {
-        crate::playlist_files::forget_file(&operation_owner, playlist).await?;
+        crate::playlist_files::forget_file(&operation_owner, playlist)
+            .await
+            .map_err(SourceError::Other)?;
         let result = match target {
             PlaylistOwner::Local(source_key) => database
                 .delete_playlist(source_key, playlist)
                 .await
                 .map(|changed| (changed, None))
-                .map_err(string_error),
-            PlaylistOwner::Server(source, source_key) => source
-                .delete_playlist(&database, source_key, playlist)
-                .await
-                .map_err(string_error),
+                .map_err(SourceError::from),
+            PlaylistOwner::Server(source, source_key) => {
+                source
+                    .delete_playlist(&database, source_key, playlist)
+                    .await
+            }
         };
         if matches!(result, Ok((true, _))) {
             prune_imported_playlist_files(&operation_owner).await;
@@ -705,7 +708,11 @@ pub fn add_playlist_tracks(
                 } else {
                     owner.shared.warn_nonfatal(&error.to_string());
                 }
-                Err(error.to_string())
+                let message = error.to_string();
+                if matches!(error, SourceError::IncompleteScan { .. }) {
+                    accept_playlist_result(&owner, source_key, Some(playlist), Err(error)).await;
+                }
+                Err(message)
             }
         };
         let _ = sender.send(reply).await;
@@ -725,11 +732,12 @@ pub fn remove_playlist_entries(
                 .remove_playlist_entries(source_key, playlist, &entries)
                 .await
                 .map(|removed| (removed > 0, None))
-                .map_err(string_error),
-            PlaylistOwner::Server(source, source_key) => source
-                .remove_playlist_entries(&database, source_key, playlist, &entries)
-                .await
-                .map_err(string_error),
+                .map_err(SourceError::from),
+            PlaylistOwner::Server(source, source_key) => {
+                source
+                    .remove_playlist_entries(&database, source_key, playlist, &entries)
+                    .await
+            }
         };
         if matches!(result, Ok((true, _))) {
             prune_imported_playlist_files(&operation_owner).await;
@@ -806,11 +814,12 @@ pub fn move_playlist_entry(
                 .move_playlist_entry(source_key, playlist, entry, position)
                 .await
                 .map(|changed| (changed, None))
-                .map_err(string_error),
-            PlaylistOwner::Server(source, source_key) => source
-                .move_playlist_entry(&database, source_key, playlist, entry, position)
-                .await
-                .map_err(string_error),
+                .map_err(SourceError::from),
+            PlaylistOwner::Server(source, source_key) => {
+                source
+                    .move_playlist_entry(&database, source_key, playlist, entry, position)
+                    .await
+            }
         }
     })
 }
@@ -836,7 +845,7 @@ fn playlist_change<F, Work>(
 ) -> Receiver<Result<bool, String>>
 where
     F: FnOnce(PlaylistOwner, Arc<Database>) -> Work + Send + 'static,
-    Work: Future<Output = Result<(bool, Option<ScanOutcome>), String>> + Send + 'static,
+    Work: Future<Output = Result<(bool, Option<ScanOutcome>), SourceError>> + Send + 'static,
 {
     let (sender, receiver) = async_channel::bounded(1);
     owner.spawn_serialized(move |owner| async move {
@@ -844,12 +853,12 @@ where
         let source_key = target.as_ref().ok().and_then(PlaylistOwner::source_key);
         let result = match target {
             Ok(target) => change(target, Arc::clone(&owner.shared.database)).await,
-            Err(error) => Err(error),
+            Err(error) => Err(SourceError::Other(error)),
         };
         let reply = result
             .as_ref()
             .map(|(changed, _)| *changed)
-            .map_err(Clone::clone);
+            .map_err(string_error);
         accept_playlist_result(&owner, source_key, Some(playlist), result).await;
         let _ = sender.try_send(reply);
     });
@@ -920,13 +929,15 @@ async fn enrich_imported_playlist(
     }
     if readable {
         let source = owner.ensure_local_source().await?;
-        let outcome = source
+        let result = source
             .import_playlist_files(&owner.shared.database, playlist)
-            .await
-            .map_err(string_error)?;
-        owner
-            .accept_scan(source.source_id(), outcome, CatalogChange::Broad)
             .await;
+        if let Ok(outcome) | Err(SourceError::IncompleteScan { outcome, .. }) = &result {
+            owner
+                .accept_scan(source.source_id(), *outcome, CatalogChange::Broad)
+                .await;
+        }
+        result.map_err(string_error)?;
     }
     Ok(())
 }
@@ -948,7 +959,14 @@ pub(crate) async fn prune_imported_playlist_files(owner: &SourceOwner) {
                         .accept_scan(client.source_id(), outcome, CatalogChange::Broad)
                         .await;
                 }
-                Err(error) => owner.shared.warn_nonfatal(&error.to_string()),
+                Err(error) => {
+                    if let SourceError::IncompleteScan { outcome, .. } = &error {
+                        owner
+                            .accept_scan(client.source_id(), *outcome, CatalogChange::Broad)
+                            .await;
+                    }
+                    owner.shared.warn_nonfatal(&error.to_string());
+                }
                 Ok(None) => {}
             }
         }
@@ -959,14 +977,17 @@ async fn accept_playlist_result(
     owner: &SourceOwner,
     source: Option<SourceKey>,
     playlist: Option<PlaylistKey>,
-    result: Result<(bool, Option<ScanOutcome>), String>,
+    result: Result<(bool, Option<ScanOutcome>), SourceError>,
 ) {
     let outcome = match result {
         Ok((true, outcome)) => outcome,
         Ok((false, _)) => return,
         Err(error) => {
-            owner.shared.warn_nonfatal(&error);
-            return;
+            owner.shared.warn_nonfatal(&error.to_string());
+            match error {
+                SourceError::IncompleteScan { outcome, .. } => Some(outcome),
+                _ => return,
+            }
         }
     };
     if let Some(playlist) = playlist {

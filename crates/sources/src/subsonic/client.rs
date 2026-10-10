@@ -265,32 +265,35 @@ impl SubsonicSource {
             .await?;
         let results = &body["searchResult3"];
         let mut scan = library::Scan::begin_items(database, source_id.as_str()).await?;
-        let source = scan
-            .existing_source()
-            .ok_or(SourceError::InvalidRequest("Search source is unavailable"))?;
-        let (artists, albums, tracks) = tokio::try_join!(
-            self.read_artists(json::items(&results["artist"])),
-            self.read_albums(json::items(&results["album"])),
-            self.read_tracks(json::items(&results["song"])),
-        )?;
-        scan.begin_batch().await?;
-        let mut artist_ids = Vec::new();
-        let mut album_ids = Vec::new();
-        let mut track_ids = Vec::new();
-        for artist in artists.into_iter().take(limit.clamp(1, 100)) {
-            artist_ids.push(artist.id.clone());
-            stage_artist(&mut scan, artist).await?;
+        let source = scan.source();
+        let result = async {
+            let (artists, albums, tracks) = tokio::try_join!(
+                self.read_artists(json::items(&results["artist"])),
+                self.read_albums(json::items(&results["album"])),
+                self.read_tracks(json::items(&results["song"])),
+            )?;
+            scan.begin_batch().await?;
+            let mut artist_ids = Vec::new();
+            let mut album_ids = Vec::new();
+            let mut track_ids = Vec::new();
+            for artist in artists.into_iter().take(limit.clamp(1, 100)) {
+                artist_ids.push(artist.id.clone());
+                stage_artist(&mut scan, artist).await?;
+            }
+            for album in albums.into_iter().take(limit.clamp(1, 100)) {
+                album_ids.push(album.id.clone());
+                stage_album(&mut scan, album).await?;
+            }
+            for track in tracks.into_iter().take(limit.clamp(1, 100)) {
+                track_ids.push(track.id.clone());
+                stage_track(&mut scan, track).await?;
+            }
+            scan.finish_batch().await?;
+            Ok((track_ids, album_ids, artist_ids))
         }
-        for album in albums.into_iter().take(limit.clamp(1, 100)) {
-            album_ids.push(album.id.clone());
-            stage_album(&mut scan, album).await?;
-        }
-        for track in tracks.into_iter().take(limit.clamp(1, 100)) {
-            track_ids.push(track.id.clone());
-            stage_track(&mut scan, track).await?;
-        }
-        scan.finish_batch().await?;
-        let outcome = scan.finish().await?;
+        .await;
+        let ((track_ids, album_ids, artist_ids), outcome) =
+            crate::finish_scan(scan, result).await?;
         let rows = database
             .search_rows_by_objects(
                 source,
@@ -301,7 +304,11 @@ impl SubsonicSource {
                 &artist_ids,
                 &library::ReadCancellation::new(),
             )
-            .await?;
+            .await
+            .map_err(|error| SourceError::IncompleteScan {
+                outcome,
+                error: Box::new(error.into()),
+            })?;
         Ok((rows, Some(outcome)))
     }
 }

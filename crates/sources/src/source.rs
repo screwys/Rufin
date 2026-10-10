@@ -1073,20 +1073,9 @@ impl Source {
                     .await
             }
         };
-        if let Err(error) = &staged {
-            if matches!(error, SourceError::Cancelled) {
-                return Err(SourceError::Cancelled);
-            }
-            tracing::warn!(%error, "source collection was incomplete; publishing accepted staged facts without removals");
-            scan.incomplete();
-        }
-        let outcome = scan.finish().await?;
-        staged
-            .map(|_| outcome)
-            .map_err(|error| SourceError::IncompleteScan {
-                outcome,
-                error: Box::new(error),
-            })
+        crate::finish_scan(scan, staged)
+            .await
+            .map(|(_, outcome)| outcome)
     }
 
     pub async fn catch_up_local(
@@ -1853,7 +1842,7 @@ impl Source {
         let refresh = self
             .apply_items(database, vec![object], Vec::new())
             .await
-            .map_err(|error| crate::SourceMetadataError::SavedRefreshFailed(error.to_string()));
+            .map_err(crate::operations::metadata_refresh_error);
         crate::operations::finish_metadata_save(result, refresh, saved)
     }
 
@@ -1949,9 +1938,7 @@ impl Source {
             local
                 .publish_metadata_paths(database, self.source_id.as_str(), &written, None, None)
                 .await
-                .map_err(|error| {
-                    crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
-                })?;
+                .map_err(crate::operations::metadata_refresh_error)?;
         }
         Ok(())
     }
@@ -2417,23 +2404,19 @@ impl Source {
             Ok(())
         }
         .await;
-        let refresh = async {
-            let files = match &self.implementation {
-                Implementation::Files(files) => crate::file::artwork::ArtworkFiles::Remote(files),
-                Implementation::Local(_) => crate::file::artwork::ArtworkFiles::Local,
-                _ => unreachable!(),
-            };
-            files
-                .stage(database, &mut scan, &|| false)
-                .await
-                .map_err(|error| {
-                    crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
-                })?;
-            scan.finish()
-                .await
-                .map_err(|error| crate::SourceMetadataError::SavedRefreshFailed(error.to_string()))
+        if result.is_err() {
+            scan.incomplete();
         }
-        .await;
+        let files = match &self.implementation {
+            Implementation::Files(files) => crate::file::artwork::ArtworkFiles::Remote(files),
+            Implementation::Local(_) => crate::file::artwork::ArtworkFiles::Local,
+            _ => unreachable!(),
+        };
+        let refresh = files.stage(database, &mut scan, &|| false).await;
+        let refresh = crate::finish_scan(scan, refresh)
+            .await
+            .map(|(_, outcome)| outcome)
+            .map_err(crate::operations::metadata_refresh_error);
         crate::operations::finish_metadata_save(result, refresh, saved)
     }
 
@@ -2565,61 +2548,63 @@ impl Source {
                             matches!(owner, MetadataOwner::Artist(_)).then(|| owner.object_id()),
                         )
                         .await
-                        .map_err(|error| {
-                            crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
-                        })
+                        .map_err(crate::operations::metadata_refresh_error)
                 }
                 Implementation::OpenSubsonic(source) => {
                     let refreshed = async {
                         self.refresh_remote_metadata_index().await?;
                         let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
-                        let mut albums = std::collections::HashSet::new();
-                        let mut items = Vec::new();
-                        if !matches!(owner, MetadataOwner::Track(_)) {
-                            items.push(self.item_request_id(edit.kind(), owner.object_id()));
-                            if matches!(owner, MetadataOwner::Album(_)) {
-                                albums.insert(owner.object_id().to_string());
+                        let result = async {
+                            let mut albums = std::collections::HashSet::new();
+                            let mut items = Vec::new();
+                            if !matches!(owner, MetadataOwner::Track(_)) {
+                                items.push(self.item_request_id(edit.kind(), owner.object_id()));
+                                if matches!(owner, MetadataOwner::Album(_)) {
+                                    albums.insert(owner.object_id().to_string());
+                                }
                             }
-                        }
-                        // Song IDs still locate the files after their album IDs change.
-                        let mut tracks = CollectionTracks::new(database, media_uri);
-                        let mut track = match owner {
-                            MetadataOwner::Track(track) => Some((**track).clone()),
-                            _ => tracks
-                                .next()
-                                .await
-                                .map_err(|error| SourceError::Other(error.to_string()))?,
-                        };
-                        while let Some(current) = track {
-                            if let Some((_, _, album)) = current
-                                .album_media_uri
-                                .as_deref()
-                                .and_then(library::source_entity_parts)
-                                && albums.insert(album.clone())
-                                && !scan.contains_entity("album", &album, false).await?
-                            {
-                                items.push(self.item_request_id("album", &album));
+                            // Song IDs still locate the files after their album IDs change.
+                            let mut tracks = CollectionTracks::new(database, media_uri);
+                            let mut track = match owner {
+                                MetadataOwner::Track(track) => Some((**track).clone()),
+                                _ => tracks
+                                    .next()
+                                    .await
+                                    .map_err(|error| SourceError::Other(error.to_string()))?,
+                            };
+                            while let Some(current) = track {
+                                if let Some((_, _, album)) = current
+                                    .album_media_uri
+                                    .as_deref()
+                                    .and_then(library::source_entity_parts)
+                                    && albums.insert(album.clone())
+                                    && !scan.contains_entity("album", &album, false).await?
+                                {
+                                    items.push(self.item_request_id("album", &album));
+                                }
+                                items.push(self.item_request_id("track", &current.object_id));
+                                if items.len() >= 128 {
+                                    source
+                                        .stage_items(&mut scan, std::mem::take(&mut items), true)
+                                        .await?;
+                                }
+                                track = tracks
+                                    .next()
+                                    .await
+                                    .map_err(|error| SourceError::Other(error.to_string()))?;
                             }
-                            items.push(self.item_request_id("track", &current.object_id));
-                            if items.len() >= 128 {
-                                source
-                                    .stage_items(&mut scan, std::mem::take(&mut items), true)
-                                    .await?;
+                            if !items.is_empty() {
+                                source.stage_items(&mut scan, items, true).await?;
                             }
-                            track = tracks
-                                .next()
-                                .await
-                                .map_err(|error| SourceError::Other(error.to_string()))?;
+                            self.stage_item_relations(&mut scan).await
                         }
-                        if !items.is_empty() {
-                            source.stage_items(&mut scan, items, true).await?;
-                        }
-                        self.publish_items(scan).await
+                        .await;
+                        crate::finish_scan(scan, result)
+                            .await
+                            .map(|(_, outcome)| outcome)
                     }
                     .await;
-                    refreshed.map_err(|error| {
-                        crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
-                    })
+                    refreshed.map_err(crate::operations::metadata_refresh_error)
                 }
                 _ => unreachable!(),
             }
@@ -2637,52 +2622,44 @@ impl Source {
         let mut scan = library::Scan::begin_items(database, self.source_id.as_str())
             .await
             .map_err(metadata_database_error)?;
-        let mut after = None;
-        loop {
-            let uris = if is_track {
-                vec![media_uri.to_string()]
-            } else {
-                let page = database
-                    .file_metadata_track_page(media_uri, after)
-                    .await
-                    .map_err(metadata_database_error)?;
-                if page.is_empty() {
+        let result = async {
+            let mut after = None;
+            loop {
+                let uris = if is_track {
+                    vec![media_uri.to_string()]
+                } else {
+                    let page = database.file_metadata_track_page(media_uri, after).await?;
+                    if page.is_empty() {
+                        break;
+                    }
+                    after = page.last().map(|(key, _)| *key);
+                    page.into_iter().map(|(_, uri)| uri).collect()
+                };
+                for uri in uris {
+                    let track = database
+                        .track_row_by_uri(&uri, &library::ReadCancellation::new())
+                        .await?
+                        .ok_or(SourceError::NotFound)?;
+                    if let Some(cue) = &track.cue_path {
+                        scan.retain_local_cue_path(cue).await?;
+                    } else if let Some((_, path)) = scan.local_track_file(&uri).await? {
+                        scan.retain_local_media_paths(&[path]).await?;
+                    }
+                }
+                if is_track {
                     break;
                 }
-                after = page.last().map(|(key, _)| *key);
-                page.into_iter().map(|(_, uri)| uri).collect()
-            };
-            for uri in uris {
-                let track = database
-                    .track_row_by_uri(&uri, &library::ReadCancellation::new())
-                    .await
-                    .map_err(metadata_database_error)?
-                    .ok_or(crate::SourceMetadataError::Unavailable)?;
-                if let Some(cue) = &track.cue_path {
-                    scan.retain_local_cue_path(cue)
-                        .await
-                        .map_err(metadata_database_error)?;
-                } else if let Some((_, path)) = scan
-                    .local_track_file(&uri)
-                    .await
-                    .map_err(metadata_database_error)?
-                {
-                    scan.retain_local_media_paths(&[path])
-                        .await
-                        .map_err(metadata_database_error)?;
-                }
             }
-            if is_track {
-                break;
-            }
+            crate::file::artwork::ArtworkFiles::Local
+                .stage(database, &mut scan, &|| false)
+                .await?;
+            Ok(())
         }
-        crate::file::artwork::ArtworkFiles::Local
-            .stage(database, &mut scan, &|| false)
+        .await;
+        crate::finish_scan(scan, result)
             .await
-            .map_err(|error| crate::SourceMetadataError::SavedRefreshFailed(error.to_string()))?;
-        scan.finish()
-            .await
-            .map_err(|error| crate::SourceMetadataError::SavedRefreshFailed(error.to_string()))
+            .map(|(_, outcome)| outcome)
+            .map_err(crate::operations::metadata_refresh_error)
     }
 
     async fn metadata_targets(
@@ -2936,7 +2913,7 @@ impl Source {
         let refresh = self
             .accept_playlist_change(database, Some(id), None)
             .await
-            .map_err(error);
+            .map_err(crate::operations::metadata_refresh_error);
         crate::operations::finish_metadata_save(result, refresh, name.is_some() || public.is_some())
             .map(|outcome| (true, Some(outcome)))
     }
@@ -3117,14 +3094,20 @@ impl Source {
             }
             Implementation::OpenSubsonic(source) => {
                 let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
-                if let Some(playlist) = affected {
-                    source.stage_playlist_snapshot(&mut scan, &playlist).await?;
-                } else if let Some(playlist) = deleted {
-                    scan.begin_batch().await?;
-                    scan.remove_playlist(&playlist).await?;
-                    scan.finish_batch().await?;
+                let result = async {
+                    if let Some(playlist) = affected {
+                        source.stage_playlist_snapshot(&mut scan, &playlist).await?;
+                    } else if let Some(playlist) = deleted {
+                        scan.begin_batch().await?;
+                        scan.remove_playlist(&playlist).await?;
+                        scan.finish_batch().await?;
+                    }
+                    Ok(())
                 }
-                Ok(scan.finish().await?)
+                .await;
+                crate::finish_scan(scan, result)
+                    .await
+                    .map(|(_, outcome)| outcome)
             }
             Implementation::Local(_) | Implementation::Files(_) => Err(
                 SourceError::InvalidRequest("File playlists do not have provider changes"),
@@ -3252,17 +3235,24 @@ impl Source {
             .unreferenced_import_page(self.source_id.as_str(), "")
             .await?;
         let mut scan = Scan::begin_local_items(database, self.source_id.as_str()).await?;
-        while !page.is_empty() {
-            scan.begin_batch().await?;
-            for object in &page {
-                scan.remove_track(object).await?;
+        let result = async {
+            while !page.is_empty() {
+                scan.begin_batch().await?;
+                for object in &page {
+                    scan.remove_track(object).await?;
+                }
+                scan.finish_batch().await?;
+                page = database
+                    .unreferenced_import_page(self.source_id.as_str(), page.last().unwrap())
+                    .await?;
             }
-            scan.finish_batch().await?;
-            page = database
-                .unreferenced_import_page(self.source_id.as_str(), page.last().unwrap())
-                .await?;
+            Ok(())
         }
-        match scan.finish().await? {
+        .await;
+        match crate::finish_scan(scan, result)
+            .await
+            .map(|(_, outcome)| outcome)?
+        {
             ScanOutcome::Identical(_) => Ok(None),
             outcome => Ok(Some(outcome)),
         }
@@ -3443,8 +3433,14 @@ impl Source {
         removals: Vec<String>,
     ) -> SourceResult<ScanOutcome> {
         let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
-        self.stage_items(&mut scan, upserts, removals).await?;
-        self.publish_items(scan).await
+        let result = async {
+            self.stage_items(&mut scan, upserts, removals).await?;
+            self.stage_item_relations(&mut scan).await
+        }
+        .await;
+        crate::finish_scan(scan, result)
+            .await
+            .map(|(_, outcome)| outcome)
     }
 
     pub(crate) async fn apply_changes(
@@ -3453,36 +3449,41 @@ impl Source {
         items: impl IntoIterator<Item = (String, RemoteItemUpdate)>,
     ) -> SourceResult<ScanOutcome> {
         let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
-        let (mut upserts, mut removals) = (Vec::new(), Vec::new());
-        for (id, change) in items {
-            match change {
-                RemoteItemUpdate::Remove => removals.push(id),
-                RemoteItemUpdate::Metadata => upserts.push(id),
-                RemoteItemUpdate::UserData(facts) => {
-                    let mut known = false;
-                    if let Implementation::JellyfinEmby(provider) = &self.implementation {
-                        for kind in ["track", "album", "artist"] {
-                            known |= scan
-                                .write_source_user_data(
-                                    kind,
-                                    provider.kind.object_id(kind, &id),
-                                    facts.clone(),
-                                )
-                                .await?;
+        let result = async {
+            let (mut upserts, mut removals) = (Vec::new(), Vec::new());
+            for (id, change) in items {
+                match change {
+                    RemoteItemUpdate::Remove => removals.push(id),
+                    RemoteItemUpdate::Metadata => upserts.push(id),
+                    RemoteItemUpdate::UserData(facts) => {
+                        let mut known = false;
+                        if let Implementation::JellyfinEmby(provider) = &self.implementation {
+                            for kind in ["track", "album", "artist"] {
+                                known |= scan
+                                    .write_source_user_data(
+                                        kind,
+                                        provider.kind.object_id(kind, &id),
+                                        facts.clone(),
+                                    )
+                                    .await?;
+                            }
                         }
-                    }
-                    if !known {
-                        upserts.push(id);
+                        if !known {
+                            upserts.push(id);
+                        }
                     }
                 }
             }
+            if !upserts.is_empty() || !removals.is_empty() {
+                self.stage_items(&mut scan, upserts, removals).await?;
+                self.stage_item_relations(&mut scan).await?;
+            }
+            Ok(())
         }
-        if upserts.is_empty() && removals.is_empty() {
-            Ok(scan.finish().await?)
-        } else {
-            self.stage_items(&mut scan, upserts, removals).await?;
-            self.publish_items(scan).await
-        }
+        .await;
+        crate::finish_scan(scan, result)
+            .await
+            .map(|(_, outcome)| outcome)
     }
 
     async fn stage_items(
@@ -3513,7 +3514,7 @@ impl Source {
         }
     }
 
-    async fn publish_items(&self, mut scan: Scan) -> SourceResult<ScanOutcome> {
+    async fn stage_item_relations(&self, scan: &mut Scan) -> SourceResult<()> {
         let section = SourceHomeSection::NewlyAdded;
         match self.home_section(section).await {
             Ok(entries) => {
@@ -3532,7 +3533,7 @@ impl Source {
                     }
                 }
                 if !missing.is_empty() {
-                    if let Err(error) = self.stage_items(&mut scan, missing, Vec::new()).await {
+                    if let Err(error) = self.stage_items(scan, missing, Vec::new()).await {
                         optional_collection_error(error)?;
                     }
                 }
@@ -3548,7 +3549,7 @@ impl Source {
             }
             after = tracks.last().cloned();
             self.stage_items(
-                &mut scan,
+                scan,
                 tracks
                     .iter()
                     .map(|id| self.item_request_id("track", id))
@@ -3557,19 +3558,19 @@ impl Source {
             )
             .await?;
         }
-        Ok(scan.finish().await?)
+        Ok(())
     }
 
     pub async fn prepare_collection(
         &self,
         database: &Database,
         media_uri: &str,
-    ) -> SourceResult<()> {
+    ) -> SourceResult<Option<ScanOutcome>> {
         if matches!(
             self.implementation,
             Implementation::Local(_) | Implementation::Files(_)
         ) {
-            return Ok(());
+            return Ok(None);
         }
         let Some((source_id, kind, object_id)) = library::source_entity_parts(media_uri) else {
             return Err(SourceError::InvalidRequest("collection URI is unavailable"));
@@ -3585,18 +3586,26 @@ impl Source {
             _ => return Err(SourceError::InvalidRequest("URI is not a collection")),
         };
         let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
-        match &self.implementation {
-            Implementation::Plex(source) => source.stage_collection(&mut scan, &collection).await?,
-            Implementation::JellyfinEmby(source) => {
-                source.stage_collection(&mut scan, &collection).await?
+        let result = async {
+            match &self.implementation {
+                Implementation::Plex(source) => {
+                    source.stage_collection(&mut scan, &collection).await?
+                }
+                Implementation::JellyfinEmby(source) => {
+                    source.stage_collection(&mut scan, &collection).await?
+                }
+                Implementation::OpenSubsonic(source) => {
+                    source.stage_collection(&mut scan, &collection).await?
+                }
+                Implementation::Local(_) | Implementation::Files(_) => unreachable!(),
             }
-            Implementation::OpenSubsonic(source) => {
-                source.stage_collection(&mut scan, &collection).await?
-            }
-            Implementation::Local(_) | Implementation::Files(_) => unreachable!(),
+            self.stage_item_relations(&mut scan).await
         }
-        self.publish_items(scan).await?;
-        Ok(())
+        .await;
+        crate::finish_scan(scan, result)
+            .await
+            .map(|(_, outcome)| outcome)
+            .map(Some)
     }
 
     pub async fn home_section(

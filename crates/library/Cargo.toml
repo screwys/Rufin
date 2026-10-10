@@ -21,6 +21,7 @@ process-memory.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
+sqlx-core.workspace = true
 regex.workspace = true
 roxmltree.workspace = true
 thiserror.workspace = true

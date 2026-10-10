@@ -30,19 +30,25 @@ pub(crate) async fn publish_metadata_paths(
     removed_artist: Option<&str>,
 ) -> SourceResult<library::ScanOutcome> {
     let mut scan = Scan::begin_local_items(database, source_id).await?;
-    scan.begin_batch().await?;
-    if let Some(album) = removed_album {
-        scan.remove_album(album).await?;
+    let result = async {
+        scan.begin_batch().await?;
+        if let Some(album) = removed_album {
+            scan.remove_album(album).await?;
+        }
+        if let Some(artist) = removed_artist {
+            scan.remove_artist(artist).await?;
+        }
+        scan.finish_batch().await?;
+        stage_metadata_paths(&mut scan, paths).await?;
+        crate::file::artwork::ArtworkFiles::Local
+            .stage(database, &mut scan, &|| false)
+            .await?;
+        Ok(())
     }
-    if let Some(artist) = removed_artist {
-        scan.remove_artist(artist).await?;
-    }
-    scan.finish_batch().await?;
-    stage_metadata_paths(&mut scan, paths).await?;
-    crate::file::artwork::ArtworkFiles::Local
-        .stage(database, &mut scan, &|| false)
-        .await?;
-    Ok(scan.finish().await?)
+    .await;
+    crate::finish_scan(scan, result)
+        .await
+        .map(|(_, outcome)| outcome)
 }
 
 pub(crate) async fn stage_metadata_paths(scan: &mut Scan, paths: &[PathBuf]) -> SourceResult<()> {
@@ -100,59 +106,65 @@ pub(crate) async fn catch_up(
             .map_err(|error| SourceError::Other(format!("{}: {error}", root.display())))?;
     }
     let mut scan = Scan::begin_local_items(database, source_id).await?;
-    let mut after = None;
-    let mut completed = 0_usize;
-    let mut changed = false;
-    loop {
-        check_cancelled(cancelled)?;
-        let page = database
-            .local_file_page(
-                source,
-                after,
-                LOCAL_BATCH_SIZE,
-                &library::ReadCancellation::new(),
-            )
-            .await?;
-        if page.is_empty() {
-            break;
-        }
-        after = page.last().map(|file| file.local_file_key);
-        let changed_paths = page
-            .iter()
-            .filter(|file| {
-                matches!(
-                    file.kind,
-                    library::LocalFileKind::Media
-                        | library::LocalFileKind::Cue
-                        | library::LocalFileKind::Directory
+    let result = async {
+        let mut after = None;
+        let mut completed = 0_usize;
+        let mut changed = false;
+        loop {
+            check_cancelled(cancelled)?;
+            let page = database
+                .local_file_page(
+                    source,
+                    after,
+                    LOCAL_BATCH_SIZE,
+                    &library::ReadCancellation::new(),
                 )
-            })
-            .filter(|file| cached_observation_changed(file))
-            .map(|file| PathBuf::from(&file.path))
-            .collect::<Vec<_>>();
-        if !changed_paths.is_empty() {
-            let seeds = changed_paths
-                .iter()
-                .map(|path| path.to_string_lossy().into_owned())
-                .collect::<Vec<_>>();
-            stage_component_paths(&mut scan, source, local, &changed_paths, &seeds, cancelled)
                 .await?;
-            changed = true;
+            if page.is_empty() {
+                break;
+            }
+            after = page.last().map(|file| file.local_file_key);
+            let changed_paths = page
+                .iter()
+                .filter(|file| {
+                    matches!(
+                        file.kind,
+                        library::LocalFileKind::Media
+                            | library::LocalFileKind::Cue
+                            | library::LocalFileKind::Directory
+                    )
+                })
+                .filter(|file| cached_observation_changed(file))
+                .map(|file| PathBuf::from(&file.path))
+                .collect::<Vec<_>>();
+            if !changed_paths.is_empty() {
+                let seeds = changed_paths
+                    .iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>();
+                stage_component_paths(&mut scan, source, local, &changed_paths, &seeds, cancelled)
+                    .await?;
+                changed = true;
+            }
+            completed = completed.saturating_add(page.len());
+            progress(SourceReadProgress {
+                stage: SourceReadStage::Files,
+                completed,
+                total: None,
+            });
         }
-        completed = completed.saturating_add(page.len());
-        progress(SourceReadProgress {
-            stage: SourceReadStage::Files,
-            completed,
-            total: None,
-        });
+        if changed {
+            stage_component(database, source, roots, &mut scan, false, None, cancelled).await?;
+            crate::file::artwork::ArtworkFiles::Local
+                .stage(database, &mut scan, cancelled)
+                .await?;
+        }
+        Ok(())
     }
-    if changed {
-        stage_component(database, source, roots, &mut scan, false, None, cancelled).await?;
-        crate::file::artwork::ArtworkFiles::Local
-            .stage(database, &mut scan, cancelled)
-            .await?;
-    }
-    Ok(scan.finish().await?)
+    .await;
+    crate::finish_scan(scan, result)
+        .await
+        .map(|(_, outcome)| outcome)
 }
 
 fn cached_observation_changed(file: &library::LocalFileRow) -> bool {
@@ -223,21 +235,27 @@ pub(crate) async fn publish_paths(
         .iter()
         .all(|path| crate::file::artwork::supported_image(path));
     let mut scan = Scan::begin_local_items(database, source_id).await?;
-    stage_component_paths(&mut scan, source, local, &paths, &seeds, &|| false).await?;
-    stage_component(
-        database,
-        source,
-        roots,
-        &mut scan,
-        artwork_only,
-        rename.as_ref(),
-        &|| false,
-    )
-    .await?;
-    crate::file::artwork::ArtworkFiles::Local
-        .stage(database, &mut scan, &|| false)
+    let result = async {
+        stage_component_paths(&mut scan, source, local, &paths, &seeds, &|| false).await?;
+        stage_component(
+            database,
+            source,
+            roots,
+            &mut scan,
+            artwork_only,
+            rename.as_ref(),
+            &|| false,
+        )
         .await?;
-    Ok(scan.finish().await?)
+        crate::file::artwork::ArtworkFiles::Local
+            .stage(database, &mut scan, &|| false)
+            .await?;
+        Ok(())
+    }
+    .await;
+    crate::finish_scan(scan, result)
+        .await
+        .map(|(_, outcome)| outcome)
 }
 
 pub(super) fn normalize_observed_path(path: &Path) -> PathBuf {
@@ -354,12 +372,6 @@ async fn stage_component(
     scan.expand_local_component(source).await?;
     scan.finish_batch().await?;
 
-    scan.begin_batch().await?;
-    if !artwork_only {
-        scan.remove_local_component_tracks(source).await?;
-    }
-    scan.finish_batch().await?;
-
     let mut parsers = MediaPool::new();
     let mut after = None;
     loop {
@@ -428,6 +440,9 @@ async fn stage_component(
     }
 
     if !artwork_only {
+        scan.begin_batch().await?;
+        scan.remove_local_component_tracks(source).await?;
+        scan.finish_batch().await?;
         let mut after = None;
         loop {
             let page = scan
@@ -584,12 +599,15 @@ pub(crate) async fn import_paths(
 ) -> SourceResult<(library::PlaylistKey, library::ScanOutcome)> {
     let local = LocalSource::from_roots(paths)?;
     let mut scan = Scan::begin_local_items(database, source_id).await?;
-    stage_roots(database, &local, &mut scan, progress, &|| false, true).await?;
-    crate::file::artwork::ArtworkFiles::Local
-        .stage(database, &mut scan, &|| false)
-        .await?;
-    let playlist = scan.create_local_playlist(name).await?;
-    Ok((playlist, scan.finish().await?))
+    let result = async {
+        stage_roots(database, &local, &mut scan, progress, &|| false, true).await?;
+        crate::file::artwork::ArtworkFiles::Local
+            .stage(database, &mut scan, &|| false)
+            .await?;
+        Ok(scan.create_local_playlist(name).await?)
+    }
+    .await;
+    crate::finish_scan(scan, result).await
 }
 
 async fn stage_roots(
@@ -801,9 +819,7 @@ async fn cached_cue(
     scan: &Scan,
     observation: &library::LocalFileWrite,
 ) -> SourceResult<Option<library::LocalFileRow>> {
-    let Some(source) = scan.existing_source() else {
-        return Ok(None);
-    };
+    let source = scan.source();
     Ok(database
         .local_file_reuse_candidates(
             source,
@@ -1056,9 +1072,7 @@ async fn path_reuse(
     paths: &[PathBuf],
     explicit_rename: Option<&(PathBuf, PathBuf)>,
 ) -> SourceResult<PathReuse> {
-    let Some(source) = scan.existing_source() else {
-        return Ok(PathReuse::default());
-    };
+    let source = scan.source();
     let mut facts = Vec::new();
     for path in paths {
         let observation = file_observation(
@@ -1299,7 +1313,7 @@ pub(crate) async fn stage_imported_paths(
         }
         after = page.last().unwrap().0.clone();
         let mut staged = scan
-            .staged_media_uris(&page.iter().map(|(uri, _)| uri.as_str()).collect::<Vec<_>>())
+            .observed_media_uris(&page.iter().map(|(uri, _)| uri.as_str()).collect::<Vec<_>>())
             .await?
             .into_iter()
             .collect::<BTreeSet<_>>();
@@ -1350,7 +1364,7 @@ pub(crate) async fn stage_imported_paths(
             });
             uris.dedup_by(|a, b| a.0 == b.0);
             staged.extend(
-                scan.staged_media_uris(
+                scan.observed_media_uris(
                     &uris
                         .iter()
                         .map(|(uri, _, _)| uri.as_str())

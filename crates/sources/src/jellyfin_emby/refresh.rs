@@ -1,4 +1,4 @@
-//! Streams Jellyfin catalog pages directly into Library Scan staging.
+//! Streams Jellyfin catalog pages into bounded Library updates.
 
 use std::collections::HashSet;
 
@@ -280,12 +280,6 @@ impl JellyfinEmbySource {
             }
         }
 
-        let folders = self.stage_music_folders(scan, cancelled).await?;
-        for (folder_position, folder_id) in folders.iter().enumerate() {
-            self.stage_music_folder_memberships(scan, folder_id, folder_position as i64, cancelled)
-                .await?;
-        }
-
         let mut pages = PageState::default();
         loop {
             check_cancelled(cancelled)?;
@@ -309,6 +303,12 @@ impl JellyfinEmbySource {
             if finished {
                 break;
             }
+        }
+
+        let folders = self.stage_music_folders(scan, cancelled).await?;
+        for (folder_position, folder_id) in folders.iter().enumerate() {
+            self.stage_music_folder_memberships(scan, folder_id, folder_position as i64, cancelled)
+                .await?;
         }
 
         for path in ["Artists", "Artists/AlbumArtists"] {

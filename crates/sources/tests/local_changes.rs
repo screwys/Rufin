@@ -212,6 +212,31 @@ async fn local_image_change_publishes_artwork_without_catalog_revision() {
         .artwork_binding
         .clone();
     assert!(before.is_some());
+    let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stop = Arc::clone(&cancelled);
+    let interrupted = source
+        .manual_refresh(
+            &database,
+            &configuration.name,
+            &move |progress| {
+                if progress.stage == sources::SourceReadStage::Tracks {
+                    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+            },
+            cancelled,
+        )
+        .await;
+    assert!(matches!(interrupted,
+        Err(sources::SourceError::IncompleteScan { error, .. })
+        if matches!(error.as_ref(), sources::SourceError::Cancelled)));
+    assert_eq!(
+        database
+            .album_rows(initial.source, &[album], None, &ReadCancellation::new())
+            .await
+            .expect("Album cover after cancelled discovery")[0]
+            .artwork_binding,
+        before
+    );
     fs::write(&image, b"changed-image").expect("change image");
     let outcome = source
         .apply_local_change(

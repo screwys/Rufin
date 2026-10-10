@@ -1110,8 +1110,19 @@ impl SourceOwner {
                     continue;
                 }
                 Ok(None) => {}
-                Err(SourceError::Cancelled) => return,
                 Err(error) => {
+                    if let SourceError::IncompleteScan { outcome, .. } = &error {
+                        self.publish_scan(
+                            selected.source_id(),
+                            *outcome,
+                            CatalogChange::Broad,
+                            false,
+                        )
+                        .await;
+                    }
+                    if source_error_is_cancelled(&error) {
+                        return;
+                    }
                     warn!(%error, "bounded selected-source change failed; reacquiring after feed boundary loss");
                 }
             }
@@ -1127,6 +1138,9 @@ impl SourceOwner {
                     .await;
                 if self.shared.acquisition_is_current(&acquisition) {
                     self.finish_automatic_refresh(selected.source_id(), result)
+                        .await;
+                } else {
+                    self.accept_refresh_result(selected.source_id(), &result, false)
                         .await;
                 }
             }
@@ -1158,6 +1172,9 @@ impl SourceOwner {
             .await;
         if self.shared.acquisition_is_current(&cancelled) {
             self.finish_automatic_refresh(selected.source_id(), result)
+                .await;
+        } else {
+            self.accept_refresh_result(selected.source_id(), &result, false)
                 .await;
         }
     }
@@ -1203,7 +1220,12 @@ impl SourceOwner {
             progress: initial_progress(),
         })
         .await;
-        let progress = refreshing_progress(Arc::clone(&self.shared), source_id.clone());
+        let report = refreshing_progress(Arc::clone(&self.shared), source_id.clone());
+        let progress = |value| {
+            if self.shared.acquisition_is_current(&acquisition) {
+                report(value);
+            }
+        };
         let outcome = source
             .manual_refresh(
                 &self.shared.database,
@@ -1217,6 +1239,7 @@ impl SourceOwner {
             .map(|_| ())
             .map_err(source_refresh_error_text);
         if !self.shared.acquisition_is_current(&acquisition) {
+            self.accept_refresh_result(source_id, &outcome, false).await;
             return Err(SourceError::Cancelled.to_string());
         }
         if automatic {
@@ -1225,6 +1248,27 @@ impl SourceOwner {
             self.finish_refresh(source_id, outcome).await;
         }
         result
+    }
+
+    async fn accept_refresh_result(
+        &self,
+        source_id: &SourceId,
+        result: &sources::SourceResult<ScanOutcome>,
+        current: bool,
+    ) {
+        if let Ok(outcome) | Err(SourceError::IncompleteScan { outcome, .. }) = result {
+            self.publish_scan(
+                source_id,
+                *outcome,
+                if current {
+                    CatalogChange::Acquired
+                } else {
+                    CatalogChange::Broad
+                },
+                current,
+            )
+            .await;
+        }
     }
 
     async fn finish_automatic_refresh(
@@ -1255,10 +1299,7 @@ impl SourceOwner {
             && source_error_is_temporary(error)
         {
             warn!(%error, "automatic source refresh unavailable");
-            if let Err(SourceError::IncompleteScan { outcome, .. }) = &result {
-                self.accept_scan(source_id, *outcome, CatalogChange::Acquired)
-                    .await;
-            }
+            self.accept_refresh_result(source_id, &result, true).await;
             self.publish_operation(SourceOperation::Idle).await;
         } else {
             self.finish_refresh(source_id, result).await;
@@ -1270,12 +1311,10 @@ impl SourceOwner {
         source_id: &SourceId,
         result: sources::SourceResult<ScanOutcome>,
     ) {
-        if let Ok(outcome) | Err(SourceError::IncompleteScan { outcome, .. }) = &result {
-            self.accept_scan(source_id, *outcome, CatalogChange::Acquired)
-                .await;
-        }
+        self.accept_refresh_result(source_id, &result, true).await;
         let operation = match result {
-            Ok(_) | Err(SourceError::Cancelled) => SourceOperation::Idle,
+            Ok(_) => SourceOperation::Idle,
+            Err(error) if source_error_is_cancelled(&error) => SourceOperation::Idle,
             Err(error) => SourceOperation::Failed {
                 source_id: Some(source_id.clone()),
                 message: {
@@ -1495,6 +1534,16 @@ impl SourceOwner {
         outcome: ScanOutcome,
         change: CatalogChange,
     ) {
+        self.publish_scan(source_id, outcome, change, true).await;
+    }
+
+    async fn publish_scan(
+        &self,
+        source_id: &SourceId,
+        outcome: ScanOutcome,
+        change: CatalogChange,
+        report_progress: bool,
+    ) {
         if let ScanOutcome::Changed(publication)
         | ScanOutcome::PlaylistsChanged(publication)
         | ScanOutcome::ArtworkChanged(publication)
@@ -1574,11 +1623,12 @@ impl SourceOwner {
                 .resolve()
                 .is_some_and(|selected| selected.source_key == publication.source)
         {
-            let report_progress = publication.tracks_added
-                || matches!(
-                    *self.shared.operation.borrow(),
-                    SourceOperation::Refreshing { .. }
-                );
+            let report_progress = report_progress
+                && (publication.tracks_added
+                    || matches!(
+                        *self.shared.operation.borrow(),
+                        SourceOperation::Refreshing { .. }
+                    ));
             self.start_artwork_preparation(session, report_progress);
         }
     }
@@ -1601,18 +1651,17 @@ impl SourceOwner {
                 Arc::clone(&acquisition),
             )
             .await;
+        let result = match result {
+            Ok(Some(outcome)) => Ok(outcome),
+            Err(error) => Err(error),
+            Ok(None) => return,
+        };
         if self.shared.acquisition_is_current(&acquisition) {
-            match result {
-                Ok(Some(outcome)) => {
-                    self.finish_automatic_refresh(selected.source_id(), Ok(outcome))
-                        .await
-                }
-                Err(error) => {
-                    self.finish_automatic_refresh(selected.source_id(), Err(error))
-                        .await
-                }
-                Ok(None) => {}
-            }
+            self.finish_automatic_refresh(selected.source_id(), result)
+                .await;
+        } else {
+            self.accept_refresh_result(selected.source_id(), &result, false)
+                .await;
         }
     }
 
@@ -1896,12 +1945,14 @@ impl SourceOwner {
 
     pub fn prepare_collection(&self, media_uri: String) -> Receiver<Result<(), String>> {
         self.reply(move |owner, database| async move {
-            owner
-                .media_client(&media_uri)
-                .await?
-                .prepare_collection(&database, &media_uri)
-                .await
-                .map_err(string_error)
+            let source = owner.media_client(&media_uri).await?;
+            let result = source.prepare_collection(&database, &media_uri).await;
+            if let Ok(Some(outcome)) | Err(SourceError::IncompleteScan { outcome, .. }) = &result {
+                owner
+                    .accept_scan(source.source_id(), *outcome, CatalogChange::Broad)
+                    .await;
+            }
+            result.map(|_| ()).map_err(string_error)
         })
     }
 
@@ -2125,7 +2176,11 @@ impl SourceOwner {
                     ))
                     .await;
                 let shared = Arc::clone(&owner.shared);
+                let progress_acquisition = Arc::clone(&cancelled);
                 let progress = move |value| {
+                    if !shared.acquisition_is_current(&progress_acquisition) {
+                        return;
+                    }
                     shared.publish_operation(SourceOperation::Adding {
                         progress: source_progress(value),
                     });
@@ -2146,6 +2201,14 @@ impl SourceOwner {
                     Err(error) => return Err(error.to_string()),
                 };
                 if !owner.shared.acquisition_is_current(&cancelled) {
+                    owner
+                        .publish_scan(
+                            &configuration.source_id,
+                            outcome,
+                            CatalogChange::Broad,
+                            false,
+                        )
+                        .await;
                     return Ok(());
                 }
                 let publication = match outcome {
@@ -3123,18 +3186,20 @@ impl ActiveSource {
                 .source
                 .clone()
                 .ok_or_else(source_access_unavailable)?;
-            let (rows, outcome) = source
-                .live_search(&selected.database, &query, limit)
-                .await
-                .map_err(string_error)?;
-            if let Some(shared) = shared.upgrade()
-                && let Some(outcome) = outcome
-            {
-                SourceOwner { shared }
-                    .accept_scan(source.source_id(), outcome, CatalogChange::Broad)
-                    .await;
+            let result = source.live_search(&selected.database, &query, limit).await;
+            if let Some(shared) = shared.upgrade() {
+                let outcome = match &result {
+                    Ok((_, outcome)) => *outcome,
+                    Err(SourceError::IncompleteScan { outcome, .. }) => Some(*outcome),
+                    Err(_) => None,
+                };
+                if let Some(outcome) = outcome {
+                    SourceOwner { shared }
+                        .accept_scan(source.source_id(), outcome, CatalogChange::Broad)
+                        .await;
+                }
             }
-            Ok(rows)
+            result.map(|(rows, _)| rows).map_err(string_error)
         })
     }
 }
@@ -3613,6 +3678,14 @@ fn favorite_object(
         FavoriteTarget::Artist(_) => SourceEntityKind::Artist,
     };
     Some((kind, object_id))
+}
+
+fn source_error_is_cancelled(error: &SourceError) -> bool {
+    match error {
+        SourceError::Cancelled => true,
+        SourceError::IncompleteScan { error, .. } => source_error_is_cancelled(error),
+        _ => false,
+    }
 }
 
 fn source_error_is_temporary(error: &SourceError) -> bool {
@@ -4330,6 +4403,10 @@ mod artwork_preparation_tests {
             SourceError::Network("connection refused".into()),
             SourceError::IncompleteScan {
                 outcome: ScanOutcome::Identical(publication),
+                error: Box::new(SourceError::Cancelled),
+            },
+            SourceError::IncompleteScan {
+                outcome: ScanOutcome::Identical(publication),
                 error: Box::new(SourceError::Network("connection timed out".into())),
             },
         ] {
@@ -4389,7 +4466,7 @@ mod artwork_preparation_tests {
             }),
         );
         *owner.shared.selected.lock().unwrap() = Some(session.clone());
-        for (revision, visible) in [(1, true), (2, false), (3, true)] {
+        for (revision, visible) in [(1, true), (2, false), (3, true), (4, false)] {
             while receiver.try_recv().is_ok() {}
             let binding = serde_json::to_vec(&sources::LocalImageRef::File {
                 source_id: source_id.clone(),
@@ -4421,6 +4498,19 @@ mod artwork_preparation_tests {
                     selected.artwork_digest = publication.artwork_digest
                 });
                 session.selected_library_revealed();
+            } else if revision == 4 {
+                owner
+                    .publish_operation(SourceOperation::Refreshing {
+                        source_id: SourceId::new("new-acquisition"),
+                        progress: initial_progress(),
+                    })
+                    .await;
+                owner
+                    .accept_refresh_result(&source_id, &Ok(outcome), false)
+                    .await;
+                assert!(matches!(&*owner.shared.operation.borrow(),
+                    SourceOperation::Refreshing { source_id, .. }
+                    if source_id.as_str() == "new-acquisition"));
             } else {
                 if revision == 3 {
                     owner

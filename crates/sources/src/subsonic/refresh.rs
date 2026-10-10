@@ -81,9 +81,12 @@ impl SubsonicSource {
     ) -> SourceResult<library::ScanOutcome> {
         check_cancelled(cancelled)?;
         let mut scan = Scan::begin_items(database, source_id).await?;
-        self.stage_user_collections(&mut scan, &|_| {}, cancelled)
-            .await?;
-        Ok(scan.finish().await?)
+        let result = self
+            .stage_user_collections(&mut scan, &|_| {}, cancelled)
+            .await;
+        crate::finish_scan(scan, result)
+            .await
+            .map(|(_, outcome)| outcome)
     }
 
     async fn stage_user_collections(

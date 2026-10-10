@@ -315,39 +315,45 @@ impl PlexSource {
             )
             .await?;
         let mut scan = library::Scan::begin_items(database, source_id.as_str()).await?;
-        let source = scan.existing_source().ok_or(SourceError::NotFound)?;
-        let (mut tracks, mut albums, mut artists) = (Vec::new(), Vec::new(), Vec::new());
-        scan.begin_batch().await?;
-        for hub in items(&response["MediaContainer"]["Hub"]) {
-            for entry in items(&hub["Metadata"]).iter().take(limit.min(100)) {
-                let Some(raw) = id(&entry["ratingKey"]) else {
-                    continue;
-                };
-                match entry["type"].as_str() {
-                    Some("track") => tracks.push(plex_id("track", &raw)),
-                    Some("album") => albums.push(plex_id("album", &raw)),
-                    Some("artist") => artists.push(plex_id("artist", &raw)),
-                    _ => continue,
+        let source = scan.source();
+        let result = async {
+            let (mut tracks, mut albums, mut artists) = (Vec::new(), Vec::new(), Vec::new());
+            scan.begin_batch().await?;
+            for hub in items(&response["MediaContainer"]["Hub"]) {
+                for entry in items(&hub["Metadata"]).iter().take(limit.min(100)) {
+                    let Some(raw) = id(&entry["ratingKey"]) else {
+                        continue;
+                    };
+                    match entry["type"].as_str() {
+                        Some("track") => tracks.push(plex_id("track", &raw)),
+                        Some("album") => albums.push(plex_id("album", &raw)),
+                        Some("artist") => artists.push(plex_id("artist", &raw)),
+                        _ => continue,
+                    }
+                    item::stage_item(&mut scan, entry).await?;
                 }
-                item::stage_item(&mut scan, entry).await?;
             }
+            scan.finish_batch().await?;
+            Ok((tracks, albums, artists))
         }
-        scan.finish_batch().await?;
-        let outcome = scan.finish().await?;
-        Ok((
-            database
-                .search_rows_by_objects(
-                    source,
-                    None,
-                    false,
-                    &tracks,
-                    &albums,
-                    &artists,
-                    &library::ReadCancellation::new(),
-                )
-                .await?,
-            Some(outcome),
-        ))
+        .await;
+        let ((tracks, albums, artists), outcome) = crate::finish_scan(scan, result).await?;
+        let rows = database
+            .search_rows_by_objects(
+                source,
+                None,
+                false,
+                &tracks,
+                &albums,
+                &artists,
+                &library::ReadCancellation::new(),
+            )
+            .await
+            .map_err(|error| SourceError::IncompleteScan {
+                outcome,
+                error: Box::new(error.into()),
+            })?;
+        Ok((rows, Some(outcome)))
     }
     pub(crate) async fn browse_folder(
         &self,

@@ -364,25 +364,3 @@ pub(crate) async fn recompute_album_loudness_key(
         .await?;
     Ok(key)
 }
-
-pub(crate) async fn recompute_album_source_and_current_keys(
-    transaction: &mut Transaction<'_, Sqlite>,
-    album: AlbumKey,
-) -> LibraryResult<()> {
-    let keys=sqlx::query_as::<_,(Vec<u8>,Vec<u8>)>("SELECT source_loudness_analysis_key,loudness_analysis_key FROM tracks WHERE source_key=(SELECT source_key FROM albums WHERE album_key=?1) AND album_key=?1 ORDER BY disc_number,track_number,sort_text,object_id")
-        .bind(album).fetch_all(&mut **transaction).await?;
-    let mut source = Hasher::new();
-    source.update(b"rufin-album-loudness-v1\0");
-    let mut current = Hasher::new();
-    current.update(b"rufin-album-loudness-v1\0");
-    for (source_key, current_key) in keys {
-        source.update(&source_key);
-        current.update(&current_key);
-    }
-    let source = *source.finalize().as_bytes();
-    let current = *current.finalize().as_bytes();
-    sqlx::query("UPDATE albums SET source_loudness_analysis_key=?2,loudness_analysis_key=?3 WHERE album_key=?1")
-        .bind(album).bind(source.as_slice()).bind(current.as_slice())
-        .execute(&mut **transaction).await?;
-    Ok(())
-}

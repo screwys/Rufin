@@ -35,13 +35,9 @@ impl FileSource {
                 break;
             }
             after = files.last().map(|file| file.path.clone());
-            let previous = if let Some(source) = scan.existing_source() {
-                database
-                    .local_file_reuse_candidates(source, &files, &ReadCancellation::new())
-                    .await?
-            } else {
-                vec![]
-            };
+            let previous = database
+                .local_file_reuse_candidates(scan.source(), &files, &ReadCancellation::new())
+                .await?;
             for mut file in files {
                 if cancelled() {
                     return Err(SourceError::Cancelled);
@@ -49,12 +45,15 @@ impl FileSource {
                 let renamed = if let Some((old, new)) = rename
                     && let Some(suffix) = file.path.strip_prefix(new)
                     && (suffix.is_empty() || suffix.starts_with('/'))
-                    && let Some(source) = scan.existing_source()
                 {
                     let mut from = file.clone();
                     from.path = format!("{old}{suffix}");
                     database
-                        .local_file_reuse_candidates(source, &[from], &ReadCancellation::new())
+                        .local_file_reuse_candidates(
+                            scan.source(),
+                            &[from],
+                            &ReadCancellation::new(),
+                        )
                         .await?
                 } else {
                     vec![]
@@ -235,9 +234,7 @@ impl FileSource {
         scan: &mut Scan,
         paths: &[String],
     ) -> SourceResult<bool> {
-        let Some(source) = scan.existing_source() else {
-            return Ok(false);
-        };
+        let source = scan.source();
         for page in paths.chunks(128) {
             let files = scan.local_inventory_files(page).await?;
             if files.len() != page.len() {

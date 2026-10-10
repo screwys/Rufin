@@ -1,10 +1,8 @@
 //! Concrete music sources behind one source-agnostic application boundary.
 //!
 //! Providers own authentication, HTTP or filesystem work, paging, wire
-//! translation, and preparation of invisible Library candidates. Rufin owns
-//! source lifecycle, artwork preparation, and candidate acceptance. Local
-//! preparation reads one selected Library's accepted baselines; only Library
-//! can accept and persist the resulting replacement.
+//! translation, and bounded Library updates. Rufin owns source lifecycle,
+//! artwork preparation, and publication of committed catalog changes.
 
 #[cfg(test)]
 extern crate self as sources;
@@ -115,3 +113,20 @@ pub enum SourceError {
 }
 
 pub type SourceResult<T> = Result<T, SourceError>;
+
+pub(crate) async fn finish_scan<T>(
+    mut scan: library::Scan,
+    result: SourceResult<T>,
+) -> SourceResult<(T, library::ScanOutcome)> {
+    if result.is_err() {
+        scan.incomplete();
+        scan.discard_pending_artwork().await?;
+    }
+    let outcome = scan.finish().await?;
+    result
+        .map(|value| (value, outcome))
+        .map_err(|error| SourceError::IncompleteScan {
+            outcome,
+            error: Box::new(error),
+        })
+}

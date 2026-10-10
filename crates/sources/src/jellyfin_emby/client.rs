@@ -318,36 +318,39 @@ impl JellyfinEmbySource {
         let albums = albums.unwrap_or_default();
         let tracks = tracks.unwrap_or_default();
         let mut scan = library::Scan::begin_items(database, source_id.as_str()).await?;
-        let source = scan
-            .existing_source()
-            .ok_or(SourceError::InvalidRequest("Search source is unavailable"))?;
-        scan.begin_batch().await?;
-        let mut artist_ids = Vec::new();
-        let mut album_ids = Vec::new();
-        let mut track_ids = Vec::new();
-        for artist in artists
-            .into_iter()
-            .filter_map(|item| artist_from_item(self.kind, &item))
-        {
-            artist_ids.push(artist.id.clone());
-            stage_artist(&mut scan, artist).await?;
+        let source = scan.source();
+        let result = async {
+            scan.begin_batch().await?;
+            let mut artist_ids = Vec::new();
+            let mut album_ids = Vec::new();
+            let mut track_ids = Vec::new();
+            for artist in artists
+                .into_iter()
+                .filter_map(|item| artist_from_item(self.kind, &item))
+            {
+                artist_ids.push(artist.id.clone());
+                stage_artist(&mut scan, artist).await?;
+            }
+            for album in albums
+                .into_iter()
+                .filter_map(|item| album_from_item(self.kind, &item))
+            {
+                album_ids.push(album.id.clone());
+                stage_album(&mut scan, album).await?;
+            }
+            for track in tracks
+                .into_iter()
+                .filter_map(|item| track_from_item(self.kind, &item))
+            {
+                track_ids.push(track.id.clone());
+                stage_track(&mut scan, track).await?;
+            }
+            scan.finish_batch().await?;
+            Ok((track_ids, album_ids, artist_ids))
         }
-        for album in albums
-            .into_iter()
-            .filter_map(|item| album_from_item(self.kind, &item))
-        {
-            album_ids.push(album.id.clone());
-            stage_album(&mut scan, album).await?;
-        }
-        for track in tracks
-            .into_iter()
-            .filter_map(|item| track_from_item(self.kind, &item))
-        {
-            track_ids.push(track.id.clone());
-            stage_track(&mut scan, track).await?;
-        }
-        scan.finish_batch().await?;
-        let outcome = scan.finish().await?;
+        .await;
+        let ((track_ids, album_ids, artist_ids), outcome) =
+            crate::finish_scan(scan, result).await?;
         let rows = database
             .search_rows_by_objects(
                 source,
@@ -358,7 +361,11 @@ impl JellyfinEmbySource {
                 &artist_ids,
                 &library::ReadCancellation::new(),
             )
-            .await?;
+            .await
+            .map_err(|error| SourceError::IncompleteScan {
+                outcome,
+                error: Box::new(error.into()),
+            })?;
         Ok((rows, Some(outcome)))
     }
 

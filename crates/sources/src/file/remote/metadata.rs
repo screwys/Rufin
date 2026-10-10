@@ -30,7 +30,7 @@ impl FileSource {
         self.save_file(&copy).await?;
         self.publish_saved_file(database, &track.media_uri, &copy)
             .await
-            .map_err(|e| SourceMetadataError::SavedRefreshFailed(e.to_string()))
+            .map_err(crate::operations::metadata_refresh_error)
     }
 
     pub(crate) async fn read_track_metadata(
@@ -169,7 +169,7 @@ impl FileSource {
                 saved = true;
                 self.stage_saved_file(&mut scan, uri, &copy)
                     .await
-                    .map_err(|error| SourceMetadataError::SavedRefreshFailed(error.to_string()))?;
+                    .map_err(crate::operations::metadata_refresh_error)?;
                 copy.relative
             } else {
                 let file = database
@@ -195,17 +195,16 @@ impl FileSource {
             Ok(())
         }
         .await;
-        // Publish the tag write even when saving folder artwork fails.
-        let refresh = async {
-            crate::file::artwork::ArtworkFiles::Remote(self)
-                .stage(database, &mut scan, &|| false)
-                .await
-                .map_err(|error| SourceMetadataError::SavedRefreshFailed(error.to_string()))?;
-            scan.finish()
-                .await
-                .map_err(|error| SourceMetadataError::SavedRefreshFailed(error.to_string()))
+        if result.is_err() {
+            scan.incomplete();
         }
-        .await;
+        let refresh = crate::file::artwork::ArtworkFiles::Remote(self)
+            .stage(database, &mut scan, &|| false)
+            .await;
+        let refresh = crate::finish_scan(scan, refresh)
+            .await
+            .map(|(_, outcome)| outcome)
+            .map_err(crate::operations::metadata_refresh_error);
         crate::operations::finish_metadata_save(result, refresh, saved)
     }
 
@@ -281,11 +280,11 @@ impl FileSource {
         let input = self
             .input()
             .await
-            .map_err(|error| SourceMetadataError::SavedRefreshFailed(error.to_string()))?;
+            .map_err(crate::operations::metadata_refresh_error)?;
         let mut observation = self
             .stat(&input, &relative)
             .await
-            .map_err(|error| SourceMetadataError::SavedRefreshFailed(error.to_string()))?;
+            .map_err(crate::operations::metadata_refresh_error)?;
         let saved_path = observation.path.clone();
         observation.state = library::LocalFileState::Accepted;
         scan.write_local_files(&[(observation, Vec::new())])
@@ -641,7 +640,7 @@ impl FileSource {
             self.save_file(&copy).await?;
             self.publish_saved_file(database, &track.media_uri, &copy)
                 .await
-                .map_err(|error| SourceMetadataError::SavedRefreshFailed(error.to_string()))?;
+                .map_err(crate::operations::metadata_refresh_error)?;
             Ok(())
         }
     }
@@ -833,18 +832,12 @@ impl FileSource {
             None,
         )
         .await?;
-        if let Err(error) = self
+        let result = self
             .stage_catalog(database, &mut scan, &|_| {}, cancelled)
+            .await;
+        crate::finish_scan(scan, result)
             .await
-        {
-            if matches!(error, SourceError::Cancelled) {
-                return Err(error);
-            }
-            scan.incomplete();
-            scan.finish().await?;
-            return Err(error);
-        }
-        Ok(scan.finish().await?)
+            .map(|(_, outcome)| outcome)
     }
 
     pub(crate) async fn read_album_metadata(
