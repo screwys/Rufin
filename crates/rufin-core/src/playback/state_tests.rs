@@ -1026,6 +1026,17 @@ async fn clearing_queue_with_current_stops_the_run_and_empties_the_session() {
         unix_seconds: 0,
         local_period: "1970-01".into(),
     };
+    session
+        .handle_command(
+            Command::SetAutoDj {
+                enabled: true,
+                refill_threshold: 3,
+            },
+            &sample,
+        )
+        .unwrap();
+    session.publish(&sample);
+    let request = session.auto_dj_in_flight.clone().unwrap();
     commands.lock().unwrap().clear();
     session
         .handle_command(
@@ -1041,10 +1052,39 @@ async fn clearing_queue_with_current_stops_the_run_and_empties_the_session() {
     assert!(session.sequence.selected().is_none());
     assert_eq!(session.status(), TransportStatus::Stopped);
     assert!(session.view().transport.current.is_none());
+    assert!(!session.view().queue_loading);
     assert_eq!(database.restore_queue().await.unwrap().rows.len(), 0);
     assert!(commands.lock().unwrap().iter().any(
         |command| matches!(command, BackendCommand::Stop { run: stopped } if *stopped == run)
     ));
+    session
+        .handle_command(
+            Command::ApplyBatch {
+                batch: Batch::new(vec![batch_item(10, Provenance::Manual)]),
+                placement: Placement::End,
+            },
+            &sample,
+        )
+        .unwrap();
+    finish_queue(&mut session, &inbox, &sample).await;
+    assert!(
+        !session
+            .complete_auto_dj_candidates(
+                request.seed_run,
+                &request.seed_media_uri,
+                vec![batch_item(3, Provenance::AutoDj).item],
+                5,
+                7,
+                &sample,
+            )
+            .unwrap()
+    );
+    finish_queue(&mut session, &inbox, &sample).await;
+    assert_eq!(database.restore_queue().await.unwrap().rows.len(), 1);
+    assert_eq!(
+        session.sequence.selected().unwrap().media_uri,
+        "https://example.test/track-10"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1786,64 +1826,121 @@ async fn receiver_observation_keeps_global_queue_facts_without_commands_or_dupli
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn one_track_auto_dj_completion_publishes_appended_queue_entries() {
-    let (_directory, database, sequence, owner, commands, playback, inbox) =
-        seeded(vec![batch_item(1, Provenance::Manual)]).await;
-    let mut session = Player::new(
-        sequence,
-        "autodj-law",
-        PlaybackSettings::default(),
-        PlaybackOutput::Local,
-        false,
-        3,
-        Box::new(IdleBackend(commands.clone())),
-        Arc::downgrade(&owner),
-        playback.downgrade(),
-    );
+async fn auto_dj_refills_after_track_changes_and_delayed_completion() {
     let sample = ClockSample {
         monotonic_millis: 0,
         unix_seconds: 0,
         local_period: "1970-01".into(),
     };
-    session
-        .handle_command(
-            Command::SetAutoDj {
-                enabled: true,
-                refill_threshold: 3,
-            },
-            &sample,
+    for (repeat, queue_length, request_position, delayed_completion) in [
+        (RepeatMode::Off, 1, 0, true),
+        (RepeatMode::Off, 4, 3, false),
+        (RepeatMode::All, 4, 3, false),
+        (RepeatMode::Off, 4, 2, false),
+        (RepeatMode::All, 4, 2, false),
+    ] {
+        let (_directory, database, mut sequence, owner, commands, playback, inbox) = seeded(
+            (1..=queue_length)
+                .map(|track| batch_item(track as i64, Provenance::Manual))
+                .collect(),
         )
-        .unwrap();
-    let request = session
-        .auto_dj_in_flight
-        .clone()
-        .expect("one Track requests AutoDJ");
-    assert!(session.view().queue_loading);
-    session.set_playing(true);
-    session.accept_ended(session.current_run().unwrap(), &sample);
-    assert!(
-        session
-            .complete_auto_dj_candidates(
-                request.seed_run,
-                &request.seed_media_uri,
-                vec![
-                    batch_item(2, Provenance::AutoDj).item,
-                    batch_item(3, Provenance::AutoDj).item
-                ],
-                5,
-                7,
-                &sample
-            )
-            .unwrap()
-    );
-    finish_queue(&mut session, &inbox, &sample).await;
-    assert_eq!(database.restore_queue().await.unwrap().rows.len(), 3);
-    assert_eq!(owner.updates.current().unwrap().queue.total, 3);
-    assert_eq!(
-        session.sequence.selected().unwrap().media_uri,
-        "https://example.test/track-2"
-    );
-    assert!(session.current_run().is_some());
+        .await;
+        sequence.set_repeat_mode(repeat);
+        let refill_threshold = if delayed_completion {
+            3
+        } else {
+            queue_length - request_position
+        };
+        let mut session = Player::new(
+            sequence,
+            "autodj-law",
+            PlaybackSettings::default(),
+            PlaybackOutput::Local,
+            !delayed_completion,
+            refill_threshold,
+            Box::new(IdleBackend(commands.clone())),
+            Arc::downgrade(&owner),
+            playback.downgrade(),
+        );
+        if delayed_completion {
+            session
+                .handle_command(
+                    Command::SetAutoDj {
+                        enabled: true,
+                        refill_threshold,
+                    },
+                    &sample,
+                )
+                .unwrap();
+            session.publish(&sample);
+        }
+        session.handle_command(Command::Play, &sample).unwrap();
+        session.publish(&sample);
+        if !delayed_completion {
+            assert!(session.auto_dj_in_flight.is_none());
+            session
+                .handle_command(Command::Activate(queue_length - 2), &sample)
+                .unwrap();
+            session.publish(&sample);
+            if request_position == queue_length - 1 {
+                assert!(session.auto_dj_in_flight.is_none());
+                session
+                    .handle_command(Command::Activate(request_position), &sample)
+                    .unwrap();
+                session.publish(&sample);
+            }
+        }
+        let request = session
+            .auto_dj_in_flight
+            .clone()
+            .expect("playing near the queue end requests Auto DJ before the track ends");
+        assert!(owner.updates.current().unwrap().queue_loading);
+        if request_position < queue_length - 1 {
+            session
+                .handle_command(Command::Activate(queue_length - 1), &sample)
+                .unwrap();
+            session.publish(&sample);
+        }
+        if delayed_completion {
+            session.accept_ended(session.current_run().unwrap(), &sample);
+            session.publish(&sample);
+            assert!(session.current_run().is_none());
+        }
+        assert!(
+            session
+                .complete_auto_dj_candidates(
+                    request.seed_run,
+                    &request.seed_media_uri,
+                    vec![
+                        batch_item(queue_length as i64 + 1, Provenance::AutoDj).item,
+                        batch_item(queue_length as i64 + 2, Provenance::AutoDj).item
+                    ],
+                    5,
+                    7,
+                    &sample
+                )
+                .unwrap()
+        );
+        finish_queue(&mut session, &inbox, &sample).await;
+        assert_eq!(
+            database.restore_queue().await.unwrap().rows.len(),
+            queue_length + 2
+        );
+        assert_eq!(
+            owner.updates.current().unwrap().queue.total,
+            queue_length + 2
+        );
+        if !delayed_completion {
+            assert_eq!(session.sequence.selected_index(), Some(queue_length - 1));
+            session.accept_ended(session.current_run().unwrap(), &sample);
+            session.publish(&sample);
+        }
+        assert_eq!(
+            session.sequence.selected().unwrap().media_uri,
+            format!("https://example.test/track-{}", queue_length + 1)
+        );
+        assert!(session.current_run().is_some());
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1855,7 +1952,9 @@ async fn unavailable_auto_dj_publishes_the_end_of_loading() {
         unix_seconds: 0,
         local_period: "1970-01".into(),
     };
+    session.publish(&sample);
     session.set_auto_dj(true, 3);
+    session.publish(&sample);
     let request = session.auto_dj_in_flight.clone().unwrap();
     assert!(session.view().queue_loading);
     assert!(session.auto_dj_unavailable(request.seed_run, &request.seed_media_uri, None));

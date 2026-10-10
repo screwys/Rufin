@@ -181,13 +181,6 @@ struct NextPlan {
     resolution: NextResolution,
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct AutoDjKey {
-    seed_run: Option<RunId>,
-    seed_media_uri: String,
-    seed_position: Option<usize>,
-}
-
 #[derive(Clone, Debug)]
 struct FailedRun {
     desired_playing: bool,
@@ -239,7 +232,7 @@ pub(super) struct Player {
     output_muted: bool,
     auto_dj_enabled: bool,
     auto_dj_refill_threshold: usize,
-    auto_dj_in_flight: Option<AutoDjKey>,
+    auto_dj_in_flight: Option<AutoDjRequest>,
     auto_dj_waiting_for_continuation: bool,
     buffering_percent: Option<u8>,
     last_error: Option<String>,
@@ -1140,21 +1133,14 @@ impl Player {
         if self.external.is_some() {
             return Ok(false);
         }
-        let Some(key) = self
-            .auto_dj_in_flight
-            .as_ref()
-            .filter(|key| key.seed_run == seed_run && key.seed_media_uri == seed_media_uri)
-        else {
+        if !self.auto_dj_in_flight.as_ref().is_some_and(|request| {
+            request.seed_run == seed_run && request.seed_media_uri == seed_media_uri
+        }) {
             return Ok(false);
-        };
-        let seed_position = key.seed_position;
+        }
         self.auto_dj_in_flight = None;
         if !self.auto_dj_enabled
-            || self.sequence.selected_index() != seed_position
-            || self
-                .sequence
-                .selected()
-                .is_none_or(|row| row.media_uri != seed_media_uri)
+            || self.sequence.selected_index().is_none()
             || self.sequence.remaining_after_selected() >= self.auto_dj_refill_threshold
         {
             self.dirty = true;
@@ -1330,14 +1316,8 @@ impl Player {
         let mut positions = [
             self.next_plan.as_ref().and_then(|plan| plan.position),
             target,
-            self.auto_dj_in_flight
-                .as_ref()
-                .and_then(|key| key.seed_position),
         ];
         edit(&mut self.sequence, &mut positions);
-        if let Some(key) = self.auto_dj_in_flight.as_mut() {
-            key.seed_position = positions[2];
-        }
         if let Some(plan) = self.next_plan.as_mut() {
             plan.position = positions[0];
             if let NextResolution::Ready(stream) = &mut plan.resolution {
@@ -1388,6 +1368,10 @@ impl Player {
             self.replan_next_if_changed();
         }
         self.sequence.persist_state();
+        if self.sequence.selected_index().is_none() {
+            self.auto_dj_in_flight = None;
+            self.auto_dj_waiting_for_continuation = false;
+        }
         self.maybe_request_auto_dj();
     }
 
@@ -2544,20 +2528,13 @@ impl Player {
         let Some(seed) = self.sequence.selected() else {
             return;
         };
-        let key = AutoDjKey {
+        let request = AutoDjRequest {
             seed_run: self.current_run(),
             seed_media_uri: seed.media_uri.clone(),
-            seed_position: Some(seed.position),
+            requested_count: 5,
         };
-        self.auto_dj_in_flight = Some(key.clone());
-        self.owner().request_auto_dj(
-            self.playback.clone(),
-            AutoDjRequest {
-                seed_run: key.seed_run,
-                seed_media_uri: seed.media_uri.clone(),
-                requested_count: 5,
-            },
-        );
+        self.auto_dj_in_flight = Some(request.clone());
+        self.owner().request_auto_dj(self.playback.clone(), request);
     }
 
     fn next_run_id(&mut self) -> RunId {
@@ -2749,6 +2726,9 @@ impl Player {
                 .save_queue(QueuePersistence::capture(&self.sequence, kind));
         }
         let current_media_changed = std::mem::take(&mut self.current_media_changed);
+        if current_media_changed && self.current_run.is_some() {
+            self.maybe_request_auto_dj();
+        }
         if std::mem::take(&mut self.dirty) || !self.notices.is_empty() || current_media_changed {
             let projection = PlaybackProjection {
                 view: self.view(),
