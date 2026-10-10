@@ -98,7 +98,7 @@ ksni = "0.3.4"
 keyring-core = "1.0.0"
 lofty = "0.25.1"
 md5_digest = { package = "md-5", version = "0.10" }
-mediaplayer = "0.4.3"
+mediaplayer = "0.5.0"
 mpris-server = "0.10.0"
 notify = "8.2.0"
 oo7 = "0.6.0"
