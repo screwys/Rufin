@@ -17,7 +17,9 @@ const ACTIVITY_RESULT_LIMIT: usize = 100;
 const DELIVERY_LIMIT: usize = 100;
 const ACTIVITY_EXPORT_SELECT: &str = "SELECT listen_key,external_id,
                     strftime('%Y-%m-%dT%H:%M:%SZ',started_at,'unixepoch') utc_time,
-                    source_id,media_uri,track_title title,artist_name artist,album_title album,
+                    source_id,COALESCE(captured_media_uri,media_uri) media_uri,
+                    CASE WHEN captured_media_uri IS NOT NULL THEN media_uri END current_media_uri,
+                    track_title title,artist_name artist,album_title album,
                     duration_millis,disc_number,track_number,year,release_date,source_format,
                     musicbrainz_recording_id,musicbrainz_release_track_id,started_at,
                     local_period,listened_millis,skipped
@@ -84,6 +86,8 @@ pub struct ActivityRecord {
     pub version: u32,
     pub listen_key: i64,
     pub source_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_media_uri: Option<String>,
     #[serde(flatten)]
     pub listen: ListenWrite,
 }
@@ -221,18 +225,27 @@ impl Database {
     pub async fn record_listen(
         &self,
         listen: &ListenWrite,
+        current_media_uri: Option<&str>,
         deliveries: &[ListenDeliveryTarget],
     ) -> LibraryResult<ListenKey> {
         validate_listen(listen, deliveries)?;
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         let mut transaction = connection.begin().await?;
-        let source_id = match source_entity_parts(&listen.media_uri) {
+        let media_uri = current_media_uri.unwrap_or(&listen.media_uri);
+        let source_id = match source_entity_parts(media_uri) {
             Some((source, _, _)) => Some(source.as_str().to_string()),
             None => sqlx::query_scalar("SELECT source.object_id FROM tracks track JOIN sources source USING(source_key) WHERE track.media_uri=?1 LIMIT 1")
-                .bind(&listen.media_uri).fetch_optional(&mut *transaction).await?,
+                .bind(media_uri).fetch_optional(&mut *transaction).await?,
         };
-        let key = write_listen(&mut transaction, listen, source_id.as_deref()).await?;
+        let key = write_listen(
+            &mut transaction,
+            listen,
+            source_id.as_deref(),
+            current_media_uri,
+            None,
+        )
+        .await?;
         for delivery in deliveries {
             sqlx::query("INSERT OR IGNORE INTO listen_outbox(listen_key,service,account_id,next_attempt_at) VALUES (?1,?2,?3,?4)")
                 .bind(key).bind(&delivery.service).bind(&delivery.account_id)
@@ -690,26 +703,19 @@ pub(crate) async fn write_listen(
     connection: &mut SqliteConnection,
     listen: &ListenWrite,
     source_id: Option<&str>,
-) -> LibraryResult<ListenKey> {
-    write_imported_listen(connection, listen, source_id, None).await
-}
-
-pub(crate) async fn write_imported_listen(
-    connection: &mut SqliteConnection,
-    listen: &ListenWrite,
-    source_id: Option<&str>,
+    current_media_uri: Option<&str>,
     imported_key: Option<i64>,
 ) -> LibraryResult<ListenKey> {
     validate_listen(listen, &[])?;
     let inserted = sqlx::query_scalar::<_, ListenKey>(
         "INSERT INTO listens(
-                 external_id,source_id,media_uri,listen_key,
+                 external_id,source_id,media_uri,listen_key,captured_media_uri,
                  track_title,artist_name,album_title,
                  disc_number,track_number,year,release_date,source_format,
                  musicbrainz_recording_id,musicbrainz_release_track_id,
                  started_at,local_period,duration_millis,listened_millis,skipped
              ) VALUES (
-                 ?1,?2,?3,?19,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,
+                 ?1,?2,?3,?19,?20,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,
                  ?17,?18
              )
              ON CONFLICT DO NOTHING
@@ -717,7 +723,7 @@ pub(crate) async fn write_imported_listen(
     )
     .bind(&listen.external_id)
     .bind(source_id)
-    .bind(&listen.media_uri)
+    .bind(current_media_uri.unwrap_or(&listen.media_uri))
     .bind(&listen.title)
     .bind(&listen.artist)
     .bind(&listen.album)
@@ -744,6 +750,11 @@ pub(crate) async fn write_imported_listen(
     .bind(listen.listened_millis)
     .bind(listen.skipped)
     .bind(imported_key)
+    .bind(
+        current_media_uri
+            .filter(|uri| *uri != listen.media_uri)
+            .map(|_| &listen.media_uri),
+    )
     .fetch_optional(&mut *connection)
     .await?;
     let key = if let Some(key) = inserted {
@@ -774,6 +785,7 @@ struct ActivityExportRow {
     listen_key: i64,
     utc_time: String,
     source_id: Option<String>,
+    current_media_uri: Option<String>,
     #[sqlx(flatten)]
     listen: ListenWrite,
 }
@@ -795,10 +807,11 @@ pub(crate) async fn import_activity_jsonl_on(
                 continue;
             }
         };
-        write_imported_listen(
+        write_listen(
             connection,
             &record.listen,
             record.source_id.as_deref(),
+            record.current_media_uri.as_deref(),
             Some(record.listen_key),
         )
         .await?;
@@ -885,6 +898,7 @@ pub(crate) async fn export_activity_jsonl_on(
                 version: 1,
                 listen_key: row.listen_key,
                 source_id: row.source_id,
+                current_media_uri: row.current_media_uri,
                 listen: row.listen,
             },
         )?;

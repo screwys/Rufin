@@ -452,7 +452,8 @@ impl Scan {
     ) -> LibraryResult<Option<(String, String)>> {
         let mut writer = self.database.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        Ok(sqlx::query_as("SELECT object_id,source_path FROM tracks WHERE media_uri=?1 AND source_path IS NOT NULL")
+        Ok(sqlx::query_as("SELECT object_id,source_path FROM temp.scan_tracks WHERE media_uri=?1 AND source_path IS NOT NULL
+            UNION ALL SELECT object_id,source_path FROM tracks WHERE media_uri=?1 AND source_path IS NOT NULL LIMIT 1")
             .bind(media_uri).fetch_optional(connection).await?)
     }
 

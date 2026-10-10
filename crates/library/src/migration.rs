@@ -528,7 +528,7 @@ async fn import_listens(
                 release_date:string(&row,"release_date"),source_format:string(&row,"source_format"),
                 musicbrainz_recording_id:string(&row,"musicbrainz_recording_id"),musicbrainz_release_track_id:string(&row,"musicbrainz_release_track_id"),
                 started_at:row.try_get("started_at")?,local_period:row.try_get("local_period")?,listened_millis:row.try_get("listened_millis")?,skipped:row.try_get("skipped")?};
-            let key=crate::activity::write_imported_listen(target,&listen,source_id.as_deref(),Some(old_key)).await?;
+            let key=crate::activity::write_listen(target,&listen,source_id.as_deref(),None,Some(old_key)).await?;
             if has_delivery {
                 let mut deliveries=sqlx::query("SELECT * FROM listen_outbox WHERE listen_key=?1").bind(old_key).fetch(&mut *lookup);
                 while let Some(delivery)=deliveries.try_next().await? {

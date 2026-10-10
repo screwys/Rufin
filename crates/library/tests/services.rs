@@ -1042,6 +1042,7 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
                 listened_millis: 1000,
                 skipped: false,
             },
+            None,
             &[ListenDeliveryTarget {
                 service: "lastfm".to_string(),
                 account_id: "account".to_string(),

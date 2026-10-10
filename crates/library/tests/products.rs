@@ -273,6 +273,26 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
     let fixture = fixture().await;
     let database = &fixture.database;
     let cancel = ReadCancellation::new();
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("UPDATE albums SET year=CASE object_id WHEN 'album-a' THEN 2020 ELSE 1990 END")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE album_artists SET artist_key=?1 WHERE album_key=?2")
+        .bind(fixture.artists[0])
+        .bind(fixture.albums[1])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO album_artists(album_key,artist_key,position) VALUES(?1,?2,1)")
+        .bind(fixture.albums[0])
+        .bind(fixture.artists[1])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM track_folders WHERE track_key IN(SELECT track_key FROM tracks WHERE album_key=?1)")
+        .bind(fixture.albums[1]).execute(&mut raw).await.unwrap();
+    drop(raw);
     for sort in [
         AlbumSort::Title,
         AlbumSort::AlbumArtist,
@@ -304,6 +324,53 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                         .unwrap();
                     let order = rows.iter().map(|row| row.album_key).collect::<Vec<_>>();
                     assert_eq!(count, order.len());
+                    if sort == AlbumSort::AlbumArtist {
+                        let expected = if folder.is_some() {
+                            vec![fixture.albums[0]]
+                        } else {
+                            vec![fixture.albums[1], fixture.albums[0]]
+                        };
+                        assert_eq!(
+                            order, expected,
+                            "Album artist keeps albums chronological in either direction"
+                        );
+                        assert_eq!(
+                            database
+                                .artist_album_projection_order(
+                                    fixture.source,
+                                    fixture.artists[0],
+                                    true,
+                                    folder,
+                                    filter,
+                                    sort,
+                                    descending,
+                                    &cancel
+                                )
+                                .await
+                                .unwrap(),
+                            order
+                        );
+                        assert_eq!(
+                            database
+                                .album_detail_route_order(
+                                    fixture.source,
+                                    folder,
+                                    false,
+                                    filter,
+                                    sort,
+                                    descending,
+                                    &cancel
+                                )
+                                .await
+                                .unwrap()
+                                .1,
+                            if folder.is_some() {
+                                vec![fixture.album_uris[0].clone()]
+                            } else {
+                                vec![fixture.album_uris[1].clone(), fixture.album_uris[0].clone()]
+                            }
+                        );
+                    }
                     let mut paged = Vec::new();
                     for offset in 0..=order.len() {
                         let page = database
@@ -488,6 +555,18 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
 async fn track_pages_preserve_sort_filter_and_source_scope() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("UPDATE albums SET year=CASE object_id WHEN 'album-a' THEN 2020 ELSE 1990 END")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE album_artists SET artist_key=?1 WHERE album_key=?2")
+        .bind(fixture.artists[0])
+        .bind(fixture.albums[1])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    drop(raw);
     for sort in [
         library::TrackSort::Title,
         library::TrackSort::TrackNumber,
@@ -512,6 +591,22 @@ async fn track_pages_preserve_sort_filter_and_source_scope() {
                     .track_order(fixture.source, folder, false, sort, descending, &cancel)
                     .await
                     .unwrap();
+                let expected = match sort {
+                    library::TrackSort::AlbumArtist => Some([2, 3, 0, 1]),
+                    library::TrackSort::Artist | library::TrackSort::Album => Some(if descending {
+                        [2, 3, 0, 1]
+                    } else {
+                        [0, 1, 2, 3]
+                    }),
+                    _ => None,
+                };
+                if let Some(expected) = expected {
+                    assert_eq!(
+                        order,
+                        expected.map(|index| fixture.track_uris[index].clone()),
+                        "{sort:?}, descending={descending}"
+                    );
+                }
                 let mut pages = Vec::new();
                 for offset in (0..order.len()).step_by(2) {
                     let page = fixture
@@ -898,11 +993,21 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
             .map(|row| row.media_uri)
             .collect::<Vec<_>>();
         assert_eq!(ascending.len(), 11, "{sort:?}");
-        assert_eq!(
-            ascending.iter().rev().collect::<Vec<_>>(),
-            descending.iter().collect::<Vec<_>>(),
-            "{sort:?}"
-        );
+        let expected_descending = match sort {
+            TrackSort::AlbumArtist
+            | TrackSort::Album
+            | TrackSort::ReleaseDate
+            | TrackSort::DateAdded
+            | TrackSort::PlayCount
+            | TrackSort::Genre => ascending.clone(),
+            TrackSort::Favorite => (0..11)
+                .filter(|index| index % 2 == 1)
+                .chain((0..11).filter(|index| index % 2 == 0))
+                .map(|index| uris[index].clone())
+                .collect(),
+            _ => ascending.iter().rev().cloned().collect(),
+        };
+        assert_eq!(descending, expected_descending, "{sort:?}");
         if matches!(
             sort,
             TrackSort::Title

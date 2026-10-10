@@ -181,18 +181,10 @@ impl SourceConfiguration {
         if !self.is_local() {
             return None;
         }
-        let host = library::playlist_host_path(path);
         let roots = crate::file::local::LocalSourceConfig::from_configuration(self)
             .ok()?
             .roots;
-        roots.iter().enumerate().find_map(|(index, root)| {
-            let root_host = library::playlist_host_path(root);
-            let relative = host.strip_prefix(&root_host).ok()?;
-            Some((
-                format!("@{index}/{}", relative.to_string_lossy()),
-                root.join(relative),
-            ))
-        })
+        crate::file::local::local_file_location(&roots, path)
     }
 
     pub fn is_local(&self) -> bool {

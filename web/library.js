@@ -304,6 +304,7 @@ function setSort() {
   const tracks = [
     ["title", tr("Title")],
     ["artist", tr("Artist")],
+    ["album_artist", tr("Album artist")],
     ["album", tr("Album")],
     ["track_number", tr("Track number")],
     ["year", tr("Year")],

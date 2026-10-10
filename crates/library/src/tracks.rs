@@ -37,99 +37,87 @@ impl TrackSort {
     }
 
     pub(crate) fn order_terms(self, descending: bool) -> Vec<String> {
-        let fields: &[(&str, bool)] = match self {
-            Self::Title => &[("track.sort_text", false), ("track.track_key", false)],
-            Self::TrackNumber => &[
-                ("track.disc_number", false),
-                ("track.track_number", false),
-                ("track.sort_text", false),
-                ("track.track_key", false),
-            ],
-            Self::Artist => &[
-                ("track.display_artist", false),
-                ("track.sort_text", false),
-                ("track.track_key", false),
-            ],
-            Self::AlbumArtist => &[
-                (
-                    "(SELECT artist.sort_text FROM albums album JOIN album_artists relation USING(album_key) JOIN artists artist USING(artist_key) WHERE album.album_key=track.album_key ORDER BY relation.position LIMIT 1)",
-                    true,
-                ),
-                ("track.sort_text", false),
-                ("track.track_key", false),
-            ],
-            Self::Album => &[
-                ("track.display_album", false),
-                ("track.sort_text", false),
-                ("track.track_key", false),
-            ],
-            Self::Year => &[
-                ("track.year", true),
-                ("track.sort_text", false),
-                ("track.track_key", false),
-            ],
-            Self::ReleaseDate => &[
-                ("track.release_date", true),
-                ("track.sort_text", false),
-                ("track.track_key", false),
-            ],
-            Self::DateAdded => &[
-                ("track.date_added", true),
-                ("track.sort_text", false),
-                ("track.track_key", false),
-            ],
-            Self::UserRating => &[
-                (
-                    "COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_rating)",
-                    true,
-                ),
-                ("track.sort_text", false),
-                ("track.track_key", false),
-            ],
-            Self::Genre => &[
-                (
-                    "(SELECT genre.sort_text FROM track_genres relation JOIN genres genre USING(genre_key) WHERE relation.track_key=track.track_key ORDER BY relation.position LIMIT 1)",
-                    true,
-                ),
-                ("track.sort_text", false),
-                ("track.track_key", false),
-            ],
-            Self::Bpm => &[
-                ("track.bpm", true),
-                ("track.sort_text", false),
-                ("track.track_key", false),
-            ],
-            Self::Duration => &[
-                ("track.duration_millis", false),
-                ("track.sort_text", false),
-                ("track.track_key", false),
-            ],
-            Self::Favorite => &[
-                (
-                    "COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_favorite)",
-                    false,
-                ),
-                ("track.sort_text", false),
-                ("track.track_key", false),
-            ],
-            Self::LastPlayed => &[("activity.last_played", true), ("track.track_key", false)],
-            Self::PlayCount => &[("activity.play_count", false), ("track.track_key", false)],
+        self.order_by(descending, |field| match field {
+            "rating" => "COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_rating)".into(),
+            "favorite" => "COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_favorite)".into(),
+            "genre" => "(SELECT genre.sort_text FROM track_genres relation JOIN genres genre USING(genre_key) WHERE relation.track_key=track.track_key ORDER BY relation.position LIMIT 1)".into(),
+            "last_played" | "play_count" => format!("activity.{field}"),
+            "key" => "track.track_key".into(),
+            "artist_sort" => "track.display_artist".into(),
+            "album_artist_sort" => "album_artist.sort_text".into(),
+            "album_sort" => "COALESCE(album.sort_text,track.display_album)".into(),
+            "album_year" => "album.year".into(),
+            _ => format!("track.{field}"),
+        })
+    }
+
+    pub(crate) fn order_by(self, descending: bool, column: impl Fn(&str) -> String) -> Vec<String> {
+        let field = match self {
+            Self::Title => "sort_text",
+            Self::TrackNumber => "disc_number",
+            Self::Artist => "artist_sort",
+            Self::AlbumArtist => "album_artist_sort",
+            Self::Album => "album_sort",
+            Self::Year => "year",
+            Self::ReleaseDate => "release_date",
+            Self::DateAdded => "date_added",
+            Self::LastPlayed => "last_played",
+            Self::PlayCount => "play_count",
+            Self::UserRating => "rating",
+            Self::Genre => "genre",
+            Self::Bpm => "bpm",
+            Self::Duration => "duration_millis",
+            Self::Favorite => "favorite",
         };
-        let mut terms = Vec::new();
-        for (i, (field, nulls_last)) in fields.iter().enumerate() {
-            let desc = descending && (i == 0 || (self == Self::TrackNumber && i == 1));
-            let field = if self == Self::TrackNumber && i < 2 {
-                format!("coalesce({field},-1)")
-            } else {
-                (*field).to_string()
-            };
-            terms.push(format!(
-                "{field} {}{}",
-                if desc { "DESC" } else { "ASC" },
-                if *nulls_last { " NULLS LAST" } else { "" },
-            ));
+        let mut fields = vec![field];
+        match self {
+            Self::Artist | Self::AlbumArtist => {
+                fields.extend([
+                    "album_year",
+                    "album_sort",
+                    "album_key",
+                    "disc_number",
+                    "track_number",
+                ]);
+            }
+            Self::Album => fields.extend(["album_key", "disc_number", "track_number"]),
+            Self::TrackNumber => fields.push("track_number"),
+            _ => {}
         }
-        terms
+        if self != Self::Title {
+            fields.push("sort_text");
+        }
+        fields.push("key");
+        fields
+            .into_iter()
+            .enumerate()
+            .map(|(index, field)| {
+                let direction =
+                    if descending && (index == 0 || (self == Self::TrackNumber && index == 1)) {
+                        "DESC"
+                    } else {
+                        "ASC"
+                    };
+                let nulls = if matches!(
+                    field,
+                    "album_artist_sort"
+                        | "album_year"
+                        | "album_key"
+                        | "year"
+                        | "release_date"
+                        | "date_added"
+                        | "last_played"
+                        | "rating"
+                        | "genre"
+                        | "bpm"
+                ) {
+                    " NULLS LAST"
+                } else {
+                    ""
+                };
+                format!("{} {direction}{nulls}", column(field))
+            })
+            .collect()
     }
 }
 
@@ -718,8 +706,12 @@ impl Database {
     ) -> LibraryResult<TrackRoutePage> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
+        let count = query
+            .sql(filter, TrackSort::Title, false)
+            .count(&mut transaction)
+            .await?
+            .max(0) as usize;
         let sql = query.sql(filter, sort, descending);
-        let count = sql.count(&mut transaction).await?.max(0) as usize;
         let range = window.range(count);
         let disc_sections = if matches!(
             query.collection,
@@ -1050,6 +1042,19 @@ pub(crate) fn track_query(
         uri: "track.media_uri".into(),
         entry_key: "NULL".into(),
     };
+    if matches!(
+        sort,
+        TrackSort::Artist | TrackSort::AlbumArtist | TrackSort::Album
+    ) {
+        query
+            .from
+            .push_str(" LEFT JOIN albums album ON album.album_key=track.album_key");
+    }
+    if sort == TrackSort::AlbumArtist {
+        query.from.push_str(
+            " LEFT JOIN artists album_artist ON album_artist.artist_key=track.album_artist_key",
+        );
+    }
     track_filter(&mut query, folder, filter, favorites_only);
     if sort.uses_activity() {
         for field in &mut query.order {

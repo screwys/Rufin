@@ -3954,16 +3954,17 @@ async fn direct_stream(
     let backing = cue
         .as_ref()
         .map_or(media_uri, |(_, uri, _, _)| uri.as_str());
-    let uri = if library::document_media_id(backing).is_some() {
-        let mut access = database.playback_access(media_uri).await?;
-        if access.is_none() && cue.is_some() {
-            access = database.playback_access(backing).await?;
-        }
-        access.ok_or(SourceError::NotFound)?.0
-    } else if let Some(uri) = library::normalize_direct_media_uri(backing) {
-        uri
-    } else {
+    let Some(uri) = library::normalize_direct_media_uri(backing) else {
         return Ok(None);
+    };
+    let mut access = database.playback_access(media_uri).await?;
+    if access.is_none() && cue.is_some() {
+        access = database.playback_access(backing).await?;
+    }
+    let uri = match access {
+        Some((uri, _)) => uri,
+        None if library::document_media_id(backing).is_some() => return Err(SourceError::NotFound),
+        None => uri,
     };
     let stream = if uri.starts_with("content:") {
         crate::resolve_document_stream(&uri).await?

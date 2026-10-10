@@ -685,7 +685,7 @@ impl Database {
         let text = match sort {
             crate::TrackSort::Title => "title",
             crate::TrackSort::Artist => "artist",
-            crate::TrackSort::AlbumArtist => "sort_album_artist",
+            crate::TrackSort::AlbumArtist => "album_artist_sort",
             crate::TrackSort::Album => "album",
             crate::TrackSort::Genre => "sort_genre",
             _ => unreachable!(),
@@ -1289,11 +1289,15 @@ fn smart_track_sql(input: &str, projection: &str) -> String {
          SELECT {links} requested.key position,requested.value media_uri,COALESCE(track.title,{title},requested.value) title,
                 COALESCE(track.display_artist,{artist},'') artist,COALESCE(track.display_album,{album},'') album,
                 COALESCE(album.display_artist,{album_artist}) album_display_artist,
-                COALESCE((SELECT artist.name FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=track.album_key ORDER BY credit.position LIMIT 1),track.display_artist,{artist},'') sort_album_artist,
-                COALESCE((SELECT min(genre.name COLLATE NOCASE) FROM track_genres credit JOIN genres genre USING(genre_key) WHERE credit.track_key=track.track_key),'') sort_genre,
+                COALESCE(track.sort_text,lower({title}),requested.value) sort_text,
+                COALESCE(track.display_artist,{artist},'') artist_sort,
+                COALESCE(album_artist.sort_text,lower({album_artist})) album_artist_sort,
+                COALESCE(album.sort_text,track.display_album,{album},'') album_sort,
+                album.year album_year,track.album_key,
+                (SELECT genre.sort_text FROM track_genres credit JOIN genres genre USING(genre_key) WHERE credit.track_key=track.track_key ORDER BY credit.position LIMIT 1) sort_genre,
                 track.artwork_binding,COALESCE(track.duration_millis,{duration},0) duration_millis,
-                COALESCE(track.disc_number,{disc_number}) disc_number,
-                COALESCE(track.track_number,{track_number}) track_number,
+                COALESCE(track.disc_number,{disc_number},0) disc_number,
+                COALESCE(track.track_number,{track_number},0) track_number,
                 COALESCE(track.year,{year}) year,track.date_added,track.bpm,
                 COALESCE(track.release_date,{release_date}) release_date,
                 COALESCE(track.source_format,{source_format}) source_format,
@@ -1309,6 +1313,7 @@ fn smart_track_sql(input: &str, projection: &str) -> String {
          FROM input requested
          LEFT JOIN tracks track ON track.media_uri=requested.value
          LEFT JOIN albums album USING(album_key)
+         LEFT JOIN artists album_artist ON album_artist.artist_key=track.album_artist_key
          LEFT JOIN main.playlist_entries entry ON entry.playlist_entry_key=(
              SELECT playlist_entry_key FROM main.playlist_entries WHERE track.track_key IS NULL AND media_uri=requested.value
              ORDER BY title IS NULL,snapshot_at DESC,playlist_entry_key DESC LIMIT 1)
@@ -2217,45 +2222,12 @@ async fn smart_uri_page(
 }
 
 fn smart_display_order(sort: crate::TrackSort, descending: bool) -> String {
-    let direction = if descending { "DESC" } else { "ASC" };
-    let field = match sort {
-        crate::TrackSort::Title => "title COLLATE NOCASE",
-        crate::TrackSort::TrackNumber => "coalesce(disc_number,0)",
-        crate::TrackSort::Artist => "artist COLLATE NOCASE",
-        crate::TrackSort::AlbumArtist => "sort_album_artist COLLATE NOCASE",
-        crate::TrackSort::Album => "album COLLATE NOCASE",
-        crate::TrackSort::Year => "coalesce(year,0)",
-        crate::TrackSort::ReleaseDate => "release_date",
-        crate::TrackSort::DateAdded => "date_added",
-        crate::TrackSort::LastPlayed => "last_played",
-        crate::TrackSort::PlayCount => "play_count",
-        crate::TrackSort::UserRating => "rating",
-        crate::TrackSort::Genre => "sort_genre COLLATE NOCASE",
-        crate::TrackSort::Bpm => "bpm",
-        crate::TrackSort::Duration => "duration_millis",
-        crate::TrackSort::Favorite => "favorite",
-    };
-    let number = if sort == crate::TrackSort::TrackNumber {
-        format!(",coalesce(track_number,0) {direction}")
-    } else {
-        String::new()
-    };
-    let nulls = if matches!(
-        sort,
-        crate::TrackSort::ReleaseDate
-            | crate::TrackSort::DateAdded
-            | crate::TrackSort::LastPlayed
-            | crate::TrackSort::PlayCount
-            | crate::TrackSort::UserRating
-            | crate::TrackSort::Bpm
-    ) {
-        " NULLS LAST"
-    } else {
-        ""
-    };
-    format!(
-        "{field} {direction}{nulls}{number},album COLLATE NOCASE {direction},coalesce(disc_number,0) {direction},coalesce(track_number,0) {direction},title COLLATE NOCASE {direction},media_uri {direction}"
-    )
+    sort.order_by(descending, |field| match field {
+        "key" => "media_uri".into(),
+        "genre" => "sort_genre".into(),
+        _ => field.to_string(),
+    })
+    .join(",")
 }
 
 async fn smart_display_input(

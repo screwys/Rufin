@@ -463,7 +463,23 @@ impl PlaybackOwner {
             listened_millis: i64::try_from(activity.listened_millis).unwrap_or(i64::MAX),
             skipped: activity.skipped,
         };
-        match self.database.record_listen(&listen, &deliveries).await {
+        let current_media_uri = if let Some(path) = library::file_media_path(&listen.media_uri) {
+            tokio::task::spawn_blocking(move || {
+                url::Url::from_file_path(sources::local_media_identity_path(&path))
+                    .ok()
+                    .map(|uri| uri.to_string())
+            })
+            .await
+            .ok()
+            .flatten()
+        } else {
+            None
+        };
+        match self
+            .database
+            .record_listen(&listen, current_media_uri.as_deref(), &deliveries)
+            .await
+        {
             Ok(_) => self.scrobbler.listen_recorded(deliveries.len()),
             Err(error) => warn!(%error, "could not record Rufin Activity"),
         }

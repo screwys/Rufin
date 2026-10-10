@@ -49,7 +49,7 @@ pub use file::documents::{
     resolve_document_stream, save_document, stat_document,
 };
 pub use file::documents::{read_document_prefix, read_document_queue_item};
-pub use file::local::media::read_local_queue_item;
+pub use file::local::media::{local_media_identity_path, read_local_queue_item};
 pub use file::metadata::read_embedded_lyrics;
 pub use file::playlist::{playlist_file_is_non_audio, playlist_file_revision};
 pub use file::remote::smb::list_smb_shares;

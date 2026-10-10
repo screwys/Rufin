@@ -6,12 +6,22 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+pub fn local_media_identity_path(path: &Path) -> PathBuf {
+    let access = fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+    let host = library::playlist_host_path(&access);
+    if host == access {
+        access
+    } else {
+        fs::canonicalize(&host).unwrap_or(host)
+    }
+}
+
 pub fn read_local_queue_item(path: &Path) -> Option<library::QueueItem> {
-    let MediaRead::Accepted(mut track) = read_media(&mut Worker::default(), path.to_owned(), None)
+    let MediaRead::Accepted(track) = read_media(&mut Worker::default(), path.to_owned(), None)
     else {
         return None;
     };
-    let uri = track.local_uri.take()?;
+    let uri = url::Url::from_file_path(path).ok()?.to_string();
     Some(crate::file::media::queue_item(*track, uri))
 }
 
@@ -27,22 +37,27 @@ pub(crate) fn read_media(
         Ok(file) => file,
         Err(_) => return MediaRead::Unreadable,
     };
-    let Ok(uri) = url::Url::from_file_path(&path) else {
+    let identity = local_media_identity_path(&path);
+    let Ok(uri) = url::Url::from_file_path(&identity) else {
         return MediaRead::Unreadable;
     };
-    let mut read = read_media_input(worker, path.clone(), &mut file, uri.as_str(), sidecar);
+    let Ok(access_uri) = url::Url::from_file_path(&path) else {
+        return MediaRead::Unreadable;
+    };
+    let mut read = read_media_input(worker, path, &mut file, access_uri.as_str(), sidecar);
     if let MediaRead::Accepted(track) = &mut read {
+        track.id = crate::file::media::track_id(&identity);
         track.local_uri = Some(uri.into());
-        track.audio_revision = audio_revision(&path);
+        track.audio_revision = audio_revision(&track.source_path, &identity);
     }
     read
 }
 
-fn audio_revision(path: &Path) -> blake3::Hasher {
+fn audio_revision(access: &str, identity: &Path) -> blake3::Hasher {
     let mut hash = blake3::Hasher::new();
     hash.update(b"rufin-local-audio-v1\0");
-    hash.update(path.to_string_lossy().as_bytes());
-    if let Ok(metadata) = fs::metadata(path) {
+    hash.update(identity.to_string_lossy().as_bytes());
+    if let Ok(metadata) = fs::metadata(access) {
         hash.update(&metadata.len().to_le_bytes());
         let modified = metadata
             .modified()

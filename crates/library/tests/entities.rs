@@ -1886,20 +1886,24 @@ async fn metadata_point_writes_publish_changes_and_leave_no_ops_unchanged() {
         !artist_plan.contains("USE TEMP B-TREE FOR ORDER BY"),
         "{artist_plan}"
     );
-    let direct_album_plan = sqlx::query_as::<_, (i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT album.album_key FROM albums album WHERE album.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.album_key=album.album_key AND scope.folder_key=?2)) AND (?3 OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite)=1) ORDER BY album.year DESC NULLS LAST,album.sort_text,album.album_key")
-        .bind(fixture.source).bind(Option::<i64>::None).bind(true).fetch_all(&mut raw).await.expect("actual direct Album sort plan").into_iter().map(|row| row.3).collect::<Vec<_>>().join(" | ");
+    let direct_album_plan = sqlx::query_as::<_, (i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT album.album_key FROM albums album WHERE album.source_key=?1 ORDER BY (album.album_artist_sort IS NULL),album.album_artist_sort ASC,(album.year IS NULL),album.year,album.sort_text,album.album_key")
+        .bind(fixture.source).fetch_all(&mut raw).await.expect("actual direct Album sort plan").into_iter().map(|row| row.3).collect::<Vec<_>>().join(" | ");
+    assert!(
+        direct_album_plan.contains("albums_artist_order_idx"),
+        "{direct_album_plan}"
+    );
+    assert!(
+        !direct_album_plan.contains("USE TEMP B-TREE"),
+        "{direct_album_plan}"
+    );
     assert!(
         !direct_album_plan.contains("listens"),
         "{direct_album_plan}"
     );
+    let counted_album_plan = sqlx::query_as::<_, (i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT album.album_key FROM albums album WHERE album.source_key=?1 ORDER BY (SELECT count(*) FROM tracks item WHERE item.album_key=album.album_key) DESC NULLS LAST,album.sort_text,album.album_key")
+        .bind(fixture.source).fetch_all(&mut raw).await.expect("actual counted Album sort plan").into_iter().map(|row| row.3).collect::<Vec<_>>().join(" | ");
     assert!(
-        !direct_album_plan.contains("activity_baseline"),
-        "{direct_album_plan}"
-    );
-    let counted_album_plan = sqlx::query_as::<_, (i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT album.album_key FROM albums album LEFT JOIN tracks track ON track.album_key=album.album_key AND (?2 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?2)) WHERE album.source_key=?1 AND (?3 OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite)=1) GROUP BY album.album_key ORDER BY count(track.track_key) DESC,album.sort_text,album.album_key")
-        .bind(fixture.source).bind(Option::<i64>::None).bind(true).fetch_all(&mut raw).await.expect("actual counted Album sort plan").into_iter().map(|row| row.3).collect::<Vec<_>>().join(" | ");
-    assert!(
-        counted_album_plan.contains("tracks_album_idx"),
+        counted_album_plan.contains("tracks_album_order_idx"),
         "{counted_album_plan}"
     );
     assert!(

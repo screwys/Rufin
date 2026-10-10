@@ -150,11 +150,16 @@ async fn listens_accept_empty_optional_recording_ids() {
         listened_millis: 1000,
         skipped: false,
     };
-    fixture.database.record_listen(&listen, &[]).await.unwrap();
+    fixture
+        .database
+        .record_listen(&listen, None, &[])
+        .await
+        .unwrap();
     let record = library::ActivityRecord {
         version: 1,
         listen_key: 100,
         source_id: None,
+        current_media_uri: None,
         listen: ListenWrite {
             external_id: Some("imported-optional-recording-ids".into()),
             ..listen
@@ -221,13 +226,13 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         .collect::<Vec<_>>();
     let key = fixture
         .database
-        .record_listen(&listen, &targets)
+        .record_listen(&listen, None, &targets)
         .await
         .expect("record listen");
     assert_eq!(
         fixture
             .database
-            .record_listen(&listen, &targets)
+            .record_listen(&listen, None, &targets)
             .await
             .expect("record listen idempotently"),
         key
@@ -453,7 +458,7 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
     }
     let mut listen = ListenWrite {
         external_id: None,
-        media_uri: file.clone(),
+        media_uri: "file:///music/../music/local.flac".into(),
         title: "Recorded file".into(),
         artist: "Artist".into(),
         album: "Album".into(),
@@ -470,11 +475,29 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
         listened_millis: 90000,
         skipped: false,
     };
-    let file_key = fixture.database.record_listen(&listen, &[]).await.unwrap();
+    let file_key = fixture
+        .database
+        .record_listen(&listen, Some(&file), &[])
+        .await
+        .unwrap();
+    assert_eq!(
+        sqlx::query_as::<_, (String, String)>(
+            "SELECT media_uri,captured_media_uri FROM listens WHERE listen_key=?1"
+        )
+        .bind(file_key)
+        .fetch_one(&mut raw)
+        .await
+        .unwrap(),
+        (file.clone(), listen.media_uri.clone()),
+    );
     listen.media_uri = cue.clone();
     listen.title = "Recorded CUE".into();
     listen.started_at = 200;
-    let cue_key = fixture.database.record_listen(&listen, &[]).await.unwrap();
+    let cue_key = fixture
+        .database
+        .record_listen(&listen, None, &[])
+        .await
+        .unwrap();
     for key in [file_key, cue_key] {
         assert_eq!(
             sqlx::query_scalar::<_, String>("SELECT source_id FROM listens WHERE listen_key=?1")
@@ -497,7 +520,11 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
     listen.media_uri = "rufin:source/track/remote/uncached".into();
     listen.title = "Remote".into();
     listen.started_at = 500;
-    fixture.database.record_listen(&listen, &[]).await.unwrap();
+    fixture
+        .database
+        .record_listen(&listen, None, &[])
+        .await
+        .unwrap();
     let cancel = ReadCancellation::new();
     let current = fixture
         .database
@@ -680,6 +707,7 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
         version: 1,
         listen_key: 1,
         source_id: Some("forgotten-server".into()),
+        current_media_uri: Some("https://example.org/canonical/music.ogg".into()),
         listen: ListenWrite {
             external_id: Some("accepted-play-exact-id".into()),
             media_uri: "https://example.org/music.ogg".into(),
@@ -720,6 +748,7 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     );
     let restored: library::ActivityRecord = serde_json::from_slice(&exported).unwrap();
     assert_eq!(restored.source_id, input.source_id);
+    assert_eq!(restored.current_media_uri, input.current_media_uri);
     assert_eq!(restored.listen, input.listen);
     let empty = tempfile::tempdir().unwrap();
     let database = library::Database::open(empty.path().join("store.sqlite"))
@@ -729,6 +758,19 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
         .import_activity_jsonl(std::io::Cursor::new(&exported))
         .await
         .unwrap();
+    database.close().await.unwrap();
+    let database = library::Database::open(empty.path().join("store.sqlite"))
+        .await
+        .unwrap();
+    let history = database
+        .activity_history(None, "", true, &ReadCancellation::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        history[0].media_uri,
+        input.current_media_uri.as_deref().unwrap()
+    );
+    assert_eq!(history[0].title, input.listen.title);
     let mut again = Vec::new();
     database
         .export_activity_jsonl(&mut again, None)
@@ -776,6 +818,7 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
             version: 1,
             listen_key: index as i64 + 2,
             source_id: source.map(str::to_string),
+            current_media_uri: None,
             listen,
         };
         database

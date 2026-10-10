@@ -983,11 +983,11 @@ mod tests {
             skipped: false,
         };
         database
-            .record_listen(&listen, &deliveries)
+            .record_listen(&listen, None, &deliveries)
             .await
             .expect("record Activity");
         database
-            .record_listen(&listen, &deliveries)
+            .record_listen(&listen, None, &deliveries)
             .await
             .expect("record Activity idempotently");
 

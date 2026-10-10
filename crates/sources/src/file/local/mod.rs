@@ -232,7 +232,7 @@ impl LocalSource {
         playlist: library::PlaylistKey,
     ) -> SourceResult<library::ScanOutcome> {
         let mut scan = library::Scan::begin_local_items(database, source_id).await?;
-        scan::stage_imported_paths(database, &mut scan, Some(playlist)).await?;
+        scan::stage_imported_paths(database, self, &mut scan, Some(playlist)).await?;
         crate::file::artwork::ArtworkFiles::Local
             .stage(database, &mut scan, &|| false)
             .await?;
@@ -444,6 +444,21 @@ fn excluded_paths(roots: &[PathBuf], folders: &[PathBuf]) -> Vec<PathBuf> {
             normalized
         })
         .collect()
+}
+
+pub(crate) fn local_file_location(
+    roots: &[PathBuf],
+    path: &std::path::Path,
+) -> Option<(String, PathBuf)> {
+    let host = library::playlist_host_path(path);
+    roots.iter().enumerate().find_map(|(index, root)| {
+        let root_host = library::playlist_host_path(root);
+        let relative = host.strip_prefix(&root_host).ok()?;
+        Some((
+            format!("@{index}/{}", relative.to_string_lossy()),
+            root.join(relative),
+        ))
+    })
 }
 
 fn normalize_roots(roots: Vec<PathBuf>) -> SourceResult<Vec<PathBuf>> {

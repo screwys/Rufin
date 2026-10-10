@@ -444,14 +444,29 @@ impl Database {
         media_uri: &str,
     ) -> LibraryResult<Option<(String, LocalAccessOrigin)>> {
         let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_as(
-            "SELECT access_uri,origin FROM local_access_files WHERE media_uri=?1
-             ORDER BY CASE origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,
-                      local_access_file_key LIMIT 1",
+        let access = sqlx::query_as::<_, (String, LocalAccessOrigin, bool)>(
+            "SELECT location,origin,is_path FROM (
+                SELECT access_uri location,origin,0 is_path,
+                    CASE origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END priority,
+                    local_access_file_key key
+                FROM local_access_files WHERE media_uri=?1
+                UNION ALL
+                SELECT source_path,'local',1,3,track_key FROM tracks
+                WHERE media_uri=?1 AND media_uri LIKE 'file:%' AND source_path IS NOT NULL
+             ) ORDER BY priority,key LIMIT 1",
         )
         .bind(media_uri)
         .fetch_optional(&mut *connection)
-        .await?)
+        .await?;
+        Ok(access.and_then(|(location, origin, is_path)| {
+            if is_path {
+                url::Url::from_file_path(location)
+                    .ok()
+                    .map(|uri| (uri.into(), origin))
+            } else {
+                Some((location, origin))
+            }
+        }))
     }
 
     /// Paths admitted on this device, including downloaded and mapped copies.
@@ -1174,6 +1189,106 @@ impl Database {
 }
 
 impl Database {
+    pub async fn merge_local_file_uris(
+        &self,
+        aliases: &[(String, String, String)],
+    ) -> LibraryResult<()> {
+        if aliases.is_empty() {
+            return Ok(());
+        }
+        let mut writer = self.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut transaction = connection.begin().await?;
+        for (previous, current, object_id) in aliases {
+            for table in ["main.playlist_entries", "catalog.native_playlist_entries"] {
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "UPDATE {table} SET media_uri=?2 WHERE media_uri=?1"
+                )))
+                .bind(previous)
+                .bind(current)
+                .execute(&mut *transaction)
+                .await?;
+            }
+            sqlx::query(
+                "INSERT INTO main.user_media_state(media_uri,favorite,rating)
+                SELECT ?2,favorite,rating FROM main.user_media_state WHERE media_uri=?1
+                ON CONFLICT(media_uri) DO UPDATE SET
+                    favorite=COALESCE(user_media_state.favorite,excluded.favorite),
+                    rating=COALESCE(user_media_state.rating,excluded.rating)
+                WHERE (user_media_state.favorite IS NULL AND excluded.favorite IS NOT NULL)
+                   OR (user_media_state.rating IS NULL AND excluded.rating IS NOT NULL)",
+            )
+            .bind(previous)
+            .bind(current)
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query("DELETE FROM main.user_media_state WHERE media_uri=?1")
+                .bind(previous)
+                .execute(&mut *transaction)
+                .await?;
+            sqlx::query(
+                "UPDATE main.listens SET
+                    captured_media_uri=COALESCE(captured_media_uri,media_uri),media_uri=?2
+                WHERE media_uri=?1",
+            )
+            .bind(previous)
+            .bind(current)
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query(
+                "UPDATE tracks SET local_play_count=(
+                    SELECT count(*) FROM main.listens WHERE media_uri=tracks.media_uri)
+                WHERE media_uri IN (?1,?2) AND local_play_count IS NOT (
+                    SELECT count(*) FROM main.listens WHERE media_uri=tracks.media_uri)",
+            )
+            .bind(previous)
+            .bind(current)
+            .execute(&mut *transaction)
+            .await?;
+
+            let old = sqlx::query_as::<_, (i64, String, String)>(
+                "SELECT track.source_key,source.object_id,track.object_id
+                 FROM tracks track JOIN sources source USING(source_key) WHERE track.media_uri=?1",
+            )
+            .bind(previous)
+            .fetch_optional(&mut *transaction)
+            .await?;
+            if let Some((old_source, old_source_id, old_object)) = old {
+                let (source, source_id, object) = sqlx::query_as::<_, (i64, String, String)>(
+                    "SELECT track.source_key,source.object_id,track.object_id
+                     FROM tracks track JOIN sources source USING(source_key) WHERE track.media_uri=?1",
+                ).bind(current).fetch_optional(&mut *transaction).await?
+                    .unwrap_or_else(|| (old_source, old_source_id.clone(), object_id.clone()));
+                if (old_source, old_object.as_str()) != (source, object.as_str()) {
+                    sqlx::query("INSERT INTO main.legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at)
+                        SELECT ?3,period,item_kind,?4,play_count,skip_count,last_played_at
+                        FROM main.legacy_activity WHERE source_id=?1 AND track_object_id=?2 AND item_kind='track'
+                        ON CONFLICT(source_id,period,item_kind,track_object_id) DO UPDATE SET
+                            play_count=legacy_activity.play_count+excluded.play_count,
+                            skip_count=legacy_activity.skip_count+excluded.skip_count,
+                            last_played_at=COALESCE(max(legacy_activity.last_played_at,excluded.last_played_at),legacy_activity.last_played_at,excluded.last_played_at)")
+                        .bind(&old_source_id).bind(&old_object).bind(&source_id).bind(&object)
+                        .execute(&mut *transaction).await?;
+                    sqlx::query("DELETE FROM main.legacy_activity WHERE source_id=?1 AND track_object_id=?2 AND item_kind='track'")
+                        .bind(&old_source_id).bind(&old_object).execute(&mut *transaction).await?;
+                    sqlx::query("INSERT INTO catalog.activity_baseline(source_key,period,item_kind,track_object_id,play_count,skip_count,last_played_at)
+                        SELECT ?3,period,item_kind,?4,play_count,skip_count,last_played_at
+                        FROM catalog.activity_baseline WHERE source_key=?1 AND track_object_id=?2 AND item_kind='track'
+                        ON CONFLICT(source_key,period,item_kind,track_object_id) DO UPDATE SET
+                            play_count=activity_baseline.play_count+excluded.play_count,
+                            skip_count=activity_baseline.skip_count+excluded.skip_count,
+                            last_played_at=COALESCE(max(activity_baseline.last_played_at,excluded.last_played_at),activity_baseline.last_played_at,excluded.last_played_at)")
+                        .bind(old_source).bind(&old_object).bind(source).bind(&object)
+                        .execute(&mut *transaction).await?;
+                    sqlx::query("DELETE FROM catalog.activity_baseline WHERE source_key=?1 AND track_object_id=?2 AND item_kind='track'")
+                        .bind(old_source).bind(&old_object).execute(&mut *transaction).await?;
+                }
+            }
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
     pub async fn remove_unreferenced_import_access(&self, source_id: &str) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;

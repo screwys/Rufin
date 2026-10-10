@@ -20,7 +20,7 @@ use crate::{SourceError, SourceResult};
 
 const LOCAL_BATCH_SIZE: usize = 128;
 const LOCAL_CUE_MAX_BYTES: u64 = 1024 * 1024;
-pub(crate) const LOCAL_PARSER_VERSION: u32 = 14;
+pub(crate) const LOCAL_PARSER_VERSION: u32 = 15;
 
 pub(crate) async fn publish_metadata_paths(
     database: &library::Database,
@@ -571,7 +571,7 @@ pub(crate) async fn stage_catalog(
     reuse_unchanged: bool,
 ) -> SourceResult<()> {
     stage_roots(database, local, scan, progress, cancelled, reuse_unchanged).await?;
-    stage_imported_paths(database, scan, None).await?;
+    stage_imported_paths(database, local, scan, None).await?;
     Ok(())
 }
 
@@ -842,7 +842,8 @@ async fn stage_audio_batch(
     let unchanged = reuse.unchanged;
     let renamed_ids = reuse.renamed;
     let accepted_current = reuse.accepted;
-    let mut accepted = Vec::with_capacity(paths.len());
+    let mut accepted: Vec<ScannedTrack> = Vec::with_capacity(paths.len());
+    let mut aliases = Vec::new();
     let mut retained = Vec::new();
     let mut observations = Vec::with_capacity(paths.len());
     let jobs = paths
@@ -881,8 +882,27 @@ async fn stage_audio_batch(
                     &[],
                 )?;
                 observations.push(observation);
-                if let Some(object_id) = renamed_ids.get(path.to_string_lossy().as_ref()) {
+                let previous = if let Some((object_id, previous)) =
+                    renamed_ids.get(path.to_string_lossy().as_ref())
+                {
                     track.id = object_id.clone();
+                    Path::new(previous)
+                } else {
+                    path.as_path()
+                };
+                if let Some(canonical) = track.local_uri.as_ref()
+                    && let Ok(previous) = url::Url::from_file_path(previous)
+                    && previous.as_str() != canonical
+                {
+                    if let Some(existing) = accepted
+                        .iter()
+                        .find(|existing| existing.local_uri.as_ref() == Some(canonical))
+                    {
+                        track.id = existing.id.clone();
+                    } else if let Some((object_id, _)) = scan.local_track_file(canonical).await? {
+                        track.id = object_id;
+                    }
+                    aliases.push((previous.into(), canonical.clone(), track.id.clone()));
                 }
                 accepted.push(*track)
             }
@@ -917,6 +937,9 @@ async fn stage_audio_batch(
     stage_audio_tracks_batch(scan, &accepted).await?;
     scan.retain_local_media_paths(&retained).await?;
     scan.finish_batch().await?;
+    if !aliases.is_empty() {
+        database.merge_local_file_uris(&aliases).await?;
+    }
     Ok(accepted_count)
 }
 
@@ -1023,7 +1046,7 @@ impl Drop for MediaPool {
 struct PathReuse {
     unchanged: BTreeMap<String, library::LocalFileState>,
     accepted: BTreeSet<String>,
-    renamed: BTreeMap<String, String>,
+    renamed: BTreeMap<String, (String, String)>,
 }
 
 async fn path_reuse(
@@ -1093,7 +1116,9 @@ async fn path_reuse(
                     && stored.inode == observation.inode)
         }) && let Some(object_id) = stored.track_object_id.as_ref()
         {
-            reuse.renamed.insert(observation.path, object_id.clone());
+            reuse
+                .renamed
+                .insert(observation.path, (object_id.clone(), stored.path.clone()));
         }
     }
     if let Some((old_path, new_path)) = explicit
@@ -1102,7 +1127,7 @@ async fn path_reuse(
             .find(|stored| stored.path == old_path)
             .and_then(|stored| stored.track_object_id.clone())
     {
-        reuse.renamed.insert(new_path, object_id);
+        reuse.renamed.insert(new_path, (object_id, old_path));
     }
     Ok(reuse)
 }
@@ -1128,11 +1153,13 @@ fn read_cue_tracks(
     let album_title = sheet.album_title;
     let album_performer = sheet.album_performer;
     for file in sheet.files {
-        let MediaRead::Accepted(backing) =
+        let MediaRead::Accepted(mut backing) =
             read_media(worker, resolve_cue_file_path(cue_path, &file.path), None)
         else {
             return None;
         };
+        // Existing CUE URIs include the backing path as written in the sheet.
+        backing.local_uri = Some(url::Url::from_file_path(&backing.source_path).ok()?.into());
         let duration_millis = u64::from(backing.duration_seconds) * 1_000;
         for (position, cue) in file.tracks.iter().enumerate() {
             let end = file
@@ -1259,26 +1286,83 @@ fn check_cancelled(cancelled: &(dyn Fn() -> bool + Send + Sync)) -> SourceResult
 
 pub(crate) async fn stage_imported_paths(
     database: &library::Database,
+    local: &LocalSource,
     scan: &mut Scan,
     playlist: Option<library::PlaylistKey>,
 ) -> SourceResult<()> {
     let mut after = String::new();
     let mut worker = media::Worker::default();
     loop {
-        let uris = database.imported_local_uri_page(playlist, &after).await?;
-        if uris.is_empty() {
+        let page = database.imported_local_uri_page(playlist, &after).await?;
+        if page.is_empty() {
             break;
         }
-        after = uris.last().unwrap().0.clone();
-        let staged = scan
-            .staged_media_uris(&uris.iter().map(|(uri, _)| uri.as_str()).collect::<Vec<_>>())
+        after = page.last().unwrap().0.clone();
+        let mut staged = scan
+            .staged_media_uris(&page.iter().map(|(uri, _)| uri.as_str()).collect::<Vec<_>>())
             .await?
             .into_iter()
             .collect::<BTreeSet<_>>();
+        let mut uris = Vec::with_capacity(page.len());
+        let mut aliases = Vec::new();
+        for (mut uri, cue) in page.into_iter().filter(|(uri, _)| !staged.contains(uri)) {
+            let access = if let Some(path) = library::file_media_path(&uri) {
+                if path.is_file() {
+                    Some(path)
+                } else if let Some((_, access)) = super::local_file_location(local.roots(), &path)
+                    .filter(|(_, access)| access.is_file())
+                {
+                    Some(access)
+                } else {
+                    database
+                        .playback_access(&uri)
+                        .await?
+                        .and_then(|(uri, _)| library::file_media_path(&uri))
+                        .filter(|path| path.is_file())
+                }
+            } else {
+                None
+            };
+            if let Some(path) = access.as_deref() {
+                let identity = super::media::local_media_identity_path(path);
+                if let Ok(canonical) = url::Url::from_file_path(&identity)
+                    && canonical.as_str() != uri
+                {
+                    let canonical = canonical.to_string();
+                    let object_id = scan
+                        .local_track_file(&canonical)
+                        .await?
+                        .map_or_else(|| media::track_id(&identity), |(id, _)| id);
+                    aliases.push((
+                        std::mem::replace(&mut uri, canonical.clone()),
+                        canonical,
+                        object_id,
+                    ));
+                }
+            }
+            uris.push((uri, cue, access));
+        }
+        if !aliases.is_empty() {
+            database.merge_local_file_uris(&aliases).await?;
+            uris.sort_unstable_by(|a, b| {
+                a.0.cmp(&b.0)
+                    .then_with(|| a.2.is_none().cmp(&b.2.is_none()))
+            });
+            uris.dedup_by(|a, b| a.0 == b.0);
+            staged.extend(
+                scan.staged_media_uris(
+                    &uris
+                        .iter()
+                        .map(|(uri, _, _)| uri.as_str())
+                        .collect::<Vec<_>>(),
+                )
+                .await?,
+            );
+        }
         let mut tracks = Vec::new();
         let mut cue_tracks = BTreeMap::new();
         let mut cue_path = None;
-        for (uri, cue) in uris.into_iter().filter(|(uri, _)| !staged.contains(uri)) {
+        for (uri, cue, access) in uris.into_iter().filter(|(uri, _, _)| !staged.contains(uri)) {
             if let Some(path) = cue.map(PathBuf::from) {
                 if cue_path.as_ref() != Some(&path) {
                     cue_tracks.clear();
@@ -1294,7 +1378,7 @@ pub(crate) async fn stage_imported_paths(
                 {
                     tracks.push(track);
                 }
-            } else if let Some(path) = library::file_media_path(&uri)
+            } else if let Some(path) = access
                 && let MediaRead::Accepted(mut track) = read_media(&mut worker, path, None)
             {
                 if let Some((id, _)) = scan.local_track_file(&uri).await? {
