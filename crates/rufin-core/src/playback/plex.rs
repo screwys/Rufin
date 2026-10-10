@@ -2,14 +2,16 @@
 #[cfg(test)]
 mod tests;
 use super::*;
-use playback::{
-    ExternalPlayback, PlaybackOutput, RemoteOutput, RemoteOutputProtocol, TransportStatus,
+use crate::playback::{
+    actor::Playback,
+    state::{AutoDjRequest, Command, ExternalPlayback},
 };
+use playback::{PlaybackOutput, RemoteOutput, RemoteOutputProtocol, TransportStatus};
 use playback_cast::plex::{PlayMedia, PlexClient, PlexPlayer, Timeline};
 use sources::{
     PlexCompanionContext, PlexQueueMutation, PlexQueuePlacement, PlexQueueWindow, Source,
 };
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub(super) struct PlexPlayback {
     client: PlexClient,
@@ -591,15 +593,15 @@ impl PlexPlayback {
         })
     }
 
-    async fn command(&self, command: SessionCommand) -> Result<(), String> {
+    async fn command(&self, command: Command) -> Result<(), String> {
         let _guard = self.commands.lock().await;
         if self.cancelled.load(Ordering::Acquire) {
             return Ok(());
         }
         match command {
-            SessionCommand::Play => self.control(|client| client.play()).await?,
-            SessionCommand::Pause => self.control(|client| client.pause()).await?,
-            SessionCommand::PlayPause => {
+            Command::Play => self.control(|client| client.play()).await?,
+            Command::Pause => self.control(|client| client.pause()).await?,
+            Command::PlayPause => {
                 let playing = matches!(
                     self.current().await?.state.as_str(),
                     "playing" | "buffering"
@@ -613,18 +615,18 @@ impl PlexPlayback {
                 })
                 .await?;
             }
-            SessionCommand::Stop => self.control(|client| client.stop()).await?,
-            SessionCommand::Next => self.control(|client| client.next()).await?,
-            SessionCommand::Previous => self.control(|client| client.previous()).await?,
-            SessionCommand::Seek(offset) => self.control(move |client| client.seek(offset)).await?,
-            SessionCommand::SetVolume(value) | SessionCommand::PersistVolume(value) => {
+            Command::Stop => self.control(|client| client.stop()).await?,
+            Command::Next => self.control(|client| client.next()).await?,
+            Command::Previous => self.control(|client| client.previous()).await?,
+            Command::Seek(offset) => self.control(move |client| client.seek(offset)).await?,
+            Command::SetVolume(value) | Command::PersistVolume(value) => {
                 *self.prior_volume.lock().unwrap_or_else(|p| p.into_inner()) = None;
                 self.control(move |client| {
                     client.volume((value.clamp(0.0, 1.0) * 100.0).round() as u8)
                 })
                 .await?;
             }
-            SessionCommand::SetMuted(muted) => {
+            Command::SetMuted(muted) => {
                 let volume = self.current().await?.volume.unwrap_or(100);
                 let target = {
                     let mut saved = self.prior_volume.lock().unwrap_or_else(|p| p.into_inner());
@@ -637,13 +639,11 @@ impl PlexPlayback {
                 };
                 self.control(move |client| client.volume(target)).await?;
             }
-            SessionCommand::SetRepeat(mode) => {
-                self.control(move |client| client.repeat(mode)).await?
-            }
-            SessionCommand::SetShuffle { enabled, .. } => {
+            Command::SetRepeat(mode) => self.control(move |client| client.repeat(mode)).await?,
+            Command::SetShuffle { enabled, .. } => {
                 self.control(move |client| client.shuffle(enabled)).await?
             }
-            SessionCommand::Activate(position) => {
+            Command::Activate(position) => {
                 let timeline = self.current().await?;
                 let items = self.items_at(&timeline, &[position]).await?;
                 let item = &items[0];
@@ -651,12 +651,10 @@ impl PlexPlayback {
                 let id = item.occurrence_id;
                 self.control(move |client| client.skip_to(&key, id)).await?;
             }
-            SessionCommand::Remove(position) => self.remove(&[position]).await?,
-            SessionCommand::RemoveMany(positions) => self.remove(&positions).await?,
-            SessionCommand::Reorder { positions, target } => {
-                self.reorder(&positions, &target).await?
-            }
-            SessionCommand::MoveAfterCurrent(position) => {
+            Command::Remove(position) => self.remove(&[position]).await?,
+            Command::RemoveMany(positions) => self.remove(&positions).await?,
+            Command::Reorder { positions, target } => self.reorder(&positions, &target).await?,
+            Command::MoveAfterCurrent(position) => {
                 let timeline = self.current().await?;
                 let queue_id = timeline
                     .play_queue_id
@@ -679,7 +677,7 @@ impl PlexPlayback {
                         .await?;
                 }
             }
-            SessionCommand::Insert { input, target } => {
+            Command::Insert { input, target } => {
                 self.insert(
                     input,
                     None,
@@ -690,7 +688,7 @@ impl PlexPlayback {
                 )
                 .await?
             }
-            SessionCommand::Clear { include_current } => {
+            Command::Clear { include_current } => {
                 let timeline = self.current().await?;
                 let queue = timeline
                     .play_queue_id
@@ -705,7 +703,7 @@ impl PlexPlayback {
                     .collect();
                 self.remove_items(queue, items).await?;
             }
-            SessionCommand::ApplyBatch { batch, placement } => {
+            Command::ApplyBatch { batch, placement } => {
                 self.insert(
                     batch.input().clone(),
                     batch.context_title().cloned(),
@@ -1088,7 +1086,7 @@ impl PlaybackOwner {
             .map_err(string_error)
     }
 
-    pub(super) fn request_plex_auto_dj(&self, request: &playback::AutoDjRequest) -> bool {
+    pub(super) fn request_plex_auto_dj(&self, request: &AutoDjRequest) -> bool {
         let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return false;
         };
@@ -1185,9 +1183,7 @@ impl PlaybackOwner {
             }
             .await;
             if let Err(error) = result {
-                let _ = plex
-                    .playback
-                    .command(SessionCommand::OperationFailed(error));
+                let _ = plex.playback.command(Command::OperationFailed(error));
             }
         });
         true
@@ -1235,9 +1231,7 @@ impl PlaybackOwner {
             }
             .await;
             if let Err(error) = result {
-                let _ = plex
-                    .playback
-                    .command(SessionCommand::OperationFailed(error));
+                let _ = plex.playback.command(Command::OperationFailed(error));
             }
         });
         true
@@ -1259,7 +1253,7 @@ impl PlaybackOwner {
             .cloned()
             .ok_or("The Plex player is no longer available; search for outputs again")?;
         let active = self.active().ok_or("Playback is unavailable")?;
-        let (local, _, _) = active.playback.handoff_snapshot().map_err(string_error)?;
+        let (local, _, _) = active.handoff_snapshot().map_err(string_error)?;
         let sources = self.plex_sources()?;
         let transferring = !local.entries.is_empty()
             && self
@@ -1326,7 +1320,7 @@ impl PlaybackOwner {
                 .unwrap_or_default(),
             settings: self.settings.clone(),
             output: output.clone(),
-            playback: active.playback.clone(),
+            playback: active.clone(),
             database: self.database.clone(),
             queue: tokio::sync::Mutex::new(None),
             timeline: Mutex::new(stopped_timeline()),
@@ -1363,7 +1357,7 @@ impl PlaybackOwner {
                     .map_err(string_error)?;
                 check_cancelled(&cancelled)?;
                 let (fresh, report, _) =
-                    active.playback.handoff_snapshot().map_err(string_error)?;
+                    active.handoff_snapshot().map_err(string_error)?;
                 if fresh.entries != local.entries
                     || fresh.order != local.order
                     || fresh.current_index != local.current_index
@@ -1453,9 +1447,7 @@ impl PlaybackOwner {
                             break;
                         }
                         if let Err(error) = observed.observe(timeline, false).await {
-                            let _ = observed
-                                .playback
-                                .command(SessionCommand::OperationFailed(error));
+                            let _ = observed.playback.command(Command::OperationFailed(error));
                         }
                     }
                     Ok(None) => {
@@ -1481,7 +1473,7 @@ impl PlaybackOwner {
                                     {
                                         let _ = observed
                                             .playback
-                                            .command(SessionCommand::OperationFailed(error));
+                                            .command(Command::OperationFailed(error));
                                     }
                                 });
                             }
@@ -1698,25 +1690,22 @@ impl PlaybackOwner {
             .collect())
     }
 
-    pub(super) fn send_plex(&self, command: SessionCommand) -> Option<SessionCommand> {
+    pub(super) fn send_plex(&self, command: Command) -> Option<Command> {
         let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return Some(command);
         };
         if matches!(
             command,
-            SessionCommand::UpdateSettings(_)
-                | SessionCommand::SetAutoDj { .. }
-                | SessionCommand::SetVisualizerEnabled(_)
-                | SessionCommand::ArtworkRefreshed(_)
-                | SessionCommand::CatalogChanged
+            Command::UpdateSettings(_)
+                | Command::SetAutoDj { .. }
+                | Command::SetVisualizerEnabled(_)
+                | Command::CatalogChanged
         ) {
             return Some(command);
         }
         self.runtime.spawn(async move {
             if let Err(error) = plex.command(command).await {
-                let _ = plex
-                    .playback
-                    .command(SessionCommand::OperationFailed(error));
+                let _ = plex.playback.command(Command::OperationFailed(error));
             }
         });
         None
@@ -1741,9 +1730,7 @@ impl PlaybackOwner {
                 )
                 .await
             {
-                let _ = plex
-                    .playback
-                    .command(SessionCommand::OperationFailed(error));
+                let _ = plex.playback.command(Command::OperationFailed(error));
             }
         });
         true

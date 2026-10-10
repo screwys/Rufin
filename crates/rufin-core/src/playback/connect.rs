@@ -1,8 +1,12 @@
 //! A Rufin receiver owns playback and its queue; this device observes and controls it.
 use super::*;
 use crate::connect::{ConnectOwner, Control, casting::ReceiverState};
-use playback::{ExternalPlayback, PlaybackOutput, RemoteOutputProtocol};
-use std::sync::atomic::AtomicBool;
+use crate::playback::{
+    actor::Playback,
+    state::{Command, ExternalPlayback},
+};
+use playback::{PlaybackOutput, RemoteOutputProtocol};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Default)]
 struct VolumeRequests {
@@ -121,7 +125,7 @@ impl RufinPlayback {
             )
             .map_err(string_error)?;
         self.playback
-            .command(SessionCommand::SetAutoDj {
+            .command(Command::SetAutoDj {
                 enabled: state.auto_dj,
                 refill_threshold: state.auto_dj_threshold,
             })
@@ -202,7 +206,7 @@ impl PlaybackOwner {
             stored.ui.auto_dj_enabled = enabled;
             Ok(())
         });
-        self.send(SessionCommand::SetAutoDj {
+        self.send(Command::SetAutoDj {
             enabled,
             refill_threshold: usize::from(self.settings.load().ui.auto_dj_refill_threshold),
         });
@@ -210,7 +214,7 @@ impl PlaybackOwner {
 
     pub(crate) async fn receiver_state(&self) -> Result<ReceiverState, String> {
         let active = self.active().ok_or("Playback is unavailable")?;
-        let view = active.playback.projection().map_err(string_error)?.view;
+        let view = active.projection().map_err(string_error)?.view;
         let offset = view
             .queue
             .current_index
@@ -248,7 +252,7 @@ impl PlaybackOwner {
             shuffle: view.controls.shuffle_enabled,
             auto_dj: view.controls.auto_dj_enabled,
             auto_dj_threshold: usize::from(self.settings.load().ui.auto_dj_refill_threshold),
-            content_id: active.playback.queue_content_id().map_err(string_error)?,
+            content_id: active.queue_content_id().map_err(string_error)?,
         })
     }
 
@@ -291,7 +295,7 @@ impl PlaybackOwner {
                 window_offset: 0,
             });
         };
-        let queue = active.playback.handoff_snapshot().map_err(string_error)?.0;
+        let queue = active.handoff_snapshot().map_err(string_error)?.0;
         let (positions, total) = if filter.trim().is_empty() {
             let start = (offset as usize).min(queue.order.len());
             let end = start.saturating_add(limit as usize).min(queue.order.len());
@@ -338,10 +342,10 @@ impl PlaybackOwner {
             return plex.cast_queue_snapshot().await;
         }
         let active = self.active().ok_or("Playback is unavailable")?;
-        if let Some(snapshot) = active.playback.continuation().map_err(string_error)? {
+        if let Some(snapshot) = active.continuation().map_err(string_error)? {
             return Ok(Some(snapshot));
         }
-        let queue = active.playback.handoff_snapshot().map_err(string_error)?.0;
+        let queue = active.handoff_snapshot().map_err(string_error)?.0;
         let Some(current) = queue
             .current_index
             .or_else(|| (!queue.entries.is_empty()).then_some(0))
@@ -414,7 +418,7 @@ impl PlaybackOwner {
         let receiver = Arc::new(RufinPlayback {
             peer: remote.id.clone(),
             connect: Arc::downgrade(&connect),
-            playback: active.playback.clone(),
+            playback: active.clone(),
             database: self.database.clone(),
             output: output.clone(),
             commands: tokio::sync::Mutex::new(()),
@@ -429,14 +433,7 @@ impl PlaybackOwner {
             connect
                 .select_receiver(
                     &receiver.peer,
-                    active
-                        .playback
-                        .projection()
-                        .map_err(string_error)?
-                        .view
-                        .queue
-                        .total
-                        > 0,
+                    active.projection().map_err(string_error)?.view.queue.total > 0,
                 )
                 .await?;
             if cancelled.load(Ordering::Acquire) {
@@ -505,9 +502,7 @@ impl PlaybackOwner {
                 }
                 .await;
                 if let Err(error) = result {
-                    let _ = receiver
-                        .playback
-                        .command(SessionCommand::OperationFailed(error));
+                    let _ = receiver.playback.command(Command::OperationFailed(error));
                 }
             }
         });
@@ -566,9 +561,7 @@ impl PlaybackOwner {
                 )
                 .await
             {
-                let _ = receiver
-                    .playback
-                    .command(SessionCommand::OperationFailed(error));
+                let _ = receiver.playback.command(Command::OperationFailed(error));
             }
         });
         true
@@ -611,9 +604,7 @@ impl PlaybackOwner {
             }
             .await;
             if let Err(error) = result {
-                let _ = receiver
-                    .playback
-                    .command(SessionCommand::OperationFailed(error));
+                let _ = receiver.playback.command(Command::OperationFailed(error));
             }
         });
         true
@@ -666,19 +657,17 @@ impl PlaybackOwner {
             }
             .await;
             if let Err(error) = result {
-                let _ = receiver
-                    .playback
-                    .command(SessionCommand::OperationFailed(error));
+                let _ = receiver.playback.command(Command::OperationFailed(error));
             }
         });
         true
     }
 
-    pub(super) fn send_rufin(&self, command: SessionCommand) -> Option<SessionCommand> {
+    pub(super) fn send_rufin(&self, command: Command) -> Option<Command> {
         let Some(receiver) = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return Some(command);
         };
-        if let SessionCommand::Insert { input, target } = command {
+        if let Command::Insert { input, target } = command {
             self.runtime.spawn(async move {
                 let _command = receiver.commands.lock().await;
                 if let Err(error) = receiver
@@ -692,22 +681,20 @@ impl PlaybackOwner {
                     )
                     .await
                 {
-                    let _ = receiver
-                        .playback
-                        .command(SessionCommand::OperationFailed(error));
+                    let _ = receiver.playback.command(Command::OperationFailed(error));
                 }
             });
             return None;
         }
         let control = match command {
-            SessionCommand::PlayPause => Control::PlayPause,
-            SessionCommand::Play => Control::Play,
-            SessionCommand::Pause => Control::Pause,
-            SessionCommand::Stop => Control::Stop,
-            SessionCommand::Next => Control::Next,
-            SessionCommand::Previous => Control::Previous,
-            SessionCommand::Seek(millis) => Control::Seek { millis },
-            SessionCommand::SetVolume(value) => {
+            Command::PlayPause => Control::PlayPause,
+            Command::Play => Control::Play,
+            Command::Pause => Control::Pause,
+            Command::Stop => Control::Stop,
+            Command::Next => Control::Next,
+            Command::Previous => Control::Previous,
+            Command::Seek(millis) => Control::Seek { millis },
+            Command::SetVolume(value) => {
                 receiver
                     .volume
                     .lock()
@@ -716,7 +703,7 @@ impl PlaybackOwner {
                 receiver.volume_changed.notify_one();
                 return None;
             }
-            SessionCommand::PersistVolume(value) => {
+            Command::PersistVolume(value) => {
                 receiver
                     .volume
                     .lock()
@@ -725,18 +712,18 @@ impl PlaybackOwner {
                 receiver.volume_changed.notify_one();
                 return None;
             }
-            SessionCommand::SetMuted(muted) => Control::Mute { muted },
-            SessionCommand::SetRepeat(mode) => Control::Repeat { mode },
-            SessionCommand::SetShuffle { enabled, .. } => Control::Shuffle { enabled },
-            SessionCommand::SetAutoDj { enabled, .. } => Control::AutoDj { enabled },
-            SessionCommand::Activate(position) => Control::Activate { position },
-            SessionCommand::Remove(position) => Control::Remove {
+            Command::SetMuted(muted) => Control::Mute { muted },
+            Command::SetRepeat(mode) => Control::Repeat { mode },
+            Command::SetShuffle { enabled, .. } => Control::Shuffle { enabled },
+            Command::SetAutoDj { enabled, .. } => Control::AutoDj { enabled },
+            Command::Activate(position) => Control::Activate { position },
+            Command::Remove(position) => Control::Remove {
                 positions: vec![position],
             },
-            SessionCommand::RemoveMany(positions) => Control::Remove { positions },
-            SessionCommand::Reorder { positions, target } => Control::Reorder { positions, target },
-            SessionCommand::MoveAfterCurrent(position) => Control::MoveNext { position },
-            SessionCommand::Clear { include_current } => Control::Clear { include_current },
+            Command::RemoveMany(positions) => Control::Remove { positions },
+            Command::Reorder { positions, target } => Control::Reorder { positions, target },
+            Command::MoveAfterCurrent(position) => Control::MoveNext { position },
+            Command::Clear { include_current } => Control::Clear { include_current },
             command => return Some(command),
         };
         self.runtime.spawn(async move {
@@ -750,9 +737,7 @@ impl PlaybackOwner {
             }
             .await;
             if let Err(error) = result {
-                let _ = receiver
-                    .playback
-                    .command(SessionCommand::OperationFailed(error));
+                let _ = receiver.playback.command(Command::OperationFailed(error));
             }
         });
         None

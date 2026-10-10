@@ -16,9 +16,7 @@ impl PlaybackOwner {
             receiver.cancel();
         }
         tokio::task::spawn_blocking(move || {
-            active
-                .playback
-                .replace_backend(playback::PlaybackOutput::Local, backend)
+            active.replace_backend(playback::PlaybackOutput::Local, backend)
         })
         .await
         .map_err(string_error)?
@@ -41,14 +39,13 @@ impl PlaybackOwner {
         }
         self.active()
             .ok_or("Playback is unavailable")?
-            .playback
             .queue_content_id()
             .map_err(string_error)
     }
 
     pub(crate) fn has_continuation(&self) -> bool {
         self.active()
-            .and_then(|active| active.playback.projection().ok())
+            .and_then(|active| active.projection().ok())
             .is_some_and(|projection| {
                 projection.view.transport.current.is_some()
                     && projection.view.transport.state != playback::TransportStatus::Stopped
@@ -66,7 +63,6 @@ impl PlaybackOwner {
         }
         self.active()
             .ok_or("Playback is unavailable")?
-            .playback
             .continuation()
             .map_err(string_error)
     }
@@ -208,7 +204,6 @@ impl PlaybackOwner {
         }
         self.active()
             .ok_or("Playback is unavailable")?
-            .playback
             .stop_continuation(expected)
             .map_err(string_error)
     }
@@ -266,11 +261,7 @@ impl PlaybackOwner {
             .await
             .map_err(string_error)?;
         tokio::task::spawn_blocking(move || {
-            active.playback.adopt_continuation(
-                prepared.continuation,
-                prepared.stream,
-                prepared.backend,
-            )
+            active.adopt_continuation(prepared.continuation, prepared.stream, prepared.backend)
         })
         .await
         .map_err(string_error)?

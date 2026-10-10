@@ -1,121 +1,65 @@
 //! Complete lightweight playback membership, order, and nearby resolved metadata.
-use crate::{Provenance, QueueItem, QueueRow, RepeatMode};
-pub use library::{QueuePlacement as Placement, QueueReorderTarget};
+use ::playback::{Provenance, QueueReorderTarget, QueueRow, RepeatMode};
 use std::sync::{Arc, OnceLock};
 use thiserror::Error;
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct BatchItem {
-    pub item: QueueItem,
-    pub provenance: Provenance,
-}
-impl BatchItem {
-    pub fn direct(item: QueueItem, provenance: Provenance) -> Self {
-        Self { item, provenance }
-    }
-}
-#[derive(Clone, Debug, PartialEq)]
-pub struct Batch {
-    pub(crate) input: library::QueueInput,
-    pub(crate) context_title: Option<Arc<library::QueueContextTitle>>,
-    pub(crate) shuffle_seed: u64,
-    pub(crate) random_start: bool,
-    pub(crate) shuffled: bool,
-}
-impl Batch {
-    pub fn new(items: Vec<BatchItem>) -> Self {
-        Self::from_input(library::QueueInput::Items(
-            items
-                .into_iter()
-                .map(|item| (item.item, item.provenance))
-                .collect(),
-        ))
-    }
-    pub fn from_input(input: library::QueueInput) -> Self {
-        Self {
-            input,
-            context_title: None,
-            shuffle_seed: 0,
-            random_start: false,
-            shuffled: false,
-        }
-    }
-    pub fn with_shuffle_intent(mut self, seed: u64, random_start: bool) -> Self {
-        self.shuffle_seed = seed;
-        self.random_start = random_start;
-        self
-    }
-    pub fn with_context_title(mut self, title: Option<Arc<library::QueueContextTitle>>) -> Self {
-        self.context_title = title;
-        self
-    }
-    pub fn input(&self) -> &library::QueueInput {
-        &self.input
-    }
-    pub fn context_title(&self) -> Option<&Arc<library::QueueContextTitle>> {
-        self.context_title.as_ref()
-    }
-    pub fn shuffled_seed(&self) -> Option<u64> {
-        self.shuffled.then_some(self.shuffle_seed)
-    }
-    pub(crate) fn activation_context(&self, index: usize) -> Option<(String, String, usize)> {
-        match &self.input {
-            library::QueueInput::Query {
-                context_id,
-                anchor_uri: Some(uri),
-                ..
-            } => Some((context_id.to_string(), uri.clone(), index)),
-            library::QueueInput::PlaylistQuery {
-                context_id,
-                anchor_uri: Some(uri),
-                ..
-            } => Some((context_id.to_string(), uri.clone(), index)),
-            library::QueueInput::Items(items) => {
-                let (
-                    item,
-                    Provenance::Context {
-                        context_id,
-                        source_rank,
-                        ..
-                    },
-                ) = items.get(index)?
-                else {
-                    return None;
-                };
-                Some((context_id.to_string(), item.media_uri.clone(), *source_rank))
-            }
-            library::QueueInput::Uris {
-                order,
-                context_id,
-                source_start,
-            } => Some((
-                context_id.to_string(),
-                order.get(index)?.clone(),
-                source_start + index,
-            )),
-            library::QueueInput::PlaylistEntries { context_id, order } if index < order.len() => {
-                Some((context_id.to_string(), String::new(), index))
-            }
-            _ => None,
-        }
-    }
-}
-
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
-pub enum SequenceError {
+pub(crate) enum SequenceError {
     #[error("the selected playback entry is missing")]
     MissingSelectedEntry,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub enum QueuePersistenceKind {
+pub(super) enum QueuePersistenceKind {
     State,
     Order,
     Membership,
 }
 
 #[derive(Clone, Debug)]
-pub struct Sequence {
+pub(super) struct QueuePersistence {
+    revision: u64,
+    state: library::QueueRestore,
+    kind: QueuePersistenceKind,
+}
+
+impl QueuePersistence {
+    pub(super) fn capture(sequence: &Sequence, kind: QueuePersistenceKind) -> Self {
+        Self {
+            revision: sequence.revision(),
+            state: sequence.snapshot(),
+            kind,
+        }
+    }
+    pub(super) fn coalesce(&mut self, newer: Self) {
+        if newer.revision >= self.revision {
+            let kind = self.kind.max(newer.kind);
+            *self = newer;
+            self.kind = kind;
+        }
+    }
+    pub(super) fn state(&self) -> &library::QueueRestore {
+        &self.state
+    }
+    pub(super) fn kind(&self) -> QueuePersistenceKind {
+        self.kind
+    }
+    pub(super) fn current(&self) -> Option<usize> {
+        self.state.current_index
+    }
+    pub(super) fn progress_millis(&self) -> u64 {
+        self.state.progress_millis.max(0) as u64
+    }
+    pub(super) const fn repeat_mode(&self) -> RepeatMode {
+        self.state.repeat_mode
+    }
+    pub(super) const fn shuffled(&self) -> bool {
+        self.state.shuffled
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct Sequence {
     members: Arc<[library::QueueEntry]>,
     order: Arc<[u32]>,
     rows: Vec<Arc<QueueRow>>,
@@ -131,7 +75,7 @@ pub struct Sequence {
 }
 
 impl Sequence {
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             members: Arc::from([]),
             order: Arc::from([]),
@@ -146,7 +90,7 @@ impl Sequence {
             window_dirty: true,
         }
     }
-    pub fn from_window(
+    pub(super) fn from_window(
         window: library::QueueRestore,
         revision: u64,
     ) -> Result<Self, SequenceError> {
@@ -171,7 +115,7 @@ impl Sequence {
         }
         Ok(sequence)
     }
-    pub(crate) fn snapshot(&self) -> library::QueueRestore {
+    pub(super) fn snapshot(&self) -> library::QueueRestore {
         library::QueueRestore {
             entries: self.members.clone(),
             order: self.order.clone(),
@@ -190,57 +134,60 @@ impl Sequence {
         self.window_dirty |= kind != QueuePersistenceKind::State;
         self.dirty = Some(self.dirty.map_or(kind, |old| old.max(kind)));
     }
-    pub(crate) fn take_persistence(&mut self) -> Option<QueuePersistenceKind> {
+    pub(super) fn take_persistence(&mut self) -> Option<QueuePersistenceKind> {
         self.dirty.take()
     }
-    pub(crate) fn entry_at(&self, index: usize) -> Option<&library::QueueEntry> {
+    pub(super) fn entry_at(&self, index: usize) -> Option<&library::QueueEntry> {
         self.members.get(*self.order.get(index)? as usize)
     }
-    pub fn entries(&self) -> &[Arc<QueueRow>] {
+    pub(super) fn entries(&self) -> &[Arc<QueueRow>] {
         &self.rows
     }
-    pub fn total(&self) -> usize {
+    pub(super) fn total(&self) -> usize {
         self.order.len()
     }
-    pub fn at(&self, index: usize) -> Option<&Arc<QueueRow>> {
+    pub(super) fn at(&self, index: usize) -> Option<&Arc<QueueRow>> {
         self.rows.iter().find(|row| row.position == index)
     }
-    pub fn selected(&self) -> Option<&Arc<QueueRow>> {
+    pub(super) fn selected(&self) -> Option<&Arc<QueueRow>> {
         self.at(self.selected_index?)
     }
-    pub fn selected_index(&self) -> Option<usize> {
+    pub(super) fn selected_index(&self) -> Option<usize> {
         self.selected_index
     }
-    pub fn context_index(&self, context_id: &str, uri: &str, rank: usize) -> Option<usize> {
+    pub(super) fn context_index(&self, context_id: &str, uri: &str, rank: usize) -> Option<usize> {
         self.order.iter().position(|&i| { let e = &self.members[i as usize];
             e.media_uri.as_ref() == uri && matches!(&e.provenance, Provenance::Context { context_id: c, source_rank, .. } if c.as_ref() == context_id && *source_rank == rank) })
     }
-    pub fn repeat_mode(&self) -> RepeatMode {
+    pub(super) fn repeat_mode(&self) -> RepeatMode {
         self.repeat_mode
     }
-    pub fn shuffle_enabled(&self) -> bool {
+    pub(super) fn shuffle_enabled(&self) -> bool {
         self.shuffle_enabled
     }
-    pub(crate) fn observe_shuffle(&mut self, enabled: bool) {
+    pub(super) fn observe_shuffle(&mut self, enabled: bool) {
         self.shuffle_enabled = enabled;
     }
-    pub(crate) fn persist_membership(&mut self) {
+    pub(super) fn persist_membership(&mut self) {
         self.changed(QueuePersistenceKind::Membership);
     }
-    pub fn revision(&self) -> u64 {
+    pub(super) fn persist_state(&mut self) {
+        self.dirty.get_or_insert(QueuePersistenceKind::State);
+    }
+    pub(super) fn revision(&self) -> u64 {
         self.revision
     }
-    pub fn content_id(&self) -> &str {
+    pub(super) fn content_id(&self) -> &str {
         self.content_id
             .get_or_init(|| library::queue_content_id(&self.members, &self.order))
     }
-    pub fn progress_millis(&self) -> u64 {
+    pub(super) fn progress_millis(&self) -> u64 {
         self.progress_millis
     }
-    pub fn set_progress_millis(&mut self, value: u64) {
+    pub(super) fn set_progress_millis(&mut self, value: u64) {
         self.progress_millis = value;
     }
-    pub(crate) fn set_selected_duration(&mut self, millis: u64) {
+    pub(super) fn set_selected_duration(&mut self, millis: u64) {
         let selected = self.selected_index;
         if let Some(row) = self
             .rows
@@ -250,17 +197,17 @@ impl Sequence {
             Arc::make_mut(row).item.duration_millis = millis.min(i64::MAX as u64) as i64;
         }
     }
-    pub fn set_repeat_mode(&mut self, value: RepeatMode) {
+    pub(super) fn set_repeat_mode(&mut self, value: RepeatMode) {
         if self.repeat_mode != value {
             self.repeat_mode = value;
             self.changed(QueuePersistenceKind::State);
         }
     }
-    pub fn remaining_after_selected(&self) -> usize {
+    pub(super) fn remaining_after_selected(&self) -> usize {
         self.total()
             .saturating_sub(self.selected_index.map_or(0, |i| i + 1))
     }
-    pub(crate) fn next_index(&self, eos: bool) -> Option<usize> {
+    pub(super) fn next_index(&self, eos: bool) -> Option<usize> {
         let current = self.selected_index?;
         if eos && self.repeat_mode == RepeatMode::One {
             return Some(current);
@@ -270,13 +217,13 @@ impl Sequence {
         }
         (self.repeat_mode == RepeatMode::All && self.total() > 0).then_some(self.total())
     }
-    pub(crate) fn next_index_eos(&self) -> Option<usize> {
+    pub(super) fn next_index_eos(&self) -> Option<usize> {
         self.next_index(true)
     }
-    pub fn peek_next_eos(&self) -> Option<&Arc<QueueRow>> {
+    pub(super) fn peek_next_eos(&self) -> Option<&Arc<QueueRow>> {
         self.at(self.next_index_eos()?)
     }
-    pub fn previous_index(&self) -> Option<usize> {
+    pub(super) fn previous_index(&self) -> Option<usize> {
         let current = self.selected_index?;
         if current == 0 && self.repeat_mode == RepeatMode::All {
             self.total().checked_sub(1)
@@ -284,17 +231,7 @@ impl Sequence {
             current.checked_sub(1)
         }
     }
-    pub fn peek_previous(&self) -> Option<&Arc<QueueRow>> {
-        self.at(self.previous_index()?)
-    }
-    pub fn upcoming(&self, limit: usize) -> Vec<&Arc<QueueRow>> {
-        let start = self.selected_index.map_or(0, |i| i + 1);
-        (start..self.total())
-            .take(limit)
-            .filter_map(|i| self.at(i))
-            .collect()
-    }
-    pub(crate) fn activate_index(&mut self, index: usize) -> bool {
+    pub(super) fn activate_index(&mut self, index: usize) -> bool {
         if index >= self.total() || self.selected_index == Some(index) {
             return false;
         }
@@ -303,7 +240,7 @@ impl Sequence {
         self.window_dirty = true;
         true
     }
-    pub(crate) fn activate_backend(&mut self, index: usize) -> bool {
+    pub(super) fn activate_backend(&mut self, index: usize) -> bool {
         if index >= self.total() {
             return false;
         }
@@ -312,7 +249,7 @@ impl Sequence {
         self.window_dirty = true;
         true
     }
-    pub(crate) fn start_next_pass(&mut self) {
+    pub(super) fn start_next_pass(&mut self) {
         let old = self.order.clone();
         let order = Arc::make_mut(&mut self.order);
         for (i, entry) in order.iter_mut().enumerate() {
@@ -326,7 +263,7 @@ impl Sequence {
         self.selected_index = None;
         self.changed(QueuePersistenceKind::Order);
     }
-    pub(crate) fn advance_index(&mut self, eos: bool) -> Option<usize> {
+    pub(super) fn advance_index(&mut self, eos: bool) -> Option<usize> {
         let mut index = self.next_index(eos)?;
         if index == self.total() {
             self.start_next_pass();
@@ -336,19 +273,6 @@ impl Sequence {
         self.progress_millis = 0;
         self.window_dirty = true;
         Some(index)
-    }
-    pub fn advance_manual(&mut self) -> Option<&Arc<QueueRow>> {
-        let i = self.advance_index(false)?;
-        self.at(i)
-    }
-    pub fn advance_eos(&mut self) -> Option<&Arc<QueueRow>> {
-        let i = self.advance_index(true)?;
-        self.at(i)
-    }
-    pub fn previous(&mut self) -> Option<&Arc<QueueRow>> {
-        let i = self.previous_index()?;
-        self.activate_index(i);
-        self.at(i)
     }
     fn remap_positions(
         &mut self,
@@ -369,7 +293,7 @@ impl Sequence {
             true
         });
     }
-    pub(crate) fn shuffle(&mut self, enabled: bool, seed: u64, pending: &mut [Option<usize>]) {
+    pub(super) fn shuffle(&mut self, enabled: bool, seed: u64, pending: &mut [Option<usize>]) {
         if self.shuffle_enabled == enabled {
             return;
         }
@@ -386,7 +310,7 @@ impl Sequence {
         self.remap_positions(|position| Some(positions[old[position] as usize]), pending);
         self.changed(QueuePersistenceKind::Order);
     }
-    pub(crate) fn random_start(&mut self, seed: u64) {
+    pub(super) fn random_start(&mut self, seed: u64) {
         self.shuffle_enabled = true;
         let old = self.order.clone();
         if let Some(selected) = self.selected_index {
@@ -400,7 +324,7 @@ impl Sequence {
         self.trim_rows();
         self.content_id.take();
     }
-    pub(crate) fn add_page(
+    pub(super) fn add_page(
         &mut self,
         page: library::QueueReadPage,
         target: QueueReorderTarget,
@@ -468,7 +392,7 @@ impl Sequence {
             QueueReorderTarget::After(position) => position.saturating_add(1).min(self.total()),
         }
     }
-    pub(crate) fn remove(&mut self, positions: &[usize], pending: &mut [Option<usize>]) {
+    pub(super) fn remove(&mut self, positions: &[usize], pending: &mut [Option<usize>]) {
         let mut removed = positions
             .iter()
             .copied()
@@ -517,7 +441,7 @@ impl Sequence {
         }
         self.changed(QueuePersistenceKind::Membership);
     }
-    pub(crate) fn reorder(
+    pub(super) fn reorder(
         &mut self,
         positions: &[usize],
         target: &QueueReorderTarget,
@@ -588,7 +512,7 @@ impl Sequence {
         self.members = members.into();
         self.changed(QueuePersistenceKind::Membership);
     }
-    pub(crate) fn clear(&mut self, include_current: bool, pending: &mut [Option<usize>]) {
+    pub(super) fn clear(&mut self, include_current: bool, pending: &mut [Option<usize>]) {
         let selected = self.selected_index.filter(|_| !include_current);
         let member = selected.and_then(|i| self.entry_at(i).cloned());
         self.remap_positions(
@@ -609,7 +533,7 @@ impl Sequence {
         self.rows.retain(|row| range.contains(&row.position));
         self.rows.sort_by_key(|row| row.position);
     }
-    pub(crate) fn read_request(&mut self) -> Option<library::QueueReadRequest> {
+    pub(super) fn read_request(&mut self) -> Option<library::QueueReadRequest> {
         if !std::mem::take(&mut self.window_dirty) {
             return None;
         }
@@ -621,7 +545,7 @@ impl Sequence {
             .collect::<Vec<_>>();
         (!entries.is_empty()).then_some(library::QueueReadRequest::Hydrate { entries })
     }
-    pub(crate) fn hydrate(&mut self, page: library::QueueReadPage) {
+    pub(super) fn hydrate(&mut self, page: library::QueueReadPage) {
         for row in page.rows {
             if self.at(row.position).is_none() {
                 self.rows.push(row);
@@ -630,13 +554,13 @@ impl Sequence {
         self.trim_rows();
         self.window_dirty = true;
     }
-    pub(crate) fn need_metadata(&mut self) {
+    pub(super) fn need_metadata(&mut self) {
         self.window_dirty = true;
     }
-    pub(crate) fn artwork_uris(&self) -> Vec<String> {
+    pub(super) fn artwork_uris(&self) -> Vec<String> {
         self.rows.iter().map(|e| e.media_uri.clone()).collect()
     }
-    pub(crate) fn refresh_artwork(&mut self, bindings: &[(String, Option<Vec<u8>>)]) -> bool {
+    pub(super) fn refresh_artwork(&mut self, bindings: &[(String, Option<Vec<u8>>)]) -> bool {
         let mut changed = false;
         for row in &mut self.rows {
             if let Some((_, binding)) = bindings.iter().find(|(u, _)| u == &row.media_uri)
@@ -666,6 +590,7 @@ impl Default for Sequence {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ::playback::QueueItem;
 
     fn page(start: usize, count: usize) -> library::QueueReadPage {
         let entries = (start..start + count)
@@ -790,7 +715,7 @@ mod tests {
         assert_eq!(s.selected_index(), Some(0));
         assert!(Arc::ptr_eq(&members, &s.members));
         assert_eq!(s.take_persistence(), Some(QueuePersistenceKind::Order));
-        s.previous();
+        s.activate_index(s.previous_index().unwrap());
         assert_eq!(s.selected_index(), Some(9));
         assert_eq!(s.take_persistence(), None);
     }

@@ -1,92 +1,32 @@
+use super::queue::{QueuePersistence, QueuePersistenceKind, Sequence};
 use super::{PlaybackStoreWork, enqueue_queue_save, save_pending_queue};
 use library::{Database, QueueInput, QueueRestore};
-use playback::{
-    BackendCommand, BackendError, BackendEvent, ClockSample, PlayRequest, Playback,
-    PlaybackBackend, PlaybackOutput, PlaybackSettings, PlaybackUpdate, QueuePersistence,
-    QueuePersistenceKind, QueuePlacement, RepeatMode, Sequence, SessionCommand, SessionEffect,
-};
-use std::sync::{Arc, Mutex, mpsc};
-use std::time::Duration;
+use playback::RepeatMode;
+use std::sync::{Arc, Mutex};
 
-struct IdleBackend;
-
-impl PlaybackBackend for IdleBackend {
-    fn send(&mut self, _: BackendCommand) -> Result<(), BackendError> {
-        Ok(())
-    }
-
-    fn drain_events(&mut self) -> Vec<BackendEvent> {
-        Vec::new()
-    }
-}
-
-fn start_playback() -> (Playback, mpsc::Receiver<PlaybackUpdate>) {
-    let (sender, updates) = mpsc::channel();
-    let (playback, _) = Playback::start(
-        Sequence::new(),
-        "queue-writer-test",
-        PlaybackSettings::default(),
-        false,
-        1,
-        PlaybackOutput::Local,
-        Box::new(IdleBackend),
-        Arc::new(|| ClockSample {
-            monotonic_millis: 0,
-            unix_seconds: 0,
-            local_period: "1970-01".into(),
-        }),
-        move |update| {
-            let _ = sender.send(update);
-        },
-    )
-    .unwrap();
-    (playback, updates)
-}
-
-fn replace_queue(playback: &Playback, replacement: usize, count: usize) {
-    let request = PlayRequest::ordered(
-        QueueInput::Uris {
-            order: (0..count)
-                .map(|index| format!("https://example.test/{replacement}/{index}"))
-                .collect(),
-            context_id: format!("replacement-{replacement}").into(),
-            source_start: 0,
-        },
-        0,
-        QueuePlacement::Now,
-        false,
-    );
-    let reservation = playback.admit_play(&request).unwrap().unwrap();
-    let (batch, placement) = request.compact_batch(7);
-    assert!(
-        playback
-            .complete_materialization(reservation.id, batch, placement)
-            .unwrap()
-    );
-}
-
-async fn next_snapshot(
-    playback: &Playback,
-    updates: &mpsc::Receiver<PlaybackUpdate>,
+async fn replace_queue(
+    sequence: &mut Sequence,
     database: &Database,
-) -> QueuePersistence {
-    loop {
-        let update = updates.recv_timeout(Duration::from_secs(5)).unwrap();
-        for effect in update.effects {
-            if let SessionEffect::Queue { id, request } = effect {
-                let result = database.read_queue(request).await.unwrap();
-                playback
-                    .command(SessionCommand::QueueComplete {
-                        id,
-                        result: Box::new(Ok(result)),
-                    })
-                    .unwrap();
-            }
-        }
-        if let Some(snapshot) = update.queue_persistence {
-            return snapshot;
-        }
-    }
+    replacement: usize,
+    count: usize,
+) {
+    let page = database
+        .read_queue(library::QueueReadRequest::Capture {
+            context_title: None,
+            input: Box::new(QueueInput::Uris {
+                order: (0..count)
+                    .map(|index| format!("https://example.test/{replacement}/{index}"))
+                    .collect(),
+                context_id: format!("replacement-{replacement}").into(),
+                source_start: 0,
+            }),
+            anchor_index: 0,
+            random_start: None,
+            shuffled: None,
+        })
+        .await
+        .unwrap();
+    sequence.add_page(page, library::QueueReorderTarget::End, true, None, &mut []);
 }
 
 fn assert_restored_state(restored: &QueueRestore, expected: &QueueRestore) {
@@ -104,23 +44,25 @@ async fn paused_queue_writer_retains_only_latest_membership_and_one_wakeup() {
     let database = Database::open(directory.path().join("queue.sqlite3"))
         .await
         .unwrap();
-    let (playback, updates) = start_playback();
+    let mut sequence = Sequence::new();
     let pending = Mutex::new(None);
     let (sender, work) = async_channel::unbounded();
     let mut retired_memberships = Vec::new();
     let mut retired_orders = Vec::new();
 
     for replacement in 0..12 {
-        replace_queue(&playback, replacement, 512);
-        let snapshot = next_snapshot(&playback, &updates, &database).await;
+        replace_queue(&mut sequence, &database, replacement, 512).await;
+        let kind = sequence.take_persistence().unwrap();
+        let snapshot = QueuePersistence::capture(&sequence, kind);
         assert_eq!(snapshot.kind(), QueuePersistenceKind::Membership);
         let remove = snapshot.state().order.len() - 1;
         retired_memberships.push(Arc::downgrade(&snapshot.state().entries));
         retired_orders.push(Arc::downgrade(&snapshot.state().order));
         enqueue_queue_save(&pending, &sender, snapshot);
 
-        playback.command(SessionCommand::Remove(remove)).unwrap();
-        let snapshot = next_snapshot(&playback, &updates, &database).await;
+        sequence.remove(&[remove], &mut []);
+        let kind = sequence.take_persistence().unwrap();
+        let snapshot = QueuePersistence::capture(&sequence, kind);
         assert_eq!(snapshot.kind(), QueuePersistenceKind::Membership);
         assert_eq!(snapshot.state().entries.len(), 511);
         let current_membership = Arc::downgrade(&snapshot.state().entries);
@@ -159,7 +101,6 @@ async fn paused_queue_writer_retains_only_latest_membership_and_one_wakeup() {
     assert!(pending.lock().unwrap().is_none());
     assert!(work.is_empty());
     assert_restored_state(&database.restore_queue().await.unwrap(), &expected);
-    playback.shutdown().unwrap();
 }
 
 #[tokio::test]
@@ -168,36 +109,41 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
     let database = Database::open(directory.path().join("queue.sqlite3"))
         .await
         .unwrap();
-    let (playback, updates) = start_playback();
+    let mut sequence = Sequence::new();
     let pending = Mutex::new(None);
     let (sender, work) = async_channel::unbounded();
 
-    replace_queue(&playback, 0, 24);
-    let membership = next_snapshot(&playback, &updates, &database).await;
+    replace_queue(&mut sequence, &database, 0, 24).await;
+    let kind = sequence.take_persistence().unwrap();
+    let membership = QueuePersistence::capture(&sequence, kind);
     assert_eq!(membership.kind(), QueuePersistenceKind::Membership);
     enqueue_queue_save(&pending, &sender, membership);
 
-    for (command, expected_kind) in [
-        (
-            SessionCommand::SetShuffle {
-                enabled: true,
-                seed: 19,
-            },
-            QueuePersistenceKind::Order,
-        ),
-        (SessionCommand::Next, QueuePersistenceKind::State),
-        (
-            SessionCommand::SetRepeat(RepeatMode::All),
-            QueuePersistenceKind::State,
-        ),
-        (SessionCommand::Stop, QueuePersistenceKind::State),
-        (SessionCommand::Seek(42_000), QueuePersistenceKind::State),
-    ] {
-        playback.command(command).unwrap();
-        let snapshot = next_snapshot(&playback, &updates, &database).await;
-        assert_eq!(snapshot.kind(), expected_kind);
-        enqueue_queue_save(&pending, &sender, snapshot);
-    }
+    sequence.shuffle(true, 19, &mut []);
+    let kind = sequence.take_persistence().unwrap();
+    assert_eq!(kind, QueuePersistenceKind::Order);
+    enqueue_queue_save(
+        &pending,
+        &sender,
+        QueuePersistence::capture(&sequence, kind),
+    );
+
+    sequence.advance_index(false);
+    sequence.set_repeat_mode(RepeatMode::All);
+    let kind = sequence.take_persistence().unwrap();
+    assert_eq!(kind, QueuePersistenceKind::State);
+    enqueue_queue_save(
+        &pending,
+        &sender,
+        QueuePersistence::capture(&sequence, kind),
+    );
+
+    sequence.set_progress_millis(42_000);
+    enqueue_queue_save(
+        &pending,
+        &sender,
+        QueuePersistence::capture(&sequence, QueuePersistenceKind::State),
+    );
     assert_eq!(work.len(), 1);
     let expected = {
         let pending = pending.lock().unwrap();
@@ -216,20 +162,20 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
     save_pending_queue(&database, &pending).await.unwrap();
     assert_restored_state(&database.restore_queue().await.unwrap(), &expected);
 
-    for command in [
-        SessionCommand::SetShuffle {
-            enabled: false,
-            seed: 0,
-        },
-        SessionCommand::SetRepeat(RepeatMode::One),
-    ] {
-        playback.command(command).unwrap();
-        enqueue_queue_save(
-            &pending,
-            &sender,
-            next_snapshot(&playback, &updates, &database).await,
-        );
-    }
+    sequence.shuffle(false, 0, &mut []);
+    let kind = sequence.take_persistence().unwrap();
+    enqueue_queue_save(
+        &pending,
+        &sender,
+        QueuePersistence::capture(&sequence, kind),
+    );
+    sequence.set_repeat_mode(RepeatMode::One);
+    let kind = sequence.take_persistence().unwrap();
+    enqueue_queue_save(
+        &pending,
+        &sender,
+        QueuePersistence::capture(&sequence, kind),
+    );
     let expected = {
         let pending = pending.lock().unwrap();
         let snapshot = pending.as_ref().unwrap();
@@ -244,8 +190,8 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
     save_pending_queue(&database, &pending).await.unwrap();
     assert_restored_state(&database.restore_queue().await.unwrap(), &expected);
 
-    playback.command(SessionCommand::Seek(43_000)).unwrap();
-    let snapshot = next_snapshot(&playback, &updates, &database).await;
+    sequence.set_progress_millis(43_000);
+    let snapshot = QueuePersistence::capture(&sequence, QueuePersistenceKind::State);
     assert_eq!(snapshot.kind(), QueuePersistenceKind::State);
     let expected = snapshot.state().clone();
     enqueue_queue_save(&pending, &sender, snapshot);
@@ -256,5 +202,4 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
     save_pending_queue(&database, &pending).await.unwrap();
     assert_restored_state(&database.restore_queue().await.unwrap(), &expected);
     assert!(work.is_empty());
-    playback.shutdown().unwrap();
 }

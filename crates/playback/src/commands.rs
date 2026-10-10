@@ -1,13 +1,110 @@
 use std::sync::Arc;
 
+pub use library::{QueuePlacement as Placement, QueueReorderTarget};
 use library::{RadioSeed, RandomCriteria};
 
 use crate::{
-    AudioOutput, Batch, BatchItem, CastNetwork, Placement, PlaybackOutput, Provenance, QueueItem,
-    QueueReorderTarget, RemoteOutput, RepeatMode,
+    AudioOutput, CastNetwork, PlaybackOutput, Provenance, QueueItem, RemoteOutput, RepeatMode,
 };
 
 pub type QueuePlacement = Placement;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BatchItem {
+    pub item: QueueItem,
+    pub provenance: Provenance,
+}
+impl BatchItem {
+    pub fn direct(item: QueueItem, provenance: Provenance) -> Self {
+        Self { item, provenance }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct Batch {
+    pub input: library::QueueInput,
+    pub context_title: Option<Arc<library::QueueContextTitle>>,
+    pub shuffle_seed: u64,
+    pub random_start: bool,
+    pub shuffled: bool,
+}
+impl Batch {
+    pub fn new(items: Vec<BatchItem>) -> Self {
+        Self::from_input(library::QueueInput::Items(
+            items
+                .into_iter()
+                .map(|item| (item.item, item.provenance))
+                .collect(),
+        ))
+    }
+    pub fn from_input(input: library::QueueInput) -> Self {
+        Self {
+            input,
+            context_title: None,
+            shuffle_seed: 0,
+            random_start: false,
+            shuffled: false,
+        }
+    }
+    pub fn with_shuffle_intent(mut self, seed: u64, random_start: bool) -> Self {
+        self.shuffle_seed = seed;
+        self.random_start = random_start;
+        self
+    }
+    pub fn with_context_title(mut self, title: Option<Arc<library::QueueContextTitle>>) -> Self {
+        self.context_title = title;
+        self
+    }
+    pub fn input(&self) -> &library::QueueInput {
+        &self.input
+    }
+    pub fn context_title(&self) -> Option<&Arc<library::QueueContextTitle>> {
+        self.context_title.as_ref()
+    }
+    pub fn shuffled_seed(&self) -> Option<u64> {
+        self.shuffled.then_some(self.shuffle_seed)
+    }
+    fn activation_context(&self, index: usize) -> Option<(String, String, usize)> {
+        match &self.input {
+            library::QueueInput::Query {
+                context_id,
+                anchor_uri: Some(uri),
+                ..
+            } => Some((context_id.to_string(), uri.clone(), index)),
+            library::QueueInput::PlaylistQuery {
+                context_id,
+                anchor_uri: Some(uri),
+                ..
+            } => Some((context_id.to_string(), uri.clone(), index)),
+            library::QueueInput::Items(items) => {
+                let (
+                    item,
+                    Provenance::Context {
+                        context_id,
+                        source_rank,
+                        ..
+                    },
+                ) = items.get(index)?
+                else {
+                    return None;
+                };
+                Some((context_id.to_string(), item.media_uri.clone(), *source_rank))
+            }
+            library::QueueInput::Uris {
+                order,
+                context_id,
+                source_start,
+            } => Some((
+                context_id.to_string(),
+                order.get(index)?.clone(),
+                source_start + index,
+            )),
+            library::QueueInput::PlaylistEntries { context_id, order } if index < order.len() => {
+                Some((context_id.to_string(), String::new(), index))
+            }
+            _ => None,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct PlayRequest {

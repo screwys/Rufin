@@ -1,7 +1,23 @@
 use std::sync::Arc;
 
-use crate::sequence::Sequence;
-use crate::{PlaybackSession, QueueRow, RepeatMode, RunId, TransportStatus};
+use crate::{QueueRow, RepeatMode, RunId};
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum TransportStatus {
+    #[default]
+    Stopped,
+    Resolving,
+    Buffering,
+    Playing,
+    Paused,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PositionDiscontinuity {
+    pub run: RunId,
+    pub position_millis: u64,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueueSummaryView {
@@ -121,86 +137,4 @@ pub enum PlaybackNotice {
 pub struct PlaybackProjection {
     pub view: PlaybackView,
     pub notices: Vec<PlaybackNotice>,
-}
-
-impl Sequence {
-    pub fn summary(&self) -> QueueSummaryView {
-        let next_index = self.next_index_eos();
-        QueueSummaryView {
-            revision: self.revision(),
-            total: self.total(),
-            current_index: self.selected_index(),
-            next_index: next_index.filter(|index| *index < self.total()),
-            can_next: self.next_index(false).is_some(),
-        }
-    }
-}
-
-impl PlaybackSession {
-    pub fn view(&self) -> PlaybackView {
-        let sequence = self.sequence();
-        let settings = self.settings();
-        let mut summary = sequence.summary();
-        let offset = self.external_queue_extent().map_or(0, |(_, offset)| offset);
-        let projected_row = |row: &Arc<QueueRow>| {
-            let mut row = row.clone();
-            if offset != 0 {
-                Arc::make_mut(&mut row).position += offset;
-            }
-            row
-        };
-        if let Some((total, offset)) = self.external_queue_extent() {
-            summary.total = total;
-            summary.current_index = summary.current_index.map(|index| index + offset);
-            summary.next_index = summary.next_index.map(|index| index + offset);
-            summary.can_next = summary.current_index.is_some_and(|index| index + 1 < total)
-                || sequence.repeat_mode() != RepeatMode::Off;
-        }
-        PlaybackView {
-            queue_loading: self.queue_loading(),
-            queue: summary,
-            queue_window: sequence.entries().iter().map(projected_row).collect(),
-            transport: TransportView {
-                current: sequence.selected().map(|entry| {
-                    Arc::new(CurrentMedia {
-                        id: CurrentMediaId {
-                            run: self.current_run(),
-                            media_uri: sequence
-                                .entry_at(entry.position)
-                                .expect("current queue member")
-                                .media_uri
-                                .clone(),
-                        },
-                        row: projected_row(entry),
-                    })
-                }),
-                state: self.status(),
-                desired_playing: self.desired_playing(),
-                position_millis: self.position_millis(),
-                position_observed_at_millis: self.position_observed_at_millis(),
-                playback_rate: if self.playback_output().is_local() {
-                    settings.playback_rate
-                } else {
-                    1.0
-                },
-                duration_millis: self.duration_millis(),
-                can_seek: self.can_seek(),
-                buffering_percent: self.buffering_percent(),
-                error: self.last_error().map(str::to_string),
-            },
-            controls: ControlsView {
-                repeat_mode: sequence.repeat_mode(),
-                shuffle_enabled: sequence.shuffle_enabled(),
-                auto_dj_enabled: self.auto_dj_enabled(),
-                volume: if self.output_muted() {
-                    0.0
-                } else {
-                    self.output_volume()
-                },
-                muted: self.output_muted(),
-                audio_output: settings.audio_output.clone(),
-                playback_output: self.playback_output().clone(),
-            },
-        }
-    }
 }

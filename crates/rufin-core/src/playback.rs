@@ -1,7 +1,10 @@
-//! Rufin crossings for compact Playback, Database Queue persistence, streams, and Activity.
+//! Playback controls, source jobs, and persistent playback facts.
+pub(crate) mod actor;
 mod connect;
 mod continuation;
 mod plex;
+mod queue;
+pub(crate) mod state;
 pub(crate) use continuation::PreparedContinuation;
 #[cfg(test)]
 mod queue_tests;
@@ -15,19 +18,21 @@ pub fn seek_preview_matches_position(target_millis: u64, position_millis: u64) -
         .contains(&position_millis)
 }
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::runtime::VisualizerPublication;
+use actor::{Playback, WeakPlayback};
 use async_channel::{Receiver, Sender as EventSender, TrySendError};
 use library::{Database, ListenWrite, ReadCancellation};
 use playback::{
-    PlayRequest, Playback, PlaybackBackend, PlaybackProjection, PlaybackUpdate, PreparedStream,
-    QueueCommandPort, QueueReorderRequest, RadioCommandPort, RadioPlayRequest, RandomPlayRequest,
-    RepeatMode, RunId, SessionCommand, SessionEffect, StreamRequest, TransportCommandPort,
+    PlayRequest, PlaybackBackend, PlaybackProjection, PreparedStream, QueueCommandPort,
+    QueueReorderRequest, RadioCommandPort, RadioPlayRequest, RandomPlayRequest, RepeatMode, RunId,
+    StreamRequest, TransportCommandPort,
 };
+use queue::{QueuePersistence, QueuePersistenceKind, Sequence};
 use scrobbling::Scrobbler;
+use state::{AutoDjRequest, ClockSample, Command};
 use tracing::{debug, warn};
 
 use crate::loudness::LoudnessAnalysisOwner;
@@ -35,12 +40,6 @@ use crate::lyrics::{LyricsContext, LyricsService};
 use crate::settings::SettingsFile;
 use crate::source::SourceOwner;
 use crate::waveform::{WaveformMedia, WaveformOwner};
-
-#[derive(Clone)]
-struct ActivePlayback {
-    instance: u64,
-    playback: Playback,
-}
 
 struct OutputSelection {
     selected: playback::PlaybackOutput,
@@ -62,14 +61,10 @@ pub(crate) struct PlaybackOwner {
     scrobbler: Arc<Scrobbler>,
     source: Mutex<std::sync::Weak<SourceOwner>>,
     connect: Mutex<std::sync::Weak<crate::connect::ConnectOwner>>,
-    active: Mutex<Option<ActivePlayback>>,
-    stream_tasks: Mutex<std::collections::HashMap<RunId, tokio::task::JoinHandle<()>>>,
-    pending_queue: Mutex<Option<playback::QueuePersistence>>,
-    latest_queue_request: Mutex<(u64, u64)>,
+    active: Mutex<Option<Playback>>,
+    pending_queue: Mutex<Option<QueuePersistence>>,
     store_sender: async_channel::Sender<PlaybackStoreWork>,
     monotonic_origin: Instant,
-    play_id_prefix: String,
-    next_instance: AtomicU64,
     start_backend: Box<dyn Fn() -> Result<Box<dyn PlaybackBackend>, String> + Send + Sync>,
     cast: playback_cast::CastManager,
     output: Mutex<OutputSelection>,
@@ -83,25 +78,20 @@ enum PlaybackStoreWork {
         prepared: Box<PreparedContinuation>,
         reply: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
-    Artwork {
-        playback: Playback,
-        media_uris: Vec<String>,
-    },
     Activity(Box<playback::ActivityListen>),
     Flush(std::sync::mpsc::SyncSender<()>),
-    Read {
-        playback: Playback,
-        instance: u64,
-        id: u64,
-        request: library::QueueReadRequest,
+    Output {
+        volume: f64,
+        muted: bool,
+        audio_output: Option<String>,
     },
     Settings,
 }
 
 fn enqueue_queue_save(
-    pending: &Mutex<Option<playback::QueuePersistence>>,
+    pending: &Mutex<Option<QueuePersistence>>,
     sender: &async_channel::Sender<PlaybackStoreWork>,
-    update: playback::QueuePersistence,
+    update: QueuePersistence,
 ) {
     let mut pending = pending.lock().unwrap_or_else(|p| p.into_inner());
     if let Some(current) = pending.as_mut() {
@@ -114,14 +104,14 @@ fn enqueue_queue_save(
 
 async fn save_pending_queue(
     database: &Database,
-    pending: &Mutex<Option<playback::QueuePersistence>>,
+    pending: &Mutex<Option<QueuePersistence>>,
 ) -> library::LibraryResult<()> {
     let state = pending.lock().unwrap_or_else(|p| p.into_inner()).take();
     let Some(state) = state else { return Ok(()) };
     match state.kind() {
-        playback::QueuePersistenceKind::Membership => database.save_queue(state.state()).await,
-        playback::QueuePersistenceKind::Order => database.save_queue_order(state.state()).await,
-        playback::QueuePersistenceKind::State => {
+        QueuePersistenceKind::Membership => database.save_queue(state.state()).await,
+        QueuePersistenceKind::Order => database.save_queue_order(state.state()).await,
+        QueuePersistenceKind::State => {
             database
                 .persist_queue_settings(
                     state.current(),
@@ -176,13 +166,9 @@ impl PlaybackOwner {
             source: Mutex::new(std::sync::Weak::new()),
             connect: Mutex::new(std::sync::Weak::new()),
             active: Mutex::new(None),
-            stream_tasks: Mutex::new(std::collections::HashMap::new()),
             pending_queue: Mutex::new(None),
-            latest_queue_request: Mutex::new((0, 0)),
             store_sender,
             monotonic_origin: Instant::now(),
-            play_id_prefix: random_identity(),
-            next_instance: AtomicU64::new(1),
             start_backend: Box::new(start_backend),
             cast: playback_cast::CastManager::new(
                 ui.cast_proxy_enabled,
@@ -226,14 +212,13 @@ impl PlaybackOwner {
                     restore.repeat_mode = stored.ui.repeat_mode;
                     restore.shuffled = stored.ui.shuffle_enabled;
                 }
-                playback::Sequence::from_window(restore, 0).map_err(string_error)
+                Sequence::from_window(restore, 0).map_err(string_error)
             }
             Err(error) => Err(string_error(error)),
         }.unwrap_or_else(|error| {
             warn!(%error, "could not restore optional Queue; starting with an empty playback window");
-            playback::Sequence::new()
+            Sequence::new()
         });
-        let instance = self.next_instance.fetch_add(1, Ordering::AcqRel);
         let owner = Arc::downgrade(self);
         let clock_owner = Arc::downgrade(self);
         let backend_owner = Arc::clone(self);
@@ -241,9 +226,9 @@ impl PlaybackOwner {
             tokio::task::spawn_blocking(move || backend_owner.take_selected_backend())
                 .await
                 .map_err(string_error)??;
-        let (playback, _) = Playback::start(
+        let (playback, projection) = Playback::start(
             sequence,
-            format!("{}:{instance}", self.play_id_prefix),
+            random_identity(),
             stored.ui.playback,
             stored.ui.auto_dj_enabled,
             usize::from(stored.ui.auto_dj_refill_threshold),
@@ -254,20 +239,10 @@ impl PlaybackOwner {
                     .upgrade()
                     .map_or_else(empty_clock_sample, |owner| owner.clock_sample())
             }),
-            move |update| {
-                if let Some(owner) = owner.upgrade() {
-                    owner.consume_update(instance, update);
-                }
-            },
+            owner,
         )
         .map_err(string_error)?;
-        *self.active.lock().unwrap_or_else(|p| p.into_inner()) = Some(ActivePlayback {
-            instance,
-            playback: playback.clone(),
-        });
-        let projection = playback.projection().map_err(string_error)?;
-        self.publish_selected_products(&projection);
-        self.publish_projection(projection.clone());
+        *self.active.lock().unwrap_or_else(|p| p.into_inner()) = Some(playback.clone());
         Ok(projection)
     }
 
@@ -281,7 +256,7 @@ impl PlaybackOwner {
         let Some(active) = self.active() else {
             return Ok(());
         };
-        let queue = active.playback.handoff_snapshot().map_err(string_error)?.0;
+        let queue = active.handoff_snapshot().map_err(string_error)?.0;
         let positions = self
             .database
             .queue_positions_for_source(&queue, source)
@@ -297,74 +272,53 @@ impl PlaybackOwner {
                 })
                 .collect();
             active
-                .playback
-                .command(SessionCommand::Forget(uris))
+                .command(Command::Forget(uris))
                 .map_err(string_error)?;
         }
         Ok(())
     }
 
-    fn take_active(&self) -> Option<ActivePlayback> {
+    fn take_active(&self) -> Option<Playback> {
         let active = self.active.lock().unwrap_or_else(|p| p.into_inner()).take();
         self.loudness.cancel();
-        for (_, task) in self
-            .stream_tasks
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .drain()
-        {
-            task.abort();
-        }
         self.publish_current_media(None);
         (self.observe_playback)(None, false);
         self.updates.clear();
         active
     }
 
-    fn consume_update(&self, instance: u64, mut update: PlaybackUpdate) {
-        for effect in &update.effects {
-            if let SessionEffect::Queue { id, .. } = effect {
-                *self
-                    .latest_queue_request
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner()) = (instance, *id);
-            }
+    fn publish(&self, projection: PlaybackProjection, current_media_changed: bool) {
+        if current_media_changed {
+            self.publish_current_media(projection.view.transport.current.clone());
         }
-        if let Some(persistence) = update.queue_persistence.take() {
-            enqueue_queue_save(&self.pending_queue, &self.store_sender, persistence);
-        }
-        if let Some((run, levels)) = update.visualizer.take() {
-            let frame = VisualizerPublication { run, levels };
-            if let Err(TrySendError::Full(frame)) = self.visualizer_events.try_send(frame) {
-                let _ = self.visualizer_drain.try_recv();
-                let _ = self.visualizer_events.try_send(frame);
-            }
-        }
-        if update.is_empty() {
-            return;
-        }
-        let Some(active) = self.active_matching(instance) else {
-            return;
-        };
-        if let Some(projection) = update.projection.take() {
-            if update.current_media_changed {
-                self.publish_current_media(projection.view.transport.current.clone());
-            }
-            (self.observe_playback)(
-                Some(&projection),
-                projection.notices.iter().any(|notice| {
-                    matches!(notice, playback::PlaybackNotice::PositionDiscontinuity(_))
-                }),
-            );
-            self.publish_projection(projection);
-        }
-        for effect in update.effects {
-            self.consume_effect(&active, effect);
+        (self.observe_playback)(
+            Some(&projection),
+            projection
+                .notices
+                .iter()
+                .any(|notice| matches!(notice, playback::PlaybackNotice::PositionDiscontinuity(_))),
+        );
+        self.updates.publish(projection);
+    }
+
+    fn publish_visualizer(&self, run: RunId, levels: Vec<f64>) {
+        let frame = VisualizerPublication { run, levels };
+        if let Err(TrySendError::Full(frame)) = self.visualizer_events.try_send(frame) {
+            let _ = self.visualizer_drain.try_recv();
+            let _ = self.visualizer_events.try_send(frame);
         }
     }
 
-    fn publish_projection(&self, publication: PlaybackProjection) {
-        self.updates.publish(publication);
+    fn save_queue(&self, state: QueuePersistence) {
+        enqueue_queue_save(&self.pending_queue, &self.store_sender, state);
+    }
+
+    fn persist_output(&self, volume: f64, muted: bool, audio_output: Option<String>) {
+        let _ = self.store_sender.try_send(PlaybackStoreWork::Output {
+            volume,
+            muted,
+            audio_output,
+        });
     }
 
     async fn consume_store(&self, work: PlaybackStoreWork) {
@@ -372,96 +326,14 @@ impl PlaybackOwner {
             PlaybackStoreWork::Continue { prepared, reply } => {
                 let _ = reply.send(self.commit_continuation(*prepared).await);
             }
-            PlaybackStoreWork::Artwork {
-                playback,
-                media_uris,
-            } => match self.database.queue_artwork_for_uris(&media_uris).await {
-                Ok(bindings) => {
-                    let _ = playback.command(SessionCommand::ArtworkRefreshed(bindings));
-                }
-                Err(error) => warn!(%error, "could not refresh playback artwork"),
-            },
-            PlaybackStoreWork::Activity(activity) => self.record_activity(*activity).await,
+            PlaybackStoreWork::Activity(activity) => self.store_activity(*activity).await,
             PlaybackStoreWork::Flush(reply) => {
+                if let Err(error) = save_pending_queue(&self.database, &self.pending_queue).await {
+                    warn!(%error, "could not persist Queue");
+                }
                 let _ = reply.send(());
             }
-            PlaybackStoreWork::Read {
-                playback,
-                instance,
-                id,
-                request,
-            } => {
-                if *self
-                    .latest_queue_request
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    != (instance, id)
-                {
-                    return;
-                }
-                let hydrate_entries = match &request {
-                    library::QueueReadRequest::Hydrate { entries } => Some(entries.clone()),
-                    _ => None,
-                };
-                let result = self
-                    .database
-                    .read_queue(request)
-                    .await
-                    .map_err(string_error);
-                let result = match (hydrate_entries, result) {
-                    (Some(entries), Ok(page)) => {
-                        self.import_missing_plex_queue_rows(entries, page).await
-                    }
-                    (_, result) => result,
-                };
-                let current = *self
-                    .latest_queue_request
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    == (instance, id);
-                if current {
-                    let _ = playback.complete_queue(id, result);
-                }
-            }
-            PlaybackStoreWork::Settings => {
-                if let Err(error) = save_pending_queue(&self.database, &self.pending_queue).await {
-                    warn!(%error,"could not persist Queue");
-                }
-            }
-        }
-    }
-
-    fn consume_effect(&self, active: &ActivePlayback, effect: SessionEffect) {
-        match effect {
-            SessionEffect::RefreshArtwork(media_uris) => {
-                let _ = self.store_sender.try_send(PlaybackStoreWork::Artwork {
-                    playback: active.playback.clone(),
-                    media_uris,
-                });
-            }
-            SessionEffect::CancelStream(run) => {
-                if let Some(task) = self
-                    .stream_tasks
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .remove(&run)
-                {
-                    task.abort();
-                }
-            }
-            SessionEffect::Queue { id, request } => {
-                let _ = self.store_sender.try_send(PlaybackStoreWork::Read {
-                    playback: active.playback.clone(),
-                    instance: active.instance,
-                    id,
-                    request,
-                });
-            }
-            SessionEffect::ResolveStream {
-                run, row, request, ..
-            } => self.resolve_stream(active.clone(), run, row, request),
-            SessionEffect::PersistProgress { .. } | SessionEffect::PersistState { .. } => {}
-            SessionEffect::PersistOutputState {
+            PlaybackStoreWork::Output {
                 volume,
                 muted,
                 audio_output,
@@ -473,60 +345,100 @@ impl PlaybackOwner {
                     Ok(())
                 });
             }
-            SessionEffect::Listening(fact) => {
-                if let playback::ListeningFact::Started { item, .. } = &fact {
-                    self.scrobbler.now_playing(item);
+            PlaybackStoreWork::Settings => {
+                if let Err(error) = save_pending_queue(&self.database, &self.pending_queue).await {
+                    warn!(%error, "could not persist Queue");
                 }
             }
-            SessionEffect::Activity(activity) => {
-                let _ = self
-                    .store_sender
-                    .try_send(PlaybackStoreWork::Activity(activity));
-            }
-            SessionEffect::SourceReport(report)
-                if external_source_reporting_enabled(self.settings.load().ui.private_mode) =>
-            {
-                if let Some((source_id, kind, _)) = library::source_entity_parts(&report.media_uri)
-                    && kind == "track"
-                {
-                    let owner = self.source_owner();
-                    self.runtime.spawn(async move {
-                        if let Ok(Some(source)) =
-                            tokio::task::spawn_blocking(move || owner?.client(&source_id).ok())
-                                .await
-                        {
-                            let _ = source.report_playback(&report).await;
-                        }
-                    });
-                }
-            }
-            SessionEffect::SourceReport(_) => {}
-            SessionEffect::RequestAutoDj(request) => {
-                if !self.request_plex_auto_dj(&request) {
-                    crate::radio::request_auto_dj(
-                        self.runtime.clone(),
-                        Arc::clone(&self.database),
-                        self.source_owner()
-                            .map(|source| Arc::downgrade(&source))
-                            .unwrap_or_default(),
-                        active.playback.clone(),
-                        request,
-                    );
-                }
-            }
-            SessionEffect::NonfatalError(error) => {
-                debug!(%error, "Playback operation was not available")
-            }
-            SessionEffect::FatalError(error) => warn!(%error, "Playback session failed"),
-            SessionEffect::FlushPersistence { .. }
-            | SessionEffect::Backend(_)
-            | SessionEffect::CurrentMediaChanged
-            | SessionEffect::PositionDiscontinuity(_)
-            | SessionEffect::Visualizer { .. } => {}
         }
     }
 
-    async fn record_activity(&self, activity: playback::ActivityListen) {
+    fn read_queue(
+        self: &Arc<Self>,
+        playback: WeakPlayback,
+        id: u64,
+        request: library::QueueReadRequest,
+    ) -> tokio::task::JoinHandle<()> {
+        let owner = Arc::clone(self);
+        self.runtime.spawn(async move {
+            let hydrate_entries = match &request {
+                library::QueueReadRequest::Hydrate { entries } => Some(entries.clone()),
+                _ => None,
+            };
+            let result = owner
+                .database
+                .read_queue(request)
+                .await
+                .map_err(string_error);
+            let result = match (hydrate_entries, result) {
+                (Some(entries), Ok(page)) => {
+                    owner.import_missing_plex_queue_rows(entries, page).await
+                }
+                (_, result) => result,
+            };
+            playback.post(move |player, sample| {
+                if let Err(error) = player.complete_queue(id, result, sample) {
+                    player.report_error(error.to_string());
+                }
+            });
+        })
+    }
+
+    fn refresh_artwork(&self, playback: WeakPlayback, media_uris: Vec<String>) {
+        let database = self.database.clone();
+        self.runtime.spawn(async move {
+            match database.queue_artwork_for_uris(&media_uris).await {
+                Ok(bindings) => playback.post(move |player, _| player.artwork_refreshed(bindings)),
+                Err(error) => warn!(%error, "could not refresh playback artwork"),
+            }
+        });
+    }
+
+    fn record_listening(&self, fact: playback::ListeningFact) {
+        if let playback::ListeningFact::Started { item, .. } = fact {
+            self.scrobbler.now_playing(&item);
+        }
+    }
+
+    fn record_activity(&self, activity: Box<playback::ActivityListen>) {
+        let _ = self
+            .store_sender
+            .try_send(PlaybackStoreWork::Activity(activity));
+    }
+
+    fn report_source(&self, report: playback::SourceReportFact) {
+        if external_source_reporting_enabled(self.settings.load().ui.private_mode)
+            && let Some((source_id, kind, _)) = library::source_entity_parts(&report.media_uri)
+            && kind == "track"
+        {
+            let owner = self.source_owner();
+            self.runtime.spawn(async move {
+                if let Ok(Some(source)) =
+                    tokio::task::spawn_blocking(move || owner?.client(&source_id).ok()).await
+                {
+                    let _ = source.report_playback(&report).await;
+                }
+            });
+        }
+    }
+
+    fn request_auto_dj(&self, playback: WeakPlayback, request: AutoDjRequest) {
+        if !self.request_plex_auto_dj(&request)
+            && let Some(playback) = playback.upgrade()
+        {
+            crate::radio::request_auto_dj(
+                self.runtime.clone(),
+                self.database.clone(),
+                self.source_owner()
+                    .map(|source| Arc::downgrade(&source))
+                    .unwrap_or_default(),
+                playback,
+                request,
+            );
+        }
+    }
+
+    async fn store_activity(&self, activity: playback::ActivityListen) {
         let deliveries = if activity.skipped {
             Vec::new()
         } else {
@@ -559,21 +471,20 @@ impl PlaybackOwner {
 
     fn resolve_stream(
         &self,
-        active: ActivePlayback,
+        playback: WeakPlayback,
         run: RunId,
         occurrence: Arc<playback::QueueRow>,
         request: StreamRequest,
-    ) {
+    ) -> tokio::task::JoinHandle<()> {
         let database = Arc::clone(&self.database);
         let source_owner = self.source_owner();
-        let playback = active.playback;
         let local = self.settings.local_configuration();
         let connect = self
             .connect
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .upgrade();
-        let task = self.runtime.spawn(async move {
+        self.runtime.spawn(async move {
             let (track, album) = database
                 .playback_loudness(&occurrence.item.media_uri, &ReadCancellation::new())
                 .await
@@ -601,16 +512,11 @@ impl PlaybackOwner {
             )
             .await
             .map(|stream| prepare_media_stream(stream, loudness, occurrence));
-            let _ = tokio::task::spawn_blocking(move || playback.resolve_stream(run, result)).await;
-        });
-        if let Some(previous) = self
-            .stream_tasks
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(run, task)
-        {
-            previous.abort();
-        }
+            playback.post(move |player, sample| match result {
+                Ok(stream) => player.stream_resolved(run, stream),
+                Err(error) => player.stream_failed(run, error, sample),
+            });
+        })
     }
 
     pub(crate) fn waveform_setting_changed(&self, enabled: bool) {
@@ -627,7 +533,7 @@ impl PlaybackOwner {
             self.source_owner()
                 .and_then(|source| source.current_session()),
         );
-        self.send(SessionCommand::UpdateSettings(settings));
+        self.send(Command::UpdateSettings(settings));
     }
     pub(crate) fn cast_proxy_setting_changed(&self, enabled: bool) {
         self.cast.set_proxy_media(enabled);
@@ -636,7 +542,7 @@ impl PlaybackOwner {
         self.cast.set_network_interface(network);
     }
     pub(crate) fn auto_dj_threshold_changed(&self, enabled: bool, threshold: u8) {
-        self.send(SessionCommand::SetAutoDj {
+        self.send(Command::SetAutoDj {
             enabled,
             refill_threshold: usize::from(threshold),
         });
@@ -646,13 +552,12 @@ impl PlaybackOwner {
             .active()
             .ok_or_else(|| "Playback is unavailable".to_string())?;
         active
-            .playback
-            .command(SessionCommand::StreamInputsChanged)
+            .command(Command::StreamInputsChanged)
             .map_err(string_error)
     }
     pub(crate) fn catalog_changed(&self) {
         if self.active().is_some() {
-            self.send(SessionCommand::CatalogChanged);
+            self.send(Command::CatalogChanged);
             let playback = self.settings.load().ui.playback;
             self.loudness.library_changed(
                 playback.loudness_normalization,
@@ -664,11 +569,12 @@ impl PlaybackOwner {
         }
     }
     pub(crate) fn current_media(&self) -> Option<Arc<playback::CurrentMedia>> {
-        self.active()
-            .and_then(|active| active.playback.current_media().ok().flatten())
+        self.updates
+            .current()
+            .and_then(|view| view.transport.current.clone())
     }
 
-    fn active(&self) -> Option<ActivePlayback> {
+    fn active(&self) -> Option<Playback> {
         self.active
             .lock()
             .unwrap_or_else(|p| p.into_inner())
@@ -680,10 +586,6 @@ impl PlaybackOwner {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .upgrade()
-    }
-    fn active_matching(&self, instance: u64) -> Option<ActivePlayback> {
-        self.active()
-            .filter(|active| instance == 0 || active.instance == instance)
     }
     fn publish_current_media(&self, media: Option<Arc<playback::CurrentMedia>>) {
         let waveform = media
@@ -717,15 +619,13 @@ impl PlaybackOwner {
         }
     }
 
-    pub(crate) fn publish_selected_products(&self, projection: &PlaybackProjection) {
-        self.publish_current_media(projection.view.transport.current.clone());
-        (self.observe_playback)(Some(projection), false);
-    }
     pub(crate) fn current_projection(&self) -> Option<PlaybackProjection> {
-        self.active()
-            .and_then(|active| active.playback.projection().ok())
+        self.updates.current().map(|view| PlaybackProjection {
+            view: (*view).clone(),
+            notices: Vec::new(),
+        })
     }
-    fn send(&self, command: SessionCommand) {
+    fn send(&self, command: Command) {
         let command = match self.send_rufin(command) {
             Some(command) => command,
             None => return,
@@ -735,7 +635,7 @@ impl PlaybackOwner {
             None => return,
         };
         if let Some(active) = self.active() {
-            if let Err(error) = active.playback.command(command) {
+            if let Err(error) = active.command(command) {
                 warn!(%error,"Playback command failed");
             }
         }
@@ -813,7 +713,6 @@ impl PlaybackOwner {
         let backend = self.start_output_backend(&selected)?;
         if let Some(active) = self.active() {
             active
-                .playback
                 .replace_backend(selected.clone(), backend)
                 .map_err(string_error)?;
             let mut output = self.output.lock().unwrap_or_else(|p| p.into_inner());
@@ -826,10 +725,10 @@ impl PlaybackOwner {
         }
         Ok(())
     }
-    fn clock_sample(&self) -> playback::ClockSample {
+    fn clock_sample(&self) -> ClockSample {
         let now = SystemTime::now();
         let unix_seconds = unix_seconds(now);
-        playback::ClockSample {
+        ClockSample {
             monotonic_millis: self
                 .monotonic_origin
                 .elapsed()
@@ -859,7 +758,6 @@ impl QueueCommandPort for PlaybackOwner {
             return Ok(library::QueueRestore::default());
         };
         active
-            .playback
             .handoff_snapshot()
             .map(|(queue, _, _)| queue)
             .map_err(string_error)
@@ -874,7 +772,7 @@ impl QueueCommandPort for PlaybackOwner {
             .collect())
     }
 
-    fn play(&self, mut request: PlayRequest) {
+    fn play(&self, request: PlayRequest) {
         if self.play_rufin(&request) {
             return;
         }
@@ -884,44 +782,33 @@ impl QueueCommandPort for PlaybackOwner {
         let Some(active) = self.active() else {
             return;
         };
-        let playback = active.playback;
-        self.runtime.spawn(async move {
-            let shuffled = playback
-                .projection()
-                .is_ok_and(|projection| projection.view.controls.shuffle_enabled);
-            request.shuffled_start &=
-                shuffled && request.placement == playback::QueuePlacement::Now;
-            let Some(reservation) = playback.admit_play(&request).ok().flatten() else {
-                return;
-            };
-            let seed = random_u64();
-            let (batch, placement) = request.compact_batch(seed);
-            let _ = playback.complete_materialization(reservation.id, batch, placement);
-        });
+        if let Err(error) = active.play(request) {
+            warn!(%error, "could not play Queue");
+        }
     }
     fn insert(&self, input: library::QueueInput, target: playback::QueueReorderTarget) {
-        self.send(SessionCommand::Insert { input, target });
+        self.send(Command::Insert { input, target });
     }
     fn remove(&self, position: usize) {
-        self.send(SessionCommand::Remove(position));
+        self.send(Command::Remove(position));
     }
     fn remove_many(&self, positions: Vec<usize>) {
-        self.send(SessionCommand::RemoveMany(positions));
+        self.send(Command::RemoveMany(positions));
     }
     fn activate(&self, position: usize) {
-        self.send(SessionCommand::Activate(position));
+        self.send(Command::Activate(position));
     }
     fn move_after_current(&self, position: usize) {
-        self.send(SessionCommand::MoveAfterCurrent(position));
+        self.send(Command::MoveAfterCurrent(position));
     }
     fn reorder(&self, request: QueueReorderRequest) {
-        self.send(SessionCommand::Reorder {
+        self.send(Command::Reorder {
             positions: request.positions,
             target: request.target,
         });
     }
     fn clear(&self, include_current: bool) {
-        self.send(SessionCommand::Clear { include_current });
+        self.send(Command::Clear { include_current });
     }
 }
 
@@ -959,7 +846,7 @@ impl RadioCommandPort for PlaybackOwner {
             let _ = crate::radio::play_random(
                 self.runtime.clone(),
                 selected.downgrade(),
-                active.playback,
+                active,
                 request,
             );
         }
@@ -979,7 +866,7 @@ impl RadioCommandPort for PlaybackOwner {
                     .lock()
                     .unwrap_or_else(|p| p.into_inner())
                     .clone(),
-                active.playback,
+                active,
                 request,
             );
         }
@@ -988,44 +875,44 @@ impl RadioCommandPort for PlaybackOwner {
 
 impl TransportCommandPort for PlaybackOwner {
     fn play_pause(&self) {
-        self.send(SessionCommand::PlayPause)
+        self.send(Command::PlayPause)
     }
     fn play(&self) {
-        self.send(SessionCommand::Play)
+        self.send(Command::Play)
     }
     fn pause(&self) {
-        self.send(SessionCommand::Pause)
+        self.send(Command::Pause)
     }
     fn stop(&self) {
-        self.send(SessionCommand::Stop)
+        self.send(Command::Stop)
     }
     fn next(&self) {
-        self.send(SessionCommand::Next)
+        self.send(Command::Next)
     }
     fn previous(&self) {
-        self.send(SessionCommand::Previous)
+        self.send(Command::Previous)
     }
     fn seek_seconds(&self, seconds: u32) {
         self.seek_millis(u64::from(seconds) * 1000)
     }
     fn seek_millis(&self, millis: u64) {
-        self.send(SessionCommand::Seek(millis))
+        self.send(Command::Seek(millis))
     }
     fn set_volume(&self, volume: f64) {
-        self.send(SessionCommand::SetVolume(volume))
+        self.send(Command::SetVolume(volume))
     }
     fn persist_volume(&self, volume: f64) {
-        self.send(SessionCommand::PersistVolume(volume))
+        self.send(Command::PersistVolume(volume))
     }
     fn set_muted(&self, muted: bool) {
-        self.send(SessionCommand::SetMuted(muted))
+        self.send(Command::SetMuted(muted))
     }
     fn set_shuffle(&self, enabled: bool) {
         let _ = self.settings.update(|stored| {
             stored.ui.shuffle_enabled = enabled;
             Ok(())
         });
-        self.send(SessionCommand::SetShuffle {
+        self.send(Command::SetShuffle {
             enabled,
             seed: random_u64(),
         })
@@ -1045,7 +932,7 @@ impl TransportCommandPort for PlaybackOwner {
             stored.ui.repeat_mode = next_repeat(stored.ui.repeat_mode);
             Ok(stored.ui.repeat_mode)
         }) {
-            Ok(repeat) => self.send(SessionCommand::SetRepeat(repeat)),
+            Ok(repeat) => self.send(Command::SetRepeat(repeat)),
             Err(_) => self.set_repeat(RepeatMode::Off),
         }
     }
@@ -1054,7 +941,7 @@ impl TransportCommandPort for PlaybackOwner {
             stored.ui.repeat_mode = repeat;
             Ok(())
         });
-        self.send(SessionCommand::SetRepeat(repeat))
+        self.send(Command::SetRepeat(repeat))
     }
     fn toggle_auto_dj(&self) {
         if self
@@ -1077,13 +964,13 @@ impl TransportCommandPort for PlaybackOwner {
                 ))
             })
             .unwrap_or((false, 1));
-        self.send(SessionCommand::SetAutoDj {
+        self.send(Command::SetAutoDj {
             enabled: value,
             refill_threshold: usize::from(threshold),
         })
     }
     fn set_visualizer_enabled(&self, enabled: bool) {
-        self.send(SessionCommand::SetVisualizerEnabled(enabled))
+        self.send(Command::SetVisualizerEnabled(enabled))
     }
     fn available_audio_outputs(&self) -> Vec<playback::AudioOutput> {
         (self.audio_outputs)()
@@ -1137,7 +1024,7 @@ impl TransportCommandPort for PlaybackOwner {
             let _ = backend.shutdown();
         }
         if let Some(active) = self.active() {
-            let _ = active.playback.shutdown();
+            let _ = active.shutdown();
         }
         let (reply, done) = std::sync::mpsc::sync_channel(0);
         if self
@@ -1369,8 +1256,8 @@ fn local_calendar_period(unix_seconds: i64) -> String {
         .map(|period| period.to_string())
         .unwrap_or_else(|_| "1970-01".to_string())
 }
-fn empty_clock_sample() -> playback::ClockSample {
-    playback::ClockSample {
+fn empty_clock_sample() -> ClockSample {
+    ClockSample {
         monotonic_millis: 0,
         unix_seconds: 0,
         local_period: "1970-01".to_string(),

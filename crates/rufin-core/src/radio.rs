@@ -3,13 +3,15 @@
 use std::sync::{Arc, Weak};
 
 use library::{Database, RadioSeed, ReadCancellation, SourceKey};
-use playback::{
-    AutoDjRequest, Batch, Placement, Playback, Provenance, RadioPlayRequest, RandomPlayRequest,
-};
+use playback::{Batch, Placement, Provenance, RadioPlayRequest, RandomPlayRequest};
 use sources::{Source, SourceRadioSeed};
 use tracing::warn;
 
-use crate::playback::random_u64;
+use crate::playback::{
+    actor::Playback,
+    random_u64,
+    state::{AutoDjRequest, MaterializationReservation},
+};
 use crate::source::{SourceOwner, WeakActiveSource};
 
 const MANUAL_RADIO_COUNT: usize = 20;
@@ -262,7 +264,7 @@ fn source_seed(
 
 async fn complete_materialization(
     playback: Playback,
-    reservation: playback::MaterializationReservation,
+    reservation: MaterializationReservation,
     placement: Placement,
     candidates: Result<Vec<String>, String>,
     provenance: Provenance,

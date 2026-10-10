@@ -230,7 +230,7 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
             name: "receiver".into(),
             protocol: RemoteOutputProtocol::PlexCompanion,
         }),
-        playback: owner.active().unwrap().playback,
+        playback: owner.active().unwrap(),
         database: owner.database.clone(),
         queue: tokio::sync::Mutex::new(Some(cached)),
         timeline: Mutex::new(stopped_timeline()),

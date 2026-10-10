@@ -118,7 +118,8 @@ impl PlaybackSubscription {
 mod tests {
     use super::*;
     use crate::{
-        PlaybackNotice, PlaybackOutput, PlaybackSession, PlaybackSettings, RunId, Sequence,
+        ControlsView, PlaybackNotice, PlaybackOutput, QueueSummaryView, RepeatMode, RunId,
+        TransportStatus, TransportView,
     };
 
     #[tokio::test]
@@ -126,15 +127,38 @@ mod tests {
         let updates = PlaybackUpdates::default();
         let mut first = updates.subscribe();
         let mut slow = updates.subscribe();
-        let mut view = PlaybackSession::new(
-            Sequence::new(),
-            "updates",
-            PlaybackSettings::default(),
-            PlaybackOutput::Local,
-            false,
-            1,
-        )
-        .view();
+        let mut view = PlaybackView {
+            queue_loading: false,
+            queue: QueueSummaryView {
+                revision: 0,
+                total: 0,
+                current_index: None,
+                next_index: None,
+                can_next: false,
+            },
+            queue_window: Vec::new(),
+            transport: TransportView {
+                current: None,
+                state: TransportStatus::Stopped,
+                desired_playing: false,
+                position_millis: 0,
+                position_observed_at_millis: 0,
+                playback_rate: 1.0,
+                duration_millis: 0,
+                can_seek: false,
+                buffering_percent: None,
+                error: None,
+            },
+            controls: ControlsView {
+                repeat_mode: RepeatMode::Off,
+                shuffle_enabled: false,
+                auto_dj_enabled: false,
+                volume: 1.0,
+                muted: false,
+                audio_output: None,
+                playback_output: PlaybackOutput::Local,
+            },
+        };
         let started = PlaybackNotice::RunStarted(RunId::new(1));
         updates.publish(PlaybackProjection {
             view: view.clone(),
