@@ -499,6 +499,12 @@ fn clean_optional(value: Option<String>) -> Option<String> {
     value.and_then(clean)
 }
 
+fn item_release_date(item: &Value) -> Option<String> {
+    ["releaseDate", "date", "originalDate"]
+        .into_iter()
+        .find_map(|key| normalized_date(field(item, key)))
+}
+
 fn album_from_navidrome(source: &SubsonicSource, raw_id: &str, album: &Value) -> Album {
     let mut album_artists = participant_credits(
         source,
@@ -522,7 +528,7 @@ fn album_from_navidrome(source: &SubsonicSource, raw_id: &str, album: &Value) ->
         .into_iter()
         .collect();
     }
-    let release_date = normalized_date(field(album, "releaseDate"));
+    let release_date = item_release_date(album);
     let year = positive_u16(field(album, "maxYear"))
         .or_else(|| {
             release_date
@@ -622,7 +628,7 @@ fn track_from_navidrome(source: &SubsonicSource, raw_id: &str, track: &Value) ->
         artist,
         album: clean_optional(field(track, "album")).unwrap_or_else(|| "Unknown Album".to_string()),
         year: positive_u16(field(track, "year")).unwrap_or_default(),
-        release_date: normalized_date(field(track, "releaseDate")),
+        release_date: item_release_date(track),
         date_added: normalized_date(field(track, "createdAt")),
         last_played: crate::policy::unix_seconds(field(track, "playDate")),
         play_count: capped_u32(field(track, "playCount")),
@@ -966,6 +972,38 @@ mod tests {
                 Some("2025-04-04T12:00:00Z")
             ))
         );
+
+        for (data, expected) in [
+            (
+                serde_json::json!({"releaseDate":"2020", "date":"2010-02", "originalDate":"1990"}),
+                Some("2020"),
+            ),
+            (
+                serde_json::json!({"releaseDate":"", "date":"2010-02", "originalDate":"1990"}),
+                Some("2010-02"),
+            ),
+            (
+                serde_json::json!({"originalDate":"1990-03-04"}),
+                Some("1990-03-04"),
+            ),
+            (
+                serde_json::json!({"releaseDate":"", "date":"", "originalDate":""}),
+                None,
+            ),
+        ] {
+            assert_eq!(
+                album_from_navidrome(&source, "dates", &data)
+                    .release_date
+                    .as_deref(),
+                expected
+            );
+            assert_eq!(
+                track_from_navidrome(&source, "dates", &data)
+                    .release_date
+                    .as_deref(),
+                expected
+            );
+        }
 
         let artist = serde_json::json!({
             "id": "artist-one",

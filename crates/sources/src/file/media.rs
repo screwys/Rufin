@@ -10,7 +10,7 @@ use lofty::file::TaggedFileExt;
 use lofty::prelude::*;
 use lofty::tag::{ItemKey, Tag};
 
-use crate::policy::stable_hash;
+use crate::policy::{normalized_date, stable_hash};
 
 use super::discovery;
 use super::lofty::{read_lofty_file, source_format};
@@ -26,6 +26,7 @@ pub(crate) struct ScannedTrack {
     pub(crate) album: String,
     pub(crate) sort_album: Option<String>,
     pub(crate) year: u16,
+    pub(crate) release_date: Option<String>,
     pub(crate) duration_seconds: u32,
     pub(crate) disc_number: u16,
     pub(crate) track_number: u16,
@@ -108,6 +109,7 @@ struct AudioMetadata {
     genres: Vec<String>,
     moods: Vec<String>,
     year: u16,
+    release_date: Option<String>,
     comment: Option<String>,
     bpm: Option<u16>,
     musicbrainz_album_id: Option<String>,
@@ -152,6 +154,7 @@ pub(crate) fn queue_item(track: ScannedTrack, uri: String) -> library::QueueItem
     item.disc_number = (track.disc_number > 0).then_some(i64::from(track.disc_number));
     item.track_number = (track.track_number > 0).then_some(i64::from(track.track_number));
     item.year = (track.year > 0).then_some(i64::from(track.year));
+    item.release_date = track.release_date;
     item.source_format = track.source_format;
     item.musicbrainz_recording_id = track.musicbrainz_recording_id;
     item.musicbrainz_release_track_id = track.musicbrainz_release_track_id;
@@ -297,6 +300,22 @@ fn audio_metadata_from_lofty(
         tag.and_then(|tag| tag_mbid(tag, ItemKey::MusicBrainzReleaseGroupId));
     let release_types = album_release_types(tag);
     let is_compilation = album_compilation(tag, &release_types);
+    let date = tag.and_then(|tag| tag.date());
+    let release_date = tag
+        .and_then(|tag| {
+            [
+                ItemKey::ReleaseDate,
+                ItemKey::RecordingDate,
+                ItemKey::OriginalReleaseDate,
+            ]
+            .into_iter()
+            .find_map(|key| normalized_date(tag.get_string(key).map(str::to_owned)))
+        })
+        .or_else(|| normalized_date(date.map(|date| date.to_string())));
+    let year = date
+        .map(|date| date.year)
+        .or_else(|| release_date.as_deref()?.get(..4)?.parse().ok())
+        .unwrap_or_default();
     AudioMetadata {
         audio_properties: library::AudioProperties {
             bitrate_kbps: tagged_file.properties().audio_bitrate(),
@@ -318,10 +337,8 @@ fn audio_metadata_from_lofty(
         album_artists,
         genres,
         moods,
-        year: tag
-            .and_then(|tag| tag.date())
-            .map(|date| date.year)
-            .unwrap_or_default(),
+        year,
+        release_date,
         comment: tag
             .and_then(|tag| tag.get_string(ItemKey::Comment))
             .map(str::trim)
@@ -472,6 +489,7 @@ fn audio_metadata_from_discoverer(
         year: metadata
             .and_then(|metadata| metadata.year)
             .unwrap_or_default(),
+        release_date: metadata.and_then(|metadata| metadata.release_date.clone()),
         comment: metadata.and_then(|metadata| metadata.comment.clone()),
         bpm: metadata.and_then(|metadata| metadata.bpm),
         musicbrainz_album_id: metadata
@@ -524,6 +542,7 @@ fn scanned_track(path: &Path, metadata: AudioMetadata) -> ScannedTrack {
         genres,
         moods,
         year,
+        release_date,
         comment,
         bpm,
         musicbrainz_album_id,
@@ -595,6 +614,7 @@ fn scanned_track(path: &Path, metadata: AudioMetadata) -> ScannedTrack {
         artist,
         album,
         year,
+        release_date,
         duration_seconds,
         disc_number,
         track_number,
@@ -946,6 +966,9 @@ mod tests {
             tag.insert_text(ItemKey::TrackTitleSortOrder, "A Song".into());
             tag.insert_text(ItemKey::AlbumTitleSortOrder, "Album, The".into());
             tag.insert_text(ItemKey::TrackArtistSortOrder, "Cure, The".into());
+            tag.insert_text(ItemKey::RecordingDate, "2001-02-03".into());
+            tag.insert_text(ItemKey::ReleaseDate, "2004-05".into());
+            tag.insert_text(ItemKey::OriginalReleaseDate, "1995".into());
             tag.set_comment("Retained comment".into());
             tag.save_to_path(&path, WriteOptions::new().preferred_padding(0))
                 .expect("audio tags");
@@ -974,6 +997,14 @@ mod tests {
                 "{name}"
             );
             assert_eq!(track.comment.as_deref(), Some("Retained comment"), "{name}");
+            assert_eq!(track.year, 2001, "{name}");
+            assert_eq!(track.release_date.as_deref(), Some("2004-05"), "{name}");
+            let uri = url::Url::from_file_path(&path).unwrap().to_string();
+            assert_eq!(
+                queue_item((*track).clone(), uri).release_date.as_deref(),
+                Some("2004-05"),
+                "{name}"
+            );
             let mut metadata = crate::file::metadata::read_track_metadata(&path, Some("mp3"))
                 .expect("read audio metadata");
             assert!(metadata.writable.title, "{name}");

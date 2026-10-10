@@ -171,7 +171,12 @@ impl Scan {
         &self.source_id
     }
 
-    pub async fn contains_entity(&mut self, kind: &str, object_id: &str) -> LibraryResult<bool> {
+    pub async fn contains_entity(
+        &mut self,
+        kind: &str,
+        object_id: &str,
+        include_cached: bool,
+    ) -> LibraryResult<bool> {
         let table = match kind {
             "album" => "albums",
             "track" => "tracks",
@@ -182,10 +187,11 @@ impl Scan {
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT EXISTS(SELECT 1 FROM temp.scan_{table} WHERE object_id=?2
-             UNION ALL SELECT 1 FROM {table} WHERE source_key=?1 AND object_id=?2)"
+             UNION ALL SELECT 1 FROM {table} WHERE ?3 AND source_key=?1 AND object_id=?2)"
         )))
         .bind(self.existing_source_key)
         .bind(object_id)
+        .bind(include_cached)
         .fetch_one(connection)
         .await?)
     }
@@ -2088,7 +2094,7 @@ impl Scan {
         object_id: String,
         facts: crate::SourceUserData,
     ) -> LibraryResult<bool> {
-        if !self.contains_entity(kind, &object_id).await? {
+        if !self.contains_entity(kind, &object_id, true).await? {
             return Ok(false);
         }
         self.user_data.push((kind, object_id, facts));

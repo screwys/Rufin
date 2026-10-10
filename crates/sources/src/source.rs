@@ -2579,90 +2579,57 @@ impl Source {
                             crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
                         })
                 }
-                Implementation::OpenSubsonic(_) => {
-                    self.refresh_remote_metadata_index()
-                        .await
-                        .map_err(|error| {
-                            crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
-                        })?;
-                    if edit.artwork().is_some() {
-                        return self
-                            .apply_items(
-                                database,
-                                vec![self.item_request_id(edit.kind(), owner.object_id())],
-                                Vec::new(),
-                            )
-                            .await
-                            .map_err(|error| {
-                                crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
-                            });
-                    }
-                    match (owner, edit) {
-                        (MetadataOwner::Track(track), crate::MetadataEdit::Track(edit)) => database
-                            .update_track_metadata(
-                                track.source_key,
-                                track.track_key,
-                                track_write_from_values(track, &edit.values),
-                            )
-                            .await
-                            .map_err(metadata_database_error),
-                        (MetadataOwner::Album(album), crate::MetadataEdit::Album(edit)) => database
-                            .update_album_metadata(
-                                album.source_key,
-                                album.album_key,
-                                library::AlbumMetadataWrite {
-                                    title: edit.values.title.clone(),
-                                    normalized_title: edit.values.title.to_lowercase(),
-                                    display_artist: edit
-                                        .values
-                                        .album_artist
-                                        .clone()
-                                        .unwrap_or_else(|| album.display_artist.clone()),
-                                    sort_text: edit
-                                        .values
-                                        .sort_title
-                                        .clone()
-                                        .unwrap_or_else(|| edit.values.title.to_lowercase()),
-                                    year: edit.values.year.map(i64::from),
-                                    release_date: album.release_date.clone(),
-                                    date_added: album.date_added.clone(),
-                                    musicbrainz_release_id: edit
-                                        .values
-                                        .musicbrainz_album_id
-                                        .clone(),
-                                    musicbrainz_release_group_id: edit
-                                        .values
-                                        .musicbrainz_release_group_id
-                                        .clone(),
-                                    is_compilation: album.is_compilation,
-                                },
-                            )
-                            .await
-                            .map_err(metadata_database_error),
-                        (MetadataOwner::Artist(artist), crate::MetadataEdit::Artist(edit)) => {
-                            database
-                                .update_artist_metadata(
-                                    artist.source_key,
-                                    artist.artist_key,
-                                    library::ArtistMetadataWrite {
-                                        name: edit.values.name.clone(),
-                                        normalized_name: edit.values.name.to_lowercase(),
-                                        sort_text: edit
-                                            .values
-                                            .sort_name
-                                            .clone()
-                                            .unwrap_or_else(|| edit.values.name.to_lowercase()),
-                                        musicbrainz_artist_id: edit
-                                            .values
-                                            .musicbrainz_artist_id
-                                            .clone(),
-                                    },
-                                )
-                                .await
-                                .map_err(metadata_database_error)
+                Implementation::OpenSubsonic(source) => {
+                    let refreshed = async {
+                        self.refresh_remote_metadata_index().await?;
+                        let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
+                        let mut albums = std::collections::HashSet::new();
+                        let mut items = Vec::new();
+                        if !matches!(owner, MetadataOwner::Track(_)) {
+                            items.push(self.item_request_id(edit.kind(), owner.object_id()));
+                            if matches!(owner, MetadataOwner::Album(_)) {
+                                albums.insert(owner.object_id().to_string());
+                            }
                         }
-                        _ => unreachable!(),
+                        // Song IDs still locate the files after their album IDs change.
+                        let mut tracks = CollectionTracks::new(database, media_uri);
+                        let mut track = match owner {
+                            MetadataOwner::Track(track) => Some((**track).clone()),
+                            _ => tracks
+                                .next()
+                                .await
+                                .map_err(|error| SourceError::Other(error.to_string()))?,
+                        };
+                        while let Some(current) = track {
+                            if let Some((_, _, album)) = current
+                                .album_media_uri
+                                .as_deref()
+                                .and_then(library::source_entity_parts)
+                                && albums.insert(album.clone())
+                                && !scan.contains_entity("album", &album, false).await?
+                            {
+                                items.push(self.item_request_id("album", &album));
+                            }
+                            items.push(self.item_request_id("track", &current.object_id));
+                            if items.len() >= 128 {
+                                source
+                                    .stage_items(&mut scan, std::mem::take(&mut items), true)
+                                    .await?;
+                            }
+                            track = tracks
+                                .next()
+                                .await
+                                .map_err(|error| SourceError::Other(error.to_string()))?;
+                        }
+                        if !items.is_empty() {
+                            source.stage_items(&mut scan, items, true).await?;
+                        }
+                        self.publish_items(scan).await
                     }
+                    .await;
+                    refreshed.map_err(|error| {
+                        crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
+                    })
                 }
                 _ => unreachable!(),
             }
@@ -3539,7 +3506,7 @@ impl Source {
                 source.stage_items(scan, upserts, removals).await
             }
             Implementation::Plex(source) => source.stage_items(scan, upserts, removals).await,
-            Implementation::OpenSubsonic(source) => source.stage_items(scan, upserts).await,
+            Implementation::OpenSubsonic(source) => source.stage_items(scan, upserts, false).await,
             _ => Err(SourceError::InvalidRequest(
                 "Source has no remote item feed",
             )),
@@ -3567,7 +3534,10 @@ impl Source {
                         library::HomeEntryKind::Track => "track",
                         _ => continue,
                     };
-                    if !scan.contains_entity(kind, &entry.entity_object_id).await? {
+                    if !scan
+                        .contains_entity(kind, &entry.entity_object_id, true)
+                        .await?
+                    {
                         missing.push(self.item_request_id(kind, &entry.entity_object_id));
                     }
                 }
@@ -4152,52 +4122,6 @@ pub fn reported_path_is_absolute(value: &str) -> bool {
 fn mapped_file(root: &std::path::Path, candidate: PathBuf) -> Option<PathBuf> {
     let path = std::fs::canonicalize(candidate).ok()?;
     (path.starts_with(root) && path.is_file()).then_some(path)
-}
-
-fn track_write_from_values(
-    track: &library::TrackRow,
-    values: &crate::TrackMetadataValues,
-) -> library::TrackMetadataWrite {
-    let title = values.title.trim().to_string();
-    let album = values.album.clone().unwrap_or_else(|| track.album.clone());
-    let artist = values
-        .artist
-        .clone()
-        .unwrap_or_else(|| track.artist.clone());
-    library::TrackMetadataWrite {
-        normalized_search: format!(
-            "{title} {album} {artist} {}",
-            values.comment.as_deref().unwrap_or_default()
-        )
-        .to_lowercase(),
-        sort_text: values
-            .sort_title
-            .clone()
-            .unwrap_or_else(|| title.to_lowercase()),
-        title,
-        display_album: album,
-        display_artist: artist,
-        duration_millis: track.duration_millis,
-        disc_number: values
-            .disc_number
-            .map(i64::from)
-            .unwrap_or(track.disc_number),
-        track_number: values
-            .track_number
-            .map(i64::from)
-            .unwrap_or(track.track_number),
-        year: values.year.map(i64::from),
-        release_date: track.release_date.clone(),
-        date_added: track.date_added.clone(),
-        source_format: track.source_format.clone(),
-        comment: values.comment.clone(),
-        bpm: values.bpm.map(i64::from),
-        musicbrainz_recording_id: values.musicbrainz_recording_id.clone(),
-        musicbrainz_release_track_id: values.musicbrainz_release_track_id.clone(),
-        cue_path: track.cue_path.clone(),
-        cue_start_millis: track.cue_start_millis,
-        cue_end_millis: track.cue_end_millis,
-    }
 }
 
 #[cfg(test)]

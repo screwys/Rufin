@@ -824,6 +824,18 @@ async fn local_metadata_save_returns_publication_after_album_identity_changes() 
     let root = tempfile::tempdir().unwrap();
     let path = root.path().canonicalize().unwrap().join("café %.wav");
     write_tagged_wav(&path, "Track", "Artist", "Before", "Rock").unwrap();
+    let second_path = root.path().canonicalize().unwrap().join("second.wav");
+    write_tagged_wav(&second_path, "Second", "Artist", "Before", "Rock").unwrap();
+    let other_path = root.path().canonicalize().unwrap().join("other.wav");
+    write_tagged_wav(&other_path, "Other", "Artist", "Aardvark", "Rock").unwrap();
+    let mut other = Probe::open(&other_path).unwrap().read().unwrap();
+    other
+        .primary_tag_mut()
+        .unwrap()
+        .insert_text(ItemKey::ReleaseDate, "2030".into());
+    other
+        .save_to_path(&other_path, WriteOptions::default())
+        .unwrap();
     let store = tempfile::tempdir().unwrap();
     let database = Database::open(store.path().join("library.sqlite"))
         .await
@@ -915,6 +927,128 @@ async fn local_metadata_save_returns_publication_after_album_identity_changes() 
         matches!(unchanged, ScanOutcome::Identical(_)),
         "{unchanged:?}"
     );
+    for (date, release, original, expected, year) in [
+        ("2001", "", "", Some("2001"), Some(2001)),
+        ("2001-02", "", "", Some("2001-02"), Some(2001)),
+        (
+            "2001-02-03",
+            "",
+            "1995-07-08",
+            Some("2001-02-03"),
+            Some(2001),
+        ),
+        (
+            "2001-02-03",
+            "2004-05-06",
+            "1995-07-08",
+            Some("2004-05-06"),
+            Some(2001),
+        ),
+        ("", "2004-05-06", "", Some("2004-05-06"), Some(2004)),
+        ("", "", "1995-07-08", Some("1995-07-08"), Some(1995)),
+        ("", "", "", None, None),
+    ] {
+        let album = database
+            .album_rows(
+                initial.source,
+                &[current.album_key.unwrap()],
+                None,
+                &ReadCancellation::new(),
+            )
+            .await
+            .unwrap()
+            .remove(0);
+        let metadata = source
+            .read_album_metadata(&database, &album.media_uri)
+            .await
+            .unwrap();
+        source
+            .write_metadata(
+                &database,
+                &album.media_uri,
+                metadata.revision.as_deref().unwrap(),
+                None,
+                sources::MetadataEdit::Album(sources::AlbumMetadataEdit {
+                    extra: [
+                        ("recording_date".to_string(), date.to_string()),
+                        ("release_date".to_string(), release.to_string()),
+                        ("original_release_date".to_string(), original.to_string()),
+                    ]
+                    .into(),
+                    artwork: None,
+                    values: metadata.values,
+                    changed: Default::default(),
+                }),
+            )
+            .await
+            .unwrap();
+        let album = database
+            .album_rows(
+                initial.source,
+                &[current.album_key.unwrap()],
+                None,
+                &ReadCancellation::new(),
+            )
+            .await
+            .unwrap()
+            .remove(0);
+        for path in [&path, &second_path] {
+            let uri = url::Url::from_file_path(path).unwrap().to_string();
+            let metadata = source.read_track_metadata(&database, &uri).await.unwrap();
+            for (key, value) in [
+                ("recording_date", date),
+                ("release_date", release),
+                ("original_release_date", original),
+            ] {
+                assert_eq!(
+                    metadata
+                        .extra
+                        .iter()
+                        .find(|field| field.key == key)
+                        .unwrap()
+                        .value,
+                    value
+                );
+            }
+            let track = database
+                .track_row_by_uri(&uri, &ReadCancellation::new())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(track.release_date.as_deref(), expected);
+            assert_eq!(track.year, year);
+        }
+        assert_eq!(album.release_date.as_deref(), expected);
+        assert_eq!(album.year, year);
+        for descending in [false, true] {
+            let albums = database
+                .album_page(
+                    initial.source,
+                    None,
+                    false,
+                    "",
+                    library::AlbumSort::ReleaseDate,
+                    descending,
+                    0,
+                    10,
+                    &ReadCancellation::new(),
+                )
+                .await
+                .unwrap();
+            let titles = albums
+                .iter()
+                .map(|row| row.title.as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                titles,
+                if expected.is_none() || descending {
+                    vec!["Aardvark", "After"]
+                } else {
+                    vec!["After", "Aardvark"]
+                }
+            );
+        }
+    }
 }
 
 #[tokio::test]

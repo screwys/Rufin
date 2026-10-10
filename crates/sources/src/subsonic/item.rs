@@ -395,7 +395,8 @@ pub(super) fn album_from_json(source: &SubsonicSource, album: &Value) -> Option<
     } else {
         structured_artists
     };
-    let release_date = structured_release_date(&album["releaseDate"]);
+    let release_date = structured_release_date(&album["releaseDate"])
+        .or_else(|| structured_release_date(&album["originalReleaseDate"]));
     let year = {
         let scalar = u16_from_option(json::field(album, "year"));
         if scalar > 0 {

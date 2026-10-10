@@ -28,6 +28,7 @@ impl SubsonicSource {
         &self,
         scan: &mut library::Scan,
         objects: Vec<String>,
+        refresh_parents: bool,
     ) -> SourceResult<()> {
         for (kind, entity, method) in [
             ("album", "album", "getAlbum"),
@@ -44,6 +45,10 @@ impl SubsonicSource {
             let mut values = Vec::with_capacity(ids.len());
             let mut removed = Vec::new();
             for raw in &ids {
+                if kind == "album" {
+                    scan.replace_album_membership(&self.id("album", raw))
+                        .await?;
+                }
                 if self.has_navidrome_library() {
                     values.push(serde_json::json!({"id":raw}));
                 } else {
@@ -83,7 +88,10 @@ impl SubsonicSource {
                     for track in &tracks {
                         observed.insert(track.id.clone());
                         if let Some(album) = &track.album_id {
-                            if !scan.contains_entity("album", album).await? {
+                            if !scan
+                                .contains_entity("album", album, !refresh_parents)
+                                .await?
+                            {
                                 if let Err(error) = self
                                     .stage_collection(
                                         scan,

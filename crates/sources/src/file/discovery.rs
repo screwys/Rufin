@@ -6,7 +6,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::OnceLock;
 
-use gstreamer_pbutils::gst;
+use gstreamer_pbutils::gst::{self, glib::translate::IntoGlib};
 use gstreamer_pbutils::prelude::*;
 use gstreamer_pbutils::{Discoverer, DiscovererInfo, DiscovererResult};
 
@@ -68,6 +68,7 @@ pub(crate) struct Metadata {
     pub(crate) genres: Vec<String>,
     pub(crate) moods: Vec<String>,
     pub(crate) year: Option<u16>,
+    pub(crate) release_date: Option<String>,
     pub(crate) comment: Option<String>,
     pub(crate) bpm: Option<u16>,
     pub(crate) track_number: Option<u16>,
@@ -380,6 +381,10 @@ impl ScopedTags {
 }
 
 fn metadata_from_tags(tags: &ScopedTags, duration_seconds: u32, is_asf: bool) -> Metadata {
+    let release_date = tag_date(tags);
+    let year = release_date
+        .as_deref()
+        .and_then(|date| date.get(..4)?.parse().ok());
     let artists = tags.strings::<gst::tags::Artist>();
     let artist = if is_asf {
         artists.first().cloned()
@@ -444,7 +449,8 @@ fn metadata_from_tags(tags: &ScopedTags, duration_seconds: u32, is_asf: bool) ->
                 .map(String::as_str),
         ),
         moods: split_values(tags.extended_values(&["mood"]).iter().map(String::as_str)),
-        year: tag_year(tags),
+        year,
+        release_date,
         comment: tags.string::<gst::tags::Comment>().or_else(|| {
             is_asf
                 .then(|| tags.string::<gst::tags::Description>())
@@ -554,7 +560,7 @@ fn join_tag_values(values: Vec<String>) -> Option<String> {
     (!values.is_empty()).then(|| values.join("; "))
 }
 
-fn tag_year(tags: &ScopedTags) -> Option<u16> {
+fn tag_date(tags: &ScopedTags) -> Option<String> {
     tags.audio
         .as_ref()
         .and_then(|tags| tags.get::<gst::tags::DateTime>())
@@ -563,7 +569,8 @@ fn tag_year(tags: &ScopedTags) -> Option<u16> {
                 .as_ref()
                 .and_then(|tags| tags.get::<gst::tags::DateTime>())
         })
-        .map(|value| value.get().year())
+        .and_then(|value| value.get().to_iso8601_string().ok())
+        .and_then(|value| crate::policy::normalized_date(Some(value.to_string())))
         .or_else(|| {
             tags.audio
                 .as_ref()
@@ -573,9 +580,16 @@ fn tag_year(tags: &ScopedTags) -> Option<u16> {
                         .as_ref()
                         .and_then(|tags| tags.get::<gst::tags::Date>())
                 })
-                .map(|value| i32::from(value.get().year()))
+                .map(|value| {
+                    let date = value.get();
+                    format!(
+                        "{:04}-{:02}-{:02}",
+                        date.year(),
+                        date.month().into_glib(),
+                        date.day()
+                    )
+                })
         })
-        .and_then(|year| u16::try_from(year).ok())
 }
 
 fn tag_bpm(tags: &ScopedTags) -> Option<u16> {
@@ -972,6 +986,10 @@ mod tests {
         container.add::<gst::tags::Title>(&"Container title", gst::TagMergeMode::Append);
         container.add::<gst::tags::Artist>(&"Container artist", gst::TagMergeMode::Append);
         container.add::<gst::tags::Album>(&"Album", gst::TagMergeMode::Append);
+        container.add::<gst::tags::Date>(
+            &gst::glib::Date::from_dmy(8, gst::glib::DateMonth::July, 1995).unwrap(),
+            gst::TagMergeMode::Append,
+        );
         container.add::<gst::tags::TitleSortname>(&"A Title", gst::TagMergeMode::Append);
         container.add::<gst::tags::AlbumSortname>(&"An Album", gst::TagMergeMode::Append);
         container.add::<gst::tags::ArtistSortname>(&"Artist, Stream", gst::TagMergeMode::Append);
@@ -1030,6 +1048,21 @@ mod tests {
         assert_eq!(metadata.release_types, ["album", "compilation"]);
         assert_eq!(metadata.is_compilation, Some(true));
         assert_eq!(metadata.duration_seconds, 42);
+        assert_eq!(metadata.year, Some(1995));
+        assert_eq!(metadata.release_date.as_deref(), Some("1995-07-08"));
+        for date in ["2001", "2001-02", "2001-02-03", "2001-02-03T04:05:06Z"] {
+            audio.add::<gst::tags::DateTime>(
+                &gst::DateTime::from_iso8601_string(date).unwrap(),
+                gst::TagMergeMode::Replace,
+            );
+            let tags = ScopedTags::new(Some(container.to_owned()), Some(audio.to_owned()));
+            let metadata = metadata_from_tags(&tags, 42, false);
+            assert_eq!(metadata.year, Some(2001));
+            assert_eq!(
+                metadata.release_date.as_deref(),
+                Some(&date[..date.len().min(10)])
+            );
+        }
     }
 
     #[test]

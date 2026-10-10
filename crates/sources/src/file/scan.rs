@@ -118,7 +118,7 @@ async fn stage_album(scan: &mut Scan, track: &ScannedTrack) -> SourceResult<()> 
             .unwrap_or(&track.album)
             .to_lowercase(),
         Some(i64::from(track.year)).filter(|year| *year > 0),
-        None,
+        track.release_date.as_deref(),
         None,
         track.musicbrainz_album_id.as_deref(),
         track.musicbrainz_release_group_id.as_deref(),
@@ -162,7 +162,7 @@ async fn stage_track_row(scan: &mut Scan, track: &ScannedTrack) -> SourceResult<
         i64::from(track.disc_number),
         i64::from(track.track_number),
         Some(i64::from(track.year)).filter(|year| *year > 0),
-        None,
+        track.release_date.as_deref(),
         None,
         track.local_uri.as_deref(),
         track.source_format.as_deref(),
