@@ -24,7 +24,8 @@ const ACTIVITY_EXPORT_SELECT: &str = "SELECT listen_key,external_id,
                     musicbrainz_recording_id,musicbrainz_release_track_id,started_at,
                     local_period,listened_millis,skipped
              FROM listens";
-const HISTORY_ROW_SELECT: &str = r#"
+const HISTORY_ROW_SELECT: &str = concat!(
+    r#"
              listen.media_uri,
                     listen.track_title title,listen.artist_name artist,listen.album_title album,
                     album.display_artist album_display_artist,
@@ -33,7 +34,9 @@ const HISTORY_ROW_SELECT: &str = r#"
                     listen.musicbrainz_release_track_id,
                     listen.started_at last_played,
                     listen.duration_millis,track.artwork_binding,
-                    COALESCE(track.audio_properties,'{}') audio_properties,track.date_added,track.bpm,track.source_path,
+                    COALESCE(track.audio_properties,'{}') audio_properties,date("#,
+    crate::tracks::added_at!("track"),
+    r#",'unixepoch') date_added,track.bpm,track.source_path,
                     (SELECT display_name FROM sources WHERE source_key=track.source_key) source_name,
                     (SELECT COALESCE(group_concat(name, ', '),'') FROM (
                        SELECT genre.name FROM track_genres credit JOIN genres genre USING(genre_key)
@@ -57,7 +60,8 @@ const HISTORY_ROW_SELECT: &str = r#"
              FROM selected listen
              LEFT JOIN tracks track USING(media_uri)
              LEFT JOIN albums album ON album.album_key=track.album_key
-"#;
+"#
+);
 
 #[derive(Clone, Debug, FromRow, PartialEq, Deserialize, Serialize)]
 pub struct ListenWrite {

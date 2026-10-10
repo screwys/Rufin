@@ -345,31 +345,6 @@ fn validate_measurement(measurement: &LoudnessMeasurement) -> LibraryResult<()> 
     Ok(())
 }
 
-pub(crate) fn source_track_loudness_key(
-    media_uri: Option<&str>,
-    source_format: Option<&str>,
-    duration_millis: i64,
-    cue_path: Option<&str>,
-    cue_start_millis: Option<i64>,
-    cue_end_millis: Option<i64>,
-) -> [u8; 32] {
-    let mut hasher = Hasher::new();
-    hasher.update(b"rufin-track-loudness-v1\0");
-    hash_optional_text(&mut hasher, media_uri);
-    hash_optional_text(&mut hasher, source_format);
-    hasher.update(&duration_millis.to_le_bytes());
-    hash_optional_text(&mut hasher, cue_path);
-    hasher.update(&cue_start_millis.unwrap_or(-1).to_le_bytes());
-    hasher.update(&cue_end_millis.unwrap_or(-1).to_le_bytes());
-    *hasher.finalize().as_bytes()
-}
-
-fn hash_optional_text(hasher: &mut Hasher, value: Option<&str>) {
-    let value = value.unwrap_or_default().as_bytes();
-    hasher.update(&(value.len() as u64).to_le_bytes());
-    hasher.update(value);
-}
-
 pub(crate) async fn recompute_album_loudness_key(
     transaction: &mut Transaction<'_, Sqlite>,
     album: AlbumKey,

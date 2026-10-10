@@ -1283,7 +1283,7 @@ fn smart_track_sql(input: &str, projection: &str) -> String {
                 track.artwork_binding,COALESCE(track.duration_millis,{duration},0) duration_millis,
                 COALESCE(track.disc_number,{disc_number}) disc_number,
                 COALESCE(track.track_number,{track_number}) track_number,
-                COALESCE(track.year,{year}) year,track.date_added,track.bpm,
+                COALESCE(track.year,{year}) year,{added_at} added_at,date({added_at},'unixepoch') date_added,track.bpm,
                 COALESCE(track.release_date,{release_date}) release_date,
                 COALESCE(track.source_format,{source_format}) source_format,
                 COALESCE(track.musicbrainz_recording_id,{recording_id}) musicbrainz_recording_id,
@@ -1321,6 +1321,7 @@ fn smart_track_sql(input: &str, projection: &str) -> String {
          LEFT JOIN user_media_state state ON state.media_uri=requested.value
          ) {projection}",
          links = crate::tracks::TRACK_LINK_COLUMNS,
+         added_at = crate::tracks::added_at!("track"),
          title = snapshot(["COALESCE(entry.title,'')", "COALESCE(native.title,'')", "occurrence.title", "listen.track_title", "COALESCE(access.title,'')"]),
          artist = snapshot(["COALESCE(entry.artist,'')", "COALESCE(native.artist,'')", "occurrence.artist", "listen.artist_name", "COALESCE(access.artist,'')"]),
          album = snapshot(["COALESCE(entry.album,'')", "COALESCE(native.album,'')", "occurrence.album", "listen.album_title", "COALESCE(access.album,'')"]),
@@ -1631,7 +1632,8 @@ fn source_fact(
         F::Comment => "owner.comment".into(),
         F::Bpm => "owner.bpm".into(),
         F::Year => "owner.year".into(),
-        F::DateAdded => "owner.date_added".into(),
+        F::DateAdded if catalog => crate::tracks::added_at!("owner").into(),
+        F::DateAdded => "NULL".into(),
         F::Favorite => "COALESCE((SELECT favorite FROM user_media_state WHERE media_uri=owner.media_uri),owner.source_favorite)".into(),
         F::Rating => "COALESCE((SELECT rating FROM user_media_state WHERE media_uri=owner.media_uri),owner.source_rating)/10".into(),
         F::Played => local_count,
@@ -1712,7 +1714,7 @@ fn source_rule(
         let played = value != (rule.operator == O::IsNot);
         return format!("{fact}{}0", if played { ">" } else { "=" });
     }
-    if rule.field == F::LastPlayed {
+    if matches!(rule.field, F::LastPlayed | F::DateAdded) {
         fact = format!("date({fact},'unixepoch')");
     }
     let text = matches!(rule.field, F::Title | F::Artist | F::Album | F::Comment);
@@ -2209,6 +2211,7 @@ fn smart_display_order(sort: crate::TrackSort, descending: bool) -> String {
     let mut order = sort.order_by(descending, |field| match field {
         "key" => "sort_key".into(),
         "genre" => "sort_genre".into(),
+        "date_added" => "added_at".into(),
         _ => field.to_string(),
     });
     order.push("media_uri ASC".into());

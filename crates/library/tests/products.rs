@@ -1260,7 +1260,7 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,title,normalized_search,display_album,display_artist,sort_text,duration_millis) SELECT source_key,'local-track',?1,'Local Track','local track','','','local track',60000 FROM sources WHERE object_id='local'")
+    sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,title,normalized_search,display_album,display_artist,sort_text,duration_millis,first_seen_at) SELECT source_key,'local-track',?1,'Local Track','local track','','','local track',60000,86400 FROM sources WHERE object_id='local'")
         .bind(local_uri)
         .execute(&mut raw)
         .await
@@ -1339,6 +1339,34 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
     assert!(queued[1].primary_artist_media_uri.is_none());
     assert_eq!(entries[3].media_uri, local_uri);
     assert_eq!(entries[3].source_id.as_deref(), Some("local"));
+    assert_eq!(entries[3].date_added.as_deref(), Some("1970-01-02"));
+    assert_eq!(smart[3].date_added, entries[3].date_added);
+    assert!(entries[1].date_added.is_none());
+    let tracks = database
+        .track_rows_by_uri(&[local_uri.to_owned()], &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tracks[0].date_added, entries[3].date_added);
+    let added = database
+        .create_smart_playlist(
+            "Added",
+            &SmartPlaylistDefinition {
+                current: false,
+                match_all: vec![SmartPlaylistRule {
+                    field: SmartPlaylistRuleField::DateAdded,
+                    operator: SmartPlaylistRuleOperator::Equals,
+                    value: Some(SmartPlaylistRuleValue::Date("1970-01-02".into())),
+                }],
+                ..SmartPlaylistDefinition::default()
+            },
+        )
+        .await
+        .unwrap();
+    let dated = database
+        .smart_playlist_media_uri_order(None, added, None, 86400, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(dated, [local_uri.to_owned()]);
 }
 
 #[tokio::test]
@@ -3568,6 +3596,45 @@ async fn home_search_and_radio_results_stay_bounded() {
     let mut raw = connection(&fixture.path).await;
     sqlx::query("UPDATE albums SET date_added=NULL,first_seen_at=CASE album_key WHEN ?1 THEN 200 ELSE 100 END")
         .bind(fixture.albums[0]).execute(&mut raw).await.expect("establish Local first-seen facts");
+    let albums = fixture
+        .database
+        .album_rows(fixture.source, &fixture.albums, None, &cancel)
+        .await
+        .unwrap();
+    assert!(
+        albums
+            .iter()
+            .all(|album| album.date_added.as_deref() == Some("1970-01-01"))
+    );
+    for descending in [false, true] {
+        let sorted = fixture
+            .database
+            .album_page(
+                fixture.source,
+                None,
+                false,
+                "",
+                library::AlbumSort::DateAdded,
+                descending,
+                0,
+                10,
+                &cancel,
+            )
+            .await
+            .unwrap();
+        let expected = if descending {
+            fixture.albums.clone()
+        } else {
+            fixture.albums.iter().rev().copied().collect()
+        };
+        assert_eq!(
+            sorted
+                .iter()
+                .map(|album| album.album_key)
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
     let newly_added = fixture
         .database
         .home_page(

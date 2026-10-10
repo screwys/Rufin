@@ -1420,7 +1420,7 @@ pub(crate) async fn load_playlist_entry_rows(
     }
     let mut query = playlist_entries_query(keys);
     query.push(crate::tracks::TRACK_LINK_COLUMNS);
-    query.push("entry.playlist_entry_key,entry.media_uri,entry.position,source.object_id source_id,
+    query.push(concat!("entry.playlist_entry_key,entry.media_uri,entry.position,source.object_id source_id,
                       COALESCE(track.title,entry.title,'') title,
                       COALESCE(track.display_artist,entry.artist,'') artist,
                       COALESCE(track.display_album,entry.album,'') album,
@@ -1430,7 +1430,7 @@ pub(crate) async fn load_playlist_entry_rows(
                       COALESCE(track.track_number,entry.track_number) track_number,
                       COALESCE(track.year,entry.year) year,
                       COALESCE(track.release_date,entry.release_date) release_date,
-                      COALESCE(track.audio_properties,'{}') audio_properties,track.date_added,track.bpm,track.source_path,source.display_name source_name,
+                      COALESCE(track.audio_properties,'{}') audio_properties,date(", crate::tracks::added_at!("track"), ",'unixepoch') date_added,track.bpm,track.source_path,source.display_name source_name,
                       (SELECT COALESCE(group_concat(name, ', '),'') FROM (
                          SELECT genre.name FROM track_genres credit JOIN genres genre USING(genre_key)
                          WHERE credit.track_key=track.track_key ORDER BY credit.position
@@ -1459,7 +1459,7 @@ pub(crate) async fn load_playlist_entry_rows(
                LEFT JOIN tracks track USING(media_uri)
                LEFT JOIN sources source ON source.source_key=track.source_key
                LEFT JOIN albums album ON album.album_key=track.album_key
-               ORDER BY entry.ordinal");
+               ORDER BY entry.ordinal"));
     query
         .build()
         .persistent(false)

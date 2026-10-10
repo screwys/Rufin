@@ -1,7 +1,6 @@
 use library::{
-    AlbumMetadataWrite, AlbumReleaseResult, AlbumSort, ArtistMetadataWrite, ArtistSort,
-    FavoriteTarget, GenreSort, MoodSort, ReadCancellation, RouteSeedWindow, SearchRequest,
-    TrackMetadataWrite, TrackSort,
+    AlbumReleaseResult, AlbumSort, ArtistSort, FavoriteTarget, GenreSort, MoodSort,
+    ReadCancellation, RouteSeedWindow, SearchRequest, TrackSort,
 };
 
 use super::support::{connection, fixture};
@@ -1161,27 +1160,37 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         missing_row.release_lookup_identity.as_deref(),
         Some("release-group:group-a")
     );
+    let mut scan = library::Scan::begin_items(&fixture.database, "source")
+        .await
+        .unwrap();
+    scan.write_album(
+        "album-a",
+        "Album A",
+        "album a",
+        "Artist A",
+        "album a",
+        Some(2024),
+        Some("2024-01-02"),
+        Some("2024-01-02"),
+        None,
+        Some("group-a2"),
+        Some(true),
+        None,
+        false,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    scan.write_album_relations(
+        &[("album-a", "artist-a")],
+        &[("album-a", "genre")],
+        &[("album-a", "Album")],
+    )
+    .await
+    .unwrap();
     assert!(matches!(
-        fixture
-            .database
-            .update_album_metadata(
-                fixture.source,
-                first.album_key,
-                AlbumMetadataWrite {
-                    title: "Album A".to_string(),
-                    normalized_title: "album a".to_string(),
-                    display_artist: "Artist A".to_string(),
-                    sort_text: "album a".to_string(),
-                    year: Some(2024),
-                    release_date: Some("2024-01-02".to_string()),
-                    date_added: Some("2024-01-02".to_string()),
-                    musicbrainz_release_id: None,
-                    musicbrainz_release_group_id: Some("group-a2".to_string()),
-                    is_compilation: Some(true)
-                }
-            )
-            .await
-            .unwrap(),
+        scan.finish().await.unwrap(),
         library::ScanOutcome::Changed(_)
     ));
     let changed = fixture
@@ -1619,40 +1628,106 @@ async fn empty_named_collection_routes_return_empty_pages() {
 }
 
 #[tokio::test]
-async fn metadata_point_writes_publish_changes_and_leave_no_ops_unchanged() {
+async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let track = fixture.tracks[0];
-    let outcome = fixture
-        .database
-        .update_track_metadata(
-            fixture.source,
-            track,
-            TrackMetadataWrite {
-                title: "Edited".to_string(),
-                normalized_search: "edited album a artist a changed".to_string(),
-                display_album: "Album A".to_string(),
-                display_artist: "Artist A".to_string(),
-                sort_text: "edited".to_string(),
-                duration_millis: 181_000,
-                disc_number: 1,
-                track_number: 1,
-                year: Some(2025),
-                release_date: None,
-                date_added: Some("2025-01-01".to_string()),
-                source_format: Some("FLAC".to_string()),
-                comment: Some("Changed".to_string()),
-                bpm: Some(121),
-                musicbrainz_recording_id: None,
-                musicbrainz_release_track_id: None,
-                cue_path: None,
-                cue_start_millis: None,
-                cue_end_millis: None,
-            },
+    let mut publication = None;
+    for refresh in 0..2 {
+        let mut scan = library::Scan::begin_items(&fixture.database, "source")
+            .await
+            .unwrap();
+        scan.write_track(
+            "track-0",
+            Some("album-a"),
+            "Edited",
+            "edited album a artist a changed",
+            "Album A",
+            "Artist A",
+            "edited",
+            181_000,
+            1,
+            1,
+            Some(2025),
+            None,
+            Some("2025-01-01"),
+            None,
+            Some("FLAC"),
+            Some("Changed"),
+            Some(121),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            Some(5),
+            None,
+            None,
+            None,
+            None,
+            None,
+            [1; 32],
+            &library::AudioProperties::default(),
         )
         .await
-        .expect("update Track metadata");
-    assert!(matches!(outcome, library::ScanOutcome::Changed(_)));
+        .expect("refresh Track metadata");
+        scan.write_track_relations(
+            &[("track-0", "artist-a")],
+            &[("track-0", "genre")],
+            &[("track-0", "mood")],
+        )
+        .await
+        .unwrap();
+        scan.write_album(
+            "album-a",
+            "Edited Album",
+            "edited album",
+            "Artist A",
+            "edited album",
+            Some(2025),
+            None,
+            None,
+            None,
+            None,
+            Some(true),
+            None,
+            false,
+            None,
+            None,
+        )
+        .await
+        .expect("refresh Album metadata");
+        scan.write_album_relations(
+            &[("album-a", "artist-a")],
+            &[("album-a", "genre")],
+            &[("album-a", "Album")],
+        )
+        .await
+        .unwrap();
+        scan.write_artist(
+            "artist-a",
+            "Edited Artist",
+            "edited artist",
+            Some("edited artist"),
+            None,
+            None,
+            Some(false),
+            None,
+        )
+        .await
+        .expect("refresh Artist metadata");
+        match scan.finish().await.unwrap() {
+            library::ScanOutcome::Changed(changed) if refresh == 0 => {
+                publication = Some(changed.catalog_revision);
+            }
+            library::ScanOutcome::Identical(unchanged) if refresh == 1 => {
+                assert_eq!(publication, Some(unchanged.catalog_revision));
+            }
+            outcome => panic!("unexpected refresh {refresh} result: {outcome:?}"),
+        }
+    }
     let row = fixture
         .database
         .track_rows(&[track], &cancel)
@@ -1662,53 +1737,6 @@ async fn metadata_point_writes_publish_changes_and_leave_no_ops_unchanged() {
         .unwrap();
     assert_eq!(row.title, "Edited");
     assert_eq!(row.comment.as_deref(), Some("Changed"));
-
-    assert!(matches!(
-        fixture
-            .database
-            .update_album_metadata(
-                fixture.source,
-                fixture.albums[0],
-                AlbumMetadataWrite {
-                    title: "Edited Album".to_string(),
-                    normalized_title: "edited album".to_string(),
-                    display_artist: "Artist A".to_string(),
-                    sort_text: "edited album".to_string(),
-                    year: Some(2025),
-                    release_date: None,
-                    date_added: None,
-                    musicbrainz_release_id: None,
-                    musicbrainz_release_group_id: None,
-                    is_compilation: Some(true),
-                },
-            )
-            .await
-            .expect("update Album metadata"),
-        library::ScanOutcome::Changed(_)
-    ));
-    let artist_write = ArtistMetadataWrite {
-        name: "Edited Artist".to_string(),
-        normalized_name: "edited artist".to_string(),
-        sort_text: "edited artist".to_string(),
-        musicbrainz_artist_id: None,
-    };
-    let outcome = fixture
-        .database
-        .update_artist_metadata(fixture.source, fixture.artists[0], artist_write.clone())
-        .await
-        .expect("update Artist metadata");
-    let library::ScanOutcome::Changed(publication) = outcome else {
-        panic!("changed artist must publish");
-    };
-    let unchanged = fixture
-        .database
-        .update_artist_metadata(fixture.source, fixture.artists[0], artist_write)
-        .await
-        .unwrap();
-    let library::ScanOutcome::Identical(unchanged) = unchanged else {
-        panic!("identical artist must not invalidate");
-    };
-    assert_eq!(publication.catalog_revision, unchanged.catalog_revision);
     let filtered = fixture
         .database
         .query_track_route_page(

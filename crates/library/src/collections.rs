@@ -1,4 +1,4 @@
-//! Owns Album, Artist, Genre, Mood, and Folder orders, rows, details, and metadata writes.
+//! Owns Album, Artist, Genre, Mood, and Folder orders, rows, and details.
 //! Collection membership, filtering, and sorting are resolved in one Store operation.
 
 use std::collections::BTreeMap;
@@ -240,7 +240,7 @@ impl AlbumSort {
             Self::AlbumArtist => "album.album_artist_sort".to_string(),
             Self::Year => "album.year".to_string(),
             Self::ReleaseDate => "album.release_date".to_string(),
-            Self::DateAdded => "album.date_added".to_string(),
+            Self::DateAdded => crate::tracks::added_at!("album").to_string(),
             Self::LastPlayed => format!("(SELECT max(value) FROM (SELECT base.last_played_at value FROM tracks item JOIN activity_baseline base ON base.source_key=item.source_key AND base.track_object_id=item.object_id AND base.period='lifetime' AND base.item_kind='track' WHERE {tracks} UNION ALL SELECT listen.started_at FROM tracks item JOIN listens listen USING(media_uri) WHERE {tracks}))"),
             Self::PlayCount => format!("(SELECT COALESCE(sum(item.local_play_count+COALESCE((SELECT base.play_count FROM activity_baseline base WHERE base.source_key=item.source_key AND base.track_object_id=item.object_id AND base.period='lifetime' AND base.item_kind='track'),0)),0) FROM tracks item WHERE {tracks})"),
             Self::Rating => "COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_rating)".to_string(),
@@ -528,20 +528,6 @@ fn album_release_cte(scope: &str) -> String {
       )")
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct AlbumMetadataWrite {
-    pub title: String,
-    pub normalized_title: String,
-    pub display_artist: String,
-    pub sort_text: String,
-    pub year: Option<i64>,
-    pub release_date: Option<String>,
-    pub date_added: Option<String>,
-    pub musicbrainz_release_id: Option<String>,
-    pub musicbrainz_release_group_id: Option<String>,
-    pub is_compilation: Option<bool>,
-}
-
 #[derive(Clone, Debug, Eq, FromRow, PartialEq)]
 pub struct AlbumReleaseCandidate {
     pub album_key: AlbumKey,
@@ -553,14 +539,6 @@ pub struct AlbumReleaseCandidate {
 pub enum AlbumReleaseResult {
     Found { release_types: Vec<String> },
     Missing,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ArtistMetadataWrite {
-    pub name: String,
-    pub normalized_name: String,
-    pub sort_text: String,
-    pub musicbrainz_artist_id: Option<String>,
 }
 
 fn push_artist_role_scope(
@@ -975,15 +953,15 @@ impl Database {
         let album_limit = album_limit.clamp(1, 100) as i64;
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         Ok(sqlx::query_scalar::<_, String>(
-            "WITH latest AS (
+            concat!("WITH latest AS (
                SELECT album.album_key FROM albums album
                WHERE album.source_key=?1
                  AND (?2 IS NULL OR EXISTS (SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.album_key=album.album_key AND scope.folder_key=?2))
-               ORDER BY album.date_added DESC NULLS LAST,album.album_key LIMIT ?3
+               ORDER BY ",crate::tracks::added_at!("album")," DESC NULLS LAST,album.album_key LIMIT ?3
              )
              SELECT track.media_uri FROM latest JOIN tracks track USING(album_key)
              WHERE (?2 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?2))
-             ORDER BY latest.album_key,track.disc_number,track.track_number,track.track_key",
+             ORDER BY latest.album_key,track.disc_number,track.track_number,track.track_key"),
         )
         .bind(source)
         .bind(folder)
@@ -1943,77 +1921,6 @@ impl Database {
         Ok(mood)
     }
 
-    pub async fn update_album_metadata(
-        &self,
-        source: SourceKey,
-        key: AlbumKey,
-        write: AlbumMetadataWrite,
-    ) -> LibraryResult<crate::ScanOutcome> {
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
-        let changed = sqlx::query(
-            "UPDATE albums SET title=?3, normalized_title=?4,
-                    display_artist=?5, sort_text=?6, year=?7,
-                    release_date=?8, date_added=?9,
-                    musicbrainz_release_id=?10,
-                    musicbrainz_release_group_id=?11,
-                    is_compilation=?12
-             WHERE source_key=?1 AND album_key=?2
-               AND (title,normalized_title,display_artist,sort_text,year,release_date,date_added,
-                    musicbrainz_release_id,musicbrainz_release_group_id,is_compilation)
-                   IS NOT (?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
-        )
-        .bind(source)
-        .bind(key)
-        .bind(write.title)
-        .bind(write.normalized_title)
-        .bind(write.display_artist)
-        .bind(write.sort_text)
-        .bind(write.year)
-        .bind(write.release_date)
-        .bind(write.date_added)
-        .bind(write.musicbrainz_release_id)
-        .bind(write.musicbrainz_release_group_id)
-        .bind(write.is_compilation)
-        .execute(&mut *transaction)
-        .await?
-        .rows_affected()
-            == 1;
-        let outcome = crate::scan::metadata_publication(&mut transaction, source, changed).await?;
-        transaction.commit().await?;
-        Ok(outcome)
-    }
-
-    pub async fn update_artist_metadata(
-        &self,
-        source: SourceKey,
-        key: ArtistKey,
-        write: ArtistMetadataWrite,
-    ) -> LibraryResult<crate::ScanOutcome> {
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
-        let changed = sqlx::query(
-            "UPDATE artists SET name=?3, normalized_name=?4,
-                    sort_text=?5, musicbrainz_artist_id=?6
-             WHERE source_key=?1 AND artist_key=?2
-               AND (name,normalized_name,sort_text,musicbrainz_artist_id) IS NOT (?3,?4,?5,?6)",
-        )
-        .bind(source)
-        .bind(key)
-        .bind(write.name)
-        .bind(write.normalized_name)
-        .bind(write.sort_text)
-        .bind(write.musicbrainz_artist_id)
-        .execute(&mut *transaction)
-        .await?
-        .rows_affected()
-            == 1;
-        let outcome = crate::scan::metadata_publication(&mut transaction, source, changed).await?;
-        transaction.commit().await?;
-        Ok(outcome)
-    }
 }
 
 pub(crate) async fn load_artist_rows(
@@ -2285,7 +2192,7 @@ pub(crate) async fn load_album_rows(
         SELECT track.album_key,count(*) listen_plays,max(listen.started_at) listen_last_played
         FROM scoped_tracks track CROSS JOIN listens listen USING(media_uri) GROUP BY track.album_key
       ) SELECT album.album_key,album.source_key,album.object_id,album.media_uri,album.title,
-          album.display_artist,album.year,album.release_date,album.date_added,
+          album.display_artist,album.year,album.release_date,date(").push(crate::tracks::added_at!("album")).push(",'unixepoch') date_added,
           album.musicbrainz_release_id,album.musicbrainz_release_group_id,album.is_compilation,
           album.release_lookup_identity,album.artwork_binding,
           COALESCE((SELECT state.favorite FROM user_media_state state

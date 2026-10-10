@@ -291,17 +291,19 @@ impl Database {
             let mut newly_added =
                 provider_section(&mut transaction, source, folder, "newly-added").await?;
             if newly_added.tracks.is_empty() && newly_added.albums.is_empty() {
-                newly_added.albums = sqlx::query_as::<_, HomeAlbumFact>(
-                "SELECT album_key,title FROM albums
+                newly_added.albums = sqlx::query_as::<_, HomeAlbumFact>(concat!(
+                    "SELECT album_key,title FROM albums
                  WHERE source_key=?1 AND (?2 IS NULL OR EXISTS (
                    SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key)
                    WHERE track.album_key=albums.album_key AND scope.folder_key=?2))
-                 ORDER BY COALESCE(unixepoch(date_added),first_seen_at) DESC NULLS LAST,sort_text,album_key LIMIT 24",
-            )
-            .bind(source)
-            .bind(folder)
-            .fetch_all(&mut *transaction)
-            .await?;
+                 ORDER BY ",
+                    crate::tracks::added_at!("albums"),
+                    " DESC NULLS LAST,sort_text,album_key LIMIT 24"
+                ))
+                .bind(source)
+                .bind(folder)
+                .fetch_all(&mut *transaction)
+                .await?;
             }
 
             newly_added

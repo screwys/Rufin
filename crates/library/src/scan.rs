@@ -2802,32 +2802,6 @@ async fn publish_artwork_bindings(
     Ok(())
 }
 
-pub(crate) async fn metadata_publication(
-    connection: &mut sqlx::SqliteConnection,
-    source: SourceKey,
-    changed: bool,
-) -> LibraryResult<ScanOutcome> {
-    if changed {
-        sqlx::query("UPDATE sources SET freshness=NULL,catalog_revision=catalog_revision+1 WHERE source_key=?1")
-            .bind(source).execute(&mut *connection).await?;
-    }
-    let Some((revision, artwork)) = sqlx::query_as::<_, (i64, Vec<u8>)>(
-        "SELECT catalog_revision,artwork_digest FROM sources WHERE source_key=?1",
-    )
-    .bind(source)
-    .fetch_optional(connection)
-    .await?
-    else {
-        return Ok(ScanOutcome::Stale);
-    };
-    let publication = publication(source.raw(), revision, &artwork)?;
-    Ok(if changed {
-        ScanOutcome::Changed(publication)
-    } else {
-        ScanOutcome::Identical(publication)
-    })
-}
-
 impl Database {
     pub async fn reconcile_source(&self, source_id: &SourceId) -> LibraryResult<Publication> {
         let mut writer = self.writer().await?;

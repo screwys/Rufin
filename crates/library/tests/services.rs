@@ -219,35 +219,56 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
             .expect("read Track loudness"),
         Some(source_fact.clone())
     );
-    fixture
-        .database
-        .update_track_metadata(
-            fixture.source,
-            work.track_key,
-            library::TrackMetadataWrite {
-                title: "Alpha".to_string(),
-                normalized_search: "alpha album a artist a note".to_string(),
-                display_album: "Album A".to_string(),
-                display_artist: "Artist A".to_string(),
-                sort_text: "alpha".to_string(),
-                duration_millis: 180_000,
-                disc_number: 1,
-                track_number: 1,
-                year: Some(2020),
-                release_date: None,
-                date_added: Some("2024-01-02".to_string()),
-                source_format: Some("FLAC".to_string()),
-                comment: Some("Note".to_string()),
-                bpm: Some(100),
-                musicbrainz_recording_id: None,
-                musicbrainz_release_track_id: None,
-                cue_path: Some("/music/changed.cue".to_string()),
-                cue_start_millis: Some(1_000),
-                cue_end_millis: Some(181_000),
-            },
-        )
+    let mut scan = library::Scan::begin_items(&fixture.database, "source")
         .await
-        .expect("change Track CUE identity");
+        .unwrap();
+    scan.write_track(
+        "track-0",
+        Some("album-a"),
+        "Alpha",
+        "alpha album a artist a note",
+        "Album A",
+        "Artist A",
+        "alpha",
+        180_000,
+        1,
+        1,
+        Some(2020),
+        None,
+        Some("2024-01-02"),
+        None,
+        Some("FLAC"),
+        Some("Note"),
+        Some(100),
+        None,
+        None,
+        Some("/music/changed.cue"),
+        Some(1_000),
+        Some(181_000),
+        None,
+        false,
+        Some(5),
+        None,
+        None,
+        None,
+        None,
+        None,
+        [99; 32],
+        &library::AudioProperties::default(),
+    )
+    .await
+    .expect("refresh Track CUE identity");
+    scan.write_track_relations(
+        &[("track-0", "artist-a")],
+        &[("track-0", "genre")],
+        &[("track-0", "mood")],
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        scan.finish().await.unwrap(),
+        library::ScanOutcome::Changed(_)
+    ));
     let changed = fixture
         .database
         .next_missing_track_loudness(fixture.source, None, &cancel)
@@ -280,6 +301,20 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
             .await
             .expect("reject stale analyzer completion")
     );
+    let current_source = LoudnessMeasurement {
+        analysis_key: changed.expected_analysis_key,
+        integrated_lufs: Some(-10.0),
+        true_peak: None,
+        replay_gain_db: None,
+        replay_gain_peak: None,
+    };
+    assert!(
+        fixture
+            .database
+            .write_track_source_loudness(fixture.source, changed.track_key, &current_source)
+            .await
+            .expect("refresh source gain identity")
+    );
     assert!(
         !fixture
             .database
@@ -296,20 +331,6 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
             )
             .await
             .expect("do not replace newer source fact")
-    );
-    let current_source = LoudnessMeasurement {
-        analysis_key: changed.expected_analysis_key,
-        integrated_lufs: Some(-10.0),
-        true_peak: None,
-        replay_gain_db: None,
-        replay_gain_peak: None,
-    };
-    assert!(
-        fixture
-            .database
-            .write_track_source_loudness(fixture.source, changed.track_key, &current_source)
-            .await
-            .expect("refresh source gain identity")
     );
     assert_eq!(
         fixture

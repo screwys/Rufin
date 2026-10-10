@@ -1,4 +1,4 @@
-//! Owns complete Track orders, bounded final rows, details, and Track metadata writes.
+//! Owns complete Track orders, bounded final rows, and details.
 //! Each bounded row query includes its ordered artist and genre links.
 
 use sqlx::sqlite::SqliteRow;
@@ -7,8 +7,21 @@ use sqlx::{Connection, FromRow, QueryBuilder, Row, Sqlite, SqliteConnection};
 use crate::{
     AlbumKey, ArtistKey, Database, FolderKey, GenreKey, LibraryError, LibraryResult,
     ReadCancellation, RouteSeedWindow, SourceKey, TrackKey,
-    loudness::{recompute_album_loudness_key, source_track_loudness_key},
 };
+
+// Provider dates take precedence over the preserved first-seen timestamp.
+macro_rules! added_at {
+    ($row:literal) => {
+        concat!(
+            "COALESCE(unixepoch(",
+            $row,
+            ".date_added),",
+            $row,
+            ".first_seen_at)"
+        )
+    };
+}
+pub(crate) use added_at;
 
 const TRACK_ROW_LIMIT: usize = 256;
 
@@ -52,6 +65,7 @@ impl TrackSort {
                 "album_artist_sort" => "track.sort_album_artist".into(),
                 "album_sort" => "track.sort_album".into(),
                 "album_year" => "track.sort_album_year".into(),
+                "date_added" => added_at!("track").into(),
                 _ => format!("track.{field}"),
             };
             if !playlist { return column; }
@@ -398,29 +412,6 @@ impl TrackQuery {
             },
         }
     }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct TrackMetadataWrite {
-    pub title: String,
-    pub normalized_search: String,
-    pub display_album: String,
-    pub display_artist: String,
-    pub sort_text: String,
-    pub duration_millis: i64,
-    pub disc_number: i64,
-    pub track_number: i64,
-    pub year: Option<i64>,
-    pub release_date: Option<String>,
-    pub date_added: Option<String>,
-    pub source_format: Option<String>,
-    pub comment: Option<String>,
-    pub bpm: Option<i64>,
-    pub musicbrainz_recording_id: Option<String>,
-    pub musicbrainz_release_track_id: Option<String>,
-    pub cue_path: Option<String>,
-    pub cue_start_millis: Option<i64>,
-    pub cue_end_millis: Option<i64>,
 }
 
 impl Database {
@@ -903,85 +894,6 @@ impl Database {
         result
     }
 
-    pub async fn update_track_metadata(
-        &self,
-        source: SourceKey,
-        key: TrackKey,
-        write: TrackMetadataWrite,
-    ) -> LibraryResult<crate::ScanOutcome> {
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
-        let current = sqlx::query_as::<_, (String, Option<AlbumKey>)>(
-            "SELECT media_uri,album_key FROM tracks WHERE source_key=?1 AND track_key=?2",
-        )
-        .bind(source)
-        .bind(key)
-        .fetch_optional(&mut *transaction)
-        .await?;
-        let Some((media_uri, album)) = current else {
-            transaction.commit().await?;
-            return Ok(crate::ScanOutcome::Stale);
-        };
-        let loudness_analysis_key = source_track_loudness_key(
-            Some(&media_uri),
-            write.source_format.as_deref(),
-            write.duration_millis,
-            write.cue_path.as_deref(),
-            write.cue_start_millis,
-            write.cue_end_millis,
-        );
-        let changed = sqlx::query(
-            "UPDATE tracks SET
-                 title=?3, normalized_search=?4, display_album=?5,
-                 display_artist=?6, sort_text=?7, duration_millis=?8,
-                 disc_number=?9, track_number=?10, year=?11,
-                 release_date=?12, date_added=?13,
-                 source_format=?14, comment=?15, bpm=?16,
-                 musicbrainz_recording_id=?17, musicbrainz_release_track_id=?18,
-                 cue_path=?19, cue_start_millis=?20, cue_end_millis=?21,
-                 source_loudness_analysis_key=?22,
-                 loudness_analysis_key=COALESCE((SELECT loudness_analysis_key FROM local_access_files access WHERE access.media_uri=tracks.media_uri ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),?22)
-             WHERE source_key=?1 AND track_key=?2
-               AND (title,normalized_search,display_album,display_artist,sort_text,duration_millis,
-                    disc_number,track_number,year,release_date,date_added,source_format,comment,bpm,
-                    musicbrainz_recording_id,musicbrainz_release_track_id,cue_path,cue_start_millis,cue_end_millis)
-                   IS NOT (?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
-        )
-        .bind(source)
-        .bind(key)
-        .bind(write.title)
-        .bind(write.normalized_search)
-        .bind(write.display_album)
-        .bind(write.display_artist)
-        .bind(write.sort_text)
-        .bind(write.duration_millis)
-        .bind(write.disc_number)
-        .bind(write.track_number)
-        .bind(write.year)
-        .bind(write.release_date)
-        .bind(write.date_added)
-        .bind(write.source_format)
-        .bind(write.comment)
-        .bind(write.bpm)
-        .bind(write.musicbrainz_recording_id)
-        .bind(write.musicbrainz_release_track_id)
-        .bind(write.cue_path)
-        .bind(write.cue_start_millis)
-        .bind(write.cue_end_millis)
-        .bind(loudness_analysis_key.as_slice())
-        .execute(&mut *transaction)
-        .await?;
-        let changed = changed.rows_affected() == 1;
-        if changed {
-            if let Some(album) = album {
-                recompute_album_loudness_key(&mut transaction, album).await?;
-            }
-        }
-        let outcome = crate::scan::metadata_publication(&mut transaction, source, changed).await?;
-        transaction.commit().await?;
-        Ok(outcome)
-    }
 }
 
 pub(crate) async fn query_selected_track_uris_on(
@@ -1126,7 +1038,7 @@ pub(crate) async fn load_track_rows(
                         track.display_album album,track.display_artist artist,
                         album.display_artist album_display_artist,
                         track.duration_millis,track.disc_number,track.track_number,
-                        track.year,track.release_date,track.date_added,track.media_uri,
+                        track.year,track.release_date,date(").push(added_at!("track")).push(",'unixepoch') date_added,track.media_uri,
                         track.audio_properties,track.source_format,track.source_path,source.display_name source_name,track.comment,track.bpm,
                         track.musicbrainz_recording_id,track.musicbrainz_release_track_id,
                         track.cue_path,track.cue_start_millis,track.cue_end_millis,
