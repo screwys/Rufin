@@ -142,7 +142,7 @@ pub(super) async fn copy_catalog(
                 after = row.try_get(key)?;
                 let source: String = row.try_get("migration_source")?;
                 let object: String = row.try_get("object_id")?;
-                let uri = if kind == "track" {
+                let uri = if kind == "track" && released {
                     track_uri(&row, &source, &object)
                 } else {
                     super::string(&row, "media_uri")
