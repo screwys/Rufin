@@ -1,6 +1,82 @@
 use super::*;
 use library::{AlbumSort, FolderKey, ReadCancellation, SourceKey};
 
+pub(super) async fn song_query(
+    products: &ProductHandles,
+    parameters: &HashMap<String, String>,
+    kind: &str,
+) -> Result<library::SongQuery, Error> {
+    use library::{SongQuery, SongScope};
+    if parameters.contains_key("folder") && !parameters.contains_key("source") {
+        return Err(bad_request("source is required with folder"));
+    }
+    let (source, folder) = if parameters.contains_key("source")
+        && (parameters.contains_key("folder")
+            || matches!(
+                kind,
+                "source" | "tracks" | "smart-playlist" | "smart-tracks"
+            )) {
+        let (source, folder) = scope(products, parameters).await?;
+        (Some(source), folder)
+    } else {
+        (None, None)
+    };
+    let scope = match kind {
+        "source" | "tracks" => {
+            SongScope::Tracks(source.ok_or_else(|| bad_request("Source not found"))?)
+        }
+        "album" | "album-tracks" => SongScope::Album(key(parameters, "id")?),
+        "artist" | "artist-tracks" => SongScope::Artist {
+            key: key(parameters, "id")?,
+            album_artist: boolean(parameters, "album_artists")?,
+        },
+        "genre" | "genre-tracks" => SongScope::Genre(key(parameters, "id")?),
+        "playlist" | "entries" => SongScope::Playlist(key(parameters, "id")?),
+        "smart-playlist" | "smart-tracks" => SongScope::Smart {
+            key: key(parameters, "id")?,
+            source,
+            now: now(),
+        },
+        _ => return Err(bad_request("Unknown media kind")),
+    };
+    let mut query = SongQuery::new(scope);
+    query.folder = folder;
+    query.filter = parameters.get("q").cloned().unwrap_or_default();
+    query.sort = if matches!(query.scope, SongScope::Smart { .. }) {
+        smart_track_sort(parameters.get("sort").map(String::as_str))?
+    } else {
+        Some(track_sort(
+            parameters
+                .get("sort")
+                .map(String::as_str)
+                .unwrap_or(match query.scope {
+                    SongScope::Playlist(_) => "position",
+                    SongScope::Album(_) => "track_number",
+                    _ => "title",
+                }),
+        )?)
+    };
+    query.descending = boolean(parameters, "descending")?;
+    query.favorites_only = boolean(parameters, "favorites")?;
+    Ok(query)
+}
+
+pub(super) async fn song_total(
+    products: &ProductHandles,
+    parameters: &HashMap<String, String>,
+    query: &library::SongQuery,
+) -> Result<Option<i64>, Error> {
+    if !boolean(parameters, "total")? {
+        return Ok(None);
+    }
+    products
+        .library
+        .song_count(query, &ReadCancellation::new())
+        .await
+        .map(Some)
+        .map_err(internal)
+}
+
 pub(super) async fn page_total(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
@@ -11,16 +87,16 @@ pub(super) async fn page_total(
     }
     let filter = parameters.get("q").map(String::as_str).unwrap_or("");
     let favorites = boolean(parameters, "favorites")?;
-    if matches!(kind, "tracks" | "albums")
+    if kind == "albums"
         && !parameters.contains_key("folder")
         && filter.trim().is_empty()
         && !favorites
         && let Some(source) = parameters.get("source")
-        && let Some((albums, tracks)) = products
+        && let Some((albums, _)) = products
             .source
             .cached_source_counts(&sources::SourceId::new(source))
     {
-        return Ok(Some(if kind == "tracks" { tracks } else { albums } as i64));
+        return Ok(Some(albums as i64));
     }
     let (source, folder) = if parameters.contains_key("source") {
         let (source, folder) = scope(products, parameters).await?;
@@ -32,21 +108,6 @@ pub(super) async fn page_total(
     let database = &products.library;
     let required_source = || source.ok_or_else(|| bad_request("Source not found"));
     let count = match kind {
-        "tracks" => {
-            database
-                .track_count(
-                    &library::TrackQuery {
-                        source: required_source()?,
-                        collection: None,
-                        folder,
-                        favorites_only: favorites,
-                        downloaded_only: false,
-                    },
-                    filter,
-                    &cancel,
-                )
-                .await
-        }
         "albums" => {
             database
                 .album_count(
@@ -85,45 +146,9 @@ pub(super) async fn page_total(
                 .playlist_count(source, folder, filter, &cancel)
                 .await
         }
-        "entries" => {
-            database
-                .playlist_entries_count(key(parameters, "id")?, folder, filter, &cancel)
-                .await
-        }
         "smart-playlists" => {
             database
                 .smart_playlist_count(source, folder, filter, now(), &cancel)
-                .await
-        }
-        "smart-tracks" => {
-            database
-                .smart_playlist_track_count(
-                    source,
-                    key(parameters, "id")?,
-                    folder,
-                    filter,
-                    now(),
-                    &cancel,
-                )
-                .await
-        }
-        "album-tracks" | "artist-tracks" | "genre-tracks" => {
-            let collection = match kind {
-                "album-tracks" => library::QueueCollection::AlbumKey(key(parameters, "id")?),
-                "artist-tracks" => library::QueueCollection::ArtistKey {
-                    key: key(parameters, "id")?,
-                    album_artist: boolean(parameters, "album_artists")?,
-                },
-                _ => library::QueueCollection::Genre(key(parameters, "id")?),
-            };
-            database
-                .collection_tracks_count(
-                    &collection,
-                    folder,
-                    filter,
-                    kind != "genre-tracks" && favorites,
-                    &cancel,
-                )
                 .await
         }
         _ => unreachable!("Unknown catalog count"),
@@ -314,33 +339,18 @@ pub(super) async fn genre_tracks_data(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
-    let folder = if parameters.contains_key("folder") {
-        scope(products, parameters).await?.1
-    } else {
-        None
-    };
-    let (rows, _) = products
+    let query = song_query(products, parameters, "genre-tracks").await?;
+    let offset = number(parameters, "offset", 0)?;
+    let limit = number(parameters, "limit", 48)?.min(256);
+    let rows = products
         .library
-        .collection_tracks_page(
-            &library::QueueCollection::Genre(key(parameters, "id")?),
-            folder,
-            parameters.get("q").map(String::as_str).unwrap_or(""),
-            track_sort(
-                parameters
-                    .get("sort")
-                    .map(String::as_str)
-                    .unwrap_or("title"),
-            )?,
-            boolean(parameters, "descending")?,
-            false,
-            number(parameters, "offset", 0)?,
-            number(parameters, "limit", 48)?.min(256),
-            &ReadCancellation::new(),
-        )
+        .song_rows(&query, offset, limit, &ReadCancellation::new())
         .await
         .map_err(internal)?;
-    let total = page_total(products, parameters, "genre-tracks").await?;
-    Ok(json!({"total":total,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}))
+    let total = song_total(products, parameters, &query).await?;
+    Ok(
+        json!({"total":total,"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
+    )
 }
 
 async fn artists(
@@ -414,38 +424,15 @@ pub(super) async fn artist_tracks_data(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
-    let folder = if parameters.contains_key("folder") {
-        scope(products, parameters).await?.1
-    } else {
-        None
-    };
-    let collection = library::QueueCollection::ArtistKey {
-        key: key(parameters, "id")?,
-        album_artist: boolean(parameters, "album_artists")?,
-    };
+    let query = song_query(products, parameters, "artist-tracks").await?;
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 48)?.min(256);
-    let (rows, _) = products
+    let rows = products
         .library
-        .collection_tracks_page(
-            &collection,
-            folder,
-            parameters.get("q").map(String::as_str).unwrap_or(""),
-            track_sort(
-                parameters
-                    .get("sort")
-                    .map(String::as_str)
-                    .unwrap_or("title"),
-            )?,
-            boolean(parameters, "descending")?,
-            boolean(parameters, "favorites")?,
-            offset,
-            limit,
-            &ReadCancellation::new(),
-        )
+        .song_rows(&query, offset, limit, &ReadCancellation::new())
         .await
         .map_err(internal)?;
-    let total = page_total(products, parameters, "artist-tracks").await?;
+    let total = song_total(products, parameters, &query).await?;
     Ok(
         json!({"total":total,"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
     )
@@ -529,36 +516,17 @@ pub(super) async fn smart_tracks_data(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
-    let (source, folder) = if parameters.contains_key("source") {
-        let (s, f) = scope(products, parameters).await?;
-        (Some(s), f)
-    } else {
-        (None, None)
-    };
+    let query = song_query(products, parameters, "smart-tracks").await?;
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 48)?.min(256);
-    let id = key(parameters, "id")?;
-    let filter = parameters.get("q").map(String::as_str).unwrap_or("");
-    let cancellation = ReadCancellation::new();
     let rows = products
         .library
-        .smart_playlist_track_page(
-            source,
-            id,
-            folder,
-            filter,
-            smart_track_sort(parameters.get("sort").map(String::as_str))?,
-            boolean(parameters, "descending")?,
-            now(),
-            offset,
-            limit,
-            &cancellation,
-        )
+        .song_rows(&query, offset, limit, &ReadCancellation::new())
         .await
         .map_err(internal)?;
-    let total = page_total(products, parameters, "smart-tracks").await?;
+    let total = song_total(products, parameters, &query).await?;
     Ok(
-        json!({"total":total,"offset":offset,"limit":limit,"tracks":rows.iter().map(|row|json!({"uri":row.media_uri,"title":row.title,"artist":row.artist,"album":row.album,"favorite":row.favorite,"duration_ms":row.duration_millis})).collect::<Vec<_>>()}),
+        json!({"total":total,"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
     )
 }
 
@@ -643,42 +611,22 @@ pub(super) async fn album_tracks_data(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
+    let query = song_query(products, parameters, "album-tracks").await?;
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 100)?.min(128);
-    let filter = parameters.get("q").map(String::as_str).unwrap_or("");
-    let descending = boolean(parameters, "descending")?;
-    let favorites = boolean(parameters, "favorites")?;
-    let cancellation = ReadCancellation::new();
-    let album = key(parameters, "id")?;
-    let folder = if parameters.contains_key("folder") {
-        scope(products, parameters).await?.1
-    } else {
-        None
-    };
-    let sort = track_sort(
-        parameters
-            .get("sort")
-            .map(String::as_str)
-            .unwrap_or("track_number"),
-    )?;
-    let (rows, disc_sections) = products
+    let rows = products
         .library
-        .collection_tracks_page(
-            &library::QueueCollection::AlbumKey(album),
-            folder,
-            filter,
-            sort,
-            descending,
-            favorites,
-            offset,
-            limit,
-            &cancellation,
-        )
+        .song_rows(&query, offset, limit, &ReadCancellation::new())
         .await
-        .map_err(bad_request)?;
-    let total = page_total(products, parameters, "album-tracks").await?;
+        .map_err(internal)?;
+    let disc_sections = products
+        .library
+        .song_disc_sections(&query, &ReadCancellation::new())
+        .await
+        .map_err(internal)?;
+    let total = song_total(products, parameters, &query).await?;
     Ok(
-        json!({"total":total,"album_tracks":true,"disc_sections":disc_sections,"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
+        json!({"album_tracks":true,"disc_sections":disc_sections,"total":total,"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
     )
 }
 

@@ -2007,51 +2007,6 @@ impl SourceOwner {
 
     /// Browsing uses the requested source and folder without changing desktop selection.
     #[allow(clippy::too_many_arguments)]
-    pub fn tracks(
-        &self,
-        source_id: SourceId,
-        folder: Option<String>,
-        filter: String,
-        favorites_only: bool,
-        sort: library::TrackSort,
-        descending: bool,
-        offset: usize,
-        limit: usize,
-    ) -> Receiver<Result<Vec<library::TrackRow>, String>> {
-        self.reply(move |_, database| async move {
-            let cancellation = ReadCancellation::new();
-            let source = database
-                .source_identity_key(&source_id)
-                .await
-                .map_err(string_error)?
-                .ok_or_else(|| "Source not found".to_string())?;
-            let folder = match folder {
-                Some(folder) => Some(
-                    database
-                        .folder_key_by_object(source, &folder, &cancellation)
-                        .await
-                        .map_err(string_error)?
-                        .ok_or_else(|| "Folder not found".to_string())?,
-                ),
-                None => None,
-            };
-            database
-                .track_page(
-                    source,
-                    folder,
-                    favorites_only,
-                    &filter,
-                    sort,
-                    descending,
-                    offset,
-                    limit,
-                    &cancellation,
-                )
-                .await
-                .map_err(string_error)
-        })
-    }
-
     pub fn collection_folder_uri(
         &self,
         media_uri: String,

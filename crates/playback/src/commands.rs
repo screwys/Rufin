@@ -10,178 +10,206 @@ use crate::{
 pub type QueuePlacement = Placement;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct BatchItem {
-    pub item: QueueItem,
-    pub provenance: Provenance,
-}
-impl BatchItem {
-    pub fn direct(item: QueueItem, provenance: Provenance) -> Self {
-        Self { item, provenance }
-    }
-}
-#[derive(Clone, Debug, PartialEq)]
-pub struct Batch {
-    pub input: library::QueueInput,
-    pub context_title: Option<Arc<library::QueueContextTitle>>,
-    pub shuffle_seed: u64,
-    pub random_start: bool,
-    pub shuffled: bool,
-}
-impl Batch {
-    pub fn new(items: Vec<BatchItem>) -> Self {
-        Self::from_input(library::QueueInput::Items(
-            items
-                .into_iter()
-                .map(|item| (item.item, item.provenance))
-                .collect(),
-        ))
-    }
-    pub fn from_input(input: library::QueueInput) -> Self {
-        Self {
-            input,
-            context_title: None,
-            shuffle_seed: 0,
-            random_start: false,
-            shuffled: false,
-        }
-    }
-    pub fn with_shuffle_intent(mut self, seed: u64, random_start: bool) -> Self {
-        self.shuffle_seed = seed;
-        self.random_start = random_start;
-        self
-    }
-    pub fn with_context_title(mut self, title: Option<Arc<library::QueueContextTitle>>) -> Self {
-        self.context_title = title;
-        self
-    }
-    pub fn input(&self) -> &library::QueueInput {
-        &self.input
-    }
-    pub fn context_title(&self) -> Option<&Arc<library::QueueContextTitle>> {
-        self.context_title.as_ref()
-    }
-    pub fn shuffled_seed(&self) -> Option<u64> {
-        self.shuffled.then_some(self.shuffle_seed)
-    }
-    fn activation_context(&self, index: usize) -> Option<(String, library::TrackKey, usize)> {
-        match &self.input {
-            library::QueueInput::Query {
-                context_id,
-                anchor_key: Some(key),
-                ..
-            }
-            | library::QueueInput::PlaylistQuery {
-                context_id,
-                anchor_key: Some(key),
-                ..
-            } => Some((context_id.to_string(), *key, index)),
-            library::QueueInput::Tracks {
-                order,
-                context_id,
-                source_start,
-            } => Some((
-                context_id.to_string(),
-                *order.get(index)?,
-                source_start + index,
-            )),
-            library::QueueInput::Captured {
-                entries,
-                anchor_index,
-            } => {
-                let entry = entries.get(*anchor_index)?;
-                let Provenance::Context {
-                    context_id,
-                    source_rank,
-                    ..
-                } = &entry.provenance
-                else {
-                    return None;
-                };
-                Some((context_id.to_string(), entry.track_key, *source_rank))
-            }
-            _ => None,
-        }
-    }
-}
-
-#[derive(Clone)]
 pub struct PlayRequest {
-    pub batch: Batch,
-    pub anchor_index: usize,
+    pub load: library::QueueReadRequest,
     pub placement: QueuePlacement,
-    /// Whole-collection start intent, resolved against the current Shuffle setting before admission.
     pub shuffled_start: bool,
     reactivate: bool,
 }
 
 impl PlayRequest {
     pub fn one(item: QueueItem, placement: QueuePlacement) -> Self {
+        Self::items(vec![item], placement)
+    }
+    pub fn items(items: Vec<QueueItem>, placement: QueuePlacement) -> Self {
+        Self::from_load(
+            library::QueueReadRequest::items(
+                items
+                    .into_iter()
+                    .map(|item| (item, Provenance::Manual))
+                    .collect(),
+            ),
+            placement,
+        )
+    }
+    pub fn uris(uris: Vec<String>, placement: QueuePlacement) -> Self {
+        Self::from_load(
+            library::QueueReadRequest::media_uris(uris, Provenance::Manual),
+            placement,
+        )
+    }
+    pub fn from_load(load: library::QueueReadRequest, placement: QueuePlacement) -> Self {
         Self {
-            batch: Batch::new(vec![BatchItem::direct(item, Provenance::Manual)]),
-            anchor_index: 0,
+            load,
             placement,
             shuffled_start: false,
             reactivate: false,
         }
     }
-
     pub fn ordered(
-        input: library::QueueInput,
+        selection: library::SongSelection,
         anchor_index: usize,
         placement: QueuePlacement,
         shuffled_start: bool,
     ) -> Self {
-        Self {
-            batch: Batch::from_input(input),
-            anchor_index,
-            placement,
-            shuffled_start,
-            reactivate: false,
-        }
+        let mut request = Self::from_load(library::QueueReadRequest::songs(selection), placement);
+        request.load.anchor_index = anchor_index;
+        request.shuffled_start = shuffled_start;
+        request
     }
-
     pub fn captured(
-        input: library::QueueInput,
+        selection: library::SongSelection,
         anchor_index: usize,
         placement: QueuePlacement,
         shuffled_start: bool,
     ) -> Self {
-        let mut request = Self::ordered(input, anchor_index, placement, shuffled_start);
+        let mut request = Self::ordered(selection, anchor_index, placement, shuffled_start);
         request.reactivate = true;
         request
     }
-
-    pub fn activation_context(&self) -> Option<(String, library::TrackKey, usize)> {
-        (self.reactivate
-            && self.placement == QueuePlacement::Now
-            && !self.shuffled_start
-            && !self.batch.shuffled)
-            .then(|| self.batch.activation_context(self.anchor_index))
-            .flatten()
+    pub fn group(requests: Vec<Self>, placement: QueuePlacement) -> Self {
+        let mut groups = Vec::new();
+        for request in requests {
+            if let library::QueueLoad::Songs(mut selections) = request.load.input {
+                for (_, provenance) in &mut selections {
+                    if let Provenance::Context { context_title, .. } = provenance {
+                        *context_title = request.load.context_title.clone();
+                    }
+                }
+                groups.extend(selections);
+            }
+        }
+        Self::from_load(
+            library::QueueReadRequest::new(library::QueueLoad::Songs(groups)),
+            placement,
+        )
     }
-
+    pub fn selection(&self) -> Option<library::SongSelection> {
+        let library::QueueLoad::Songs(groups) = &self.load.input else {
+            return None;
+        };
+        if groups.len() == 1 {
+            Some(groups[0].0.clone())
+        } else {
+            Some(library::SongSelection::Concat(
+                groups
+                    .iter()
+                    .map(|(selection, _)| selection.clone())
+                    .collect(),
+            ))
+        }
+    }
+    pub fn context(&self) -> Option<&str> {
+        let library::QueueLoad::Songs(groups) = &self.load.input else {
+            return None;
+        };
+        let (_, Provenance::Context { context_id, .. }) = groups.first()? else {
+            return None;
+        };
+        Some(context_id)
+    }
+    pub fn with_context(mut self, context: Arc<str>) -> Self {
+        match &mut self.load.input {
+            library::QueueLoad::Songs(groups) => {
+                for (_, provenance) in groups {
+                    *provenance = Provenance::Context {
+                        context_id: context.clone(),
+                        context_title: None,
+                        source_rank: 0,
+                    };
+                }
+            }
+            library::QueueLoad::Items(items) => {
+                for (index, (_, provenance)) in items.iter_mut().enumerate() {
+                    *provenance = Provenance::Context {
+                        context_id: context.clone(),
+                        context_title: None,
+                        source_rank: index,
+                    };
+                }
+            }
+            library::QueueLoad::Uris(_, provenance) => {
+                *provenance = Provenance::Context {
+                    context_id: context,
+                    context_title: None,
+                    source_rank: 0,
+                }
+            }
+            library::QueueLoad::Captured(_) => {}
+        }
+        self
+    }
+    pub fn with_anchor(
+        mut self,
+        key: library::TrackKey,
+        entry: Option<library::PlaylistEntryKey>,
+    ) -> Self {
+        self.load.anchor = Some((key, entry));
+        self
+    }
+    pub fn with_anchor_index(mut self, index: usize) -> Self {
+        self.load.anchor_index = index;
+        self
+    }
+    pub fn activation_context(&self) -> Option<(String, library::TrackKey, usize)> {
+        if !self.reactivate
+            || self.placement != QueuePlacement::Now
+            || self.shuffled_start
+            || self.load.shuffled.is_some()
+        {
+            return None;
+        }
+        let library::QueueLoad::Songs(groups) = &self.load.input else {
+            return None;
+        };
+        let (
+            selection,
+            Provenance::Context {
+                context_id,
+                source_rank,
+                ..
+            },
+        ) = groups.first()?
+        else {
+            return None;
+        };
+        let key = self
+            .load
+            .anchor
+            .map(|(key, _)| key)
+            .or_else(|| match selection {
+                library::SongSelection::Tracks(keys) => keys.get(self.load.anchor_index).copied(),
+                _ => None,
+            })?;
+        Some((
+            context_id.to_string(),
+            key,
+            source_rank + self.load.anchor_index,
+        ))
+    }
     pub fn shuffled(mut self, shuffled: bool) -> Self {
-        self.batch.shuffled = shuffled;
+        self.load.shuffled = shuffled.then_some(0);
         if shuffled {
-            self.anchor_index = 0;
-            self.batch.input.clear_anchor();
+            self.load.anchor_index = 0;
+            self.load.anchor = None;
             self.shuffled_start = false;
         }
         self
     }
-
     pub fn with_context_title(mut self, title: Option<Arc<library::QueueContextTitle>>) -> Self {
-        self.batch = self.batch.with_context_title(title);
+        self.load.context_title = title;
         self
     }
-
-    pub fn compact_batch(self, shuffle_seed: u64) -> (Batch, Placement) {
-        let placement = self.placement.with_anchor(self.anchor_index);
-        (
-            self.batch
-                .with_shuffle_intent(shuffle_seed, self.shuffled_start),
-            placement,
-        )
+    pub fn into_load(mut self, shuffle_seed: u64) -> (library::QueueReadRequest, Placement) {
+        let placement = self.placement.with_anchor(self.load.anchor_index);
+        self.load.random_start = self.shuffled_start.then_some(shuffle_seed);
+        if self.shuffled_start {
+            self.load.anchor = None;
+        }
+        if self.load.shuffled.is_some() {
+            self.load.shuffled = Some(shuffle_seed);
+        }
+        (self.load, placement)
     }
 }
 
@@ -238,7 +266,7 @@ pub trait QueueCommandPort: Send + Sync {
     fn snapshot(&self) -> Result<library::QueueRestore, String>;
     fn media_uris(&self) -> Result<Vec<String>, String>;
     fn play(&self, request: PlayRequest);
-    fn insert(&self, input: library::QueueInput, target: QueueReorderTarget);
+    fn insert(&self, selection: library::SongSelection, target: QueueReorderTarget);
     fn remove(&self, position: usize);
     fn remove_many(&self, selection: QueueSelection);
     fn activate(&self, position: usize);
@@ -299,94 +327,45 @@ pub trait TransportCommandPort: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::{PlayRequest, QueuePlacement};
-    use crate::{Provenance, QueueItem};
+    use crate::Provenance;
     use std::sync::Arc;
 
     #[test]
     fn full_context_keeps_the_absolute_route_rank_for_reactivation() {
-        let items = (0..250)
-            .map(|index| {
-                QueueItem::direct(
-                    format!("https://example.test/{index}"),
-                    index.to_string(),
-                    "",
-                    "",
-                    0,
-                )
-            })
-            .collect::<Vec<_>>();
-        let order: Arc<[String]> = items.iter().map(|item| item.media_uri.clone()).collect();
-        let keys: Arc<[library::TrackKey]> = (0..items.len())
-            .map(|index| library::TrackKey::from_raw(index as i64 + 1))
+        let keys: Arc<[library::TrackKey]> = (0..250)
+            .map(|index| library::TrackKey::from_raw(index + 1))
             .collect();
         for anchor in [3, 125, 248] {
             let request = PlayRequest::captured(
-                library::QueueInput::Tracks {
-                    order: Arc::clone(&keys),
-                    context_id: "mounted-order".into(),
-                    source_start: 20,
-                },
+                library::SongSelection::Tracks(keys.clone()),
                 anchor,
                 QueuePlacement::Now,
                 false,
-            );
-            assert_eq!(request.anchor_index, anchor);
-            let library::QueueInput::Tracks {
-                order: captured, ..
-            } = &request.batch.input
-            else {
-                panic!("captured route order")
+            )
+            .with_context("mounted-order".into());
+            assert_eq!(request.load.anchor_index, anchor);
+            let Some(library::SongSelection::Tracks(captured)) = request.selection() else {
+                panic!("captured route order");
             };
-            assert!(Arc::ptr_eq(captured, &keys));
+            assert!(Arc::ptr_eq(&captured, &keys));
             assert_eq!(captured.len(), 250);
             assert_eq!(
-                captured[anchor],
-                library::TrackKey::from_raw(anchor as i64 + 1)
-            );
-            assert_eq!(
                 request.activation_context(),
-                Some((
-                    "mounted-order".into(),
-                    library::TrackKey::from_raw(anchor as i64 + 1),
-                    20 + anchor
-                ))
+                Some(("mounted-order".into(), keys[anchor], anchor))
             );
         }
-        let request = PlayRequest::ordered(
-            library::QueueInput::MediaUris {
-                order,
-                provenance: Provenance::Manual,
-            },
-            0,
-            QueuePlacement::Next,
-            false,
-        );
-        let library::QueueInput::MediaUris { order, .. } = &request.batch.input else {
-            panic!("selected media order")
-        };
-        assert_eq!(order.len(), 250);
-        let request = PlayRequest::ordered(
-            library::QueueInput::MediaUris {
-                order: items
-                    .iter()
-                    .map(|item| item.media_uri.clone())
-                    .collect::<Vec<_>>()
-                    .into(),
-                provenance: Provenance::Random,
-            },
-            0,
+        let request = PlayRequest::from_load(
+            library::QueueReadRequest::media_uris(
+                (0..250).map(|index| format!("https://example.test/{index}")),
+                Provenance::Random,
+            ),
             QueuePlacement::Last,
-            false,
         );
-        let library::QueueInput::MediaUris {
-            order: captured,
-            provenance,
-        } = &request.batch.input
-        else {
-            panic!("random media order")
+        let library::QueueLoad::Uris(uris, provenance) = &request.load.input else {
+            panic!("external media order");
         };
-        assert_eq!(captured.len(), 250);
-        assert_eq!(captured[125], "https://example.test/125");
+        assert_eq!(uris.len(), 250);
+        assert_eq!(uris[125], "https://example.test/125");
         assert_eq!(*provenance, Provenance::Random);
     }
 
@@ -397,54 +376,32 @@ mod tests {
             .await
             .unwrap();
         let admitted = database
-            .read_queue(library::QueueReadRequest {
-                input: library::QueueInput::MediaUris {
-                    order: Arc::from([
-                        "https://example.test/first".to_string(),
-                        "https://example.test/second".to_string(),
-                    ]),
-                    provenance: Provenance::Manual,
-                },
-                context_title: None,
-                anchor_index: 0,
-                random_start: None,
-                shuffled: None,
-            })
+            .read_queue(library::QueueReadRequest::media_uris(
+                vec![
+                    "https://example.test/first".into(),
+                    "https://example.test/second".into(),
+                ],
+                Provenance::Manual,
+            ))
             .await
             .unwrap();
         let request = PlayRequest::captured(
-            library::QueueInput::Tracks {
-                order: admitted
+            library::SongSelection::Tracks(
+                admitted
                     .entries
                     .iter()
                     .map(|entry| entry.track_key)
                     .collect(),
-                context_id: "genre:4".into(),
-                source_start: 75,
-            },
+            ),
             0,
             QueuePlacement::Now,
             false,
-        );
-        let page = database
-            .read_queue(library::QueueReadRequest {
-                context_title: None,
-                input: request.batch.input.clone(),
-                anchor_index: 0,
-                random_start: None,
-                shuffled: None,
-            })
-            .await
-            .unwrap();
+        )
+        .with_context("genre:4".into());
+        let page = database.read_queue(request.load).await.unwrap();
         let first = &page.entries[0].provenance;
         let second = &page.entries[1].provenance;
-        assert!(matches!(
-            second,
-            Provenance::Context {
-                source_rank: 76,
-                ..
-            }
-        ));
+        assert!(matches!(second, Provenance::Context { source_rank: 1, .. }));
         let (
             Provenance::Context {
                 context_id: first, ..

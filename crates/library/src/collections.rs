@@ -21,91 +21,6 @@ pub struct GenreChoice {
     pub name: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum CollectionIdentity {
-    Album(String),
-    Artist {
-        media_uri: String,
-        album_artist: bool,
-    },
-    Genre {
-        source_id: crate::SourceId,
-        object_id: String,
-    },
-    Mood {
-        source_id: crate::SourceId,
-        object_id: String,
-    },
-    Playlist {
-        source_id: Option<crate::SourceId>,
-        object_id: String,
-        native: bool,
-    },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct CollectionSourceReference {
-    pub collection: CollectionIdentity,
-    pub folder: Option<(crate::SourceId, String)>,
-}
-
-pub(crate) async fn resolve_collection_reference(
-    connection: &mut SqliteConnection,
-    reference: &CollectionSourceReference,
-) -> LibraryResult<Option<(crate::QueueCollection, Option<FolderKey>)>> {
-    use crate::QueueCollection as C;
-    let collection = match &reference.collection {
-        CollectionIdentity::Album(uri) => C::Album(uri.clone()),
-        CollectionIdentity::Artist {
-            media_uri,
-            album_artist,
-        } => C::Artist {
-            media_uri: media_uri.clone(),
-            album_artist: *album_artist,
-        },
-        CollectionIdentity::Genre {
-            source_id,
-            object_id,
-        } => {
-            let Some(key)=sqlx::query_scalar::<_,GenreKey>("SELECT genre_key FROM genres JOIN sources USING(source_key) WHERE sources.object_id=?1 AND genres.object_id=?2").bind(source_id.as_str()).bind(object_id).fetch_optional(&mut *connection).await? else{return Ok(None);};
-            C::Genre(key)
-        }
-        CollectionIdentity::Mood {
-            source_id,
-            object_id,
-        } => {
-            let Some(key)=sqlx::query_scalar::<_,MoodKey>("SELECT mood_key FROM moods JOIN sources USING(source_key) WHERE sources.object_id=?1 AND moods.object_id=?2").bind(source_id.as_str()).bind(object_id).fetch_optional(&mut *connection).await? else{return Ok(None);};
-            C::Mood(key)
-        }
-        CollectionIdentity::Playlist {
-            source_id,
-            object_id,
-            native,
-        } => {
-            let Some(key) = sqlx::query_scalar::<_, crate::PlaylistKey>(
-                "SELECT playlist.playlist_key FROM playlists playlist LEFT JOIN sources source USING(source_key)
-                 WHERE source.object_id IS ?1 AND playlist.object_id=?2 AND playlist.owner=?3"
-            )
-                .bind(source_id.as_ref().map(crate::SourceId::as_str))
-                .bind(object_id)
-                .bind(if *native { "source" } else { "rufin" })
-                .fetch_optional(&mut *connection)
-                .await?
-            else {
-                return Ok(None);
-            };
-            C::Playlist(key)
-        }
-    };
-    let folder = if let Some((source, id)) = &reference.folder {
-        let Some(key)=sqlx::query_scalar::<_,FolderKey>("SELECT folder_key FROM folders JOIN sources USING(source_key) WHERE sources.object_id=?1 AND folders.object_id=?2").bind(source.as_str()).bind(id).fetch_optional(connection).await? else{return Ok(None);};
-        Some(key)
-    } else {
-        None
-    };
-    Ok(Some((collection, folder)))
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AlbumSort {
     Title,
@@ -746,64 +661,38 @@ impl Database {
         .await?)
     }
 
-    pub async fn collection_tracks_count(
-        &self,
-        collection: &crate::QueueCollection,
-        folder: Option<FolderKey>,
-        filter: &str,
-        favorites_only: bool,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<i64> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let query = playback_query(
-            &mut connection,
-            collection,
-            folder,
-            filter,
-            TrackSort::Title,
-            false,
-            favorites_only,
-        )
-        .await?;
-        Ok(query.count(&mut connection).await?)
-    }
-
     pub async fn collection_source(
         &self,
-        collection: &crate::QueueCollection,
+        scope: &crate::SongScope,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<SourceKey>> {
+        use crate::SongScope as C;
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        collection_source_on(&mut connection, collection).await
-    }
-
-    pub async fn collection_media_uri_order(
-        &self,
-        collection: &crate::QueueCollection,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<String>> {
-        use crate::QueueCollection as C;
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let query = if let C::Playlist(key) = collection {
-            crate::playlists::playlist_query(*key, None, crate::TrackSort::Position, false, "")
-        } else {
-            let Some(source) = collection_source_on(&mut transaction, collection).await? else {
-                transaction.commit().await?;
-                return Ok(Vec::new());
-            };
-            let sort = if matches!(collection, C::Album(_) | C::AlbumKey(_)) {
-                TrackSort::TrackNumber
-            } else {
-                TrackSort::Title
-            };
-            collection_track_query(source, sort, false, collection)
+        let query = match scope {
+            C::Tracks(key) => return Ok(Some(*key)),
+            C::Smart { source, .. } => return Ok(*source),
+            C::History { source } => {
+                sqlx::query_scalar("SELECT source_key FROM sources WHERE object_id=?1")
+                    .bind(source.as_ref().map(crate::SourceId::as_str))
+            }
+            C::Album(key) => {
+                sqlx::query_scalar("SELECT source_key FROM albums WHERE album_key=?1").bind(key)
+            }
+            C::Artist { key, .. } => {
+                sqlx::query_scalar("SELECT source_key FROM artists WHERE artist_key=?1").bind(key)
+            }
+            C::Genre(key) => {
+                sqlx::query_scalar("SELECT source_key FROM genres WHERE genre_key=?1").bind(key)
+            }
+            C::Mood(key) => {
+                sqlx::query_scalar("SELECT source_key FROM moods WHERE mood_key=?1").bind(key)
+            }
+            C::Playlist(key) => sqlx::query_scalar(
+                "SELECT source_key FROM playlists WHERE playlist_key=?1 AND source_key IS NOT NULL",
+            )
+            .bind(key),
         };
-        let result = sqlx::query_scalar(sqlx::AssertSqlSafe(query.select(&query.uri)))
-            .fetch_all(&mut *transaction)
-            .await?;
-        transaction.commit().await?;
-        Ok(result)
+        Ok(query.fetch_optional(&mut *connection).await?)
     }
 
     pub async fn album_release_classifications(
@@ -1717,48 +1606,6 @@ impl Database {
         ))
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub async fn collection_tracks_page(
-        &self,
-        collection: &crate::QueueCollection,
-        folder: Option<FolderKey>,
-        filter: &str,
-        sort: TrackSort,
-        descending: bool,
-        favorites_only: bool,
-        offset: usize,
-        limit: usize,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<(Vec<TrackRow>, Vec<(u32, i64)>)> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let query = playback_query(
-            &mut transaction,
-            collection,
-            folder,
-            filter,
-            sort,
-            descending,
-            favorites_only,
-        )
-        .await?;
-        let disc_sections = if matches!(collection, crate::QueueCollection::AlbumKey(_)) {
-            album_disc_sections(&query, sort, descending, &mut transaction).await?
-        } else {
-            Vec::new()
-        };
-        let sql = format!("{} LIMIT ?1 OFFSET ?2", query.select("track.track_key"));
-        let keys = sqlx::query_scalar::<_, TrackKey>(sqlx::AssertSqlSafe(sql))
-            .bind(limit.min(256) as i64)
-            .bind(offset.min(i64::MAX as usize) as i64)
-            .persistent(false)
-            .fetch_all(&mut *transaction)
-            .await?;
-        let rows = load_track_rows(&mut transaction, &keys).await?;
-        transaction.commit().await?;
-        Ok((rows, disc_sections))
-    }
-
     pub async fn album_detail_route_rows(
         &self,
         source: SourceKey,
@@ -1895,135 +1742,6 @@ fn row_limit(kind: &str) -> LibraryError {
     LibraryError::InvalidRequest(format!(
         "{kind} row reads are limited to {COLLECTION_ROW_LIMIT} keys"
     ))
-}
-
-pub(crate) fn collection_track_query(
-    source: SourceKey,
-    sort: TrackSort,
-    descending: bool,
-    collection: &crate::QueueCollection,
-) -> crate::source_window::SourceQuery {
-    let mut query = crate::tracks::track_query(source, sort, descending, false, None, "");
-    use crate::QueueCollection as C;
-    let predicate = match collection {
-        C::AlbumKey(key) => format!("track.album_key={}", key.raw()),
-        C::Album(uri) => format!(
-            "track.album_key=(SELECT album_key FROM albums WHERE media_uri={})",
-            crate::source_window::quote(uri)
-        ),
-        C::ArtistKey { key, album_artist } => format!(
-            "track.{} IN (SELECT {} FROM {} WHERE artist_key={})",
-            if *album_artist {
-                "album_key"
-            } else {
-                "track_key"
-            },
-            if *album_artist {
-                "album_key"
-            } else {
-                "track_key"
-            },
-            if *album_artist {
-                "album_artists"
-            } else {
-                "track_artists"
-            },
-            key.raw()
-        ),
-        C::Artist {
-            media_uri,
-            album_artist,
-        } => format!(
-            "track.{} IN (SELECT credit.{} FROM {} credit JOIN artists USING(artist_key) WHERE artists.media_uri={})",
-            if *album_artist {
-                "album_key"
-            } else {
-                "track_key"
-            },
-            if *album_artist {
-                "album_key"
-            } else {
-                "track_key"
-            },
-            if *album_artist {
-                "album_artists"
-            } else {
-                "track_artists"
-            },
-            crate::source_window::quote(media_uri)
-        ),
-        C::Genre(key) => format!(
-            "track.track_key IN (SELECT track_key FROM track_genres WHERE genre_key={0} UNION SELECT member.track_key FROM album_genres credit JOIN tracks member USING(album_key) WHERE credit.genre_key={0} AND member.source_key={1})",
-            key.raw(),
-            source.raw()
-        ),
-        C::Mood(key) => format!(
-            "track.track_key IN (SELECT track_key FROM track_moods WHERE mood_key={})",
-            key.raw()
-        ),
-        C::Playlist(_) => unreachable!("playlist queries belong to the playlist owner"),
-    };
-    query.predicate.push_str(&format!(" AND ({predicate})"));
-    query
-}
-
-async fn collection_source_on(
-    connection: &mut SqliteConnection,
-    collection: &crate::QueueCollection,
-) -> LibraryResult<Option<SourceKey>> {
-    use crate::QueueCollection as C;
-    let query = match collection {
-        C::Album(uri) => {
-            sqlx::query_scalar("SELECT source_key FROM albums WHERE media_uri=?1").bind(uri)
-        }
-        C::Artist { media_uri, .. } => {
-            sqlx::query_scalar("SELECT source_key FROM artists WHERE media_uri=?1").bind(media_uri)
-        }
-        C::AlbumKey(key) => {
-            sqlx::query_scalar("SELECT source_key FROM albums WHERE album_key=?1").bind(key)
-        }
-        C::ArtistKey { key, .. } => {
-            sqlx::query_scalar("SELECT source_key FROM artists WHERE artist_key=?1").bind(key)
-        }
-        C::Genre(key) => {
-            sqlx::query_scalar("SELECT source_key FROM genres WHERE genre_key=?1").bind(key)
-        }
-        C::Mood(key) => {
-            sqlx::query_scalar("SELECT source_key FROM moods WHERE mood_key=?1").bind(key)
-        }
-        C::Playlist(key) => sqlx::query_scalar(
-            "SELECT source_key FROM playlists WHERE playlist_key=?1 AND source_key IS NOT NULL",
-        )
-        .bind(key),
-    };
-    Ok(query.fetch_optional(connection).await?)
-}
-
-pub(crate) async fn playback_query(
-    connection: &mut SqliteConnection,
-    collection: &crate::QueueCollection,
-    folder: Option<FolderKey>,
-    filter: &str,
-    sort: TrackSort,
-    descending: bool,
-    favorites_only: bool,
-) -> LibraryResult<crate::source_window::SourceQuery> {
-    use crate::QueueCollection as C;
-    if let C::Playlist(key) = collection {
-        return Ok(crate::playlists::playlist_query(
-            *key,
-            folder,
-            crate::TrackSort::Position,
-            descending,
-            filter,
-        ));
-    }
-    let source = collection_source_on(connection, collection)
-        .await?
-        .ok_or(sqlx::Error::RowNotFound)?;
-    let mut query = collection_track_query(source, sort, descending, collection);
-    crate::tracks::track_filter(&mut query, folder, filter, favorites_only);
-    Ok(query)
 }
 
 pub(crate) async fn album_disc_sections(

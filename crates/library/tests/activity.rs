@@ -242,7 +242,17 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     let cancel = ReadCancellation::new();
     let history = fixture
         .database
-        .activity_history(Some(&SourceId::new("source")), "", true, &cancel)
+        .song_history_rows(
+            &library::SongQuery {
+                descending: true,
+                ..library::SongQuery::new(library::SongScope::History {
+                    source: (Some(&SourceId::new("source"))).cloned(),
+                })
+            },
+            0,
+            100,
+            &cancel,
+        )
         .await
         .expect("Activity History");
     assert_eq!(history.len(), 1);
@@ -305,7 +315,15 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         .unwrap();
     let unplayed = fixture
         .database
-        .smart_playlist_media_uri_order(Some(fixture.source), never, None, 1800000000, &cancel)
+        .selected_track_uris(
+            &library::SongQuery::new(library::SongScope::Smart {
+                key: never,
+                source: Some(fixture.source),
+                now: 1800000000,
+            })
+            .selection(),
+            &cancel,
+        )
         .await
         .unwrap();
     assert!(
@@ -321,7 +339,15 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         .unwrap();
     let history = fixture
         .database
-        .activity_history(None, "", true, &cancel)
+        .song_history_rows(
+            &library::SongQuery {
+                descending: true,
+                ..library::SongQuery::new(library::SongScope::History { source: None })
+            },
+            0,
+            100,
+            &cancel,
+        )
         .await
         .unwrap();
     let row = &history[0];
@@ -352,12 +378,12 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         .unwrap();
     let entries = fixture
         .database
-        .playlist_entry_order(
-            playlist,
-            None,
-            library::TrackSort::Position,
-            false,
-            "",
+        .selected_playlist_entries(
+            &library::SongQuery {
+                sort: Some(library::TrackSort::Position),
+                ..library::SongQuery::new(library::SongScope::Playlist(playlist))
+            }
+            .selection(),
             &cancel,
         )
         .await
@@ -413,7 +439,17 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     assert_eq!(
         fixture
             .database
-            .activity_history(Some(&SourceId::new("source")), "", true, &cancel)
+            .song_history_rows(
+                &library::SongQuery {
+                    descending: true,
+                    ..library::SongQuery::new(library::SongScope::History {
+                        source: (Some(&SourceId::new("source"))).cloned()
+                    })
+                },
+                0,
+                100,
+                &cancel
+            )
             .await
             .expect("History survives delivery")
             .len(),
@@ -537,7 +573,17 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
     let cancel = ReadCancellation::new();
     let current = fixture
         .database
-        .activity_history(Some(&SourceId::new("source")), "", true, &cancel)
+        .song_history_rows(
+            &library::SongQuery {
+                descending: true,
+                ..library::SongQuery::new(library::SongScope::History {
+                    source: (Some(&SourceId::new("source"))).cloned(),
+                })
+            },
+            0,
+            100,
+            &cancel,
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -549,7 +595,18 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
     );
     let matching = fixture
         .database
-        .activity_history(Some(&SourceId::new("source")), "legacy", true, &cancel)
+        .song_history_rows(
+            &library::SongQuery {
+                filter: ("legacy").into(),
+                descending: true,
+                ..library::SongQuery::new(library::SongScope::History {
+                    source: (Some(&SourceId::new("source"))).cloned(),
+                })
+            },
+            0,
+            100,
+            &cancel,
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -561,7 +618,17 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
     );
     let remote = fixture
         .database
-        .activity_history(Some(&SourceId::new("remote")), "", true, &cancel)
+        .song_history_rows(
+            &library::SongQuery {
+                descending: true,
+                ..library::SongQuery::new(library::SongScope::History {
+                    source: (Some(&SourceId::new("remote"))).cloned(),
+                })
+            },
+            0,
+            100,
+            &cancel,
+        )
         .await
         .unwrap();
     assert_eq!(remote.len(), 1);
@@ -597,17 +664,12 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
     ] {
         let tracks = fixture
             .database
-            .query_track_route_page(
-                &library::TrackQuery {
-                    source: fixture.source,
-                    collection: None,
-                    folder: None,
-                    downloaded_only: false,
-                    favorites_only: false,
+            .song_route_page(
+                &library::SongQuery {
+                    sort: Some(sort),
+                    descending: true,
+                    ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
                 },
-                "",
-                sort,
-                true,
                 library::RouteSeedWindow::top(),
                 &cancel,
             )
@@ -622,17 +684,12 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
         );
         let album = fixture
             .database
-            .query_track_route_page(
-                &library::TrackQuery {
-                    source: fixture.source,
-                    collection: Some(library::QueueCollection::AlbumKey(fixture.albums[0])),
-                    folder: None,
-                    downloaded_only: false,
-                    favorites_only: false,
+            .song_route_page(
+                &library::SongQuery {
+                    sort: Some(sort),
+                    descending: true,
+                    ..library::SongQuery::new(library::SongScope::Album(fixture.albums[0]))
                 },
-                "",
-                sort,
-                true,
                 library::RouteSeedWindow::top(),
                 &cancel,
             )
@@ -659,19 +716,52 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
 #[tokio::test]
 async fn history_preserves_latest_matching_facts_and_source_scope() {
     let fixture = fixture().await;
-    let mut raw = connection(&fixture.path).await;
-    sqlx::query("INSERT INTO listens(source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped)
-        VALUES ('source','https://example.org/a','Old title','Artist','Album',1,'2023-11',1000,900,0),
-               ('source','https://example.org/a','New title','Artist','Album',2,'2023-11',1000,900,0),
-               ('other','https://example.org/b','Other account','Artist','Album',2,'2023-11',1000,900,0),
-               ('forgotten','https://example.org/c','Retained history','Artist','Album',3,'2023-11',1000,900,0),
-               (NULL,'https://example.org/d','Direct media','Artist','Album',4,'2023-11',1000,900,0)")
-        .execute(&mut raw).await.unwrap();
-    drop(raw);
+    let records = [
+        (Some("source"), "https://example.org/a", "Old title", 1),
+        (Some("source"), "https://example.org/a", "New title", 2),
+        (Some("other"), "https://example.org/b", "Other account", 2),
+        (
+            Some("forgotten"),
+            "https://example.org/c",
+            "Retained history",
+            3,
+        ),
+        (None, "https://example.org/d", "Direct media", 4),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, (source, uri, title, started_at))| {
+        serde_json::json!({
+            "version":1,"listen_key":index+1,"source_id":source,
+            "media_uri":uri,"title":title,"artist":"Artist","album":"Album",
+            "started_at":started_at,"local_period":"2023-11",
+            "duration_millis":1000,"listened_millis":900,"skipped":false
+        })
+        .to_string()
+    })
+    .collect::<Vec<_>>()
+    .join("\n");
+    assert_eq!(
+        fixture
+            .database
+            .import_activity_jsonl(std::io::Cursor::new(records))
+            .await
+            .unwrap()
+            .accepted,
+        5
+    );
     let cancel = ReadCancellation::new();
     let all = fixture
         .database
-        .activity_history(None, "", true, &cancel)
+        .song_history_rows(
+            &library::SongQuery {
+                descending: true,
+                ..library::SongQuery::new(library::SongScope::History { source: None })
+            },
+            0,
+            100,
+            &cancel,
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -686,13 +776,32 @@ async fn history_preserves_latest_matching_facts_and_source_scope() {
     assert_eq!(all[3].play_count, 2);
     let current = fixture
         .database
-        .activity_history(Some(&SourceId::new("source")), "", true, &cancel)
+        .song_history_rows(
+            &library::SongQuery {
+                descending: true,
+                ..library::SongQuery::new(library::SongScope::History {
+                    source: (Some(&SourceId::new("source"))).cloned(),
+                })
+            },
+            0,
+            100,
+            &cancel,
+        )
         .await
         .unwrap();
     assert_eq!(current, vec![all[3].clone()]);
     let matching = fixture
         .database
-        .activity_history(None, " old TITLE ", true, &cancel)
+        .song_history_rows(
+            &library::SongQuery {
+                filter: (" old TITLE ").into(),
+                descending: true,
+                ..library::SongQuery::new(library::SongScope::History { source: None })
+            },
+            0,
+            100,
+            &cancel,
+        )
         .await
         .unwrap();
     assert_eq!(matching.len(), 1);
@@ -702,7 +811,18 @@ async fn history_preserves_latest_matching_facts_and_source_scope() {
     assert!(
         fixture
             .database
-            .activity_history(Some(&SourceId::new("other")), "old", true, &cancel)
+            .song_history_rows(
+                &library::SongQuery {
+                    filter: ("old").into(),
+                    descending: true,
+                    ..library::SongQuery::new(library::SongScope::History {
+                        source: (Some(&SourceId::new("other"))).cloned()
+                    })
+                },
+                0,
+                100,
+                &cancel
+            )
             .await
             .unwrap()
             .is_empty()
@@ -772,7 +892,15 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
         .await
         .unwrap();
     let history = database
-        .activity_history(None, "", true, &ReadCancellation::new())
+        .song_history_rows(
+            &library::SongQuery {
+                descending: true,
+                ..library::SongQuery::new(library::SongScope::History { source: None })
+            },
+            0,
+            100,
+            &ReadCancellation::new(),
+        )
         .await
         .unwrap();
     assert_eq!(

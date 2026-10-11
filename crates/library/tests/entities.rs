@@ -27,17 +27,12 @@ async fn album_disc_sections_follow_filtered_order_and_page_boundaries() {
     ] {
         let route = fixture
             .database
-            .query_track_route_page(
-                &library::TrackQuery {
-                    source: fixture.source,
-                    collection: Some(library::QueueCollection::AlbumKey(fixture.albums[0])),
-                    folder: None,
-                    downloaded_only: false,
-                    favorites_only: false,
+            .song_route_page(
+                &library::SongQuery {
+                    sort: Some(TrackSort::TrackNumber),
+                    descending: descending,
+                    ..library::SongQuery::new(library::SongScope::Album(fixture.albums[0]))
                 },
-                "",
-                TrackSort::TrackNumber,
-                descending,
                 RouteSeedWindow::top(),
                 &cancel,
             )
@@ -47,22 +42,28 @@ async fn album_disc_sections_follow_filtered_order_and_page_boundaries() {
         assert_eq!(route.count, 3);
         assert_eq!(route.first_rows.len(), 3);
         for offset in 0..3 {
-            let (rows, sections) = fixture
+            let rows = fixture
                 .database
-                .collection_tracks_page(
-                    &library::QueueCollection::AlbumKey(fixture.albums[0]),
-                    None,
-                    "",
-                    TrackSort::TrackNumber,
-                    descending,
-                    false,
+                .song_rows(
+                    &library::SongQuery {
+                        sort: Some(TrackSort::TrackNumber),
+                        descending: descending,
+                        ..library::SongQuery::new(library::SongScope::Album(fixture.albums[0]))
+                    },
                     offset,
                     1,
                     &cancel,
                 )
                 .await
                 .unwrap();
-            assert_eq!(sections, expected);
+            assert_eq!(
+                fixture
+                    .database
+                    .song_disc_sections(&route.query, &cancel)
+                    .await
+                    .unwrap(),
+                expected
+            );
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].media_uri, route.first_rows[offset].media_uri);
         }
@@ -70,17 +71,12 @@ async fn album_disc_sections_follow_filtered_order_and_page_boundaries() {
     for (filter, sort) in [("Alpha", TrackSort::TrackNumber), ("", TrackSort::Title)] {
         let route = fixture
             .database
-            .query_track_route_page(
-                &library::TrackQuery {
-                    source: fixture.source,
-                    collection: Some(library::QueueCollection::AlbumKey(fixture.albums[0])),
-                    folder: None,
-                    downloaded_only: false,
-                    favorites_only: false,
+            .song_route_page(
+                &library::SongQuery {
+                    filter: (filter).into(),
+                    sort: Some(sort),
+                    ..library::SongQuery::new(library::SongScope::Album(fixture.albums[0]))
                 },
-                filter,
-                sort,
-                false,
                 RouteSeedWindow::top(),
                 &cancel,
             )
@@ -96,17 +92,11 @@ async fn album_disc_sections_follow_filtered_order_and_page_boundaries() {
         .unwrap();
     let detail = fixture
         .database
-        .query_track_route_page(
-            &library::TrackQuery {
-                source: fixture.source,
-                collection: Some(library::QueueCollection::AlbumKey(fixture.albums[0])),
-                folder: None,
-                downloaded_only: false,
-                favorites_only: false,
+        .song_route_page(
+            &library::SongQuery {
+                sort: Some(TrackSort::TrackNumber),
+                ..library::SongQuery::new(library::SongScope::Album(fixture.albums[0]))
             },
-            "",
-            TrackSort::TrackNumber,
-            false,
             RouteSeedWindow::top(),
             &cancel,
         )
@@ -140,17 +130,12 @@ async fn track_sorts_keep_nulls_last_and_title_ties_in_both_directions() {
         for (descending, expected) in [(false, [1, 3, 2, 0]), (true, [3, 2, 1, 0])] {
             let page = fixture
                 .database
-                .query_track_route_page(
-                    &library::TrackQuery {
-                        source: fixture.source,
-                        collection: None,
-                        folder: None,
-                        downloaded_only: false,
-                        favorites_only: false,
+                .song_route_page(
+                    &library::SongQuery {
+                        sort: Some(sort),
+                        descending: descending,
+                        ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
                     },
-                    "",
-                    sort,
-                    descending,
                     RouteSeedWindow::top(),
                     &ReadCancellation::new(),
                 )
@@ -517,17 +502,11 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
     let pages = [
         fixture
             .database
-            .query_track_route_page(
-                &library::TrackQuery {
-                    source: fixture.source,
-                    collection: Some(library::QueueCollection::AlbumKey(fixture.albums[0])),
-                    folder: None,
-                    downloaded_only: false,
-                    favorites_only: false,
+            .song_route_page(
+                &library::SongQuery {
+                    sort: Some(TrackSort::TrackNumber),
+                    ..library::SongQuery::new(library::SongScope::Album(fixture.albums[0]))
                 },
-                "",
-                TrackSort::TrackNumber,
-                false,
                 RouteSeedWindow::top(),
                 &cancel,
             )
@@ -535,20 +514,14 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
             .unwrap(),
         fixture
             .database
-            .query_track_route_page(
-                &library::TrackQuery {
-                    source: fixture.source,
-                    collection: Some(library::QueueCollection::ArtistKey {
+            .song_route_page(
+                &library::SongQuery {
+                    sort: Some(TrackSort::Title),
+                    ..library::SongQuery::new(library::SongScope::Artist {
                         key: fixture.artists[0],
                         album_artist: false,
-                    }),
-                    folder: None,
-                    downloaded_only: false,
-                    favorites_only: false,
+                    })
                 },
-                "",
-                TrackSort::Title,
-                false,
                 RouteSeedWindow::top(),
                 &cancel,
             )
@@ -556,20 +529,14 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
             .unwrap(),
         fixture
             .database
-            .query_track_route_page(
-                &library::TrackQuery {
-                    source: fixture.source,
-                    collection: Some(library::QueueCollection::ArtistKey {
+            .song_route_page(
+                &library::SongQuery {
+                    sort: Some(TrackSort::Title),
+                    ..library::SongQuery::new(library::SongScope::Artist {
                         key: fixture.artists[0],
                         album_artist: true,
-                    }),
-                    folder: None,
-                    downloaded_only: false,
-                    favorites_only: false,
+                    })
                 },
-                "",
-                TrackSort::Title,
-                false,
                 RouteSeedWindow::top(),
                 &cancel,
             )
@@ -577,17 +544,11 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
             .unwrap(),
         fixture
             .database
-            .query_track_route_page(
-                &library::TrackQuery {
-                    source: fixture.source,
-                    collection: Some(library::QueueCollection::Genre(fixture.genre)),
-                    folder: None,
-                    downloaded_only: false,
-                    favorites_only: false,
+            .song_route_page(
+                &library::SongQuery {
+                    sort: Some(TrackSort::Title),
+                    ..library::SongQuery::new(library::SongScope::Genre(fixture.genre))
                 },
-                "",
-                TrackSort::Title,
-                false,
                 RouteSeedWindow::top(),
                 &cancel,
             )
@@ -595,17 +556,11 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
             .unwrap(),
         fixture
             .database
-            .query_track_route_page(
-                &library::TrackQuery {
-                    source: fixture.source,
-                    collection: Some(library::QueueCollection::Mood(fixture.mood)),
-                    folder: None,
-                    downloaded_only: false,
-                    favorites_only: false,
+            .song_route_page(
+                &library::SongQuery {
+                    sort: Some(TrackSort::Title),
+                    ..library::SongQuery::new(library::SongScope::Mood(fixture.mood))
                 },
-                "",
-                TrackSort::Title,
-                false,
                 RouteSeedWindow::top(),
                 &cancel,
             )
@@ -625,17 +580,17 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
             .all(|pair| pair[0].title.to_lowercase() <= pair[1].title.to_lowercase())
     );
     let collections = [
-        library::QueueCollection::AlbumKey(fixture.albums[0]),
-        library::QueueCollection::ArtistKey {
+        library::SongScope::Album(fixture.albums[0]),
+        library::SongScope::Artist {
             key: fixture.artists[0],
             album_artist: false,
         },
-        library::QueueCollection::ArtistKey {
+        library::SongScope::Artist {
             key: fixture.artists[0],
             album_artist: true,
         },
-        library::QueueCollection::Genre(fixture.genre),
-        library::QueueCollection::Mood(fixture.mood),
+        library::SongScope::Genre(fixture.genre),
+        library::SongScope::Mood(fixture.mood),
     ];
     for (page, collection) in pages.into_iter().zip(collections) {
         let total = page.count;
@@ -655,7 +610,10 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
         );
         let order = fixture
             .database
-            .collection_media_uri_order(&collection, &cancel)
+            .selected_track_uris(
+                &library::SongQuery::new(collection.clone()).selection(),
+                &cancel,
+            )
             .await
             .unwrap();
         assert_eq!(order.len(), total);
@@ -668,11 +626,14 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
         );
         let state = super::support::resolve_queue(
             &fixture.database,
-            library::QueueInput::Collection {
-                collection,
-                folder: None,
-                context_id: "collection".into(),
-            },
+            library::QueueLoad::Songs(vec![(
+                library::SongQuery::new(collection).selection(),
+                library::QueueProvenance::Context {
+                    context_id: "collection".into(),
+                    context_title: None,
+                    source_rank: 0,
+                },
+            )]),
             Default::default(),
         )
         .await;
@@ -697,17 +658,12 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
     assert_eq!(
         fixture
             .database
-            .query_track_route_page(
-                &library::TrackQuery {
-                    source: fixture.source,
-                    collection: Some(library::QueueCollection::AlbumKey(fixture.albums[0])),
+            .song_route_page(
+                &library::SongQuery {
                     folder: Some(fixture.folder),
-                    downloaded_only: false,
-                    favorites_only: false
+                    sort: Some(TrackSort::TrackNumber),
+                    ..library::SongQuery::new(library::SongScope::Album(fixture.albums[0]))
                 },
-                "",
-                TrackSort::TrackNumber,
-                false,
                 RouteSeedWindow::top(),
                 &cancel
             )
@@ -719,17 +675,13 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
     assert!(
         fixture
             .database
-            .query_track_route_page(
-                &library::TrackQuery {
-                    source: library::SourceKey::from_raw(999),
-                    collection: Some(library::QueueCollection::AlbumKey(fixture.albums[0])),
-                    folder: None,
-                    downloaded_only: false,
-                    favorites_only: false
+            .song_route_page(
+                &library::SongQuery {
+                    sort: Some(TrackSort::TrackNumber),
+                    ..library::SongQuery::new(library::SongScope::Album(
+                        library::AlbumKey::from_raw(999)
+                    ))
                 },
-                "",
-                TrackSort::TrackNumber,
-                false,
                 RouteSeedWindow::top(),
                 &cancel
             )
@@ -849,12 +801,12 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     let cancel = ReadCancellation::new();
     let title = fixture
         .database
-        .track_order(
-            fixture.source,
-            None,
-            false,
-            TrackSort::Title,
-            false,
+        .selected_track_uris(
+            &library::SongQuery {
+                sort: Some(TrackSort::Title),
+                ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
+            }
+            .selection(),
             &cancel,
         )
         .await
@@ -862,12 +814,13 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(title.len(), 4);
     let numbered = fixture
         .database
-        .track_order(
-            fixture.source,
-            None,
-            false,
-            TrackSort::TrackNumber,
-            true,
+        .selected_track_uris(
+            &library::SongQuery {
+                sort: Some(TrackSort::TrackNumber),
+                descending: true,
+                ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
+            }
+            .selection(),
             &cancel,
         )
         .await
@@ -878,18 +831,27 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
     let favorites = fixture
         .database
-        .track_order(fixture.source, None, true, TrackSort::Title, false, &cancel)
+        .selected_track_uris(
+            &library::SongQuery {
+                sort: Some(TrackSort::Title),
+                favorites_only: true,
+                ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
+            }
+            .selection(),
+            &cancel,
+        )
         .await
         .expect("favorite Track order");
     assert_eq!(favorites.len(), 1);
     let folder = fixture
         .database
-        .track_order(
-            fixture.source,
-            Some(fixture.folder),
-            false,
-            TrackSort::Title,
-            false,
+        .selected_track_uris(
+            &library::SongQuery {
+                folder: Some(fixture.folder),
+                sort: Some(TrackSort::Title),
+                ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
+            }
+            .selection(),
             &cancel,
         )
         .await
@@ -1079,17 +1041,11 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(album_rows[0].genres[0].name, "Rock");
     let album_detail = fixture
         .database
-        .query_track_route_page(
-            &library::TrackQuery {
-                source: fixture.source,
-                collection: Some(library::QueueCollection::AlbumKey(album_rows[0].album_key)),
-                folder: None,
-                downloaded_only: false,
-                favorites_only: false,
+        .song_route_page(
+            &library::SongQuery {
+                sort: Some(library::TrackSort::TrackNumber),
+                ..library::SongQuery::new(library::SongScope::Album(album_rows[0].album_key))
             },
-            "",
-            library::TrackSort::TrackNumber,
-            false,
             RouteSeedWindow::top(),
             &cancel,
         )
@@ -1098,17 +1054,12 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(album_detail.count, 2);
     let reversed = fixture
         .database
-        .query_track_route_page(
-            &library::TrackQuery {
-                source: fixture.source,
-                collection: Some(library::QueueCollection::AlbumKey(album_rows[0].album_key)),
-                folder: None,
-                downloaded_only: false,
-                favorites_only: false,
+        .song_route_page(
+            &library::SongQuery {
+                sort: Some(library::TrackSort::TrackNumber),
+                descending: true,
+                ..library::SongQuery::new(library::SongScope::Album(album_rows[0].album_key))
             },
-            "",
-            library::TrackSort::TrackNumber,
-            true,
             RouteSeedWindow::top(),
             &cancel,
         )
@@ -1308,20 +1259,14 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(
         fixture
             .database
-            .query_track_route_page(
-                &library::TrackQuery {
-                    source: fixture.source,
-                    collection: Some(library::QueueCollection::ArtistKey {
+            .song_route_page(
+                &library::SongQuery {
+                    sort: Some(TrackSort::Title),
+                    ..library::SongQuery::new(library::SongScope::Artist {
                         key: fixture.artists[0],
                         album_artist: true
-                    }),
-                    folder: None,
-                    downloaded_only: false,
-                    favorites_only: false
+                    })
                 },
-                "",
-                TrackSort::Title,
-                false,
                 RouteSeedWindow::top(),
                 &cancel
             )
@@ -1333,20 +1278,14 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(
         fixture
             .database
-            .query_track_route_page(
-                &library::TrackQuery {
-                    source: fixture.source,
-                    collection: Some(library::QueueCollection::ArtistKey {
+            .song_route_page(
+                &library::SongQuery {
+                    sort: Some(TrackSort::Title),
+                    ..library::SongQuery::new(library::SongScope::Artist {
                         key: fixture.artists[0],
                         album_artist: false
-                    }),
-                    folder: None,
-                    downloaded_only: false,
-                    favorites_only: false
+                    })
                 },
-                "",
-                TrackSort::Title,
-                false,
                 RouteSeedWindow::top(),
                 &cancel
             )
@@ -1397,17 +1336,13 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(
         fixture
             .database
-            .query_track_route_page(
-                &library::TrackQuery {
-                    source: fixture.source,
-                    collection: Some(library::QueueCollection::AlbumKey(fixture.albums[0])),
+            .song_route_page(
+                &library::SongQuery {
                     folder: Some(fixture.folder),
-                    downloaded_only: false,
-                    favorites_only: false
+                    filter: ("beta").into(),
+                    sort: Some(TrackSort::Title),
+                    ..library::SongQuery::new(library::SongScope::Album(fixture.albums[0]))
                 },
-                "beta",
-                TrackSort::Title,
-                false,
                 RouteSeedWindow::top(),
                 &cancel
             )
@@ -1422,17 +1357,12 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(
         fixture
             .database
-            .query_track_route_page(
-                &library::TrackQuery {
-                    source: fixture.source,
-                    collection: Some(library::QueueCollection::AlbumKey(fixture.albums[0])),
-                    folder: None,
-                    downloaded_only: false,
-                    favorites_only: false
+            .song_route_page(
+                &library::SongQuery {
+                    sort: Some(TrackSort::LastPlayed),
+                    descending: true,
+                    ..library::SongQuery::new(library::SongScope::Album(fixture.albums[0]))
                 },
-                "",
-                TrackSort::LastPlayed,
-                true,
                 RouteSeedWindow::top(),
                 &cancel
             )
@@ -1444,17 +1374,14 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(
         fixture
             .database
-            .query_track_route_page(
-                &library::TrackQuery {
-                    source: fixture.source,
-                    collection: Some(library::QueueCollection::Genre(fixture.genre)),
+            .song_route_page(
+                &library::SongQuery {
                     folder: Some(fixture.folder),
-                    downloaded_only: false,
-                    favorites_only: false
+                    filter: ("artist b").into(),
+                    sort: Some(TrackSort::Album),
+                    descending: true,
+                    ..library::SongQuery::new(library::SongScope::Genre(fixture.genre))
                 },
-                "artist b",
-                TrackSort::Album,
-                true,
                 RouteSeedWindow::top(),
                 &cancel
             )
@@ -1466,17 +1393,12 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(
         fixture
             .database
-            .query_track_route_page(
-                &library::TrackQuery {
-                    source: fixture.source,
-                    collection: Some(library::QueueCollection::Mood(fixture.mood)),
-                    folder: None,
-                    downloaded_only: false,
-                    favorites_only: false
+            .song_route_page(
+                &library::SongQuery {
+                    filter: ("2023").into(),
+                    sort: Some(TrackSort::Year),
+                    ..library::SongQuery::new(library::SongScope::Mood(fixture.mood))
                 },
-                "2023",
-                TrackSort::Year,
-                false,
                 RouteSeedWindow::top(),
                 &cancel
             )
@@ -1760,17 +1682,12 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
     assert_eq!(row.comment.as_deref(), Some("Changed"));
     let filtered = fixture
         .database
-        .query_track_route_page(
-            &library::TrackQuery {
-                source: fixture.source,
-                collection: None,
-                folder: None,
-                downloaded_only: false,
-                favorites_only: false,
+        .song_route_page(
+            &library::SongQuery {
+                filter: ("changed").into(),
+                sort: Some(library::TrackSort::Title),
+                ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
             },
-            "changed",
-            library::TrackSort::Title,
-            false,
             RouteSeedWindow::top(),
             &cancel,
         )
@@ -1784,17 +1701,12 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
     assert_eq!(
         fixture
             .database
-            .query_track_route_page(
-                &library::TrackQuery {
-                    source: fixture.source,
-                    collection: None,
-                    folder: None,
-                    downloaded_only: false,
-                    favorites_only: false
+            .song_route_page(
+                &library::SongQuery {
+                    filter: ("2025").into(),
+                    sort: Some(library::TrackSort::Title),
+                    ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
                 },
-                "2025",
-                library::TrackSort::Title,
-                false,
                 RouteSeedWindow::top(),
                 &cancel
             )
@@ -2023,32 +1935,26 @@ async fn album_genres_supply_browsing_and_playback_without_changing_track_tags()
         assert_eq!(detail.representative_artwork, [vec![1u8]]);
         let route = fixture
             .database
-            .query_track_route_page(
-                &library::TrackQuery {
-                    source: fixture.source,
-                    collection: Some(library::QueueCollection::Genre(fixture.genre)),
+            .song_route_page(
+                &library::SongQuery {
                     folder: folder,
-                    downloaded_only: false,
-                    favorites_only: false,
+                    sort: Some(TrackSort::Title),
+                    ..library::SongQuery::new(library::SongScope::Genre(fixture.genre))
                 },
-                "",
-                TrackSort::Title,
-                false,
                 RouteSeedWindow::top(),
                 &cancel,
             )
             .await
             .unwrap();
         assert_eq!(route.count, 2);
-        let (tracks, _) = fixture
+        let tracks = fixture
             .database
-            .collection_tracks_page(
-                &library::QueueCollection::Genre(fixture.genre),
-                folder,
-                "",
-                TrackSort::Title,
-                false,
-                false,
+            .song_rows(
+                &library::SongQuery {
+                    folder: folder,
+                    sort: Some(TrackSort::Title),
+                    ..library::SongQuery::new(library::SongScope::Genre(fixture.genre))
+                },
                 0,
                 10,
                 &cancel,

@@ -1,32 +1,33 @@
 use async_channel::Receiver;
-use library::{FolderKey, SourceKey};
 
 use super::SourceOwner;
-use crate::playback::PlaybackTarget;
 
 impl SourceOwner {
-    pub fn download_target(
+    pub fn download_selection(
         &self,
-        target: PlaybackTarget,
-        source: Option<SourceKey>,
-        folder: Option<FolderKey>,
+        selection: library::SongSelection,
+        subject: downloads::DownloadSubject,
     ) -> Receiver<Result<(), String>> {
         self.reply(move |owner, database| async move {
-            let media_uris = target.resolve_media_uris(&database, source, folder).await?;
-            owner.download_media(target.download_subject(), media_uris);
+            let uris = database
+                .selected_track_uris(&selection, &library::ReadCancellation::new())
+                .await
+                .map_err(|error| error.to_string())?;
+            owner.download_media(subject, uris);
             Ok(())
         })
     }
 
-    pub fn remove_download_target(
+    pub fn remove_download_selection(
         &self,
-        target: PlaybackTarget,
-        source: Option<SourceKey>,
-        folder: Option<FolderKey>,
+        selection: library::SongSelection,
     ) -> Receiver<Result<(), String>> {
         self.reply(move |owner, database| async move {
-            let media_uris = target.resolve_media_uris(&database, source, folder).await?;
-            owner.remove_download_media(media_uris);
+            let uris = database
+                .selected_track_uris(&selection, &library::ReadCancellation::new())
+                .await
+                .map_err(|error| error.to_string())?;
+            owner.remove_download_media(uris);
             Ok(())
         })
     }

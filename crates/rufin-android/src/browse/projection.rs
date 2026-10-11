@@ -6,24 +6,13 @@ impl AndroidBrowseQuery {
         offset: usize,
         limit: usize,
     ) -> library::LibraryResult<Vec<AndroidBrowseRow>> {
-        let current = if self.history_current_only {
-            Some(&self.selected().source_id)
-        } else {
-            None
-        };
+        let query = self.song_query().await?.expect("History query");
         let rows = self
             .database
-            .activity_history(
-                current,
-                &self.filter,
-                self.descending,
-                &ReadCancellation::new(),
-            )
+            .song_history_rows(query, offset, limit, &ReadCancellation::new())
             .await?;
         Ok(rows
             .into_iter()
-            .skip(offset)
-            .take(limit)
             .enumerate()
             .map(|(index, row)| {
                 let fields = self
@@ -211,9 +200,7 @@ impl AndroidBrowseQuery {
                     rows.push(AndroidBrowseRow {
                         track_key: None,
                         kind: "genre".into(),
-                        playback_context_id: Some(
-                            rufin_core::playback::PlaybackTarget::Genre(row.genre_key).context_id(),
-                        ),
+                        playback_context_id: Some(format!("genre:{}", row.genre_key)),
                         fields: Vec::new(),
                         artist: String::new(),
                         album: String::new(),
@@ -285,6 +272,59 @@ impl AndroidBrowseQuery {
         }
         if matches!(self.route, Route::Folders { .. }) {
             return self.folder_rows(offset, limit).await;
+        }
+        if let Some(query) = self.song_query().await? {
+            if matches!(query.scope, SongScope::Playlist(_)) {
+                return Ok(self
+                    .database
+                    .song_playlist_rows(query, offset, limit, &ReadCancellation::new())
+                    .await?
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, row)| {
+                        let fields = self.track_field_values(offset + index, |field| {
+                            rufin_core::settings::presentation::playlist_entry_field(&row, field)
+                        });
+                        AndroidBrowseRow {
+                            track_key: Some(row.track_key.raw()),
+                            kind: "track".into(),
+                            playback_context_id: None,
+                            fields,
+                            artist: row.artist.clone(),
+                            album: row.album.clone(),
+                            key: serde_json::to_string(&row.playlist_entry_key)
+                                .expect("Playlist entry serialization"),
+                            media_uri: row.media_uri,
+                            title: row.title,
+                            subtitle: format!("{} · {}", row.artist, row.album),
+                            favorite: row.favorite,
+                            duration_millis: row.duration_millis.max(0) as u64,
+                            detail_route: None,
+                            pin: None,
+                            section: String::new(),
+                            section_id: String::new(),
+                            section_kind: String::new(),
+                            section_refreshable: false,
+                            year: row.year,
+                            track_count: 1,
+                            source_id: None,
+                            source_name: String::new(),
+                            last_played: row.last_played,
+                            writable: false,
+                            downloaded: row.is_downloaded,
+                            artwork_identity: row.artwork_binding,
+                        }
+                    })
+                    .collect());
+            }
+            return Ok(self
+                .database
+                .song_rows(query, offset, limit, &ReadCancellation::new())
+                .await?
+                .into_iter()
+                .enumerate()
+                .map(|(index, row)| self.track_row(row, offset + index))
+                .collect());
         }
         let db = &self.database;
         let selected_source = self.selected.as_ref().map(|selected| selected.source_key);
@@ -490,105 +530,6 @@ impl AndroidBrowseQuery {
                 .into_iter()
                 .map(Into::into)
                 .collect()),
-            Route::PlaylistDetail(key) => Ok(db
-                .playlist_entries_page(
-                    *key,
-                    folder,
-                    sort.track_sort(),
-                    descending,
-                    filter,
-                    offset,
-                    limit,
-                    &cancel,
-                )
-                .await?
-                .into_iter()
-                .enumerate()
-                .map(|(index, row)| {
-                    let fields = self.track_field_values(offset + index, |field| {
-                        rufin_core::settings::presentation::playlist_entry_field(&row, field)
-                    });
-                    AndroidBrowseRow {
-                        track_key: Some(row.track_key.raw()),
-                        kind: "track".into(),
-                        playback_context_id: None,
-                        fields,
-                        artist: row.artist.clone(),
-                        album: row.album.clone(),
-                        key: serde_json::to_string(&row.playlist_entry_key)
-                            .expect("Playlist entry serialization"),
-                        media_uri: row.media_uri,
-                        title: row.title,
-                        subtitle: format!("{} · {}", row.artist, row.album),
-                        favorite: row.favorite,
-                        duration_millis: row.duration_millis.max(0) as u64,
-                        detail_route: None,
-                        pin: None,
-                        section: String::new(),
-                        section_id: String::new(),
-                        section_kind: String::new(),
-                        section_refreshable: false,
-                        year: row.year,
-                        track_count: 1,
-                        source_id: None,
-                        source_name: String::new(),
-                        last_played: row.last_played,
-                        writable: false,
-                        downloaded: row.is_downloaded,
-                        artwork_identity: row.artwork_binding,
-                    }
-                })
-                .collect()),
-            Route::SmartPlaylistDetail(key) => Ok(db
-                .smart_playlist_track_page(
-                    selected_source,
-                    *key,
-                    folder,
-                    filter,
-                    Some(sort.track_sort()),
-                    descending,
-                    self.now,
-                    offset,
-                    limit,
-                    &cancel,
-                )
-                .await?
-                .into_iter()
-                .enumerate()
-                .map(|(index, row)| {
-                    let fields = self.track_field_values(offset + index, |field| {
-                        rufin_core::settings::presentation::track_field(&row, field)
-                    });
-                    AndroidBrowseRow {
-                        track_key: Some(row.track_key.raw()),
-                        kind: "track".into(),
-                        playback_context_id: None,
-                        fields,
-                        artist: row.artist.clone(),
-                        album: row.album.clone(),
-                        key: row.media_uri.clone(),
-                        media_uri: row.media_uri,
-                        title: row.title,
-                        subtitle: format!("{} · {}", row.artist, row.album),
-                        favorite: row.favorite,
-                        duration_millis: row.duration_millis.max(0) as u64,
-                        detail_route: None,
-                        pin: None,
-                        section: String::new(),
-                        section_id: String::new(),
-                        section_kind: String::new(),
-                        section_refreshable: false,
-                        year: row.year,
-                        track_count: 1,
-                        source_id: None,
-                        source_name: String::new(),
-                        last_played: row.last_played,
-                        writable: false,
-                        downloaded: row.is_downloaded,
-                        artwork_identity: row.artwork_binding,
-                    }
-                })
-                .collect()),
             Route::History => unreachable!("History is handled before source projection"),
             Route::Home => Ok(self
                 .home_rows()
@@ -615,27 +556,7 @@ impl AndroidBrowseQuery {
             Route::Folders { .. } => {
                 unreachable!("Folder projection is handled before source rows")
             }
-            _ => Ok(db
-                .query_tracks_page(
-                    &library::TrackQuery {
-                        source: self.selected().source_key,
-                        folder,
-                        collection: self.collection(),
-                        downloaded_only: self.downloaded(),
-                        favorites_only: self.favorites(),
-                    },
-                    filter,
-                    sort.track_sort(),
-                    descending,
-                    offset,
-                    limit,
-                    &cancel,
-                )
-                .await?
-                .into_iter()
-                .enumerate()
-                .map(|(index, track)| self.track_row(track, offset + index))
-                .collect()),
+            _ => Ok(Vec::new()),
         }
     }
 }

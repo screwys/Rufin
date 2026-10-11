@@ -3,7 +3,7 @@
 use std::sync::{Arc, Weak};
 
 use library::{Database, RadioSeed, ReadCancellation, SourceKey};
-use playback::{Batch, Placement, Provenance, RadioPlayRequest, RandomPlayRequest};
+use playback::{Placement, Provenance, RadioPlayRequest, RandomPlayRequest};
 use sources::{Source, SourceRadioSeed};
 use tracing::warn;
 
@@ -59,14 +59,9 @@ pub async fn queue_random(
     if order.is_empty() {
         return Ok(true);
     }
-    queue.play(playback::PlayRequest::ordered(
-        library::QueueInput::MediaUris {
-            order: order.into(),
-            provenance: Provenance::Random,
-        },
-        0,
+    queue.play(playback::PlayRequest::from_load(
+        library::QueueReadRequest::media_uris(order, Provenance::Random),
         request.placement,
-        false,
     ));
     Ok(false)
 }
@@ -98,7 +93,6 @@ pub(crate) fn request_auto_dj(
                     request.seed_media_uri,
                     media,
                     request.requested_count,
-                    random_u64(),
                 );
             }
             Err(error) => {
@@ -271,10 +265,7 @@ async fn complete_materialization(
 ) {
     match candidates {
         Ok(candidates) if !candidates.is_empty() => {
-            let batch = Batch::from_input(library::QueueInput::MediaUris {
-                order: candidates.into(),
-                provenance,
-            });
+            let batch = library::QueueReadRequest::media_uris(candidates, provenance);
             if let Err(error) = playback.complete_materialization(reservation.id, batch, placement)
             {
                 warn!(%error, "could not complete queue materialization");

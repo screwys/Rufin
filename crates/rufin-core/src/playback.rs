@@ -8,8 +8,6 @@ pub(crate) mod state;
 pub(crate) use continuation::PreparedContinuation;
 #[cfg(test)]
 mod queue_tests;
-mod target;
-pub use target::PlaybackTarget;
 
 pub fn seek_preview_matches_position(target_millis: u64, position_millis: u64) -> bool {
     const TOLERANCE_MILLIS: u64 = 1_500;
@@ -125,6 +123,14 @@ async fn save_pending_queue(
 }
 
 impl PlaybackOwner {
+    pub(crate) fn insert_load(
+        &self,
+        input: library::QueueReadRequest,
+        target: playback::QueueReorderTarget,
+    ) {
+        self.send(Command::Insert { input, target });
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new<StartBackend>(
         database: Arc<Database>,
@@ -781,8 +787,8 @@ impl QueueCommandPort for PlaybackOwner {
             warn!(%error, "could not play Queue");
         }
     }
-    fn insert(&self, input: library::QueueInput, target: playback::QueueReorderTarget) {
-        self.send(Command::Insert { input, target });
+    fn insert(&self, input: library::SongSelection, target: playback::QueueReorderTarget) {
+        self.insert_load(library::QueueReadRequest::songs(input), target);
     }
     fn remove(&self, position: usize) {
         self.send(Command::Remove(position));

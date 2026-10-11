@@ -14,7 +14,7 @@ pub use records::{
     AndroidSortField, AndroidSortSelection,
 };
 
-use library::{QueueCollection, ReadCancellation};
+use library::{ReadCancellation, SongQuery, SongScope, SongSelection};
 use rufin_core::source::folders::FolderProjection;
 use rufin_core::{
     route::{CollectionCategory, Route, sidebar_route_descriptor},
@@ -245,14 +245,15 @@ fn artist_row(row: library::ArtistRow, album_artist: bool) -> AndroidBrowseRow {
     AndroidBrowseRow {
         track_key: None,
         kind: "artist".into(),
-        playback_context_id: Some(
+        playback_context_id: Some(format!(
+            "{}:{}",
             if album_artist {
-                rufin_core::playback::PlaybackTarget::AlbumArtist(row.media_uri.clone())
+                "album-artist"
             } else {
-                rufin_core::playback::PlaybackTarget::Artist(row.media_uri.clone())
-            }
-            .context_id(),
-        ),
+                "artist"
+            },
+            row.media_uri
+        )),
         fields: Vec::new(),
         artist: row.name.clone(),
         album: String::new(),
@@ -309,6 +310,7 @@ pub struct AndroidBrowseQuery {
     release_section: Option<ArtistReleaseSection>,
     release_counts: tokio::sync::OnceCell<[i64; 6]>,
     folder_projection: tokio::sync::OnceCell<FolderProjection>,
+    songs: tokio::sync::OnceCell<Option<SongQuery>>,
 }
 
 fn search_rows(rows: library::SearchResults) -> Vec<AndroidBrowseRow> {
@@ -392,27 +394,127 @@ impl AndroidBrowseQuery {
         self.display.layout == LibraryLayout::Detail
             && library_list_key(&self.route, self.category) == LibraryListKey::Albums
     }
-    fn collection(&self) -> Option<QueueCollection> {
-        match &self.route {
-            Route::AlbumDetail(uri) => Some(QueueCollection::Album(uri.clone())),
+    async fn song_query(&self) -> library::LibraryResult<Option<&SongQuery>> {
+        self.songs
+            .get_or_try_init(|| async {
+                let cancel = ReadCancellation::new();
+                let scope = match &self.route {
+                    Route::Tracks => SongScope::Tracks(self.selected().source_key),
+                    Route::Favorites if self.category == CollectionCategory::Tracks => {
+                        SongScope::Tracks(self.selected().source_key)
+                    }
+                    Route::AlbumDetail(uri) => {
+                        let Some(row) = self.database.album_row_by_media_uri(uri, &cancel).await?
+                        else {
+                            return Ok(None);
+                        };
+                        SongScope::Album(row.album_key)
+                    }
+                    Route::ArtistDetail(_) | Route::AlbumArtistDetail(_)
+                        if self.category == CollectionCategory::Albums =>
+                    {
+                        return Ok(None);
+                    }
+                    Route::ArtistDetail(uri)
+                    | Route::ArtistTracks(uri)
+                    | Route::ArtistFavoriteTracks(uri)
+                    | Route::AlbumArtistDetail(uri)
+                    | Route::AlbumArtistTracks(uri)
+                    | Route::AlbumArtistFavoriteTracks(uri) => {
+                        let Some(row) = self.database.artist_row_by_media_uri(uri, &cancel).await?
+                        else {
+                            return Ok(None);
+                        };
+                        SongScope::Artist {
+                            key: row.artist_key,
+                            album_artist: matches!(
+                                self.route,
+                                Route::AlbumArtistDetail(_)
+                                    | Route::AlbumArtistTracks(_)
+                                    | Route::AlbumArtistFavoriteTracks(_)
+                            ),
+                        }
+                    }
+                    Route::GenreDetail(key) => SongScope::Genre(*key),
+                    Route::MoodDetail(key) => SongScope::Mood(*key),
+                    Route::PlaylistDetail(key) => SongScope::Playlist(*key),
+                    Route::SmartPlaylistDetail(key) => SongScope::Smart {
+                        key: *key,
+                        source: self.selected.as_ref().map(|selected| selected.source_key),
+                        now: self.now,
+                    },
+                    Route::Folders { .. } => match self.folder_projection().await? {
+                        FolderProjection::Cached(_) => {
+                            SongScope::Tracks(self.selected().source_key)
+                        }
+                        FolderProjection::Live { .. } => return Ok(None),
+                    },
+                    Route::History => SongScope::History {
+                        source: self
+                            .history_current_only
+                            .then(|| self.selected().source_id.clone()),
+                    },
+                    _ => return Ok(None),
+                };
+                let mut query = SongQuery::new(scope);
+                query.folder = self
+                    .selected
+                    .as_ref()
+                    .and_then(|selected| selected.music_folder_key);
+                if matches!(self.route, Route::Folders { .. }) {
+                    if let FolderProjection::Cached(folder) = self.folder_projection().await? {
+                        query.folder = *folder;
+                    }
+                }
+                query.filter = self.filter.clone();
+                query.sort = Some(self.sort.track_sort());
+                query.descending = self.descending;
+                query.favorites_only = self.favorites();
+                query.downloaded_only = self.downloaded();
+                Ok(Some(query))
+            })
+            .await
+            .map(Option::as_ref)
+    }
+
+    async fn target_selection(&self) -> Result<SongSelection, AndroidError> {
+        if matches!(self.route, Route::Folders { .. }) {
+            return self.folder_selection().await;
+        }
+        let mut query = self
+            .song_query()
+            .await
+            .map_err(error)?
+            .cloned()
+            .ok_or_else(|| error("Choose a collection"))?;
+        if !matches!(query.scope, SongScope::Smart { .. }) {
+            query.folder = None;
+        }
+        query.sort = None;
+        query.descending = false;
+        Ok(query.selection())
+    }
+
+    fn context_id(&self) -> Arc<str> {
+        let context = match &self.route {
+            Route::AlbumDetail(uri) => format!("album:{uri}"),
             Route::ArtistDetail(uri)
             | Route::ArtistTracks(uri)
             | Route::ArtistFavoriteTracks(uri)
-            | Route::ArtistDiscography(uri) => Some(QueueCollection::Artist {
-                media_uri: uri.clone(),
-                album_artist: false,
-            }),
+            | Route::ArtistDiscography(uri) => format!("artist:{uri}"),
             Route::AlbumArtistDetail(uri)
             | Route::AlbumArtistTracks(uri)
             | Route::AlbumArtistFavoriteTracks(uri)
-            | Route::AlbumArtistDiscography(uri) => Some(QueueCollection::Artist {
-                media_uri: uri.clone(),
-                album_artist: true,
-            }),
-            Route::GenreDetail(key) => Some(QueueCollection::Genre(*key)),
-            Route::MoodDetail(key) => Some(QueueCollection::Mood(*key)),
-            _ => None,
-        }
+            | Route::AlbumArtistDiscography(uri) => format!("album-artist:{uri}"),
+            Route::GenreDetail(key) => format!("genre:{key}"),
+            Route::MoodDetail(key) => format!("mood:{key}"),
+            Route::PlaylistDetail(key) => format!("playlist:{key}"),
+            Route::SmartPlaylistDetail(key) => format!("smart-playlist:{key}"),
+            _ => format!("android:{}", route_json(self.route.clone())),
+        };
+        format!("{context}|query={}|source={}|folder={:?}|sort={:?}|descending={}|favorites={}|downloaded={}",
+            self.filter, self.selected.as_ref().map_or("rufin", |selected| selected.source_id.as_str()),
+            self.selected.as_ref().and_then(|selected| selected.music_folder_key), self.sort, self.descending, self.favorites(), self.downloaded()).into()
     }
 
     fn downloaded(&self) -> bool {

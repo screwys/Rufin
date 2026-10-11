@@ -717,7 +717,11 @@ mod tests {
             assert_eq!(rows[0].artwork_binding.is_some(), next <= 1);
             assert_eq!(
                 database
-                    .playlist_media_uri_order(playlist, None, &cancellation)
+                    .selected_track_uris(
+                        &library::SongQuery::new(library::SongScope::Playlist(playlist))
+                            .selection(),
+                        &cancellation
+                    )
                     .await
                     .unwrap()
                     .len(),

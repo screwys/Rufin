@@ -9,7 +9,7 @@ use std::task::Poll;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_channel::{Receiver, Sender};
-use library::{Database, FolderKey, SourceKey, TrackKey, TrackSort};
+use library::{Database, FolderKey, SourceKey, TrackKey};
 use playback::{ResolvedStream, StreamQuality, StreamRequest};
 use serde::{Deserialize, Serialize};
 use sources::{Source, SourceError, SourceId};
@@ -565,21 +565,12 @@ async fn rule_media_uris(
 ) -> library::LibraryResult<Vec<String>> {
     let cancellation = library::ReadCancellation::new();
     match rule {
-        DownloadRule::EntireLibrary => {
+        DownloadRule::EntireLibrary | DownloadRule::Favorites => {
+            let mut query = library::SongQuery::new(library::SongScope::Tracks(source));
+            query.folder = folder;
+            query.favorites_only = matches!(rule, DownloadRule::Favorites);
             database
-                .track_order(
-                    source,
-                    folder,
-                    false,
-                    TrackSort::Title,
-                    false,
-                    &cancellation,
-                )
-                .await
-        }
-        DownloadRule::Favorites => {
-            database
-                .track_order(source, folder, true, TrackSort::Title, false, &cancellation)
+                .selected_track_uris(&query.selection(), &cancellation)
                 .await
         }
         DownloadRule::AllPlaylists => {

@@ -846,17 +846,16 @@ impl Shell {
             "Track route",
             move |window, cancellation| async move {
                 database
-                    .query_track_route_page(
-                        &library::TrackQuery {
-                            source: source_key,
-                            collection: None,
-                            folder,
+                    .song_route_page(
+                        &library::SongQuery {
+                            scope: library::SongScope::Tracks(source_key),
+                            folder: folder,
+                            filter: "".to_string(),
+                            sort: Some(settings.sort_key.track_sort()),
+                            descending: settings.descending,
+                            favorites_only: favorites_only,
                             downloaded_only: false,
-                            favorites_only,
                         },
-                        "",
-                        settings.sort_key.track_sort(),
-                        settings.descending,
                         window,
                         &cancellation,
                     )
@@ -1035,10 +1034,11 @@ impl Shell {
             move |window, cancellation| async move {
                 database
                     .playlist_detail_page(
-                        key,
-                        None,
-                        settings.sort_key.track_sort(),
-                        settings.descending,
+                        &library::SongQuery {
+                            sort: Some(settings.sort_key.track_sort()),
+                            descending: settings.descending,
+                            ..library::SongQuery::new(library::SongScope::Playlist(key))
+                        },
                         window,
                         &cancellation,
                     )
@@ -1320,9 +1320,15 @@ impl Shell {
             render_started,
             "History route",
             move |_, cancellation| async move {
-                database
-                    .activity_history(None, "", settings.descending, &cancellation)
-                    .await
+                let query = library::SongQuery {
+                    descending: settings.descending,
+                    ..library::SongQuery::new(library::SongScope::History { source: None })
+                };
+                let count = database.song_count(&query, &cancellation).await?.max(0) as usize;
+                let rows = database
+                    .song_history_rows(&query, 0, 64, &cancellation)
+                    .await?;
+                Ok::<_, library::LibraryError>((query, count, rows))
             },
             |shell, rows| shell.history_route(rows),
         );

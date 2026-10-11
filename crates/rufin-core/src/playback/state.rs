@@ -14,10 +14,10 @@ use std::sync::{Arc, Weak};
 use tokio::task::JoinHandle;
 
 use playback::{
-    BackendCommand, BackendEvent, BackendState, Batch, BatchItem, ListeningFact, NextTransition,
-    Placement, PlaybackOutput, PlaybackSettings, PlaybackTransitionMode, PreparedNext,
-    PreparedStream, Provenance, QueueItem, QueueRow, RepeatMode, RunEndReason, RunId,
-    StreamRequest, manual_end_is_skip, qualified_play_threshold_millis,
+    BackendCommand, BackendEvent, BackendState, ListeningFact, NextTransition, Placement,
+    PlaybackOutput, PlaybackSettings, PlaybackTransitionMode, PreparedNext, PreparedStream,
+    Provenance, QueueItem, QueueRow, RepeatMode, RunEndReason, RunId, StreamRequest,
+    manual_end_is_skip, qualified_play_threshold_millis,
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -66,8 +66,8 @@ pub enum Command {
         output: PlaybackOutput,
         observation: ExternalPlayback,
     },
-    ApplyBatch {
-        batch: Batch,
+    ApplyQueue {
+        load: library::QueueReadRequest,
         placement: Placement,
     },
     Activate(usize),
@@ -80,7 +80,7 @@ pub enum Command {
         target: playback::QueueReorderTarget,
     },
     Insert {
-        input: library::QueueInput,
+        input: library::QueueReadRequest,
         target: playback::QueueReorderTarget,
     },
     MoveAfterCurrent(usize),
@@ -826,7 +826,7 @@ impl Player {
     pub(super) fn apply_materialization(
         &mut self,
         id: MaterializationId,
-        batch: Batch,
+        load: library::QueueReadRequest,
         placement: Placement,
         sample: &ClockSample,
     ) -> Result<bool, SequenceError> {
@@ -844,7 +844,7 @@ impl Player {
         } else {
             self.pending_additive.remove(&id);
         }
-        self.apply_batch(batch, placement, sample)?;
+        self.apply_batch(load, placement, sample)?;
         Ok(true)
     }
 
@@ -896,10 +896,10 @@ impl Player {
         {
             return Ok(());
         }
-        let placement = request.placement.with_anchor(request.anchor_index);
+        let placement = request.placement.with_anchor(request.load.anchor_index);
         let reservation = self.reserve_materialization(placement);
-        let (batch, placement) = request.compact_batch(super::random_u64());
-        self.apply_materialization(reservation.id, batch, placement, sample)?;
+        let (load, placement) = request.into_load(super::random_u64());
+        self.apply_materialization(reservation.id, load, placement, sample)?;
         Ok(())
     }
 
@@ -932,7 +932,7 @@ impl Player {
                 output,
                 observation,
             } => self.observe_external(output, observation, sample),
-            Command::ApplyBatch { batch, placement } => self.apply_batch(batch, placement, sample),
+            Command::ApplyQueue { load, placement } => self.apply_batch(load, placement, sample),
             Command::Activate(position) => Ok(self.activate(&position, sample)),
             Command::ActivateOccurrence(id) => Ok({
                 if let Some(position) = self.sequence.index_of(OccurrenceId(id)) {
@@ -1199,7 +1199,7 @@ impl Player {
         &mut self,
         seed_run: Option<RunId>,
         seed_media_uri: &str,
-        batch: Batch,
+        load: library::QueueReadRequest,
         sample: &ClockSample,
     ) -> Result<bool, SequenceError> {
         if self.external.is_some() {
@@ -1218,7 +1218,7 @@ impl Player {
             self.dirty = true;
             return Ok(true);
         }
-        self.apply_batch(batch, Placement::End, sample)?;
+        self.apply_batch(load, Placement::End, sample)?;
         Ok(true)
     }
 
@@ -1228,13 +1228,12 @@ impl Player {
         seed_media_uri: &str,
         candidates: Vec<QueueItem>,
         requested_count: usize,
-        shuffle_seed: u64,
         sample: &ClockSample,
     ) -> Result<bool, SequenceError> {
         let items = candidates
             .into_iter()
             .take(requested_count)
-            .map(|media| BatchItem::direct(media, Provenance::AutoDj))
+            .map(|media| (media, Provenance::AutoDj))
             .collect::<Vec<_>>();
         if items.is_empty() {
             return Ok(self.auto_dj_unavailable(seed_run, seed_media_uri, None));
@@ -1242,7 +1241,7 @@ impl Player {
         self.complete_auto_dj(
             seed_run,
             seed_media_uri,
-            Batch::new(items).with_shuffle_intent(shuffle_seed, false),
+            library::QueueReadRequest::items(items),
             sample,
         )
     }
@@ -1271,7 +1270,7 @@ impl Player {
 
     fn apply_batch(
         &mut self,
-        mut batch: Batch,
+        mut load: library::QueueReadRequest,
         placement: Placement,
         _sample: &ClockSample,
     ) -> Result<(), SequenceError> {
@@ -1280,7 +1279,7 @@ impl Player {
         self.queue_loading = true;
         if self.pending_queue.is_some() && !replacing {
             self.deferred_queue
-                .push_back(Command::ApplyBatch { batch, placement });
+                .push_back(Command::ApplyQueue { load, placement });
             return Ok({
                 self.dirty |= loading_changed;
             });
@@ -1289,14 +1288,14 @@ impl Player {
             self.deferred_queue.clear();
             self.queue_transport = None;
         }
-        let seed =
-            (self.sequence.shuffle_enabled() || batch.random_start).then_some(batch.shuffle_seed);
+        let seed = (self.sequence.shuffle_enabled() || load.random_start.is_some())
+            .then(|| load.random_start.unwrap_or_else(super::random_u64));
         let anchor = match placement {
             Placement::Replace { anchor_index } => anchor_index,
             _ => 0,
         };
-        if batch.random_start {
-            batch.input.clear_anchor();
+        if load.random_start.is_some() {
+            load.anchor = None;
         }
         let target = match placement {
             Placement::AfterCurrent => {
@@ -1310,19 +1309,12 @@ impl Player {
             }
             _ => QueueReorderTarget::End,
         };
+        load.anchor_index = anchor;
+        let random_start = load.random_start.is_some();
         Ok(self.request_queue(
-            library::QueueReadRequest {
-                context_title: batch.context_title,
-                input: batch.input,
-                anchor_index: anchor,
-                random_start: batch.random_start.then_some(batch.shuffle_seed),
-                shuffled: batch.shuffled.then_some(batch.shuffle_seed),
-            },
+            load,
             if replacing {
-                QueueCompletion::Replace {
-                    seed,
-                    random_start: batch.random_start,
-                }
+                QueueCompletion::Replace { seed, random_start }
             } else {
                 QueueCompletion::Insert { target }
             },
@@ -1635,15 +1627,9 @@ impl Player {
         self.edit_queue(|sequence| sequence.reorder(selection, target));
         self.changed_queue(false, false, sample)
     }
-    fn insert(&mut self, input: library::QueueInput, target: &QueueReorderTarget) {
+    fn insert(&mut self, input: library::QueueReadRequest, target: &QueueReorderTarget) {
         self.request_queue(
-            library::QueueReadRequest {
-                context_title: None,
-                input: input,
-                anchor_index: 0,
-                random_start: None,
-                shuffled: None,
-            },
+            input,
             QueueCompletion::Insert {
                 target: match target {
                     QueueReorderTarget::Before(i) => self

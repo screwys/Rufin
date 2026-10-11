@@ -202,23 +202,12 @@ impl CatalogUi {
         route_stack.set_visible_child_name("content");
 
         let database = Arc::clone(&self.library);
-        let source = album.source_key;
-        let folder = None;
         let load = move |request: TrackProjectionRequest, cancellation| {
             let database = Arc::clone(&database);
             async move {
                 let page = database
-                    .query_track_route_page(
-                        &library::TrackQuery {
-                            source: source,
-                            collection: Some(library::QueueCollection::AlbumKey(album_id)),
-                            folder: folder,
-                            downloaded_only: false,
-                            favorites_only: false,
-                        },
-                        &request.query,
-                        request.settings.sort_key.track_sort(),
-                        request.settings.descending,
+                    .song_route_page(
+                        request.query(),
                         library::RouteSeedWindow::top(),
                         &cancellation,
                     )
@@ -334,17 +323,16 @@ pub async fn load_album_detail(
         return Ok(None);
     };
     let page = database
-        .query_track_route_page(
-            &library::TrackQuery {
-                source: album.source_key,
-                collection: Some(library::QueueCollection::AlbumKey(album.album_key)),
+        .song_route_page(
+            &library::SongQuery {
+                scope: library::SongScope::Album(album.album_key),
                 folder: None,
-                downloaded_only: false,
+                filter: "".to_string(),
+                sort: Some(settings.sort_key.track_sort()),
+                descending: settings.descending,
                 favorites_only: false,
+                downloaded_only: false,
             },
-            "",
-            settings.sort_key.track_sort(),
-            settings.descending,
             window,
             cancellation,
         )

@@ -32,7 +32,7 @@ use super::grid_cells::{
 };
 use crate::home_layout::home_section_header;
 use gtk_media_menus::media_menus::present_album_context_menu;
-use rufin_core::playback::PlaybackTarget;
+use gtk_widgets::selection::track_play_request;
 
 use crate::route_layout::{ROUTE_TOP_MARGIN, route_scroller_widget};
 use gtk_widgets::detail_links::{
@@ -650,16 +650,15 @@ impl CatalogUi {
             radio_controller.play_radio(RadioPlayRequest::now(radio_seed.clone()));
         });
         showcase_view.append_kind_control(&radio);
-        let drag_album = album.media_uri.clone();
+        let drag_album = album.clone();
         let drag_title = title_text.clone();
         let drag_target: gtk::Widget = cover.button().upcast();
         let drag_artwork = cover.drag_paintable_source();
         let drag_shell = Rc::downgrade(self);
         install_compact_media_drag_source(&drag_target, &drag_artwork, move || {
-            let shell = drag_shell.upgrade()?;
+            let _shell = drag_shell.upgrade()?;
             let source = MediaDragSource::capture_target(
-                shell.selected_library().as_deref(),
-                PlaybackTarget::Album(drag_album.clone()),
+                gtk_widgets::selection::album_play_request(&drag_album),
             );
             Some((source, drag_title.clone()))
         });
@@ -667,7 +666,7 @@ impl CatalogUi {
         let actions = showcase_view.actions();
         actions.set_halign(gtk::Align::Start);
         let play_shell = Rc::clone(self);
-        let play_target = PlaybackTarget::Album(album.media_uri.clone());
+        let play_target = gtk_widgets::selection::album_play_request(&album);
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {
             (play_shell.media_menus.play_target)(&play_target, placement, shuffled);
         });
@@ -829,10 +828,10 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
             let mut track = item.track;
             track.title = item.title;
             let play_shell = Rc::clone(shell);
-            let play_media_uri = track.media_uri.clone();
+            let play_key = track.track_key;
             let play = Rc::new(move |_| {
                 (play_shell.media_menus.play_target)(
-                    &rufin_core::playback::PlaybackTarget::Track(play_media_uri.clone()),
+                    &track_play_request(play_key),
                     playback::QueuePlacement::Now,
                     false,
                 );
@@ -881,7 +880,7 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
 fn activate_home_item(shell: &Rc<CatalogUi>, item: HomeItem) {
     match item {
         HomeItem::Track(item) => (shell.media_menus.play_target)(
-            &rufin_core::playback::PlaybackTarget::Track(item.track.media_uri),
+            &track_play_request(item.track.track_key),
             playback::QueuePlacement::Now,
             false,
         ),

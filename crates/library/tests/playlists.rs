@@ -259,7 +259,14 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     let cancel = ReadCancellation::new();
     let initial = fixture
         .database
-        .playlist_entry_order(playlist, None, TrackSort::Position, false, "", &cancel)
+        .selected_playlist_entries(
+            &library::SongQuery {
+                sort: Some(TrackSort::Position),
+                ..library::SongQuery::new(library::SongScope::Playlist(playlist))
+            }
+            .selection(),
+            &cancel,
+        )
         .await
         .expect("initial Playlist order");
     let rows = fixture
@@ -300,7 +307,14 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     );
     let added = fixture
         .database
-        .playlist_entry_order(playlist, None, TrackSort::Position, false, "", &cancel)
+        .selected_playlist_entries(
+            &library::SongQuery {
+                sort: Some(TrackSort::Position),
+                ..library::SongQuery::new(library::SongScope::Playlist(playlist))
+            }
+            .selection(),
+            &cancel,
+        )
         .await
         .expect("added Playlist order");
     assert!(
@@ -312,7 +326,14 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     );
     let moved = fixture
         .database
-        .playlist_entry_order(playlist, None, TrackSort::Position, false, "", &cancel)
+        .selected_playlist_entries(
+            &library::SongQuery {
+                sort: Some(TrackSort::Position),
+                ..library::SongQuery::new(library::SongScope::Playlist(playlist))
+            }
+            .selection(),
+            &cancel,
+        )
         .await
         .expect("moved Playlist order");
     assert_eq!(moved[0], added[4]);
@@ -337,7 +358,14 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     assert_eq!(
         fixture
             .database
-            .playlist_entry_order(playlist, None, TrackSort::Position, false, "", &cancel)
+            .selected_playlist_entries(
+                &library::SongQuery {
+                    sort: Some(TrackSort::Position),
+                    ..library::SongQuery::new(library::SongScope::Playlist(playlist))
+                }
+                .selection(),
+                &cancel
+            )
             .await
             .expect("complete Playlist order")
             .len(),
@@ -345,15 +373,26 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     );
     let entries = fixture
         .database
-        .playlist_entry_order(playlist, None, TrackSort::Position, false, "", &cancel)
+        .selected_playlist_entries(
+            &library::SongQuery {
+                sort: Some(TrackSort::Position),
+                ..library::SongQuery::new(library::SongScope::Playlist(playlist))
+            }
+            .selection(),
+            &cancel,
+        )
         .await
         .unwrap();
     let state = super::support::resolve_queue(
         &fixture.database,
-        library::QueueInput::PlaylistEntries {
-            order: entries.into(),
-            context_id: "playlist".into(),
-        },
+        library::QueueLoad::Songs(vec![(
+            library::SongSelection::PlaylistEntries(entries.into()),
+            library::QueueProvenance::Context {
+                context_id: "playlist".into(),
+                context_title: None,
+                source_rank: 0,
+            },
+        )]),
         Default::default(),
     )
     .await;
@@ -392,7 +431,10 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
     );
     let order = fixture
         .database
-        .playlist_media_uri_order(playlist, None, &ReadCancellation::new())
+        .selected_track_uris(
+            &library::SongQuery::new(library::SongScope::Playlist(playlist)).selection(),
+            &ReadCancellation::new(),
+        )
         .await
         .expect("global Playlist order");
     assert_eq!(
@@ -414,12 +456,12 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
     drop(raw);
     let entries = fixture
         .database
-        .playlist_entry_order(
-            playlist,
-            None,
-            TrackSort::Position,
-            false,
-            "",
+        .selected_playlist_entries(
+            &library::SongQuery {
+                sort: Some(TrackSort::Position),
+                ..library::SongQuery::new(library::SongScope::Playlist(playlist))
+            }
+            .selection(),
             &ReadCancellation::new(),
         )
         .await
@@ -433,10 +475,14 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
     assert_eq!(rows[1].media_uri, fixture.track_uris[1]);
     let playback = super::support::resolve_queue(
         &fixture.database,
-        library::QueueInput::PlaylistEntries {
-            order: entries.into(),
-            context_id: "unavailable".into(),
-        },
+        library::QueueLoad::Songs(vec![(
+            library::SongSelection::PlaylistEntries(entries.into()),
+            library::QueueProvenance::Context {
+                context_id: "unavailable".into(),
+                context_title: None,
+                source_rank: 0,
+            },
+        )]),
         Default::default(),
     )
     .await;
@@ -645,7 +691,10 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
     );
     assert_eq!(
         database
-            .playlist_media_uri_order(playlist, None, &cancel)
+            .selected_track_uris(
+                &library::SongQuery::new(library::SongScope::Playlist(playlist)).selection(),
+                &cancel
+            )
             .await
             .unwrap(),
         std::slice::from_ref(&own_uri)
@@ -666,7 +715,10 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
     );
     assert_eq!(
         database
-            .playlist_media_uri_order(global, None, &cancel)
+            .selected_track_uris(
+                &library::SongQuery::new(library::SongScope::Playlist(global)).selection(),
+                &cancel
+            )
             .await
             .unwrap(),
         mixed

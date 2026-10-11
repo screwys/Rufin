@@ -210,7 +210,11 @@ async fn connect_saved_playlist_replay_keeps_duplicate_media_without_catalog_mem
         .unwrap();
     assert_eq!(
         received
-            .playlist_media_uri_order(imported_playlist, None, &library::ReadCancellation::new())
+            .selected_track_uris(
+                &library::SongQuery::new(library::SongScope::Playlist(imported_playlist))
+                    .selection(),
+                &library::ReadCancellation::new()
+            )
             .await
             .unwrap(),
         uris

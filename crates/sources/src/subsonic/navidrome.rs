@@ -1411,17 +1411,8 @@ mod tests {
         assert_eq!(binding.source_id, crate::SourceId::new("navidrome:test"));
         assert_eq!(binding.image.tag.as_deref(), Some("2026-08-27T00:00:00Z"));
         let tracks = database
-            .query_track_route_page(
-                &library::TrackQuery {
-                    source: source_key,
-                    collection: None,
-                    folder: None,
-                    downloaded_only: false,
-                    favorites_only: false,
-                },
-                "",
-                library::TrackSort::Title,
-                false,
+            .song_route_page(
+                &library::SongQuery::new(library::SongScope::Tracks(source_key)),
                 library::RouteSeedWindow::top(),
                 &cancellation,
             )

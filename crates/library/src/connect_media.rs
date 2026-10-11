@@ -95,20 +95,29 @@ mod tests {
         );
         assert_eq!(
             database
+                .track_row_by_uri(&uri, &crate::ReadCancellation::new())
+                .await
+                .unwrap()
+                .unwrap()
+                .title,
+            "Track"
+        );
+        assert!(
+            database
                 .connect_track_reference(&uri)
                 .await
                 .unwrap()
-                .unwrap()["title"],
-            "Track"
+                .is_none()
         );
         database.connect_forget_media_file(&receipt).await.unwrap();
         assert!(database.playback_access(&uri).await.unwrap().is_none());
         assert_eq!(
             database
-                .connect_track_reference(&uri)
+                .track_row_by_uri(&uri, &crate::ReadCancellation::new())
                 .await
                 .unwrap()
-                .unwrap()["title"],
+                .unwrap()
+                .title,
             "Track"
         );
         assert_eq!(std::fs::read(original).unwrap(), b"original");

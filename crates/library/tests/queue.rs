@@ -22,8 +22,9 @@ async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue
     let database = &fixture.database;
     let captured = database
         .read_queue(library::QueueReadRequest {
+            anchor: None,
             context_title: None,
-            input: library::QueueInput::Items(
+            input: library::QueueLoad::Items(
                 (0..205)
                     .map(|index| {
                         (
@@ -377,17 +378,11 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
     let cancel = ReadCancellation::new();
     let album = fixture
         .database
-        .query_track_route_page(
-            &library::TrackQuery {
-                source: fixture.source,
-                collection: Some(library::QueueCollection::AlbumKey(fixture.albums[0])),
-                folder: None,
-                downloaded_only: false,
-                favorites_only: false,
+        .song_route_page(
+            &library::SongQuery {
+                sort: Some(TrackSort::TrackNumber),
+                ..library::SongQuery::new(library::SongScope::Album(fixture.albums[0]))
             },
-            "",
-            TrackSort::TrackNumber,
-            false,
             library::RouteSeedWindow::top(),
             &cancel,
         )
@@ -406,7 +401,10 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
         .0;
     let playlist = fixture
         .database
-        .playlist_media_uri_order(playlist_key, None, &cancel)
+        .selected_track_uris(
+            &library::SongQuery::new(library::SongScope::Playlist(playlist_key)).selection(),
+            &cancel,
+        )
         .await
         .expect("Playlist URI order");
     let smart_key = fixture
@@ -416,7 +414,15 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
         .expect("create Smart Playlist");
     let smart = fixture
         .database
-        .smart_playlist_media_uri_order(Some(fixture.source), smart_key, None, 0, &cancel)
+        .selected_track_uris(
+            &library::SongQuery::new(library::SongScope::Smart {
+                key: smart_key,
+                source: Some(fixture.source),
+                now: 0,
+            })
+            .selection(),
+            &cancel,
+        )
         .await
         .expect("Smart Playlist URI order");
 
@@ -439,11 +445,12 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
 
 async fn source_items(
     database: &library::Database,
-    input: library::QueueInput,
+    input: library::QueueLoad,
     seed: Option<u64>,
 ) -> Vec<QueueItem> {
     let page = database
         .read_queue(library::QueueReadRequest {
+            anchor: None,
             context_title: None,
             input: input,
             anchor_index: 0,
@@ -494,36 +501,32 @@ async fn source_membership_matches_track_view_sort_filter_and_null_order() {
             for filter in ["", "a"] {
                 let view = fixture
                     .database
-                    .query_track_route_page(
-                        &library::TrackQuery {
-                            source: fixture.source,
-                            collection: None,
-                            folder: None,
-                            downloaded_only: false,
-                            favorites_only: false,
+                    .song_route_page(
+                        &library::SongQuery {
+                            filter: (filter).into(),
+                            sort: Some(sort),
+                            descending: descending,
+                            ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
                         },
-                        filter,
-                        sort,
-                        descending,
                         library::RouteSeedWindow::top(),
                         &ReadCancellation::new(),
                     )
                     .await
                     .unwrap();
-                let input = library::QueueInput::Query {
-                    query: library::QueueQuery::Tracks {
-                        source: fixture.source,
-                        downloaded_only: false,
-                        favorites_only: false,
-                        recursive: false,
+                let input = library::QueueLoad::Songs(vec![(
+                    library::SongQuery {
+                        filter: filter.into(),
+                        sort: Some(sort),
+                        descending: descending,
+                        ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
+                    }
+                    .selection(),
+                    library::QueueProvenance::Context {
+                        context_id: "tracks".into(),
+                        context_title: None,
+                        source_rank: 0,
                     },
-                    folder: None,
-                    filter: filter.into(),
-                    sort,
-                    descending,
-                    context_id: "tracks".into(),
-                    anchor_key: None,
-                };
+                )]);
                 let items = source_items(&fixture.database, input, None).await;
                 assert_eq!(
                     items.iter().map(|row| &row.media_uri).collect::<Vec<_>>(),
@@ -552,14 +555,18 @@ async fn source_playlist_preserves_duplicate_members_with_shared_uri_metadata() 
         .await
         .unwrap();
     for seed in [None, Some(71)] {
-        let input = library::QueueInput::Collection {
-            collection: library::QueueCollection::Playlist(imported.playlist),
-            folder: None,
-            context_id: "duplicates".into(),
-        };
+        let input = library::QueueLoad::Songs(vec![(
+            library::SongQuery::new(library::SongScope::Playlist(imported.playlist)).selection(),
+            library::QueueProvenance::Context {
+                context_id: "duplicates".into(),
+                context_title: None,
+                source_rank: 0,
+            },
+        )]);
         let page = fixture
             .database
             .read_queue(library::QueueReadRequest {
+                anchor: None,
                 input: input.clone(),
                 context_title: None,
                 anchor_index: 0,
@@ -599,13 +606,21 @@ async fn saved_queue_keeps_compact_choices_and_reads_only_the_window() {
     let fixture = fixture().await;
     let mut state = super::support::resolve_queue(
         &fixture.database,
-        library::QueueInput::Uris {
-            order: (0..500)
-                .map(|i| format!("https://example.test/{i}"))
-                .collect(),
-            context_id: "explicit".into(),
-            source_start: 0,
-        },
+        library::QueueReadRequest::media_uris(
+            Into::<std::sync::Arc<[String]>>::into(
+                (0..500)
+                    .map(|i| format!("https://example.test/{i}"))
+                    .collect::<Vec<_>>(),
+            )
+            .iter()
+            .cloned(),
+            library::QueueProvenance::Context {
+                context_id: "explicit".into(),
+                context_title: None,
+                source_rank: 0,
+            },
+        )
+        .input,
         120,
     )
     .await;
@@ -724,7 +739,8 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
     let missing = fixture
         .database
         .read_queue(library::QueueReadRequest {
-            input: library::QueueInput::Items(vec![(
+            anchor: None,
+            input: library::QueueLoad::Items(vec![(
                 QueueItem::direct(&missing_uri, "Missing", "", "", 0),
                 QueueProvenance::Legacy,
             )]),
@@ -764,8 +780,9 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
         fixture
             .database
             .read_queue(library::QueueReadRequest {
+                anchor: None,
                 context_title: None,
-                input: library::QueueInput::Items(vec![(
+                input: library::QueueLoad::Items(vec![(
                     unavailable.clone(),
                     QueueProvenance::Manual,
                 )]),
@@ -1004,8 +1021,9 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
         let page = fixture
             .database
             .read_queue(library::QueueReadRequest {
+                anchor: None,
                 context_title: None,
-                input: library::QueueInput::Items(
+                input: library::QueueLoad::Items(
                     (0..2)
                         .map(|index| {
                             (
@@ -1114,21 +1132,12 @@ async fn installed_shuffled_source_keeps_its_exact_pending_order() {
         .enumerate()
         .map(|(index, uri)| serde_json::json!({"occurrence":format!("old:{index}"),"item":QueueItem::direct(uri.clone(),uri.clone(),"","",1000),"canonical_position":index,"source_index":0,"playlist_entry_id":null,"provenance":{"Context":{"context_id":"source","context_title":null,"source_rank":index}}}))
         .collect::<Vec<_>>();
-    let reference = library::QueueSource {
-        scope: library::QueueScope::Tracks {
-            source: library::SourceId::new("source"),
-            folder: None,
-            downloaded_only: false,
-            favorites_only: false,
-            recursive: false,
-        },
-        filter: String::new(),
-        sort: TrackSort::Title,
-        descending: false,
-        anchor_uri: None,
-    };
+    let reference = serde_json::json!({
+        "scope": {"Tracks": {"source":"source","folder":null,"downloaded_only":false,"favorites_only":false,"recursive":false}},
+        "filter":"","sort":"Title","descending":false,"anchor_uri":null
+    });
     let saved = serde_json::json!({"occurrences":rows,"current_index":1,"progress_millis":42,"repeat_mode":"All","shuffled":true,"next_id":20,
-        "sources":[{"input":library::QueueInput::Source {reference,context_id:"source".into()},"repeat":true,"seed":seed}],
+        "sources":[{"input":{"Source":{"reference":reference,"context_id":"source"}},"repeat":true,"seed":seed}],
         "pending":[{"source":0,"offset":2,"seed":seed}]});
     fixture
         .database
@@ -1169,21 +1178,21 @@ async fn repeated_large_source_starts_resolve_only_the_selected_window() {
         let page = fixture
             .database
             .read_queue(library::QueueReadRequest {
+                anchor: None,
                 context_title: None,
-                input: library::QueueInput::Query {
-                    query: library::QueueQuery::Tracks {
-                        source: fixture.source,
-                        downloaded_only: false,
-                        favorites_only: false,
-                        recursive: false,
+                input: library::QueueLoad::Songs(vec![(
+                    library::SongQuery {
+                        filter: "bulk".into(),
+                        sort: Some(TrackSort::Title),
+                        ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
+                    }
+                    .selection(),
+                    library::QueueProvenance::Context {
+                        context_id: "bulk".into(),
+                        context_title: None,
+                        source_rank: 0,
                     },
-                    folder: None,
-                    filter: "bulk".into(),
-                    sort: TrackSort::Title,
-                    descending: false,
-                    context_id: "bulk".into(),
-                    anchor_key: None,
-                },
+                )]),
                 anchor_index: 0,
                 random_start: Some(activation * 7919),
                 shuffled: None,

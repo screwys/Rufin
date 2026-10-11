@@ -70,11 +70,10 @@ impl SearchSession {
                 settings.remember_search_result(result.clone())
             });
         if result.kind == RecentSearchKind::Track {
-            (catalog.media_menus.play_target)(
-                &PlaybackTarget::Track(result.media_uri.clone()),
+            catalog.queue.play(playback::PlayRequest::uris(
+                vec![result.media_uri.clone()],
                 placement,
-                false,
-            );
+            ));
             return;
         }
         let source = MediaDragSource::LiveCollection {
@@ -82,9 +81,13 @@ impl SearchSession {
             operations: catalog.source.clone(),
         };
         let queue = catalog.queue.clone();
+        let database = catalog.library.clone();
         catalog.runtime.spawn(async move {
-            match source.queue_input().await {
-                Ok(input) => queue.play(playback::PlayRequest::ordered(input, 0, placement, true)),
+            match source.play_request(&database).await {
+                Ok(mut request) => {
+                    request.placement = placement;
+                    queue.play(request);
+                }
                 Err(error) => tracing::warn!(%error, "could not prepare recent search playback"),
             }
         });

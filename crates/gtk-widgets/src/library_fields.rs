@@ -14,6 +14,7 @@ use rufin_core::settings::layout::{
 };
 
 pub trait TrackPresentation: Clone + PartialEq + Send + Sync + 'static {
+    fn track_key(&self) -> Option<library::TrackKey>;
     fn media_uri(&self) -> &str;
     fn title(&self) -> &str;
     fn artist(&self) -> &str;
@@ -62,6 +63,9 @@ macro_rules! track_presentation_fields {
 }
 
 impl TrackPresentation for TrackRow {
+    fn track_key(&self) -> Option<library::TrackKey> {
+        Some(self.track_key)
+    }
     fn track_number(&self) -> Option<i64> {
         Some(self.track_number)
     }
@@ -81,6 +85,9 @@ impl TrackPresentation for TrackRow {
 }
 
 impl TrackPresentation for library::HistoryRow {
+    fn track_key(&self) -> Option<library::TrackKey> {
+        Some(self.track_key)
+    }
     fn track_number(&self) -> Option<i64> {
         self.track_number
     }
@@ -100,6 +107,9 @@ impl TrackPresentation for library::HistoryRow {
 }
 
 impl TrackPresentation for QueuePageRow {
+    fn track_key(&self) -> Option<library::TrackKey> {
+        self.entry.track_key
+    }
     fn media_uri(&self) -> &str {
         &self.media_uri
     }

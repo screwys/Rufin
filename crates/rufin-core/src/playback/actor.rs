@@ -14,8 +14,8 @@ use super::{
     },
 };
 use playback::{
-    Batch, Placement, PlayRequest, PlaybackBackend, PlaybackOutput, PlaybackProjection,
-    PlaybackSettings, PreparedStream, QueueItem, RunId,
+    Placement, PlayRequest, PlaybackBackend, PlaybackOutput, PlaybackProjection, PlaybackSettings,
+    PreparedStream, QueueItem, RunId,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -249,7 +249,7 @@ impl Playback {
     pub(crate) fn complete_materialization(
         &self,
         id: MaterializationId,
-        batch: Batch,
+        batch: library::QueueReadRequest,
         placement: Placement,
     ) -> PlaybackResult<bool> {
         self.request(move |player, sample| {
@@ -277,7 +277,6 @@ impl Playback {
         seed_media_uri: String,
         candidates: Vec<QueueItem>,
         requested_count: usize,
-        shuffle_seed: u64,
     ) -> PlaybackResult<bool> {
         self.request(move |player, sample| {
             Ok(player.complete_auto_dj_candidates(
@@ -285,7 +284,6 @@ impl Playback {
                 &seed_media_uri,
                 candidates,
                 requested_count,
-                shuffle_seed,
                 sample,
             )?)
         })

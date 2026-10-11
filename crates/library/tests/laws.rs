@@ -32,10 +32,7 @@ proptest! {
                 .0;
             let projection = fixture
                 .database
-                .playlist_media_uri_order(playlist,
-                    None,
-                    &ReadCancellation::new(),
-                )
+                .selected_track_uris(&library::SongQuery::new(library::SongScope::Playlist(playlist)).selection(),&ReadCancellation::new())
                 .await
                 .expect("property Playlist projection");
             (expected, projection)

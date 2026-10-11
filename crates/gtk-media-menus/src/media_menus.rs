@@ -23,7 +23,8 @@ use rufin_core::playlists::SmartPlaylistChange;
 use rufin_core::settings::ContextMenuItem;
 use rufin_core::settings::SidebarPin;
 
-use rufin_core::playback::PlaybackTarget;
+use gtk_widgets::selection::{collection_play_request, track_play_request};
+use playback::PlayRequest;
 const PLAY_ACTIONS: [(&str, QueuePlacement, bool); 6] = [
     ("play", QueuePlacement::Now, false),
     ("play-next", QueuePlacement::Next, false),
@@ -102,11 +103,11 @@ pub struct MediaMenus {
         Rc<dyn Fn(SmartPlaylistChange, Option<Rc<dyn Fn(Result<(), String>)>>)>,
     pub operation_feedback: Rc<dyn Fn(&OperationFeedback, Option<Box<dyn FnOnce()>>)>,
     pub show_error: Rc<dyn Fn(String)>,
-    pub picker_target: Rc<dyn Fn(&ContextMenuSurface, PlaybackTarget)>,
+    pub picker_target: Rc<dyn Fn(&ContextMenuSurface, PlayRequest)>,
     pub picker_payload: Rc<dyn Fn(&ContextMenuSurface, gtk_widgets::media_drag::MediaDragSource)>,
-    pub play_target: Rc<dyn Fn(&PlaybackTarget, QueuePlacement, bool)>,
-    pub download: Rc<dyn Fn(&PlaybackTarget)>,
-    pub remove_download: Rc<dyn Fn(&PlaybackTarget)>,
+    pub play_target: Rc<dyn Fn(&PlayRequest, QueuePlacement, bool)>,
+    pub download: Rc<dyn Fn(&gtk_widgets::media_drag::MediaDragSource)>,
+    pub remove_download: Rc<dyn Fn(&gtk_widgets::media_drag::MediaDragSource)>,
 }
 fn present_catalog_track_menu(
     target: &gtk::Widget,
@@ -135,11 +136,7 @@ fn present_catalog_track_menu(
     );
     let favorite = menus.projected_track_favorite(&track.media_uri, track.favorite);
     append_favorite_action(&surface, favorite);
-    append_context_menu_picker(
-        &surface,
-        menus,
-        PlaybackTarget::Track(track.media_uri.clone()),
-    );
+    append_context_menu_picker(&surface, menus, track_play_request(track.track_key));
     if track.cue_path.is_none() {
         surface.append_configurable_action(
             ContextMenuItem::EditMetadata,
@@ -156,12 +153,19 @@ fn present_catalog_track_menu(
         &track.album_artists,
         track.album_media_uri.as_deref(),
     );
-    let playback = PlaybackTarget::Track(track.media_uri.clone());
-    install_download_actions(&surface, menus, &playback, track.is_downloaded);
+    let playback = track_play_request(track.track_key);
+    install_download_actions(
+        &surface,
+        menus,
+        &gtk_widgets::media_drag::MediaDragSource::capture_target(playback),
+        Some(&track.media_uri),
+        true,
+        track.is_downloaded,
+    );
     if let Some(media) = playback_media {
         install_live_track_playback_actions(&surface, menus, media);
     } else {
-        install_media_uri_playback_actions(&surface, menus, track.media_uri.clone());
+        install_loaded_actions(&surface, menus, track_play_request(track.track_key), None);
     }
     install_radio_actions(&surface, menus, RadioSeed::Track(track.media_uri.clone()));
     add_favorite_action(
@@ -296,7 +300,9 @@ fn present_direct_playback_media_menu(
     install_download_actions(
         &surface,
         menus,
-        &PlaybackTarget::Track(media.media_uri.clone()),
+        &gtk_widgets::media_drag::MediaDragSource::track(media.media_uri.clone()),
+        Some(&media.media_uri),
+        true,
         downloaded,
     );
     if media.media_uri.starts_with("file:") {
@@ -461,7 +467,11 @@ pub fn present_playlist_entry_menu(
     install_download_actions(
         &surface,
         menus,
-        &PlaybackTarget::Track(row.media_uri.clone()),
+        &gtk_widgets::media_drag::MediaDragSource::capture_target(track_play_request(
+            row.track_key,
+        )),
+        Some(&row.media_uri),
+        true,
         row.is_downloaded,
     );
     if row.media_uri.starts_with("file:") || library::source_entity_parts(&row.media_uri).is_some()
@@ -724,9 +734,9 @@ pub fn present_album_context_menu(
     play: Option<CollectionPlay>,
     position: Option<(f64, f64)>,
 ) {
-    let base = PlaybackTarget::Album(album.media_uri.clone());
+    let base = gtk_widgets::selection::album_play_request(&album);
     let playback = playback_context
-        .map(|context| base.clone().in_context(context))
+        .map(|context| base.clone().with_context(context.into()))
         .unwrap_or(base);
     let favorite = (menus.projected_item_favorite)(
         &FavoriteTarget::Album(album.media_uri.clone()),
@@ -744,7 +754,7 @@ pub fn present_album_context_menu(
     append_context_menu_picker(
         &surface,
         menus,
-        PlaybackTarget::Album(album.media_uri.clone()),
+        gtk_widgets::selection::album_play_request(&album),
     );
     surface.append_configurable_action(
         ContextMenuItem::EditMetadata,
@@ -776,7 +786,11 @@ pub fn present_album_context_menu(
     install_download_actions(
         &surface,
         menus,
-        &playback,
+        &gtk_widgets::media_drag::MediaDragSource::capture_target(
+            gtk_widgets::selection::album_play_request(&album),
+        ),
+        Some(&album.media_uri),
+        false,
         album.track_count > 0 && album.downloaded_count == album.track_count,
     );
     install_loaded_actions(&surface, menus, playback, play);
@@ -856,9 +870,9 @@ pub fn present_artist_context_menu(
         &surface,
         menus,
         if album_artist {
-            PlaybackTarget::AlbumArtist(artist.media_uri.clone())
+            gtk_widgets::selection::artist_play_request(&artist, true)
         } else {
-            PlaybackTarget::Artist(artist.media_uri.clone())
+            gtk_widgets::selection::artist_play_request(&artist, false)
         },
     );
     surface.append_configurable_action(
@@ -885,14 +899,16 @@ pub fn present_artist_context_menu(
         GO_TO_ICON,
     );
     let playback = if album_artist {
-        PlaybackTarget::AlbumArtist(artist.media_uri.clone())
+        gtk_widgets::selection::artist_play_request(&artist, true)
     } else {
-        PlaybackTarget::Artist(artist.media_uri.clone())
+        gtk_widgets::selection::artist_play_request(&artist, false)
     };
     install_download_actions(
         &surface,
         menus,
-        &playback,
+        &gtk_widgets::media_drag::MediaDragSource::capture_target(playback.clone()),
+        Some(&artist.media_uri),
+        false,
         artist.track_count > 0 && artist.downloaded_count == artist.track_count,
     );
     install_loaded_actions(&surface, menus, playback, play);
@@ -970,11 +986,13 @@ pub fn present_genre_context_menu(
             genre_id: genre.object_id.clone(),
         }),
     );
-    let playback = PlaybackTarget::Genre(genre.genre_key);
+    let playback = collection_play_request(library::SongScope::Genre(genre.genre_key));
     install_download_actions(
         &surface,
         menus,
-        &playback,
+        &gtk_widgets::media_drag::MediaDragSource::capture_target(playback.clone()),
+        None,
+        false,
         genre.track_count > 0 && genre.downloaded_count == genre.track_count,
     );
     install_loaded_actions(&surface, menus, playback, play);
@@ -991,11 +1009,13 @@ pub fn present_mood_context_menu(
 ) {
     let surface = ContextMenuSurface::new(target, "mood", position);
     surface.append_play_actions(&menus.settings.current.borrow().context_menu);
-    let playback = PlaybackTarget::Mood(mood.mood_key);
+    let playback = collection_play_request(library::SongScope::Mood(mood.mood_key));
     install_download_actions(
         &surface,
         menus,
-        &playback,
+        &gtk_widgets::media_drag::MediaDragSource::capture_target(playback.clone()),
+        None,
+        false,
         mood.track_count > 0 && mood.downloaded_count == mood.track_count,
     );
     install_loaded_actions(&surface, menus, playback.clone(), play);
@@ -1094,11 +1114,13 @@ pub fn present_playlist_context_menu(
     if playlist.metadata_writable {
         surface.append_fixed_action(msgid("Delete"), "delete", DELETE_ICON);
     }
-    let playback = PlaybackTarget::Playlist(playlist.playlist_key);
+    let playback = collection_play_request(library::SongScope::Playlist(playlist.playlist_key));
     install_download_actions(
         &surface,
         menus,
-        &playback,
+        &gtk_widgets::media_drag::MediaDragSource::capture_target(playback.clone()),
+        None,
+        false,
         playlist.track_count > 0 && playlist.downloaded_count == playlist.track_count,
     );
     install_loaded_actions(&surface, menus, playback, play);
@@ -1169,11 +1191,16 @@ pub fn present_smart_playlist_context_menu(
     });
     surface.append_fixed_action(msgid("Edit"), "edit-definition", EDIT_ICON);
     surface.append_fixed_action(msgid("Delete"), "delete", DELETE_ICON);
-    let playback = PlaybackTarget::SmartPlaylist(playlist.smart_playlist_key);
+    let playback = gtk_widgets::selection::smart_play_request(
+        playlist.smart_playlist_key,
+        menus.source.selected_library().as_ref(),
+    );
     install_download_actions(
         &surface,
         menus,
-        &playback,
+        &gtk_widgets::media_drag::MediaDragSource::capture_target(playback.clone()),
+        None,
+        false,
         playlist.track_count > 0 && playlist.downloaded_count == playlist.track_count,
     );
     install_loaded_actions(&surface, menus, playback, play);
@@ -1264,7 +1291,7 @@ fn install_sidebar_pin_action(
 fn install_loaded_actions(
     surface: &ContextMenuSurface,
     menus: &Rc<MediaMenus>,
-    target: PlaybackTarget,
+    target: PlayRequest,
     play: Option<CollectionPlay>,
 ) {
     for (action, placement, shuffled) in PLAY_ACTIONS {
@@ -1303,24 +1330,10 @@ fn install_media_uri_playback_actions(
     media_uri: String,
 ) {
     for (action, placement, shuffled) in PLAY_ACTIONS {
-        let database = Arc::clone(&menus.library);
-        let runtime = menus.runtime.clone();
         let queue = menus.queue.clone();
         let media_uri = media_uri.clone();
         surface.add_action(action, move || {
-            let database = Arc::clone(&database);
-            let queue = queue.clone();
-            let media_uri = media_uri.clone();
-            runtime.spawn(async move {
-                let media = database
-                    .queue_items_for_uris(&[media_uri], &library::ReadCancellation::new())
-                    .await
-                    .ok()
-                    .and_then(|mut media| media.pop());
-                if let Some(media) = media {
-                    queue.play(playback::PlayRequest::one(media, placement).shuffled(shuffled));
-                }
-            });
+            queue.play(PlayRequest::uris(vec![media_uri.clone()], placement).shuffled(shuffled))
         });
     }
 }
@@ -1328,34 +1341,26 @@ fn install_media_uri_playback_actions(
 pub fn install_download_actions(
     surface: &ContextMenuSurface,
     menus: &Rc<MediaMenus>,
-    target: &PlaybackTarget,
+    payload: &gtk_widgets::media_drag::MediaDragSource,
+    media_uri: Option<&str>,
+    single: bool,
     downloaded: bool,
 ) {
-    let mut addressed = target;
-    while let PlaybackTarget::Contextual { target, .. } = addressed {
-        addressed = target;
-    }
-    let available = match addressed {
-        PlaybackTarget::Track(uri)
-        | PlaybackTarget::Album(uri)
-        | PlaybackTarget::Artist(uri)
-        | PlaybackTarget::AlbumArtist(uri) => {
-            if let Some((source_id, _, _)) = library::source_entity_parts(uri) {
-                (menus.source_download_available)(&source_id)
-            } else {
-                library::normalize_direct_media_uri(uri)
-                    .is_some_and(|uri| uri.starts_with("https:") || uri.starts_with("http:"))
-            }
+    let available = media_uri.is_none_or(|uri| {
+        if let Some((source_id, _, _)) = library::source_entity_parts(uri) {
+            (menus.source_download_available)(&source_id)
+        } else {
+            library::normalize_direct_media_uri(uri)
+                .is_some_and(|uri| uri.starts_with("https:") || uri.starts_with("http:"))
         }
-        _ => true,
-    };
+    });
     if !downloaded && !available {
         return;
     }
     if downloaded {
         surface.append_configurable_action(
             ContextMenuItem::Download,
-            if matches!(target, PlaybackTarget::Track(_)) {
+            if single {
                 msgid("Remove Download")
             } else {
                 msgid("Remove Downloads")
@@ -1363,10 +1368,10 @@ pub fn install_download_actions(
             "remove-downloads",
             TRASH_ICON,
         );
-        let remove_menus = Rc::clone(menus);
-        let remove_target = target.clone();
+        let menus = Rc::clone(menus);
+        let payload = payload.clone();
         surface.add_action("remove-downloads", move || {
-            (remove_menus.remove_download)(&remove_target)
+            (menus.remove_download)(&payload)
         });
     } else {
         surface.append_configurable_action(
@@ -1375,11 +1380,9 @@ pub fn install_download_actions(
             "download",
             DOWNLOAD_ICON,
         );
-        let download_menus = Rc::clone(menus);
-        let download_target = target.clone();
-        surface.add_action("download", move || {
-            (download_menus.download)(&download_target)
-        });
+        let menus = Rc::clone(menus);
+        let payload = payload.clone();
+        surface.add_action("download", move || (menus.download)(&payload));
     }
 }
 
@@ -1434,7 +1437,7 @@ fn append_context_menu_picker_media(
 fn append_context_menu_picker(
     surface: &ContextMenuSurface,
     menus: &Rc<MediaMenus>,
-    target: PlaybackTarget,
+    target: PlayRequest,
 ) {
     (menus.picker_target)(surface, target);
 }

@@ -12,7 +12,7 @@ use gtk_widgets::interactions::{ADD_TO_PLAYLIST_ICON, ContextMenuSurface};
 use rufin_core::settings::ContextMenuItem;
 
 use gtk_widgets::selection::{PlaylistEntrySelectionSnapshot, TrackSelectionSnapshot};
-use rufin_core::playback::PlaybackTarget;
+use playback::PlayRequest;
 
 pub(crate) fn refresh_context_playlist_picker(shell: &Rc<Shell>) {
     shell.refresh_playlist_picker();
@@ -21,9 +21,9 @@ pub(crate) fn refresh_context_playlist_picker(shell: &Rc<Shell>) {
 pub(crate) fn append_context_menu_picker(
     surface: &ContextMenuSurface,
     shell: &Rc<Shell>,
-    target: PlaybackTarget,
+    target: PlayRequest,
 ) {
-    let source = MediaDragSource::capture_target(shell.selected_library().as_deref(), target);
+    let source = MediaDragSource::capture_target(target);
     append_context_menu_picker_source(surface, shell, source);
 }
 

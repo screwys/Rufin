@@ -28,7 +28,6 @@ use crate::route_layout::PRIMARY_ROUTE_MARGIN_START;
 use crate::track_model::PreparedTrackProjection;
 use gtk_media_menus::media_menus::present_artist_context_menu;
 use gtk_widgets::route::Route;
-use rufin_core::playback::PlaybackTarget;
 
 #[derive(Clone)]
 pub struct ArtistOverviewData {
@@ -86,14 +85,6 @@ fn artist_tracks_route(artist: String, album_artist: bool) -> Route {
         Route::AlbumArtistTracks(artist)
     } else {
         Route::ArtistTracks(artist)
-    }
-}
-
-fn artist_playback_target(artist: String, album_artist: bool) -> PlaybackTarget {
-    if album_artist {
-        PlaybackTarget::AlbumArtist(artist)
-    } else {
-        PlaybackTarget::Artist(artist)
     }
 }
 
@@ -513,7 +504,6 @@ impl CatalogUi {
             "artist-tracks"
         };
         let settings = self.settings.current.borrow().library_list(key);
-        let query = page.query.clone();
         let model = crate::track_model::TrackCollectionModel::new(
             Arc::clone(&self.library),
             self.runtime.clone(),
@@ -552,14 +542,10 @@ impl CatalogUi {
             |request| request,
             move |request, cancellation| {
                 let database = Arc::clone(&database);
-                let query = query.clone();
                 async move {
                     let page = database
-                        .query_track_route_page(
-                            &query,
-                            &request.query,
-                            request.settings.sort_key.track_sort(),
-                            request.settings.descending,
+                        .song_route_page(
+                            request.query(),
                             library::RouteSeedWindow::top(),
                             &cancellation,
                         )
@@ -753,20 +739,19 @@ pub async fn load_artist_overview(
         return Ok(None);
     };
     let favorite_tracks = database
-        .query_track_route_page(
-            &library::TrackQuery {
-                source: source,
-                collection: Some(library::QueueCollection::ArtistKey {
+        .song_route_page(
+            &library::SongQuery {
+                scope: library::SongScope::Artist {
                     key: artist,
                     album_artist: album_artist,
-                }),
+                },
                 folder: folder,
-                downloaded_only: false,
+                filter: "".to_string(),
+                sort: Some(track_settings.sort_key.track_sort()),
+                descending: track_settings.descending,
                 favorites_only: true,
+                downloaded_only: false,
             },
-            "",
-            track_settings.sort_key.track_sort(),
-            track_settings.descending,
             library::RouteSeedWindow::top(),
             cancellation,
         )
@@ -915,20 +900,19 @@ pub async fn load_artist_tracks(
         return Ok(None);
     };
     let tracks = database
-        .query_track_route_page(
-            &library::TrackQuery {
-                source: source,
-                collection: Some(library::QueueCollection::ArtistKey {
+        .song_route_page(
+            &library::SongQuery {
+                scope: library::SongScope::Artist {
                     key: artist,
                     album_artist: album_artist,
-                }),
+                },
                 folder: folder,
-                downloaded_only: false,
+                filter: "".to_string(),
+                sort: Some(settings.sort_key.track_sort()),
+                descending: settings.descending,
                 favorites_only: favorites_only,
+                downloaded_only: false,
             },
-            "",
-            settings.sort_key.track_sort(),
-            settings.descending,
             window,
             cancellation,
         )
@@ -1050,7 +1034,7 @@ fn artist_detail_header_restored(
     let actions = showcase.actions();
     actions.add_css_class("artist-detail-actions");
     actions.set_halign(gtk::Align::Start);
-    let target = artist_playback_target(artist.media_uri.clone(), album_artist);
+    let target = gtk_widgets::selection::artist_play_request(artist, album_artist);
     let play_shell = Rc::clone(shell);
     let play: CollectionPlay = Rc::new(move |placement, shuffled| {
         (play_shell.media_menus.play_target)(&target, placement, shuffled);
@@ -1240,15 +1224,17 @@ mod tests {
             artist_detail_route(key.clone(), true),
             Route::AlbumArtistDetail(key)
         );
-        let key = library::source_entity_uri(&library::SourceId::new("source"), "artist", "7");
-        assert!(matches!(
-            artist_playback_target(key.clone(), false),
-            PlaybackTarget::Artist(value) if value == key
-        ));
-        assert!(matches!(
-            artist_playback_target(key.clone(), true),
-            PlaybackTarget::AlbumArtist(value) if value == key
-        ));
+        let key = library::ArtistKey::from_raw(7);
+        for album_artist in [false, true] {
+            let request =
+                gtk_widgets::selection::collection_play_request(library::SongScope::Artist {
+                    key,
+                    album_artist,
+                });
+            assert!(
+                matches!(request.selection(), Some(library::SongSelection::Query { query: library::SongQuery { scope: library::SongScope::Artist { key: value, album_artist: role }, .. }, .. }) if value == key && role == album_artist)
+            );
+        }
     }
 }
 

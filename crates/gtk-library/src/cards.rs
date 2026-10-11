@@ -12,7 +12,6 @@ use gtk_widgets::favorites::{favorite_button_is_active, favorite_icon_button};
 use gtk_widgets::interactions::ContextMenuOpen;
 use localization::msgid;
 use playback::QueuePlacement;
-use rufin_core::playback::PlaybackTarget;
 use std::rc::Rc;
 
 use gtk_widgets::library_fields::{COLLECTION_GRID_CARD_MARGIN, COLLECTION_GRID_MIN_CARD_WIDTH};
@@ -65,7 +64,7 @@ pub fn album_cover_overlay(
         (&controls.play_last, QueuePlacement::Last),
     ] {
         let play_shell = Rc::clone(shell);
-        let target = PlaybackTarget::Album(album.media_uri.clone());
+        let target = gtk_widgets::selection::album_play_request(&album);
         button.connect_clicked(move |_| {
             (play_shell.media_menus.play_target)(&target, placement, false)
         });

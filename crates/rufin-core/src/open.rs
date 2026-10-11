@@ -3,7 +3,7 @@ use std::io::{Cursor, Read};
 use std::path::Path;
 
 use gio::prelude::*;
-use library::{PlaylistFile, PlaylistFormat, QueueInput, QueueItem, QueueProvenance};
+use library::{PlaylistFile, PlaylistFormat, QueueItem, QueueProvenance};
 
 pub async fn arguments(
     queue: &playback::QueueHandle,
@@ -145,11 +145,9 @@ pub async fn files(
     if items.is_empty() {
         return Err(localization::tr("No playable entries were found"));
     }
-    queue.play(playback::PlayRequest::ordered(
-        QueueInput::Items(items),
-        0,
+    queue.play(playback::PlayRequest::from_load(
+        library::QueueReadRequest::items(items),
         playback::QueuePlacement::Now,
-        false,
     ));
     Ok(())
 }

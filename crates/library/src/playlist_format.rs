@@ -936,12 +936,12 @@ mod tests {
             .unwrap();
         assert!(first.changed);
         let keys = database
-            .playlist_entry_order(
-                first.playlist,
-                None,
-                crate::TrackSort::Position,
-                false,
-                "",
+            .selected_playlist_entries(
+                &crate::SongQuery {
+                    sort: Some(crate::TrackSort::Position),
+                    ..crate::SongQuery::new(crate::SongScope::Playlist(first.playlist))
+                }
+                .selection(),
                 &crate::ReadCancellation::new(),
             )
             .await
@@ -959,12 +959,12 @@ mod tests {
         assert_eq!(same.imported, 3);
         assert_eq!(
             database
-                .playlist_entry_order(
-                    first.playlist,
-                    None,
-                    crate::TrackSort::Position,
-                    false,
-                    "",
+                .selected_playlist_entries(
+                    &crate::SongQuery {
+                        sort: Some(crate::TrackSort::Position),
+                        ..crate::SongQuery::new(crate::SongScope::Playlist(first.playlist))
+                    }
+                    .selection(),
                     &crate::ReadCancellation::new()
                 )
                 .await
@@ -984,12 +984,12 @@ mod tests {
         assert!(rename.changed);
         assert_eq!(
             database
-                .playlist_entry_order(
-                    first.playlist,
-                    None,
-                    crate::TrackSort::Position,
-                    false,
-                    "",
+                .selected_playlist_entries(
+                    &crate::SongQuery {
+                        sort: Some(crate::TrackSort::Position),
+                        ..crate::SongQuery::new(crate::SongScope::Playlist(first.playlist))
+                    }
+                    .selection(),
                     &crate::ReadCancellation::new()
                 )
                 .await
@@ -1244,12 +1244,11 @@ mod tests {
         );
         assert_eq!(
             database
-                .playlist_entries_page(
-                    second.playlist,
-                    None,
-                    crate::TrackSort::Position,
-                    false,
-                    "",
+                .song_playlist_rows(
+                    &crate::SongQuery {
+                        sort: Some(crate::TrackSort::Position),
+                        ..crate::SongQuery::new(crate::SongScope::Playlist(second.playlist))
+                    },
                     0,
                     128,
                     &crate::ReadCancellation::new()
@@ -1540,12 +1539,11 @@ mod tests {
             .unwrap();
         assert_eq!(report.imported, 3);
         let entries = database
-            .playlist_entries_page(
-                report.playlist,
-                None,
-                crate::TrackSort::Position,
-                false,
-                "",
+            .song_playlist_rows(
+                &crate::SongQuery {
+                    sort: Some(crate::TrackSort::Position),
+                    ..crate::SongQuery::new(crate::SongScope::Playlist(report.playlist))
+                },
                 0,
                 128,
                 &crate::ReadCancellation::new(),

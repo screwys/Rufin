@@ -33,36 +33,47 @@ async fn selected_uris(
     let Some(selection) = selection else {
         return Ok(uris);
     };
-    let target = match selection {
-        MediaSelection::Album { id } => rufin_core::playback::PlaybackTarget::AlbumKey(id),
-        MediaSelection::Artist { id, album_artists } => {
-            rufin_core::playback::PlaybackTarget::ArtistKey(id, album_artists)
-        }
-        MediaSelection::Playlist { id } => rufin_core::playback::PlaybackTarget::Playlist(id),
-        MediaSelection::Genre { id } => rufin_core::playback::PlaybackTarget::Genre(id),
-        MediaSelection::SmartPlaylist { id } => {
-            rufin_core::playback::PlaybackTarget::SmartPlaylist(id)
-        }
-    };
-    let (source, folder) = if let Some(source) = source {
-        let mut parameters = HashMap::from([("source".into(), source)]);
-        if let Some(folder) = folder {
-            parameters.insert("folder".into(), folder);
-        }
-        let (source, folder) = catalog::scope(products, &parameters).await?;
-        (Some(source), folder)
+    let (source, folder) = if source.is_some() {
+        (source, folder)
     } else {
         products
             .source
             .selected_library()
             .map_or((None, None), |selected| {
-                (Some(selected.source_key), selected.music_folder_key)
+                (
+                    Some(selected.source_id.to_string()),
+                    selected.music_folder_object_id,
+                )
             })
     };
-    target
-        .resolve_media_uris(&products.library, source, folder)
+    let mut parameters = HashMap::new();
+    if let Some(source) = source {
+        parameters.insert("source".into(), source);
+    }
+    if let Some(folder) = folder {
+        parameters.insert("folder".into(), folder);
+    }
+    let (kind, id) = match selection {
+        MediaSelection::Album { id } => ("album", id.to_string()),
+        MediaSelection::Artist { id, album_artists } => {
+            parameters.insert("album_artists".into(), album_artists.to_string());
+            ("artist", id.to_string())
+        }
+        MediaSelection::Playlist { id } => ("playlist", id.to_string()),
+        MediaSelection::Genre { id } => ("genre", id.to_string()),
+        MediaSelection::SmartPlaylist { id } => ("smart-playlist", id.to_string()),
+    };
+    parameters.insert("id".into(), id);
+    let mut query = catalog::song_query(products, &parameters, kind).await?;
+    if !matches!(query.scope, library::SongScope::Smart { .. }) {
+        query.folder = None;
+    }
+    query.sort = None;
+    products
+        .library
+        .selected_track_uris(&query.selection(), &library::ReadCancellation::new())
         .await
-        .map_err(bad_request)
+        .map_err(internal)
 }
 
 pub(super) fn routes() -> Router<ProductHandles> {
@@ -381,36 +392,15 @@ pub(super) async fn entries_data(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
-    let cancellation = library::ReadCancellation::new();
-    let id = key(parameters, "id")?;
-    let sort = track_sort(
-        parameters
-            .get("sort")
-            .map(String::as_str)
-            .unwrap_or("position"),
-    )?;
-    let folder = if parameters.contains_key("folder") {
-        catalog::scope(products, parameters).await?.1
-    } else {
-        None
-    };
+    let query = catalog::song_query(products, parameters, "entries").await?;
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 100)?.min(256);
     let rows = products
         .library
-        .playlist_entries_page(
-            id,
-            folder,
-            sort,
-            boolean(parameters, "descending")?,
-            parameters.get("q").map(String::as_str).unwrap_or(""),
-            offset,
-            limit,
-            &cancellation,
-        )
+        .song_playlist_rows(&query, offset, limit, &library::ReadCancellation::new())
         .await
         .map_err(internal)?;
-    let total = catalog::page_total(products, parameters, "entries").await?;
+    let total = catalog::song_total(products, parameters, &query).await?;
     Ok(
         json!({"total":total,"offset":offset,"limit":limit,"entries":rows.iter().map(|row| json!({"id":row.playlist_entry_key,"position":row.position,"uri":row.media_uri,"title":row.title,"artist":row.artist,"album":row.album,"favorite":row.favorite,"duration_ms":row.duration_millis})).collect::<Vec<_>>()}),
     )

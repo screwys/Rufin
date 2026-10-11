@@ -7,7 +7,7 @@ use crate::{
     lyrics::LyricsService, settings::SettingsFile, source::SourceOwner, waveform::WaveformOwner,
 };
 use playback::{BackendError, PlaybackBackend};
-use playback::{BatchItem, Placement, Provenance};
+use playback::{Placement, Provenance};
 use std::sync::Mutex;
 
 pub(in crate::playback) struct IdleBackend(pub(in crate::playback) Arc<Mutex<Vec<BackendCommand>>>);
@@ -22,7 +22,7 @@ impl PlaybackBackend for IdleBackend {
 }
 
 pub(in crate::playback) async fn seeded(
-    items: Vec<BatchItem>,
+    items: Vec<(QueueItem, Provenance)>,
 ) -> (
     tempfile::TempDir,
     library::Database,
@@ -37,13 +37,7 @@ pub(in crate::playback) async fn seeded(
         .await
         .unwrap();
     let page = database
-        .read_queue(library::QueueReadRequest {
-            context_title: None,
-            input: Batch::new(items).input,
-            anchor_index: 0,
-            random_start: None,
-            shuffled: None,
-        })
+        .read_queue(library::QueueReadRequest::items(items))
         .await
         .unwrap();
     let mut sequence = Sequence::new();
@@ -175,10 +169,10 @@ fn restored_item() -> QueueItem {
     item
 }
 
-fn batch_item(track: i64, provenance: Provenance) -> BatchItem {
+fn batch_item(track: i64, provenance: Provenance) -> (QueueItem, Provenance) {
     let mut item = restored_item();
     item.media_uri = format!("https://example.test/track-{track}");
-    BatchItem::direct(item, provenance)
+    (item, provenance)
 }
 
 async fn active_two_track_session() -> (
@@ -708,8 +702,8 @@ async fn loaded_advancement_reuses_positions_without_a_store_read() {
     };
     session
         .handle_command(
-            Command::ApplyBatch {
-                batch: Batch::new(
+            Command::ApplyQueue {
+                load: library::QueueReadRequest::items(
                     (0..240)
                         .map(|index| batch_item(index, Provenance::Manual))
                         .collect(),
@@ -759,8 +753,8 @@ async fn failed_queue_replacement_keeps_the_existing_run_and_can_be_retried() {
     let before = session.view().queue_window;
     session
         .handle_command(
-            Command::ApplyBatch {
-                batch: Batch::new(vec![batch_item(10, Provenance::Manual)]),
+            Command::ApplyQueue {
+                load: library::QueueReadRequest::items(vec![batch_item(10, Provenance::Manual)]),
                 placement: Placement::Now,
             },
             &sample,
@@ -782,8 +776,8 @@ async fn failed_queue_replacement_keeps_the_existing_run_and_can_be_retried() {
     assert!(!session.view().queue_loading);
     session
         .handle_command(
-            Command::ApplyBatch {
-                batch: Batch::new(vec![batch_item(20, Provenance::Manual)]),
+            Command::ApplyQueue {
+                load: library::QueueReadRequest::items(vec![batch_item(20, Provenance::Manual)]),
                 placement: Placement::Now,
             },
             &sample,
@@ -875,7 +869,7 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
     };
     let mut first = None;
     for identity in ["first", "latest"] {
-        let input = library::QueueInput::Items(vec![(
+        let input = library::QueueReadRequest::items(vec![(
             QueueItem::direct(
                 format!("https://example.test/{identity}"),
                 identity,
@@ -887,8 +881,8 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
         )]);
         session
             .handle_command(
-                Command::ApplyBatch {
-                    batch: Batch::from_input(input.clone()),
+                Command::ApplyQueue {
+                    load: input.clone(),
                     placement: Placement::Now,
                 },
                 &sample,
@@ -897,16 +891,7 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
         if identity == "first" {
             first = Some((
                 session.pending_queue.as_ref().unwrap().0,
-                database
-                    .read_queue(library::QueueReadRequest {
-                        context_title: None,
-                        input: input,
-                        anchor_index: 0,
-                        random_start: None,
-                        shuffled: None,
-                    })
-                    .await
-                    .unwrap(),
+                database.read_queue(input).await.unwrap(),
             ));
         }
     }
@@ -921,8 +906,8 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
 
     session
         .handle_command(
-            Command::ApplyBatch {
-                batch: Batch::new(
+            Command::ApplyQueue {
+                load: library::QueueReadRequest::items(
                     (0..240)
                         .map(|index| batch_item(index, Provenance::Manual))
                         .collect(),
@@ -960,8 +945,8 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
         .unwrap();
     session
         .handle_command(
-            Command::ApplyBatch {
-                batch: Batch::new(vec![batch_item(999, Provenance::Manual)]),
+            Command::ApplyQueue {
+                load: library::QueueReadRequest::items(vec![batch_item(999, Provenance::Manual)]),
                 placement: Placement::Now,
             },
             &sample,
@@ -1176,8 +1161,8 @@ async fn clearing_queue_with_current_stops_the_run_and_empties_the_session() {
     ));
     session
         .handle_command(
-            Command::ApplyBatch {
-                batch: Batch::new(vec![batch_item(10, Provenance::Manual)]),
+            Command::ApplyQueue {
+                load: library::QueueReadRequest::items(vec![batch_item(10, Provenance::Manual)]),
                 placement: Placement::End,
             },
             &sample,
@@ -1189,9 +1174,8 @@ async fn clearing_queue_with_current_stops_the_run_and_empties_the_session() {
             .complete_auto_dj_candidates(
                 request.seed_run,
                 &request.seed_media_uri,
-                vec![batch_item(3, Provenance::AutoDj).item],
+                vec![batch_item(3, Provenance::AutoDj).0],
                 5,
-                7,
                 &sample,
             )
             .unwrap()
@@ -1347,15 +1331,14 @@ async fn shuffled_batches_keep_placement_and_global_shuffle() {
                         )
                     })
                     .collect::<Vec<_>>();
-                let request = playback::PlayRequest::captured(
-                    Batch::new(items).input,
-                    count as usize - 1,
+                let request = playback::PlayRequest::from_load(
+                    library::QueueReadRequest::items(items),
                     placement,
-                    true,
                 )
+                .with_anchor_index(count as usize - 1)
                 .shuffled(true);
                 assert!(request.activation_context().is_none());
-                let (batch, placement) = request.compact_batch(42);
+                let (batch, placement) = request.into_load(42);
                 let reservation = session.reserve_materialization(placement);
                 session
                     .apply_materialization(reservation.id, batch, placement, &sample)
@@ -1431,10 +1414,14 @@ async fn collection_starts_and_selected_rows_keep_distinct_shuffle_anchors() {
                 .collect::<Vec<_>>();
             let (_directory, database, mut sequence, owner, commands, playback, inbox) =
                 seeded(items.clone()).await;
-            let input = library::QueueInput::Captured {
-                entries: sequence.snapshot().entries,
-                anchor_index: anchor,
-            };
+            let input = library::SongSelection::Tracks(
+                sequence
+                    .snapshot()
+                    .entries
+                    .iter()
+                    .map(|entry| entry.track_key)
+                    .collect(),
+            );
             sequence.set_progress_millis(42_000);
             let mut session = Player::new(
                 sequence,
@@ -1466,9 +1453,10 @@ async fn collection_starts_and_selected_rows_keep_distinct_shuffle_anchors() {
             } else {
                 playback::PlayRequest::captured
             };
-            let request = request(input, anchor, Placement::Now, collection_start && shuffled);
+            let request = request(input, anchor, Placement::Now, collection_start && shuffled)
+                .with_context("collection".into());
             assert_eq!(request.activation_context().is_none(), collection_start);
-            let (batch, placement) = request.compact_batch(2);
+            let (batch, placement) = request.into_load(2);
             let reservation = session.reserve_materialization(placement);
             session
                 .apply_materialization(reservation.id, batch, placement, &sample)
@@ -1537,7 +1525,7 @@ async fn gapless_preparation_resolves_exactly_the_next_position() {
     let items = (1..=2)
         .map(|number| {
             let mut item = batch_item(number, Provenance::Manual);
-            item.item.media_uri =
+            item.0.media_uri =
                 library::source_entity_uri(&source_id, "track", &format!("plex:track:{number}"));
             item
         })
@@ -1884,7 +1872,7 @@ async fn receiver_observation_keeps_global_queue_facts_without_commands_or_dupli
             .complete_auto_dj(
                 None,
                 &session.sequence.selected().unwrap().media_uri.clone(),
-                Batch::new(vec![batch_item(9, Provenance::AutoDj)]),
+                library::QueueReadRequest::items(vec![batch_item(9, Provenance::AutoDj)]),
                 &sample
             )
             .unwrap(),
@@ -2025,11 +2013,10 @@ async fn auto_dj_refills_after_track_changes_and_delayed_completion() {
                     request.seed_run,
                     &request.seed_media_uri,
                     vec![
-                        batch_item(queue_length as i64 + 1, Provenance::AutoDj).item,
-                        batch_item(queue_length as i64 + 2, Provenance::AutoDj).item
+                        batch_item(queue_length as i64 + 1, Provenance::AutoDj).0,
+                        batch_item(queue_length as i64 + 2, Provenance::AutoDj).0
                     ],
                     5,
-                    7,
                     &sample
                 )
                 .unwrap()
@@ -2216,7 +2203,7 @@ async fn pause_and_stop_during_queue_preparation_apply_to_the_requested_track() 
         };
         session
             .apply_batch(
-                Batch::new(vec![batch_item(99, Provenance::Manual)]),
+                library::QueueReadRequest::items(vec![batch_item(99, Provenance::Manual)]),
                 Placement::Now,
                 &sample,
             )
@@ -2254,17 +2241,16 @@ async fn repeat_wraps_when_source_exhaustion_is_discovered_after_a_full_page() {
         .unwrap()
         .unwrap();
     let page = db
-        .read_queue(library::QueueReadRequest {
-            context_title: None,
-            input: library::QueueInput::Collection {
-                collection: library::QueueCollection::Playlist(key),
-                folder: None,
-                context_id: "source".into(),
-            },
-            anchor_index: 0,
-            random_start: None,
-            shuffled: None,
-        })
+        .read_queue(
+            playback::PlayRequest::ordered(
+                library::SongQuery::new(library::SongScope::Playlist(key)).selection(),
+                0,
+                Placement::Now,
+                false,
+            )
+            .with_context("source".into())
+            .load,
+        )
         .await
         .unwrap();
     sequence.add_page(page, QueueReorderTarget::End, true, None);

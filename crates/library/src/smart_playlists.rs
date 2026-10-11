@@ -16,75 +16,8 @@ const SMART_PLAYLIST_RULE_LIMIT: usize = 64;
 const SMART_PLAYLIST_DEFINITION_BYTES: usize = 256 * 1024;
 const MOST_PLAYED_OBJECT_ID: &str = "builtin:most_played";
 const NEVER_PLAYED_OBJECT_ID: &str = "builtin:never_played";
-pub(crate) fn now() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_secs() as i64)
-}
+
 const MOST_SKIPPED_OBJECT_ID: &str = "builtin:most_skipped";
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct SmartSourceReference {
-    pub object_id: String,
-    pub source_id: Option<crate::SourceId>,
-    pub folder_object_id: Option<String>,
-}
-
-pub(crate) async fn smart_members_ref(
-    connection: &mut SqliteConnection,
-    reference: &SmartSourceReference,
-    now: i64,
-    filter: &str,
-    display_sort: Option<crate::TrackSort>,
-    descending: bool,
-) -> LibraryResult<Vec<String>> {
-    let Some((key, source, folder)) = resolve_smart_reference(connection, reference).await? else {
-        return Ok(Vec::new());
-    };
-    let query = smart_query(
-        connection,
-        source,
-        key,
-        folder,
-        filter,
-        display_sort,
-        descending,
-        now,
-    )
-    .await?;
-    Ok(sqlx::query_scalar(AssertSqlSafe(query.select(&query.uri)))
-        .persistent(false)
-        .fetch_all(connection)
-        .await?)
-}
-
-async fn resolve_smart_reference(
-    connection: &mut SqliteConnection,
-    reference: &SmartSourceReference,
-) -> LibraryResult<Option<(SmartPlaylistKey, Option<SourceKey>, Option<FolderKey>)>> {
-    let Some((key,current))=sqlx::query_as::<_,(SmartPlaylistKey,bool)>("SELECT smart_playlist_key,COALESCE(json_extract(definition_json,'$.current'),0) FROM smart_playlists WHERE object_id=?1").bind(&reference.object_id).fetch_optional(&mut *connection).await? else {return Ok(None);};
-    let source =
-        sqlx::query_scalar::<_, SourceKey>("SELECT source_key FROM sources WHERE object_id=?1")
-            .bind(reference.source_id.as_ref().map(crate::SourceId::as_str))
-            .fetch_optional(&mut *connection)
-            .await?;
-    let folder = if current && let Some(id) = &reference.folder_object_id {
-        let Some(folder) = sqlx::query_scalar::<_, FolderKey>(
-            "SELECT folder_key FROM folders WHERE source_key=?1 AND object_id=?2",
-        )
-        .bind(source)
-        .bind(id)
-        .fetch_optional(&mut *connection)
-        .await?
-        else {
-            return Ok(None);
-        };
-        Some(folder)
-    } else {
-        None
-    };
-    Ok(Some((key, source, folder)))
-}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum SmartPlaylistRuleField {
@@ -600,42 +533,6 @@ impl Database {
         )
     }
 
-    pub async fn smart_track_section_positions(
-        &self,
-        source: Option<SourceKey>,
-        key: SmartPlaylistKey,
-        folder: Option<FolderKey>,
-        filter: &str,
-        sort: crate::TrackSort,
-        descending: bool,
-        now: i64,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<crate::ScrollSection>> {
-        if !crate::scroll_sections::text_sort(sort) {
-            return Ok(Vec::new());
-        }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let query = smart_query(
-            &mut connection,
-            source,
-            key,
-            folder,
-            filter,
-            Some(sort),
-            descending,
-            now,
-        )
-        .await?;
-        crate::scroll_sections::decode_sections(
-            sqlx::query_scalar(AssertSqlSafe(crate::scroll_sections::section_sql(
-                &query.select(&query.uri),
-                "",
-            )))
-            .persistent(false)
-            .fetch_all(&mut *connection)
-            .await?,
-        )
-    }
     pub async fn smart_playlist_count(
         &self,
         source: Option<SourceKey>,
@@ -657,31 +554,6 @@ impl Database {
             sqlx::query_scalar(AssertSqlSafe(format!("{policy} SELECT count(*) FROM definitions WHERE instr(normalized_name,lower(?1))>0 AND (current_scope=0 OR EXISTS(SELECT 1 FROM selected WHERE selected.definition_key=definitions.definition_key))")))
                 .bind(filter.trim()).fetch_one(&mut *connection).await?
         })
-    }
-
-    pub async fn smart_playlist_track_count(
-        &self,
-        source: Option<SourceKey>,
-        key: SmartPlaylistKey,
-        folder: Option<FolderKey>,
-        filter: &str,
-        now: i64,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<i64> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        smart_query(
-            &mut connection,
-            source,
-            key,
-            folder,
-            filter,
-            None,
-            false,
-            now,
-        )
-        .await?
-        .count(&mut connection)
-        .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -713,45 +585,6 @@ impl Database {
         )
         .await?;
         let rows = load_smart_playlist_rows(&mut transaction, source, &keys, folder, now).await?;
-        transaction.commit().await?;
-        Ok(rows)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub async fn smart_playlist_track_page(
-        &self,
-        source: Option<SourceKey>,
-        key: SmartPlaylistKey,
-        folder: Option<FolderKey>,
-        filter: &str,
-        sort: Option<crate::TrackSort>,
-        descending: bool,
-        now: i64,
-        offset: usize,
-        limit: usize,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<crate::TrackRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let query = smart_query(
-            &mut transaction,
-            source,
-            key,
-            folder,
-            filter,
-            sort,
-            descending,
-            now,
-        )
-        .await?;
-        let keys = crate::source_window::selected_values_on(
-            &mut transaction,
-            &query,
-            "track.track_key",
-            &[offset..offset.saturating_add(limit.min(256))],
-        )
-        .await?;
-        let rows = crate::tracks::load_track_rows(&mut transaction, &keys).await?;
         transaction.commit().await?;
         Ok(rows)
     }
@@ -1056,22 +889,6 @@ impl Database {
         transaction.commit().await?;
         Ok(true)
     }
-
-    pub async fn smart_playlist_media_uri_order(
-        &self,
-        source: Option<SourceKey>,
-        key: SmartPlaylistKey,
-        folder: Option<FolderKey>,
-        now: i64,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<String>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let query = smart_query(&mut connection, source, key, folder, "", None, false, now).await?;
-        Ok(sqlx::query_scalar(AssertSqlSafe(query.select(&query.uri)))
-            .persistent(false)
-            .fetch_all(&mut *connection)
-            .await?)
-    }
 }
 
 fn require_name(name: &str) -> LibraryResult<&str> {
@@ -1271,65 +1088,6 @@ mod source_window_tests {
             work.load(Ordering::Relaxed) < 5000,
             "row hydration visited unrelated downloads: {}",
             work.load(Ordering::Relaxed)
-        );
-    }
-
-    #[tokio::test]
-    async fn stable_source_references_survive_catalog_and_definition_key_changes() {
-        let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("store.sqlite"))
-            .await
-            .unwrap();
-        let mut writer = database.writer().await.unwrap();
-        let connection = writer.as_mut().unwrap();
-        sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'source','Source','source',zeroblob(32)); INSERT INTO genres(genre_key,source_key,object_id,name,normalized_name,sort_text) VALUES(1,1,'genre','Genre','genre','genre'); INSERT INTO folders(folder_key,source_key,object_id,name,normalized_name,sort_text) VALUES(1,1,'folder','Folder','folder','folder');").execute(&mut *connection).await.unwrap();
-        let definition = SmartPlaylistDefinition {
-            current: true,
-            ..SmartPlaylistDefinition::default()
-        };
-        sqlx::query("INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position) VALUES('smart','Smart','smart',?1,0)")
-            .bind(serde_json::to_string(&definition).unwrap())
-            .execute(&mut *connection)
-            .await
-            .unwrap();
-        let smart = SmartSourceReference {
-            object_id: "smart".into(),
-            source_id: Some(crate::SourceId::new("source")),
-            folder_object_id: Some("folder".into()),
-        };
-        let collection = crate::collections::CollectionSourceReference {
-            collection: crate::collections::CollectionIdentity::Genre {
-                source_id: crate::SourceId::new("source"),
-                object_id: "genre".into(),
-            },
-            folder: Some((crate::SourceId::new("source"), "folder".into())),
-        };
-        sqlx::raw_sql("DELETE FROM sources; UPDATE smart_playlists SET smart_playlist_key=500; INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (99,'source','Source','source',zeroblob(32)); INSERT INTO genres(genre_key,source_key,object_id,name,normalized_name,sort_text) VALUES(88,99,'genre','Genre','genre','genre'); INSERT INTO folders(folder_key,source_key,object_id,name,normalized_name,sort_text) VALUES(77,99,'folder','Folder','folder','folder');").execute(&mut *connection).await.unwrap();
-        let (key, source, folder) = resolve_smart_reference(connection, &smart)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            (key.raw(), source.unwrap().raw(), folder.unwrap().raw()),
-            (500, 99, 77)
-        );
-        let (collection, folder) =
-            crate::collections::resolve_collection_reference(connection, &collection)
-                .await
-                .unwrap()
-                .unwrap();
-        assert!(matches!(collection,crate::QueueCollection::Genre(key) if key.raw()==88));
-        assert_eq!(folder.unwrap().raw(), 77);
-        sqlx::query("DELETE FROM folders")
-            .execute(&mut *connection)
-            .await
-            .unwrap();
-        assert!(
-            resolve_smart_reference(connection, &smart)
-                .await
-                .unwrap()
-                .is_none(),
-            "a missing folder must not widen the source scope"
         );
     }
 }

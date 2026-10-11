@@ -336,7 +336,8 @@ mod tests {
         }
         let admitted = source
             .read_queue(crate::QueueReadRequest {
-                input: crate::QueueInput::Items(
+                anchor: None,
+                input: crate::QueueLoad::Items(
                     (0..250)
                         .map(|_| {
                             (

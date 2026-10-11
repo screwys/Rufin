@@ -23,18 +23,12 @@ impl AndroidLibrary {
                     RecentSearchKind::Album => (
                         "album",
                         Some(route_json(Route::AlbumDetail(result.media_uri.clone()))),
-                        Some(
-                            rufin_core::playback::PlaybackTarget::Album(result.media_uri.clone())
-                                .context_id(),
-                        ),
+                        Some(format!("album:{}", result.media_uri)),
                     ),
                     RecentSearchKind::Artist => (
                         "artist",
                         Some(route_json(Route::ArtistDetail(result.media_uri.clone()))),
-                        Some(
-                            rufin_core::playback::PlaybackTarget::Artist(result.media_uri.clone())
-                                .context_id(),
-                        ),
+                        Some(format!("artist:{}", result.media_uri)),
                     ),
                 };
                 let source_id = library::source_entity_parts(&result.media_uri)

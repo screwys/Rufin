@@ -34,7 +34,6 @@ use super::grid_cells::{
     install_grid_play,
 };
 use gtk_media_menus::media_menus::{present_album_context_menu, present_artist_context_menu};
-use rufin_core::playback::PlaybackTarget;
 use rufin_core::settings::app::{RecentSearchKind, RecentSearchResult};
 
 use super::route_shell::{LibraryPageShell, LibraryToolbarProjection};
@@ -89,19 +88,17 @@ impl SearchItem {
             artwork_binding: artwork_binding.clone(),
         }
     }
-    fn drag_source(&self, shell: &CatalogUi) -> Option<MediaDragSource> {
-        Some(match self {
-            Self::Track(row) => MediaDragSource::track(row.media_uri.clone()),
-            Self::Album(row) => MediaDragSource::LiveCollection {
-                media_uri: row.media_uri.clone(),
-                operations: shell.source.clone(),
-            },
-            Self::Artist(row) => MediaDragSource::LiveCollection {
-                media_uri: row.media_uri.clone(),
-                operations: shell.source.clone(),
-            },
-        })
+    fn drag_source(&self, _: &CatalogUi) -> Option<MediaDragSource> {
+        Some(MediaDragSource::capture_target(self.play_request()))
     }
+    fn play_request(&self) -> playback::PlayRequest {
+        match self {
+            Self::Track(row) => gtk_widgets::selection::track_play_request(row.track_key),
+            Self::Album(row) => gtk_widgets::selection::album_play_request(row),
+            Self::Artist(row) => gtk_widgets::selection::artist_play_request(row, false),
+        }
+    }
+
     fn media_uri(&self) -> Option<&str> {
         match self {
             Self::Track(row) => Some(&row.media_uri),
@@ -235,10 +232,21 @@ impl SearchItem {
         })
     }
     fn play(&self, shell: &Rc<CatalogUi>, placement: QueuePlacement) {
-        session::SearchSession::play_recent(&self.recent_result(), shell, placement);
+        shell
+            .settings
+            .update_app_settings("recent search", |settings| {
+                settings.remember_search_result(self.recent_result())
+            });
+        let mut request = self.play_request();
+        request.placement = placement;
+        shell.queue.play(request);
     }
     fn activate(&self, shell: &Rc<CatalogUi>) {
-        session::SearchSession::activate_recent(&self.recent_result(), shell);
+        if matches!(self, Self::Track(_)) {
+            self.play(shell, QueuePlacement::Now);
+        } else {
+            session::SearchSession::activate_recent(&self.recent_result(), shell);
+        }
     }
     fn present_context(
         &self,
@@ -386,15 +394,9 @@ impl ReusableCollectionGridCell<SearchItem> for SearchGridCell {
 
     fn bind(&self, _: u32, item: SearchItem) {
         let target = match &item {
-            SearchItem::Track(row) => {
-                rufin_core::playback::PlaybackTarget::Track(row.media_uri.clone())
-            }
-            SearchItem::Album(row) => {
-                rufin_core::playback::PlaybackTarget::Album(row.media_uri.clone())
-            }
-            SearchItem::Artist(row) => {
-                rufin_core::playback::PlaybackTarget::Artist(row.media_uri.clone())
-            }
+            SearchItem::Track(row) => gtk_widgets::selection::track_play_request(row.track_key),
+            SearchItem::Album(row) => gtk_widgets::selection::album_play_request(&row),
+            SearchItem::Artist(row) => gtk_widgets::selection::artist_play_request(&row, false),
         };
         self.body.bind_playing_target(&self.shell, target);
         self.body

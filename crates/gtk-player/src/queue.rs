@@ -445,8 +445,9 @@ fn enqueue_media_drop(
         queue.reorder(QueueReorderRequest { selection, target });
         return true;
     }
+    let database = shell.database.clone();
     shell.runtime.spawn(async move {
-        let Ok(input) = source.queue_input().await else {
+        let Ok(input) = source.song_selection(&database).await else {
             return;
         };
         queue.insert(input, target);

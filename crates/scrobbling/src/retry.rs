@@ -917,12 +917,12 @@ mod tests {
         };
         let cancellation = ReadCancellation::new();
         let track_uri = database
-            .track_order(
-                publication.source,
-                None,
-                false,
-                TrackSort::Title,
-                false,
+            .selected_track_uris(
+                &library::SongQuery {
+                    sort: Some(TrackSort::Title),
+                    ..library::SongQuery::new(library::SongScope::Tracks(publication.source))
+                }
+                .selection(),
                 &cancellation,
             )
             .await
@@ -992,7 +992,17 @@ mod tests {
 
         assert_eq!(
             database
-                .activity_history(Some(&SourceId::new("source")), "", true, &cancellation)
+                .song_history_rows(
+                    &library::SongQuery {
+                        descending: true,
+                        ..library::SongQuery::new(library::SongScope::History {
+                            source: Some(SourceId::new("source"))
+                        })
+                    },
+                    0,
+                    256,
+                    &cancellation,
+                )
                 .await
                 .expect("Activity")
                 .len(),
@@ -1038,7 +1048,17 @@ mod tests {
         );
         assert_eq!(
             database
-                .activity_history(Some(&SourceId::new("source")), "", true, &cancellation)
+                .song_history_rows(
+                    &library::SongQuery {
+                        descending: true,
+                        ..library::SongQuery::new(library::SongScope::History {
+                            source: Some(SourceId::new("source"))
+                        })
+                    },
+                    0,
+                    256,
+                    &cancellation,
+                )
                 .await
                 .expect("Activity after account removal")
                 .len(),

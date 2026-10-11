@@ -36,8 +36,9 @@ pub async fn persist_queue(
     let _ = source;
     let captured = database
         .read_queue(library::QueueReadRequest {
+            anchor: None,
             context_title: None,
-            input: library::QueueInput::Items(
+            input: library::QueueLoad::Items(
                 occurrences
                     .iter()
                     .map(|row| (row.item.clone(), row.provenance.clone()))
@@ -280,11 +281,12 @@ pub async fn connection(path: &std::path::Path) -> SqliteConnection {
 /// Capture complete membership with a bounded metadata projection.
 pub async fn resolve_queue(
     database: &Database,
-    input: library::QueueInput,
+    input: library::QueueLoad,
     anchor_index: usize,
 ) -> library::QueueRestore {
     let mut page = database
         .read_queue(library::QueueReadRequest {
+            anchor: None,
             context_title: None,
             input: input,
             anchor_index,

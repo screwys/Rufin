@@ -701,12 +701,8 @@ pub(super) mod tests {
             .unwrap()
             .unwrap();
         let order = database
-            .playlist_entry_order(
-                playlist_key,
-                None,
-                library::TrackSort::Position,
-                false,
-                "",
+            .selected_playlist_entries(
+                &library::SongQuery::new(library::SongScope::Playlist(playlist_key)).selection(),
                 &cancellation,
             )
             .await

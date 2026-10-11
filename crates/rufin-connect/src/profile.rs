@@ -2399,7 +2399,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn server_playlist_pins_resolve_after_catalog_sync_and_refresh() {
+    async fn server_playlist_pins_resolve_after_profile_sync_and_source_refresh() {
         let directory = tempfile::tempdir().unwrap();
         let source = Database::open(directory.path().join("source.sqlite"))
             .await
@@ -2416,57 +2416,104 @@ mod tests {
         let id = library::SourceId::new("server");
         let cancel = library::ReadCancellation::new();
         let art = br#"{"source_id":"server","image":"playlist-cover"}"#;
+        let sidebar = json!({"pins":[{"Playlist":{"source_id":"server","playlist_id":"mix"}}]});
         for revision in 0..3 {
-            let mut scan = library::Scan::begin(&source, "server", "Server", "server", None)
-                .await
-                .unwrap();
-            if revision < 2 {
-                scan.write_playlist("mix", "Server mix", "server mix", "server mix", Some(art))
-                    .await
-                    .unwrap();
-                scan.write_playlist_permissions("mix", false, false)
-                    .await
-                    .unwrap();
-                for position in 0..140 {
-                    let entry = if revision == 0 {
-                        position
-                    } else {
-                        139 - position
-                    };
-                    scan.write_playlist_entry(
-                        "mix",
-                        &format!("entry-{entry}"),
-                        &format!("track-{entry}"),
-                        position,
+            for (receiving, database) in [(false, &source), (true, &target)] {
+                if receiving {
+                    if revision == 0 {
+                        source.connect_initialize_profile().await.unwrap();
+                        a.write_records(&[ConnectRecord {
+                            kind: "preference".into(),
+                            key: "sidebar".into(),
+                            value: Some(sidebar.clone()),
+                        }])
+                        .await
+                        .unwrap();
+                    }
+                    while source.connect_seed_page().await.unwrap() {}
+                    while a.capture(&source).await.unwrap() > 0 {}
+                    deliver(&a, &b).await;
+                    loop {
+                        let (page, _) = b.project(&target).await.unwrap();
+                        if page.is_empty() {
+                            break;
+                        }
+                        b.acknowledge_projection(&page).await.unwrap();
+                    }
+                    assert!(!b.projection_pending().await.unwrap());
+                    let mut connection = database_connection(&b.connection).await.unwrap();
+                    let preferences = records(
+                        &b.load_document(&mut connection, "preference:sidebar")
+                            .await
+                            .unwrap(),
                     )
+                    .unwrap();
+                    assert_eq!(
+                        preferences[&("preference".into(), "sidebar".into())],
+                        sidebar
+                    );
+                    if revision == 0 {
+                        assert!(
+                            target
+                                .playlist_key_by_identity(Some(&id), "mix", &cancel)
+                                .await
+                                .unwrap()
+                                .is_none()
+                        );
+                    }
+                }
+                let mut scan = library::Scan::begin(database, "server", "Server", "server", None)
                     .await
                     .unwrap();
+                if revision < 2 {
+                    scan.write_playlist("mix", "Server mix", "server mix", "server mix", Some(art))
+                        .await
+                        .unwrap();
+                    scan.write_playlist_permissions("mix", false, false)
+                        .await
+                        .unwrap();
+                    for position in 0..140 {
+                        let entry = if revision == 0 {
+                            position
+                        } else {
+                            139 - position
+                        };
+                        scan.write_playlist_entry(
+                            "mix",
+                            &format!("entry-{entry}"),
+                            &format!("track-{entry}"),
+                            position,
+                        )
+                        .await
+                        .unwrap();
+                    }
                 }
+                scan.finish().await.unwrap();
             }
-            scan.finish().await.unwrap();
-            if revision == 0 {
-                source.connect_initialize_profile().await.unwrap();
-            }
-            while source.connect_seed_page().await.unwrap() {}
-            while a.capture(&source).await.unwrap() > 0 {}
-            deliver(&a, &b).await;
-            loop {
-                let (page, _) = b.project(&target).await.unwrap();
-                if page.is_empty() {
-                    break;
-                }
-                b.acknowledge_projection(&page).await.unwrap();
-            }
-            assert!(!b.projection_pending().await.unwrap());
             let key = target
                 .playlist_key_by_identity(Some(&id), "mix", &cancel)
                 .await
                 .unwrap();
             if revision == 2 {
-                assert!(key.is_none());
+                assert!(
+                    target
+                        .playlist_page(
+                            None,
+                            None,
+                            library::PlaylistSort::Position,
+                            false,
+                            "",
+                            0,
+                            140,
+                            &cancel
+                        )
+                        .await
+                        .unwrap()
+                        .is_empty()
+                );
                 continue;
             }
-            let key = key.expect("shared pin resolves without contacting its server");
+            let key = key.expect("shared pin resolves from the receiving source cache");
             let row = target
                 .playlist_rows(&[key], &cancel)
                 .await
@@ -2478,12 +2525,8 @@ mod tests {
             assert!(!row.writable);
             assert_eq!(row.artwork_binding.as_deref(), Some(art.as_slice()));
             let entries = target
-                .playlist_entries_page(
-                    key,
-                    None,
-                    library::TrackSort::Position,
-                    false,
-                    "",
+                .song_playlist_rows(
+                    &library::SongQuery::new(library::SongScope::Playlist(key)),
                     0,
                     140,
                     &cancel,

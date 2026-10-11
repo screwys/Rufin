@@ -43,17 +43,11 @@ impl AndroidBrowseQuery {
                     .await
                     .map_err(error)?,
                 self.database
-                    .track_section_positions(
-                        &library::TrackQuery {
-                            source,
-                            collection: None,
-                            folder: *folder,
-                            downloaded_only: false,
-                            favorites_only: false,
-                        },
-                        &self.filter,
-                        self.sort.track_sort(),
-                        self.descending,
+                    .song_sections(
+                        self.song_query()
+                            .await
+                            .map_err(error)?
+                            .expect("Cached folder query"),
                         &cancel,
                     )
                     .await
@@ -89,89 +83,31 @@ impl AndroidBrowseQuery {
         shuffled: bool,
         context_title: Option<Arc<library::QueueContextTitle>>,
     ) -> Result<(), AndroidError> {
-        let (folder_count, _) = self.folder_counts().await.map_err(error)?;
+        let (folders, _) = self.folder_counts().await.map_err(error)?;
         let rank = usize::try_from(index)
             .map_err(error)?
-            .saturating_sub(folder_count);
-        let anchor_key = self
+            .saturating_sub(folders);
+        let selection = self.folder_selection().await?;
+        let mut request = playback::PlayRequest::captured(selection, rank, placement, false)
+            .with_context(self.context_id())
+            .with_context_title(context_title)
+            .shuffled(shuffled);
+        if let Some(key) = self
             .database
             .track_key_by_uri(&media_uri, &ReadCancellation::new())
             .await
-            .map_err(error)?;
-        let (input, rank) = self.folder_input(anchor_key, rank).await?;
-        self.queue.play(
-            playback::PlayRequest::captured(input, rank, placement, false)
-                .with_context_title(context_title)
-                .shuffled(shuffled),
-        );
-        Ok(())
-    }
-
-    pub(super) async fn folder_target_play(
-        &self,
-        placement: playback::QueuePlacement,
-        shuffled: bool,
-        context_title: Option<Arc<library::QueueContextTitle>>,
-    ) -> Result<(), AndroidError> {
-        let (input, _) = self.folder_input(None, 0).await?;
-        self.queue.play(
-            playback::PlayRequest::ordered(input, 0, placement, true)
-                .with_context_title(context_title)
-                .shuffled(shuffled),
-        );
-        Ok(())
-    }
-
-    pub(super) async fn folder_target_uris(&self) -> Result<Vec<String>, AndroidError> {
-        match self.folder_input(None, 0).await?.0 {
-            library::QueueInput::Tracks { order, .. } => self
-                .database
-                .track_uris(&order, &ReadCancellation::new())
-                .await
-                .map_err(error),
-            library::QueueInput::Query {
-                folder,
-                filter,
-                sort,
-                descending,
-                ..
-            } => self
-                .database
-                .query_track_media_uris(
-                    &library::TrackQuery {
-                        source: self.selected().source_key,
-                        collection: None,
-                        folder,
-                        downloaded_only: false,
-                        favorites_only: false,
-                    },
-                    &filter,
-                    sort,
-                    descending,
-                    &ReadCancellation::new(),
-                )
-                .await
-                .map_err(error),
-            _ => unreachable!("Folder input"),
+            .map_err(error)?
+        {
+            request = request.with_anchor(key, None);
         }
+        self.queue.play(request);
+        Ok(())
     }
 
-    async fn folder_input(
-        &self,
-        anchor_key: Option<library::TrackKey>,
-        anchor_index: usize,
-    ) -> Result<(library::QueueInput, usize), AndroidError> {
-        let context: Arc<str> = format!(
-            "android:{}:{}:{}",
-            self.selected().source_id,
-            route_json(self.route.clone()),
-            self.filter
-        )
-        .into();
+    pub(super) async fn folder_selection(&self) -> Result<SongSelection, AndroidError> {
         Ok(match self.folder_projection().await.map_err(error)? {
-            FolderProjection::Live { candidates, .. } => {
-                let keys = self
-                    .database
+            FolderProjection::Live { candidates, .. } => SongSelection::Tracks(
+                self.database
                     .live_folder_track_order(
                         self.selected().source_key,
                         candidates,
@@ -181,36 +117,16 @@ impl AndroidBrowseQuery {
                         &ReadCancellation::new(),
                     )
                     .await
-                    .map_err(error)?;
-                let anchor_index = anchor_key
-                    .and_then(|key| keys.iter().position(|candidate| *candidate == key))
-                    .unwrap_or(anchor_index.min(keys.len().saturating_sub(1)));
-                (
-                    library::QueueInput::Tracks {
-                        order: keys.into(),
-                        context_id: context,
-                        source_start: 0,
-                    },
-                    anchor_index,
-                )
-            }
-            FolderProjection::Cached(folder) => (
-                library::QueueInput::Query {
-                    query: library::QueueQuery::Tracks {
-                        source: self.selected().source_key,
-                        downloaded_only: false,
-                        favorites_only: false,
-                        recursive: false,
-                    },
-                    folder: *folder,
-                    filter: self.filter.clone(),
-                    sort: self.sort.track_sort(),
-                    descending: self.descending,
-                    context_id: context,
-                    anchor_key,
-                },
-                anchor_index,
+                    .map_err(error)?
+                    .into(),
             ),
+            FolderProjection::Cached(_) => self
+                .song_query()
+                .await
+                .map_err(error)?
+                .expect("Cached folder query")
+                .clone()
+                .selection(),
         })
     }
     pub(super) async fn folder_projection(&self) -> library::LibraryResult<&FolderProjection> {
@@ -280,15 +196,8 @@ impl AndroidBrowseQuery {
                 Ok((
                     folders,
                     self.database
-                        .track_count(
-                            &library::TrackQuery {
-                                source,
-                                collection: None,
-                                folder: *folder,
-                                favorites_only: false,
-                                downloaded_only: false,
-                            },
-                            &self.filter,
+                        .song_count(
+                            self.song_query().await?.expect("Cached folder query"),
                             &cancel,
                         )
                         .await?,
@@ -397,13 +306,8 @@ impl AndroidBrowseQuery {
                     .collect::<Vec<_>>();
                 let tracks = self
                     .database
-                    .track_page(
-                        source,
-                        *folder,
-                        false,
-                        &self.filter,
-                        self.sort.track_sort(),
-                        self.descending,
+                    .song_rows(
+                        self.song_query().await?.expect("Cached folder query"),
                         offset.saturating_sub(count),
                         limit.saturating_sub(rows.len()),
                         &cancel,

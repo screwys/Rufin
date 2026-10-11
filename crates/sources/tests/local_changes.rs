@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use library::{Database, ReadCancellation, ScanOutcome, TrackSort};
+use library::{Database, ReadCancellation, ScanOutcome, SongQuery, SongScope};
 use lofty::config::WriteOptions;
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::prelude::{Accessor, ItemKey};
@@ -115,12 +115,8 @@ async fn one_local_path_republishes_only_its_component() {
             .expect("initial scan"),
     );
     let before = database
-        .track_order(
-            first_publication.source,
-            None,
-            false,
-            TrackSort::Title,
-            false,
+        .selected_track_uris(
+            &SongQuery::new(SongScope::Tracks(first_publication.source)).selection(),
             &ReadCancellation::new(),
         )
         .await
@@ -146,12 +142,8 @@ async fn one_local_path_republishes_only_its_component() {
         first_publication.catalog_revision + 1
     );
     let after = database
-        .track_order(
-            changed.source,
-            None,
-            false,
-            TrackSort::Title,
-            false,
+        .selected_track_uris(
+            &SongQuery::new(SongScope::Tracks(changed.source)).selection(),
             &ReadCancellation::new(),
         )
         .await
@@ -306,12 +298,8 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
             .expect("scan"),
     );
     let order = database
-        .track_order(
-            initial.source,
-            None,
-            false,
-            TrackSort::Title,
-            false,
+        .selected_track_uris(
+            &SongQuery::new(SongScope::Tracks(initial.source)).selection(),
             &ReadCancellation::new(),
         )
         .await
@@ -1256,12 +1244,8 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
             .expect("scan"),
     );
     let order = database
-        .track_order(
-            initial.source,
-            None,
-            false,
-            TrackSort::Title,
-            false,
+        .selected_track_uris(
+            &SongQuery::new(SongScope::Tracks(initial.source)).selection(),
             &ReadCancellation::new(),
         )
         .await
@@ -1323,12 +1307,8 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
             .expect("point outcome"),
     );
     let changed_order = database
-        .track_order(
-            changed.source,
-            None,
-            false,
-            TrackSort::Title,
-            false,
+        .selected_track_uris(
+            &SongQuery::new(SongScope::Tracks(changed.source)).selection(),
             &ReadCancellation::new(),
         )
         .await
@@ -1426,17 +1406,12 @@ async fn initial_local_walk_reports_real_total_free_file_progress() {
 
 async fn track_count(database: &Database, publication: &library::Publication) -> usize {
     database
-        .track_order(
-            publication.source,
-            None,
-            false,
-            TrackSort::Title,
-            false,
+        .song_count(
+            &SongQuery::new(SongScope::Tracks(publication.source)),
             &ReadCancellation::new(),
         )
         .await
-        .expect("Track order")
-        .len()
+        .expect("Track count") as usize
 }
 
 async fn album_genres(

@@ -15,7 +15,8 @@ use gtk_media_menus::media_menus::{
     present_playlist_context_menu, present_smart_playlist_context_menu,
 };
 use gtk_widgets::cover_controls::cover_play_only_hover_controls;
-use rufin_core::playback::PlaybackTarget;
+use gtk_widgets::selection::collection_play_request;
+use playback::PlayRequest;
 
 use crate::{SidebarPin, SidebarRouteItem};
 use adw::prelude::*;
@@ -627,20 +628,27 @@ impl SidebarPinItem {
         }
     }
 
-    fn playback_target(&self) -> PlaybackTarget {
+    fn playback_target(
+        &self,
+        selected: Option<&rufin_core::runtime::SelectedLibrary>,
+    ) -> PlayRequest {
         match self {
-            Self::Album(album) => PlaybackTarget::Album(album.media_uri.clone()),
+            Self::Album(album) => gtk_widgets::selection::album_play_request(&album),
             Self::Artist(artist, album_artist) => {
                 if *album_artist {
-                    PlaybackTarget::AlbumArtist(artist.media_uri.clone())
+                    gtk_widgets::selection::artist_play_request(&artist, true)
                 } else {
-                    PlaybackTarget::Artist(artist.media_uri.clone())
+                    gtk_widgets::selection::artist_play_request(&artist, false)
                 }
             }
-            Self::Genre(genre) => PlaybackTarget::Genre(genre.genre_key),
-            Self::Playlist(playlist) => PlaybackTarget::Playlist(playlist.playlist_key),
+            Self::Genre(genre) => {
+                collection_play_request(library::SongScope::Genre(genre.genre_key))
+            }
+            Self::Playlist(playlist) => {
+                collection_play_request(library::SongScope::Playlist(playlist.playlist_key))
+            }
             Self::SmartPlaylist(playlist) => {
-                PlaybackTarget::SmartPlaylist(playlist.smart_playlist_key)
+                gtk_widgets::selection::smart_play_request(playlist.smart_playlist_key, selected)
             }
         }
     }
@@ -1317,7 +1325,11 @@ fn sidebar_pin_row(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
             shell.navigate(route.clone());
         }
     });
-    install_sidebar_pin_double_click(&activate, shell, pin.playback_target());
+    install_sidebar_pin_double_click(
+        &activate,
+        shell,
+        pin.playback_target(shell.selected_library().as_deref()),
+    );
     row.set_child(Some(&activate));
     install_sidebar_pin_drag(&row, &cover, shell, &pin);
     install_playlist_pin_drop(&row, shell, &pin);
@@ -1328,7 +1340,7 @@ fn sidebar_pin_row(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
     controls.set_valign(gtk::Align::Center);
     controls.set_margin_end(2);
     controls.set_visible(false);
-    let playback_target = pin.playback_target();
+    let playback_target = pin.playback_target(shell.selected_library().as_deref());
     for (icon_name, label, placement) in [
         (PLAY_ICON, "Play", QueuePlacement::Now),
         (PLAY_NEXT_ICON, "Play Next", QueuePlacement::Next),
@@ -1416,7 +1428,11 @@ fn compact_sidebar_pin(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
             shell.navigate(route.clone());
         }
     });
-    install_sidebar_pin_double_click(&activate, shell, pin.playback_target());
+    install_sidebar_pin_double_click(
+        &activate,
+        shell,
+        pin.playback_target(shell.selected_library().as_deref()),
+    );
     row.set_child(Some(&activate));
     install_sidebar_pin_drag(&row, &cover, shell, &pin);
     install_playlist_pin_drop(&row, shell, &pin);
@@ -1426,7 +1442,7 @@ fn compact_sidebar_pin(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
     play.set_size_request(32, 32);
     play.set_tooltip_text(Some(&title));
     let playback_shell = Rc::downgrade(shell);
-    let playback_target = pin.playback_target();
+    let playback_target = pin.playback_target(shell.selected_library().as_deref());
     play.connect_clicked(move |_| {
         let Some(playback_shell) = playback_shell.upgrade() else {
             return;
@@ -1459,7 +1475,7 @@ fn install_sidebar_pin_drag(
     shell: &Rc<Shell>,
     pin: &SidebarPinItem,
 ) {
-    let playback = pin.playback_target();
+    let playback = pin.playback_target(shell.selected_library().as_deref());
     let title = pin.title();
     let pin = pin.stored_pin();
     let payload = sidebar_pin_drag_variant(&pin);
@@ -1470,16 +1486,13 @@ fn install_sidebar_pin_drag(
     let preview = MediaDragPreviewBinding::default();
     preview.connect(&drag);
     let cover = cover.downgrade();
-    let drag_shell = Rc::downgrade(shell);
     drag.connect_prepare(move |_, _, _| {
         preview.clear();
-        let shell = drag_shell.upgrade()?;
         let artwork = cover
             .upgrade()
             .map(|cover| gtk::WidgetPaintable::new(Some(&cover)).current_image());
         preview.prepare(title.clone(), artwork);
-        let source =
-            MediaDragSource::capture_target(shell.selected_library().as_deref(), playback.clone());
+        let source = MediaDragSource::capture_target(playback.clone());
         Some(gtk::gdk::ContentProvider::new_union(&[
             gtk::gdk::ContentProvider::for_value(&payload.to_value()),
             media_drag_content_provider(source),
@@ -1605,7 +1618,7 @@ fn install_playlist_pin_drop(
 fn install_sidebar_pin_double_click(
     target: &impl IsA<gtk::Widget>,
     shell: &Rc<Shell>,
-    playback: PlaybackTarget,
+    playback: PlayRequest,
 ) {
     let click = gtk::GestureClick::new();
     click.set_button(1);
@@ -1679,7 +1692,7 @@ fn sidebar_pin_metadata(track_count: u32, duration_seconds: u32) -> gtk::Box {
 
 fn sidebar_pin_transport_button(
     shell: &Rc<Shell>,
-    target: &PlaybackTarget,
+    target: &PlayRequest,
     icon_name: &str,
     label: &str,
     placement: QueuePlacement,

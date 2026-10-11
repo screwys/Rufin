@@ -187,20 +187,7 @@ impl CatalogUi {
                 let database = rows_database.clone();
                 Box::pin(async move {
                     database
-                        .smart_playlist_track_page(
-                            source,
-                            key,
-                            folder,
-                            &request.query,
-                            Some(request.settings.sort_key.track_sort()),
-                            request.settings.descending,
-                            SystemTime::now()
-                                .duration_since(UNIX_EPOCH)
-                                .map_or(0, |duration| duration.as_secs() as i64),
-                            range.start,
-                            range.len(),
-                            &cancellation,
-                        )
+                        .song_rows(request.query(), range.start, range.len(), &cancellation)
                         .await
                         .map_err(|error| error.to_string())
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
@@ -209,7 +196,7 @@ impl CatalogUi {
         let model = crate::track_model::TrackCollectionModel::with_load(
             self.runtime.clone(),
             detail.projection.order,
-            Some((library::QueueQuery::SmartDisplay { key, source }, folder)),
+            detail.projection.request.query,
             detail.projection.first_row_position,
             detail.projection.first_rows,
             settings,
@@ -321,16 +308,12 @@ impl CatalogUi {
                 let database = Arc::clone(&database);
                 Box::pin(async move {
                     let count = database
-                        .playlist_entries_count(key, None, &request.query, &cancellation)
+                        .song_count(&request.query, &cancellation)
                         .await
                         .map_err(|error| error.to_string())?
                         .max(0) as usize;
                     let rows = database
-                        .playlist_entries_page(
-                            key,
-                            None,
-                            request.settings.sort_key.track_sort(),
-                            request.settings.descending,
+                        .song_playlist_rows(
                             &request.query,
                             request.first_row_position.min(count),
                             64,
@@ -710,7 +693,12 @@ pub async fn load_smart_playlist_detail(
         key,
         folder,
         TrackProjectionRequest {
-            query: String::new(),
+            query: Some(library::SongQuery {
+                folder,
+                sort: Some(settings.sort_key.track_sort()),
+                descending: settings.descending,
+                ..library::SongQuery::new(library::SongScope::Smart { key, source, now })
+            }),
             settings,
         },
         window,
@@ -725,45 +713,18 @@ pub async fn load_smart_playlist_detail(
 
 async fn prepare_smart_playlist_projection(
     database: &Database,
-    source: Option<library::SourceKey>,
-    key: SmartPlaylistKey,
-    folder: Option<library::FolderKey>,
+    _source: Option<library::SourceKey>,
+    _key: SmartPlaylistKey,
+    _folder: Option<library::FolderKey>,
     request: TrackProjectionRequest,
     window: library::RouteSeedWindow,
     cancellation: &ReadCancellation,
 ) -> Result<PreparedTrackProjection<library::TrackRow>, String> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_secs() as i64);
-    let count = database
-        .smart_playlist_track_count(source, key, folder, &request.query, now, cancellation)
-        .await
-        .map_err(|error| error.to_string())?
-        .max(0) as usize;
-    let seed = window.range(count);
-    let first_row_position = seed.start;
-    let first_rows = database
-        .smart_playlist_track_page(
-            source,
-            key,
-            folder,
-            &request.query,
-            Some(request.settings.sort_key.track_sort()),
-            request.settings.descending,
-            now,
-            seed.start,
-            seed.len(),
-            cancellation,
-        )
+    let page = database
+        .song_route_page(request.query(), window, cancellation)
         .await
         .map_err(|error| error.to_string())?;
-    Ok(PreparedTrackProjection {
-        disc_sections: Vec::new(),
-        order: gtk_widgets::sparse_model::SparseSource::Query { count },
-        first_row_position,
-        first_rows,
-        request,
-    })
+    Ok(PreparedTrackProjection::from_page(page, request))
 }
 
 pub fn playlist_cover_size(width: i32) -> i32 {

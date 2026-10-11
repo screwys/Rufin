@@ -148,32 +148,18 @@ async fn tracks_data(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
+    let query = catalog::song_query(products, parameters, "tracks").await?;
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 100)?.min(256);
     let rows = products
-        .source
-        .tracks(
-            sources::SourceId::new(required(parameters, "source")?),
-            parameters.get("folder").cloned(),
-            parameters.get("q").cloned().unwrap_or_default(),
-            boolean(parameters, "favorites")?,
-            track_sort(
-                parameters
-                    .get("sort")
-                    .map(String::as_str)
-                    .unwrap_or("title"),
-            )?,
-            boolean(parameters, "descending")?,
-            offset,
-            limit,
-        )
-        .recv()
+        .library
+        .song_rows(&query, offset, limit, &library::ReadCancellation::new())
         .await
-        .map_err(internal)?
-        .map_err(bad_request)?;
-    let rows = rows.iter().map(track_row_json).collect::<Vec<_>>();
-    let total = catalog::page_total(products, parameters, "tracks").await?;
-    Ok(json!({"offset":offset,"limit":limit,"total":total,"tracks":rows}))
+        .map_err(internal)?;
+    let total = catalog::song_total(products, parameters, &query).await?;
+    Ok(
+        json!({"offset":offset,"limit":limit,"total":total,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
+    )
 }
 
 async fn queue_state(
@@ -261,7 +247,14 @@ async fn queue_play(
                 } else {
                     view
                 });
-                for key in ["source", "folder", "q", "sort"] {
+                for key in [
+                    "source",
+                    "folder",
+                    "q",
+                    "sort",
+                    "album_artists",
+                    "favorites",
+                ] {
                     if let Some(value) = parameters.get(key) {
                         selection[key] = json!(value);
                     }
@@ -269,35 +262,14 @@ async fn queue_play(
                 if let Some(id) = parameters.get("id") {
                     selection["id"] = serde_json::from_str(id).map_err(bad_request)?;
                 }
-                selection["favorites"] = json!(view == "favorites");
+                selection["favorites"] =
+                    json!(view == "favorites" || boolean(&parameters, "favorites")?);
                 selection["descending"] =
                     json!(parameters.get("descending").is_some_and(|v| v == "true"));
             }
         }
         kind = selection["kind"].as_str().unwrap_or(&kind).to_owned();
     }
-    let folder = if kind != "source" {
-        if let Some(folder) = input.selection.get("folder").and_then(Value::as_str) {
-            let source = input
-                .selection
-                .get("source")
-                .and_then(Value::as_str)
-                .ok_or_else(|| bad_request("source is required with folder"))?;
-            catalog::scope(
-                products,
-                &HashMap::from([
-                    ("source".into(), source.into()),
-                    ("folder".into(), folder.into()),
-                ]),
-            )
-            .await?
-            .1
-        } else {
-            None
-        }
-    } else {
-        None
-    };
     let shuffled_start = kind != "track"
         && input.selection.get("anchor_uri").is_none_or(Value::is_null)
         && input
@@ -314,164 +286,67 @@ async fn queue_play(
             ));
         }
     };
-    let anchor_key = if let Some(uri) = input.selection.get("anchor_uri").and_then(Value::as_str) {
-        products
-            .library
-            .track_key_by_uri(uri, &library::ReadCancellation::new())
-            .await
-            .map_err(internal)?
-    } else {
-        None
-    };
-    let selection = match kind.as_str() {
-        "track" => {
-            #[derive(Deserialize)]
-            struct Uris {
-                uris: Vec<String>,
-            }
-            let input: Uris = serde_json::from_value(input.selection).map_err(bad_request)?;
-            library::QueueInput::MediaUris {
-                order: input.uris.into(),
-                provenance: playback::Provenance::Manual,
-            }
-        }
-        "album" | "playlist" | "artist" | "genre" => {
-            #[derive(Deserialize)]
-            struct Collection {
-                id: Value,
-                #[serde(default)]
-                q: String,
-                sort: Option<String>,
-                #[serde(default)]
-                descending: bool,
-                anchor_entry: Option<library::PlaylistEntryKey>,
-                #[serde(default)]
-                album_artists: bool,
-            }
-            let input: Collection = serde_json::from_value(input.selection).map_err(bad_request)?;
-            if !(kind == "playlist") {
-                let collection = if kind == "artist" {
-                    library::QueueCollection::ArtistKey {
-                        key: serde_json::from_value(input.id).map_err(bad_request)?,
-                        album_artist: input.album_artists,
-                    }
-                } else if kind == "genre" {
-                    library::QueueCollection::Genre(
-                        serde_json::from_value(input.id).map_err(bad_request)?,
-                    )
-                } else {
-                    library::QueueCollection::AlbumKey(
-                        serde_json::from_value(input.id).map_err(bad_request)?,
-                    )
-                };
-                library::QueueInput::Query {
-                    query: library::QueueQuery::Collection {
-                        collection,
-                        downloaded_only: false,
-                        favorites_only: false,
-                    },
-                    folder,
-                    context_id: "api".into(),
-                    filter: input.q,
-                    sort: track_sort(input.sort.as_deref().unwrap_or(if kind == "artist" {
-                        "title"
-                    } else {
-                        "track_number"
-                    }))?,
-                    descending: input.descending,
-                    anchor_key,
-                }
-            } else {
-                library::QueueInput::PlaylistQuery {
-                    key: serde_json::from_value(input.id).map_err(bad_request)?,
-                    folder,
-                    context_id: "api".into(),
-                    filter: input.q,
-                    sort: track_sort(input.sort.as_deref().unwrap_or("position"))?,
-                    descending: input.descending,
-                    anchor_entry: input.anchor_entry,
-                    anchor_key,
-                }
-            }
-        }
-        "smart-playlist" => {
-            #[derive(Deserialize)]
-            struct Smart {
-                id: library::SmartPlaylistKey,
-                source: Option<String>,
-                #[serde(default)]
-                q: String,
-                sort: Option<String>,
-                #[serde(default)]
-                descending: bool,
-            }
-            let input: Smart = serde_json::from_value(input.selection).map_err(bad_request)?;
-            let source = if let Some(source) = input.source {
-                Some(
-                    catalog::scope(products, &HashMap::from([("source".into(), source)]))
-                        .await?
-                        .0,
+    let mut anchor_key =
+        if let Some(uri) = input.selection.get("anchor_uri").and_then(Value::as_str) {
+            products
+                .library
+                .track_key_by_uri(uri, &library::ReadCancellation::new())
+                .await
+                .map_err(internal)?
+        } else {
+            None
+        };
+    let anchor_entry = input
+        .selection
+        .get("anchor_entry")
+        .filter(|value| !value.is_null())
+        .map(|value| serde_json::from_value(value.clone()).map_err(bad_request))
+        .transpose()?;
+    if anchor_key.is_none() {
+        if let Some(entry) = anchor_entry {
+            anchor_key = products
+                .library
+                .selected_track_keys(
+                    &library::SongSelection::PlaylistEntries(Arc::from([entry])),
+                    &library::ReadCancellation::new(),
                 )
-            } else {
-                None
-            };
-            let sort = smart_track_sort(input.sort.as_deref())?;
-            library::QueueInput::Query {
-                query: if sort.is_some() {
-                    library::QueueQuery::SmartDisplay {
-                        key: input.id,
-                        source,
-                    }
-                } else {
-                    library::QueueQuery::Smart {
-                        key: input.id,
-                        source,
-                        now: catalog::now(),
-                    }
-                },
-                folder,
-                filter: input.q,
-                sort: sort.unwrap_or(library::TrackSort::Title),
-                descending: input.descending,
-                context_id: "api".into(),
-                anchor_key,
-            }
+                .await
+                .map_err(internal)?
+                .first()
+                .copied();
         }
-        "source" => {
-            #[derive(Deserialize)]
-            struct Source {
-                source: String,
-                folder: Option<String>,
-                #[serde(default)]
-                q: String,
-                sort: Option<String>,
-                #[serde(default)]
-                descending: bool,
-                #[serde(default)]
-                favorites: bool,
-            }
-            let input: Source = serde_json::from_value(input.selection).map_err(bad_request)?;
-            let mut scope = HashMap::from([("source".into(), input.source)]);
-            if let Some(folder) = input.folder {
-                scope.insert("folder".into(), folder);
-            }
-            let (source, folder) = catalog::scope(products, &scope).await?;
-            library::QueueInput::Query {
-                query: library::QueueQuery::Tracks {
-                    source,
-                    downloaded_only: false,
-                    favorites_only: input.favorites,
-                    recursive: true,
-                },
-                folder,
-                filter: input.q,
-                sort: track_sort(input.sort.as_deref().unwrap_or("title"))?,
-                descending: input.descending,
-                context_id: "api".into(),
-                anchor_key,
-            }
-        }
-        _ => return Err(bad_request("Unknown media kind")),
+    }
+    let selection = if kind == "track" {
+        let uris: Vec<String> =
+            serde_json::from_value(input.selection["uris"].clone()).map_err(bad_request)?;
+        library::SongSelection::Tracks(
+            products
+                .library
+                .remember_media_uris(&uris)
+                .await
+                .map_err(internal)?
+                .into(),
+        )
+    } else {
+        let parameters = input
+            .selection
+            .as_object()
+            .ok_or_else(|| bad_request("Invalid media selection"))?
+            .iter()
+            .filter(|(_, value)| !value.is_null())
+            .map(|(key, value)| {
+                (
+                    key.clone(),
+                    value
+                        .as_str()
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| value.to_string()),
+                )
+            })
+            .collect();
+        catalog::song_query(products, &parameters, &kind)
+            .await?
+            .selection()
     };
     let queue = products.playback.queue.clone();
     tokio::task::spawn_blocking(move || {
@@ -479,12 +354,14 @@ async fn queue_play(
             queue.insert(selection, queue_drop_target(input.before, input.after));
             return;
         }
-        queue.play(playback::PlayRequest::ordered(
-            selection,
-            0,
-            placement,
-            shuffled_start,
-        ))
+        let mut request = playback::PlayRequest::ordered(selection, 0, placement, shuffled_start);
+        if kind != "track" {
+            request = request.with_context("api".into());
+        }
+        if let Some(key) = anchor_key {
+            request = request.with_anchor(key, anchor_entry);
+        }
+        queue.play(request)
     })
     .await
     .map_err(internal)?;

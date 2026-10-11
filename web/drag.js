@@ -66,7 +66,7 @@ function acceptsPin(event) {
 function queueMedia(media, mode = "append", position = {}) {
   return api(media.uris ? "/queue" : `/queue/${media.kind}`, "POST", {
     source: media.source || null,
-    folder: media.folder,
+    folder: media.kind === "smart-playlist" ? media.folder : null,
     ...(media.uris
       ? { uris: media.uris }
       : { id: media.row.id, album_artists: !!media.row.album_artists }),

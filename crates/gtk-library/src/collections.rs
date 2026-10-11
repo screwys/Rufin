@@ -1,5 +1,7 @@
+#[cfg(test)]
+use gtk_widgets::selection::collection_play_request;
 use gtk_widgets::sparse_model::{item_at, item_at_from_item};
-use rufin_core::playback::PlaybackTarget;
+use playback::PlayRequest;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -1213,8 +1215,15 @@ pub fn install_smart_playlist_reorder(
     install_playlist_order_drop(
         target,
         Rc::new(move || current().map(|playlist| playlist.smart_playlist_key.raw())),
-        |target| match target {
-            PlaybackTarget::SmartPlaylist(key) => Some(key.raw()),
+        |target| match target.selection() {
+            Some(library::SongSelection::Query {
+                query:
+                    library::SongQuery {
+                        scope: library::SongScope::Smart { key, .. },
+                        ..
+                    },
+                ..
+            }) => Some(key.raw()),
             _ => None,
         },
         Rc::new(|_| false),
@@ -1247,8 +1256,15 @@ pub fn install_playlist_reorder(
     install_playlist_order_drop(
         target,
         Rc::new(move || current().map(|playlist| playlist.playlist_key.raw())),
-        |target| match target {
-            PlaybackTarget::Playlist(key) => Some(key.raw()),
+        |target| match target.selection() {
+            Some(library::SongSelection::Query {
+                query:
+                    library::SongQuery {
+                        scope: library::SongScope::Playlist(key),
+                        ..
+                    },
+                ..
+            }) => Some(key.raw()),
             _ => None,
         },
         Rc::new(move |source| {
@@ -1291,7 +1307,7 @@ pub fn install_playlist_reorder(
 fn install_playlist_order_drop(
     widget: &impl IsA<gtk::Widget>,
     current: Rc<dyn Fn() -> Option<i64>>,
-    key: fn(&PlaybackTarget) -> Option<i64>,
+    key: fn(&PlayRequest) -> Option<i64>,
     drop_media: Rc<dyn Fn(gtk_widgets::media_drag::MediaDragSource) -> bool>,
     reorder: Rc<dyn Fn(i64, i64)>,
 ) {
@@ -1326,7 +1342,7 @@ fn install_playlist_order_drop(
 }
 fn playlist_order_key(
     source: &gtk_widgets::media_drag::MediaDragSource,
-    key: fn(&PlaybackTarget) -> Option<i64>,
+    key: fn(&PlayRequest) -> Option<i64>,
 ) -> Option<i64> {
     use gtk_widgets::media_drag::{CollectionTargets, MediaDragSource};
     let target = match source {
@@ -1337,10 +1353,7 @@ fn playlist_order_key(
         } if targets.len() == 1 => &targets[0],
         _ => return None,
     };
-    key(match target {
-        PlaybackTarget::Contextual { target, .. } => target.as_ref(),
-        target => target,
-    })
+    key(target)
 }
 
 fn collection_grid_field_class(field: LibraryField) -> &'static str {
@@ -1360,9 +1373,11 @@ mod layout_policy_tests {
 
     #[test]
     fn contextual_playback_target_uses_the_route_context() {
-        let target = PlaybackTarget::Album("album:1".to_string()).in_context("artist:1|releases");
+        let target =
+            collection_play_request(library::SongScope::Album(library::AlbumKey::from_raw(1)))
+                .with_context("artist:1|releases".into());
 
-        assert_eq!(target.context_id(), "artist:1|releases");
+        assert_eq!(target.context(), Some("artist:1|releases"));
     }
 
     #[test]

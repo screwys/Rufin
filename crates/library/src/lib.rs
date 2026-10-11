@@ -28,6 +28,8 @@ mod scroll_sections;
 pub use scroll_sections::ScrollSection;
 mod schema;
 mod search;
+mod selection;
+pub use selection::{SongQuery, SongScope, SongSelection};
 mod smart_playlists;
 mod source_window;
 mod tracks;
@@ -43,8 +45,7 @@ pub use backup::{BackupRestoreReport, StateGroups};
 pub use collections::{
     AlbumArtistLink, AlbumGenreLink, AlbumReleaseCandidate, AlbumReleaseClass,
     AlbumReleaseClassification, AlbumReleaseResult, AlbumRow, AlbumSort, ArtistRow, ArtistSort,
-    CollectionIdentity, CollectionSourceReference, FolderRow, GenreChoice, GenreRow, GenreSort,
-    MoodRow, MoodSort,
+    FolderRow, GenreChoice, GenreRow, GenreSort, MoodRow, MoodSort,
 };
 pub use connect::{CONNECT_PAGE_SIZE, ConnectChange, ConnectRecord, ConnectRoot};
 pub use db::{Database, ReadCancellation};
@@ -77,10 +78,10 @@ pub use playlists::{
     PlaylistGenreLink, PlaylistIdentity, PlaylistRow, PlaylistSort,
 };
 pub use queue::{
-    QUEUE_CONTEXT_LIMIT, QueueChoice, QueueCollection, QueueContextTitle, QueueEntry, QueueInput,
-    QueueItem, QueueOrderUpdate, QueuePageRow, QueuePlacement, QueueProvenance, QueueQuery,
-    QueueReadPage, QueueReadRequest, QueueReorderTarget, QueueRepeatMode, QueueRestore, QueueRow,
-    QueueScope, QueueSource, QueueTransferPage, QueueUpdate, shuffle_order,
+    QUEUE_CONTEXT_LIMIT, QueueContextTitle, QueueEntry, QueueItem, QueueLoad, QueueOrderUpdate,
+    QueuePageRow, QueuePlacement, QueueProvenance, QueueReadPage, QueueReadRequest,
+    QueueReorderTarget, QueueRepeatMode, QueueRestore, QueueRow, QueueTransferPage, QueueUpdate,
+    shuffle_order,
 };
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
 pub use scan::{
@@ -91,11 +92,9 @@ pub use smart_playlists::{
     SmartPlaylistActivityPeriod, SmartPlaylistDefinition, SmartPlaylistListSort, SmartPlaylistRow,
     SmartPlaylistRule, SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue,
     SmartPlaylistRuleValueKind, SmartPlaylistSort, SmartPlaylistValueSuggestions,
-    SmartPlaylistWrite, SmartSourceReference,
+    SmartPlaylistWrite,
 };
-pub use tracks::{
-    TrackArtistLink, TrackGenreLink, TrackQuery, TrackRoutePage, TrackRow, TrackSort,
-};
+pub use tracks::{TrackArtistLink, TrackGenreLink, TrackRoutePage, TrackRow, TrackSort};
 
 use thiserror::Error;
 

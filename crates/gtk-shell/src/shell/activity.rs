@@ -579,7 +579,7 @@ impl ActivityView {
             }
             match result {
                 Ok(data) => {
-                    let top = data.tracks.first().map(|row| row.media_uri.clone());
+                    let top = data.tracks.first().map(|row| row.track_key);
                     view.transition.skip();
                     let animate = view.report.is_visible() && view.report.is_mapped();
                     if animate {
@@ -620,7 +620,7 @@ impl ActivityView {
                         && let Some(uri) = top
                     {
                         (shell.media_menus.play_target)(
-                            &rufin_core::playback::PlaybackTarget::Track(uri),
+                            &gtk_widgets::selection::track_play_request(uri),
                             playback::QueuePlacement::Now,
                             false,
                         );

@@ -9,12 +9,12 @@ async fn reopening_without_statistics_preserves_library_order() {
     let fixture = super::support::fixture().await;
     let before = fixture
         .database
-        .track_order(
-            fixture.source,
-            None,
-            false,
-            library::TrackSort::Title,
-            false,
+        .selected_track_uris(
+            &library::SongQuery {
+                sort: Some(library::TrackSort::Title),
+                ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
+            }
+            .selection(),
             &ReadCancellation::new(),
         )
         .await
@@ -28,12 +28,12 @@ async fn reopening_without_statistics_preserves_library_order() {
     fixture.database.close().await.unwrap();
     let database = Database::open(&fixture.path).await.unwrap();
     let after = database
-        .track_order(
-            fixture.source,
-            None,
-            false,
-            library::TrackSort::Title,
-            false,
+        .selected_track_uris(
+            &library::SongQuery {
+                sort: Some(library::TrackSort::Title),
+                ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
+            }
+            .selection(),
             &ReadCancellation::new(),
         )
         .await
@@ -755,7 +755,15 @@ async fn schema_43_fixture_relocates_and_migrates_every_core_durable_family_and_
         .await
         .expect("migrate schema 43 to the current schema");
     let history = database
-        .activity_history(None, "", true, &ReadCancellation::new())
+        .song_history_rows(
+            &library::SongQuery {
+                descending: true,
+                ..library::SongQuery::new(library::SongScope::History { source: None })
+            },
+            0,
+            100,
+            &ReadCancellation::new(),
+        )
         .await
         .expect("read migrated orphan Activity");
     assert_eq!(
@@ -780,7 +788,7 @@ async fn schema_43_fixture_relocates_and_migrates_every_core_durable_family_and_
             .fetch_one(&mut reader)
             .await
             .expect("read migrated version"),
-        56
+        57
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>(
@@ -1039,7 +1047,7 @@ async fn schema_43_malformed_listen_keeps_valid_siblings_and_preserves_input() {
             .fetch_one(&mut reader)
             .await
             .expect("read rebuilt schema version"),
-        56
+        57
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>("SELECT external_id FROM listens ORDER BY listen_key")
@@ -1089,7 +1097,7 @@ async fn fresh_schema_has_one_durable_entity_family() {
             .fetch_one(&mut raw)
             .await
             .unwrap(),
-        56
+        57
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
@@ -1304,7 +1312,7 @@ async fn schema_39_store_runs_the_committed_chain_into_current_schema() {
             .fetch_one(&mut reader)
             .await
             .expect("read current schema version"),
-        56
+        57
     );
     let definition = sqlx::query_scalar::<_, String>(
         "SELECT definition_json FROM smart_playlists WHERE object_id='smart-list'",
@@ -1345,7 +1353,7 @@ async fn released_migration_ignores_unused_catalog_damage() {
             .fetch_one(&mut restored)
             .await
             .expect("read repaired schema version"),
-        56
+        57
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sources WHERE catalog_complete=1")

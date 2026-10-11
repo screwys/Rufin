@@ -2,7 +2,6 @@ use std::{cell::RefCell, rc::Rc, sync::Arc, time::Duration};
 
 use adw::prelude::*;
 use gtk::glib;
-use rufin_core::playback::PlaybackTarget;
 use tracing::warn;
 
 use crate::CatalogUi;
@@ -21,6 +20,7 @@ use super::route_shell::{LibraryPageShellOptions, LibraryToolbarProjection};
 use crate::track_model::CollectionTrack;
 use crate::track_model::{PreparedTrackProjection, TrackCollectionModel, TrackProjectionRequest};
 use gtk_widgets::route::CollectionCategory;
+use gtk_widgets::sparse_model::SparseSource;
 
 const TRACK_FILTER_DEBOUNCE: Duration = Duration::from_millis(150);
 
@@ -114,7 +114,7 @@ impl<T: CollectionTrack> TrackListProjection<T> {
                 source.remove();
             }
             let request = model.projection_request();
-            if request.query.is_empty() {
+            if request.query().filter.is_empty() {
                 callback(request);
                 return;
             }
@@ -561,22 +561,25 @@ impl CatalogUi {
         self.track_page_route(options, projection, selected, favorites_only)
     }
 
-    pub fn history_route(self: &Rc<Self>, rows: Vec<library::HistoryRow>) -> MountedRoute {
+    pub fn history_route(
+        self: &Rc<Self>,
+        initial: (library::SongQuery, usize, Vec<library::HistoryRow>),
+    ) -> MountedRoute {
+        let (query, count, rows) = initial;
         let key = LibraryListKey::History;
         let database = Arc::clone(&self.library);
         let runtime = self.runtime.clone();
-        let order = rows.iter().map(|row| row.track_key).collect::<Vec<_>>();
         let settings = self.settings.current.borrow().library_list(key);
         let rows_database = database.clone();
         let load = Rc::new(
-            move |keys: Vec<library::TrackKey>,
-                  _: std::ops::Range<usize>,
-                  _: TrackProjectionRequest,
+            move |_: Vec<library::TrackKey>,
+                  range: std::ops::Range<usize>,
+                  request: TrackProjectionRequest,
                   cancellation: library::ReadCancellation| {
                 let database = rows_database.clone();
                 Box::pin(async move {
                     database
-                        .history_rows(&keys, &cancellation)
+                        .song_history_rows(request.query(), range.start, range.len(), &cancellation)
                         .await
                         .map_err(|error| error.to_string())
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
@@ -584,8 +587,8 @@ impl CatalogUi {
         );
         let model = TrackCollectionModel::with_load(
             runtime.clone(),
-            order.into(),
-            None,
+            SparseSource::Query { count },
+            Some(query),
             0,
             rows,
             settings.clone(),
@@ -613,26 +616,24 @@ impl CatalogUi {
             }
         });
         let load = Arc::new(
-            move |request: (TrackProjectionRequest, Option<library::SourceId>),
+            move |mut request: (TrackProjectionRequest, Option<library::SourceId>),
                   cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&database);
                 Box::pin(async move {
+                    request.0.query.as_mut().expect("history query").scope =
+                        library::SongScope::History { source: request.1 };
+                    let count = database
+                        .song_count(request.0.query(), &cancellation)
+                        .await
+                        .map_err(|error| error.to_string())?
+                        .max(0) as usize;
                     let rows = database
-                        .activity_history(
-                            request.1.as_ref(),
-                            &request.0.query,
-                            request.0.settings.descending,
-                            &cancellation,
-                        )
+                        .song_history_rows(request.0.query(), 0, 64, &cancellation)
                         .await
                         .map_err(|error| error.to_string())?;
                     Ok::<_, String>(PreparedTrackProjection {
                         disc_sections: Vec::new(),
-                        order: rows
-                            .iter()
-                            .map(|row| row.track_key)
-                            .collect::<Vec<_>>()
-                            .into(),
+                        order: SparseSource::Query { count },
                         first_row_position: 0,
                         first_rows: rows,
                         request: request.0,
@@ -667,6 +668,11 @@ impl CatalogUi {
                 })
                 .flatten();
             *filter_current.borrow_mut() = source.clone();
+            filter_projection
+                .model
+                .set_scope(library::SongScope::History {
+                    source: source.clone(),
+                });
             let Some(read) = filter_read.upgrade() else {
                 return;
             };
@@ -752,9 +758,9 @@ impl CatalogUi {
             row_load,
             move |row| {
                 if album_artist {
-                    PlaybackTarget::AlbumArtist(row.media_uri.clone())
+                    gtk_widgets::selection::artist_play_request(&row, true)
                 } else {
-                    PlaybackTarget::Artist(row.media_uri.clone())
+                    gtk_widgets::selection::artist_play_request(&row, false)
                 }
             },
         );
@@ -1165,24 +1171,13 @@ impl CatalogUi {
             })
         };
         let database = Arc::clone(&selected.database);
-        let source_key = selected.source_key;
-        let folder = selected.music_folder_key;
         let load = Arc::new(
             move |request: TrackProjectionRequest, cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&database);
                 Box::pin(async move {
                     let page = database
-                        .query_track_route_page(
-                            &library::TrackQuery {
-                                source: source_key,
-                                collection: None,
-                                folder,
-                                downloaded_only: false,
-                                favorites_only,
-                            },
-                            &request.query,
-                            request.settings.sort_key.track_sort(),
-                            request.settings.descending,
+                        .song_route_page(
+                            request.query(),
                             library::RouteSeedWindow::top(),
                             &cancellation,
                         )

@@ -10,9 +10,9 @@ use gtk_widgets::sparse_model::{SparseObjectModel, SparseRouteModel, SparseSourc
 
 const PLAYLIST_ENTRY_OVERSCAN: usize = 64;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PlaylistEntryProjectionRequest {
-    pub query: String,
+    pub query: library::SongQuery,
     pub settings: LibraryListSettings,
     pub first_row_position: usize,
 }
@@ -40,7 +40,11 @@ impl PlaylistEntryModel {
         settings: LibraryListSettings,
     ) -> Self {
         let applied = Rc::new(RefCell::new(PlaylistEntryProjectionRequest {
-            query: String::new(),
+            query: library::SongQuery {
+                sort: Some(settings.sort_key.track_sort()),
+                descending: settings.descending,
+                ..library::SongQuery::new(library::SongScope::Playlist(playlist_key))
+            },
             settings: settings.clone(),
             first_row_position,
         }));
@@ -54,16 +58,7 @@ impl PlaylistEntryModel {
                 let request = load_request.borrow().clone();
                 Box::pin(async move {
                     database
-                        .playlist_entries_page(
-                            playlist_key,
-                            None,
-                            request.settings.sort_key.track_sort(),
-                            request.settings.descending,
-                            &request.query,
-                            range.start,
-                            range.len(),
-                            &cancellation,
-                        )
+                        .song_playlist_rows(&request.query, range.start, range.len(), &cancellation)
                         .await
                         .map_err(|error| error.to_string())
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
@@ -82,7 +77,11 @@ impl PlaylistEntryModel {
                 sparse,
                 applied,
                 request: RefCell::new(PlaylistEntryProjectionRequest {
-                    query: String::new(),
+                    query: library::SongQuery {
+                        sort: Some(settings.sort_key.track_sort()),
+                        descending: settings.descending,
+                        ..library::SongQuery::new(library::SongScope::Playlist(playlist_key))
+                    },
                     settings,
                     first_row_position,
                 }),
@@ -104,15 +103,10 @@ impl PlaylistEntryModel {
             .ready_position(|row| row.playlist_entry_key == entry)
     }
 
-    pub fn selection_input(&self, positions: &gtk::Bitset) -> library::QueueInput {
-        let applied = self.inner.applied.borrow();
-        library::QueueInput::PlaylistSelection {
-            key: self.inner.playlist_key,
-            filter: applied.query.clone(),
-            sort: applied.settings.sort_key.track_sort(),
-            descending: applied.settings.descending,
-            ranges: gtk_widgets::selection::selected_ranges(positions),
-            context_id: format!("playlist-selection:{}", self.inner.playlist_key).into(),
+    pub fn selection_input(&self, positions: &gtk::Bitset) -> library::SongSelection {
+        library::SongSelection::Query {
+            query: self.inner.applied.borrow().query.clone(),
+            ranges: Some(gtk_widgets::selection::selected_ranges(positions)),
         }
     }
 
@@ -141,10 +135,10 @@ impl PlaylistEntryModel {
     pub fn set_query(&self, query: &str) -> bool {
         let query = query.trim();
         let mut request = self.inner.request.borrow_mut();
-        if request.query == query {
+        if request.query.filter == query {
             return false;
         }
-        request.query = query.to_string();
+        request.query.filter = query.to_string();
         true
     }
 
@@ -153,6 +147,8 @@ impl PlaylistEntryModel {
         if request.settings == settings {
             return false;
         }
+        request.query.sort = Some(settings.sort_key.track_sort());
+        request.query.descending = settings.descending;
         request.settings = settings;
         true
     }
@@ -190,7 +186,7 @@ impl PlaylistEntryModel {
         format!(
             "playlist:{}|query={}|sort={:?}|descending={}|result={}",
             self.inner.playlist_key,
-            request.query,
+            request.query.filter,
             request.settings.sort_key,
             request.settings.descending,
             self.inner.sparse.order_id()
@@ -242,32 +238,22 @@ impl PlaylistEntryModel {
         if position >= self.inner.sparse.len() {
             return;
         }
-        let row = (!collection_start)
-            .then(|| self.ready(position as u32))
-            .flatten();
-        let applied = self.inner.applied.borrow();
-        let request = if collection_start {
+        let constructor = if collection_start {
             playback::PlayRequest::ordered
         } else {
             playback::PlayRequest::captured
         };
-        queue.play(
-            request(
-                library::QueueInput::PlaylistQuery {
-                    key: self.inner.playlist_key,
-                    folder: None,
-                    filter: applied.query.clone(),
-                    sort: applied.settings.sort_key.track_sort(),
-                    descending: applied.settings.descending,
-                    context_id: self.visible_context_id().into(),
-                    anchor_entry: row.as_ref().map(|row| row.playlist_entry_key),
-                    anchor_key: row.as_ref().map(|row| row.track_key),
-                },
-                position,
-                placement,
-                collection_start,
-            )
-            .shuffled(shuffled),
-        );
+        let mut request = constructor(
+            self.inner.applied.borrow().query.clone().selection(),
+            position,
+            placement,
+            collection_start,
+        )
+        .with_context(self.visible_context_id().into())
+        .shuffled(shuffled);
+        if !collection_start && let Some(row) = self.ready(position as u32) {
+            request = request.with_anchor(row.track_key, Some(row.playlist_entry_key));
+        }
+        queue.play(request);
     }
 }

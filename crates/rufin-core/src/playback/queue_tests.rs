@@ -1,6 +1,6 @@
 use super::queue::Sequence;
 use super::{PlaybackStoreWork, enqueue_queue_save, save_pending_queue};
-use library::{Database, QueueInput, QueueRestore};
+use library::{Database, QueueRestore};
 use playback::{QueueSelection, RepeatMode};
 use std::sync::Mutex;
 
@@ -11,19 +11,14 @@ async fn replace_queue(
     count: usize,
 ) {
     let page = database
-        .read_queue(library::QueueReadRequest {
-            context_title: None,
-            input: QueueInput::Uris {
-                order: (0..count)
-                    .map(|index| format!("https://example.test/{replacement}/{index}"))
-                    .collect(),
+        .read_queue(library::QueueReadRequest::media_uris(
+            (0..count).map(|index| format!("https://example.test/{replacement}/{index}")),
+            library::QueueProvenance::Context {
                 context_id: format!("replacement-{replacement}").into(),
-                source_start: 0,
+                context_title: None,
+                source_rank: 0,
             },
-            anchor_index: 0,
-            random_start: None,
-            shuffled: None,
-        })
+        ))
         .await
         .unwrap();
     sequence.add_page(page, library::QueueReorderTarget::End, true, None);
@@ -183,18 +178,10 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
 
     let mut failed = None;
     let later = database
-        .read_queue(library::QueueReadRequest {
-            context_title: None,
-            input: QueueInput::MediaUris {
-                order: ["failed", "later"]
-                    .map(|suffix| format!("https://example.test/{suffix}"))
-                    .into(),
-                provenance: playback::Provenance::Manual,
-            },
-            anchor_index: 0,
-            random_start: None,
-            shuffled: None,
-        })
+        .read_queue(library::QueueReadRequest::media_uris(
+            ["failed", "later"].map(|suffix| format!("https://example.test/{suffix}")),
+            playback::Provenance::Manual,
+        ))
         .await
         .unwrap();
     database.clone().close().await.unwrap();

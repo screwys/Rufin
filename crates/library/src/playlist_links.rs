@@ -273,12 +273,12 @@ mod tests {
             .mark_playlist_file_synced(playlist, "third")
             .await?;
         let entries = database
-            .playlist_entry_order(
-                playlist,
-                None,
-                crate::TrackSort::Position,
-                false,
-                "",
+            .selected_playlist_entries(
+                &crate::SongQuery {
+                    sort: Some(crate::TrackSort::Position),
+                    ..crate::SongQuery::new(crate::SongScope::Playlist(playlist))
+                }
+                .selection(),
                 &crate::ReadCancellation::default(),
             )
             .await?;

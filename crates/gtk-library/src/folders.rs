@@ -197,17 +197,16 @@ pub async fn prepare_folder_route(
         folders.reverse();
     }
     let page = database
-        .query_track_route_page(
-            &library::TrackQuery {
-                source: source,
-                collection: None,
+        .song_route_page(
+            &library::SongQuery {
+                scope: library::SongScope::Tracks(source),
                 folder: exact_folder,
-                downloaded_only: false,
+                filter: "".to_string(),
+                sort: Some(settings.sort_key.track_sort()),
+                descending: settings.descending,
                 favorites_only: false,
+                downloaded_only: false,
             },
-            "",
-            settings.sort_key.track_sort(),
-            settings.descending,
             library::RouteSeedWindow::top(),
             cancellation,
         )
@@ -284,21 +283,21 @@ fn folder_page(
         .current
         .borrow()
         .library_list(LibraryListKey::Folders);
-    let queue_input = Rc::new(RefCell::new(match &source {
+    let query = library::SongQuery {
+        folder: match &source {
+            FolderTrackSource::CachedFolder(folder) => *folder,
+            _ => None,
+        },
+        sort: Some(settings.sort_key.track_sort()),
+        descending: settings.descending,
+        ..library::SongQuery::new(library::SongScope::Tracks(selected.source_key))
+    };
+    let applied_query = Rc::new(RefCell::new(match &source {
         FolderTrackSource::Live(_) => None,
-        FolderTrackSource::CachedFolder(folder) => Some(
-            rufin_core::playback::PlaybackTarget::Folder {
-                source: selected.source_key,
-                folder: *folder,
-                sort: settings.sort_key.track_sort(),
-                descending: settings.descending,
-            }
-            .in_context(folder_context_id(&path))
-            .queue_input(Some(selected.source_key), *folder),
-        ),
+        FolderTrackSource::CachedFolder(_) => Some(query.clone()),
     }));
     let row_database = Arc::clone(&selected.database);
-    let load_input = Rc::clone(&queue_input);
+    let load_input = Rc::clone(&applied_query);
     let track_load = Rc::new(
         move |keys: Vec<library::TrackKey>,
               range: std::ops::Range<usize>,
@@ -307,31 +306,9 @@ fn folder_page(
             let input = load_input.borrow().clone();
             Box::pin(async move {
                 let rows = match input {
-                    Some(library::QueueInput::Query {
-                        query:
-                            library::QueueQuery::Tracks {
-                                source,
-                                favorites_only,
-                                ..
-                            },
-                        folder,
-                        filter,
-                        sort,
-                        descending,
-                        ..
-                    }) => {
+                    Some(query) => {
                         database
-                            .track_page(
-                                source,
-                                folder,
-                                favorites_only,
-                                &filter,
-                                sort,
-                                descending,
-                                range.start,
-                                range.len(),
-                                &cancellation,
-                            )
+                            .song_rows(&query, range.start, range.len(), &cancellation)
                             .await
                     }
                     _ => database.track_rows(&keys, &cancellation).await,
@@ -373,7 +350,7 @@ fn folder_page(
         Rc::clone(&track_sparse),
         path.clone(),
         table_initial_width,
-        Rc::clone(&queue_input),
+        Rc::clone(&applied_query),
         &settings.row_fields,
     );
 
@@ -415,16 +392,8 @@ fn folder_page(
                 } else {
                     "content"
                 });
-                if let Some(library::QueueInput::Query {
-                    filter,
-                    sort,
-                    descending,
-                    ..
-                }) = &mut *queue_input.borrow_mut()
-                {
-                    *filter = request.query;
-                    *sort = request.settings.sort_key.track_sort();
-                    *descending = request.settings.descending;
+                if applied_query.borrow().is_some() {
+                    applied_query.replace(request.query);
                 }
                 folder_sparse.replace_order(folders);
                 track_sparse.replace_prepared(
@@ -456,7 +425,7 @@ fn folder_page(
                             .live_folder_track_order(
                                 source_key,
                                 &candidates,
-                                &request.query,
+                                &request.query().filter,
                                 request.settings.sort_key.track_sort(),
                                 request.settings.descending,
                                 &cancellation,
@@ -465,19 +434,10 @@ fn folder_page(
                             .into(),
                         Vec::new(),
                     ),
-                    FolderTrackSource::CachedFolder(folder) => {
+                    FolderTrackSource::CachedFolder(_) => {
                         let page = database
-                            .query_track_route_page(
-                                &library::TrackQuery {
-                                    source: source_key,
-                                    collection: None,
-                                    folder: folder,
-                                    downloaded_only: false,
-                                    favorites_only: false,
-                                },
-                                &request.query,
-                                request.settings.sort_key.track_sort(),
-                                request.settings.descending,
+                            .song_route_page(
+                                request.query(),
                                 library::RouteSeedWindow::top(),
                                 &cancellation,
                             )
@@ -485,7 +445,7 @@ fn folder_page(
                         (SparseSource::Query { count: page.count }, page.first_rows)
                     }
                 };
-                let normalized = request.query.to_lowercase();
+                let normalized = request.query().filter.to_lowercase();
                 let mut folders: Vec<FolderLink> = folders
                     .iter()
                     .filter(|folder| {
@@ -510,18 +470,24 @@ fn folder_page(
         let shell = Rc::downgrade(shell);
         let folder_sparse = Rc::clone(&folder_sparse);
         let previous = RefCell::new(crate::track_model::TrackProjectionRequest {
-            query: String::new(),
+            query: Some(query),
             settings,
         });
         Rc::new(move |query: String, refresh: bool| {
             let Some(shell) = shell.upgrade() else { return };
+            let settings = shell
+                .settings
+                .current
+                .borrow()
+                .library_list(LibraryListKey::Folders);
             let request = crate::track_model::TrackProjectionRequest {
-                query,
-                settings: shell
-                    .settings
-                    .current
-                    .borrow()
-                    .library_list(LibraryListKey::Folders),
+                query: Some(library::SongQuery {
+                    filter: query,
+                    sort: Some(settings.sort_key.track_sort()),
+                    descending: settings.descending,
+                    ..previous.borrow().query().clone()
+                }),
+                settings,
             };
             let name_changed = folder_name_field(&previous.borrow().settings.row_fields)
                 != folder_name_field(&request.settings.row_fields);
@@ -580,7 +546,7 @@ fn folder_table(
     tracks: Rc<gtk_widgets::sparse_model::SparseRouteModel<library::TrackKey, FolderTableRow>>,
     path: Vec<FolderPathItem>,
     initial_width: i32,
-    queue_input: Rc<RefCell<Option<library::QueueInput>>>,
+    applied_query: Rc<RefCell<Option<library::SongQuery>>>,
     fields: &[LibraryField],
 ) -> crate::collections::CollectionTableProjection {
     let selection = gtk::SingleSelection::new(Some(rows.clone()));
@@ -616,44 +582,29 @@ fn folder_table(
             }
             FolderTableRow::Track(track) => {
                 let anchor = position.saturating_sub(folder_count);
-                let mut input = queue_input.borrow().clone().unwrap_or_else(|| {
-                    let context_id: Arc<str> = format!(
-                        "{}|result={}",
-                        folder_context_id(&path),
-                        activate_tracks.order_id()
-                    )
-                    .into();
-                    library::QueueInput::Tracks {
-                        order: Arc::clone(
+                let input = applied_query.borrow().clone().map_or_else(
+                    || {
+                        library::SongSelection::Tracks(Arc::clone(
                             activate_tracks
                                 .order()
                                 .keys()
                                 .expect("live folder track keys"),
-                        ),
-                        context_id,
-                        source_start: 0,
-                    }
-                });
-                if let library::QueueInput::Query {
-                    anchor_key,
-                    context_id,
-                    ..
-                } = &mut input
-                {
-                    *anchor_key = Some(track.track_key);
-                    *context_id = format!(
-                        "{}|result={}",
-                        folder_context_id(&path),
-                        activate_tracks.order_id()
-                    )
-                    .into();
-                }
-                activate_shell.queue.play(playback::PlayRequest::captured(
-                    input,
-                    anchor,
-                    QueuePlacement::Now,
-                    false,
-                ));
+                        ))
+                    },
+                    library::SongQuery::selection,
+                );
+                activate_shell.queue.play(
+                    playback::PlayRequest::captured(input, anchor, QueuePlacement::Now, false)
+                        .with_context(
+                            format!(
+                                "{}|result={}",
+                                folder_context_id(&path),
+                                activate_tracks.order_id()
+                            )
+                            .into(),
+                        )
+                        .with_anchor(track.track_key, None),
+                );
             }
         }
     };

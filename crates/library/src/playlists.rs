@@ -212,28 +212,6 @@ pub struct PlaylistDetailPage {
     pub first_rows: Vec<PlaylistEntryRow>,
 }
 
-pub(crate) async fn selected_playlist_entries_on(
-    connection: &mut SqliteConnection,
-    input: &crate::QueueInput,
-) -> LibraryResult<Vec<PlaylistEntryKey>> {
-    match input {
-        crate::QueueInput::PlaylistEntries { order, .. } => Ok(order.to_vec()),
-        crate::QueueInput::PlaylistSelection {
-            key,
-            filter,
-            sort,
-            descending,
-            ranges,
-            ..
-        } => {
-            let query = playlist_query(*key, None, *sort, *descending, filter);
-            crate::source_window::selected_values_on(connection, &query, &query.entry_key, ranges)
-                .await
-        }
-        _ => unreachable!("playlist entry selection"),
-    }
-}
-
 impl Database {
     pub async fn playlist_section_positions(
         &self,
@@ -256,39 +234,6 @@ impl Database {
         .await
     }
 
-    pub async fn playlist_track_section_positions(
-        &self,
-        playlist: PlaylistKey,
-        folder: Option<FolderKey>,
-        sort: TrackSort,
-        descending: bool,
-        filter: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<crate::ScrollSection>> {
-        if !crate::scroll_sections::text_sort(sort) {
-            return Ok(Vec::new());
-        }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let query = playlist_query(playlist, folder, sort, descending, filter);
-        let sql = crate::scroll_sections::section_sql(
-            &query.select(&query.entry_key),
-            crate::scroll_sections::order_text(&query.order[0]),
-        );
-        crate::scroll_sections::decode_sections(
-            sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
-                .persistent(false)
-                .fetch_all(&mut *connection)
-                .await?,
-        )
-    }
-    pub async fn selected_playlist_entries(
-        &self,
-        input: &crate::QueueInput,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<PlaylistEntryKey>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        selected_playlist_entries_on(&mut connection, input).await
-    }
     pub async fn playlist_count(
         &self,
         source: Option<SourceKey>,
@@ -301,21 +246,6 @@ impl Database {
             playlist_order_query(source, folder, PlaylistSort::Position, false, filter, true)
                 .build_query_scalar::<i64>()
                 .fetch_one(&mut *connection)
-                .await?,
-        )
-    }
-
-    pub async fn playlist_entries_count(
-        &self,
-        playlist: PlaylistKey,
-        folder: Option<FolderKey>,
-        filter: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<i64> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(
-            playlist_query(playlist, folder, TrackSort::Position, false, filter)
-                .count(&mut connection)
                 .await?,
         )
     }
@@ -489,33 +419,6 @@ impl Database {
         Ok(rows)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub async fn playlist_entries_page(
-        &self,
-        playlist: PlaylistKey,
-        folder: Option<FolderKey>,
-        sort: TrackSort,
-        descending: bool,
-        filter: &str,
-        offset: usize,
-        limit: usize,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<PlaylistEntryRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let query = playlist_query(playlist, folder, sort, descending, filter);
-        let sql = format!("{} LIMIT ?1 OFFSET ?2", query.select(&query.entry_key));
-        let keys = sqlx::query_scalar::<_, PlaylistEntryKey>(sqlx::AssertSqlSafe(sql))
-            .bind(limit.min(PLAYLIST_ENTRY_ROW_LIMIT) as i64)
-            .bind(offset.min(i64::MAX as usize) as i64)
-            .persistent(false)
-            .fetch_all(&mut *transaction)
-            .await?;
-        let rows = load_playlist_entry_rows(&mut transaction, &keys).await?;
-        transaction.commit().await?;
-        Ok(rows)
-    }
-
     pub async fn playlist_destinations(
         &self,
         source: Option<SourceKey>,
@@ -541,40 +444,25 @@ impl Database {
         Ok(rows)
     }
 
-    pub async fn playlist_entry_order(
-        &self,
-        playlist: PlaylistKey,
-        folder: Option<FolderKey>,
-        sort: TrackSort,
-        descending: bool,
-        filter: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<PlaylistEntryKey>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Self::load_playlist_entry_order(&mut connection, playlist, folder, sort, descending, filter)
-            .await
-    }
-
     pub async fn playlist_detail_page(
         &self,
-        playlist: PlaylistKey,
-        folder: Option<FolderKey>,
-        sort: TrackSort,
-        descending: bool,
+        input: &crate::SongQuery,
         window: RouteSeedWindow,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<PlaylistDetailPage>> {
+        let crate::SongScope::Playlist(playlist) = input.scope else {
+            return Err(LibraryError::InvalidRequest(
+                "Playlist detail needs a playlist query".into(),
+            ));
+        };
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let summary = Self::load_playlist_rows(&mut transaction, &[playlist])
             .await?
             .pop();
         let page = if let Some(summary) = summary {
-            let count = playlist_query(playlist, folder, TrackSort::Position, false, "")
-                .count(&mut transaction)
-                .await?
-                .max(0) as usize;
-            let query = playlist_query(playlist, folder, sort, descending, "");
+            let query = crate::selection::song_query_on(&mut transaction, input).await?;
+            let count = query.count(&mut transaction).await?.max(0) as usize;
             let range = window.range(count);
             let first_row_position = range.start;
             let keys = crate::source_window::selected_values_on(
@@ -596,48 +484,6 @@ impl Database {
         };
         transaction.commit().await?;
         Ok(page)
-    }
-
-    async fn load_playlist_entry_order(
-        connection: &mut SqliteConnection,
-        playlist: PlaylistKey,
-        folder: Option<FolderKey>,
-        sort: TrackSort,
-        descending: bool,
-        filter: &str,
-    ) -> LibraryResult<Vec<PlaylistEntryKey>> {
-        let query = playlist_query(playlist, folder, sort, descending, filter);
-        Ok(
-            sqlx::query_scalar::<_, PlaylistEntryKey>(sqlx::AssertSqlSafe(
-                query.select(&query.entry_key),
-            ))
-            .fetch_all(connection)
-            .await?,
-        )
-    }
-
-    pub async fn playlist_media_uri_order(
-        &self,
-        playlist: PlaylistKey,
-        folder: Option<FolderKey>,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<String>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(sqlx::query_scalar::<_, String>(
-            "SELECT track.media_uri FROM playlist_entries entry
-             JOIN playlists playlist USING(playlist_key)
-             JOIN tracks track USING(track_key)
-             WHERE playlist.playlist_key=?1
-               AND (playlist.source_key IS NULL OR ?2 IS NULL OR EXISTS (
-                 SELECT 1 FROM track_folders scope
-                 WHERE scope.track_key=track.track_key AND scope.folder_key=?2
-               ))
-             ORDER BY entry.position,entry.playlist_entry_key",
-        )
-        .bind(playlist)
-        .bind(folder)
-        .fetch_all(&mut *connection)
-        .await?)
     }
 
     pub async fn playlist_rows(
@@ -1678,17 +1524,13 @@ pub(crate) fn playlist_query(
         entry_key: "entry.playlist_entry_key".into(),
         order: sort.order_terms(descending, true),
     };
-    let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
     if sort != TrackSort::Position {
         query.order.push("entry.position ASC".into());
     }
     if let Some(folder) = folder {
         query.predicate.push_str(&format!(" AND (playlist.source_key IS NULL OR EXISTS(SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.track_key=entry.track_key AND scope.folder_key={}))",folder.raw()));
     }
-    if !filter.is_empty() {
-        let filter = crate::source_window::quote(&filter);
-        query.predicate.push_str(&format!(" AND (instr(lower(COALESCE(track.title,'')||' '||COALESCE(track.display_artist,'')||' '||COALESCE(track.display_album,'')),{filter})>0 OR CAST(track.year AS TEXT)={filter})"));
-    }
+    crate::tracks::track_filter(&mut query, None, filter, false);
     query
 }
 

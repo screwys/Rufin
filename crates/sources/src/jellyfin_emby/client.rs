@@ -1250,10 +1250,7 @@ mod tests {
             .unwrap();
         let page = database
             .playlist_detail_page(
-                key,
-                None,
-                library::TrackSort::Position,
-                false,
+                &library::SongQuery::new(library::SongScope::Playlist(key)),
                 library::RouteSeedWindow::top(),
                 &cancellation,
             )
@@ -1830,17 +1827,8 @@ mod tests {
             .expect("apply exact removal");
         assert!(
             database
-                .query_track_route_page(
-                    &library::TrackQuery {
-                        source: source_key,
-                        collection: None,
-                        folder: None,
-                        downloaded_only: false,
-                        favorites_only: false
-                    },
-                    "",
-                    library::TrackSort::Title,
-                    false,
+                .song_route_page(
+                    &library::SongQuery::new(library::SongScope::Tracks(source_key)),
                     library::RouteSeedWindow::top(),
                     &cancellation
                 )

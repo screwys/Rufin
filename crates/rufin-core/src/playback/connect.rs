@@ -64,19 +64,13 @@ impl RufinPlayback {
         let restore = if changed {
             let mut page = self
                 .database
-                .read_queue(library::QueueReadRequest {
-                    input: library::QueueInput::Items(
-                        state
-                            .rows
-                            .iter()
-                            .map(|row| (row.item.clone(), row.provenance.clone()))
-                            .collect(),
-                    ),
-                    context_title: None,
-                    anchor_index: 0,
-                    random_start: None,
-                    shuffled: None,
-                })
+                .read_queue(library::QueueReadRequest::items(
+                    state
+                        .rows
+                        .iter()
+                        .map(|row| (row.item.clone(), row.provenance.clone()))
+                        .collect(),
+                ))
                 .await
                 .map_err(string_error)?;
             for (entry, row) in page.entries.iter_mut().zip(&state.rows) {
@@ -153,22 +147,13 @@ impl RufinPlayback {
 
     async fn input(
         &self,
-        input: library::QueueInput,
-        title: Option<Arc<library::QueueContextTitle>>,
-        anchor: usize,
-        shuffled: Option<u64>,
+        input: library::QueueReadRequest,
         placement: library::QueuePlacement,
         target: Option<library::QueueReorderTarget>,
     ) -> Result<(), String> {
         let page = self
             .database
-            .read_queue(library::QueueReadRequest {
-                input: input,
-                context_title: title,
-                anchor_index: anchor,
-                random_start: None,
-                shuffled,
-            })
+            .read_queue(input)
             .await
             .map_err(string_error)?;
         if page.entries.is_empty() {
@@ -543,21 +528,10 @@ impl PlaybackOwner {
                 .playback
                 .projection()
                 .is_ok_and(|projection| projection.view.controls.shuffle_enabled);
-        let anchor = request.anchor_index;
-        let (batch, placement) = request.compact_batch(random_u64());
+        let (input, placement) = request.into_load(random_u64());
         self.runtime.spawn(async move {
             let _command = receiver.commands.lock().await;
-            if let Err(error) = receiver
-                .input(
-                    batch.input().clone(),
-                    batch.context_title().cloned(),
-                    anchor,
-                    batch.shuffled_seed(),
-                    placement,
-                    None,
-                )
-                .await
-            {
+            if let Err(error) = receiver.input(input, placement, None).await {
                 let _ = receiver.playback.command(Command::OperationFailed(error));
             }
         });
@@ -587,13 +561,10 @@ impl PlaybackOwner {
                 let _command = receiver.commands.lock().await;
                 receiver
                     .input(
-                        library::QueueInput::MediaUris {
-                            order: candidates.into(),
-                            provenance: playback::Provenance::Radio,
-                        },
-                        None,
-                        0,
-                        None,
+                        library::QueueReadRequest::media_uris(
+                            candidates,
+                            playback::Provenance::Radio,
+                        ),
                         request.placement,
                         None,
                     )
@@ -640,13 +611,10 @@ impl PlaybackOwner {
                 let _command = receiver.commands.lock().await;
                 receiver
                     .input(
-                        library::QueueInput::MediaUris {
-                            order: candidates.into(),
-                            provenance: playback::Provenance::Random,
-                        },
-                        None,
-                        0,
-                        None,
+                        library::QueueReadRequest::media_uris(
+                            candidates,
+                            playback::Provenance::Random,
+                        ),
                         request.placement,
                         None,
                     )
@@ -668,14 +636,7 @@ impl PlaybackOwner {
             self.runtime.spawn(async move {
                 let _command = receiver.commands.lock().await;
                 if let Err(error) = receiver
-                    .input(
-                        input,
-                        None,
-                        0,
-                        None,
-                        library::QueuePlacement::End,
-                        Some(target),
-                    )
+                    .input(input, library::QueuePlacement::End, Some(target))
                     .await
                 {
                     let _ = receiver.playback.command(Command::OperationFailed(error));

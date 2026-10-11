@@ -6,12 +6,10 @@ use crate::{
 };
 use adw::prelude::*;
 use gtk::{gio, glib};
+use gtk_widgets::selection::track_play_request;
 use gtk_widgets::{mounted_route::RouteCurrentTrack, route::Route};
 use library::{ActivityOverview, HistoryRow};
-use rufin_core::{
-    playback::PlaybackTarget,
-    settings::{LibraryField, LibraryListKey},
-};
+use rufin_core::settings::{LibraryField, LibraryListKey};
 use std::{cell::RefCell, rc::Rc};
 
 pub struct ActivityCollections {
@@ -61,7 +59,7 @@ impl ActivityCollections {
             if let Some(item) = rows.item(position).and_downcast::<glib::BoxedAnyObject>() {
                 let row = item.borrow::<HistoryRow>();
                 (shell.media_menus.play_target)(
-                    &PlaybackTarget::Track(row.media_uri.clone()),
+                    &track_play_request(row.track_key),
                     playback::QueuePlacement::Now,
                     false,
                 );

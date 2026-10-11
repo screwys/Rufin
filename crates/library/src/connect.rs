@@ -673,7 +673,7 @@ impl Database {
         let mut connection = self.acquire_reader().await?;
         let projection = PROJECTIONS.iter().find(|p| p.kind == "track").unwrap();
         let payload: Option<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT {} FROM tracks r WHERE media_uri=?1",
+            "SELECT {} FROM tracks r WHERE media_uri=?1 AND (r.indexed=1 OR EXISTS(SELECT 1 FROM connect_collection transport WHERE transport.media_uri=r.media_uri))",
             object(projection, "r")
         )))
         .bind(media_uri)
@@ -986,13 +986,17 @@ async fn remember_media(
         connection,
         uri,
         crate::tracks::SongMetadata {
-            title: value["title"].as_str(),
+            title: value["title"]
+                .as_str()
+                .or_else(|| value["track_title"].as_str()),
             artist: value["display_artist"]
                 .as_str()
-                .or_else(|| value["artist"].as_str()),
+                .or_else(|| value["artist"].as_str())
+                .or_else(|| value["artist_name"].as_str()),
             album: value["display_album"]
                 .as_str()
-                .or_else(|| value["album"].as_str()),
+                .or_else(|| value["album"].as_str())
+                .or_else(|| value["album_title"].as_str()),
             album_display_artist: value["album_display_artist"].as_str(),
             duration_millis: value["duration_millis"].as_i64(),
             disc_number: value["disc_number"].as_i64(),
@@ -1219,8 +1223,23 @@ async fn apply_record(
     } else {
         None
     };
+    let remembered = if record.kind == "listen" {
+        let uri = value["media_uri"].as_str().ok_or_else(|| {
+            LibraryError::InvalidRequest("Connect listen media is missing".into())
+        })?;
+        let before: i64 = sqlx::query_scalar("SELECT total_changes()")
+            .fetch_one(&mut *connection)
+            .await?;
+        remember_media(connection, uri, value).await?;
+        sqlx::query_scalar::<_, i64>("SELECT total_changes()")
+            .fetch_one(&mut *connection)
+            .await?
+            != before
+    } else {
+        false
+    };
     if same_record(old.as_mut(), value) {
-        return Ok(false);
+        return Ok(remembered);
     }
     match record.kind.as_str() {
         "cache_lyrics" => {
@@ -1509,6 +1528,59 @@ mod tests {
         let database = Database::open(directory.path().join("profile.sqlite"))
             .await
             .unwrap();
+        {
+            let mut writer = database.writer().await.unwrap();
+            sqlx::raw_sql("INSERT INTO listens(source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped)
+                VALUES ('removed','https://example.org/retained','Old title','Old artist','Old album',1,'2026-10',1000,900,0),
+                       ('removed','https://example.org/retained','Retained song','Retained artist','Retained album',2,'2026-10',2000,1900,0);
+                PRAGMA user_version=56;")
+                .execute(writer.as_mut().unwrap()).await.unwrap();
+        }
+        database.close().await.unwrap();
+        let database = Database::open(directory.path().join("profile.sqlite"))
+            .await
+            .unwrap();
+        let recovered = database
+            .track_row_by_uri(
+                "https://example.org/retained",
+                &crate::ReadCancellation::new(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(recovered.title, "Retained song");
+        assert_eq!(recovered.artist, "Retained artist");
+        assert_eq!(recovered.album, "Retained album");
+        {
+            let mut reader = database.acquire_reader().await.unwrap();
+            assert_eq!(
+                crate::schema::pragma(&mut reader, "user_version")
+                    .await
+                    .unwrap(),
+                57
+            );
+            assert_eq!(
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT local_play_count FROM tracks WHERE track_key=?1"
+                )
+                .bind(recovered.track_key)
+                .fetch_one(&mut *reader)
+                .await
+                .unwrap(),
+                2
+            );
+        }
+        let selection = crate::SongQuery::new(crate::SongScope::History {
+            source: Some(crate::SourceId::new("removed")),
+        })
+        .selection();
+        assert_eq!(
+            database
+                .selected_track_keys(&selection, &crate::ReadCancellation::new())
+                .await
+                .unwrap(),
+            vec![recovered.track_key]
+        );
         let record = ConnectRecord {
             kind: "listen".into(),
             key: "shared-listen".into(),
@@ -1520,14 +1592,28 @@ mod tests {
             .connect_apply(std::slice::from_ref(&record))
             .await
             .unwrap();
-        database.connect_apply(&[record]).await.unwrap();
+        assert!(!database.connect_apply(&[record]).await.unwrap());
+        let history = database
+            .song_history_rows(
+                &crate::SongQuery::new(crate::SongScope::History { source: None }),
+                0,
+                100,
+                &crate::ReadCancellation::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].title, "Retained song");
+        assert_eq!(history[1].title, "Song");
+        assert_eq!(history[1].artist, "Artist");
+        assert_eq!(history[1].album, "Album");
         let mut connection = database.acquire_reader().await.unwrap();
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT count(*) FROM listens")
                 .fetch_one(&mut *connection)
                 .await
                 .unwrap(),
-            1
+            3
         );
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT count(*) FROM listen_outbox")

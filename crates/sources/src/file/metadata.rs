@@ -1662,15 +1662,8 @@ mod tests {
             .unwrap();
         assert_eq!(
             database
-                .track_count(
-                    &library::TrackQuery {
-                        source: key,
-                        collection: None,
-                        folder: None,
-                        favorites_only: false,
-                        downloaded_only: false,
-                    },
-                    "",
+                .song_count(
+                    &library::SongQuery::new(library::SongScope::Tracks(key)),
                     &library::ReadCancellation::new()
                 )
                 .await
@@ -1773,15 +1766,8 @@ mod tests {
             .unwrap();
         assert_eq!(
             database
-                .track_count(
-                    &library::TrackQuery {
-                        source: key,
-                        collection: None,
-                        folder: None,
-                        favorites_only: false,
-                        downloaded_only: false,
-                    },
-                    "",
+                .song_count(
+                    &library::SongQuery::new(library::SongScope::Tracks(key)),
                     &library::ReadCancellation::new()
                 )
                 .await

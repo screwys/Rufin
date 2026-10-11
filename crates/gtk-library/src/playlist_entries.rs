@@ -742,7 +742,7 @@ fn install_playlist_entry_drag(
         if selection.playlist != playlist || !selection.writable || selection.count != 1 {
             return false;
         }
-        let library::QueueInput::PlaylistEntries { order, .. } = &selection.input else {
+        let library::SongSelection::PlaylistEntries(order) = &selection.input else {
             return false;
         };
         let Some(entry) = order.first().copied() else {

@@ -236,7 +236,9 @@ impl AlbumCollectionModels {
             },
         );
         gtk_widgets::media_drag::install_collection_selection(&sparse, request, load, |row| {
-            rufin_core::playback::PlaybackTarget::Album(row.media_uri.clone())
+            gtk_widgets::selection::collection_play_request(library::SongScope::Album(
+                row.album_key,
+            ))
         });
         sparse.seed_matching_at(first_row_position, first_rows, |row| row.album_key);
         Self {
@@ -1748,24 +1750,22 @@ fn play_album_track(
         .current
         .borrow()
         .library_list(LibraryListKey::AlbumDetailTracks);
-    queue.play(playback::PlayRequest::ordered(
-        library::QueueInput::Query {
-            query: library::QueueQuery::Collection {
-                collection: library::QueueCollection::AlbumKey(album),
-                downloaded_only: false,
-                favorites_only: false,
-            },
-            folder: selected.music_folder_key,
-            filter: String::new(),
-            sort: settings.sort_key.track_sort(),
-            descending: settings.descending,
-            context_id: format!("album:{album}").into(),
-            anchor_key: Some(track_key),
-        },
-        0,
-        QueuePlacement::Now,
-        false,
-    ));
+    queue.play(
+        playback::PlayRequest::ordered(
+            library::SongQuery {
+                folder: selected.music_folder_key,
+                sort: Some(settings.sort_key.track_sort()),
+                descending: settings.descending,
+                ..library::SongQuery::new(library::SongScope::Album(album))
+            }
+            .selection(),
+            0,
+            QueuePlacement::Now,
+            false,
+        )
+        .with_context(format!("album:{album}").into())
+        .with_anchor(track_key, None),
+    );
 }
 
 pub fn album_detail_track_text(track: &TrackRow, index: usize, field: LibraryField) -> String {

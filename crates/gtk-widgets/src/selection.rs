@@ -3,10 +3,7 @@ use library::{PlaylistEntryKey, PlaylistKey};
 use playback::QueuePlacement;
 use std::{cell::RefCell, sync::Arc};
 pub(crate) type CollectionSelection = Box<
-    dyn Fn(
-        &rufin_core::playback::PlaybackTarget,
-        &gtk::Bitset,
-    ) -> Option<crate::media_drag::CollectionTargets>,
+    dyn Fn(&playback::PlayRequest, &gtk::Bitset) -> Option<crate::media_drag::CollectionTargets>,
 >;
 mod position_selection_imp {
     use super::*;
@@ -233,7 +230,7 @@ impl PositionSelectionModel {
 
     pub(crate) fn collection_selection(
         &self,
-        target: &rufin_core::playback::PlaybackTarget,
+        target: &playback::PlayRequest,
         positions: &gtk::Bitset,
     ) -> Option<crate::media_drag::CollectionTargets> {
         if let Some(capture) = self.imp().collection_selection.borrow().as_ref() {
@@ -250,7 +247,7 @@ impl PositionSelectionModel {
 
 #[derive(Clone)]
 pub struct TrackSelectionSnapshot {
-    pub input: library::QueueInput,
+    pub input: library::SongSelection,
     pub count: usize,
 }
 impl TrackSelectionSnapshot {
@@ -273,7 +270,7 @@ pub struct PlaylistEntrySelectionSnapshot {
     pub writable: bool,
     pub playlist: PlaylistKey,
     pub playlist_name: Arc<str>,
-    pub input: library::QueueInput,
+    pub input: library::SongSelection,
     pub count: usize,
 }
 impl PlaylistEntrySelectionSnapshot {
@@ -360,4 +357,94 @@ mod tests {
             ["one", "three"]
         );
     }
+}
+
+pub fn collection_play_request(scope: library::SongScope) -> playback::PlayRequest {
+    let context = match &scope {
+        library::SongScope::Tracks(key) => format!("tracks:{key}"),
+        library::SongScope::Album(key) => format!("album:{key}"),
+        library::SongScope::Artist { key, album_artist } => format!(
+            "{}:{key}",
+            if *album_artist {
+                "album-artist"
+            } else {
+                "artist"
+            }
+        ),
+        library::SongScope::Genre(key) => format!("genre:{key}"),
+        library::SongScope::Mood(key) => format!("mood:{key}"),
+        library::SongScope::Playlist(key) => format!("playlist:{key}"),
+        library::SongScope::Smart { key, .. } => format!("smart-playlist:{key}"),
+        library::SongScope::History { source } => format!("history:{source:?}"),
+    };
+    playback::PlayRequest::ordered(
+        library::SongQuery::new(scope).selection(),
+        0,
+        QueuePlacement::Now,
+        true,
+    )
+    .with_context(context.into())
+}
+
+pub fn track_play_request(key: library::TrackKey) -> playback::PlayRequest {
+    playback::PlayRequest::ordered(
+        library::SongSelection::Tracks(Arc::from([key])),
+        0,
+        QueuePlacement::Now,
+        false,
+    )
+}
+
+pub fn smart_play_request(
+    key: library::SmartPlaylistKey,
+    selected: Option<&rufin_core::runtime::SelectedLibrary>,
+) -> playback::PlayRequest {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |value| value.as_secs() as i64);
+    let query = library::SongQuery {
+        folder: selected.and_then(|selected| selected.music_folder_key),
+        ..library::SongQuery::new(library::SongScope::Smart {
+            key,
+            source: selected.map(|selected| selected.source_key),
+            now,
+        })
+    };
+    playback::PlayRequest::ordered(query.selection(), 0, QueuePlacement::Now, true)
+        .with_context(format!("smart-playlist:{key}").into())
+}
+
+pub fn album_play_request(row: &library::AlbumRow) -> playback::PlayRequest {
+    playback::PlayRequest::ordered(
+        library::SongQuery::new(library::SongScope::Album(row.album_key)).selection(),
+        0,
+        QueuePlacement::Now,
+        true,
+    )
+    .with_context(format!("album:{}", row.media_uri).into())
+}
+
+pub fn artist_play_request(row: &library::ArtistRow, album_artist: bool) -> playback::PlayRequest {
+    playback::PlayRequest::ordered(
+        library::SongQuery::new(library::SongScope::Artist {
+            key: row.artist_key,
+            album_artist,
+        })
+        .selection(),
+        0,
+        QueuePlacement::Now,
+        true,
+    )
+    .with_context(
+        format!(
+            "{}:{}",
+            if album_artist {
+                "album-artist"
+            } else {
+                "artist"
+            },
+            row.media_uri
+        )
+        .into(),
+    )
 }

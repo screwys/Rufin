@@ -1,6 +1,5 @@
 //! Peer playback uses the same authenticated requests and paged queue transfer as Connect.
 use super::*;
-use playback::QueueCommandPort;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct ReceiverState {
@@ -182,15 +181,15 @@ impl ConnectOwner {
             }
             let input = self
                 .database
-                .queue_input_from_transfer(&transfer, header.total, header.current)
+                .queue_from_transfer(&transfer, header.total, header.current)
                 .await
                 .map_err(error)?;
             let playback = Arc::clone(&self.playback);
             tokio::task::spawn_blocking(move || match target {
-                Some(target) => playback.insert(input, target),
+                Some(target) => playback.insert_load(input, target),
                 None => playback::QueueCommandPort::play(
                     playback.as_ref(),
-                    playback::PlayRequest::ordered(input, 0, placement, false),
+                    playback::PlayRequest::from_load(input, placement),
                 ),
             })
             .await

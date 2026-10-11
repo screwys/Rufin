@@ -20,194 +20,45 @@ impl AndroidLibrary {
         media_uri: String,
         source_id: Option<String>,
     ) -> Result<crate::downloads::AndroidTargetDownloadStatus, AndroidError> {
+        let _ = source_id;
+        let query = route
+            .as_deref()
+            .map(|route| self.target_query(route))
+            .transpose()?;
         let database = self.database.clone();
-        let selected = self.source.selected_library();
-        let source_id = source_id.or_else(|| {
-            library::source_entity_parts(&media_uri).map(|(source, _, _)| source.to_string())
-        });
-        let route = route
-            .map(|route| serde_json::from_str::<Route>(&route))
-            .transpose()
-            .map_err(error)?;
-        let folder_query = if matches!(route, Some(Route::Folders { .. })) {
-            Some(self.browse_query(
-                route.clone().unwrap(),
-                "tracks".into(),
-                String::new(),
-                String::new(),
-                false,
-                false,
-                false,
-                None,
-            )?)
-        } else {
-            None
-        };
         self.runtime
             .spawn(async move {
                 let cancel = ReadCancellation::new();
-                let source = match source_id {
-                    Some(id) => database
-                        .source_identity_key(&sources::SourceId::new(id))
-                        .await
-                        .map_err(error)?,
-                    None => selected.as_ref().map(|selected| selected.source_key),
-                };
-                let (total, downloaded) = match route {
-                    None => (
+                let (total, downloaded) = if let Some(query) = query {
+                    let selection = query.target_selection().await?;
+                    if let SongSelection::Query { mut query, .. } = selection {
+                        let total = database.song_count(&query, &cancel).await.map_err(error)?;
+                        query.downloaded_only = true;
+                        (
+                            total,
+                            database.song_count(&query, &cancel).await.map_err(error)?,
+                        )
+                    } else {
+                        let uris = database
+                            .selected_track_uris(&selection, &cancel)
+                            .await
+                            .map_err(error)?;
+                        (
+                            uris.len() as i64,
+                            database
+                                .downloaded_media_count(&uris, &cancel)
+                                .await
+                                .map_err(error)?,
+                        )
+                    }
+                } else {
+                    (
                         1,
                         database
                             .downloaded_media_count(&[media_uri], &cancel)
                             .await
                             .map_err(error)?,
-                    ),
-                    Some(Route::AlbumDetail(uri)) => database
-                        .album_row_by_media_uri(&uri, &cancel)
-                        .await
-                        .map_err(error)?
-                        .map(|row| (row.track_count, row.downloaded_count))
-                        .unwrap_or_default(),
-                    Some(
-                        Route::ArtistDetail(uri)
-                        | Route::ArtistDiscography(uri)
-                        | Route::ArtistTracks(uri)
-                        | Route::ArtistFavoriteTracks(uri),
-                    ) => database
-                        .artist_row_by_media_uri(&uri, &cancel)
-                        .await
-                        .map_err(error)?
-                        .map(|row| (row.track_count, row.downloaded_count))
-                        .unwrap_or_default(),
-                    Some(
-                        Route::AlbumArtistDetail(uri)
-                        | Route::AlbumArtistDiscography(uri)
-                        | Route::AlbumArtistTracks(uri)
-                        | Route::AlbumArtistFavoriteTracks(uri),
-                    ) => {
-                        let collection = library::QueueCollection::Artist {
-                            media_uri: uri,
-                            album_artist: true,
-                        };
-                        let total = database
-                            .collection_tracks_count(&collection, None, "", false, &cancel)
-                            .await
-                            .map_err(error)?;
-                        let downloaded = if let Some(source) = source {
-                            database
-                                .track_count(
-                                    &library::TrackQuery {
-                                        source,
-                                        collection: Some(collection),
-                                        folder: None,
-                                        favorites_only: false,
-                                        downloaded_only: true,
-                                    },
-                                    "",
-                                    &cancel,
-                                )
-                                .await
-                                .map_err(error)?
-                        } else {
-                            0
-                        };
-                        (total, downloaded)
-                    }
-                    Some(Route::PlaylistDetail(key)) => database
-                        .playlist_rows(&[key], &cancel)
-                        .await
-                        .map_err(error)?
-                        .first()
-                        .map(|row| (row.track_count, row.downloaded_count))
-                        .unwrap_or_default(),
-                    Some(Route::SmartPlaylistDetail(key)) => database
-                        .smart_playlist_rows(
-                            source,
-                            &[key],
-                            selected.as_ref().and_then(|source| source.music_folder_key),
-                            std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map_err(error)?
-                                .as_secs() as i64,
-                            &cancel,
-                        )
-                        .await
-                        .map_err(error)?
-                        .first()
-                        .map(|row| (row.track_count, row.downloaded_count))
-                        .unwrap_or_default(),
-                    Some(Route::GenreDetail(key)) => {
-                        if let Some(source) = source {
-                            database
-                                .genre_rows(source, &[key], None, &cancel)
-                                .await
-                                .map_err(error)?
-                                .first()
-                                .map(|row| (row.track_count, row.downloaded_count))
-                                .unwrap_or_default()
-                        } else {
-                            (0, 0)
-                        }
-                    }
-                    Some(Route::MoodDetail(key)) => {
-                        if let Some(source) = source {
-                            database
-                                .mood_rows(source, &[key], None, &cancel)
-                                .await
-                                .map_err(error)?
-                                .first()
-                                .map(|row| (row.track_count, row.downloaded_count))
-                                .unwrap_or_default()
-                        } else {
-                            (0, 0)
-                        }
-                    }
-                    Some(Route::Folders { .. }) => {
-                        let query = folder_query.unwrap();
-                        let source = query.selected().source_key;
-                        match query.folder_projection().await.map_err(error)? {
-                            FolderProjection::Live { candidates, .. } => (
-                                database
-                                    .live_folder_track_count(source, candidates, "", &cancel)
-                                    .await
-                                    .map_err(error)?,
-                                database
-                                    .downloaded_media_count(candidates, &cancel)
-                                    .await
-                                    .map_err(error)?,
-                            ),
-                            FolderProjection::Cached(folder) => (
-                                database
-                                    .track_count(
-                                        &library::TrackQuery {
-                                            source,
-                                            collection: None,
-                                            folder: *folder,
-                                            favorites_only: false,
-                                            downloaded_only: false,
-                                        },
-                                        "",
-                                        &cancel,
-                                    )
-                                    .await
-                                    .map_err(error)?,
-                                database
-                                    .track_count(
-                                        &library::TrackQuery {
-                                            source,
-                                            collection: None,
-                                            folder: *folder,
-                                            favorites_only: false,
-                                            downloaded_only: true,
-                                        },
-                                        "",
-                                        &cancel,
-                                    )
-                                    .await
-                                    .map_err(error)?,
-                            ),
-                        }
-                    }
-                    _ => (0, 0),
+                    )
                 };
                 Ok(crate::downloads::AndroidTargetDownloadStatus {
                     total: total.max(0) as u64,
@@ -224,42 +75,23 @@ impl AndroidLibrary {
         media_uri: String,
         remove: bool,
     ) -> Result<(), AndroidError> {
-        if let Some(route) = route.as_deref()
-            && matches!(
-                serde_json::from_str::<Route>(route).map_err(error)?,
-                Route::Folders { .. }
-            )
-        {
-            let media_uris = self.resolve_target_uris(route).await?;
-            if remove {
-                self.source.remove_download_media(media_uris);
-            } else {
-                self.source.download_media(
-                    downloads::DownloadSubject::for_media_uris(
-                        route,
-                        Some(&localization::tr("Folder")),
-                        &media_uris,
-                    ),
-                    media_uris,
-                );
-            }
-            return Ok(());
-        }
-        let target = match route {
-            Some(route) => self.playback_target(&route).await?,
-            None => rufin_core::playback::PlaybackTarget::Track(media_uri),
+        let uris = match route.as_deref() {
+            Some(route) => self.resolve_target_uris(route).await?,
+            None => vec![media_uri],
         };
-        let selected = self.source.selected_library();
-        let source = selected.as_ref().map(|selected| selected.source_key);
-        let folder = selected
-            .as_ref()
-            .and_then(|selected| selected.music_folder_key);
-        let result = if remove {
-            self.source.remove_download_target(target, source, folder)
+        if remove {
+            self.source.remove_download_media(uris);
         } else {
-            self.source.download_target(target, source, folder)
-        };
-        result.recv().await.map_err(error)?.map_err(error)
+            self.source.download_media(
+                downloads::DownloadSubject::for_media_uris(
+                    route.as_deref().unwrap_or("track"),
+                    None,
+                    &uris,
+                ),
+                uris,
+            );
+        }
+        Ok(())
     }
 }
 
@@ -315,6 +147,7 @@ impl AndroidLibrary {
             release_section,
             release_counts: tokio::sync::OnceCell::new(),
             folder_projection: tokio::sync::OnceCell::new(),
+            songs: tokio::sync::OnceCell::new(),
             filter,
             sort,
             descending,
@@ -326,55 +159,27 @@ impl AndroidLibrary {
         }))
     }
 
-    pub(super) async fn playback_target(
-        &self,
-        route: &str,
-    ) -> Result<rufin_core::playback::PlaybackTarget, AndroidError> {
-        use rufin_core::playback::PlaybackTarget;
-        let target = match serde_json::from_str::<Route>(route).map_err(error)? {
-            Route::AlbumDetail(uri) => PlaybackTarget::Album(uri),
-            Route::ArtistDetail(uri) => PlaybackTarget::Artist(uri),
-            Route::AlbumArtistDetail(uri) => PlaybackTarget::AlbumArtist(uri),
-            Route::GenreDetail(key) => PlaybackTarget::Genre(key),
-            Route::MoodDetail(key) => PlaybackTarget::Mood(key),
-            Route::PlaylistDetail(key) => PlaybackTarget::Playlist(key),
-            Route::SmartPlaylistDetail(key) => PlaybackTarget::SmartPlaylist(key),
-            _ => return Err(error("Choose a collection")),
-        };
-        Ok(target)
+    fn target_query(&self, route: &str) -> Result<Arc<AndroidBrowseQuery>, AndroidError> {
+        let route = serde_json::from_str::<Route>(route).map_err(error)?;
+        self.browse_query(
+            route,
+            "tracks".into(),
+            String::new(),
+            String::new(),
+            false,
+            false,
+            false,
+            None,
+        )
     }
     async fn resolve_target_uris(&self, route: &str) -> Result<Vec<String>, AndroidError> {
-        let parsed = serde_json::from_str::<Route>(route).map_err(error)?;
-        if matches!(parsed, Route::Folders { .. }) {
-            let query = self.browse_query(
-                parsed,
-                "tracks".into(),
-                String::new(),
-                String::new(),
-                false,
-                false,
-                false,
-                None,
-            )?;
-            return self
-                .runtime
-                .spawn(async move { query.folder_target_uris().await })
-                .await
-                .map_err(error)?;
-        }
-        let target = self.playback_target(route).await?;
-        let selected = self.source.selected_library();
-        let database = self.database.clone();
+        let query = self.target_query(route)?;
         self.runtime
             .spawn(async move {
-                target
-                    .resolve_media_uris(
-                        &database,
-                        selected.as_ref().map(|selected| selected.source_key),
-                        selected
-                            .as_ref()
-                            .and_then(|selected| selected.music_folder_key),
-                    )
+                let selection = query.target_selection().await?;
+                query
+                    .database
+                    .selected_track_uris(&selection, &ReadCancellation::new())
                     .await
                     .map_err(error)
             })
@@ -541,48 +346,22 @@ impl AndroidLibrary {
         shuffled: bool,
         context_title: Option<String>,
     ) -> Result<(), AndroidError> {
-        let parsed = serde_json::from_str::<Route>(&route).map_err(error)?;
-        let context_title = context_caption(&parsed, context_title);
-        if matches!(parsed, Route::Folders { .. }) {
-            let query = self.browse_query(
-                parsed,
-                "tracks".into(),
-                String::new(),
-                String::new(),
-                false,
-                false,
-                false,
-                None,
-            )?;
-            let placement = queue_placement(&placement)?;
-            return self
-                .runtime
-                .spawn(async move {
-                    query
-                        .folder_target_play(placement, shuffled, context_title)
-                        .await
-                })
-                .await
-                .map_err(error)?;
-        }
-        let target = self.playback_target(&route).await?;
-        let selected = self.source.selected_library();
-        self.queue.play(
-            playback::PlayRequest::ordered(
-                target.queue_input(
-                    selected.as_ref().map(|selected| selected.source_key),
-                    selected
-                        .as_ref()
-                        .and_then(|selected| selected.music_folder_key),
-                ),
-                0,
-                queue_placement(&placement)?,
-                true,
-            )
-            .with_context_title(context_title)
-            .shuffled(shuffled),
-        );
-        Ok(())
+        let query = self.target_query(&route)?;
+        let context_title = context_caption(&query.route, context_title);
+        let placement = queue_placement(&placement)?;
+        self.runtime
+            .spawn(async move {
+                let selection = query.target_selection().await?;
+                query.queue.play(
+                    playback::PlayRequest::ordered(selection, 0, placement, true)
+                        .with_context(query.context_id())
+                        .with_context_title(context_title)
+                        .shuffled(shuffled),
+                );
+                Ok(())
+            })
+            .await
+            .map_err(error)?
     }
 
     pub async fn play_radio(
@@ -731,23 +510,16 @@ impl AndroidLibrary {
     ) -> Result<(), AndroidError> {
         let placement = queue_placement(&placement)?;
         self.queue.play(
-            playback::PlayRequest::captured(
-                library::QueueInput::Uris {
-                    order: media_uris.into(),
-                    context_id: context.into(),
-                    source_start: 0,
-                },
-                usize::try_from(index).map_err(error)?,
-                placement,
-                false,
-            )
-            .with_context_title(context_title.map(|title| {
-                Arc::new(library::QueueContextTitle {
-                    kind: None,
-                    title: title.into(),
-                })
-            }))
-            .shuffled(shuffled),
+            playback::PlayRequest::uris(media_uris, placement)
+                .with_context(context.into())
+                .with_anchor_index(usize::try_from(index).map_err(error)?)
+                .with_context_title(context_title.map(|title| {
+                    Arc::new(library::QueueContextTitle {
+                        kind: None,
+                        title: title.into(),
+                    })
+                }))
+                .shuffled(shuffled),
         );
         Ok(())
     }

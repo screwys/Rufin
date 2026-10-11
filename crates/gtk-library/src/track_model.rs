@@ -26,13 +26,16 @@ impl CollectionTrack for library::HistoryRow {
 
 const TRACK_OVERSCAN: usize = 64;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TrackProjectionRequest {
-    pub query: String,
+    pub query: Option<library::SongQuery>,
     pub settings: LibraryListSettings,
 }
 
 impl TrackProjectionRequest {
+    pub fn query(&self) -> &library::SongQuery {
+        self.query.as_ref().expect("query-backed track route")
+    }
     pub fn same_query(&self, other: &Self) -> bool {
         self.query == other.query
             && self.settings.sort_key == other.settings.sort_key
@@ -65,7 +68,6 @@ struct TrackModelState<T: CollectionTrack> {
     sparse: Rc<SparseRouteModel<TrackKey, T>>,
     request: RefCell<TrackProjectionRequest>,
     applied: Rc<RefCell<TrackProjectionRequest>>,
-    source: Option<(library::QueueQuery, Option<library::FolderKey>)>,
 }
 
 #[derive(Clone)]
@@ -78,28 +80,18 @@ impl TrackCollectionModel {
         page: library::TrackRoutePage,
         settings: LibraryListSettings,
     ) -> Self {
-        let query = page.query.clone();
         let model = Self::with_load(
             runtime,
             SparseSource::Query { count: page.count },
-            Some((page.query.queue_query(), page.query.folder)),
+            Some(page.query.clone()),
             page.first_row_position,
             page.first_rows,
             settings,
             Rc::new(move |_, range, request, cancellation| {
                 let database = database.clone();
-                let query = query.clone();
                 Box::pin(async move {
                     database
-                        .query_tracks_page(
-                            &query,
-                            &request.query,
-                            request.settings.sort_key.track_sort(),
-                            request.settings.descending,
-                            range.start,
-                            range.len(),
-                            &cancellation,
-                        )
+                        .song_rows(request.query(), range.start, range.len(), &cancellation)
                         .await
                         .map_err(|error| error.to_string())
                 })
@@ -114,7 +106,7 @@ impl<T: CollectionTrack> TrackCollectionModel<T> {
     pub fn with_load(
         runtime: tokio::runtime::Handle,
         order: SparseSource<TrackKey>,
-        source: Option<(library::QueueQuery, Option<library::FolderKey>)>,
+        query: Option<library::SongQuery>,
         first_row_position: usize,
         first_rows: Vec<T>,
         settings: LibraryListSettings,
@@ -130,7 +122,7 @@ impl<T: CollectionTrack> TrackCollectionModel<T> {
         >,
     ) -> Self {
         let applied = Rc::new(RefCell::new(TrackProjectionRequest {
-            query: String::new(),
+            query: query.clone(),
             settings: settings.clone(),
         }));
         let load_request = applied.clone();
@@ -147,9 +139,8 @@ impl<T: CollectionTrack> TrackCollectionModel<T> {
         Self(Rc::new(TrackModelState {
             sparse,
             applied,
-            source,
             request: RefCell::new(TrackProjectionRequest {
-                query: String::new(),
+                query: query.clone(),
                 settings,
             }),
         }))
@@ -169,31 +160,15 @@ impl<T: CollectionTrack> TrackCollectionModel<T> {
             .ready_position(|row| row.media_uri() == media_uri)
     }
 
-    pub fn selection_input(&self, positions: &gtk::Bitset) -> library::QueueInput {
-        if let Some((query, folder)) = &self.0.source {
-            let request = self.0.applied.borrow();
-            library::QueueInput::TrackSelection {
-                query: query.clone(),
-                folder: *folder,
-                filter: request.query.clone(),
-                sort: request.settings.sort_key.track_sort(),
-                descending: request.settings.descending,
-                ranges: gtk_widgets::selection::selected_ranges(positions),
-            }
+    pub fn selection_input(&self, positions: &gtk::Bitset) -> library::SongSelection {
+        if let Some(keys) = self.0.sparse.order().keys() {
+            library::SongSelection::Tracks(
+                gtk_widgets::selection::selected_values(keys, positions).into(),
+            )
         } else {
-            library::QueueInput::Captured {
-                entries: gtk_widgets::selection::selected_values(
-                    self.0.sparse.order().keys().expect("supplied track keys"),
-                    positions,
-                )
-                .into_iter()
-                .map(|track_key| library::QueueEntry {
-                    track_key,
-                    provenance: library::QueueProvenance::Manual,
-                    received_from_connect: false,
-                })
-                .collect(),
-                anchor_index: 0,
+            library::SongSelection::Query {
+                query: self.0.applied.borrow().query().clone(),
+                ranges: Some(gtk_widgets::selection::selected_ranges(positions)),
             }
         }
     }
@@ -211,23 +186,46 @@ impl<T: CollectionTrack> TrackCollectionModel<T> {
     }
 
     pub fn projection_request(&self) -> TrackProjectionRequest {
-        self.0.request.borrow().clone()
+        let mut request = self.0.request.borrow_mut();
+        if let Some(library::SongQuery {
+            scope: library::SongScope::Smart { now, .. },
+            ..
+        }) = request.query.as_mut()
+        {
+            *now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |duration| duration.as_secs() as i64);
+        }
+        request.clone()
     }
 
     pub fn set_query(&self, query: &str) -> bool {
         let query = query.trim();
         let mut request = self.0.request.borrow_mut();
-        if request.query == query {
+        let Some(current) = request.query.as_mut() else {
+            return false;
+        };
+        if current.filter == query {
             return false;
         }
-        request.query = query.to_string();
+        current.filter = query.to_string();
         true
+    }
+
+    pub fn set_scope(&self, scope: library::SongScope) {
+        if let Some(query) = self.0.request.borrow_mut().query.as_mut() {
+            query.scope = scope;
+        }
     }
 
     pub fn apply_settings(&self, settings: LibraryListSettings) -> bool {
         let mut request = self.0.request.borrow_mut();
         if request.settings == settings {
             return false;
+        }
+        if let Some(query) = request.query.as_mut() {
+            query.sort = Some(settings.sort_key.track_sort());
+            query.descending = settings.descending;
         }
         request.settings = settings;
         true
@@ -284,34 +282,22 @@ impl<T: CollectionTrack> TrackCollectionModel<T> {
         if anchor_index >= order.len() {
             return;
         }
-        let context_id: Arc<str> = self.visible_context_id(context_base).into();
-        let input = if let Some((query, folder)) = &self.0.source {
-            let applied = self.0.applied.borrow();
-            library::QueueInput::Query {
-                query: query.clone(),
-                folder: *folder,
-                filter: applied.query.clone(),
-                sort: applied.settings.sort_key.track_sort(),
-                descending: applied.settings.descending,
-                context_id,
-                anchor_key: (!collection_start)
-                    .then(|| self.0.sparse.ready(anchor_index as u32))
-                    .flatten()
-                    .map(|row| row.key()),
-            }
-        } else {
-            library::QueueInput::Tracks {
-                order: Arc::clone(order.keys().expect("supplied track keys")),
-                context_id,
-                source_start: 0,
-            }
-        };
-        let request = if collection_start {
+        let selection = order.keys().map_or_else(
+            || self.0.applied.borrow().query().clone().selection(),
+            |keys| library::SongSelection::Tracks(Arc::clone(keys)),
+        );
+        let constructor = if collection_start {
             PlayRequest::ordered
         } else {
             PlayRequest::captured
         };
-        queue.play(request(input, anchor_index, placement, collection_start).shuffled(shuffled));
+        let mut request = constructor(selection, anchor_index, placement, collection_start)
+            .with_context(self.visible_context_id(context_base).into())
+            .shuffled(shuffled);
+        if !collection_start && let Some(row) = self.0.sparse.ready(anchor_index as u32) {
+            request = request.with_anchor(row.key(), None);
+        }
+        queue.play(request);
     }
 
     pub fn play_source(
@@ -328,7 +314,10 @@ impl<T: CollectionTrack> TrackCollectionModel<T> {
         let request = self.0.applied.borrow();
         format!(
             "{context_base}|query={}|sort={:?}|descending={}|result={}",
-            request.query,
+            request
+                .query
+                .as_ref()
+                .map_or("", |query| query.filter.as_str()),
             request.settings.sort_key,
             request.settings.descending,
             self.0.sparse.order_id()
@@ -402,13 +391,19 @@ mod tests {
             rating: None,
             is_downloaded: false,
         };
+        let settings = LibraryListSettings::for_key(rufin_core::settings::LibraryListKey::History);
+        let query = library::SongQuery {
+            sort: Some(settings.sort_key.track_sort()),
+            descending: settings.descending,
+            ..library::SongQuery::new(library::SongScope::History { source: None })
+        };
         let model = TrackCollectionModel::with_load(
             runtime.handle().clone(),
-            vec![row.track_key].into(),
-            None,
+            SparseSource::Query { count: 1 },
+            Some(query),
             0,
             vec![row.clone()],
-            LibraryListSettings::for_key(rufin_core::settings::LibraryListKey::History),
+            settings,
             Rc::new(|_, _, _, _| panic!("seeded rows must not request hydration")),
         );
         let pending = model.projection_request();
@@ -432,7 +427,7 @@ mod tests {
         updated.title = "After".into();
         let prepared = PreparedTrackProjection {
             disc_sections: Vec::new(),
-            order: vec![updated.track_key].into(),
+            order: SparseSource::Query { count: 1 },
             first_row_position: 0,
             first_rows: vec![updated.clone()],
             request: pending,

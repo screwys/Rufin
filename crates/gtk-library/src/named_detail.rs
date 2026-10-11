@@ -179,7 +179,6 @@ impl CatalogUi {
                 id.missing_body(),
             ));
         };
-        let query = page.query.clone();
         let current = Rc::new(RefCell::new(summary));
         let borrowed = current.borrow();
         let title = borrowed.name().to_string();
@@ -214,14 +213,10 @@ impl CatalogUi {
             |request| request,
             move |request, cancellation| {
                 let database = Arc::clone(&database);
-                let query = query.clone();
                 async move {
                     let page = database
-                        .query_track_route_page(
-                            &query,
-                            &request.query,
-                            request.settings.sort_key.track_sort(),
-                            request.settings.descending,
+                        .song_route_page(
+                            request.query(),
                             library::RouteSeedWindow::top(),
                             &cancellation,
                         )
@@ -282,8 +277,8 @@ pub async fn load_named_detail(
     cancellation: &ReadCancellation,
 ) -> Result<Option<(NamedDetailSummary, library::TrackRoutePage)>, String> {
     let collection = match id {
-        NamedDetailId::Genre(key) => library::QueueCollection::Genre(key),
-        NamedDetailId::Mood(key) => library::QueueCollection::Mood(key),
+        NamedDetailId::Genre(key) => library::SongScope::Genre(key),
+        NamedDetailId::Mood(key) => library::SongScope::Mood(key),
     };
     let Some(source) = database
         .collection_source(&collection, cancellation)
@@ -302,17 +297,16 @@ pub async fn load_named_detail(
                 .map_err(|error| error.to_string())?;
             let detail = detail.map(NamedDetailSummary::Genre);
             let page = database
-                .query_track_route_page(
-                    &library::TrackQuery {
-                        source: source,
-                        collection: Some(library::QueueCollection::Genre(key)),
+                .song_route_page(
+                    &library::SongQuery {
+                        scope: library::SongScope::Genre(key),
                         folder: None,
-                        downloaded_only: false,
+                        filter: "".to_string(),
+                        sort: Some(sort),
+                        descending: descending,
                         favorites_only: false,
+                        downloaded_only: false,
                     },
-                    "",
-                    sort,
-                    descending,
                     window,
                     cancellation,
                 )
@@ -327,17 +321,16 @@ pub async fn load_named_detail(
                 .map_err(|error| error.to_string())?;
             let detail = detail.map(NamedDetailSummary::Mood);
             let page = database
-                .query_track_route_page(
-                    &library::TrackQuery {
-                        source: source,
-                        collection: Some(library::QueueCollection::Mood(key)),
+                .song_route_page(
+                    &library::SongQuery {
+                        scope: library::SongScope::Mood(key),
                         folder: None,
-                        downloaded_only: false,
+                        filter: "".to_string(),
+                        sort: Some(sort),
+                        descending: descending,
                         favorites_only: false,
+                        downloaded_only: false,
                     },
-                    "",
-                    sort,
-                    descending,
                     window,
                     cancellation,
                 )

@@ -1751,8 +1751,9 @@ mod tests {
         assert_eq!(row.artwork_binding, results.albums[0].artwork_binding);
         assert!(row.artwork_binding.is_some());
         let album = database
-            .collection_media_uri_order(
-                &library::QueueCollection::AlbumKey(results.albums[0].album_key),
+            .selected_track_uris(
+                &library::SongQuery::new(library::SongScope::Album(results.albums[0].album_key))
+                    .selection(),
                 &library::ReadCancellation::new(),
             )
             .await
@@ -1779,8 +1780,9 @@ mod tests {
             .unwrap();
         scan.finish().await.unwrap();
         let album = database
-            .collection_media_uri_order(
-                &library::QueueCollection::AlbumKey(results.albums[0].album_key),
+            .selected_track_uris(
+                &library::SongQuery::new(library::SongScope::Album(results.albums[0].album_key))
+                    .selection(),
                 &library::ReadCancellation::new(),
             )
             .await

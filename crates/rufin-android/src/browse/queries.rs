@@ -76,6 +76,19 @@ impl AndroidBrowseQuery {
                 if matches!(self.route, Route::Folders { .. }) {
                     return self.folder_sections().await;
                 }
+                if let Some(query) = self.song_query().await.map_err(error)? {
+                    return Ok(self
+                        .database
+                        .song_sections(query, &ReadCancellation::new())
+                        .await
+                        .map_err(error)?
+                        .into_iter()
+                        .map(|section| AndroidScrollSection {
+                            title: section.title,
+                            index: section.index,
+                        })
+                        .collect());
+                }
                 let db = &self.database;
                 let selected_source = self.selected.as_ref().map(|selected| selected.source_key);
                 let folder = self
@@ -205,50 +218,11 @@ impl AndroidBrowseQuery {
                         )
                         .await
                     }
-                    Route::PlaylistDetail(key) => {
-                        db.playlist_track_section_positions(
-                            *key,
-                            folder,
-                            sort.track_sort(),
-                            descending,
-                            filter,
-                            &cancel,
-                        )
-                        .await
-                    }
-                    Route::SmartPlaylistDetail(key) => {
-                        db.smart_track_section_positions(
-                            selected_source,
-                            *key,
-                            folder,
-                            filter,
-                            sort.track_sort(),
-                            descending,
-                            self.now,
-                            &cancel,
-                        )
-                        .await
-                    }
                     Route::Home | Route::Search | Route::History => Ok(Vec::new()),
                     Route::Folders { .. } => {
                         unreachable!("Folder section projection is handled first")
                     }
-                    _ => {
-                        db.track_section_positions(
-                            &library::TrackQuery {
-                                source: self.selected().source_key,
-                                folder,
-                                collection: self.collection(),
-                                downloaded_only: self.downloaded(),
-                                favorites_only: self.favorites(),
-                            },
-                            filter,
-                            sort.track_sort(),
-                            descending,
-                            &cancel,
-                        )
-                        .await
-                    }
+                    _ => Ok(Vec::new()),
                 }
                 .map_err(error)?;
                 Ok(sections
@@ -274,43 +248,45 @@ impl AndroidBrowseQuery {
             return Err(error("Sections belong to Home"));
         }
         let placement = queue_placement(&placement)?;
-        let context_title = context_caption(&self.route, context_title);
+        let title = context_caption(&self.route, context_title);
         let runtime = self.runtime.clone();
         runtime
             .spawn(async move {
-                let rows = self.rows(0, usize::MAX).await.map_err(error)?;
-                let context = format!("home:{}:{section_id}", self.selected().source_id);
-                let inputs = rows
-                    .into_iter()
-                    .filter(|row| row.section_id == section_id)
-                    .filter_map(|row| {
-                        let target = match row.kind.as_str() {
-                            "track" => rufin_core::playback::PlaybackTarget::Track(row.media_uri),
-                            "album" => rufin_core::playback::PlaybackTarget::Album(row.media_uri),
-                            "genre" => {
-                                let Route::GenreDetail(key) =
-                                    serde_json::from_str(row.detail_route.as_deref()?).ok()?
-                                else {
-                                    return None;
-                                };
-                                rufin_core::playback::PlaybackTarget::Genre(key)
-                            }
-                            _ => return None,
-                        };
-                        Some(target.in_context(context.clone()).queue_input(
-                            Some(self.selected().source_key),
-                            self.selected().music_folder_key,
-                        ))
-                    })
-                    .collect();
+                let rows = self.home_rows().await.map_err(error)?;
+                let mut selections = Vec::new();
+                for row in rows.iter().filter(|row| row.section_id == section_id) {
+                    if let Some(key) = row.track_key {
+                        selections.push(SongSelection::Tracks(Arc::from([
+                            library::TrackKey::from_raw(key),
+                        ])));
+                    } else if row.kind == "album" {
+                        if let Some(album) = self
+                            .database
+                            .album_row_by_media_uri(&row.media_uri, &ReadCancellation::new())
+                            .await
+                            .map_err(error)?
+                        {
+                            selections.push(
+                                SongQuery::new(SongScope::Album(album.album_key)).selection(),
+                            );
+                        }
+                    } else if let Some(route) = row.detail_route.as_deref() {
+                        if let Route::GenreDetail(key) =
+                            serde_json::from_str(route).map_err(error)?
+                        {
+                            selections.push(SongQuery::new(SongScope::Genre(key)).selection());
+                        }
+                    }
+                }
                 self.queue.play(
                     playback::PlayRequest::captured(
-                        library::QueueInput::Groups(inputs),
+                        SongSelection::Concat(selections),
                         0,
                         placement,
                         false,
                     )
-                    .with_context_title(context_title.clone())
+                    .with_context(format!("home:{}:{section_id}", self.selected().source_id).into())
+                    .with_context_title(title)
                     .shuffled(shuffled),
                 );
                 Ok(())
@@ -323,12 +299,17 @@ impl AndroidBrowseQuery {
         let runtime = self.runtime.clone();
         runtime
             .spawn(async move {
-                if matches!(self.route, Route::History) {
-                    return Ok(self.history_rows(0, usize::MAX).await.map_err(error)?.len() as u64);
-                }
                 if matches!(self.route, Route::Folders { .. }) {
                     let (folders, tracks) = self.folder_counts().await.map_err(error)?;
                     return Ok(folders as u64 + tracks.max(0) as u64);
+                }
+                if let Some(query) = self.song_query().await.map_err(error)? {
+                    return Ok(self
+                        .database
+                        .song_count(query, &ReadCancellation::new())
+                        .await
+                        .map_err(error)?
+                        .max(0) as u64);
                 }
                 let db = &self.database;
                 let selected_source = self.selected.as_ref().map(|selected| selected.source_key);
@@ -418,21 +399,6 @@ impl AndroidBrowseQuery {
                         db.smart_playlist_count(selected_source, folder, filter, self.now, &cancel)
                             .await
                     }
-                    Route::PlaylistDetail(key) => {
-                        db.playlist_entries_count(*key, folder, filter, &cancel)
-                            .await
-                    }
-                    Route::SmartPlaylistDetail(key) => {
-                        db.smart_playlist_track_count(
-                            selected_source,
-                            *key,
-                            folder,
-                            filter,
-                            self.now,
-                            &cancel,
-                        )
-                        .await
-                    }
                     Route::Home => return Ok(self.home_rows().await.map_err(error)?.len() as u64),
                     Route::Search | Route::History => {
                         return Ok(self.rows(0, usize::MAX).await.map_err(error)?.len() as u64);
@@ -440,46 +406,7 @@ impl AndroidBrowseQuery {
                     Route::Folders { .. } => {
                         unreachable!("Folder count is handled before source count")
                     }
-                    _ if self.downloaded() => {
-                        db.track_count(
-                            &library::TrackQuery {
-                                source: self.selected().source_key,
-                                folder,
-                                collection: self.collection(),
-                                favorites_only: self.favorites(),
-                                downloaded_only: true,
-                            },
-                            filter,
-                            &cancel,
-                        )
-                        .await
-                    }
-                    _ => match self.collection() {
-                        Some(collection) => {
-                            db.collection_tracks_count(
-                                &collection,
-                                folder,
-                                filter,
-                                self.favorites(),
-                                &cancel,
-                            )
-                            .await
-                        }
-                        None => {
-                            db.track_count(
-                                &library::TrackQuery {
-                                    source: self.selected().source_key,
-                                    collection: None,
-                                    folder,
-                                    favorites_only: self.favorites(),
-                                    downloaded_only: false,
-                                },
-                                filter,
-                                &cancel,
-                            )
-                            .await
-                        }
-                    },
+                    _ => Ok(0),
                 }
                 .map_err(error)?;
                 Ok(count.max(0) as u64)
@@ -566,209 +493,91 @@ impl AndroidBrowseQuery {
         shuffled: bool,
         context_title: Option<String>,
     ) -> Result<(), AndroidError> {
-        use rufin_core::playback::PlaybackTarget;
         let placement = queue_placement(&placement)?;
         let context_title = context_caption(&self.route, context_title);
         let runtime = self.runtime.clone();
         runtime
             .spawn(async move {
-                if matches!(self.route, Route::History) {
-                    let order = self
-                        .history_rows(0, usize::MAX)
-                        .await
-                        .map_err(error)?;
-                    let anchor = order
-                        .iter()
-                        .position(|row| row.media_uri == media_uri)
-                        .ok_or_else(|| error("Track is no longer in this route"))?;
-                    let context: Arc<str> = format!("history:{}:{}", if self.history_current_only {self.selected().source_id.as_str()} else {"all"}, self.filter).into();
-                    let keys = order.into_iter().map(|row| row.track_key.map(library::TrackKey::from_raw)
-                        .ok_or_else(|| error("Track is no longer available"))).collect::<Result<Vec<_>,AndroidError>>()?;
-                    self.queue.play(
-                        playback::PlayRequest::captured(
-                            library::QueueInput::Tracks { order: keys.into(), context_id: context, source_start: 0 },
-                            anchor,
-                            placement,
-                            false,
-                        )
-                        .with_context_title(context_title.clone())
-                        .shuffled(shuffled),
-                    );
-                    return Ok(());
-                }
                 if matches!(self.route, Route::Folders { .. }) {
                     return self
-                        .folder_play(index, media_uri, placement, shuffled, context_title.clone())
+                        .folder_play(index, media_uri, placement, shuffled, context_title)
                         .await;
                 }
-                let folder = self.selected.as_ref().and_then(|selected| selected.music_folder_key);
-                if self.album_detail_layout() {
-                    let track = self
-                        .database
-                        .track_row_by_uri(&media_uri, &ReadCancellation::new())
-                        .await
-                        .map_err(error)?
-                        .ok_or_else(|| error("Track is no longer available"))?;
-                    let context_title = Some(Arc::new(library::QueueContextTitle {
-                        kind: Some("Album".into()),
-                        title: track.album.clone().into(),
-                    }));
+                let index = usize::try_from(index).map_err(error)?;
+                let cancel = ReadCancellation::new();
+                let track = self
+                    .database
+                    .track_row_by_uri(&media_uri, &cancel)
+                    .await
+                    .map_err(error)?
+                    .ok_or_else(|| error("Track is no longer available"))?;
+                let (selection, anchor, entry, title, context) = if self.album_detail_layout() {
                     let album = track
                         .album_key
                         .ok_or_else(|| error("Album is no longer available"))?;
-                    let album_uri = track
-                        .album_media_uri
-                        .ok_or_else(|| error("Album is no longer available"))?;
-                    let context = format!(
-                        "{}|query=|source={}|folder={folder:?}|sort={:?}|descending={}",
-                        PlaybackTarget::Album(album_uri).context_id(),
-                        self.selected().source_id,
-                        self.album_tracks.sort_key,
-                        self.album_tracks.descending,
-                    );
-                    self.queue.play(
-                        playback::PlayRequest::ordered(
-                            library::QueueInput::Query {
-                                query: library::QueueQuery::Collection {
-                                    collection: library::QueueCollection::AlbumKey(album),
-                                    downloaded_only: false,
-                                    favorites_only: false,
-                                },
-                                folder,
-                                filter: String::new(),
-                                sort: self.album_tracks.sort_key.track_sort(),
-                                descending: self.album_tracks.descending,
-                                context_id: context.into(),
-                                anchor_key: Some(track.track_key),
-                            },
-                            0,
-                            placement,
-                            false,
+                    let mut query = SongQuery::new(SongScope::Album(album));
+                    query.sort = Some(self.album_tracks.sort_key.track_sort());
+                    query.descending = self.album_tracks.descending;
+                    let title = Some(Arc::new(library::QueueContextTitle {
+                        kind: Some("Album".into()),
+                        title: track.album.clone().into(),
+                    }));
+                    (
+                        query.selection(),
+                        0,
+                        None,
+                        title,
+                        format!(
+                            "album:{}|query=|sort={:?}|descending={}",
+                            track.album_media_uri.as_deref().unwrap_or_default(),
+                            self.album_tracks.sort_key,
+                            self.album_tracks.descending
                         )
-                        .with_context_title(context_title.clone())
-                        .shuffled(shuffled),
-                    );
-                    return Ok(());
-                }
-                let target = match &self.route {
-                    Route::AlbumDetail(uri) => Some(PlaybackTarget::Album(uri.clone())),
-                    Route::ArtistDetail(uri)
-                    | Route::ArtistTracks(uri)
-                    | Route::ArtistFavoriteTracks(uri)
-                    | Route::ArtistDiscography(uri) => Some(PlaybackTarget::Artist(uri.clone())),
-                    Route::AlbumArtistDetail(uri)
-                    | Route::AlbumArtistTracks(uri)
-                    | Route::AlbumArtistFavoriteTracks(uri)
-                    | Route::AlbumArtistDiscography(uri) => Some(PlaybackTarget::AlbumArtist(uri.clone())),
-                    Route::PlaylistDetail(key) => Some(PlaybackTarget::Playlist(*key)),
-                    Route::SmartPlaylistDetail(key) => Some(PlaybackTarget::SmartPlaylist(*key)),
-                    Route::GenreDetail(key) => Some(PlaybackTarget::Genre(*key)),
-                    Route::MoodDetail(key) => Some(PlaybackTarget::Mood(*key)),
-                    _ => None,
-                };
-                let context: Arc<str> = if let Some(target) = target {
-                    format!(
-                        "{}|query={}|source={}|folder={folder:?}|sort={:?}|descending={}|favorites={}|downloaded={}",
-                        target.context_id(),
-                        self.filter,
-                        self.selected.as_ref().map(|selected| selected.source_id.as_str()).unwrap_or("rufin"),
-                        self.sort,
-                        self.descending,
-                        self.favorites(),
-                        self.downloaded(),
+                        .into(),
+                    )
+                } else if let Some(query) = self.song_query().await.map_err(error)? {
+                    let entry = if matches!(query.scope, SongScope::Playlist(_)) {
+                        self.database
+                            .song_playlist_rows(query, index, 1, &cancel)
+                            .await
+                            .map_err(error)?
+                            .first()
+                            .map(|row| row.playlist_entry_key)
+                    } else {
+                        None
+                    };
+                    (
+                        query.clone().selection(),
+                        index,
+                        entry,
+                        context_title,
+                        self.context_id(),
                     )
                 } else {
-                    format!("android:{}:{}:{}", self.selected().source_id, route_json(self.route.clone()), self.filter)
-                }.into();
-                if matches!(self.route, Route::Home | Route::Search | Route::History) {
-                    let order = self
-                        .rows(0, usize::MAX)
-                        .await
-                        .map_err(error)?
+                    let rows = self.rows(0, usize::MAX).await.map_err(error)?;
+                    let keys = rows
                         .into_iter()
                         .filter(|row| row.kind == "track")
+                        .filter_map(|row| row.track_key.map(library::TrackKey::from_raw))
                         .collect::<Vec<_>>();
-                    let anchor = order
+                    let anchor = keys
                         .iter()
-                        .position(|row| row.media_uri == media_uri)
+                        .position(|key| *key == track.track_key)
                         .ok_or_else(|| error("Track is no longer in this route"))?;
-                    let keys = order.into_iter().map(|row| row.track_key.map(library::TrackKey::from_raw)
-                        .ok_or_else(|| error("Track is no longer available"))).collect::<Result<Vec<_>,AndroidError>>()?;
-                    self.queue.play(
-                        playback::PlayRequest::captured(
-                            library::QueueInput::Tracks { order: keys.into(), context_id: context, source_start: 0 },
-                            anchor,
-                            placement,
-                            false,
-                        )
-                        .with_context_title(context_title.clone())
-                        .shuffled(shuffled),
-                    );
-                    return Ok(());
-                }
-                let anchor_key = self.database.track_key_by_uri(&media_uri, &ReadCancellation::new()).await.map_err(error)?;
-                let anchor_entry = if let Route::PlaylistDetail(key) = self.route {
-                    self.database
-                        .playlist_entries_page(
-                            key,
-                            folder,
-                            self.sort.track_sort(),
-                            self.descending,
-                            &self.filter,
-                            usize::try_from(index).map_err(error)?,
-                            1,
-                            &ReadCancellation::new(),
-                        )
-                        .await
-                        .map_err(error)?
-                        .first()
-                        .map(|row| row.playlist_entry_key)
-                } else {
-                    None
-                };
-                let input = match self.route {
-                    Route::PlaylistDetail(key) => library::QueueInput::PlaylistQuery {
-                        key,
-                        folder,
-                        filter: self.filter.clone(),
-                        sort: self.sort.track_sort(),
-                        descending: self.descending,
-                        context_id: context,
-                        anchor_entry,
-                        anchor_key,
-                    },
-                    _ => library::QueueInput::Query {
-                        query: match self.route {
-                            Route::SmartPlaylistDetail(key) => library::QueueQuery::SmartDisplay {
-                                key,
-                                source: Some(self.selected().source_key),
-                            },
-                            _ => library::TrackQuery {
-                                source: self.selected().source_key,
-                                collection: self.collection(),
-                                folder,
-                                downloaded_only: self.downloaded(),
-                                favorites_only: self.favorites(),
-                            }
-                            .queue_query(),
-                        },
-                        folder,
-                        filter: self.filter.clone(),
-                        sort: self.sort.track_sort(),
-                        descending: self.descending,
-                        context_id: context,
-                        anchor_key,
-                    },
+                    (
+                        SongSelection::Tracks(keys.into()),
+                        anchor,
+                        None,
+                        context_title,
+                        self.context_id(),
+                    )
                 };
                 self.queue.play(
-                    playback::PlayRequest::captured(
-                        input,
-                        usize::try_from(index).map_err(error)?,
-                        placement,
-                        false,
-                    )
-                    .with_context_title(context_title.clone())
-                    .shuffled(shuffled),
+                    playback::PlayRequest::captured(selection, anchor, placement, false)
+                        .with_context(context)
+                        .with_anchor(track.track_key, entry)
+                        .with_context_title(title)
+                        .shuffled(shuffled),
                 );
                 Ok(())
             })

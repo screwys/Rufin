@@ -270,15 +270,14 @@ impl AndroidBrowseQuery {
                 } else {
                     base
                 };
-                let collection = library::QueueCollection::ArtistKey {
+                let mut query = SongQuery::new(SongScope::Artist {
                     key: artist.artist_key,
                     album_artist,
-                };
-                let favorite_total = db
-                    .collection_tracks_count(&collection, folder, "", true, &cancel)
-                    .await
-                    .map_err(error)?
-                    .max(0) as u64;
+                });
+                query.folder = folder;
+                query.favorites_only = true;
+                let favorite_total =
+                    db.song_count(&query, &cancel).await.map_err(error)?.max(0) as u64;
                 let links = rufin_core::detail_links::artist_external_links(
                     &link_settings,
                     configuration.as_ref(),

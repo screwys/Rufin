@@ -633,7 +633,7 @@ impl Database {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let count = sqlx::query_scalar::<_, i64>(
             "SELECT count(*) FROM tracks
-             WHERE source_key=?1 AND source_path IS NOT NULL AND (
+             WHERE source_key=?1 AND indexed=1 AND source_path IS NOT NULL AND (
                (?2 IS NOT NULL AND substr(source_path,1,length(?2))=?2)
                OR (?2 IS NULL AND (
                  (substr(source_path,1,1)<>'/' AND substr(source_path,2,1)<>':' AND substr(source_path,1,2)<>char(92)||char(92))
@@ -675,7 +675,7 @@ impl Database {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         Ok(sqlx::query_as::<_, MappingTrackRow>(
             "SELECT track_key,object_id,media_uri,source_path,COALESCE(title,media_uri) title,COALESCE(display_album,'') album,COALESCE(display_artist,'') artist,COALESCE(disc_number,0) disc_number,COALESCE(track_number,0) track_number,COALESCE(duration_millis,0) duration_millis
-             FROM tracks WHERE source_key=?1 AND source_path IS NOT NULL
+             FROM tracks WHERE source_key=?1 AND indexed=1 AND source_path IS NOT NULL
                AND ((?3 IS NULL AND track_key>?2) OR source_path=?3)
              ORDER BY track_key LIMIT ?4",
         ).bind(source).bind(after.map_or(0, TrackKey::raw)).bind(source_path).bind(limit.clamp(1,128) as i64)

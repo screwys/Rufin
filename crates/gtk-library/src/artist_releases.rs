@@ -903,7 +903,15 @@ fn artist_route_list(
     let selection_models = model.model().expect("Artist section models");
     let selection = gtk_widgets::selection::PositionSelectionModel::new(model);
     selection.set_collection_selection(Box::new(move |target, positions| {
-        let rufin_core::playback::PlaybackTarget::Album(uri) = target else {
+        let Some(library::SongSelection::Query {
+            query:
+                library::SongQuery {
+                    scope: library::SongScope::Album(key),
+                    ..
+                },
+            ..
+        }) = target.selection()
+        else {
             return None;
         };
         let selected = gtk::Bitset::new_empty();
@@ -932,7 +940,7 @@ fn artist_route_list(
             offset += model.n_items();
         }
         let sparse = sparse?;
-        let dragged = sparse.ready_position(|row| row.media_uri == *uri)?;
+        let dragged = sparse.ready_position(|row| row.album_key == key)?;
         if selected.size() < 2 || !selected.contains(dragged) {
             return None;
         }
@@ -942,7 +950,9 @@ fn artist_route_list(
                 &selected,
             )
             .into_iter()
-            .map(rufin_core::playback::PlaybackTarget::AlbumKey)
+            .map(|key| {
+                gtk_widgets::selection::collection_play_request(library::SongScope::Album(key))
+            })
             .collect(),
         ))
     }));

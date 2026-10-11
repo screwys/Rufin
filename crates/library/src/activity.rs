@@ -24,7 +24,7 @@ const ACTIVITY_EXPORT_SELECT: &str = "SELECT listen_key,external_id,
                     musicbrainz_recording_id,musicbrainz_release_track_id,started_at,
                     local_period,listened_millis,skipped
              FROM listens";
-const HISTORY_ROW_SELECT: &str = concat!(
+const HISTORY_ROW_COLUMNS: &str = concat!(
     r#"
              track.track_key,listen.media_uri,
                     listen.track_title title,listen.artist_name artist,listen.album_title album,
@@ -57,11 +57,11 @@ const HISTORY_ROW_SELECT: &str = concat!(
                               WHERE track.media_uri=listen.media_uri))/10 rating,
                     EXISTS(SELECT 1 FROM local_access_files access
                            WHERE access.media_uri=listen.media_uri AND access.origin='download') is_downloaded
-             FROM selected listen
-             LEFT JOIN tracks track USING(media_uri)
-             LEFT JOIN albums album ON album.album_key=track.album_key
 "#
 );
+const HISTORY_ROW_FROM: &str = "FROM selected listen
+             LEFT JOIN tracks track USING(media_uri)
+             LEFT JOIN albums album ON album.album_key=track.album_key";
 
 #[derive(Clone, Debug, FromRow, PartialEq, Deserialize, Serialize)]
 pub struct ListenWrite {
@@ -365,7 +365,7 @@ impl Database {
                     SELECT recent.listen_key FROM listens recent WHERE recent.media_uri=target.media_uri
                     ORDER BY recent.started_at DESC,recent.listen_key DESC LIMIT 1
                   )
-             ) SELECT {} {HISTORY_ROW_SELECT} ORDER BY listen.ordinal",
+             ) SELECT {} {HISTORY_ROW_COLUMNS} {HISTORY_ROW_FROM} ORDER BY listen.ordinal",
             crate::tracks::TRACK_LINK_COLUMNS,
         );
         history_rows(
@@ -374,73 +374,6 @@ impl Database {
                 .fetch_all(&mut *connection)
                 .await?,
         )
-    }
-
-    pub async fn activity_history(
-        &self,
-        current: Option<&SourceId>,
-        query: &str,
-        descending: bool,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<HistoryRow>> {
-        let query: String = query.trim().to_lowercase().chars().take(256).collect();
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let sources = if current.is_some() {
-            vec![
-                "listen.source_id=?1",
-                "listen.source_id IS NULL AND EXISTS (
-                   SELECT 1 FROM tracks member WHERE member.media_uri=listen.media_uri
-                     AND member.source_key=(SELECT source_key FROM sources WHERE object_id=?1))",
-            ]
-        } else {
-            vec!["1"]
-        };
-        let recent_source = if current.is_some() {
-            "AND (recent.source_id=?1 OR (recent.source_id IS NULL AND EXISTS (
-               SELECT 1 FROM tracks member WHERE member.media_uri=recent.media_uri
-                 AND member.source_key=(SELECT source_key FROM sources WHERE object_id=?1))))"
-        } else {
-            ""
-        };
-        let filter = if query.is_empty() {
-            ""
-        } else {
-            "AND (instr(lower(listen.track_title),?2)>0 OR instr(lower(listen.artist_name),?2)>0
-                  OR instr(lower(listen.album_title),?2)>0)"
-        };
-        let recent_filter = filter.replace("listen.", "recent.");
-        // Each source branch uses the history index and stops at 100. Merge at most 200
-        // candidates; old unattributed Local listens need no backfill or full-history sort.
-        let selected = sources
-            .into_iter()
-            .map(|source| {
-                format!(
-                    "SELECT * FROM (SELECT listen.* FROM listens listen
-             WHERE {source} {filter} AND listen.listen_key=(
-               SELECT recent.listen_key FROM listens recent
-               WHERE recent.media_uri=listen.media_uri {recent_source} {recent_filter}
-               ORDER BY recent.started_at DESC,recent.listen_key DESC LIMIT 1)
-             ORDER BY listen.started_at DESC,listen.listen_key DESC LIMIT ?3)"
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(" UNION ALL ");
-        let direction = if descending { "DESC" } else { "ASC" };
-        let sql = format!(
-            "WITH selected AS MATERIALIZED (
-               SELECT * FROM ({selected}) ORDER BY started_at DESC,listen_key DESC LIMIT ?3
-             )
-             SELECT {} {HISTORY_ROW_SELECT}
-             ORDER BY listen.started_at {direction},listen.listen_key {direction}",
-            crate::tracks::TRACK_LINK_COLUMNS,
-        );
-        let result = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
-            .bind(current.map(SourceId::as_str))
-            .bind(query)
-            .bind(HISTORY_LIMIT)
-            .fetch_all(&mut *connection)
-            .await;
-        history_rows(result?)
     }
 
     pub async fn calendar_activity_summary(
@@ -990,4 +923,84 @@ pub(crate) async fn write_legacy_activity(
     sqlx::query("INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(source_id,period,item_kind,track_object_id) DO UPDATE SET play_count=excluded.play_count,skip_count=excluded.skip_count,last_played_at=excluded.last_played_at")
             .bind(&record.source_id).bind(&record.period).bind(&record.item_kind).bind(&record.track_object_id).bind(record.play_count).bind(record.skip_count).bind(record.last_played_at).execute(&mut *connection).await?;
     Ok(())
+}
+
+pub(crate) fn history_query(
+    current: Option<&SourceId>,
+    filter: &str,
+    descending: bool,
+) -> crate::source_window::SourceQuery {
+    let current = current.map(|source| crate::source_window::quote(source.as_str()));
+    let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
+    let filter = crate::source_window::quote(&filter);
+    let sources = if let Some(source) = current.as_ref() {
+        vec![
+            format!("listen.source_id={source}"),
+            format!(
+                "listen.source_id IS NULL AND EXISTS (
+            SELECT 1 FROM tracks member WHERE member.media_uri=listen.media_uri
+            AND member.source_key=(SELECT source_key FROM sources WHERE object_id={source}))"
+            ),
+        ]
+    } else {
+        vec!["1".into()]
+    };
+    let recent_source = if let Some(source) = current.as_ref() {
+        format!(
+            "AND (recent.source_id={source} OR (recent.source_id IS NULL AND EXISTS (
+            SELECT 1 FROM tracks member WHERE member.media_uri=recent.media_uri
+            AND member.source_key=(SELECT source_key FROM sources WHERE object_id={source}))))"
+        )
+    } else {
+        String::new()
+    };
+    let filter = format!("AND (instr(lower(listen.track_title),{filter})>0 OR instr(lower(listen.artist_name),{filter})>0
+        OR instr(lower(listen.album_title),{filter})>0)");
+    let recent_filter = filter.replace("listen.", "recent.");
+    // Read at most 100 from each indexed source branch before the final merge.
+    let selected = sources
+        .into_iter()
+        .map(|source| {
+            format!(
+                "SELECT * FROM (SELECT listen.* FROM listens listen WHERE {source} {filter}
+        AND listen.listen_key=(SELECT recent.listen_key FROM listens recent
+            WHERE recent.media_uri=listen.media_uri {recent_source} {recent_filter}
+            ORDER BY recent.started_at DESC,recent.listen_key DESC LIMIT 1)
+        ORDER BY listen.started_at DESC,listen.listen_key DESC LIMIT {HISTORY_LIMIT})"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" UNION ALL ");
+    let direction = if descending { "DESC" } else { "ASC" };
+    crate::source_window::SourceQuery {
+        from: format!("(SELECT * FROM ({selected}) ORDER BY started_at DESC,listen_key DESC LIMIT {HISTORY_LIMIT}) listen
+            JOIN tracks track USING(media_uri) LEFT JOIN albums album ON album.album_key=track.album_key"),
+        predicate: "1".into(),
+        order: vec![format!("listen.started_at {direction}"), format!("listen.listen_key {direction}")],
+        uri: "track.media_uri".into(),
+        entry_key: "NULL".into(),
+    }
+}
+
+pub(crate) async fn load_history_page(
+    connection: &mut SqliteConnection,
+    query: &crate::source_window::SourceQuery,
+    offset: usize,
+    limit: usize,
+) -> LibraryResult<Vec<HistoryRow>> {
+    let sql = format!(
+        "{} LIMIT ?1 OFFSET ?2",
+        query.select(&format!(
+            "{} {HISTORY_ROW_COLUMNS}",
+            crate::tracks::TRACK_LINK_COLUMNS
+        ))
+    );
+    history_rows(
+        sqlx::query(sqlx::AssertSqlSafe(sql))
+            .bind(limit.min(HISTORY_LIMIT as usize) as i64)
+            .bind(offset.min(i64::MAX as usize) as i64)
+            .persistent(false)
+            .fetch_all(connection)
+            .await?,
+    )
 }

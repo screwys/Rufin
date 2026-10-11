@@ -95,8 +95,13 @@ impl Row<'_> {
         if kind == "track" {
             value["uris"] = json!([self.data["uri"]]);
         }
+        if kind == "artist" {
+            value["album_artists"] = self.data["album_artists"].clone();
+        }
         for field in ["source", "folder"] {
-            if let Some(text) = self.parameters.get(field) {
+            if (field != "folder" || matches!(kind, "track" | "smart-playlist"))
+                && let Some(text) = self.parameters.get(field)
+            {
                 value[field] = json!(text);
             }
         }

@@ -207,10 +207,7 @@ impl From<library::SmartPlaylistRow> for AndroidBrowseRow {
         Self {
             track_key: None,
             kind: "smart_playlist".into(),
-            playback_context_id: Some(
-                rufin_core::playback::PlaybackTarget::SmartPlaylist(row.smart_playlist_key)
-                    .context_id(),
-            ),
+            playback_context_id: Some(format!("smart-playlist:{}", row.smart_playlist_key)),
             fields: Vec::new(),
             artist: String::new(),
             album: String::new(),
@@ -251,9 +248,7 @@ impl From<library::PlaylistRow> for AndroidBrowseRow {
         Self {
             track_key: None,
             kind: "playlist".into(),
-            playback_context_id: Some(
-                rufin_core::playback::PlaybackTarget::Playlist(row.playlist_key).context_id(),
-            ),
+            playback_context_id: Some(format!("playlist:{}", row.playlist_key)),
             fields: Vec::new(),
             artist: String::new(),
             album: String::new(),
@@ -292,9 +287,7 @@ impl From<library::GenreRow> for AndroidBrowseRow {
         Self {
             track_key: None,
             kind: "genre".into(),
-            playback_context_id: Some(
-                rufin_core::playback::PlaybackTarget::Genre(row.genre_key).context_id(),
-            ),
+            playback_context_id: Some(format!("genre:{}", row.genre_key)),
             fields: Vec::new(),
             artist: String::new(),
             album: String::new(),
@@ -329,9 +322,7 @@ impl From<library::MoodRow> for AndroidBrowseRow {
         Self {
             track_key: None,
             kind: "mood".into(),
-            playback_context_id: Some(
-                rufin_core::playback::PlaybackTarget::Mood(row.mood_key).context_id(),
-            ),
+            playback_context_id: Some(format!("mood:{}", row.mood_key)),
             key: row.mood_key.to_string(),
             media_uri: String::new(),
             title: row.name,
@@ -370,9 +361,7 @@ impl From<library::AlbumRow> for AndroidBrowseRow {
         Self {
             track_key: None,
             kind: "album".into(),
-            playback_context_id: Some(
-                rufin_core::playback::PlaybackTarget::Album(row.media_uri.clone()).context_id(),
-            ),
+            playback_context_id: Some(format!("album:{}", row.media_uri)),
             fields: Vec::new(),
             artist: row.display_artist.clone(),
             album: row.title.clone(),

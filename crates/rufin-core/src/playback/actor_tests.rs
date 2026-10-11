@@ -4,8 +4,7 @@ use super::super::{
 };
 use super::*;
 use playback::{
-    BackendEvent, BackendFailure, BatchItem, PlaybackNotice, PlaybackSubscription, Provenance,
-    RepeatMode,
+    BackendEvent, BackendFailure, PlaybackNotice, PlaybackSubscription, Provenance, RepeatMode,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -80,18 +79,17 @@ async fn repeated_operation_failures_publish_notices_without_a_current_track() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stream_and_backend_failures_publish_notices_and_keep_diagnostics() {
     for backend_failure in [false, true] {
-        let (_directory, _database, sequence, owner, commands, _mailbox, _inbox) =
-            seeded(vec![BatchItem::direct(
-                QueueItem::direct(
-                    "https://example.test/track",
-                    "Track",
-                    "Artist",
-                    "Album",
-                    180_000,
-                ),
-                Provenance::Manual,
-            )])
-            .await;
+        let (_directory, _database, sequence, owner, commands, _mailbox, _inbox) = seeded(vec![(
+            QueueItem::direct(
+                "https://example.test/track",
+                "Track",
+                "Artist",
+                "Album",
+                180_000,
+            ),
+            Provenance::Manual,
+        )])
+        .await;
         let (playback, _) = Playback::start(
             sequence,
             "failure-feedback",
@@ -171,8 +169,8 @@ async fn published_queue_snapshot(
 
 fn replace_queue(playback: &Playback, prefix: &str, count: usize) {
     playback
-        .play(PlayRequest::ordered(
-            library::QueueInput::Items(
+        .play(PlayRequest::from_load(
+            library::QueueReadRequest::items(
                 (0..count)
                     .map(|index| {
                         (
@@ -188,9 +186,7 @@ fn replace_queue(playback: &Playback, prefix: &str, count: usize) {
                     })
                     .collect(),
             ),
-            0,
             playback::QueuePlacement::Now,
-            false,
         ))
         .unwrap();
 }
@@ -280,19 +276,14 @@ async fn persistence_coalesces_latest_queue_metadata() {
         .await
         .unwrap();
     let page = database
-        .read_queue(library::QueueReadRequest {
-            context_title: None,
-            input: library::QueueInput::Uris {
-                order: (1..=4)
-                    .map(|key| format!("https://example.test/{key}"))
-                    .collect(),
+        .read_queue(library::QueueReadRequest::media_uris(
+            (1..=4).map(|key| format!("https://example.test/{key}")),
+            library::QueueProvenance::Context {
                 context_id: "test".into(),
-                source_start: 0,
+                context_title: None,
+                source_rank: 0,
             },
-            anchor_index: 0,
-            random_start: None,
-            shuffled: None,
-        })
+        ))
         .await
         .unwrap();
     let mut sequence = Sequence::new();

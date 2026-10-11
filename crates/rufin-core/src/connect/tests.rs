@@ -215,14 +215,9 @@ fn cue_direct_continuation_transfers_one_file_without_enrollment() {
                 host.products
                     .playback
                     .queue
-                    .play(playback::PlayRequest::ordered(
-                        library::QueueInput::Items(vec![(
-                            item.clone(),
-                            library::QueueProvenance::Manual,
-                        )]),
-                        0,
+                    .play(playback::PlayRequest::one(
+                        item.clone(),
                         library::QueuePlacement::Now,
-                        false,
                     ));
                 tokio::time::timeout(Duration::from_secs(5), async {
                     loop {

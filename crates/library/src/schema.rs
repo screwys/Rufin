@@ -14,7 +14,7 @@ pub(crate) async fn pragma(
 }
 pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA application_id = 1381320270;
 
-PRAGMA user_version = 56;
+PRAGMA user_version = 57;
 
 CREATE TABLE IF NOT EXISTS queue_contexts (
     context_key INTEGER PRIMARY KEY,
@@ -747,7 +747,7 @@ CREATE VIEW IF NOT EXISTS local_access_files AS
 
 pub(crate) async fn initialize_durable(connection: &mut SqliteConnection) -> LibraryResult<()> {
     let version = pragma(connection, "user_version").await?;
-    if version != 0 && version != 56 {
+    if !matches!(version, 0 | 56 | 57) {
         return Err(crate::LibraryError::Migration(format!(
             "unsupported library schema {version}"
         )));
@@ -756,6 +756,50 @@ pub(crate) async fn initialize_durable(connection: &mut SqliteConnection) -> Lib
     sqlx::raw_sql(STORE_SCHEMA)
         .execute(&mut *transaction)
         .await?;
+    if version == 56 {
+        // Connect accepted listens without admitting their songs in version 56.
+        let mut after = String::new();
+        loop {
+            let missing = sqlx::query_as::<_, crate::ListenWrite>(
+                "SELECT listen.external_id,listen.media_uri,listen.track_title title,listen.artist_name artist,listen.album_title album,
+                    listen.duration_millis,listen.disc_number,listen.track_number,listen.year,listen.release_date,listen.source_format,
+                    listen.musicbrainz_recording_id,listen.musicbrainz_release_track_id,listen.started_at,listen.local_period,
+                    listen.listened_millis,listen.skipped
+                 FROM listens listen WHERE listen.media_uri>?1
+                    AND NOT EXISTS(SELECT 1 FROM tracks WHERE tracks.media_uri=listen.media_uri)
+                    AND listen.listen_key=(SELECT latest.listen_key FROM listens latest WHERE latest.media_uri=listen.media_uri
+                        ORDER BY latest.started_at DESC,latest.listen_key DESC LIMIT 1)
+                 ORDER BY listen.media_uri LIMIT 256",
+            ).bind(&after).fetch_all(&mut *transaction).await?;
+            if missing.is_empty() {
+                break;
+            }
+            for listen in missing {
+                crate::tracks::remember_song(
+                    &mut transaction,
+                    &listen.media_uri,
+                    crate::tracks::SongMetadata {
+                        title: Some(&listen.title),
+                        artist: Some(&listen.artist),
+                        album: Some(&listen.album),
+                        duration_millis: Some(listen.duration_millis),
+                        disc_number: listen.disc_number,
+                        track_number: listen.track_number,
+                        year: listen.year,
+                        release_date: listen.release_date.as_deref(),
+                        source_format: listen.source_format.as_deref(),
+                        musicbrainz_recording_id: listen.musicbrainz_recording_id.as_deref(),
+                        musicbrainz_release_track_id: listen
+                            .musicbrainz_release_track_id
+                            .as_deref(),
+                        ..Default::default()
+                    },
+                )
+                .await?;
+                after = listen.media_uri;
+            }
+        }
+    }
     transaction.commit().await?;
     crate::collections::install_collection_facts_on(connection).await?;
     crate::playlists::install_playlist_facts_on(connection).await?;
