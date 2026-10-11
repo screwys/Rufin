@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 
 const COALESCE: Duration = Duration::from_secs(1);
 const RECLAIM_INTERVAL: Duration = Duration::from_secs(10);
-const FILE_RECLAIM_INTERVAL: Duration = Duration::from_secs(60);
 
 pub fn configure_allocator() {
     let arenas = std::thread::available_parallelism()
@@ -23,7 +22,6 @@ pub fn configure_allocator() {
             libc::mallopt(option, value);
         }
     }
-    let _ = requests();
 }
 
 /// Requests reclamation after a batch has released its temporary allocations.
@@ -53,39 +51,18 @@ fn requests() -> Option<&'static mpsc::SyncSender<()>> {
 
 fn reclaim(requests: mpsc::Receiver<()>) {
     let mut last_trim: Option<Instant> = None;
-    let mut file_deadline = Instant::now() + FILE_RECLAIM_INTERVAL;
-    let mut startup_pending = true;
-    loop {
-        let request = if startup_pending {
-            requests.recv_timeout(file_deadline.saturating_duration_since(Instant::now()))
-        } else {
-            requests
-                .recv()
-                .map_err(|_| mpsc::RecvTimeoutError::Disconnected)
-        };
-        if matches!(request, Err(mpsc::RecvTimeoutError::Disconnected)) {
-            break;
+    while requests.recv().is_ok() {
+        let now = Instant::now();
+        let deadline = last_trim
+            .map(|last| (last + RECLAIM_INTERVAL).max(now + COALESCE))
+            .unwrap_or(now + COALESCE);
+        std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
+        let _ = requests.try_recv();
+        // SAFETY: glibc serializes malloc_trim with allocations in each arena.
+        #[allow(unsafe_code)]
+        unsafe {
+            libc::malloc_trim(0);
         }
-        if request.is_ok() {
-            let now = Instant::now();
-            let deadline = last_trim
-                .map(|last| (last + RECLAIM_INTERVAL).max(now + COALESCE))
-                .unwrap_or(now + COALESCE);
-            std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
-            let _ = requests.try_recv();
-            // SAFETY: glibc serializes malloc_trim with allocations in each arena.
-            #[allow(unsafe_code)]
-            unsafe {
-                libc::malloc_trim(0);
-            }
-            last_trim = Some(Instant::now());
-        }
-        if Instant::now() >= file_deadline {
-            startup_pending = false;
-            file_deadline = Instant::now() + FILE_RECLAIM_INTERVAL;
-            if let Err(error) = crate::file_pages::reclaim() {
-                tracing::debug!(target: "rufin::memory", %error, "could not reclaim file pages");
-            }
-        }
+        last_trim = Some(Instant::now());
     }
 }
