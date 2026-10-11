@@ -1055,15 +1055,13 @@ impl Shell {
             render_started,
             "Artist overview route",
             move |window, cancellation| async move {
-                let Some(row) = database
-                    .artist_row_by_media_uri(&artist_uri, &cancellation)
+                let Some((source, artist)) = database
+                    .artist_identity_by_media_uri(&artist_uri, &cancellation)
                     .await
                     .map_err(|error| error.to_string())?
                 else {
                     return Ok(None);
                 };
-                let source = row.source_key;
-                let artist = row.artist_key;
                 let folder = None;
                 load_artist_overview(
                     &database,
@@ -1106,15 +1104,13 @@ impl Shell {
             render_started,
             "Artist discography route",
             move |window, cancellation| async move {
-                let Some(row) = database
-                    .artist_row_by_media_uri(&artist_uri, &cancellation)
+                let Some((source, artist)) = database
+                    .artist_identity_by_media_uri(&artist_uri, &cancellation)
                     .await
                     .map_err(|error| error.to_string())?
                 else {
                     return Ok(None);
                 };
-                let source = row.source_key;
-                let artist = row.artist_key;
                 let folder = None;
                 load_artist_discography(
                     &database,
@@ -1156,15 +1152,13 @@ impl Shell {
             render_started,
             "Artist tracks route",
             move |window, cancellation| async move {
-                let Some(row) = database
-                    .artist_row_by_media_uri(&artist_uri, &cancellation)
+                let Some((source, artist)) = database
+                    .artist_identity_by_media_uri(&artist_uri, &cancellation)
                     .await
                     .map_err(|error| error.to_string())?
                 else {
                     return Ok(None);
                 };
-                let source = row.source_key;
-                let artist = row.artist_key;
                 let folder = None;
                 load_artist_tracks(
                     &database,

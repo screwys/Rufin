@@ -631,11 +631,11 @@ async fn prepare_live_collection(
             .map_err(|error| error.to_string())?
             .map(|row| library::SongScope::Album(row.album_key)),
         Some("artist") => database
-            .artist_row_by_media_uri(media_uri, &cancellation)
+            .artist_identity_by_media_uri(media_uri, &cancellation)
             .await
             .map_err(|error| error.to_string())?
-            .map(|row| library::SongScope::Artist {
-                key: row.artist_key,
+            .map(|(_, key)| library::SongScope::Artist {
+                key,
                 album_artist: false,
             }),
         _ => None,

@@ -248,28 +248,19 @@ impl AndroidBrowseQuery {
                         show_track_header: self.display.display.show_header,
                     }));
                 }
-                let Some(base) = db
-                    .artist_row_by_media_uri(&uri, &cancel)
+                let Some((source, key)) = db
+                    .artist_identity_by_media_uri(&uri, &cancel)
                     .await
                     .map_err(error)?
                 else {
                     return Ok(None);
                 };
-                let artist = if album_artist || folder.is_some() {
-                    db.artist_rows(
-                        base.source_key,
-                        &[base.artist_key],
-                        album_artist,
-                        folder,
-                        &cancel,
-                    )
+                let artist = db
+                    .artist_rows(source, &[key], album_artist, folder, &cancel)
                     .await
                     .map_err(error)?
                     .pop()
-                    .ok_or_else(|| error("Artist is no longer available"))?
-                } else {
-                    base
-                };
+                    .ok_or_else(|| error("Artist is no longer available"))?;
                 let mut query = SongQuery::new(SongScope::Artist {
                     key: artist.artist_key,
                     album_artist,

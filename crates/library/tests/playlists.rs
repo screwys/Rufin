@@ -190,6 +190,39 @@ async fn playlist_order_is_title_ordered_and_folder_scoped() {
         .await
         .expect("folder-scoped Playlists");
     assert_eq!(scoped, [zulu]);
+    let destinations = fixture
+        .database
+        .playlist_destinations(Some(fixture.source), &cancellation)
+        .await
+        .unwrap();
+    assert_eq!(
+        destinations
+            .iter()
+            .find(|row| row.playlist_key == zulu)
+            .unwrap()
+            .genres[0]
+            .name,
+        "Rock"
+    );
+    let detail = fixture
+        .database
+        .playlist_detail_page(
+            &library::SongQuery::new(library::SongScope::Playlist(zulu)),
+            library::RouteSeedWindow::top(),
+            &cancellation,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(detail.summary.genres[0].name, "Rock");
+    assert_eq!(
+        fixture
+            .database
+            .playlist_genres(zulu, &cancellation)
+            .await
+            .unwrap(),
+        detail.summary.genres
+    );
 }
 
 #[tokio::test]

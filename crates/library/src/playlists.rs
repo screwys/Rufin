@@ -440,6 +440,9 @@ impl Database {
             rows.extend(Self::load_playlist_rows(&mut transaction, keys).await?);
         }
         rows.retain(|row| row.writable);
+        for row in &mut rows {
+            row.genres = load_playlist_genres(&mut transaction, row.playlist_key).await?;
+        }
         transaction.commit().await?;
         Ok(rows)
     }
@@ -460,7 +463,8 @@ impl Database {
         let summary = Self::load_playlist_rows(&mut transaction, &[playlist])
             .await?
             .pop();
-        let page = if let Some(summary) = summary {
+        let page = if let Some(mut summary) = summary {
+            summary.genres = load_playlist_genres(&mut transaction, playlist).await?;
             let query = crate::selection::song_query_on(&mut transaction, input).await?;
             let count = query.count(&mut transaction).await?.max(0) as usize;
             let range = window.range(count);
@@ -484,6 +488,15 @@ impl Database {
         };
         transaction.commit().await?;
         Ok(page)
+    }
+
+    pub async fn playlist_genres(
+        &self,
+        key: PlaylistKey,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<PlaylistGenreLink>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        load_playlist_genres(&mut connection, key).await
     }
 
     pub async fn playlist_rows(
@@ -529,20 +542,6 @@ impl Database {
                 row.representative_artwork =
                     crate::artwork::playlist_representative_artwork_on(connection, *key).await?;
             }
-            row.genres = sqlx::query_as::<_, (crate::GenreKey, String)>(
-                "SELECT genre.genre_key,genre.name FROM playlist_entries entry
-                 CROSS JOIN tracks track USING(track_key)
-                 CROSS JOIN track_genres relation USING(track_key)
-                 JOIN genres genre USING(genre_key)
-                 WHERE entry.playlist_key=?1 GROUP BY genre.genre_key
-                 ORDER BY count(*) DESC,genre.sort_text,genre.genre_key LIMIT 2",
-            )
-            .bind(key)
-            .fetch_all(&mut *connection)
-            .await?
-            .into_iter()
-            .map(|(genre_key, name)| PlaylistGenreLink { genre_key, name })
-            .collect();
             result.push(row);
         }
         Ok(result)
@@ -1508,6 +1507,25 @@ pub(crate) async fn import_playlists_jsonl_on(
         }
     }
     Ok(count)
+}
+
+async fn load_playlist_genres(
+    connection: &mut SqliteConnection,
+    key: PlaylistKey,
+) -> LibraryResult<Vec<PlaylistGenreLink>> {
+    Ok(sqlx::query_as::<_, (crate::GenreKey, String)>(
+        "SELECT genre.genre_key,genre.name FROM playlist_entries entry
+         CROSS JOIN track_genres relation USING(track_key)
+         JOIN genres genre USING(genre_key)
+         WHERE entry.playlist_key=?1 GROUP BY genre.genre_key
+         ORDER BY count(*) DESC,genre.sort_text,genre.genre_key LIMIT 2",
+    )
+    .bind(key)
+    .fetch_all(&mut *connection)
+    .await?
+    .into_iter()
+    .map(|(genre_key, name)| PlaylistGenreLink { genre_key, name })
+    .collect())
 }
 
 pub(crate) fn playlist_query(

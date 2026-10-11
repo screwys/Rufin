@@ -1095,7 +1095,7 @@ mod source_window_tests {
 fn source_fact(
     field: SmartPlaylistRuleField,
     definition: &SmartPlaylistDefinition,
-    now: i64,
+    legacy: bool,
 ) -> String {
     use SmartPlaylistRuleField as F;
     let period = if field == F::Played {
@@ -1103,9 +1103,6 @@ fn source_fact(
     } else {
         definition.activity_period.seconds()
     };
-    let time = period
-        .map(|seconds| format!(" AND started_at>={} AND started_at<={now}", now - seconds))
-        .unwrap_or_else(|| format!(" AND started_at<={now}"));
     match field {
         F::Title => "owner.title".into(),
         F::Artist => "owner.display_artist".into(),
@@ -1117,31 +1114,34 @@ fn source_fact(
         F::Favorite => "COALESCE((SELECT favorite FROM user_media_state WHERE media_uri=owner.media_uri),owner.source_favorite)".into(),
         F::Rating => "COALESCE((SELECT rating FROM user_media_state WHERE media_uri=owner.media_uri),owner.source_rating)/10".into(),
         F::Played | F::PlayCount | F::SkipCount | F::LastPlayed => {
-            let aggregate = match field {
-                F::Played | F::PlayCount => "count(*)",
-                F::SkipCount => "COALESCE(sum(skipped),0)",
-                _ => "max(started_at)",
-            };
-            let local = if matches!(field, F::Played | F::PlayCount) && period.is_none() {
-                "owner.local_play_count".to_string()
-            } else {
-                format!("(SELECT {aggregate} FROM listens WHERE media_uri=owner.media_uri{time})")
-            };
-            if period.is_some() { return local; }
             let column = match field {
                 F::Played | F::PlayCount => "play_count",
                 F::SkipCount => "skip_count",
                 _ => "last_played_at",
             };
-            let baseline = format!("(SELECT {column} FROM legacy_activity WHERE source_id=(SELECT object_id FROM sources WHERE source_key=owner.source_key) AND track_object_id=owner.object_id AND period='lifetime' AND item_kind='track')");
-            if field != F::LastPlayed { format!("({local}+COALESCE({baseline},0))") }
-            else { format!("COALESCE(max({local},{baseline}),{local},{baseline})") }
+            let local = match field {
+                F::Played | F::PlayCount if period.is_none() => "owner.local_play_count".into(),
+                F::LastPlayed => "activity.last_played_at".into(),
+                _ => format!("COALESCE(activity.{column},0)"),
+            };
+            if period.is_some() || !legacy {
+                return local;
+            }
+            if field == F::LastPlayed {
+                format!("COALESCE(max({local},legacy.{column}),{local},legacy.{column})")
+            } else {
+                format!("({local}+COALESCE(legacy.{column},0))")
+            }
         }
         F::Genre | F::Mood => unreachable!("relation rules compile at their owner"),
     }
 }
 
-fn source_rule(rule: &SmartPlaylistRule, definition: &SmartPlaylistDefinition, now: i64) -> String {
+fn source_rule(
+    rule: &SmartPlaylistRule,
+    definition: &SmartPlaylistDefinition,
+    legacy: bool,
+) -> String {
     use SmartPlaylistRuleField as F;
     use SmartPlaylistRuleOperator as O;
     use SmartPlaylistRuleValue as V;
@@ -1179,7 +1179,7 @@ fn source_rule(rule: &SmartPlaylistRule, definition: &SmartPlaylistDefinition, n
             matched
         };
     }
-    let mut fact = source_fact(rule.field, definition, now);
+    let mut fact = source_fact(rule.field, definition, legacy);
     if rule.field == F::Played {
         let Some(V::Bool(value)) = rule.value else {
             return "0".into();
@@ -1247,16 +1247,16 @@ fn source_rule(rule: &SmartPlaylistRule, definition: &SmartPlaylistDefinition, n
     }
 }
 
-fn source_rules(definition: &SmartPlaylistDefinition, now: i64) -> String {
+fn source_rules(definition: &SmartPlaylistDefinition, legacy: bool) -> String {
     let all = definition
         .match_all
         .iter()
-        .map(|rule| format!("({})", source_rule(rule, definition, now)))
+        .map(|rule| format!("({})", source_rule(rule, definition, legacy)))
         .collect::<Vec<_>>();
     let any = definition
         .match_any
         .iter()
-        .map(|rule| format!("({})", source_rule(rule, definition, now)))
+        .map(|rule| format!("({})", source_rule(rule, definition, legacy)))
         .collect::<Vec<_>>();
     format!(
         "({}) AND ({})",
@@ -1273,7 +1273,7 @@ fn source_rules(definition: &SmartPlaylistDefinition, now: i64) -> String {
     )
 }
 
-fn source_sort(definition: &SmartPlaylistDefinition, now: i64) -> String {
+fn source_sort(definition: &SmartPlaylistDefinition, legacy: bool) -> String {
     use SmartPlaylistRuleField as F;
     use SmartPlaylistSort as S;
     let field = match definition.sort_field {
@@ -1289,7 +1289,7 @@ fn source_sort(definition: &SmartPlaylistDefinition, now: i64) -> String {
         S::Bpm => F::Bpm,
         S::Rating => F::Rating,
     };
-    let fact = source_fact(field, definition, now);
+    let fact = source_fact(field, definition, legacy);
     if field == F::Rating {
         fact.strip_suffix("/10").unwrap().to_string()
     } else {
@@ -1323,9 +1323,12 @@ async fn smart_membership_sql(
     let definitions = sqlx::query_as::<_, (i64, String)>(
         "SELECT smart_playlist_key,definition_json FROM smart_playlists
          WHERE ?1 IS NULL OR smart_playlist_key IN(SELECT value FROM json_each(?1)) ORDER BY smart_playlist_key"
-    ).bind(&keys_json).fetch_all(connection).await?
+    ).bind(&keys_json).fetch_all(&mut *connection).await?
         .into_iter().map(|(key,json)| Ok((key,serde_json::from_str::<SmartPlaylistDefinition>(&json)?)))
         .collect::<LibraryResult<Vec<_>>>()?;
+    let has_legacy = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM legacy_activity WHERE period='lifetime' AND item_kind='track')",
+    ).fetch_one(&mut *connection).await?;
     let admitted = keys_json
         .as_deref()
         .map(|keys| {
@@ -1339,7 +1342,41 @@ async fn smart_membership_sql(
         "WITH definitions AS (SELECT smart_playlist_key definition_key,position,normalized_name,COALESCE(json_extract(definition_json,'$.current'),0) current_scope FROM smart_playlists WHERE {admitted})"
     );
     let mut members = Vec::new();
+    let mut periods = std::collections::BTreeSet::new();
+    let mut legacy_used = false;
     for (key, definition) in &definitions {
+        use SmartPlaylistRuleField as F;
+        use SmartPlaylistRuleOperator as O;
+        use SmartPlaylistRuleValue as V;
+        use SmartPlaylistSort as S;
+        let period = definition.activity_period.seconds();
+        let sort_field = match definition.sort_field {
+            S::PlayCount => Some(F::PlayCount),
+            S::SkipCount => Some(F::SkipCount),
+            S::LastPlayed => Some(F::LastPlayed),
+            _ => None,
+        };
+        let mut activity = false;
+        let mut legacy = false;
+        for field in definition
+            .match_all
+            .iter()
+            .chain(&definition.match_any)
+            .map(|rule| rule.field)
+            .chain(sort_field)
+        {
+            activity |= matches!(field, F::SkipCount | F::LastPlayed)
+                || (field == F::PlayCount && period.is_some());
+            legacy |= has_legacy
+                && (field == F::Played
+                    || (period.is_none()
+                        && matches!(field, F::PlayCount | F::SkipCount | F::LastPlayed)));
+        }
+        legacy_used |= legacy;
+        if activity {
+            periods.insert(period);
+        }
+
         let mut scope = "owner.indexed=1".to_string();
         if definition.current {
             scope.push_str(&format!(
@@ -1352,26 +1389,56 @@ async fn smart_membership_sql(
                 scope.push_str(&format!(" AND EXISTS(SELECT 1 FROM track_folders WHERE track_key=owner.track_key AND folder_key={})",folder.raw()));
             }
         }
-        let recent_period = definition.activity_period.seconds().filter(|_| {
-            definition.match_all.iter().any(|rule| {
-                matches!(
-                    (rule.field, rule.operator, &rule.value),
-                    (SmartPlaylistRuleField::PlayCount, SmartPlaylistRuleOperator::Above,
-                     Some(SmartPlaylistRuleValue::Number(minimum))) if *minimum >= 0
-                )
-            })
+        let positive = definition.match_all.iter().find_map(|rule| {
+            match (rule.field, rule.operator, &rule.value) {
+                (field @ (F::PlayCount | F::SkipCount), O::Above, Some(V::Number(min)))
+                    if *min >= 0 =>
+                {
+                    Some(field)
+                }
+                (F::Played, O::Is, Some(V::Bool(true)))
+                | (F::Played, O::IsNot, Some(V::Bool(false))) => Some(F::Played),
+                _ => None,
+            }
         });
-        // Keep the time-indexed listens first so the indexed-song predicate does not scan the library.
-        let relation = if let Some(seconds) = recent_period {
-            format!(
-                "(SELECT DISTINCT media_uri FROM listens WHERE started_at>={} AND started_at<={now}) recent CROSS JOIN tracks owner USING(media_uri)",
-                now - seconds
-            )
+        let period_name = format!("activity_{}", period.unwrap_or(0));
+        let activity_first =
+            period.is_some() && matches!(positive, Some(F::PlayCount | F::SkipCount));
+        let mut relation = if activity_first {
+            format!("{period_name} activity CROSS JOIN tracks owner USING(media_uri)")
+        } else if let Some(field) = positive {
+            let (candidates, column) = if field == F::SkipCount {
+                (
+                    format!(
+                        "SELECT track_key FROM {period_name} CROSS JOIN tracks USING(media_uri) WHERE skip_count>0"
+                    ),
+                    "skip_count",
+                )
+            } else {
+                (
+                    "SELECT track_key FROM tracks WHERE local_play_count>0".into(),
+                    "play_count",
+                )
+            };
+            let baseline = if legacy {
+                format!(" UNION SELECT track_key FROM legacy WHERE {column}>0")
+            } else {
+                String::new()
+            };
+            format!("({candidates}{baseline}) played CROSS JOIN tracks owner USING(track_key)")
         } else {
             "tracks owner".into()
         };
-        let sort = source_sort(definition, now);
-        let rules = source_rules(definition, now);
+        if activity && !activity_first {
+            relation.push_str(&format!(
+                " LEFT JOIN {period_name} activity USING(media_uri)"
+            ));
+        }
+        if legacy {
+            relation.push_str(" LEFT JOIN legacy USING(track_key)");
+        }
+        let sort = source_sort(definition, legacy);
+        let rules = source_rules(definition, legacy);
         let descending = i32::from(definition.descending);
         let direction = if definition.descending { "DESC" } else { "ASC" };
         let membership_order = definition.limit.map(|limit| {
@@ -1381,6 +1448,21 @@ async fn smart_membership_sql(
             ",result_{key} AS NOT MATERIALIZED (SELECT {key} definition_key,owner.track_key,owner.media_uri,owner.duration_millis,{descending} descending,owner.sort_text,{sort} sort_value FROM {relation} WHERE {scope} AND ({rules}){membership_order})"
         ));
         members.push(format!("SELECT * FROM result_{key}"));
+    }
+    for period in periods {
+        let lower = period
+            .map(|seconds| format!(" AND started_at>={}", now - seconds))
+            .unwrap_or_default();
+        sql.push_str(&format!(",activity_{} AS MATERIALIZED (
+            SELECT media_uri,count(*) play_count,sum(skipped) skip_count,max(started_at) last_played_at
+            FROM listens WHERE started_at<={now}{lower} GROUP BY media_uri)", period.unwrap_or(0)));
+    }
+    if legacy_used {
+        sql.push_str(",legacy AS MATERIALIZED (
+            SELECT track.track_key,old.play_count,old.skip_count,old.last_played_at
+            FROM legacy_activity old JOIN sources source ON source.object_id=old.source_id
+            CROSS JOIN tracks track ON track.source_key=source.source_key AND track.object_id=old.track_object_id
+            WHERE old.period='lifetime' AND old.item_kind='track')");
     }
     if members.is_empty() {
         members.push("SELECT NULL definition_key,NULL track_key,NULL media_uri,0 duration_millis,0 descending,NULL sort_text,NULL sort_value WHERE 0".into());

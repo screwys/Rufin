@@ -1468,6 +1468,20 @@ impl Database {
         result
     }
 
+    pub async fn artist_identity_by_media_uri(
+        &self,
+        media_uri: &str,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Option<(SourceKey, ArtistKey)>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        Ok(
+            sqlx::query_as("SELECT source_key,artist_key FROM artists WHERE media_uri=?1")
+                .bind(media_uri)
+                .fetch_optional(&mut *connection)
+                .await?,
+        )
+    }
+
     pub async fn artist_row_by_media_uri(
         &self,
         media_uri: &str,
@@ -1773,30 +1787,28 @@ async fn named_collection_artwork(
     if keys.is_empty() {
         return Ok(BTreeMap::new());
     }
-    let candidates = if kind == "genre" {
-        "SELECT track.media_uri
-         FROM track_genres credit
-         JOIN tracks track USING(track_key)
-         WHERE track.indexed=1 AND credit.genre_key=requested.value AND track.source_key=?2
-           AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))
-         UNION
-         SELECT track.media_uri
-         FROM album_genres credit
-         JOIN albums album ON album.album_key=credit.album_key AND album.source_key=?2
-         JOIN tracks track USING(album_key)
-         WHERE track.indexed=1 AND credit.genre_key=requested.value
-           AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))"
-            .to_string()
+    let (from, predicate) = if kind == "genre" {
+        (
+            "(SELECT track.track_key FROM track_genres credit JOIN tracks track USING(track_key)
+              WHERE track.indexed=1 AND credit.genre_key=requested.value AND track.source_key=?2
+                AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))
+              UNION
+              SELECT track.track_key FROM album_genres credit
+              JOIN albums album ON album.album_key=credit.album_key AND album.source_key=?2
+              JOIN tracks track USING(album_key)
+              WHERE track.indexed=1 AND credit.genre_key=requested.value
+                AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))) member
+             CROSS JOIN tracks track USING(track_key)".to_string(),
+            "1".to_string(),
+        )
     } else {
-        format!(
-            "SELECT track.media_uri
-             FROM track_{kind}s credit
-             JOIN tracks track USING(track_key)
-             WHERE track.indexed=1 AND credit.{kind}_key=requested.value AND track.source_key=?2
-               AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))"
+        (
+            format!("track_{kind}s credit JOIN tracks track USING(track_key)"),
+            format!("track.indexed=1 AND credit.{kind}_key=requested.value AND track.source_key=?2
+              AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))"),
         )
     };
-    let selection = crate::artwork::collection_artwork_sql(&candidates);
+    let selection = crate::artwork::collection_artwork_sql(&from, &predicate);
     let sql = format!(
         "WITH requested AS (SELECT DISTINCT value FROM json_each(?1))
          SELECT requested.value,COALESCE(album.artwork_binding,track.artwork_binding) FROM requested

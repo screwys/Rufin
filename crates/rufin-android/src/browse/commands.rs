@@ -388,15 +388,15 @@ impl AndroidLibrary {
                             .map_err(error)?
                             .map(|row| library::RadioSeed::Album(row.album_key)),
                         Route::ArtistDetail(uri) => database
-                            .artist_row_by_media_uri(&uri, &cancel)
+                            .artist_identity_by_media_uri(&uri, &cancel)
                             .await
                             .map_err(error)?
-                            .map(|row| library::RadioSeed::Artist(row.artist_key)),
+                            .map(|(_, key)| library::RadioSeed::Artist(key)),
                         Route::AlbumArtistDetail(uri) => database
-                            .artist_row_by_media_uri(&uri, &cancel)
+                            .artist_identity_by_media_uri(&uri, &cancel)
                             .await
                             .map_err(error)?
-                            .map(|row| library::RadioSeed::AlbumArtist(row.artist_key)),
+                            .map(|(_, key)| library::RadioSeed::AlbumArtist(key)),
                         Route::GenreDetail(key) => Some(library::RadioSeed::Genre(key)),
                         Route::PlaylistDetail(key) => Some(library::RadioSeed::Playlist(key)),
                         _ => None,

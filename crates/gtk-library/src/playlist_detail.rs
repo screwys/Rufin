@@ -538,12 +538,20 @@ impl CatalogUi {
                     let database = Arc::clone(&database);
                     Box::pin(async move {
                         match owner_key {
-                            PlaylistDetailOwner::Saved { key, .. } => database
-                                .playlist_rows(&[key], &cancellation)
-                                .await
-                                .map_err(|error| error.to_string())?
-                                .pop()
-                                .map(|summary| PlaylistDetailOwner::Saved { key, summary }),
+                            PlaylistDetailOwner::Saved { key, .. } => {
+                                let mut summary = database
+                                    .playlist_rows(&[key], &cancellation)
+                                    .await
+                                    .map_err(|error| error.to_string())?
+                                    .pop();
+                                if let Some(summary) = &mut summary {
+                                    summary.genres = database
+                                        .playlist_genres(key, &cancellation)
+                                        .await
+                                        .map_err(|error| error.to_string())?;
+                                }
+                                summary.map(|summary| PlaylistDetailOwner::Saved { key, summary })
+                            }
                             PlaylistDetailOwner::Smart { key, .. } => {
                                 let now = SystemTime::now()
                                     .duration_since(UNIX_EPOCH)
@@ -648,19 +656,25 @@ pub async fn load_smart_playlist_detail(
     else {
         return Ok(None);
     };
-    let projection = database
-        .song_route_page(
-            &library::SongQuery {
-                folder,
-                sort: Some(settings.sort_key.track_sort()),
-                descending: settings.descending,
-                ..library::SongQuery::new(library::SongScope::Smart { key, source, now })
-            },
-            window,
-            cancellation,
-        )
+    let query = library::SongQuery {
+        folder,
+        sort: Some(settings.sort_key.track_sort()),
+        descending: settings.descending,
+        ..library::SongQuery::new(library::SongScope::Smart { key, source, now })
+    };
+    let count = summary.track_count.max(0) as usize;
+    let range = window.range(count);
+    let first_rows = database
+        .song_rows(&query, range.start, range.len(), cancellation)
         .await
         .map_err(|error| error.to_string())?;
+    let projection = library::TrackRoutePage {
+        query,
+        count,
+        first_row_position: range.start,
+        first_rows,
+        disc_sections: Vec::new(),
+    };
     Ok(Some(SmartPlaylistDetailData {
         summary,
         projection,

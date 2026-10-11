@@ -345,9 +345,9 @@ impl AndroidBrowseQuery {
                 let Some((uri, album_artist)) = self.artist_release_identity() else {
                     return Ok([0; 6]);
                 };
-                let Some(artist) = self
+                let Some((source, artist)) = self
                     .database
-                    .artist_row_by_media_uri(uri, &ReadCancellation::new())
+                    .artist_identity_by_media_uri(uri, &ReadCancellation::new())
                     .await
                     .map_err(error)?
                 else {
@@ -355,8 +355,8 @@ impl AndroidBrowseQuery {
                 };
                 self.database
                     .artist_release_counts(
-                        artist.source_key,
-                        artist.artist_key,
+                        source,
+                        artist,
                         album_artist,
                         self.selected().music_folder_key,
                         &self.filter,
@@ -425,12 +425,15 @@ impl AndroidBrowseQuery {
                     | Route::AlbumArtistDetail(uri)
                     | Route::AlbumArtistTracks(uri)
                     | Route::AlbumArtistFavoriteTracks(uri) => {
-                        let Some(row) = self.database.artist_row_by_media_uri(uri, &cancel).await?
+                        let Some((_, artist)) = self
+                            .database
+                            .artist_identity_by_media_uri(uri, &cancel)
+                            .await?
                         else {
                             return Ok(None);
                         };
                         SongScope::Artist {
-                            key: row.artist_key,
+                            key: artist,
                             album_artist: matches!(
                                 self.route,
                                 Route::AlbumArtistDetail(_)

@@ -12,7 +12,8 @@ pub(crate) async fn playlist_representative_artwork_on(
     playlist: crate::PlaylistKey,
 ) -> LibraryResult<Vec<Vec<u8>>> {
     let covers = collection_artwork_sql(
-        "SELECT track.media_uri FROM playlist_entries entry JOIN tracks track USING(track_key) JOIN playlists playlist USING(playlist_key) WHERE playlist.playlist_key=?1 AND playlist.owner='rufin'",
+        "playlist_entries entry JOIN tracks track USING(track_key) JOIN playlists playlist USING(playlist_key)",
+        "playlist.playlist_key=?1 AND playlist.owner='rufin'",
     );
     Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT COALESCE(track.artwork_binding,album.artwork_binding)
@@ -44,12 +45,11 @@ pub struct PlaylistArtworkBinding {
 }
 
 // Media identities keep the choice and order the same on every device.
-pub(crate) fn collection_artwork_sql(members: &str) -> String {
+pub(crate) fn collection_artwork_sql(from: &str, predicate: &str) -> String {
     format!(
-        "SELECT track.track_key,min(track.media_uri) media_uri FROM ({members}) member
-         CROSS JOIN tracks track USING(media_uri)
+        "SELECT track.track_key,min(track.media_uri) media_uri FROM {from}
          LEFT JOIN albums album USING(album_key)
-         WHERE COALESCE(track.artwork_binding,album.artwork_binding) IS NOT NULL
+         WHERE {predicate} AND COALESCE(track.artwork_binding,album.artwork_binding) IS NOT NULL
          GROUP BY COALESCE(album.media_uri,track.media_uri)
          ORDER BY COALESCE(album.media_uri,min(track.media_uri)),min(track.media_uri) LIMIT 4"
     )

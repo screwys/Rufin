@@ -414,20 +414,17 @@ async fn artwork(
             })
     } else {
         let uri = required(&parameters, "uri")?;
-        if library::source_entity_parts(uri).is_some_and(|(_, kind, _)| kind == "artist") {
+        if library::source_entity_parts(uri)
+            .is_some_and(|(_, kind, _)| matches!(kind.as_str(), "artist" | "album"))
+        {
             products
                 .library
-                .artist_row_by_media_uri(uri, &cancel)
+                .collection_artwork_bindings(&[uri.to_owned()], &cancel)
                 .await
                 .map_err(internal)?
-                .and_then(|row| row.artwork_binding)
-        } else if library::source_entity_parts(uri).is_some_and(|(_, kind, _)| kind == "album") {
-            products
-                .library
-                .album_row_by_media_uri(uri, &cancel)
-                .await
-                .map_err(internal)?
-                .and_then(|row| row.artwork_binding)
+                .into_iter()
+                .next()
+                .flatten()
         } else {
             products
                 .library
