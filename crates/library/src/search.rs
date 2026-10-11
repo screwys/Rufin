@@ -121,12 +121,11 @@ impl Database {
         let mut transaction = connection.begin().await?;
         let track_keys = sqlx::query_scalar::<_, TrackKey>(
             "SELECT track_key FROM tracks
-             WHERE source_key=?1 AND NOT EXISTS (
+             WHERE indexed=1 AND source_key=?1 AND NOT EXISTS (
                SELECT 1 FROM json_each(?2) term
                WHERE CASE WHEN length(term.value)=1
                      THEN instr(' '||normalized_search||' ',' '||term.value||' ')
                      ELSE instr(normalized_search,term.value) END=0
-                 AND CAST(year AS TEXT)<>term.value
              )
                AND (?4 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=tracks.track_key AND scope.folder_key=?4))
              ORDER BY sort_text, track_key LIMIT ?3",
@@ -140,7 +139,7 @@ impl Database {
         let tracks = load_track_rows(&mut transaction, &track_keys).await?;
         let album_keys = sqlx::query_scalar::<_, AlbumKey>(
             "SELECT album.album_key FROM albums AS album
-             WHERE album.source_key=?1 AND NOT EXISTS (
+             WHERE album.indexed=1 AND album.source_key=?1 AND NOT EXISTS (
                SELECT 1 FROM json_each(?2) term WHERE
                  CASE WHEN length(term.value)=1
                    THEN instr(' '||album.normalized_title || ' ' || lower(album.display_artist)||' ',' '||term.value||' ')
@@ -149,7 +148,7 @@ impl Database {
                  AND NOT EXISTS (SELECT 1 FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key AND CASE WHEN length(term.value)=1 THEN instr(' '||artist.normalized_name||' ',' '||term.value||' ') ELSE instr(artist.normalized_name,term.value) END>0)
                  AND NOT EXISTS (SELECT 1 FROM album_genres credit JOIN genres genre USING(genre_key) WHERE credit.album_key=album.album_key AND CASE WHEN length(term.value)=1 THEN instr(' '||genre.normalized_name||' ',' '||term.value||' ') ELSE instr(genre.normalized_name,term.value) END>0)
              )
-               AND (?4 IS NULL OR EXISTS (SELECT 1 FROM tracks item JOIN track_folders scope USING(track_key) WHERE item.album_key=album.album_key AND scope.folder_key=?4))
+               AND (?4 IS NULL OR EXISTS (SELECT 1 FROM tracks item JOIN track_folders scope USING(track_key) WHERE item.indexed=1 AND item.album_key=album.album_key AND scope.folder_key=?4))
              ORDER BY album.sort_text, album.album_key LIMIT ?3",
         )
         .bind(source)
@@ -161,13 +160,13 @@ impl Database {
         let albums = load_album_rows(&mut transaction, source, &album_keys, folder).await?;
         let artist_keys = sqlx::query_scalar::<_, ArtistKey>(
             "SELECT artist.artist_key FROM artists artist
-             WHERE artist.source_key=?1 AND NOT EXISTS (
+             WHERE artist.indexed=1 AND artist.source_key=?1 AND NOT EXISTS (
                SELECT 1 FROM json_each(?2) term WHERE CASE WHEN length(term.value)=1
                  THEN instr(' '||artist.normalized_name||' ',' '||term.value||' ')
                  ELSE instr(artist.normalized_name,term.value) END=0
              )
                AND ((?5=0 AND EXISTS (SELECT 1 FROM track_artists credit WHERE credit.artist_key=artist.artist_key)) OR (?5=1 AND EXISTS (SELECT 1 FROM album_artists credit WHERE credit.artist_key=artist.artist_key)))
-               AND (?4 IS NULL OR (?5=0 AND EXISTS (SELECT 1 FROM track_artists credit JOIN track_folders scope USING(track_key) WHERE credit.artist_key=artist.artist_key AND scope.folder_key=?4)) OR (?5=1 AND EXISTS (SELECT 1 FROM album_artists credit JOIN tracks track USING(album_key) JOIN track_folders scope USING(track_key) WHERE credit.artist_key=artist.artist_key AND scope.folder_key=?4)))
+               AND (?4 IS NULL OR (?5=0 AND EXISTS (SELECT 1 FROM track_artists credit JOIN tracks track USING(track_key) JOIN track_folders scope USING(track_key) WHERE track.indexed=1 AND credit.artist_key=artist.artist_key AND scope.folder_key=?4)) OR (?5=1 AND EXISTS (SELECT 1 FROM album_artists credit JOIN tracks track USING(album_key) JOIN track_folders scope USING(track_key) WHERE track.indexed=1 AND credit.artist_key=artist.artist_key AND scope.folder_key=?4)))
              ORDER BY artist.sort_text,artist.artist_key LIMIT ?3",
         )
         .bind(source)
@@ -272,6 +271,6 @@ fn object_key_query(
         .push(key)
         .push(" FROM requested JOIN ")
         .push(table)
-        .push(" entity ON entity.object_id=requested.object_id WHERE entity.source_key=");
+        .push(" entity ON entity.object_id=requested.object_id WHERE entity.indexed=1 AND entity.source_key=");
     query
 }

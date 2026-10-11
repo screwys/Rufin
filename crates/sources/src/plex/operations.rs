@@ -350,7 +350,7 @@ impl PlexSource {
             )
             .await
             .map_err(|error| SourceError::IncompleteScan {
-                outcome,
+                outcome: outcome.clone(),
                 error: Box::new(error.into()),
             })?;
         Ok((rows, Some(outcome)))

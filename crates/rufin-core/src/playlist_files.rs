@@ -358,7 +358,7 @@ pub fn delete_file(owner: &SourceOwner, playlist: PlaylistKey) -> Receiver<Resul
             .playlist_owner(playlist, &ReadCancellation::new())
             .await
             .map_err(string_error)?
-            .and_then(|(source, _)| source);
+            .and_then(|(source, _, _)| source);
         owner
             .shared
             .database

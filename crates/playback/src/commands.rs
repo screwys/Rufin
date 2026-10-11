@@ -63,43 +63,41 @@ impl Batch {
     pub fn shuffled_seed(&self) -> Option<u64> {
         self.shuffled.then_some(self.shuffle_seed)
     }
-    fn activation_context(&self, index: usize) -> Option<(String, String, usize)> {
+    fn activation_context(&self, index: usize) -> Option<(String, library::TrackKey, usize)> {
         match &self.input {
             library::QueueInput::Query {
                 context_id,
-                anchor_uri: Some(uri),
+                anchor_key: Some(key),
                 ..
-            } => Some((context_id.to_string(), uri.clone(), index)),
-            library::QueueInput::PlaylistQuery {
-                context_id,
-                anchor_uri: Some(uri),
-                ..
-            } => Some((context_id.to_string(), uri.clone(), index)),
-            library::QueueInput::Items(items) => {
-                let (
-                    item,
-                    Provenance::Context {
-                        context_id,
-                        source_rank,
-                        ..
-                    },
-                ) = items.get(index)?
-                else {
-                    return None;
-                };
-                Some((context_id.to_string(), item.media_uri.clone(), *source_rank))
             }
-            library::QueueInput::Uris {
+            | library::QueueInput::PlaylistQuery {
+                context_id,
+                anchor_key: Some(key),
+                ..
+            } => Some((context_id.to_string(), *key, index)),
+            library::QueueInput::Tracks {
                 order,
                 context_id,
                 source_start,
             } => Some((
                 context_id.to_string(),
-                order.get(index)?.clone(),
+                *order.get(index)?,
                 source_start + index,
             )),
-            library::QueueInput::PlaylistEntries { context_id, order } if index < order.len() => {
-                Some((context_id.to_string(), String::new(), index))
+            library::QueueInput::Captured {
+                entries,
+                anchor_index,
+            } => {
+                let entry = entries.get(*anchor_index)?;
+                let Provenance::Context {
+                    context_id,
+                    source_rank,
+                    ..
+                } = &entry.provenance
+                else {
+                    return None;
+                };
+                Some((context_id.to_string(), entry.track_key, *source_rank))
             }
             _ => None,
         }
@@ -153,7 +151,7 @@ impl PlayRequest {
         request
     }
 
-    pub fn activation_context(&self) -> Option<(String, String, usize)> {
+    pub fn activation_context(&self) -> Option<(String, library::TrackKey, usize)> {
         (self.reactivate
             && self.placement == QueuePlacement::Now
             && !self.shuffled_start
@@ -318,10 +316,13 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let order: Arc<[String]> = items.iter().map(|item| item.media_uri.clone()).collect();
+        let keys: Arc<[library::TrackKey]> = (0..items.len())
+            .map(|index| library::TrackKey::from_raw(index as i64 + 1))
+            .collect();
         for anchor in [3, 125, 248] {
             let request = PlayRequest::captured(
-                library::QueueInput::Uris {
-                    order: Arc::clone(&order),
+                library::QueueInput::Tracks {
+                    order: Arc::clone(&keys),
                     context_id: "mounted-order".into(),
                     source_start: 20,
                 },
@@ -330,19 +331,23 @@ mod tests {
                 false,
             );
             assert_eq!(request.anchor_index, anchor);
-            let library::QueueInput::Uris {
+            let library::QueueInput::Tracks {
                 order: captured, ..
             } = &request.batch.input
             else {
                 panic!("captured route order")
             };
+            assert!(Arc::ptr_eq(captured, &keys));
             assert_eq!(captured.len(), 250);
-            assert_eq!(captured[anchor], format!("https://example.test/{anchor}"));
+            assert_eq!(
+                captured[anchor],
+                library::TrackKey::from_raw(anchor as i64 + 1)
+            );
             assert_eq!(
                 request.activation_context(),
                 Some((
                     "mounted-order".into(),
-                    format!("https://example.test/{anchor}"),
+                    library::TrackKey::from_raw(anchor as i64 + 1),
                     20 + anchor
                 ))
             );
@@ -391,12 +396,29 @@ mod tests {
         let database = library::Database::open(directory.path().join("queue.sqlite3"))
             .await
             .unwrap();
+        let admitted = database
+            .read_queue(library::QueueReadRequest {
+                input: library::QueueInput::MediaUris {
+                    order: Arc::from([
+                        "https://example.test/first".to_string(),
+                        "https://example.test/second".to_string(),
+                    ]),
+                    provenance: Provenance::Manual,
+                },
+                context_title: None,
+                anchor_index: 0,
+                random_start: None,
+                shuffled: None,
+            })
+            .await
+            .unwrap();
         let request = PlayRequest::captured(
-            library::QueueInput::Uris {
-                order: Arc::from([
-                    "rufin://source/track/first".to_string(),
-                    "rufin://source/track/second".to_string(),
-                ]),
+            library::QueueInput::Tracks {
+                order: admitted
+                    .entries
+                    .iter()
+                    .map(|entry| entry.track_key)
+                    .collect(),
                 context_id: "genre:4".into(),
                 source_start: 75,
             },

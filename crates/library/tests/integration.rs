@@ -1,12 +1,3 @@
-use library::{LibraryResult, cue_media_parts};
-
-#[expect(
-    dead_code,
-    reason = "Raw integration fixtures reuse production connection setup."
-)]
-#[path = "../src/schema.rs"]
-mod production_schema;
-
 mod activity;
 mod connect;
 mod entities;

@@ -20,9 +20,7 @@ pub struct TrackSelection {
 }
 
 impl TrackSelection {
-    pub fn new<T: gtk_widgets::library_fields::TrackPresentation>(
-        model: TrackCollectionModel<T>,
-    ) -> Self {
+    pub fn new<T: super::track_model::CollectionTrack>(model: TrackCollectionModel<T>) -> Self {
         let selection = PositionSelectionModel::new(model.list_model());
         let locate = model.clone();
         Self {

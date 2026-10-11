@@ -1199,7 +1199,7 @@ mod playback_refresh_tests {
                     primary_artist_musicbrainz_id: None,
                 },
                 received_from_connect: false,
-                playlist_entry_id: None,
+                track_key: None,
                 provenance: Provenance::Manual,
             }),
         }

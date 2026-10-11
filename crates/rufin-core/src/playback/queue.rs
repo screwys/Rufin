@@ -3,7 +3,7 @@ use ::playback::{Provenance, QueueReorderTarget, QueueRow, QueueSelection, Repea
 use std::{
     collections::{HashMap, HashSet},
     ops::Range,
-    sync::{Arc, OnceLock},
+    sync::Arc,
 };
 use thiserror::Error;
 
@@ -29,7 +29,6 @@ pub(super) struct Sequence {
     repeat_mode: RepeatMode,
     shuffle_enabled: bool,
     revision: u64,
-    content_id: OnceLock<String>,
     progress_millis: u64,
     dirty: Option<library::QueueUpdate>,
     window_dirty: bool,
@@ -47,7 +46,6 @@ impl Sequence {
             repeat_mode: RepeatMode::Off,
             shuffle_enabled: false,
             revision: 0,
-            content_id: OnceLock::new(),
             progress_millis: 0,
             dirty: None,
             window_dirty: true,
@@ -88,7 +86,6 @@ impl Sequence {
             repeat_mode: window.repeat_mode,
             shuffle_enabled: window.shuffled,
             revision,
-            content_id: OnceLock::new(),
             progress_millis: window.progress_millis.max(0) as u64,
             dirty: None,
             window_dirty: true,
@@ -145,9 +142,6 @@ impl Sequence {
     }
     fn changed(&mut self, contents: bool) {
         self.revision += 1;
-        if contents {
-            self.content_id.take();
-        }
         self.window_dirty |= contents;
         self.dirty.get_or_insert_default();
     }
@@ -215,10 +209,15 @@ impl Sequence {
     pub(super) fn selected_index(&self) -> Option<usize> {
         self.selected_index
     }
-    pub(super) fn context_index(&self, context_id: &str, uri: &str, rank: usize) -> Option<usize> {
+    pub(super) fn context_index(
+        &self,
+        context_id: &str,
+        key: library::TrackKey,
+        rank: usize,
+    ) -> Option<usize> {
         self.order.iter().position(|id| {
             let e = &self.members[id];
-            e.media_uri.as_ref() == uri && matches!(&e.provenance, Provenance::Context { context_id: c, source_rank, .. } if c.as_ref() == context_id && *source_rank == rank)
+            e.track_key == key && matches!(&e.provenance, Provenance::Context { context_id: c, source_rank, .. } if c.as_ref() == context_id && *source_rank == rank)
         })
     }
     pub(super) fn repeat_mode(&self) -> RepeatMode {
@@ -249,15 +248,7 @@ impl Sequence {
     pub(super) fn revision(&self) -> u64 {
         self.revision
     }
-    pub(super) fn content_id(&self) -> &str {
-        self.content_id.get_or_init(|| {
-            library::queue_content_id(
-                self.order
-                    .iter()
-                    .map(|id| self.members[id].media_uri.as_ref()),
-            )
-        })
-    }
+
     pub(super) fn progress_millis(&self) -> u64 {
         self.progress_millis
     }
@@ -627,7 +618,7 @@ impl Sequence {
                 occurrence_id: Some(id.0),
                 position,
                 item,
-                playlist_entry_id: entry.playlist_entry_id.as_deref().map(str::to_owned),
+                track_key: Some(entry.track_key),
                 provenance: entry.provenance.clone(),
                 received_from_connect: entry.received_from_connect,
             }));
@@ -635,6 +626,35 @@ impl Sequence {
         self.trim_rows();
         self.window_dirty = true;
     }
+    pub(super) fn rekey_songs(&mut self, pairs: &[(library::TrackKey, library::TrackKey)]) -> bool {
+        let mut keys = HashMap::new();
+        for &(old, new) in pairs.iter().rev() {
+            keys.insert(old, keys.get(&new).copied().unwrap_or(new));
+        }
+        let mut changed = false;
+        for (id, entry) in &mut self.members {
+            if let Some(&key) = keys.get(&entry.track_key)
+                && key != entry.track_key
+            {
+                entry.track_key = key;
+                self.dirty
+                    .get_or_insert_default()
+                    .entries
+                    .insert(id.0, entry.clone());
+                changed = true;
+            }
+        }
+        if changed {
+            for row in &mut self.rows {
+                if let Some(key) = row.track_key.and_then(|key| keys.get(&key)).copied() {
+                    Arc::make_mut(row).track_key = Some(key);
+                }
+            }
+            self.changed(true);
+        }
+        changed
+    }
+
     pub(super) fn need_metadata(&mut self) {
         self.window_dirty = true;
     }
@@ -709,8 +729,7 @@ mod tests {
         let entries = (start..start + count)
             .map(|i| library::QueueEntry {
                 received_from_connect: false,
-                media_uri: format!("https://example.test/{}", i / 2).into(),
-                playlist_entry_id: Some(format!("appearance:{i}").into()),
+                track_key: library::TrackKey::from_raw((i / 2 + 1) as i64),
                 provenance: Provenance::Manual,
             })
             .collect::<Vec<_>>();
@@ -723,8 +742,14 @@ mod tests {
                     occurrence_id: None,
                     position: i,
                     received_from_connect: false,
-                    item: QueueItem::direct(e.media_uri.as_ref(), format!("{i}"), "", "", 1000),
-                    playlist_entry_id: e.playlist_entry_id.as_deref().map(str::to_owned),
+                    item: QueueItem::direct(
+                        format!("https://example.test/{}", e.track_key.raw()),
+                        format!("{i}"),
+                        "",
+                        "",
+                        1000,
+                    ),
+                    track_key: Some(e.track_key),
                     provenance: e.provenance.clone(),
                 })
             })
@@ -740,54 +765,6 @@ mod tests {
         s.add_page(page(0, count), QueueReorderTarget::End, true, None);
         s.take_persistence();
         s
-    }
-    #[test]
-    fn content_identity_tracks_queue_edits_but_not_playback_position() {
-        let mut queue = sequence(4);
-        let original = queue.content_id().to_owned();
-        queue.activate_index(2);
-        queue.set_progress_millis(12_000);
-        queue.set_repeat_mode(RepeatMode::All);
-        assert_eq!(queue.content_id(), original);
-        let restored = Sequence::from_window(queue.snapshot(), 0, 0).unwrap();
-        assert_eq!(restored.content_id(), original);
-        queue.reorder(
-            &QueueSelection::Positions(vec![3]),
-            &QueueReorderTarget::Before(0),
-        );
-        assert_ne!(queue.content_id(), original);
-        let snapshot = queue.snapshot();
-        assert_eq!(
-            queue.content_id(),
-            library::queue_content_id(
-                snapshot
-                    .order
-                    .iter()
-                    .map(|i| snapshot.entries[*i as usize].media_uri.as_ref())
-            )
-        );
-        queue.add_page(page(8, 1), QueueReorderTarget::End, false, None);
-        let snapshot = queue.snapshot();
-        assert_eq!(
-            queue.content_id(),
-            library::queue_content_id(
-                snapshot
-                    .order
-                    .iter()
-                    .map(|i| snapshot.entries[*i as usize].media_uri.as_ref())
-            )
-        );
-        queue.random_start(17);
-        let snapshot = queue.snapshot();
-        assert_eq!(
-            queue.content_id(),
-            library::queue_content_id(
-                snapshot
-                    .order
-                    .iter()
-                    .map(|i| snapshot.entries[*i as usize].media_uri.as_ref())
-            )
-        );
     }
     #[test]
     fn restored_membership_hydrates_a_later_duplicate_on_navigation() {
@@ -807,7 +784,13 @@ mod tests {
                 .map(|(id, entry)| {
                     (
                         id,
-                        QueueItem::direct(entry.media_uri.as_ref(), "", "", "", 1000),
+                        QueueItem::direct(
+                            format!("https://example.test/{}", entry.track_key.raw()),
+                            "",
+                            "",
+                            "",
+                            1000,
+                        ),
                     )
                 })
                 .collect(),
@@ -870,12 +853,12 @@ mod tests {
         let mut s = sequence(101);
         s.add_page(page(1000, 1), QueueReorderTarget::End, false, None);
         assert_eq!(
-            s.entry_at(100).unwrap().playlist_entry_id.as_deref(),
-            Some("appearance:100")
+            s.entry_at(100).unwrap().track_key,
+            library::TrackKey::from_raw(51)
         );
         assert_eq!(
-            s.entry_at(101).unwrap().playlist_entry_id.as_deref(),
-            Some("appearance:1000")
+            s.entry_at(101).unwrap().track_key,
+            library::TrackKey::from_raw(501)
         );
         let update = s.take_persistence().unwrap();
         assert_eq!(update.entries.len(), 1);
@@ -895,15 +878,15 @@ mod tests {
             None,
         );
         assert_eq!(
-            s.entry_at(4).unwrap().playlist_entry_id.as_deref(),
-            Some("appearance:2000")
+            s.entry_at(4).unwrap().track_key,
+            library::TrackKey::from_raw(1001)
         );
         s.remove(&QueueSelection::Positions(vec![0]));
         assert_eq!(s.selected_index(), Some(2));
         let moving = s
             .order
             .iter()
-            .find(|id| s.members[id].playlist_entry_id.as_deref() == Some("appearance:1000"))
+            .find(|id| s.members[id].track_key == library::TrackKey::from_raw(501))
             .copied()
             .unwrap();
         s.reorder(

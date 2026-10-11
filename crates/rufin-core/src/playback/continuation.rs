@@ -28,21 +28,6 @@ impl PlaybackOwner {
         Ok(())
     }
 
-    pub(crate) async fn queue_content_id(&self) -> Result<String, String> {
-        let receiver = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone();
-        if let Some(receiver) = receiver {
-            return Ok(receiver.content_id());
-        }
-        let plex = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone();
-        if let Some(plex) = plex {
-            return Ok(plex.queue_content_id().await);
-        }
-        self.active()
-            .ok_or("Playback is unavailable")?
-            .queue_content_id()
-            .map_err(string_error)
-    }
-
     pub(crate) fn has_continuation(&self) -> bool {
         self.active()
             .and_then(|active| active.projection().ok())

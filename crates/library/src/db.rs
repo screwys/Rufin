@@ -68,14 +68,12 @@ struct DatabaseInner {
     general_read: Arc<Semaphore>,
     acquisition: Arc<Mutex<()>>,
     distinct_track_covers: AtomicBool,
-    _temporary_catalog: Option<tempfile::TempDir>,
 }
 
 /// Final ownership of one fixed writer and the bounded read-only pool.
 #[derive(Clone)]
 pub struct Database {
     inner: Arc<DatabaseInner>,
-    fresh_start: bool,
 }
 
 impl Database {
@@ -132,7 +130,7 @@ impl Database {
         selected: Option<&crate::SourceId>,
     ) -> LibraryResult<Self> {
         let path = path.as_ref();
-        Self::open_with_catalog(
+        Self::open_with_legacy_catalog(
             path,
             path.with_extension("catalog.sqlite"),
             configured,
@@ -141,7 +139,7 @@ impl Database {
         .await
     }
 
-    pub async fn open_with_catalog(
+    pub async fn open_with_legacy_catalog(
         path: impl AsRef<Path>,
         catalog: impl AsRef<Path>,
         configured: &[crate::SourceId],
@@ -150,19 +148,9 @@ impl Database {
         let path = path.as_ref();
         let catalog = catalog.as_ref();
         if path.exists() {
-            let migrated = Self::migrate_released(path, path, catalog, configured, selected).await;
-            if let Err(error) = migrated {
-                if !is_corrupt_store(&error) {
-                    return Err(error);
-                }
-                tracing::warn!(%error, "could not migrate released Store; opening fresh state");
-                preserve_store(path)?;
-                let mut database = Self::open_final(path, catalog).await?;
-                database.fresh_start = true;
-                return Ok(database);
-            }
+            Self::migrate_released(path, path, catalog, configured, selected).await?;
         }
-        Self::open_final(path, catalog).await
+        Self::open_final(path).await
     }
 
     pub async fn open_installation(
@@ -173,19 +161,9 @@ impl Database {
         selected: Option<&crate::SourceId>,
     ) -> LibraryResult<Self> {
         if !path.exists() && legacy.exists() {
-            if let Err(error) =
-                Self::migrate_released(legacy, path, catalog, configured, selected).await
-            {
-                if !is_corrupt_store(&error) {
-                    return Err(error);
-                }
-                tracing::warn!(%error, "could not migrate old Store; original retained");
-                let mut database = Self::open_final(path, catalog).await?;
-                database.fresh_start = true;
-                return Ok(database);
-            }
+            Self::migrate_released(legacy, path, catalog, configured, selected).await?;
         }
-        Self::open_with_catalog(path, catalog, configured, selected).await
+        Self::open_with_legacy_catalog(path, catalog, configured, selected).await
     }
 
     async fn migrate_released(
@@ -199,18 +177,24 @@ impl Database {
             SqliteConnection::connect_with(&base_options(input).read_only(true)).await?;
         let version = schema::pragma(&mut reader, "user_version").await;
         reader.close().await?;
-        let version = version?;
-        if (1..=43).contains(&version) {
-            crate::migration::import_released(input, destination, catalog, configured, selected)
-                .await?;
-        } else if input != destination {
-            Self::relocate(input, destination).await?;
+        match version? {
+            1..=43 => {
+                crate::migration::import_released(input, destination, catalog, configured, selected)
+                    .await?
+            }
+            44..=47 => crate::migration::import_current(input, destination, catalog).await?,
+            0 | 56 => {
+                if input != destination {
+                    Self::relocate(input, destination).await?;
+                }
+            }
+            version => {
+                return Err(LibraryError::Migration(format!(
+                    "unsupported library schema {version}"
+                )));
+            }
         }
         Ok(())
-    }
-
-    pub fn fresh_start(&self) -> bool {
-        self.fresh_start
     }
 
     pub async fn close(self) -> LibraryResult<()> {
@@ -224,32 +208,24 @@ impl Database {
         Ok(())
     }
 
-    pub(crate) async fn open_final(path: &Path, catalog: &Path) -> LibraryResult<Self> {
-        async fn open_store(path: &Path) -> LibraryResult<SqliteConnection> {
-            let mut writer = open_writer(path).await?;
-            if let Err(error) = schema::initialize_durable(&mut writer).await {
-                writer.close().await?;
-                return Err(error);
-            }
-            if let Err(error) = crate::queue::migrate_queue_storage(&mut writer).await {
-                writer.close().await?;
-                return Err(error);
-            }
-            Ok(writer)
+    pub(crate) async fn open_final(path: &Path) -> LibraryResult<Self> {
+        let mut writer = open_writer(path).await?;
+        let initialized = async {
+            schema::initialize_durable(&mut writer).await?;
+            crate::connect::initialize(&mut writer).await?;
+            crate::collections::refresh_facts_on(&mut writer).await?;
+            sqlx::raw_sql("PRAGMA optimize=0x10002")
+                .execute(&mut writer)
+                .await?;
+            LibraryResult::Ok(())
         }
-        let (writer, fresh_start) = match open_store(path).await {
-            Ok(writer) => (writer, false),
-            Err(error) if is_store_content_failure(&error) => {
-                tracing::warn!(%error, "could not use Store; opening fresh state");
-                preserve_store(path)?;
-                (open_store(path).await?, true)
-            }
-            Err(error) => return Err(error),
-        };
-        writer.close().await?;
-        let (catalog, temporary_catalog, writer) = prepare_catalog(path, catalog).await?;
-        let readers = open_readers(path, &catalog, MIN_READERS, MAX_READERS).await?;
-        let export_readers = open_readers(path, &catalog, 0, 1).await?;
+        .await;
+        if let Err(error) = initialized {
+            writer.close().await?;
+            return Err(error);
+        }
+        let readers = open_readers(path, MIN_READERS, MAX_READERS).await?;
+        let export_readers = open_readers(path, 0, 1).await?;
         Ok(Self {
             inner: Arc::new(DatabaseInner {
                 writer: Arc::new(Mutex::new(Some(writer))),
@@ -259,9 +235,7 @@ impl Database {
                 general_read: Arc::new(Semaphore::new(1)),
                 acquisition: Arc::new(Mutex::new(())),
                 distinct_track_covers: AtomicBool::new(false),
-                _temporary_catalog: temporary_catalog,
             }),
-            fresh_start,
         })
     }
 
@@ -271,7 +245,7 @@ impl Database {
     ) -> LibraryResult<Option<crate::SourceKey>> {
         let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
         Ok(
-            sqlx::query_scalar("SELECT source_key FROM catalog.sources WHERE object_id=?1")
+            sqlx::query_scalar("SELECT source_key FROM sources WHERE object_id=?1")
                 .bind(source_id.as_str())
                 .fetch_optional(&mut *connection)
                 .await?,
@@ -282,12 +256,11 @@ impl Database {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         let mut transaction = connection.begin().await?;
-        let source = sqlx::query_scalar::<_, i64>(
-            "SELECT source_key FROM catalog.sources WHERE object_id=?1",
-        )
-        .bind(source_id.as_str())
-        .fetch_optional(&mut *transaction)
-        .await?;
+        let source =
+            sqlx::query_scalar::<_, i64>("SELECT source_key FROM sources WHERE object_id=?1")
+                .bind(source_id.as_str())
+                .fetch_optional(&mut *transaction)
+                .await?;
         for kind in ["track", "album", "artist"] {
             let prefix = crate::keys::source_entity_prefix(source_id, kind);
             for query in [
@@ -302,22 +275,28 @@ impl Database {
                     .await?;
             }
         }
-        sqlx::query("DELETE FROM catalog.local_access_metadata WHERE access_uri IN (SELECT access_uri FROM main.local_locators locator JOIN main.source_ids identity USING(source_key) WHERE identity.object_id=?1)").bind(source_id.as_str()).execute(&mut *transaction).await?;
-        // Accepted listens and global Playlist snapshots have no source foreign key.
+        sqlx::query("DELETE FROM local_access_metadata WHERE access_uri IN (SELECT access_uri FROM main.local_locators locator JOIN sources identity USING(source_key) WHERE identity.object_id=?1) AND NOT EXISTS(SELECT 1 FROM local_locators other WHERE other.access_uri=local_access_metadata.access_uri AND other.source_key IS NOT ?2)").bind(source_id.as_str()).bind(source).execute(&mut *transaction).await?;
+        // Referenced metadata survives source removal.
+        sqlx::query("UPDATE tracks SET indexed=0 WHERE source_key=?1")
+            .bind(source)
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("UPDATE albums SET indexed=0 WHERE source_key=?1")
+            .bind(source)
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("UPDATE artists SET indexed=0 WHERE source_key=?1")
+            .bind(source)
+            .execute(&mut *transaction)
+            .await?;
         let removed = sqlx::query("DELETE FROM sources WHERE source_key=?1")
             .bind(source)
             .execute(&mut *transaction)
             .await?
             .rows_affected()
             == 1;
-        let durable_removed = sqlx::query("DELETE FROM main.source_ids WHERE object_id=?1")
-            .bind(source_id.as_str())
-            .execute(&mut *transaction)
-            .await?
-            .rows_affected()
-            == 1;
         transaction.commit().await?;
-        Ok(removed || durable_removed)
+        Ok(removed)
     }
 
     pub(crate) async fn writer(
@@ -441,13 +420,7 @@ fn base_options(path: &Path) -> SqliteConnectOptions {
         .row_buffer_size(ROW_BUFFER)
 }
 
-async fn open_readers(
-    path: &Path,
-    catalog: &Path,
-    minimum: u32,
-    maximum: u32,
-) -> LibraryResult<SqlitePool> {
-    let catalog = catalog.to_path_buf();
+async fn open_readers(path: &Path, minimum: u32, maximum: u32) -> LibraryResult<SqlitePool> {
     let options = SqlitePoolOptions::new()
         .min_connections(minimum)
         .max_connections(maximum)
@@ -456,11 +429,7 @@ async fn open_readers(
         .max_lifetime(None)
         .test_before_acquire(true)
         .after_connect(move |connection, _| {
-            let catalog = catalog.clone();
             Box::pin(async move {
-                schema::attach_catalog(connection, &catalog)
-                    .await
-                    .map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
                 sqlx::query("PRAGMA query_only=ON")
                     .execute(connection)
                     .await?;
@@ -480,71 +449,9 @@ async fn open_readers(
     }
 }
 
-async fn prepare_catalog(
-    store: &Path,
-    path: &Path,
-) -> LibraryResult<(
-    std::path::PathBuf,
-    Option<tempfile::TempDir>,
-    SqliteConnection,
-)> {
-    async fn open(store: &Path, path: &Path) -> LibraryResult<SqliteConnection> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let mut connection = open_writer(path).await?;
-        let result = schema::initialize_catalog(&mut connection).await;
-        connection.close().await?;
-        result?;
-        let mut writer = open_writer(store).await?;
-        let result = async {
-            schema::attach_catalog(&mut writer, path).await?;
-            sqlx::query("PRAGMA catalog.synchronous=NORMAL")
-                .execute(&mut writer)
-                .await?;
-            schema::initialize_local_activity(&mut writer).await?;
-            crate::connect::initialize(&mut writer).await?;
-            sqlx::raw_sql("PRAGMA optimize=0x10002")
-                .execute(&mut writer)
-                .await?;
-            LibraryResult::Ok(())
-        }
-        .await;
-        if let Err(error) = result {
-            writer.close().await?;
-            return Err(error);
-        }
-        Ok(writer)
-    }
-    match open(store, path).await {
-        Ok(writer) => return Ok((path.to_path_buf(), None, writer)),
-        Err(error) if is_store_content_failure(&error) => {
-            for suffix in ["", "-wal", "-shm"] {
-                let mut name = path.as_os_str().to_os_string();
-                name.push(suffix);
-                match std::fs::remove_file(name) {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(_) => break,
-                }
-            }
-            if let Ok(writer) = open(store, path).await {
-                return Ok((path.to_path_buf(), None, writer));
-            }
-        }
-        Err(_) => {}
-    }
-    let directory = tempfile::Builder::new()
-        .prefix("rufin-catalog-")
-        .tempdir()?;
-    let path = directory.path().join("catalog.sqlite");
-    let writer = open(store, &path).await?;
-    Ok((path, Some(directory), writer))
-}
-
 pub(crate) fn preserve_store(path: &Path) -> std::io::Result<()> {
     let destination = path.with_extension(format!(
-        "unusable-{}",
+        "before-migration-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -560,24 +467,6 @@ pub(crate) fn preserve_store(path: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
-}
-
-fn is_corrupt_store(error: &LibraryError) -> bool {
-    matches!(error, LibraryError::Sqlite(sqlx::Error::Database(error))
-        if error.code().and_then(|code| code.parse::<i32>().ok())
-            .is_some_and(|code| matches!(code & 0xff, 11 | 26)))
-}
-
-fn is_store_content_failure(error: &LibraryError) -> bool {
-    match error {
-        LibraryError::InvalidStore(_) | LibraryError::Migration(_) | LibraryError::Json(_) => true,
-        LibraryError::Sqlite(sqlx::Error::Database(error)) => error
-            .code()
-            .as_deref()
-            .and_then(|code| code.parse::<i32>().ok())
-            .is_some_and(|code| matches!(code & 0xff, 1 | 11 | 19 | 20 | 26)),
-        _ => false,
-    }
 }
 
 #[cfg(test)]
@@ -678,14 +567,11 @@ mod tests {
         .await
         .expect("read fixed writer options");
         assert_eq!(writer_options, ("wal".to_string(), 1));
-        let sync_modes = sqlx::query_as::<_, (i64, i64)>(
-            "SELECT (SELECT synchronous FROM pragma_synchronous('main')),
-                    (SELECT synchronous FROM pragma_synchronous('catalog'))",
-        )
-        .fetch_one(&mut *writer)
-        .await
-        .expect("read both writer synchronous modes");
-        assert_eq!(sync_modes, (1, 1));
+        let synchronous = sqlx::query_scalar::<_, i64>("PRAGMA synchronous")
+            .fetch_one(&mut *writer)
+            .await
+            .expect("read writer synchronous mode");
+        assert_eq!(synchronous, 1);
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA mmap_size")
                 .fetch_one(&mut *writer)
@@ -890,14 +776,12 @@ pub(crate) async fn write_source_identity(
             "source identity cannot be empty".into(),
         ));
     }
-    sqlx::query(
-        "INSERT INTO main.source_ids(object_id) VALUES(?1) ON CONFLICT(object_id) DO NOTHING",
-    )
-    .bind(source_id)
-    .execute(&mut *connection)
-    .await?;
+    sqlx::query("INSERT INTO sources(object_id) VALUES(?1) ON CONFLICT(object_id) DO NOTHING")
+        .bind(source_id)
+        .execute(&mut *connection)
+        .await?;
     Ok(
-        sqlx::query_scalar("SELECT source_key FROM main.source_ids WHERE object_id=?1")
+        sqlx::query_scalar("SELECT source_key FROM sources WHERE object_id=?1")
             .bind(source_id)
             .fetch_one(connection)
             .await?,

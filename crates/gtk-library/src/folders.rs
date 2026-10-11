@@ -28,7 +28,7 @@ enum FolderTrackSource {
 
 pub struct PreparedFolderRoute {
     folders: Vec<FolderLink>,
-    order: SparseSource<String>,
+    order: SparseSource<library::TrackKey>,
     source: FolderTrackSource,
     first_tracks: Vec<library::TrackRow>,
 }
@@ -164,7 +164,7 @@ pub async fn prepare_folder_route(
                 folders.reverse();
             }
             let first_tracks = database
-                .track_rows_by_uri(
+                .track_rows(
                     &order[..order.len().min(64_usize.saturating_sub(folders.len()))],
                     cancellation,
                 )
@@ -242,7 +242,7 @@ fn folder_page(
     path: Vec<FolderPathItem>,
     search: gtk::SearchEntry,
     folders: Vec<FolderLink>,
-    order: SparseSource<String>,
+    order: SparseSource<library::TrackKey>,
     source: FolderTrackSource,
     first_tracks: Vec<library::TrackRow>,
 ) -> (
@@ -300,7 +300,9 @@ fn folder_page(
     let row_database = Arc::clone(&selected.database);
     let load_input = Rc::clone(&queue_input);
     let track_load = Rc::new(
-        move |keys: Vec<String>, range: std::ops::Range<usize>, cancellation: ReadCancellation| {
+        move |keys: Vec<library::TrackKey>,
+              range: std::ops::Range<usize>,
+              cancellation: ReadCancellation| {
             let database = Arc::clone(&row_database);
             let input = load_input.borrow().clone();
             Box::pin(async move {
@@ -332,7 +334,7 @@ fn folder_page(
                             )
                             .await
                     }
-                    _ => database.track_rows_by_uri(&keys, &cancellation).await,
+                    _ => database.track_rows(&keys, &cancellation).await,
                 }
                 .map_err(|error| error.to_string())?
                 .into_iter()
@@ -355,7 +357,7 @@ fn folder_page(
             .map(FolderTableRow::Track)
             .collect(),
         |row| match row {
-            FolderTableRow::Track(track) => track.media_uri.clone(),
+            FolderTableRow::Track(track) => track.track_key,
             FolderTableRow::Folder(_) => unreachable!(),
         },
     );
@@ -402,7 +404,7 @@ fn folder_page(
             move |request: crate::track_model::TrackProjectionRequest,
                   result: library::LibraryResult<(
                 Vec<FolderLink>,
-                SparseSource<String>,
+                SparseSource<library::TrackKey>,
                 Vec<library::TrackRow>,
             )>| {
                 let Ok((folders, tracks, first_rows)) = result else {
@@ -429,7 +431,7 @@ fn folder_page(
                     tracks,
                     first_rows.into_iter().map(FolderTableRow::Track).collect(),
                     |row| match row {
-                        FolderTableRow::Track(track) => track.media_uri.clone(),
+                        FolderTableRow::Track(track) => track.track_key,
                         FolderTableRow::Folder(_) => unreachable!(),
                     },
                 );
@@ -575,7 +577,7 @@ fn folder_table(
     shell: &Rc<CatalogUi>,
     rows: gtk::FlattenListModel,
     folders: Rc<gtk_widgets::sparse_model::SparseRouteModel<FolderLink, FolderTableRow>>,
-    tracks: Rc<gtk_widgets::sparse_model::SparseRouteModel<String, FolderTableRow>>,
+    tracks: Rc<gtk_widgets::sparse_model::SparseRouteModel<library::TrackKey, FolderTableRow>>,
     path: Vec<FolderPathItem>,
     initial_width: i32,
     queue_input: Rc<RefCell<Option<library::QueueInput>>>,
@@ -614,31 +616,31 @@ fn folder_table(
             }
             FolderTableRow::Track(track) => {
                 let anchor = position.saturating_sub(folder_count);
-                let mut input =
-                    queue_input
-                        .borrow()
-                        .clone()
-                        .unwrap_or_else(|| library::QueueInput::Uris {
-                            order: activate_tracks
+                let mut input = queue_input.borrow().clone().unwrap_or_else(|| {
+                    let context_id: Arc<str> = format!(
+                        "{}|result={}",
+                        folder_context_id(&path),
+                        activate_tracks.order_id()
+                    )
+                    .into();
+                    library::QueueInput::Tracks {
+                        order: Arc::clone(
+                            activate_tracks
                                 .order()
                                 .keys()
-                                .expect("live folder track keys")
-                                .clone(),
-                            context_id: format!(
-                                "{}|result={}",
-                                folder_context_id(&path),
-                                activate_tracks.order_id()
-                            )
-                            .into(),
-                            source_start: 0,
-                        });
+                                .expect("live folder track keys"),
+                        ),
+                        context_id,
+                        source_start: 0,
+                    }
+                });
                 if let library::QueueInput::Query {
-                    anchor_uri,
+                    anchor_key,
                     context_id,
                     ..
                 } = &mut input
                 {
-                    *anchor_uri = Some(track.media_uri.clone());
+                    *anchor_key = Some(track.track_key);
                     *context_id = format!(
                         "{}|result={}",
                         folder_context_id(&path),

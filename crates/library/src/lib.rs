@@ -80,7 +80,7 @@ pub use queue::{
     QUEUE_CONTEXT_LIMIT, QueueChoice, QueueCollection, QueueContextTitle, QueueEntry, QueueInput,
     QueueItem, QueueOrderUpdate, QueuePageRow, QueuePlacement, QueueProvenance, QueueQuery,
     QueueReadPage, QueueReadRequest, QueueReorderTarget, QueueRepeatMode, QueueRestore, QueueRow,
-    QueueScope, QueueSource, QueueTransferPage, QueueUpdate, queue_content_id, shuffle_order,
+    QueueScope, QueueSource, QueueTransferPage, QueueUpdate, shuffle_order,
 };
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
 pub use scan::{
@@ -90,8 +90,8 @@ pub use search::{SearchRequest, SearchResults};
 pub use smart_playlists::{
     SmartPlaylistActivityPeriod, SmartPlaylistDefinition, SmartPlaylistListSort, SmartPlaylistRow,
     SmartPlaylistRule, SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue,
-    SmartPlaylistRuleValueKind, SmartPlaylistSort, SmartPlaylistTrackRow,
-    SmartPlaylistValueSuggestions, SmartPlaylistWrite, SmartSourceReference,
+    SmartPlaylistRuleValueKind, SmartPlaylistSort, SmartPlaylistValueSuggestions,
+    SmartPlaylistWrite, SmartSourceReference,
 };
 pub use tracks::{
     TrackArtistLink, TrackGenreLink, TrackQuery, TrackRoutePage, TrackRow, TrackSort,

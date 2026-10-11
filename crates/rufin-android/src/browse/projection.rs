@@ -44,6 +44,7 @@ impl AndroidBrowseQuery {
                     })
                     .collect();
                 AndroidBrowseRow {
+                    track_key: Some(row.track_key.raw()),
                     kind: "track".into(),
                     playback_context_id: None,
                     key: row.media_uri.clone(),
@@ -208,6 +209,7 @@ impl AndroidBrowseQuery {
                 }
                 for row in home.genres {
                     rows.push(AndroidBrowseRow {
+                        track_key: None,
                         kind: "genre".into(),
                         playback_context_id: Some(
                             rufin_core::playback::PlaybackTarget::Genre(row.genre_key).context_id(),
@@ -507,6 +509,7 @@ impl AndroidBrowseQuery {
                         rufin_core::settings::presentation::playlist_entry_field(&row, field)
                     });
                     AndroidBrowseRow {
+                        track_key: Some(row.track_key.raw()),
                         kind: "track".into(),
                         playback_context_id: None,
                         fields,
@@ -554,9 +557,10 @@ impl AndroidBrowseQuery {
                 .enumerate()
                 .map(|(index, row)| {
                     let fields = self.track_field_values(offset + index, |field| {
-                        rufin_core::settings::presentation::smart_track_field(&row, field)
+                        rufin_core::settings::presentation::track_field(&row, field)
                     });
                     AndroidBrowseRow {
+                        track_key: Some(row.track_key.raw()),
                         kind: "track".into(),
                         playback_context_id: None,
                         fields,

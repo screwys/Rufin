@@ -226,7 +226,6 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         "track-0",
         Some("album-a"),
         "Alpha",
-        "alpha album a artist a note",
         "Album A",
         "Artist A",
         "alpha",
@@ -427,7 +426,6 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
             &format!("track-{index}"),
             Some(album_id),
             title,
-            &format!("{} {} note", title.to_lowercase(), artist.to_lowercase()),
             if album_id == "album-a" {
                 "Album A"
             } else {
@@ -634,7 +632,7 @@ async fn artwork_pages_distinct_opaque_bindings_by_digest() {
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO catalog.native_playlists(source_key,object_id,name,normalized_name,sort_text,artwork_binding) VALUES(?1,'artwork','Artwork','artwork','artwork',?2)")
+    sqlx::query("INSERT INTO playlists(source_key,owner,object_id,name,normalized_name,sort_text,position,artwork_binding) VALUES(?1,'source','artwork','Artwork','artwork','artwork',(SELECT COALESCE(max(position),-1)+1 FROM playlists),?2)")
         .bind(fixture.source).bind(b"binding-playlist".as_slice())
         .execute(&mut raw).await.unwrap();
     let mut expected = vec![Vec::new()];
@@ -829,7 +827,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
             .contains("SEARCH locator USING INDEX local_locators_precedence_idx (media_uri=?)"),
         "{access_plan}"
     );
-    let match_plan=sqlx::query_as::<_,(i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT locator.local_access_file_key FROM catalog.local_access_metadata metadata JOIN local_access_files locator USING(access_uri) WHERE locator.source_key=?1 AND metadata.normalized_title=?2 AND metadata.normalized_album=?3 AND metadata.normalized_artist=?4 AND metadata.disc_number=?5 AND metadata.track_number=?6 AND metadata.duration_millis=?7")
+    let match_plan=sqlx::query_as::<_,(i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT locator.local_access_file_key FROM main.local_access_metadata metadata JOIN local_access_files locator USING(access_uri) WHERE locator.source_key=?1 AND metadata.normalized_title=?2 AND metadata.normalized_album=?3 AND metadata.normalized_artist=?4 AND metadata.disc_number=?5 AND metadata.track_number=?6 AND metadata.duration_millis=?7")
         .bind(fixture.source).bind("alpha").bind("album a").bind("artist a").bind(1_i64).bind(1_i64).bind(180_000_i64).fetch_all(&mut raw).await.expect("Local metadata match plan").into_iter().map(|row|row.3).collect::<Vec<_>>().join(" | ");
     assert!(
         match_plan.contains("local_access_match_uri_idx"),
@@ -1112,7 +1110,7 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
         fixture.source,
         &[QueueRow {
             occurrence_id: None,
-            playlist_entry_id: None,
+            track_key: None,
             received_from_connect: false,
             item: queue_media,
             position: 0,
@@ -1148,5 +1146,5 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
             .unwrap(),
         1
     );
-    assert_eq!(sqlx::query_as::<_,(i64,i64,i64,i64,i64)>("SELECT (SELECT count(*) FROM sources),(SELECT count(*) FROM tracks),(SELECT count(*) FROM queue_occurrences),(SELECT count(*) FROM lyrics_cache),(SELECT count(*) FROM loudness_measurements)").fetch_one(&mut raw).await.unwrap(),(0,0,1,0,0));
+    assert_eq!(sqlx::query_as::<_,(i64,i64,i64,i64,i64)>("SELECT (SELECT count(*) FROM sources),(SELECT count(*) FROM tracks WHERE indexed),(SELECT count(*) FROM queue_entries),(SELECT count(*) FROM lyrics_cache),(SELECT count(*) FROM loudness_measurements)").fetch_one(&mut raw).await.unwrap(),(0,0,1,0,0));
 }

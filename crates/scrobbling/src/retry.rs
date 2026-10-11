@@ -881,7 +881,6 @@ mod tests {
             "track",
             None,
             "Track",
-            "track artist",
             "Album",
             "Artist",
             "track",

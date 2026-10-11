@@ -31,15 +31,6 @@ pub(super) struct PlexPlayback {
 }
 
 impl PlexPlayback {
-    pub(super) async fn queue_content_id(&self) -> String {
-        let (_, context) = self.connection();
-        let queue = self.queue.lock().await;
-        match queue.as_ref() {
-            Some(queue) => format!("plex:{}:{}:{}", context.source_id, queue.id, queue.version),
-            None => library::queue_content_id([]),
-        }
-    }
-
     pub(super) async fn continuation_snapshot(
         &self,
     ) -> Result<Option<playback::Continuation>, String> {
@@ -86,15 +77,22 @@ impl PlexPlayback {
             None => return Ok(None),
         };
         let items = self.all_items(&timeline, &self.cancelled).await?;
-        snapshot.queue.entries = items
-            .iter()
-            .map(|item| library::QueueEntry {
-                received_from_connect: false,
-                media_uri: item.media_uri.clone().into(),
-                playlist_entry_id: None,
-                provenance: playback::Provenance::Manual,
+        snapshot.queue.entries = self
+            .database
+            .read_queue(library::QueueReadRequest {
+                input: library::QueueInput::MediaUris {
+                    order: items.iter().map(|item| item.media_uri.clone()).collect(),
+                    provenance: playback::Provenance::Manual,
+                },
+                context_title: None,
+                anchor_index: 0,
+                random_start: None,
+                shuffled: None,
             })
-            .collect();
+            .await
+            .map_err(string_error)?
+            .entries
+            .into();
         snapshot.queue.ids = Arc::from([]);
         snapshot.queue.order = (0..items.len() as u32).collect();
         let current = items
@@ -226,7 +224,12 @@ impl PlexPlayback {
             })
             .await
             .map_err(string_error)?;
-        let keys = queue_keys(&page.entries, &self.connection().1.source_id)?;
+        let keys = queue_keys(
+            &self.database,
+            &page.entries,
+            &self.connection().1.source_id,
+        )
+        .await?;
         if keys.is_empty() {
             return Ok(());
         }
@@ -548,16 +551,25 @@ impl PlexPlayback {
         window: &PlexQueueWindow,
         timeline: &Timeline,
     ) -> Result<library::QueueRestore, String> {
-        let entries: Vec<_> = window
-            .items
-            .iter()
-            .map(|item| library::QueueEntry {
-                received_from_connect: false,
-                media_uri: item.media_uri.clone().into(),
-                playlist_entry_id: None,
-                provenance: playback::Provenance::Manual,
+        let entries = self
+            .database
+            .read_queue(library::QueueReadRequest {
+                input: library::QueueInput::MediaUris {
+                    order: window
+                        .items
+                        .iter()
+                        .map(|item| item.media_uri.clone())
+                        .collect(),
+                    provenance: playback::Provenance::Manual,
+                },
+                context_title: None,
+                anchor_index: 0,
+                random_start: None,
+                shuffled: None,
             })
-            .collect();
+            .await
+            .map_err(string_error)?
+            .entries;
         let rows = self
             .database
             .queue_rows_for_entries(
@@ -883,14 +895,24 @@ impl PlexPlayback {
     }
 }
 
-fn queue_keys(
+async fn queue_keys(
+    database: &Database,
     entries: &[library::QueueEntry],
     source: &sources::SourceId,
 ) -> Result<Vec<String>, String> {
-    entries
-        .iter()
-        .map(|entry| {
-            let (id, kind, key) = library::source_entity_parts(&entry.media_uri).ok_or(
+    let uris = database
+        .track_uris(
+            &entries
+                .iter()
+                .map(|entry| entry.track_key)
+                .collect::<Vec<_>>(),
+            &ReadCancellation::new(),
+        )
+        .await
+        .map_err(string_error)?;
+    uris.iter()
+        .map(|uri| {
+            let (id, kind, key) = library::source_entity_parts(uri).ok_or(
                 "Plex Companion queues require Plex music from one configured server and profile",
             )?;
             if &id != source || kind != "track" {
@@ -1207,7 +1229,14 @@ impl PlaybackOwner {
                 .is_none();
         let selected = if transferring {
             let entry = local.entries.first().unwrap();
-            let (source, _, _) = library::source_entity_parts(&entry.media_uri).ok_or(
+            let uris = self
+                .runtime
+                .block_on(
+                    self.database
+                        .track_uris(&[entry.track_key], &ReadCancellation::new()),
+                )
+                .map_err(string_error)?;
+            let (source, _, _) = uris.first().and_then(|uri| library::source_entity_parts(uri)).ok_or(
                 "Plex Companion queues require Plex music from one configured server and profile",
             )?;
             sources
@@ -1246,7 +1275,11 @@ impl PlaybackOwner {
             .ok_or("Add a Plex source before selecting a Plex player")?;
         // Validate every occurrence before sending a command to the receiver.
         let keys = if transferring {
-            Some(queue_keys(&local.entries, &context.source_id)?)
+            Some(self.runtime.block_on(queue_keys(
+                &self.database,
+                &local.entries,
+                &context.source_id,
+            ))?)
         } else {
             None
         };
@@ -1491,16 +1524,26 @@ impl PlaybackOwner {
                 items: window.items[start..end].to_vec(),
             };
             let mut queue = plex.restore(&nearby, &timeline).await?;
-            queue.entries = window
-                .items
-                .iter()
-                .map(|item| library::QueueEntry {
-                    received_from_connect: false,
-                    media_uri: item.media_uri.clone().into(),
-                    playlist_entry_id: None,
-                    provenance: playback::Provenance::Manual,
+            queue.entries = self
+                .database
+                .read_queue(library::QueueReadRequest {
+                    input: library::QueueInput::MediaUris {
+                        order: window
+                            .items
+                            .iter()
+                            .map(|item| item.media_uri.clone())
+                            .collect(),
+                        provenance: playback::Provenance::Manual,
+                    },
+                    context_title: None,
+                    anchor_index: 0,
+                    random_start: None,
+                    shuffled: None,
                 })
-                .collect();
+                .await
+                .map_err(string_error)?
+                .entries
+                .into();
             queue.ids = Arc::from([]);
             queue.order = (0..queue.entries.len() as u32).collect();
             queue.current_index = Some(selected);

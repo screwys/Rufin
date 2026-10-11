@@ -4,18 +4,6 @@ use super::{LocalArtworkCandidate, Scan};
 use crate::{ArtistArtworkBinding, LibraryError, LibraryResult};
 
 impl Scan {
-    pub async fn discard_pending_artwork(&mut self) -> LibraryResult<()> {
-        if self.batch_writer.is_some() {
-            self.finish_batch().await?;
-        }
-        let mut writer = self.database.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        sqlx::query("DELETE FROM temp.scan_artwork")
-            .execute(connection)
-            .await?;
-        Ok(())
-    }
-
     pub(super) async fn remember_artwork(
         &mut self,
         kind: &str,
@@ -157,7 +145,7 @@ impl Scan {
                 SELECT track.album_key FROM tracks track WHERE track.source_key=?3
                   AND track.source_path>=?1 AND track.source_path<?1||char(1114111)
                   AND (EXISTS(SELECT 1 FROM temp.scan_seen WHERE kind='track' AND object_id=track.object_id)
-                  OR (?4 AND NOT EXISTS(SELECT 1 FROM temp.scan_removals WHERE entity_kind='track' AND object_id=track.object_id)
+                  OR (?4 AND track.indexed AND NOT EXISTS(SELECT 1 FROM temp.scan_removals WHERE entity_kind='track' AND object_id=track.object_id)
                       AND NOT EXISTS(SELECT 1 FROM temp.scan_local_file_removals WHERE path=track.source_path)))
              ) SELECT EXISTS(SELECT 1 FROM directory_tracks) AND NOT EXISTS(
                 SELECT 1 FROM directory_tracks track WHERE NOT EXISTS(
@@ -189,7 +177,7 @@ impl Scan {
                     SELECT relation.track_key FROM artists artist JOIN track_artists relation USING(artist_key) WHERE artist.source_key=?3 AND artist.object_id=?1
                     UNION SELECT track.track_key FROM artists artist JOIN album_artists relation USING(artist_key) JOIN tracks track USING(album_key) WHERE artist.source_key=?3 AND artist.object_id=?1)
                AND (EXISTS(SELECT 1 FROM temp.scan_seen WHERE kind='track' AND object_id=track.object_id)
-               OR (?4 AND NOT EXISTS(SELECT 1 FROM temp.scan_removals WHERE entity_kind='track' AND object_id=track.object_id)
+               OR (?4 AND track.indexed AND NOT EXISTS(SELECT 1 FROM temp.scan_removals WHERE entity_kind='track' AND object_id=track.object_id)
                    AND NOT EXISTS(SELECT 1 FROM temp.scan_local_file_removals WHERE path=track.source_path)))
              ORDER BY track.object_id LIMIT 128")
             .bind(artist).bind(after).bind(self.source).bind(self.point_update).fetch_all(connection).await?)
@@ -255,7 +243,7 @@ impl Scan {
              LEFT JOIN local_files current ON current.source_key=?6 AND current.path=track.source_path
              WHERE album.source_key=?6 AND album.object_id=?1 AND track.source_path IS NOT NULL
                AND (EXISTS(SELECT 1 FROM temp.scan_seen WHERE kind='track' AND object_id=track.object_id)
-               OR (?7 AND NOT EXISTS(SELECT 1 FROM temp.scan_removals WHERE entity_kind='track' AND object_id=track.object_id)
+               OR (?7 AND track.indexed AND NOT EXISTS(SELECT 1 FROM temp.scan_removals WHERE entity_kind='track' AND object_id=track.object_id)
                    AND NOT EXISTS(SELECT 1 FROM temp.scan_local_file_removals WHERE path=track.source_path)))
                AND (?2 IS NULL OR (track.disc_number,track.track_number,track.sort_text,track.object_id)>(?3,?4,?5,?2))
              ORDER BY track.disc_number,track.track_number,track.sort_text,track.object_id LIMIT 128")
@@ -286,7 +274,7 @@ impl Scan {
         let albums: i64 = sqlx::query_scalar("SELECT count(*) FROM (SELECT DISTINCT album_key FROM tracks track
             WHERE source_key=?3 AND source_path>=?1 AND source_path<?1||char(1114111)
               AND (EXISTS(SELECT 1 FROM temp.scan_seen WHERE kind='track' AND object_id=track.object_id)
-              OR (?2 AND NOT EXISTS(SELECT 1 FROM temp.scan_removals WHERE entity_kind='track' AND object_id=track.object_id)
+              OR (?2 AND track.indexed AND NOT EXISTS(SELECT 1 FROM temp.scan_removals WHERE entity_kind='track' AND object_id=track.object_id)
                   AND NOT EXISTS(SELECT 1 FROM temp.scan_local_file_removals WHERE path=track.source_path))))")
             .bind(prefix).bind(self.point_update).bind(self.source).fetch_one(connection).await?;
         Ok(albums == 1)
@@ -385,11 +373,11 @@ pub(super) async fn update_artwork(
         ("artist", "artists"),
         ("genre", "genres"),
         ("folder", "folders"),
-        ("playlist", "catalog.native_playlists"),
+        ("playlist", "playlists"),
     ] {
         changed |= sqlx::query(sqlx::AssertSqlSafe(format!(
             "UPDATE {table} AS entity SET artwork_binding=image.binding FROM temp.scan_artwork image
-             WHERE entity.source_key=?1 AND image.kind=?2 AND image.object_id=entity.object_id AND entity.artwork_binding IS NOT image.binding"
+             WHERE entity.indexed AND entity.source_key=?1 AND image.kind=?2 AND image.object_id=entity.object_id AND entity.artwork_binding IS NOT image.binding"
         ))).bind(source).bind(kind).execute(&mut *connection).await?.rows_affected() > 0;
     }
     if !distinct {

@@ -10,13 +10,26 @@ async fn local_media_download_pages_include_files_and_cue_segments_without_copie
     let cue = library::cue_media_uri("album.cue", &file, 0, 1000);
     let mut connection = support::connection(&fixture.path).await;
     for (old, new) in fixture.track_uris.iter().zip([&file, &cue]) {
-        sqlx::query("UPDATE catalog.tracks SET media_uri=?1 WHERE media_uri=?2")
+        sqlx::query("UPDATE tracks SET media_uri=?1 WHERE media_uri=?2")
             .bind(new)
             .bind(old)
             .execute(&mut connection)
             .await
             .unwrap();
     }
+    assert!(
+        fixture
+            .database
+            .connect_local_media_page("")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    fixture
+        .database
+        .create_playlist(None, "Saved", &[file.clone(), cue.clone()])
+        .await
+        .unwrap();
     assert_eq!(
         fixture.database.connect_local_media_page("").await.unwrap(),
         vec![file.clone(), cue.clone()]
@@ -40,7 +53,7 @@ async fn local_media_download_pages_include_files_and_cue_segments_without_copie
 }
 
 #[tokio::test]
-async fn connect_uses_scanned_originals_and_repairs_existing_folder_references() {
+async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
     let fixture = support::fixture().await;
     let root = fixture._directory.path().join("Music");
     std::fs::create_dir(&root).unwrap();
@@ -48,13 +61,13 @@ async fn connect_uses_scanned_originals_and_repairs_existing_folder_references()
     std::fs::write(&original, b"original audio").unwrap();
     let uri = &fixture.track_uris[0];
     let mut connection = support::connection(&fixture.path).await;
-    sqlx::query("UPDATE catalog.tracks SET source_path=?1 WHERE media_uri=?2")
+    sqlx::query("UPDATE tracks SET source_path=?1 WHERE media_uri=?2")
         .bind(original.to_str().unwrap())
         .bind(uri)
         .execute(&mut connection)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO catalog.local_files(source_key,path,root,relative_path,kind,mtime_ns,state) VALUES(?1,?2,?3,'track.flac','media',0,'accepted')")
+    sqlx::query("INSERT INTO local_files(source_key,path,root,relative_path,kind,mtime_ns,state) VALUES(?1,?2,?3,'track.flac','media',0,'accepted')")
         .bind(fixture.source).bind(original.to_str().unwrap()).bind(root.to_str().unwrap())
         .execute(&mut connection).await.unwrap();
     assert!(matches!(
@@ -73,8 +86,12 @@ async fn connect_uses_scanned_originals_and_repairs_existing_folder_references()
             .unwrap()
             .is_none()
     );
-    // Repair already-seeded profiles using the existing index, without rescanning files.
-    sqlx::query("UPDATE main.connect_seed SET cursor=0,complete=(kind<>'local_reference')")
+    fixture
+        .database
+        .create_playlist(None, "Saved", std::slice::from_ref(uri))
+        .await
+        .unwrap();
+    sqlx::query("UPDATE main.connect_seed SET cursor=0,complete=(kind<>'track')")
         .execute(&mut connection)
         .await
         .unwrap();
@@ -150,8 +167,19 @@ async fn connect_uses_scanned_originals_and_repairs_existing_folder_references()
 }
 
 #[tokio::test]
-async fn connect_catalog_projection_preserves_collection_relations_without_local_copies() {
+async fn connect_saved_playlist_replay_keeps_duplicate_media_without_catalog_membership() {
     let fixture = support::fixture().await;
+    let uris = vec![
+        fixture.track_uris[0].clone(),
+        fixture.track_uris[1].clone(),
+        fixture.track_uris[0].clone(),
+    ];
+    let (playlist, identity) = fixture
+        .database
+        .create_playlist(None, "Saved", &uris)
+        .await
+        .unwrap()
+        .unwrap();
     fixture
         .database
         .connect_capture_enabled(true)
@@ -164,113 +192,86 @@ async fn connect_catalog_projection_preserves_collection_relations_without_local
         if page.is_empty() {
             break;
         }
-        records.extend(page.iter().map(|c| c.record.clone()));
+        records.extend(page.iter().map(|change| change.record.clone()));
         fixture.database.connect_acknowledge(&page).await.unwrap();
     }
-    records.sort_by_key(|r| match r.kind.as_str() {
-        "playlist" => 0,
-        "album" | "artist" | "genre" | "mood" | "folder" => 1,
-        "track" => 2,
-        "entry" => 3,
-        _ => 4,
-    });
-    let path = fixture._directory.path().join("replica.sqlite");
-    let replica = Database::open(&path).await.unwrap();
-    replica.connect_apply(&records).await.unwrap();
+    assert!(records.iter().all(|record| !matches!(
+        record.kind.as_str(),
+        "album" | "artist" | "genre" | "mood" | "folder" | "native_playlist" | "native_entry"
+    )));
+    let path = fixture._directory.path().join("received.sqlite");
+    let received = Database::open(&path).await.unwrap();
+    assert!(received.connect_apply(&records).await.unwrap());
+    assert!(!received.connect_apply(&records).await.unwrap());
+    let imported_playlist = received
+        .playlist_key_by_identity(None, &identity, &library::ReadCancellation::new())
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(
-        fixture.database.all_source_counts().await.unwrap(),
-        replica.all_source_counts().await.unwrap()
-    );
-    let mut original = support::connection(&fixture.path).await;
-    let mut imported = support::connection(&path).await;
-    for table in [
-        "tracks",
-        "albums",
-        "artists",
-        "genres",
-        "moods",
-        "folders",
-        "track_artists",
-        "album_artists",
-        "track_genres",
-        "album_genres",
-        "track_moods",
-        "track_folders",
-    ] {
-        let query = format!("SELECT count(*) FROM catalog.{table}");
-        let a = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(query.clone()))
-            .fetch_one(&mut original)
+        received
+            .playlist_media_uri_order(imported_playlist, None, &library::ReadCancellation::new())
             .await
-            .unwrap();
-        let b = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(query))
+            .unwrap(),
+        uris
+    );
+    let mut imported = support::connection(&path).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM tracks")
             .fetch_one(&mut imported)
             .await
-            .unwrap();
-        assert_eq!(a, b, "{table}");
-    }
-    assert!(
-        replica
-            .source_identity_key(&SourceId::new("source"))
-            .await
-            .unwrap()
-            .is_some()
+            .unwrap(),
+        2
     );
     assert_eq!(
-        sqlx::query_scalar::<_, i64>(
-            "SELECT count(*) FROM catalog.tracks WHERE album_key IS NOT NULL"
-        )
-        .fetch_one(&mut imported)
-        .await
-        .unwrap(),
-        fixture.tracks.len() as i64
-    );
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM main.local_locators")
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM tracks WHERE indexed")
             .fetch_one(&mut imported)
             .await
             .unwrap(),
         0
     );
-    drop(original);
-    drop(imported);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM local_locators")
+            .fetch_one(&mut imported)
+            .await
+            .unwrap(),
+        0
+    );
+    assert!(
+        received
+            .source_identity_key(&SourceId::new("source"))
+            .await
+            .unwrap()
+            .is_some()
+    );
     fixture
         .database
-        .remove_source(&SourceId::new("source"))
+        .delete_playlist(None, playlist)
         .await
         .unwrap();
-    let mut removed = std::collections::BTreeSet::new();
-    loop {
-        let page = fixture.database.connect_changes().await.unwrap();
-        if page.is_empty() {
-            break;
-        }
-        for change in &page {
-            if change.record.value.is_none() {
-                removed.insert((change.record.kind.clone(), change.record.key.clone()));
-            }
-        }
-        fixture.database.connect_acknowledge(&page).await.unwrap();
-    }
-    for record in records.iter().filter(|r| {
-        matches!(
-            r.kind.as_str(),
-            "track"
-                | "album"
-                | "artist"
-                | "genre"
-                | "mood"
-                | "folder"
-                | "track_artists"
-                | "track_genres"
-                | "track_moods"
-                | "track_folders"
-                | "album_artists"
-                | "album_genres"
-        )
-    }) {
-        assert!(
-            removed.contains(&(record.kind.clone(), record.key.clone())),
-            "missing cascade identity: {record:?}"
-        );
-    }
+    let changes = fixture.database.connect_changes().await.unwrap();
+    let tombstones = changes
+        .into_iter()
+        .map(|change| change.record)
+        .collect::<Vec<_>>();
+    assert!(
+        tombstones
+            .iter()
+            .any(|record| record.kind == "playlist" && record.value.is_none())
+    );
+    assert!(received.connect_apply(&tombstones).await.unwrap());
+    assert!(
+        received
+            .playlist_key_by_identity(None, &identity, &library::ReadCancellation::new())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM tracks")
+            .fetch_one(&mut imported)
+            .await
+            .unwrap(),
+        2
+    );
 }

@@ -74,6 +74,7 @@ impl AndroidLibrary {
                     .map_err(error)?
                     > 0;
                 Ok(Some(crate::browse::AndroidBrowseRow {
+                    track_key: None,
                     kind: "track".into(),
                     playback_context_id: None,
                     key: media_uri.clone(),

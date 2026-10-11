@@ -18,7 +18,6 @@ pub(crate) struct ReceiverState {
     pub shuffle: bool,
     pub auto_dj: bool,
     pub auto_dj_threshold: usize,
-    pub content_id: String,
 }
 
 impl ConnectOwner {

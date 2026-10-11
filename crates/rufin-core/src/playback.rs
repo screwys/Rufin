@@ -79,7 +79,7 @@ enum PlaybackStoreWork {
         prepared: Box<PreparedContinuation>,
         reply: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
-    Activity(Box<playback::ActivityListen>),
+    Activity(Option<library::TrackKey>, Box<playback::ActivityListen>),
     Flush(std::sync::mpsc::SyncSender<()>),
     Output {
         volume: f64,
@@ -264,16 +264,12 @@ impl PlaybackOwner {
             .await
             .map_err(string_error)?;
         if !positions.is_empty() {
-            let uris = positions
+            let keys = positions
                 .into_iter()
-                .map(|position| {
-                    queue.entries[queue.order[position] as usize]
-                        .media_uri
-                        .to_string()
-                })
+                .map(|position| queue.entries[queue.order[position] as usize].track_key)
                 .collect();
             active
-                .command(Command::Forget(uris))
+                .command(Command::Forget(keys))
                 .map_err(string_error)?;
         }
         Ok(())
@@ -331,7 +327,7 @@ impl PlaybackOwner {
             PlaybackStoreWork::Continue { prepared, reply } => {
                 let _ = reply.send(self.commit_continuation(*prepared, failed_queue_save).await);
             }
-            PlaybackStoreWork::Activity(activity) => self.store_activity(*activity).await,
+            PlaybackStoreWork::Activity(key, activity) => self.store_activity(key, *activity).await,
             PlaybackStoreWork::Flush(reply) => {
                 if let Err(error) =
                     save_pending_queue(&self.database, &self.pending_queue, failed_queue_save).await
@@ -378,10 +374,14 @@ impl PlaybackOwner {
         }
     }
 
-    fn record_activity(&self, activity: Box<playback::ActivityListen>) {
+    fn record_activity(
+        &self,
+        key: Option<library::TrackKey>,
+        activity: Box<playback::ActivityListen>,
+    ) {
         let _ = self
             .store_sender
-            .try_send(PlaybackStoreWork::Activity(activity));
+            .try_send(PlaybackStoreWork::Activity(key, activity));
     }
 
     fn report_source(&self, report: playback::SourceReportFact) {
@@ -416,7 +416,11 @@ impl PlaybackOwner {
         }
     }
 
-    async fn store_activity(&self, activity: playback::ActivityListen) {
+    async fn store_activity(
+        &self,
+        current_track: Option<library::TrackKey>,
+        activity: playback::ActivityListen,
+    ) {
         let deliveries = if activity.skipped {
             Vec::new()
         } else {
@@ -441,21 +445,9 @@ impl PlaybackOwner {
             listened_millis: i64::try_from(activity.listened_millis).unwrap_or(i64::MAX),
             skipped: activity.skipped,
         };
-        let current_media_uri = if let Some(path) = library::file_media_path(&listen.media_uri) {
-            tokio::task::spawn_blocking(move || {
-                url::Url::from_file_path(sources::local_media_identity_path(&path))
-                    .ok()
-                    .map(|uri| uri.to_string())
-            })
-            .await
-            .ok()
-            .flatten()
-        } else {
-            None
-        };
         match self
             .database
-            .record_listen(&listen, current_media_uri.as_deref(), &deliveries)
+            .record_listen(&listen, current_track, &deliveries)
             .await
         {
             Ok(_) => self.scrobbler.listen_recorded(deliveries.len()),
@@ -548,6 +540,9 @@ impl PlaybackOwner {
         active
             .command(Command::StreamInputsChanged)
             .map_err(string_error)
+    }
+    pub(crate) fn rekey_songs(&self, pairs: Arc<[(library::TrackKey, library::TrackKey)]>) {
+        self.send(Command::RekeySongs(pairs));
     }
     pub(crate) fn catalog_changed(&self) {
         if self.active().is_some() {
@@ -762,11 +757,14 @@ impl QueueCommandPort for PlaybackOwner {
 
     fn media_uris(&self) -> Result<Vec<String>, String> {
         let queue = self.snapshot()?;
-        Ok(queue
+        let keys = queue
             .order
             .iter()
-            .map(|index| queue.entries[*index as usize].media_uri.to_string())
-            .collect())
+            .map(|index| queue.entries[*index as usize].track_key)
+            .collect::<Vec<_>>();
+        self.runtime
+            .block_on(self.database.track_uris(&keys, &ReadCancellation::new()))
+            .map_err(string_error)
     }
 
     fn play(&self, request: PlayRequest) {
@@ -1309,7 +1307,7 @@ mod tests {
             item: test_media(source_format),
             position: 0,
             received_from_connect: false,
-            playlist_entry_id: None,
+            track_key: None,
             provenance: playback::Provenance::Manual,
         }
     }

@@ -593,8 +593,10 @@ pub(crate) async fn update_playlist_on(
         }
     };
     let mut publication = match &result {
-        Ok((changed, outcome)) => Ok((*changed, *outcome)),
-        Err(sources::SourceMetadataError::PartiallySaved { outcome, .. }) => Ok((true, *outcome)),
+        Ok((changed, outcome)) => Ok((*changed, outcome.clone())),
+        Err(sources::SourceMetadataError::PartiallySaved { outcome, .. }) => {
+            Ok((true, outcome.clone()))
+        }
         Err(sources::SourceMetadataError::SavedRefreshFailed(_)) => Ok((true, None)),
         Err(error) => Err(SourceError::Other(error.to_string())),
     };
@@ -747,7 +749,8 @@ pub fn remove_playlist_entries(
 }
 
 pub fn can_remove_unavailable(owner: &SourceOwner, playlist: &library::PlaylistRow) -> bool {
-    playlist.writable
+    !playlist.source_owned
+        && playlist.writable
         && playlist.source_id.as_ref().is_none_or(|id| {
             owner
                 .configuration(&SourceId::new(id))
@@ -876,8 +879,10 @@ async fn playlist_source(
         .await
         .map_err(string_error)?
     {
-        Some((None, None)) => Ok(PlaylistOwner::Local(None)),
-        Some((Some(key), Some(id))) => configured_playlist_owner(owner, &SourceId::new(id), key),
+        Some((source, _, false)) => Ok(PlaylistOwner::Local(source)),
+        Some((Some(key), Some(id), true)) => owner
+            .client(&SourceId::new(id))
+            .map(|source| PlaylistOwner::Server(source, key)),
         Some(_) => Err("Playlist owner is unavailable".to_string()),
         None => Err("Playlist no longer exists".to_string()),
     }
@@ -934,7 +939,7 @@ async fn enrich_imported_playlist(
             .await;
         if let Ok(outcome) | Err(SourceError::IncompleteScan { outcome, .. }) = &result {
             owner
-                .accept_scan(source.source_id(), *outcome, CatalogChange::Broad)
+                .accept_scan(source.source_id(), outcome.clone(), CatalogChange::Broad)
                 .await;
         }
         result.map_err(string_error)?;
@@ -962,7 +967,7 @@ pub(crate) async fn prune_imported_playlist_files(owner: &SourceOwner) {
                 Err(error) => {
                     if let SourceError::IncompleteScan { outcome, .. } = &error {
                         owner
-                            .accept_scan(client.source_id(), *outcome, CatalogChange::Broad)
+                            .accept_scan(client.source_id(), outcome.clone(), CatalogChange::Broad)
                             .await;
                     }
                     owner.shared.warn_nonfatal(&error.to_string());

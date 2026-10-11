@@ -1523,14 +1523,14 @@ fn album_track_cells(
     );
     let click_shell = Rc::clone(shell);
     let click_album = track.album_key;
-    let click_uri = track.media_uri.clone();
+    let click_key = track.track_key;
     let click = gtk::GestureClick::new();
     click.set_propagation_phase(gtk::PropagationPhase::Capture);
     click.set_button(1);
     click.connect_pressed(move |gesture, presses, _, _| {
         if album_detail_play_click(presses) {
             gesture.set_state(gtk::EventSequenceState::Claimed);
-            play_album_track(&click_shell, click_album, &click_uri);
+            play_album_track(&click_shell, click_album, click_key);
         }
     });
     row.add_controller(click);
@@ -1591,10 +1591,10 @@ fn album_track_cell(
         LibraryField::RowIndex => {
             let shell = Rc::clone(shell);
             let uri = track.media_uri.clone();
-            let play_uri = uri.clone();
+            let play_key = track.track_key;
             let album = track.album_key;
             let cell = super::columns::track_row_index_cell(&(index + 1).to_string(), move |_| {
-                play_album_track(&shell, album, &play_uri);
+                play_album_track(&shell, album, play_key);
             });
             selection.bind(cell.upcast_ref(), &uri);
             fixed_album_track_cell(width, height, cell.upcast())
@@ -1731,7 +1731,11 @@ fn album_track_column_width(field: LibraryField) -> i32 {
     }
 }
 
-fn play_album_track(shell: &Rc<CatalogUi>, album: Option<library::AlbumKey>, media_uri: &str) {
+fn play_album_track(
+    shell: &Rc<CatalogUi>,
+    album: Option<library::AlbumKey>,
+    track_key: library::TrackKey,
+) {
     let Some(selected) = shell.selected_library().as_deref().cloned() else {
         return;
     };
@@ -1756,7 +1760,7 @@ fn play_album_track(shell: &Rc<CatalogUi>, album: Option<library::AlbumKey>, med
             sort: settings.sort_key.track_sort(),
             descending: settings.descending,
             context_id: format!("album:{album}").into(),
-            anchor_uri: Some(media_uri.to_owned()),
+            anchor_key: Some(track_key),
         },
         0,
         QueuePlacement::Now,

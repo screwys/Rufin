@@ -70,7 +70,7 @@ impl Database {
             output.flush()?;
             let mut cursor = -1;
             while let Some(key) = sqlx::query_scalar::<_, PlaylistKey>(
-                "SELECT playlist_key FROM main.playlists WHERE playlist_key>?1 AND name IS NOT NULL ORDER BY playlist_key LIMIT 1")
+                "SELECT playlist_key FROM main.playlists WHERE playlist_key>?1 AND owner='rufin' AND name IS NOT NULL ORDER BY playlist_key LIMIT 1")
                 .bind(cursor).fetch_optional(&mut *transaction).await? {
                 let path = directory.join(format!("playlists/{ordinal}.m3u8"));
                 let mut output = private_file(&path)?;
@@ -128,7 +128,7 @@ impl Database {
         let mut transaction = connection.begin().await?;
         let mut report = BackupRestoreReport::default();
         if contents.playlists {
-            sqlx::raw_sql("DELETE FROM main.playlists;DELETE FROM smart_playlists;DELETE FROM playlist_file_ignored;DELETE FROM playlist_file_settings;")
+            sqlx::raw_sql("DELETE FROM main.playlists WHERE owner='rufin';DELETE FROM smart_playlists;DELETE FROM playlist_file_ignored;DELETE FROM playlist_file_settings;")
                 .execute(&mut *transaction)
                 .await?;
             report.playlists = crate::playlists::import_playlists_jsonl_on(
@@ -167,7 +167,7 @@ impl Database {
             .await?;
         }
         if contents.queue {
-            sqlx::raw_sql("DELETE FROM queue_occurrences;DELETE FROM queue_state;")
+            sqlx::raw_sql("DELETE FROM queue_state;DELETE FROM queue_positions;DELETE FROM queue_entries;DELETE FROM queue_contexts;")
                 .execute(&mut *transaction)
                 .await?;
             crate::queue::import_queue_jsonl_on(&mut transaction, open("queue.jsonl")?).await?;
@@ -200,6 +200,7 @@ impl Database {
                 )
                 .await?;
         }
+        crate::collections::refresh_facts_on(&mut transaction).await?;
         transaction.commit().await?;
         Ok(report)
     }
@@ -329,20 +330,38 @@ mod tests {
         let target = database(directory.path(), "target").await;
         {
             let mut writer = source.writer().await.unwrap();
-            sqlx::raw_sql("INSERT INTO source_ids VALUES(1,'missing-source');INSERT INTO main.playlists(playlist_key,source_key,object_id,name,position) VALUES(1,1,'native',NULL,0),(2,NULL,'authored','Mine',1);INSERT INTO main.playlist_entries(playlist_key,object_id,media_uri,title,position) VALUES(2,'a','https://example.test/song','Saved',0),(2,'b','https://example.test/song','Saved duplicate',1);INSERT INTO listens(listen_key,external_id,source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis) VALUES(7,NULL,'missing-source','https://example.test/song','Saved','Artist','Album',1,'2026-09',100,90);").execute(writer.as_mut().unwrap()).await.unwrap();
-            sqlx::raw_sql("INSERT INTO source_ids VALUES(2,'local');INSERT INTO main.playlists(playlist_key,source_key,object_id,name,position) VALUES(3,2,'local-authored','Local playlist',2);INSERT INTO main.playlist_entries(playlist_key,object_id,media_uri,title,position) VALUES(3,'c','file:///music/song.flac','Local saved',0);")
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES(1,'missing-source');INSERT INTO playlists(playlist_key,source_key,owner,object_id,name,position) VALUES(1,1,'source','native',NULL,0),(2,NULL,'rufin','authored','Mine',1);INSERT INTO tracks(track_key,media_uri,title) VALUES(1,'https://example.test/song','Saved');INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(2,'a',1,0),(2,'b',1,1);INSERT INTO listens(listen_key,external_id,source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis) VALUES(7,NULL,'missing-source','https://example.test/song','Saved','Artist','Album',1,'2026-09',100,90);").execute(writer.as_mut().unwrap()).await.unwrap();
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES(2,'local');INSERT INTO playlists(playlist_key,source_key,object_id,name,position) VALUES(3,2,'local-authored','Local playlist',2);INSERT INTO tracks(track_key,media_uri,title) VALUES(2,'file:///music/song.flac','Local saved');INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(3,'c',2,0);")
                 .execute(writer.as_mut().unwrap()).await.unwrap();
         }
+        let admitted = source
+            .read_queue(crate::QueueReadRequest {
+                input: crate::QueueInput::Items(
+                    (0..250)
+                        .map(|_| {
+                            (
+                                crate::QueueItem::direct(
+                                    "https://example.test/song",
+                                    "Saved",
+                                    "",
+                                    "",
+                                    100,
+                                ),
+                                crate::QueueProvenance::Manual,
+                            )
+                        })
+                        .collect(),
+                ),
+                context_title: None,
+                anchor_index: 0,
+                random_start: None,
+                shuffled: None,
+            })
+            .await
+            .unwrap();
         source
             .save_queue(&crate::QueueRestore {
-                entries: (0..250)
-                    .map(|_| crate::QueueEntry {
-                        received_from_connect: false,
-                        media_uri: "https://example.test/song".into(),
-                        playlist_entry_id: None,
-                        provenance: crate::QueueProvenance::Manual,
-                    })
-                    .collect(),
+                entries: admitted.entries.into(),
                 order: (0..250).collect(),
                 repeat_mode: crate::QueueRepeatMode::All,
                 shuffled: true,
@@ -370,7 +389,16 @@ mod tests {
             .export_queue_jsonl(&mut restored_queue)
             .await
             .unwrap();
-        assert_eq!(original_queue, restored_queue);
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(
+                original_queue.split(|byte| *byte == b'\n').next().unwrap()
+            )
+            .unwrap(),
+            serde_json::from_slice::<serde_json::Value>(
+                restored_queue.split(|byte| *byte == b'\n').next().unwrap()
+            )
+            .unwrap(),
+        );
         let mut writer = target.writer().await.unwrap();
         let connection = writer.as_mut().unwrap();
         assert_eq!(
@@ -396,7 +424,7 @@ mod tests {
             ]
         );
         let entries: Vec<(String, String)> = sqlx::query_as(
-            "SELECT object_id,title FROM main.playlist_entries ORDER BY playlist_key,position",
+            "SELECT entry.object_id,track.title FROM playlist_entries entry JOIN tracks track USING(track_key) ORDER BY entry.playlist_key,entry.position",
         )
         .fetch_all(&mut *connection)
         .await
@@ -404,8 +432,8 @@ mod tests {
         assert_eq!(
             entries,
             vec![
-                ("a".into(), "Saved".into()),
-                ("b".into(), "Saved duplicate".into()),
+                ("a".into(), "Song".into()),
+                ("b".into(), "Song".into()),
                 ("c".into(), "Local saved".into())
             ]
         );
@@ -425,7 +453,7 @@ mod tests {
         seed(&target, 19).await;
         {
             let mut writer = target.writer().await.unwrap();
-            sqlx::raw_sql("INSERT INTO catalog.sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (83,'remote','Remote','remote',zeroblob(32));INSERT INTO main.playlists(object_id,name,position) VALUES('retained','Keep me',0);")
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (83,'remote','Remote','remote',zeroblob(32));INSERT INTO main.playlists(object_id,name,position) VALUES('retained','Keep me',0);")
                 .execute(writer.as_mut().unwrap()).await.unwrap();
         }
         let favorites = StateGroups {
@@ -446,7 +474,7 @@ mod tests {
             let mut writer = target.writer().await.unwrap();
             let connection = writer.as_mut().unwrap();
             assert_eq!(
-                sqlx::query_scalar::<_, String>("SELECT object_id FROM catalog.sources")
+                sqlx::query_scalar::<_, String>("SELECT object_id FROM sources")
                     .fetch_one(&mut *connection)
                     .await
                     .unwrap(),

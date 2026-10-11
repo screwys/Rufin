@@ -281,7 +281,6 @@ impl PlaylistFileEntry {
                 artist: None,
                 album: None,
                 album_display_artist: None,
-                snapshot_at: 0,
                 duration_millis: None,
                 disc_number: None,
                 track_number: None,
@@ -376,6 +375,7 @@ pub(crate) async fn import_playlist_on(
             .fetch_one(&mut *connection)
             .await?;
     let mut identity = PlaylistIdentity {
+        source_owned: false,
         source_id: None,
         object_id,
         name: Some(
@@ -387,8 +387,12 @@ pub(crate) async fn import_playlist_on(
         position: 0,
     };
     if let Some(value) = parsed.identity {
-        if value.name.is_some() && !value.object_id.is_empty() && value.position >= 0 {
-            let native = sqlx::query_scalar::<_,bool>("SELECT EXISTS(SELECT 1 FROM main.playlists playlist JOIN main.source_ids source USING(source_key) WHERE source.object_id=?1 AND playlist.object_id=?2 AND playlist.name IS NULL) OR EXISTS(SELECT 1 FROM catalog.native_playlists playlist JOIN catalog.sources source USING(source_key) WHERE source.object_id=?1 AND playlist.object_id=?2)")
+        if !value.source_owned
+            && value.name.is_some()
+            && !value.object_id.is_empty()
+            && value.position >= 0
+        {
+            let native = sqlx::query_scalar::<_,bool>("SELECT EXISTS(SELECT 1 FROM playlists playlist JOIN sources source USING(source_key) WHERE source.object_id=?1 AND playlist.object_id=?2 AND playlist.owner='source')")
                 .bind(&value.source_id).bind(&value.object_id).fetch_one(&mut *connection).await?;
             if !native {
                 identity = value;
@@ -400,11 +404,8 @@ pub(crate) async fn import_playlist_on(
     }
     let mut changed = true;
     let key = if let Some(key) = target {
-        if key.raw() < 0 {
-            return Err(invalid("Cannot replace a provider playlist from a file"));
-        }
         let name = sqlx::query_scalar::<_, String>(
-            "SELECT name FROM main.playlists WHERE playlist_key=?1 AND name IS NOT NULL",
+            "SELECT name FROM playlists WHERE playlist_key=?1 AND owner='rufin' AND name IS NOT NULL",
         )
         .bind(key)
         .fetch_optional(&mut *connection)
@@ -440,39 +441,47 @@ pub(crate) async fn import_playlist_on(
         entries.push(entry);
     }
     let imported = entries.len() as u64;
-    let mut entries_changed = true;
-    if target.is_some() {
-        let mut rows = sqlx::query_as::<_, PlaylistEntryWrite>("SELECT object_id,media_uri,title,artist,album,album_display_artist,snapshot_at,duration_millis,disc_number,track_number,year,release_date,source_format,musicbrainz_recording_id,musicbrainz_release_track_id,position FROM main.playlist_entries WHERE playlist_key=?1 ORDER BY position")
-            .bind(key).fetch(&mut *connection);
-        entries_changed = false;
-        for entry in &entries {
-            let Some(mut stored) = rows.try_next().await? else {
-                entries_changed = true;
-                break;
-            };
-            // Private identifiers and snapshot age do not change playlist contents.
-            stored.object_id.clone_from(&entry.object_id);
-            stored.snapshot_at = entry.snapshot_at;
-            if &stored != entry {
-                entries_changed = true;
+    let before = sqlx::query_scalar::<_, i64>("SELECT total_changes()")
+        .fetch_one(&mut *connection)
+        .await?;
+    let mut tracks = Vec::with_capacity(entries.len());
+    for entry in &entries {
+        tracks.push(crate::playlists::remember_playlist_song(connection, entry).await?);
+    }
+    changed |= sqlx::query_scalar::<_, i64>("SELECT total_changes()")
+        .fetch_one(&mut *connection)
+        .await?
+        != before;
+    let entries_changed = if target.is_some() {
+        let mut rows = sqlx::query_scalar::<_, crate::TrackKey>(
+            "SELECT track_key FROM playlist_entries WHERE playlist_key=?1 ORDER BY position",
+        )
+        .bind(key)
+        .fetch(&mut *connection);
+        let mut changed = false;
+        for track in &tracks {
+            if rows.try_next().await?.as_ref() != Some(track) {
+                changed = true;
                 break;
             }
         }
-        if !entries_changed && rows.try_next().await?.is_some() {
-            entries_changed = true;
-        }
-    }
+        changed || rows.try_next().await?.is_some()
+    } else {
+        true
+    };
     if entries_changed {
         changed = true;
         sqlx::query("DELETE FROM main.playlist_entries WHERE playlist_key=?1")
             .bind(key)
             .execute(&mut *connection)
             .await?;
-        for mut entry in entries {
+        for (mut entry, track) in entries.into_iter().zip(tracks) {
             if sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM main.playlist_entries WHERE playlist_key=?1 AND object_id=?2)").bind(key).bind(&entry.object_id).fetch_one(&mut *connection).await? {
             entry.object_id = sqlx::query_scalar("SELECT 'playlist:' || lower(hex(randomblob(16)))").fetch_one(&mut *connection).await?;
         }
-            crate::playlists::write_playlist_entry(connection, key, &entry).await?;
+            sqlx::query("INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(?1,?2,?3,?4)")
+                .bind(key).bind(&entry.object_id).bind(track).bind(entry.position)
+                .execute(&mut *connection).await?;
         }
     }
     Ok(PlaylistImportReport {
@@ -490,18 +499,31 @@ pub(crate) async fn export_playlist_on(
     mode: PlaylistPathMode,
     output: impl Write,
 ) -> LibraryResult<u64> {
-    let mut identity = sqlx::query_as::<_, PlaylistIdentity>(if playlist.raw() >= 0 {
-        "SELECT source.object_id source_id,playlist.object_id,playlist.name,playlist.position FROM main.playlists playlist LEFT JOIN main.source_ids source USING(source_key) WHERE playlist.playlist_key=?1"
-    } else {
-        "SELECT source.object_id source_id,playlist.object_id,playlist.name,playlist.position FROM playlists playlist LEFT JOIN catalog.sources source USING(source_key) WHERE playlist.playlist_key=?1"
-    }).bind(playlist).fetch_one(&mut *connection).await?;
-    let name = identity.name.clone();
-    if playlist.raw() < 0 {
-        identity.name = None;
-    }
-    let mut writer = PlaylistWriter::new(output, file, mode, name.as_deref(), Some(&identity))?;
-    let mut entries = sqlx::query_as::<_, PlaylistEntryWrite>("SELECT object_id,media_uri,title,artist,album,album_display_artist,snapshot_at,duration_millis,disc_number,track_number,year,release_date,source_format,musicbrainz_recording_id,musicbrainz_release_track_id,position FROM playlist_entries WHERE playlist_key=?1 ORDER BY position")
-        .bind(playlist).fetch(&mut *connection);
+    let identity = sqlx::query_as::<_, PlaylistIdentity>(
+        "SELECT playlist.owner='source' source_owned,source.object_id source_id,
+                playlist.object_id,playlist.name,playlist.position
+         FROM playlists playlist LEFT JOIN sources source USING(source_key)
+         WHERE playlist.playlist_key=?1",
+    )
+    .bind(playlist)
+    .fetch_one(&mut *connection)
+    .await?;
+    let mut writer = PlaylistWriter::new(
+        output,
+        file,
+        mode,
+        identity.name.as_deref(),
+        Some(&identity),
+    )?;
+    let mut entries = sqlx::query_as::<_, PlaylistEntryWrite>(
+        "SELECT entry.object_id,track.media_uri,track.title,track.display_artist artist,
+                track.display_album album,COALESCE(album.display_artist,track.album_display_artist) album_display_artist,
+                track.duration_millis,track.disc_number,track.track_number,track.year,track.release_date,
+                track.source_format,track.musicbrainz_recording_id,track.musicbrainz_release_track_id,entry.position
+         FROM playlist_entries entry JOIN tracks track USING(track_key)
+         LEFT JOIN albums album USING(album_key)
+         WHERE entry.playlist_key=?1 ORDER BY entry.position",
+    ).bind(playlist).fetch(&mut *connection);
     while let Some(entry) = entries.try_next().await? {
         writer.entry(&entry)?;
     }
@@ -1007,7 +1029,6 @@ mod tests {
         );
         let snapshot = roundtrip.entries[0].preserved.as_mut().unwrap();
         snapshot.object_id = "external-occurrence".into();
-        snapshot.snapshot_at += 1;
         let private_only = database
             .import_playlist_document(roundtrip, &file, Some(first.playlist), |_| None)
             .await
@@ -1126,7 +1147,7 @@ mod tests {
                 .await
                 .unwrap();
             let actual: Vec<String> = sqlx::query_scalar(
-                "SELECT media_uri FROM playlist_entries WHERE playlist_key=?1 ORDER BY position",
+                "SELECT media_uri FROM playlist_entries JOIN tracks USING(track_key) WHERE playlist_key=?1 ORDER BY position",
             )
             .bind(imported.playlist)
             .fetch_all(&mut *connection)
@@ -1397,24 +1418,13 @@ mod tests {
             .unwrap();
         let file = directory.path().join("large.m3u8");
         {
-            let mut input = std::io::BufWriter::new(std::fs::File::create(&file).unwrap());
-            for index in 0..10001 {
-                writeln!(
-                    input,
-                    "#EXTINF:12,Song {index}\nhttps://example.test/{index}"
-                )
-                .unwrap();
-            }
+            let mut writer = database.writer().await.unwrap();
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES(1,'source');
+                WITH RECURSIVE n(i) AS (VALUES(0) UNION ALL SELECT i+1 FROM n WHERE i<10000)
+                INSERT INTO tracks(source_key,object_id,media_uri,indexed,title,normalized_search,sort_text,duration_millis)
+                SELECT 1,CAST(i AS TEXT),'https://example.test/'||i,1,'Song '||i,'song '||i,'song '||i,12000 FROM n;")
+                .execute(writer.as_mut().unwrap()).await.unwrap();
         }
-        database
-            .import_playlist_file(
-                std::io::BufReader::new(std::fs::File::open(&file).unwrap()),
-                &file,
-                None,
-                |_| None,
-            )
-            .await
-            .unwrap();
         let key = database
             .create_smart_playlist("All", &crate::SmartPlaylistDefinition::default())
             .await
@@ -1446,16 +1456,17 @@ mod tests {
         {
             let mut writer = database.writer().await.unwrap();
             let connection = writer.as_mut().unwrap();
-            sqlx::raw_sql("INSERT INTO catalog.sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (5,'source','Source','source',zeroblob(32));
-              INSERT INTO catalog.native_playlists(playlist_key,source_key,object_id,name,normalized_name,sort_text) VALUES(8,5,'native','Native','native','native');
-              INSERT INTO catalog.native_playlist_entries(playlist_key,object_id,media_uri,title,position) VALUES(8,'one','https://example.test/song','Song',0),(8,'two','https://example.test/song','Song',1);")
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (5,'source','Source','source',zeroblob(32));
+              INSERT INTO playlists(playlist_key,source_key,owner,object_id,name,normalized_name,sort_text,position) VALUES(8,5,'source','native','Native','native','native',0);
+              INSERT INTO tracks(track_key,media_uri,title) VALUES(1,'https://example.test/song','Song');
+              INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(8,'one',1,0),(8,'two',1,1);")
               .execute(connection).await.unwrap();
         }
         let file = directory.path().join("native.m3u8");
         let mut output = Vec::new();
         database
             .export_playlist_file(
-                PlaylistKey::from_raw(-8),
+                PlaylistKey::from_raw(8),
                 &file,
                 PlaylistPathMode::Automatic,
                 &mut output,
@@ -1472,7 +1483,7 @@ mod tests {
                 .playlist_owner(copy.playlist, &crate::ReadCancellation::new())
                 .await
                 .unwrap(),
-            Some((None, None))
+            Some((None, None, false))
         );
         let mut copied = Vec::new();
         assert_eq!(
@@ -1498,7 +1509,7 @@ mod tests {
         assert_eq!(
             database
                 .export_playlist_file(
-                    PlaylistKey::from_raw(-8),
+                    PlaylistKey::from_raw(8),
                     &file,
                     PlaylistPathMode::Automatic,
                     &mut native

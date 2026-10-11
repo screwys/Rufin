@@ -134,8 +134,8 @@ mod tests {
         let database = Database::open(directory.path().join("store.sqlite")).await?;
         {
             let mut writer = database.writer().await?;
-            sqlx::raw_sql("INSERT INTO catalog.sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES(1,'files','Files','files',zeroblob(32));
-                INSERT INTO catalog.local_files(local_file_key,source_key,path,root,relative_path,kind,mtime_ns,state) VALUES
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES(1,'files','Files','files',zeroblob(32));
+                INSERT INTO local_files(local_file_key,source_key,path,root,relative_path,kind,mtime_ns,state) VALUES
                 (1,1,'album/photo.png','album','photo.png','image',1,'rejected'),
                 (2,1,'album/Music.M3U8','album','Music.M3U8','media',1,'rejected'),
                 (3,1,'album/other.pls','album','other.pls','media',1,'observed'),
@@ -463,7 +463,7 @@ async fn linkable_on(
     connection: &mut SqliteConnection,
     playlist: PlaylistKey,
 ) -> LibraryResult<bool> {
-    Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM main.playlists WHERE playlist_key=?1 AND playlist_key>0 AND name IS NOT NULL)")
+    Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM main.playlists WHERE playlist_key=?1 AND owner='rufin' AND name IS NOT NULL)")
         .bind(playlist).fetch_one(connection).await?)
 }
 
@@ -500,7 +500,7 @@ pub(crate) async fn backup_records_on(
     mut write: impl FnMut(PlaylistFileRecord) -> LibraryResult<()>,
 ) -> LibraryResult<()> {
     use futures_util::TryStreamExt;
-    let mut rows = sqlx::query("SELECT link.*,source.object_id owner_source_id,playlist.object_id FROM playlist_file_links link JOIN main.playlists playlist USING(playlist_key) LEFT JOIN main.source_ids source USING(source_key)").fetch(&mut *connection);
+    let mut rows = sqlx::query("SELECT link.*,source.object_id owner_source_id,playlist.object_id FROM playlist_file_links link JOIN main.playlists playlist USING(playlist_key) LEFT JOIN sources source USING(source_key)").fetch(&mut *connection);
     while let Some(row) = rows.try_next().await? {
         write(PlaylistFileRecord::Link {
             source_id: row.try_get("owner_source_id")?,
@@ -539,7 +539,7 @@ pub(crate) async fn restore_record_on(
             object_id,
             mut link,
         } => {
-            link.playlist = sqlx::query_scalar("SELECT playlist_key FROM main.playlists playlist LEFT JOIN main.source_ids source USING(source_key) WHERE source.object_id IS ?1 AND playlist.object_id=?2")
+            link.playlist = sqlx::query_scalar("SELECT playlist_key FROM main.playlists playlist LEFT JOIN sources source USING(source_key) WHERE source.object_id IS ?1 AND playlist.object_id=?2")
                 .bind(source_id).bind(object_id).fetch_one(&mut *connection).await?;
             save_link_on(connection, &link).await?;
         }
@@ -613,7 +613,7 @@ impl Database {
         path: &str,
     ) -> LibraryResult<bool> {
         let mut reader = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM catalog.local_files file JOIN catalog.sources source USING(source_key) WHERE source.object_id=?1 AND file.path=?2 AND file.state='rejected')")
+        Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM local_files file JOIN sources source USING(source_key) WHERE source.object_id=?1 AND file.path=?2 AND file.state='rejected')")
             .bind(source_id.as_str()).bind(path).fetch_one(&mut *reader).await?)
     }
 
@@ -623,7 +623,7 @@ impl Database {
         after: Option<crate::LocalFileKey>,
     ) -> LibraryResult<Vec<ObservedPlaylistFile>> {
         let mut reader = self.acquire_reader().await?;
-        Ok(sqlx::query_as("SELECT local_file_key,path,root,relative_path,size_bytes,mtime_ns,revision FROM catalog.local_files WHERE source_key=?1 AND local_file_key>?2 AND kind<>'directory' AND (lower(path) LIKE '%.m3u' OR lower(path) LIKE '%.m3u8' OR lower(path) LIKE '%.pls' OR lower(path) LIKE '%.xspf') ORDER BY local_file_key LIMIT 256")
+        Ok(sqlx::query_as("SELECT local_file_key,path,root,relative_path,size_bytes,mtime_ns,revision FROM local_files WHERE source_key=?1 AND local_file_key>?2 AND kind<>'directory' AND (lower(path) LIKE '%.m3u' OR lower(path) LIKE '%.m3u8' OR lower(path) LIKE '%.pls' OR lower(path) LIKE '%.xspf') ORDER BY local_file_key LIMIT 256")
             .bind(source).bind(after.map_or(0, crate::LocalFileKey::raw)).fetch_all(&mut *reader).await?)
     }
     pub async fn get_playlist_file_link(

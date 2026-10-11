@@ -458,7 +458,7 @@ pub(crate) mod tests {
                     primary_artist_musicbrainz_id: Some("artist-id".to_string()),
                 },
                 received_from_connect: false,
-                playlist_entry_id: None,
+                track_key: None,
                 provenance: Provenance::Manual,
             }),
         });

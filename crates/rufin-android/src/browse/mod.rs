@@ -243,6 +243,7 @@ fn artist_row(row: library::ArtistRow, album_artist: bool) -> AndroidBrowseRow {
         }
     });
     AndroidBrowseRow {
+        track_key: None,
         kind: "artist".into(),
         playback_context_id: Some(
             if album_artist {

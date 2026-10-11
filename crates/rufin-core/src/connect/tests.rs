@@ -231,10 +231,12 @@ fn cue_direct_continuation_transfers_one_file_without_enrollment() {
                             .await
                             .unwrap()
                             .unwrap();
-                        if saved
-                            .entries
-                            .first()
-                            .is_some_and(|entry| entry.media_uri.as_ref() == uri)
+                        if saved.entries.first().map(|entry| entry.track_key)
+                            == a.database
+                                .track_key_by_uri(&uri, &library::ReadCancellation::new())
+                                .await
+                                .unwrap()
+                            && !saved.entries.is_empty()
                         {
                             break;
                         }

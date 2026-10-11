@@ -49,14 +49,19 @@ pub(in crate::playback) async fn seeded(
     let mut sequence = Sequence::new();
     sequence.add_page(page, library::QueueReorderTarget::End, true, None);
     if let Some(request) = sequence.read_request() {
-        let uris = request
-            .iter()
-            .map(|(_, entry)| entry.media_uri.to_string())
-            .collect::<Vec<_>>();
         let items = database
-            .queue_items_for_uris(&uris, &library::ReadCancellation::new())
+            .queue_rows_for_entries(
+                &request
+                    .iter()
+                    .enumerate()
+                    .map(|(position, (_, entry))| (position, entry.clone()))
+                    .collect::<Vec<_>>(),
+                &library::ReadCancellation::new(),
+            )
             .await
-            .unwrap();
+            .unwrap()
+            .into_iter()
+            .map(|row| row.item.clone());
         sequence.hydrate(request.into_iter().map(|(id, _)| id).zip(items).collect());
     }
     database.save_queue(&sequence.snapshot()).await.unwrap();
@@ -305,6 +310,24 @@ async fn continuation_preserves_positions_order_and_one_listen_across_devices() 
         destination_playback,
         destination_inbox,
     ) = seeded(Vec::new()).await;
+    for offset in (0..first.queue.entries.len()).step_by(library::QUEUE_CONTEXT_LIMIT) {
+        let page = database
+            .queue_transfer_page(&first.queue, offset)
+            .await
+            .unwrap();
+        destination_database
+            .stage_queue_transfer_page("continuation", &page)
+            .await
+            .unwrap();
+    }
+    let transferred = destination_database
+        .prepare_queue_transfer(
+            "continuation",
+            first.queue.entries.len(),
+            final_header.current,
+        )
+        .await
+        .unwrap();
     let mut destination = Player::new(
         sequence,
         "home-pc",
@@ -320,7 +343,7 @@ async fn continuation_preserves_positions_order_and_one_listen_across_devices() 
         .adopt_continuation(
             playback::Continuation {
                 header: final_header.clone(),
-                queue: first.queue.clone(),
+                queue: transferred,
             },
             PreparedStream::new(
                 playback::ResolvedStream::new("https://example.test/continued.flac"),
@@ -337,7 +360,32 @@ async fn continuation_preserves_positions_order_and_one_listen_across_devices() 
         },
         &sample,
     );
-    assert_eq!(destination.sequence.snapshot().entries, first.queue.entries);
+    let received = destination.sequence.snapshot();
+    assert_eq!(
+        destination_database
+            .track_uris(
+                &received
+                    .entries
+                    .iter()
+                    .map(|entry| entry.track_key)
+                    .collect::<Vec<_>>(),
+                &library::ReadCancellation::new()
+            )
+            .await
+            .unwrap(),
+        database
+            .track_uris(
+                &first
+                    .queue
+                    .entries
+                    .iter()
+                    .map(|entry| entry.track_key)
+                    .collect::<Vec<_>>(),
+                &library::ReadCancellation::new()
+            )
+            .await
+            .unwrap(),
+    );
     assert_eq!(destination.sequence.snapshot().order, first.queue.order);
     assert_ne!(first.queue.rows[0].position, first.queue.rows[1].position);
     assert_eq!(destination.sequence.repeat_mode(), RepeatMode::All);
@@ -1383,6 +1431,10 @@ async fn collection_starts_and_selected_rows_keep_distinct_shuffle_anchors() {
                 .collect::<Vec<_>>();
             let (_directory, database, mut sequence, owner, commands, playback, inbox) =
                 seeded(items.clone()).await;
+            let input = library::QueueInput::Captured {
+                entries: sequence.snapshot().entries,
+                anchor_index: anchor,
+            };
             sequence.set_progress_millis(42_000);
             let mut session = Player::new(
                 sequence,
@@ -1414,12 +1466,7 @@ async fn collection_starts_and_selected_rows_keep_distinct_shuffle_anchors() {
             } else {
                 playback::PlayRequest::captured
             };
-            let request = request(
-                Batch::new(items).input,
-                anchor,
-                Placement::Now,
-                collection_start && shuffled,
-            );
+            let request = request(input, anchor, Placement::Now, collection_start && shuffled);
             assert_eq!(request.activation_context().is_none(), collection_start);
             let (batch, placement) = request.compact_batch(2);
             let reservation = session.reserve_materialization(placement);

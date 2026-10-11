@@ -18,8 +18,8 @@ use super::collections::{
 };
 use super::named_collections::{NamedPageLoad, NamedReadRequest};
 use super::route_shell::{LibraryPageShellOptions, LibraryToolbarProjection};
+use crate::track_model::CollectionTrack;
 use crate::track_model::{PreparedTrackProjection, TrackCollectionModel, TrackProjectionRequest};
-use gtk_widgets::library_fields::TrackPresentation;
 use gtk_widgets::route::CollectionCategory;
 
 const TRACK_FILTER_DEBOUNCE: Duration = Duration::from_millis(150);
@@ -44,7 +44,7 @@ pub struct SearchableTrackOptions {
 }
 
 #[derive(Clone)]
-pub struct TrackListProjection<T: TrackPresentation = library::TrackRow> {
+pub struct TrackListProjection<T: CollectionTrack = library::TrackRow> {
     key: LibraryListKey,
     search: gtk::SearchEntry,
     collection: super::collections::LibraryCollectionProjection,
@@ -52,7 +52,7 @@ pub struct TrackListProjection<T: TrackPresentation = library::TrackRow> {
     fixed_layout: Option<LibraryLayout>,
 }
 
-impl<T: TrackPresentation> TrackListProjection<T> {
+impl<T: CollectionTrack> TrackListProjection<T> {
     pub fn download_change(&self) -> gtk_widgets::mounted_route::MountedDownloadChange {
         let model = self.model.clone();
         Rc::new(move |event| {
@@ -204,7 +204,7 @@ impl<T: TrackPresentation> TrackListProjection<T> {
 }
 
 impl CatalogUi {
-    pub fn scrolling_track_projection<T: TrackPresentation>(
+    pub fn scrolling_track_projection<T: CollectionTrack>(
         self: &Rc<Self>,
         model: TrackCollectionModel<T>,
         key: LibraryListKey,
@@ -565,21 +565,18 @@ impl CatalogUi {
         let key = LibraryListKey::History;
         let database = Arc::clone(&self.library);
         let runtime = self.runtime.clone();
-        let order = rows
-            .iter()
-            .map(|row| row.media_uri.clone())
-            .collect::<Vec<_>>();
+        let order = rows.iter().map(|row| row.track_key).collect::<Vec<_>>();
         let settings = self.settings.current.borrow().library_list(key);
         let rows_database = database.clone();
         let load = Rc::new(
-            move |uris: Vec<String>,
+            move |keys: Vec<library::TrackKey>,
                   _: std::ops::Range<usize>,
                   _: TrackProjectionRequest,
                   cancellation: library::ReadCancellation| {
                 let database = rows_database.clone();
                 Box::pin(async move {
                     database
-                        .history_rows_by_uri(&uris, &cancellation)
+                        .history_rows(&keys, &cancellation)
                         .await
                         .map_err(|error| error.to_string())
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
@@ -633,7 +630,7 @@ impl CatalogUi {
                         disc_sections: Vec::new(),
                         order: rows
                             .iter()
-                            .map(|row| row.media_uri.clone())
+                            .map(|row| row.track_key)
                             .collect::<Vec<_>>()
                             .into(),
                         first_row_position: 0,
@@ -1097,7 +1094,7 @@ impl CatalogUi {
         self.searchable_song_collection(model, key, settings, options)
     }
 
-    fn searchable_song_collection<T: TrackPresentation>(
+    fn searchable_song_collection<T: CollectionTrack>(
         self: &Rc<Self>,
         model: TrackCollectionModel<T>,
         key: LibraryListKey,
@@ -1214,7 +1211,7 @@ impl CatalogUi {
         )
     }
 
-    fn track_page_shell<T: TrackPresentation>(
+    fn track_page_shell<T: CollectionTrack>(
         self: &Rc<Self>,
         key: LibraryListKey,
         empty_body: &'static str,
@@ -1233,7 +1230,7 @@ impl CatalogUi {
         })
     }
 
-    fn mount_track_page<Q, T: TrackPresentation>(
+    fn mount_track_page<Q, T: CollectionTrack>(
         self: &Rc<Self>,
         key: LibraryListKey,
         projection: TrackListProjection<T>,

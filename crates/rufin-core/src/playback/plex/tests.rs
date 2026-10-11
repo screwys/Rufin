@@ -62,21 +62,44 @@ fn queue_load_confirmation_waits_through_stop_and_the_wrong_duplicate() {
     }
 }
 
-#[test]
-fn plex_queue_admission_retains_duplicates_and_rejects_mixed_sources() {
+#[tokio::test]
+async fn plex_queue_admission_retains_duplicates_and_rejects_mixed_sources() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = Database::open(directory.path().join("queue.sqlite3"))
+        .await
+        .unwrap();
     let source = sources::SourceId::new("plex-test");
-    let entry = |source: &sources::SourceId| library::QueueEntry {
-        received_from_connect: false,
-        media_uri: library::source_entity_uri(source, "track", "plex:track:42").into(),
-        playlist_entry_id: None,
-        provenance: playback::Provenance::Manual,
-    };
-    let entries = vec![entry(&source), entry(&source), entry(&source)];
-    assert_eq!(queue_keys(&entries, &source).unwrap(), ["42", "42", "42"]);
-    let mut mixed = entries.clone();
-    mixed.push(entry(&sources::SourceId::new("another-profile")));
-    assert!(queue_keys(&mixed, &source).is_err());
-    assert_eq!(entries.len(), 3);
+    let uri = library::source_entity_uri(&source, "track", "plex:track:42");
+    let entries = database
+        .read_queue(library::QueueReadRequest {
+            context_title: None,
+            input: library::QueueInput::MediaUris {
+                order: vec![
+                    uri.clone(),
+                    uri.clone(),
+                    uri,
+                    library::source_entity_uri(
+                        &sources::SourceId::new("another-profile"),
+                        "track",
+                        "plex:track:42",
+                    ),
+                ]
+                .into(),
+                provenance: playback::Provenance::Manual,
+            },
+            anchor_index: 0,
+            random_start: None,
+            shuffled: None,
+        })
+        .await
+        .unwrap()
+        .entries;
+    assert_eq!(
+        queue_keys(&database, &entries[..3], &source).await.unwrap(),
+        ["42", "42", "42"]
+    );
+    assert!(queue_keys(&database, &entries, &source).await.is_err());
+    assert_eq!(entries.len(), 4);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -261,7 +261,7 @@ impl PlaylistEntryModel {
                     descending: applied.settings.descending,
                     context_id: self.visible_context_id().into(),
                     anchor_entry: row.as_ref().map(|row| row.playlist_entry_key),
-                    anchor_uri: row.as_ref().map(|row| row.media_uri.clone()),
+                    anchor_key: row.as_ref().map(|row| row.track_key),
                 },
                 position,
                 placement,

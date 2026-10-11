@@ -13,8 +13,8 @@ const PERIOD_ACTIVITY: &str = "WITH period_activity AS (
     GROUP BY media_uri,artist_name
     UNION ALL
     SELECT track.media_uri,baseline.play_count,track.duration_millis*baseline.play_count,track.display_artist
-    FROM activity_baseline baseline JOIN tracks track
-      ON track.source_key=baseline.source_key AND track.object_id=baseline.track_object_id
+    FROM legacy_activity baseline JOIN sources source ON source.object_id=baseline.source_id
+    JOIN tracks track ON track.source_key=source.source_key AND track.object_id=baseline.track_object_id
     WHERE baseline.item_kind='track' AND baseline.period>=?1 AND baseline.period<?2
       AND baseline.play_count>0
 ) ";
@@ -97,15 +97,16 @@ impl Database {
                 .fetch_one(&mut *connection)
                 .await?;
         let track_sql = format!(
-            "{PERIOD_ACTIVITY} SELECT media_uri,sum(plays) plays FROM period_activity
-             GROUP BY media_uri ORDER BY plays DESC,media_uri LIMIT ?3"
+            "{PERIOD_ACTIVITY} SELECT track.track_key,sum(plays) plays FROM period_activity JOIN tracks track USING(media_uri)
+             GROUP BY track.track_key ORDER BY plays DESC,track.media_uri LIMIT ?3"
         );
-        let tracks = sqlx::query_as::<_, (String, i64)>(sqlx::AssertSqlSafe(track_sql.as_str()))
-            .bind(&from)
-            .bind(&until)
-            .bind(limit as i64)
-            .fetch_all(&mut *connection)
-            .await?;
+        let tracks =
+            sqlx::query_as::<_, (crate::TrackKey, i64)>(sqlx::AssertSqlSafe(track_sql.as_str()))
+                .bind(&from)
+                .bind(&until)
+                .bind(limit as i64)
+                .fetch_all(&mut *connection)
+                .await?;
         let album_sql = format!(
             "{PERIOD_ACTIVITY} SELECT album.media_uri,sum(plays) plays FROM period_activity listen
              JOIN tracks track USING(media_uri) JOIN albums album USING(album_key)
@@ -141,19 +142,17 @@ impl Database {
             .await?;
         drop(connection);
         drop(_permit);
-        let uris = tracks
-            .iter()
-            .map(|(uri, _)| uri.clone())
-            .collect::<Vec<_>>();
-        let mut history = self.history_rows_by_uri(&uris, cancellation).await?;
+        let keys = tracks.iter().map(|(key, _)| *key).collect::<Vec<_>>();
+        let mut history = self.history_rows(&keys, cancellation).await?;
         let mut track_rows = Vec::new();
-        for (uri, count) in tracks {
-            let row = if let Some(index) = history.iter().position(|row| row.media_uri == uri) {
+        for (key, count) in tracks {
+            let row = if let Some(index) = history.iter().position(|row| row.track_key == key) {
                 Some(history.remove(index))
             } else {
                 // A monthly baseline predates individual listen records.
-                self.track_row_by_uri(&uri, cancellation)
+                self.track_rows(&[key], cancellation)
                     .await?
+                    .pop()
                     .map(history_from_track)
             };
             if let Some(mut row) = row {
@@ -188,7 +187,7 @@ impl Database {
     pub async fn activity_months(&self) -> LibraryResult<Vec<String>> {
         let mut connection = self.acquire_reader().await?;
         Ok(sqlx::query_scalar("SELECT DISTINCT local_period FROM listens WHERE skipped=0
-            UNION SELECT period FROM activity_baseline WHERE length(period)=7 AND item_kind='track' AND play_count>0
+            UNION SELECT period FROM legacy_activity WHERE length(period)=7 AND item_kind='track' AND play_count>0
             ORDER BY 1 DESC")
             .fetch_all(&mut *connection).await?)
     }
@@ -196,6 +195,7 @@ impl Database {
 
 fn history_from_track(row: crate::TrackRow) -> HistoryRow {
     HistoryRow {
+        track_key: row.track_key,
         audio_properties: row.audio_properties,
         source_path: row.source_path,
         source_name: Some(row.source_name),

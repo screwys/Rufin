@@ -8,10 +8,10 @@ use super::support::{connection, fixture, persist_queue};
 fn queue_row(item: QueueItem, position: usize) -> QueueRow {
     QueueRow {
         occurrence_id: None,
+        track_key: None,
         received_from_connect: false,
         item,
         position,
-        playlist_entry_id: None,
         provenance: QueueProvenance::Manual,
     }
 }
@@ -79,23 +79,39 @@ async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue
         .await
         .unwrap();
     assert_eq!(
+        receiver
+            .track_uris(
+                &prepared
+                    .entries
+                    .iter()
+                    .map(|entry| entry.track_key)
+                    .collect::<Vec<_>>(),
+                &ReadCancellation::new()
+            )
+            .await
+            .unwrap(),
+        database
+            .track_uris(
+                &queue
+                    .entries
+                    .iter()
+                    .map(|entry| entry.track_key)
+                    .collect::<Vec<_>>(),
+                &ReadCancellation::new()
+            )
+            .await
+            .unwrap(),
+    );
+    assert_eq!(
         prepared
             .entries
             .iter()
-            .map(|entry| (
-                &entry.media_uri,
-                &entry.playlist_entry_id,
-                &entry.provenance
-            ))
+            .map(|entry| &entry.provenance)
             .collect::<Vec<_>>(),
         queue
             .entries
             .iter()
-            .map(|entry| (
-                &entry.media_uri,
-                &entry.playlist_entry_id,
-                &entry.provenance
-            ))
+            .map(|entry| &entry.provenance)
             .collect::<Vec<_>>()
     );
     assert_eq!(prepared.order, queue.order);
@@ -139,7 +155,7 @@ async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue
             .all(|entry| entry.received_from_connect)
     );
     let final_page = receiver.queue_transfer_page(&restored, 200).await.unwrap();
-    assert_eq!(final_page.rows[4].title, "Occurrence 204");
+    assert_eq!(final_page.rows[4].title, "Occurrence 0");
 }
 
 #[tokio::test]
@@ -180,7 +196,7 @@ async fn continuation_uses_local_artwork_before_starting_the_current_track() {
         prepared.rows[0].artwork_binding.as_ref(),
         Some(&local_binding)
     );
-    assert_eq!(prepared.rows[0].title, "Transferred title");
+    assert_eq!(prepared.rows[0].title, "Alpha");
 }
 
 #[tokio::test]
@@ -506,7 +522,7 @@ async fn source_membership_matches_track_view_sort_filter_and_null_order() {
                     sort,
                     descending,
                     context_id: "tracks".into(),
-                    anchor_uri: None,
+                    anchor_key: None,
                 };
                 let items = source_items(&fixture.database, input, None).await;
                 assert_eq!(
@@ -525,15 +541,19 @@ async fn source_membership_matches_track_view_sort_filter_and_null_order() {
 #[tokio::test]
 async fn source_playlist_preserves_duplicate_members_with_shared_uri_metadata() {
     let fixture = fixture().await;
-    let mut raw = connection(&fixture.path).await;
-    sqlx::query("INSERT INTO main.playlists(playlist_key,object_id,name,position) VALUES(100,'duplicates','Duplicates',0)").execute(&mut raw).await.unwrap();
-    for position in 0..140_i64 {
-        sqlx::query("INSERT INTO main.playlist_entries(playlist_key,object_id,media_uri,title,duration_millis,position) VALUES(100,?1,'https://example.test/repeated',?2,?3,?1)")
-            .bind(position).bind(format!("Occurrence {position}")).bind(position*1000).execute(&mut raw).await.unwrap();
-    }
+    let file = fixture._directory.path().join("duplicates.m3u8");
+    let content = format!(
+        "#EXTM3U\n#PLAYLIST:Duplicates\n{}",
+        "#EXTINF:3,Repeated\nhttps://example.test/repeated\n".repeat(140)
+    );
+    let imported = fixture
+        .database
+        .import_playlist_file(std::io::Cursor::new(content), &file, None, |_| None)
+        .await
+        .unwrap();
     for seed in [None, Some(71)] {
         let input = library::QueueInput::Collection {
-            collection: library::QueueCollection::Playlist(library::PlaylistKey::from_raw(100)),
+            collection: library::QueueCollection::Playlist(imported.playlist),
             folder: None,
             context_id: "duplicates".into(),
         };
@@ -549,24 +569,16 @@ async fn source_playlist_preserves_duplicate_members_with_shared_uri_metadata() 
             .await
             .unwrap();
         assert_eq!(page.entries.len(), 140);
-        assert_eq!(
+        assert!(
             page.entries
                 .iter()
-                .filter_map(|entry| entry.playlist_entry_id.as_ref())
-                .collect::<std::collections::HashSet<_>>()
-                .len(),
-            140
+                .all(|entry| entry.track_key == page.entries[0].track_key)
         );
         let items = source_items(&fixture.database, input, seed).await;
         assert_eq!(items.len(), 140);
         assert!(items.iter().all(|item| item == &items[0]));
-        let rank = items[0]
-            .title
-            .strip_prefix("Occurrence ")
-            .unwrap()
-            .parse::<i64>()
-            .unwrap();
-        assert_eq!(items[0].duration_millis, rank * 1000);
+        assert_eq!(items[0].title, "Repeated");
+        assert_eq!(items[0].duration_millis, 3000);
         let queue = library::QueueRestore {
             order: (0..page.entries.len() as u32).rev().collect(),
             entries: page.entries.into(),
@@ -608,11 +620,11 @@ async fn saved_queue_keeps_compact_choices_and_reads_only_the_window() {
     assert_eq!(restored, state);
     let mut raw = connection(&fixture.path).await;
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM queue_occurrences")
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM queue_entries")
             .fetch_one(&mut raw)
             .await
             .unwrap(),
-        0
+        500
     );
     assert_eq!(restored.entries.len(), 500);
     let rows = fixture
@@ -641,7 +653,7 @@ async fn saved_queue_keeps_compact_choices_and_reads_only_the_window() {
 }
 
 #[tokio::test]
-async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_formats() {
+async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_formats() {
     let fixture = fixture().await;
     let mut unavailable = QueueItem::direct(
         "https://example.test/İstanbul/%2Fduplicate?name=\"a\"",
@@ -688,8 +700,6 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
     .map(|(index, provenance)| {
         let mut row = queue_row(unavailable.clone(), index);
         row.provenance = provenance;
-        row.playlist_entry_id =
-            (index % 2 == 0).then(|| format!("[\"playlist\",\"entry-{index}\"]"));
         row
     })
     .collect::<Vec<_>>();
@@ -705,13 +715,27 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
     .await;
     let mut state = fixture.database.restore_queue().await.unwrap();
     let mut entries = state.entries.to_vec();
-    entries[6].media_uri = fixture.track_uris[0].clone().into();
-    entries[7].media_uri = library::source_entity_uri(
+    entries[6].track_key = fixture.tracks[0];
+    let missing_uri = library::source_entity_uri(
         &library::SourceId::new("source"),
         "track",
         "missing-catalog-track",
-    )
-    .into();
+    );
+    let missing = fixture
+        .database
+        .read_queue(library::QueueReadRequest {
+            input: library::QueueInput::Items(vec![(
+                QueueItem::direct(&missing_uri, "Missing", "", "", 0),
+                QueueProvenance::Legacy,
+            )]),
+            context_title: None,
+            anchor_index: 0,
+            random_start: None,
+            shuffled: None,
+        })
+        .await
+        .unwrap();
+    entries[7].track_key = missing.entries[0].track_key;
     state.entries = entries.into();
     state.order = vec![2, 1, 0, 3, 4, 5, 7, 6].into();
 
@@ -752,7 +776,8 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
             .await
             .unwrap();
         let retained: Vec<String> =
-            sqlx::query_scalar("SELECT media_uri FROM queue_occurrences ORDER BY media_uri")
+            sqlx::query_scalar("SELECT media_uri FROM tracks WHERE media_uri=?1")
+                .bind(&unavailable.media_uri)
                 .fetch_all(&mut raw)
                 .await
                 .unwrap();
@@ -766,9 +791,17 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
         let header: serde_json::Value =
             serde_json::from_slice(exported.split(|byte| *byte == b'\n').next().unwrap()).unwrap();
         assert_eq!(header["version"], 4);
-        let exported_state: library::QueueRestore =
-            serde_json::from_value(header["queue"].clone()).unwrap();
-        assert_eq!(exported_state.entries, state.entries);
+        assert_eq!(
+            header["queue"]["entries"].as_array().unwrap().len(),
+            state.entries.len()
+        );
+        assert!(
+            header["queue"]["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|entry| entry.get("track_key").is_none() && entry["media_uri"].is_string())
+        );
         let target = super::support::fixture().await;
         target
             .database
@@ -791,13 +824,14 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
     assert_eq!(removed.order, state.order);
     assert_eq!(removed.current_index, state.current_index);
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM queue_occurrences")
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM tracks WHERE media_uri=?1")
+            .bind(&unavailable.media_uri)
             .fetch_one(&mut raw)
             .await
             .unwrap(),
         1
     );
-    let membership: String = sqlx::query_scalar("SELECT json_group_array(json_object('id',entry_id,'uri',media_uri,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
+    let membership: String = sqlx::query_scalar("SELECT json_group_array(json_object('id',entry_id,'track',track_key,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
         .fetch_one(&mut raw)
         .await
         .unwrap();
@@ -816,7 +850,7 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
     assert_eq!(stopped.repeat_mode, QueueRepeatMode::One);
     assert!(!stopped.shuffled);
     assert_eq!(
-        sqlx::query_scalar::<_, String>("SELECT json_group_array(json_object('id',entry_id,'uri',media_uri,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
+        sqlx::query_scalar::<_, String>("SELECT json_group_array(json_object('id',entry_id,'track',track_key,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
             .fetch_one(&mut raw)
             .await
             .unwrap(),
@@ -825,7 +859,7 @@ async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_
 }
 
 #[tokio::test]
-async fn imported_metadata_batches_keep_member_order_and_native_playlist_ids() {
+async fn imported_metadata_batches_keep_member_order_and_known_song_facts() {
     let fixture = fixture().await;
     let mut rows = (0..205)
         .map(|index| {
@@ -839,7 +873,6 @@ async fn imported_metadata_batches_keep_member_order_and_native_playlist_ids() {
                 ),
                 index,
             );
-            row.playlist_entry_id = Some(format!("[null,\"playlist\",\"entry-{index}\"]"));
             row.provenance = QueueProvenance::Context {
                 context_title: None,
                 context_id: "original".into(),
@@ -871,7 +904,13 @@ async fn imported_metadata_batches_keep_member_order_and_native_playlist_ids() {
         .map(|line| serde_json::from_str::<QueueItem>(line).unwrap())
         .collect::<Vec<_>>();
     assert_eq!(metadata.len(), 3);
-    assert!(metadata.iter().any(|item| item.title == "Saved title 204"));
+    assert_eq!(
+        metadata
+            .iter()
+            .map(|item| item.title.as_str())
+            .collect::<Vec<_>>(),
+        ["Saved title 0", "Saved title 1", "Saved title 2"]
+    );
     rows.reverse();
     for (position, row) in rows.iter_mut().enumerate() {
         row.position = position;
@@ -890,23 +929,33 @@ async fn imported_metadata_batches_keep_member_order_and_native_playlist_ids() {
     .await;
     let restored = fixture.database.restore_queue().await.unwrap();
     assert_eq!(
+        fixture
+            .database
+            .track_uris(
+                &restored
+                    .entries
+                    .iter()
+                    .map(|entry| entry.track_key)
+                    .collect::<Vec<_>>(),
+                &ReadCancellation::new()
+            )
+            .await
+            .unwrap(),
+        rows.iter()
+            .map(|row| row.media_uri.clone())
+            .collect::<Vec<_>>()
+    );
+    assert!(
         restored
             .entries
             .iter()
-            .map(|entry| (entry.media_uri.as_ref(), entry.playlist_entry_id.as_deref()))
-            .collect::<Vec<_>>(),
-        rows.iter()
-            .map(|row| (row.media_uri.as_str(), row.playlist_entry_id.as_deref()))
-            .collect::<Vec<_>>()
+            .all(|entry| entry.provenance == QueueProvenance::Radio)
     );
     assert_eq!(restored.current_index, Some(54));
     assert_eq!(restored.progress_millis, 1200);
-    assert!(
-        restored
-            .rows
-            .iter()
-            .all(|row| row.title == "Changed supplied metadata")
-    );
+    assert!(restored.rows.iter().all(
+        |row| row.title == format!("Saved title {}", row.media_uri.rsplit('/').next().unwrap())
+    ));
 }
 
 #[tokio::test]
@@ -928,11 +977,18 @@ async fn installed_cursor_queue_retains_displaced_entries_and_play_last() {
         .unwrap();
     let restored = fixture.database.restore_queue().await.unwrap();
     assert_eq!(
-        restored
-            .order
-            .iter()
-            .map(|index| restored.entries[*index as usize].media_uri.as_ref())
-            .collect::<Vec<_>>(),
+        fixture
+            .database
+            .track_uris(
+                &restored
+                    .order
+                    .iter()
+                    .map(|index| restored.entries[*index as usize].track_key)
+                    .collect::<Vec<_>>(),
+                &ReadCancellation::new()
+            )
+            .await
+            .unwrap(),
         ["a", "x", "b", "c", "d", "z"]
     );
     assert_eq!(restored.current_index, Some(0));
@@ -983,17 +1039,19 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
     fixture.database.save_queue(&latest).await.unwrap();
     let mut raw = connection(&fixture.path).await;
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM queue_occurrences")
-            .fetch_one(&mut raw)
-            .await
-            .unwrap(),
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM tracks WHERE media_uri LIKE 'https://example.test/%'"
+        )
+        .fetch_one(&mut raw)
+        .await
+        .unwrap(),
         24
     );
-    let membership: String = sqlx::query_scalar("SELECT json_group_array(json_object('id',entry_id,'uri',media_uri,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
+    let membership: String = sqlx::query_scalar("SELECT json_group_array(json_object('id',entry_id,'track',track_key,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
         .fetch_one(&mut raw)
         .await
         .unwrap();
-    sqlx::raw_sql("CREATE TABLE queue_snapshot_writes(value INTEGER);CREATE TRIGGER queue_snapshot_updated AFTER UPDATE ON queue_occurrences BEGIN INSERT INTO queue_snapshot_writes VALUES(1); END;CREATE TRIGGER queue_snapshot_inserted AFTER INSERT ON queue_occurrences BEGIN INSERT INTO queue_snapshot_writes VALUES(1); END;").execute(&mut raw).await.unwrap();
+    sqlx::raw_sql("CREATE TABLE song_writes(value INTEGER);CREATE TRIGGER song_updated AFTER UPDATE ON tracks BEGIN INSERT INTO song_writes VALUES(1); END;CREATE TRIGGER song_inserted AFTER INSERT ON tracks BEGIN INSERT INTO song_writes VALUES(1); END;").execute(&mut raw).await.unwrap();
     latest.order = vec![1, 0].into();
     latest.current_index = Some(1);
     latest.shuffled = true;
@@ -1021,7 +1079,7 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
         .await
         .unwrap();
     assert_eq!(
-        sqlx::query_scalar::<_, String>("SELECT json_group_array(json_object('id',entry_id,'uri',media_uri,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
+        sqlx::query_scalar::<_, String>("SELECT json_group_array(json_object('id',entry_id,'track',track_key,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
             .fetch_one(&mut raw)
             .await
             .unwrap(),
@@ -1029,7 +1087,7 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
     );
     fixture.database.save_queue(&latest).await.unwrap();
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM queue_snapshot_writes")
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM song_writes")
             .fetch_one(&mut raw)
             .await
             .unwrap(),
@@ -1081,11 +1139,18 @@ async fn installed_shuffled_source_keeps_its_exact_pending_order() {
         .unwrap();
     let restored = fixture.database.restore_queue().await.unwrap();
     assert_eq!(
-        restored
-            .order
-            .iter()
-            .map(|index| restored.entries[*index as usize].media_uri.to_string())
-            .collect::<Vec<_>>(),
+        fixture
+            .database
+            .track_uris(
+                &restored
+                    .order
+                    .iter()
+                    .map(|index| restored.entries[*index as usize].track_key)
+                    .collect::<Vec<_>>(),
+                &ReadCancellation::new()
+            )
+            .await
+            .unwrap(),
         ordered
     );
     assert_eq!(restored.current_index, Some(1));
@@ -1117,7 +1182,7 @@ async fn repeated_large_source_starts_resolve_only_the_selected_window() {
                     sort: TrackSort::Title,
                     descending: false,
                     context_id: "bulk".into(),
-                    anchor_uri: None,
+                    anchor_key: None,
                 },
                 anchor_index: 0,
                 random_start: Some(activation * 7919),
@@ -1154,13 +1219,13 @@ async fn repeated_large_source_starts_resolve_only_the_selected_window() {
         };
         fixture.database.save_queue(&state).await.unwrap();
         assert_eq!(
-            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM queue_occurrences")
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM queue_entries")
                 .fetch_one(&mut raw)
                 .await
                 .unwrap(),
-            0
+            20000
         );
-        let membership: String = sqlx::query_scalar("SELECT json_group_array(json_object('id',entry_id,'uri',media_uri,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
+        let membership: String = sqlx::query_scalar("SELECT json_group_array(json_object('id',entry_id,'track',track_key,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
             .fetch_one(&mut raw)
             .await
             .unwrap();
@@ -1188,7 +1253,7 @@ async fn repeated_large_source_starts_resolve_only_the_selected_window() {
             .await
             .unwrap();
         assert_eq!(
-            sqlx::query_scalar::<_, String>("SELECT json_group_array(json_object('id',entry_id,'uri',media_uri,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
+            sqlx::query_scalar::<_, String>("SELECT json_group_array(json_object('id',entry_id,'track',track_key,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
                 .fetch_one(&mut raw)
                 .await
                 .unwrap(),

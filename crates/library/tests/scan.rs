@@ -94,7 +94,6 @@ async fn remote_relocation_keeps_media_identity_and_updates_observed_access() {
             "stable-track",
             None,
             "A track",
-            "a track",
             "Album",
             "Artist",
             "a track",
@@ -171,7 +170,7 @@ async fn remote_relocation_keeps_media_identity_and_updates_observed_access() {
 }
 
 #[tokio::test]
-async fn adding_remote_observation_columns_preserves_the_accepted_local_catalog() {
+async fn reopening_preserves_accepted_source_rows_and_noop_refresh() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("library.sqlite3");
     let database = Database::open(&path).await.unwrap();
@@ -181,10 +180,6 @@ async fn adding_remote_observation_columns_preserves_the_accepted_local_catalog(
         other => panic!("expected changed catalog, got {other:?}"),
     };
     database.close().await.unwrap();
-    let mut old = connection(&path).await;
-    sqlx::raw_sql("DROP INDEX catalog.local_files_native_id_idx; ALTER TABLE catalog.local_files DROP COLUMN native_id; ALTER TABLE catalog.local_files DROP COLUMN revision; PRAGMA catalog.user_version=44;")
-        .execute(&mut old).await.unwrap();
-    drop(old);
     let reopened = Database::open(&path).await.unwrap();
     assert_eq!(
         reopened
@@ -201,7 +196,7 @@ async fn adding_remote_observation_columns_preserves_the_accepted_local_catalog(
 }
 
 #[tokio::test]
-async fn local_play_counts_survive_import_and_catalog_reconstruction() {
+async fn local_play_counts_survive_import_source_refresh_and_reopen() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("library.sqlite3");
     let database = Database::open(&path).await.unwrap();
@@ -241,9 +236,6 @@ async fn local_play_counts_survive_import_and_catalog_reconstruction() {
         [1, 0]
     );
     database.close().await.unwrap();
-    let mut old = connection(&path).await;
-    sqlx::raw_sql("DROP INDEX catalog.tracks_local_play_count_idx; DROP INDEX catalog.tracks_global_local_play_count_idx; DROP INDEX catalog.tracks_local_shuffle_idx; DROP INDEX catalog.tracks_global_local_shuffle_idx; ALTER TABLE catalog.tracks DROP COLUMN local_play_count;").execute(&mut old).await.unwrap();
-    drop(old);
     let reopened = Database::open(&path).await.unwrap();
     assert_eq!(
         counts()
@@ -610,7 +602,6 @@ async fn write_track(scan: &mut Scan, object_id: &str, title: &str, position: i6
         object_id,
         Some("album-one"),
         title,
-        &normalized,
         "Album One",
         "Artist One",
         &normalized,
@@ -698,13 +689,13 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
     .expect("read stable keys");
     assert_eq!(
         sqlx::query_as::<_, (i64, i64, Option<i64>)>(
-            "SELECT play_count,skip_count,last_played_at FROM activity_baseline
-             WHERE source_key=?1 AND track_object_id='track-one'",
+            "SELECT source_play_count,source_skip_count,source_last_played FROM tracks
+             WHERE source_key=?1 AND object_id='track-one'",
         )
         .bind(first.source)
         .fetch_one(&mut outside)
         .await
-        .expect("read initial provider Activity baseline"),
+        .expect("read initial provider activity facts"),
         (20, 0, Some(1_700_000_000))
     );
     sqlx::query(
@@ -719,7 +710,7 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
         write_small_catalog(&database, "fresh-two", "Track One", true, b"genre-art").await,
         ScanOutcome::Identical(library::Publication {
             tracks_added: false,
-            ..first
+            ..first.clone()
         })
     );
     assert_eq!(
@@ -733,7 +724,7 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
         .expect("accept freshness"),
         Some(library::Publication {
             tracks_added: false,
-            ..first
+            ..first.clone()
         })
     );
 
@@ -768,13 +759,13 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
     );
     assert_eq!(
         sqlx::query_as::<_, (i64, i64, Option<i64>)>(
-            "SELECT play_count,skip_count,last_played_at FROM activity_baseline
-             WHERE source_key=?1 AND track_object_id='track-one'",
+            "SELECT source_play_count,source_skip_count,source_last_played FROM tracks
+             WHERE source_key=?1 AND object_id='track-one'",
         )
         .bind(first.source)
         .fetch_one(&mut outside)
         .await
-        .expect("read preserved provider Activity baseline"),
+        .expect("read current provider activity facts"),
         (20, 0, Some(1_700_000_000))
     );
     assert_eq!(
@@ -802,7 +793,7 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
         .await
         .expect("read published Track facts"),
         (
-            "changed track album one artist one note".to_string(),
+            "changed track artist one album one note 2025".to_string(),
             "2025-01-02".to_string(),
             "FLAC".to_string(),
             "Note".to_string(),
@@ -1098,12 +1089,12 @@ async fn complete_scans_remove_unseen_items_after_partial_updates() {
         });
         let mut reader = connection(&path).await;
         assert_eq!(
-            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM genres")
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM genres WHERE indexed")
                 .fetch_one(&mut reader)
                 .await
                 .unwrap(),
             expected_count,
-            "a complete scan must remove items retained by its incomplete predecessor"
+            "a complete scan clears membership omitted after an incomplete predecessor"
         );
     }
     let mut point = Scan::begin_items(&database, "source").await.unwrap();
@@ -1257,7 +1248,6 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
             "",
             None,
             "Bad",
-            "bad",
             "",
             "",
             "bad",
@@ -1371,7 +1361,6 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
             "orphan-track",
             Some("missing-album"),
             "Orphan",
-            "orphan",
             "Missing",
             "Artist",
             "orphan",

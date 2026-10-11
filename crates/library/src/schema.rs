@@ -1,4 +1,4 @@
-//! Independent durable Store and disposable catalog schemas, joined by connection-local views.
+//! The durable library schema owns source facts and application references.
 use crate::LibraryResult;
 use sqlx::{Connection, SqliteConnection};
 
@@ -14,9 +14,7 @@ pub(crate) async fn pragma(
 }
 pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA application_id = 1381320270;
 
-PRAGMA user_version = 47;
-
-CREATE TABLE IF NOT EXISTS source_ids (source_key INTEGER PRIMARY KEY, object_id TEXT NOT NULL UNIQUE CHECK(object_id<>'')) STRICT;
+PRAGMA user_version = 56;
 
 CREATE TABLE IF NOT EXISTS queue_contexts (
     context_key INTEGER PRIMARY KEY,
@@ -25,14 +23,13 @@ CREATE TABLE IF NOT EXISTS queue_contexts (
 
 CREATE TABLE IF NOT EXISTS queue_entries (
     entry_id INTEGER PRIMARY KEY,
-    media_uri TEXT NOT NULL,
-    playlist_entry_id TEXT,
+    track_key INTEGER NOT NULL REFERENCES tracks,
     provenance TEXT,
     context_key INTEGER REFERENCES queue_contexts,
     source_rank INTEGER,
     received_from_connect INTEGER NOT NULL DEFAULT 0
 ) STRICT;
-CREATE INDEX IF NOT EXISTS queue_entries_uri_idx ON queue_entries(media_uri);
+CREATE INDEX IF NOT EXISTS queue_entries_track_idx ON queue_entries(track_key);
 CREATE INDEX IF NOT EXISTS queue_entries_context_idx ON queue_entries(context_key) WHERE context_key IS NOT NULL;
 CREATE TABLE IF NOT EXISTS queue_positions (
     order_kind INTEGER NOT NULL,
@@ -42,8 +39,13 @@ CREATE TABLE IF NOT EXISTS queue_positions (
 ) STRICT, WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS playlists (
+    track_count INTEGER NOT NULL DEFAULT 0,
+    duration_millis INTEGER NOT NULL DEFAULT 0,
+    downloaded_count INTEGER NOT NULL DEFAULT 0,
     playlist_key INTEGER PRIMARY KEY,
-    source_key INTEGER REFERENCES source_ids ON DELETE CASCADE,
+    owner TEXT NOT NULL DEFAULT 'rufin' CHECK(owner IN ('rufin','source')),
+    indexed INTEGER NOT NULL DEFAULT 1 CHECK(indexed IN (0,1)),
+    source_key INTEGER REFERENCES sources ON DELETE CASCADE,
     object_id TEXT NOT NULL CHECK (object_id <> ''),
     name TEXT,
     normalized_name TEXT,
@@ -52,6 +54,11 @@ CREATE TABLE IF NOT EXISTS playlists (
     artwork_bytes BLOB,
     artwork_mime TEXT,
     artwork_revision TEXT,
+    artwork_binding BLOB,
+    writable INTEGER NOT NULL DEFAULT 1,
+    metadata_writable INTEGER NOT NULL DEFAULT 1,
+    provider_revision TEXT,
+    valid_until INTEGER,
     UNIQUE (source_key, object_id)
 ) STRICT;
 
@@ -92,22 +99,14 @@ CREATE TABLE IF NOT EXISTS playlist_entries (
     playlist_entry_key INTEGER PRIMARY KEY,
     playlist_key INTEGER NOT NULL REFERENCES playlists ON DELETE CASCADE,
     object_id TEXT NOT NULL CHECK (object_id <> ''),
-    media_uri TEXT NOT NULL CHECK (media_uri <> ''),
-    title TEXT, artist TEXT, album TEXT, album_display_artist TEXT,
-    snapshot_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    duration_millis INTEGER, disc_number INTEGER,
-    track_number INTEGER, year INTEGER, release_date TEXT,
-    source_format TEXT, musicbrainz_recording_id TEXT,
-    musicbrainz_release_track_id TEXT,
+    track_key INTEGER NOT NULL REFERENCES tracks,
     position INTEGER NOT NULL CHECK (position >= 0),
     UNIQUE (playlist_key, object_id),
     UNIQUE (playlist_key, position)
 ) STRICT;
-
 CREATE INDEX IF NOT EXISTS playlist_entries_order_idx ON playlist_entries(playlist_key, position);
 CREATE INDEX IF NOT EXISTS playlist_entries_shuffle_idx ON playlist_entries(playlist_key,((playlist_entry_key*1103515245)%2147483647),playlist_entry_key);
-
-CREATE INDEX IF NOT EXISTS playlist_entries_media_idx ON playlist_entries(media_uri,(title IS NULL),snapshot_at DESC,playlist_entry_key DESC);
+CREATE INDEX IF NOT EXISTS playlist_entries_track_idx ON playlist_entries(track_key,playlist_key);
 
 CREATE TABLE IF NOT EXISTS smart_playlists (
     smart_playlist_key INTEGER PRIMARY KEY,
@@ -215,37 +214,17 @@ CREATE INDEX IF NOT EXISTS connect_media_files_hash_idx ON connect_media_files(h
 CREATE INDEX IF NOT EXISTS connect_media_files_backing_idx ON connect_media_files(backing_uri,encoding,revision);
 CREATE INDEX IF NOT EXISTS connect_media_files_missing_backing_idx ON connect_media_files(media_uri) WHERE backing_uri IS NULL;
 
-CREATE TABLE IF NOT EXISTS queue_occurrences (
-    queue_occurrence_key INTEGER PRIMARY KEY,
-    media_uri TEXT NOT NULL UNIQUE CHECK (media_uri <> ''),
-    snapshot_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    title TEXT NOT NULL,
-    artist TEXT NOT NULL,
-    album TEXT NOT NULL,
-    album_display_artist TEXT,
-    duration_millis INTEGER NOT NULL CHECK (duration_millis >= 0),
-    disc_number INTEGER,
-    track_number INTEGER,
-    year INTEGER,
-    release_date TEXT,
-    source_format TEXT,
-    musicbrainz_recording_id TEXT,
-    musicbrainz_release_track_id TEXT,
-    musicbrainz_album_id TEXT,
-    musicbrainz_release_group_id TEXT,
-    primary_artist_musicbrainz_id TEXT
-) STRICT;
-
 CREATE TABLE IF NOT EXISTS local_locators (
     local_access_file_key INTEGER PRIMARY KEY,
-    source_key INTEGER REFERENCES source_ids ON DELETE CASCADE,
+    source_key INTEGER REFERENCES sources ON DELETE CASCADE,
     media_uri TEXT NOT NULL CHECK(media_uri<>''),
     origin TEXT NOT NULL CHECK(origin IN ('local','mapping','download','import')),
     path TEXT NOT NULL CHECK(path<>''), root TEXT NOT NULL, relative_path TEXT NOT NULL,
     access_uri TEXT NOT NULL CHECK(access_uri<>''),
-    UNIQUE(media_uri,origin), UNIQUE(source_key,path)
+    UNIQUE(media_uri,origin)
 ) STRICT;
 CREATE INDEX IF NOT EXISTS local_locators_source_idx ON local_locators(source_key,origin);
+CREATE INDEX IF NOT EXISTS local_locators_path_idx ON local_locators(source_key,path);
 CREATE INDEX IF NOT EXISTS local_locators_access_idx ON local_locators(media_uri,origin,local_access_file_key);
 
 
@@ -257,16 +236,13 @@ CREATE TABLE IF NOT EXISTS legacy_activity (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS local_locators_precedence_idx ON local_locators(media_uri,CASE origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,local_access_file_key);
-"#;
-pub(crate) const CATALOG_SCHEMA: &str = r#"PRAGMA application_id = 1381320270;
-
-PRAGMA user_version = 55;
 
 CREATE TABLE IF NOT EXISTS sources (
     source_key INTEGER PRIMARY KEY,
     object_id TEXT NOT NULL UNIQUE CHECK (object_id <> ''),
-    display_name TEXT NOT NULL, normalized_name TEXT NOT NULL, freshness BLOB,
-    artwork_digest BLOB NOT NULL CHECK (length(artwork_digest) = 32),
+    display_name TEXT NOT NULL DEFAULT '', normalized_name TEXT NOT NULL DEFAULT '', freshness BLOB,
+    kind TEXT,
+    artwork_digest BLOB NOT NULL DEFAULT X'0000000000000000000000000000000000000000000000000000000000000000' CHECK (length(artwork_digest) = 32),
     distinct_track_covers INTEGER NOT NULL DEFAULT 0 CHECK (distinct_track_covers IN (0,1)),
     catalog_revision INTEGER NOT NULL DEFAULT 0 CHECK (catalog_revision >= 0),
     catalog_complete INTEGER NOT NULL DEFAULT 0 CHECK (catalog_complete IN (0,1)),
@@ -274,7 +250,18 @@ CREATE TABLE IF NOT EXISTS sources (
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS albums (
+    derived_source_play_count INTEGER NOT NULL DEFAULT 0,
+    activity_play_count INTEGER NOT NULL DEFAULT 0,
+    derived_source_last_played INTEGER,
+    activity_last_played INTEGER,
+    track_count INTEGER NOT NULL DEFAULT 0,
+    duration_millis INTEGER NOT NULL DEFAULT 0,
+    downloaded_count INTEGER NOT NULL DEFAULT 0,
     album_key INTEGER PRIMARY KEY,
+    source_play_count INTEGER,
+    source_skip_count INTEGER,
+    source_last_played INTEGER,
+    indexed INTEGER NOT NULL DEFAULT 1 CHECK(indexed IN (0,1)),
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
     object_id TEXT NOT NULL CHECK (object_id <> ''),
     media_uri TEXT NOT NULL UNIQUE CHECK (media_uri <> ''),
@@ -321,20 +308,28 @@ CREATE INDEX IF NOT EXISTS albums_artwork_idx ON albums(source_key, artwork_bind
 
 CREATE TABLE IF NOT EXISTS tracks (
     track_key INTEGER PRIMARY KEY,
-    source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
-    object_id TEXT NOT NULL CHECK (object_id <> ''),
+    source_play_count INTEGER,
+    source_skip_count INTEGER,
+    source_last_played INTEGER,
+    indexed INTEGER NOT NULL DEFAULT 1 CHECK(indexed IN (0,1)),
+    source_key INTEGER REFERENCES sources ON DELETE SET NULL,
+    object_id TEXT CHECK (object_id <> ''),
     album_key INTEGER REFERENCES albums ON DELETE SET NULL,
-    title TEXT NOT NULL,
-    normalized_search TEXT NOT NULL,
-    display_album TEXT NOT NULL,
-    display_artist TEXT NOT NULL,
-    sort_text TEXT NOT NULL,
+    title TEXT,
+    normalized_search TEXT,
+    display_album TEXT,
+    display_artist TEXT,
+    album_display_artist TEXT,
+    musicbrainz_album_id TEXT,
+    musicbrainz_release_group_id TEXT,
+    primary_artist_musicbrainz_id TEXT,
+    sort_text TEXT,
     sort_album_artist TEXT,
     sort_album_year INTEGER,
-    sort_album TEXT NOT NULL DEFAULT '',
-    duration_millis INTEGER NOT NULL CHECK (duration_millis >= 0),
-    disc_number INTEGER NOT NULL DEFAULT 0 CHECK (disc_number >= 0),
-    track_number INTEGER NOT NULL DEFAULT 0 CHECK (track_number >= 0),
+    sort_album TEXT,
+    duration_millis INTEGER CHECK (duration_millis >= 0),
+    disc_number INTEGER CHECK (disc_number >= 0),
+    track_number INTEGER CHECK (track_number >= 0),
     year INTEGER,
     release_date TEXT,
     date_added TEXT,
@@ -359,10 +354,6 @@ CREATE TABLE IF NOT EXISTS tracks (
     loudness_analysis_key BLOB NOT NULL DEFAULT X'0000000000000000000000000000000000000000000000000000000000000000'
         CHECK (length(loudness_analysis_key) = 32),
     CHECK (bpm IS NULL OR bpm BETWEEN 0 AND 65535),
-    CHECK (musicbrainz_recording_id IS NULL OR musicbrainz_recording_id <> ''),
-    CHECK (
-        musicbrainz_release_track_id IS NULL OR musicbrainz_release_track_id <> ''
-    ),
     CHECK (
         (cue_path IS NULL AND cue_start_millis IS NULL AND cue_end_millis IS NULL)
         OR (
@@ -395,7 +386,27 @@ CREATE INDEX IF NOT EXISTS tracks_album_sort_asc_idx ON tracks(source_key,sort_a
 CREATE INDEX IF NOT EXISTS tracks_album_sort_desc_idx ON tracks(source_key,sort_album DESC,(album_key IS NULL),album_key,disc_number,track_number,sort_text,track_key);
 
 CREATE TABLE IF NOT EXISTS artists (
+    derived_source_play_count INTEGER NOT NULL DEFAULT 0,
+    activity_play_count INTEGER NOT NULL DEFAULT 0,
+    derived_source_last_played INTEGER,
+    activity_last_played INTEGER,
+    album_artist_derived_source_play_count INTEGER NOT NULL DEFAULT 0,
+    album_artist_activity_play_count INTEGER NOT NULL DEFAULT 0,
+    album_artist_derived_source_last_played INTEGER,
+    album_artist_activity_last_played INTEGER,
+    album_count INTEGER NOT NULL DEFAULT 0,
+    track_count INTEGER NOT NULL DEFAULT 0,
+    duration_millis INTEGER NOT NULL DEFAULT 0,
+    downloaded_count INTEGER NOT NULL DEFAULT 0,
+    album_artist_album_count INTEGER NOT NULL DEFAULT 0,
+    album_artist_track_count INTEGER NOT NULL DEFAULT 0,
+    album_artist_duration_millis INTEGER NOT NULL DEFAULT 0,
+    album_artist_downloaded_count INTEGER NOT NULL DEFAULT 0,
     artist_key INTEGER PRIMARY KEY,
+    source_play_count INTEGER,
+    source_skip_count INTEGER,
+    source_last_played INTEGER,
+    indexed INTEGER NOT NULL DEFAULT 1 CHECK(indexed IN (0,1)),
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
     object_id TEXT NOT NULL CHECK (object_id <> ''),
     media_uri TEXT NOT NULL UNIQUE CHECK (media_uri <> ''),
@@ -417,7 +428,15 @@ CREATE INDEX IF NOT EXISTS artists_artwork_idx ON artists(source_key, artwork_bi
     WHERE artwork_binding IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS genres (
+    album_count INTEGER NOT NULL DEFAULT 0,
+    track_count INTEGER NOT NULL DEFAULT 0,
+    duration_millis INTEGER NOT NULL DEFAULT 0,
+    downloaded_count INTEGER NOT NULL DEFAULT 0,
     genre_key INTEGER PRIMARY KEY,
+    source_play_count INTEGER,
+    source_skip_count INTEGER,
+    source_last_played INTEGER,
+    indexed INTEGER NOT NULL DEFAULT 1 CHECK(indexed IN (0,1)),
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
     object_id TEXT NOT NULL CHECK (object_id <> ''),
     name TEXT NOT NULL,
@@ -433,7 +452,11 @@ CREATE INDEX IF NOT EXISTS genres_artwork_idx ON genres(source_key, artwork_bind
     WHERE artwork_binding IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS moods (
+    track_count INTEGER NOT NULL DEFAULT 0,
+    duration_millis INTEGER NOT NULL DEFAULT 0,
+    downloaded_count INTEGER NOT NULL DEFAULT 0,
     mood_key INTEGER PRIMARY KEY,
+    indexed INTEGER NOT NULL DEFAULT 1 CHECK(indexed IN (0,1)),
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
     object_id TEXT NOT NULL CHECK (object_id <> ''),
     name TEXT NOT NULL,
@@ -446,6 +469,7 @@ CREATE INDEX IF NOT EXISTS moods_order_idx ON moods(source_key, sort_text, mood_
 
 CREATE TABLE IF NOT EXISTS folders (
     folder_key INTEGER PRIMARY KEY,
+    indexed INTEGER NOT NULL DEFAULT 1 CHECK(indexed IN (0,1)),
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
     object_id TEXT NOT NULL CHECK (object_id <> ''),
     name TEXT NOT NULL,
@@ -528,50 +552,6 @@ CREATE TABLE IF NOT EXISTS album_release_types (
     UNIQUE (album_key, release_type)
 ) STRICT;
 
-CREATE TABLE IF NOT EXISTS native_playlists (
-    playlist_key INTEGER PRIMARY KEY,
-    source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
-    object_id TEXT NOT NULL CHECK (object_id <> ''),
-    name TEXT NOT NULL,
-    normalized_name TEXT NOT NULL,
-    sort_text TEXT NOT NULL,
-    artwork_binding BLOB,
-    writable INTEGER NOT NULL DEFAULT 1,
-    metadata_writable INTEGER NOT NULL DEFAULT 1,
-    provider_revision TEXT,
-    valid_until INTEGER,
-    UNIQUE (source_key, object_id)
-) STRICT;
-
-CREATE INDEX IF NOT EXISTS native_playlists_order_idx ON native_playlists(source_key, sort_text, playlist_key);
-
-CREATE INDEX IF NOT EXISTS native_playlists_title_idx ON native_playlists(source_key, sort_text, playlist_key);
-
-CREATE INDEX IF NOT EXISTS native_playlists_public_key_idx ON native_playlists(-playlist_key);
-
-CREATE TABLE IF NOT EXISTS native_playlist_entries (
-    playlist_entry_key INTEGER PRIMARY KEY,
-    playlist_key INTEGER NOT NULL REFERENCES native_playlists ON DELETE CASCADE,
-    object_id TEXT NOT NULL CHECK (object_id <> ''),
-    media_uri TEXT NOT NULL CHECK (media_uri <> ''),
-    title TEXT, artist TEXT, album TEXT, album_display_artist TEXT,
-    snapshot_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    duration_millis INTEGER, disc_number INTEGER,
-    track_number INTEGER, year INTEGER, release_date TEXT,
-    source_format TEXT, musicbrainz_recording_id TEXT,
-    musicbrainz_release_track_id TEXT,
-    position INTEGER NOT NULL CHECK (position >= 0),
-    UNIQUE (playlist_key, object_id),
-    UNIQUE (playlist_key, position)
-) STRICT;
-
-CREATE INDEX IF NOT EXISTS native_playlist_entries_order_idx ON native_playlist_entries(playlist_key, position);
-CREATE INDEX IF NOT EXISTS native_playlist_entries_public_order_idx ON native_playlist_entries(-playlist_key,position,-playlist_entry_key);
-CREATE INDEX IF NOT EXISTS native_playlist_entries_public_key_idx ON native_playlist_entries(-playlist_entry_key);
-CREATE INDEX IF NOT EXISTS native_playlist_entries_shuffle_idx ON native_playlist_entries(playlist_key,((playlist_entry_key*1103515245)%2147483647),playlist_entry_key);
-
-CREATE INDEX IF NOT EXISTS native_playlist_entries_media_idx ON native_playlist_entries(media_uri,(title IS NULL),snapshot_at DESC,playlist_entry_key ASC);
-
 CREATE TABLE IF NOT EXISTS home_entries (
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
     section_id TEXT NOT NULL CHECK (section_id <> ''),
@@ -582,17 +562,6 @@ CREATE TABLE IF NOT EXISTS home_entries (
     subtitle TEXT NOT NULL,
     section_title TEXT,
     PRIMARY KEY (source_key, section_id, position)
-) STRICT;
-
-CREATE TABLE IF NOT EXISTS activity_baseline (
-    source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
-    period TEXT NOT NULL DEFAULT 'lifetime',
-    item_kind TEXT NOT NULL DEFAULT 'track' CHECK (item_kind IN ('track','artist','genre')),
-    track_object_id TEXT NOT NULL CHECK (track_object_id <> ''),
-    play_count INTEGER NOT NULL CHECK (play_count >= 0),
-    skip_count INTEGER NOT NULL CHECK (skip_count >= 0),
-    last_played_at INTEGER,
-    PRIMARY KEY (source_key, period, item_kind, track_object_id)
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS loudness_measurements (
@@ -724,429 +693,44 @@ WHEN (OLD.album_artist_sort,OLD.year,OLD.sort_text) IS NOT (NEW.album_artist_sor
     WHERE album_key=NEW.album_key AND (sort_album_artist,sort_album_year,sort_album)
         IS NOT (NEW.album_artist_sort,NEW.year,NEW.sort_text);
 END;
-CREATE TRIGGER IF NOT EXISTS source_track_insert AFTER INSERT ON tracks BEGIN
+CREATE TRIGGER IF NOT EXISTS source_track_insert AFTER INSERT ON tracks WHEN NEW.indexed=1 BEGIN
     UPDATE sources SET track_count=track_count+1 WHERE source_key=NEW.source_key;
 END;
-CREATE TRIGGER IF NOT EXISTS source_track_delete AFTER DELETE ON tracks BEGIN
+CREATE TRIGGER IF NOT EXISTS source_track_delete AFTER DELETE ON tracks WHEN OLD.indexed=1 BEGIN
     UPDATE sources SET track_count=track_count-1 WHERE source_key=OLD.source_key;
 END;
-CREATE TRIGGER IF NOT EXISTS source_track_update AFTER UPDATE OF source_key ON tracks
-WHEN OLD.source_key IS NOT NEW.source_key BEGIN
-    UPDATE sources SET track_count=track_count-1 WHERE source_key=OLD.source_key;
-    UPDATE sources SET track_count=track_count+1 WHERE source_key=NEW.source_key;
+CREATE TRIGGER IF NOT EXISTS source_track_update AFTER UPDATE OF source_key,indexed ON tracks
+WHEN (OLD.source_key,OLD.indexed) IS NOT (NEW.source_key,NEW.indexed) BEGIN
+    UPDATE sources SET track_count=track_count-OLD.indexed WHERE source_key=OLD.source_key;
+    UPDATE sources SET track_count=track_count+NEW.indexed WHERE source_key=NEW.source_key;
 END;
 
-"#;
+CREATE INDEX IF NOT EXISTS tracks_local_play_count_idx ON tracks(source_key,local_play_count,sort_text,media_uri);
+CREATE INDEX IF NOT EXISTS tracks_global_local_play_count_idx ON tracks(local_play_count,sort_text,media_uri);
+CREATE INDEX IF NOT EXISTS tracks_local_shuffle_idx ON tracks(source_key,local_play_count,((track_key*1103515245)%2147483647),media_uri);
+CREATE INDEX IF NOT EXISTS tracks_global_local_shuffle_idx ON tracks(local_play_count,((track_key*1103515245)%2147483647),media_uri);
+CREATE INDEX IF NOT EXISTS tracks_shuffle_idx ON tracks(source_key,((track_key*1103515245)%2147483647),media_uri);
+CREATE INDEX IF NOT EXISTS tracks_global_shuffle_idx ON tracks(((track_key*1103515245)%2147483647),media_uri);
+CREATE INDEX IF NOT EXISTS tracks_indexed_idx ON tracks(indexed,source_key,track_key);
 
-macro_rules! metadata_upsert {
-    ($insert:literal) => {
-        concat!($insert, "
-        ON CONFLICT(media_uri) DO UPDATE SET snapshot_at=excluded.snapshot_at,
-            title=COALESCE(excluded.title,queue_occurrences.title),
-            artist=COALESCE(excluded.artist,queue_occurrences.artist),
-            album=COALESCE(excluded.album,queue_occurrences.album),
-            album_display_artist=COALESCE(excluded.album_display_artist,queue_occurrences.album_display_artist),
-            duration_millis=COALESCE(excluded.duration_millis,queue_occurrences.duration_millis),
-            disc_number=COALESCE(excluded.disc_number,queue_occurrences.disc_number),
-            track_number=COALESCE(excluded.track_number,queue_occurrences.track_number),
-            year=COALESCE(excluded.year,queue_occurrences.year),
-            release_date=COALESCE(excluded.release_date,queue_occurrences.release_date),
-            source_format=COALESCE(excluded.source_format,queue_occurrences.source_format),
-            musicbrainz_recording_id=COALESCE(excluded.musicbrainz_recording_id,queue_occurrences.musicbrainz_recording_id),
-            musicbrainz_release_track_id=COALESCE(excluded.musicbrainz_release_track_id,queue_occurrences.musicbrainz_release_track_id),
-            musicbrainz_album_id=COALESCE(excluded.musicbrainz_album_id,queue_occurrences.musicbrainz_album_id),
-            musicbrainz_release_group_id=COALESCE(excluded.musicbrainz_release_group_id,queue_occurrences.musicbrainz_release_group_id),
-            primary_artist_musicbrainz_id=COALESCE(excluded.primary_artist_musicbrainz_id,queue_occurrences.primary_artist_musicbrainz_id)")
-    };
-}
-pub(crate) use metadata_upsert;
-
-pub(crate) async fn preserve_saved_metadata(
-    connection: &mut sqlx::SqliteConnection,
-) -> LibraryResult<()> {
-    sqlx::query(self::metadata_upsert!("INSERT INTO queue_occurrences(
-            media_uri,title,artist,album,
-            album_display_artist,duration_millis,disc_number,track_number,
-            year,release_date,source_format,musicbrainz_recording_id,
-            musicbrainz_release_track_id,musicbrainz_album_id,musicbrainz_release_group_id,primary_artist_musicbrainz_id)
-        SELECT json_extract(item.value,'$.media_uri'),
-            json_extract(item.value,'$.title'),
-            json_extract(item.value,'$.artist'),
-            json_extract(item.value,'$.album'),
-            json_extract(item.value,'$.album_display_artist'),
-            json_extract(item.value,'$.duration_millis'),
-            json_extract(item.value,'$.disc_number'),
-            json_extract(item.value,'$.track_number'),
-            json_extract(item.value,'$.year'),
-            json_extract(item.value,'$.release_date'),
-            json_extract(item.value,'$.source_format'),
-            json_extract(item.value,'$.musicbrainz_recording_id'),
-            json_extract(item.value,'$.musicbrainz_release_track_id'),
-            json_extract(item.value,'$.musicbrainz_album_id'),
-            json_extract(item.value,'$.musicbrainz_release_group_id'),
-            json_extract(item.value,'$.primary_artist_musicbrainz_id')
-        FROM queue_saved,json_tree(queue_saved.state) item
-        WHERE item.type='object'
-            AND json_type(item.value,'$.media_uri')='text'
-            AND json_type(item.value,'$.title')='text'"))
-        .execute(connection).await?;
-    Ok(())
-}
-
-async fn migrate_queue_metadata(connection: &mut SqliteConnection) -> LibraryResult<()> {
-    let old: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pragma_table_info('queue_occurrences') WHERE name='object_id')")
-        .fetch_one(&mut *connection).await?;
-    if !old {
-        return Ok(());
-    }
-    let mut transaction = connection.begin().await?;
-    sqlx::query("ALTER TABLE queue_occurrences RENAME TO queue_metadata_legacy")
-        .execute(&mut *transaction)
-        .await?;
-    sqlx::raw_sql(
-        r#"CREATE TABLE IF NOT EXISTS queue_occurrences (
-    queue_occurrence_key INTEGER PRIMARY KEY,
-    media_uri TEXT NOT NULL UNIQUE CHECK (media_uri <> ''),
-    snapshot_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    title TEXT NOT NULL,
-    artist TEXT NOT NULL,
-    album TEXT NOT NULL,
-    album_display_artist TEXT,
-    duration_millis INTEGER NOT NULL CHECK (duration_millis >= 0),
-    disc_number INTEGER,
-    track_number INTEGER,
-    year INTEGER,
-    release_date TEXT,
-    source_format TEXT,
-    musicbrainz_recording_id TEXT,
-    musicbrainz_release_track_id TEXT,
-    musicbrainz_album_id TEXT,
-    musicbrainz_release_group_id TEXT,
-    primary_artist_musicbrainz_id TEXT
-) STRICT;
-
-"#,
-    )
-    .execute(&mut *transaction)
-    .await?;
-    preserve_saved_metadata(&mut transaction).await?;
-    sqlx::query(self::metadata_upsert!("INSERT INTO queue_occurrences(media_uri,snapshot_at,title,artist,album,album_display_artist,duration_millis,disc_number,track_number,year,release_date,source_format,musicbrainz_recording_id,musicbrainz_release_track_id,musicbrainz_album_id,musicbrainz_release_group_id,primary_artist_musicbrainz_id)
-        SELECT media_uri,
-            (SELECT snapshot_at FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND snapshot_at IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
-            (SELECT title FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND title IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
-            (SELECT artist FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND artist IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
-            (SELECT album FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND album IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
-            (SELECT album_display_artist FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND album_display_artist IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
-            (SELECT duration_millis FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND duration_millis IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
-            (SELECT disc_number FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND disc_number IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
-            (SELECT track_number FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND track_number IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
-            (SELECT year FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND year IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
-            (SELECT release_date FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND release_date IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
-            (SELECT source_format FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND source_format IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
-            (SELECT musicbrainz_recording_id FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND musicbrainz_recording_id IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
-            (SELECT musicbrainz_release_track_id FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND musicbrainz_release_track_id IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
-            (SELECT musicbrainz_album_id FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND musicbrainz_album_id IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
-            (SELECT musicbrainz_release_group_id FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND musicbrainz_release_group_id IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1),
-            (SELECT primary_artist_musicbrainz_id FROM queue_metadata_legacy old WHERE old.media_uri=uris.media_uri AND primary_artist_musicbrainz_id IS NOT NULL ORDER BY snapshot_at DESC,queue_occurrence_key DESC LIMIT 1)
-        FROM (SELECT DISTINCT media_uri FROM queue_metadata_legacy) uris WHERE true"))
-        .execute(&mut *transaction).await?;
-    // Metadata survives the one-time reset of the former occurrence-based queue.
-    sqlx::raw_sql("DROP TABLE queue_metadata_legacy;
-        DELETE FROM queue_saved;
-        DELETE FROM queue_order;
-        DELETE FROM queue_transfer_pages;
-        ALTER TABLE queue_state RENAME TO queue_state_legacy;
-        CREATE TABLE queue_state(singleton INTEGER PRIMARY KEY CHECK(singleton=1),current_index INTEGER,progress_millis INTEGER NOT NULL DEFAULT 0 CHECK(progress_millis>=0),repeat_mode TEXT NOT NULL DEFAULT 'none' CHECK(repeat_mode IN ('none','one','all')),shuffled INTEGER NOT NULL DEFAULT 0 CHECK(shuffled IN (0,1))) STRICT;
-        INSERT INTO queue_state(singleton,repeat_mode,shuffled) SELECT singleton,repeat_mode,shuffled FROM queue_state_legacy;
-        DROP TABLE queue_state_legacy;
-        DROP TABLE IF EXISTS queue_membership;
-        DROP TABLE IF EXISTS queue_sets;
-        DROP TABLE IF EXISTS collection_members;")
-        .execute(&mut *transaction).await?;
-    transaction.commit().await?;
-    Ok(())
-}
-
-pub(crate) async fn initialize_durable(connection: &mut SqliteConnection) -> LibraryResult<()> {
-    initialize(connection, STORE_SCHEMA).await?;
-    migrate_queue_metadata(connection).await?;
-    loop {
-        let files: Vec<(String, String)> = sqlx::query_as(
-            "SELECT media_uri,encoding FROM connect_media_files WHERE backing_uri IS NULL LIMIT 128",
-        ).fetch_all(&mut *connection).await?;
-        if files.is_empty() {
-            return Ok(());
-        }
-        let mut transaction = connection.begin().await?;
-        for (uri, encoding) in files {
-            let backing = crate::cue_media_parts(&uri).map(|(_, backing, _, _)| backing);
-            sqlx::query(
-                "UPDATE connect_media_files SET backing_uri=?1 WHERE media_uri=?2 AND encoding=?3",
-            )
-            .bind(backing.as_deref().unwrap_or(&uri))
-            .bind(&uri)
-            .bind(encoding)
-            .execute(&mut *transaction)
-            .await?;
-        }
-        transaction.commit().await?;
-    }
-}
-
-pub(crate) async fn initialize_catalog(connection: &mut SqliteConnection) -> LibraryResult<()> {
-    if pragma(connection, "user_version").await? < 47 {
-        // Drop the backfill marker before advancing the version so interrupted upgrades retry.
-        sqlx::query("DROP INDEX IF EXISTS tracks_local_play_count_idx")
-            .execute(&mut *connection)
-            .await?;
-    }
-    initialize(connection, CATALOG_SCHEMA).await?;
-    if sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('sources') WHERE name='catalog_digest')",
-    )
-    .fetch_one(&mut *connection)
-    .await?
-    {
-        sqlx::query("ALTER TABLE sources DROP COLUMN catalog_digest")
-            .execute(connection)
-            .await?;
-    }
-    Ok(())
-}
-
-async fn initialize(connection: &mut SqliteConnection, schema: &'static str) -> LibraryResult<()> {
-    let upgrade_source_track_count =
-        schema == CATALOG_SCHEMA && pragma(connection, "user_version").await? < 55;
-    let upgrade_track_sort =
-        schema == CATALOG_SCHEMA && pragma(connection, "user_version").await? < 54;
-    let upgrade_album_sort =
-        schema == CATALOG_SCHEMA && pragma(connection, "user_version").await? < 53;
-    let upgrade_catalog_complete =
-        schema == CATALOG_SCHEMA && pragma(connection, "user_version").await? < 50;
-    let upgrade_artist_artwork =
-        schema == CATALOG_SCHEMA && pragma(connection, "user_version").await? < 48;
-    let upgrade_playlist_permissions =
-        schema == CATALOG_SCHEMA && pragma(connection, "user_version").await? < 49;
-    let mut transaction = connection.begin().await?;
-    for statement in sql_parts(schema, ';') {
-        let Some(table) = statement.strip_prefix("CREATE TABLE IF NOT EXISTS ") else {
-            continue;
-        };
-        let (name, columns) = table.split_once('(').expect("table declaration");
-        let name = name.trim();
-        let existing: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info(?1)")
-            .bind(name)
-            .fetch_all(&mut *transaction)
-            .await?;
-        if existing.is_empty() {
-            continue;
-        }
-        let (columns, _) = columns.rsplit_once(')').expect("table columns");
-        for definition in sql_parts(columns, ',') {
-            let column = definition
-                .split(|c: char| c.is_whitespace() || c == '(')
-                .next()
-                .expect("column definition");
-            if matches!(
-                column,
-                "PRIMARY" | "UNIQUE" | "CHECK" | "FOREIGN" | "CONSTRAINT"
-            ) || existing.iter().any(|name| name == column)
-            {
-                continue;
-            }
-            sqlx::query(sqlx::AssertSqlSafe(format!(
-                "ALTER TABLE {name} ADD COLUMN {definition}"
-            )))
-            .execute(&mut *transaction)
-            .await?;
-        }
-    }
-    if upgrade_album_sort {
-        sqlx::raw_sql(
-            "DROP TRIGGER IF EXISTS album_artist_insert;
-            DROP TRIGGER IF EXISTS album_artist_delete;
-            DROP TRIGGER IF EXISTS album_artist_update;
-            DROP TRIGGER IF EXISTS track_album_artist_insert;
-            DROP TRIGGER IF EXISTS track_album_artist_update;
-            DROP INDEX IF EXISTS tracks_album_artist_idx;",
-        )
-        .execute(&mut *transaction)
-        .await?;
-        if sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM pragma_table_info('tracks') WHERE name='album_artist_key')")
-            .fetch_one(&mut *transaction).await? {
-            sqlx::raw_sql("ALTER TABLE tracks DROP COLUMN album_artist_key").execute(&mut *transaction).await?;
-        }
-    }
-    sqlx::raw_sql(schema).execute(&mut *transaction).await?;
-    if upgrade_album_sort {
-        sqlx::raw_sql("DROP INDEX IF EXISTS tracks_album_idx;
-            DROP INDEX IF EXISTS tracks_album_source_order_idx;
-            UPDATE albums SET album_artist_sort=(SELECT artist.sort_text FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=albums.album_key ORDER BY credit.position LIMIT 1);")
-            .execute(&mut *transaction).await?;
-    }
-    if upgrade_track_sort {
-        sqlx::query("UPDATE tracks SET (sort_album_artist,sort_album_year,sort_album)=(
-            SELECT album.album_artist_sort,album.year,COALESCE(album.sort_text,tracks.display_album)
-            FROM (SELECT 1) LEFT JOIN albums album ON album.album_key=tracks.album_key)
-            WHERE (sort_album_artist,sort_album_year,sort_album) IS NOT (
-                SELECT album.album_artist_sort,album.year,COALESCE(album.sort_text,tracks.display_album)
-                FROM (SELECT 1) LEFT JOIN albums album ON album.album_key=tracks.album_key)")
-            .execute(&mut *transaction).await?;
-    }
-    if upgrade_source_track_count {
-        sqlx::query("UPDATE sources SET track_count=(SELECT count(*) FROM tracks WHERE tracks.source_key=sources.source_key)")
-            .execute(&mut *transaction).await?;
-    }
-    if upgrade_catalog_complete {
-        sqlx::query("UPDATE sources SET catalog_complete=1 WHERE freshness IS NOT NULL")
-            .execute(&mut *transaction)
-            .await?;
-    }
-    if upgrade_playlist_permissions {
-        sqlx::query("UPDATE native_playlists SET metadata_writable=writable")
-            .execute(&mut *transaction)
-            .await?;
-    }
-    if upgrade_artist_artwork {
-        // Revisit image directories while retaining the parsed media facts.
-        sqlx::query("UPDATE local_files SET mtime_ns=-1,revision=NULL WHERE kind='directory'")
-            .execute(&mut *transaction)
-            .await?;
-        sqlx::query("UPDATE sources SET freshness=NULL,artwork_digest=zeroblob(32),catalog_revision=catalog_revision+1")
-            .execute(&mut *transaction).await?;
-    }
-    transaction.commit().await?;
-    Ok(())
-}
-
-/// Split our schema declarations without splitting quoted values or SQL expressions.
-fn sql_parts(sql: &str, separator: char) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut start = 0;
-    let mut depth = 0;
-    let mut quote = None;
-    let mut chars = sql.char_indices().peekable();
-    while let Some((position, character)) = chars.next() {
-        if let Some(end) = quote {
-            if character == end {
-                if chars.peek().is_some_and(|(_, next)| *next == end) {
-                    chars.next();
-                } else {
-                    quote = None;
-                }
-            }
-            continue;
-        }
-        match character {
-            '\'' | '"' | '`' => quote = Some(character),
-            '[' => quote = Some(']'),
-            '(' => depth += 1,
-            ')' => depth -= 1,
-            value if value == separator && depth == 0 => {
-                parts.push(
-                    sql.get(start..position)
-                        .expect("character boundaries")
-                        .trim(),
-                );
-                start = position + character.len_utf8();
-            }
-            _ => {}
-        }
-    }
-    let tail = sql.get(start..).expect("character boundary").trim();
-    if !tail.is_empty() {
-        parts.push(tail);
-    }
-    parts
-}
-pub(crate) async fn attach_catalog(
-    connection: &mut SqliteConnection,
-    path: &std::path::Path,
-) -> LibraryResult<()> {
-    sqlx::query("ATTACH DATABASE ?1 AS catalog")
-        .bind(path.to_string_lossy().as_ref())
-        .execute(&mut *connection)
-        .await?;
-    sqlx::raw_sql(CONNECTION_VIEWS)
-        .execute(&mut *connection)
-        .await?;
-    Ok(())
-}
-
-/// Own the indexed local play count and its maintenance on the fixed writer.
-pub(crate) async fn initialize_local_activity(
-    connection: &mut SqliteConnection,
-) -> LibraryResult<()> {
-    let indexed: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM catalog.sqlite_schema WHERE name='tracks_local_play_count_idx')",
-    ).fetch_one(&mut *connection).await?;
-    let mut transaction = connection.begin().await?;
-    if !indexed {
-        sqlx::raw_sql("UPDATE catalog.tracks SET local_play_count=(SELECT count(*) FROM main.listens WHERE listens.media_uri=tracks.media_uri);
-        CREATE INDEX catalog.tracks_local_play_count_idx ON tracks(source_key,local_play_count,sort_text,media_uri);
-        CREATE INDEX IF NOT EXISTS catalog.tracks_global_local_play_count_idx ON tracks(local_play_count,sort_text,media_uri);")
-        .execute(&mut *transaction).await?;
-    }
-    sqlx::raw_sql("CREATE INDEX IF NOT EXISTS catalog.tracks_local_shuffle_idx ON tracks(source_key,local_play_count,((track_key*1103515245)%2147483647),media_uri);
-        CREATE INDEX IF NOT EXISTS catalog.tracks_global_local_shuffle_idx ON tracks(local_play_count,((track_key*1103515245)%2147483647),media_uri);
-        CREATE INDEX IF NOT EXISTS catalog.tracks_shuffle_idx ON tracks(source_key,((track_key*1103515245)%2147483647),media_uri);
-        CREATE INDEX IF NOT EXISTS catalog.tracks_global_shuffle_idx ON tracks(((track_key*1103515245)%2147483647),media_uri);")
-        .execute(&mut *transaction).await?;
-    transaction.commit().await?;
-    // The catalog count is an indexed copy of durable history. All writers use these triggers.
-    sqlx::raw_sql(
-        "CREATE TEMP TRIGGER local_play_count_listen_insert AFTER INSERT ON main.listens BEGIN
+CREATE TRIGGER IF NOT EXISTS local_play_count_listen_insert AFTER INSERT ON listens BEGIN
              UPDATE tracks SET local_play_count=local_play_count+1 WHERE media_uri=NEW.media_uri;
          END;
-         CREATE TEMP TRIGGER local_play_count_listen_delete AFTER DELETE ON main.listens BEGIN
+         CREATE TRIGGER IF NOT EXISTS local_play_count_listen_delete AFTER DELETE ON listens BEGIN
              UPDATE tracks SET local_play_count=local_play_count-1 WHERE media_uri=OLD.media_uri;
          END;
-         CREATE TEMP TRIGGER local_play_count_track_insert AFTER INSERT ON catalog.tracks
-         WHEN NEW.local_play_count<>0 OR EXISTS(SELECT 1 FROM main.listens WHERE media_uri=NEW.media_uri) BEGIN
-             UPDATE tracks SET local_play_count=(SELECT count(*) FROM main.listens WHERE media_uri=NEW.media_uri)
+         CREATE TRIGGER IF NOT EXISTS local_play_count_track_insert AFTER INSERT ON tracks
+         WHEN NEW.local_play_count<>0 OR EXISTS(SELECT 1 FROM listens WHERE media_uri=NEW.media_uri) BEGIN
+             UPDATE tracks SET local_play_count=(SELECT count(*) FROM listens WHERE media_uri=NEW.media_uri)
              WHERE track_key=NEW.track_key;
          END;
-         CREATE TEMP TRIGGER local_play_count_track_uri AFTER UPDATE OF media_uri ON catalog.tracks
+         CREATE TRIGGER IF NOT EXISTS local_play_count_track_uri AFTER UPDATE OF media_uri ON tracks
          WHEN OLD.media_uri IS NOT NEW.media_uri BEGIN
-             UPDATE tracks SET local_play_count=(SELECT count(*) FROM main.listens WHERE media_uri=NEW.media_uri)
+             UPDATE tracks SET local_play_count=(SELECT count(*) FROM listens WHERE media_uri=NEW.media_uri)
              WHERE track_key=NEW.track_key;
-         END;",
-    )
-    .execute(connection)
-    .await?;
-    Ok(())
-}
-
-const CONNECTION_VIEWS: &str = r#"CREATE TEMP VIEW playlists AS
-          SELECT owned.playlist_key,source.source_key,owned.object_id,owned.name,
-                 owned.normalized_name,owned.sort_text,owned.position,
-                 CASE WHEN owned.artwork_revision IS NOT NULL THEN CAST(json_object('kind','playlist','source_id',identity.object_id,'object_id',owned.object_id,'revision',owned.artwork_revision) AS BLOB) END artwork_binding,1 writable,1 metadata_writable
-          FROM main.playlists owned
-          LEFT JOIN main.source_ids identity ON identity.source_key=owned.source_key
-          LEFT JOIN catalog.sources source ON source.object_id=identity.object_id
-          WHERE owned.name IS NOT NULL
-          UNION ALL
-          SELECT -observed.playlist_key,observed.source_key,observed.object_id,
-                 observed.name,observed.normalized_name,observed.sort_text,
-                 COALESCE(identity.position,(SELECT COALESCE(max(position),0) FROM main.playlists)+observed.playlist_key),
-                 observed.artwork_binding,observed.writable,observed.metadata_writable
-          FROM catalog.native_playlists observed
-          JOIN catalog.sources source ON source.source_key=observed.source_key
-          LEFT JOIN main.source_ids durable ON durable.object_id=source.object_id
-          LEFT JOIN main.playlists identity ON identity.source_key=durable.source_key
-            AND identity.object_id=observed.object_id AND identity.name IS NULL;
-        CREATE TEMP VIEW playlist_entries AS
-          SELECT playlist_entry_key,playlist_key,object_id,media_uri,title,artist,album,
-                 album_display_artist,snapshot_at,duration_millis,disc_number,track_number,
-                 year,release_date,source_format,musicbrainz_recording_id,
-                 musicbrainz_release_track_id,position FROM main.playlist_entries
-          UNION ALL
-          SELECT -playlist_entry_key,-playlist_key,object_id,media_uri,title,artist,album,
-                 album_display_artist,snapshot_at,duration_millis,disc_number,track_number,
-                 year,release_date,source_format,musicbrainz_recording_id,
-                 musicbrainz_release_track_id,position FROM catalog.native_playlist_entries;
-        CREATE TEMP VIEW local_access_files AS
-          SELECT locator.local_access_file_key,source.source_key,locator.media_uri,
+         END;
+CREATE VIEW IF NOT EXISTS local_access_files AS
+          SELECT locator.local_access_file_key,locator.source_key,locator.media_uri,
                  locator.origin,locator.path,locator.root,locator.relative_path,
                  COALESCE(metadata.size_bytes,0) size_bytes,COALESCE(metadata.mtime_ns,0) mtime_ns,
                  metadata.device_id,metadata.inode,COALESCE(metadata.parser_version,1) parser_version,
@@ -1157,17 +741,23 @@ const CONNECTION_VIEWS: &str = r#"CREATE TEMP VIEW playlists AS
                  COALESCE(metadata.duration_millis,0) duration_millis,locator.access_uri,
                  metadata.loudness_analysis_key
           FROM main.local_locators locator
-          LEFT JOIN main.source_ids identity ON identity.source_key=locator.source_key
-          LEFT JOIN catalog.sources source ON source.object_id=identity.object_id
-          LEFT JOIN catalog.local_access_metadata metadata USING(access_uri);
-CREATE TEMP VIEW activity_baseline AS
-  SELECT source_key,period,item_kind,track_object_id,play_count,skip_count,last_played_at
-  FROM catalog.activity_baseline
-  UNION ALL
-  SELECT source.source_key,old.period,old.item_kind,old.track_object_id,old.play_count,
-         old.skip_count,old.last_played_at
-  FROM main.legacy_activity old JOIN catalog.sources source ON source.object_id=old.source_id
-  WHERE NOT EXISTS (SELECT 1 FROM catalog.activity_baseline current
-    WHERE current.source_key=source.source_key AND current.period=old.period
-      AND current.item_kind=old.item_kind AND current.track_object_id=old.track_object_id);
+          LEFT JOIN local_access_metadata metadata USING(access_uri);
+
 "#;
+
+pub(crate) async fn initialize_durable(connection: &mut SqliteConnection) -> LibraryResult<()> {
+    let version = pragma(connection, "user_version").await?;
+    if version != 0 && version != 56 {
+        return Err(crate::LibraryError::Migration(format!(
+            "unsupported library schema {version}"
+        )));
+    }
+    let mut transaction = connection.begin().await?;
+    sqlx::raw_sql(STORE_SCHEMA)
+        .execute(&mut *transaction)
+        .await?;
+    transaction.commit().await?;
+    crate::collections::install_collection_facts_on(connection).await?;
+    crate::playlists::install_playlist_facts_on(connection).await?;
+    Ok(())
+}

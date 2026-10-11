@@ -75,13 +75,13 @@ async fn unavailable_local_root_preserves_catalog_and_can_retry() {
             .await
             .is_err()
     );
-    assert_eq!(track_count(&database, initial).await, 1);
+    assert_eq!(track_count(&database, &initial).await, 1);
     fs::rename(&offline, &root).unwrap();
     source
         .manual_refresh(&database, &configuration.name, &|_| {}, cancelled)
         .await
         .unwrap();
-    assert_eq!(track_count(&database, initial).await, 1);
+    assert_eq!(track_count(&database, &initial).await, 1);
 }
 
 #[tokio::test]
@@ -1111,7 +1111,7 @@ async fn transient_cue_read_failure_retains_tracks_but_rejected_content_removes_
             .await
             .expect("scan"),
     );
-    assert_eq!(track_count(&database, initial).await, 1);
+    assert_eq!(track_count(&database, &initial).await, 1);
 
     fs::write(&media, b"temporarily unreadable media content").expect("damage backing media");
     let retained = publication(
@@ -1128,7 +1128,7 @@ async fn transient_cue_read_failure_retains_tracks_but_rejected_content_removes_
             .expect("transient CUE change")
             .expect("point outcome"),
     );
-    assert_eq!(track_count(&database, retained).await, 1);
+    assert_eq!(track_count(&database, &retained).await, 1);
 
     fs::write(&cue, "this is not a cue sheet").expect("reject CUE");
     let rejected = publication(
@@ -1145,7 +1145,7 @@ async fn transient_cue_read_failure_retains_tracks_but_rejected_content_removes_
             .expect("rejected CUE change")
             .expect("point outcome"),
     );
-    assert_eq!(track_count(&database, rejected).await, 0);
+    assert_eq!(track_count(&database, &rejected).await, 0);
 }
 
 #[tokio::test]
@@ -1201,7 +1201,7 @@ async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
         .collect::<Vec<_>>();
     assert_eq!(albums.len(), 1);
     assert_eq!(
-        album_genres(&database, initial, albums[0]).await,
+        album_genres(&database, &initial, albums[0]).await,
         ["Rock", "Jazz"]
     );
 
@@ -1221,7 +1221,7 @@ async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
             .expect("point outcome"),
     );
     assert_eq!(
-        album_genres(&database, changed, albums[0]).await,
+        album_genres(&database, &changed, albums[0]).await,
         ["Electronic", "Jazz"]
     );
 }
@@ -1424,7 +1424,7 @@ async fn initial_local_walk_reports_real_total_free_file_progress() {
     );
 }
 
-async fn track_count(database: &Database, publication: library::Publication) -> usize {
+async fn track_count(database: &Database, publication: &library::Publication) -> usize {
     database
         .track_order(
             publication.source,
@@ -1441,7 +1441,7 @@ async fn track_count(database: &Database, publication: library::Publication) -> 
 
 async fn album_genres(
     database: &Database,
-    publication: library::Publication,
+    publication: &library::Publication,
     album: library::AlbumKey,
 ) -> Vec<String> {
     database

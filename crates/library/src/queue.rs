@@ -5,9 +5,8 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use sqlx::sqlite::SqliteRow;
-use sqlx::{Connection, FromRow, Row, Sqlite};
+use sqlx::{Connection, FromRow, Row, Sqlite, SqliteConnection};
 
-use crate::schema::metadata_upsert;
 use crate::{Database, LibraryError, LibraryResult, ReadCancellation, SourceId, SourceKey};
 
 pub const QUEUE_CONTEXT_LIMIT: usize = 100;
@@ -152,11 +151,11 @@ impl From<crate::PlaylistEntryRow> for QueueItem {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct QueueRow {
     #[serde(skip)]
+    pub track_key: Option<crate::TrackKey>,
+    #[serde(skip)]
     pub occurrence_id: Option<u64>,
     pub position: usize,
     pub item: QueueItem,
-    #[serde(default)]
-    pub playlist_entry_id: Option<String>,
     pub provenance: QueueProvenance,
     #[serde(default)]
     pub received_from_connect: bool,
@@ -209,7 +208,7 @@ pub enum QueueInput {
         sort: crate::TrackSort,
         descending: bool,
         context_id: Arc<str>,
-        anchor_uri: Option<String>,
+        anchor_key: Option<crate::TrackKey>,
     },
     PlaylistQuery {
         key: crate::PlaylistKey,
@@ -219,7 +218,7 @@ pub enum QueueInput {
         descending: bool,
         context_id: Arc<str>,
         anchor_entry: Option<crate::PlaylistEntryKey>,
-        anchor_uri: Option<String>,
+        anchor_key: Option<crate::TrackKey>,
     },
     PlaylistSelection {
         key: crate::PlaylistKey,
@@ -239,6 +238,11 @@ pub enum QueueInput {
         provenance: QueueProvenance,
     },
     Items(Vec<(QueueItem, QueueProvenance)>),
+    Tracks {
+        order: Arc<[crate::TrackKey]>,
+        context_id: Arc<str>,
+        source_start: usize,
+    },
     Uris {
         order: Arc<[String]>,
         context_id: Arc<str>,
@@ -355,8 +359,7 @@ struct LegacyQueueCursor {
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct QueueEntry {
-    pub media_uri: Arc<str>,
-    pub playlist_entry_id: Option<Arc<str>>,
+    pub track_key: crate::TrackKey,
     pub provenance: QueueProvenance,
     #[serde(default)]
     pub received_from_connect: bool,
@@ -466,17 +469,6 @@ impl QueueUpdate {
     }
 }
 
-/// Compare playback order across devices without transferring queue contents.
-pub fn queue_content_id<'a>(uris: impl IntoIterator<Item = &'a str>) -> String {
-    let mut hash = blake3::Hasher::new();
-    for uri in uris {
-        let uri = uri.as_bytes();
-        hash.update(&(uri.len() as u64).to_le_bytes());
-        hash.update(uri);
-    }
-    hash.finalize().to_hex().to_string()
-}
-
 /// A page in play order, with each row's canonical member index.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct QueueTransferPage {
@@ -509,54 +501,62 @@ enum SavedProvenance<P> {
     Other(P),
 }
 
-fn decode_saved_queue(value: serde_json::Value) -> LibraryResult<QueueRestore> {
-    if value.get("contexts").is_none() {
-        return Ok(serde_json::from_value(value)?);
+pub(crate) async fn decode_saved_queue(
+    connection: &mut SqliteConnection,
+    mut value: serde_json::Value,
+) -> LibraryResult<QueueRestore> {
+    if value.get("contexts").is_some() {
+        type SavedEntry = (
+            String,
+            SavedProvenance<QueueProvenance>,
+            Option<String>,
+            bool,
+        );
+        let saved: SavedQueue<Vec<SavedEntry>, Vec<SavedContext<Arc<str>>>> =
+            serde_json::from_value(value)?;
+        let mut entries = Vec::with_capacity(saved.entries.len());
+        for (uri, provenance, _, received_from_connect) in saved.entries {
+            let provenance = match provenance {
+                SavedProvenance::Context(context, source_rank) => {
+                    let (id, title) = match saved.contexts.get(context).ok_or_else(|| {
+                        LibraryError::InvalidStore("saved Queue context is missing".into())
+                    })? {
+                        SavedContext::Titled { id, title } => (id.clone(), Some(title.clone())),
+                        SavedContext::Legacy(id) => (id.clone(), None),
+                    };
+                    QueueProvenance::Context {
+                        context_id: id,
+                        context_title: title,
+                        source_rank,
+                    }
+                }
+                SavedProvenance::Other(value) => value,
+            };
+            let track_key =
+                crate::tracks::remember_song(connection, &uri, Default::default()).await?;
+            entries.push(QueueEntry {
+                track_key,
+                provenance,
+                received_from_connect,
+            });
+        }
+        return Ok(QueueRestore {
+            entries: entries.into(),
+            ..Default::default()
+        });
     }
-    type SavedEntry = (
-        Arc<str>,
-        SavedProvenance<QueueProvenance>,
-        Option<Arc<str>>,
-        bool,
-    );
-    let saved: SavedQueue<Vec<SavedEntry>, Vec<SavedContext<Arc<str>>>> =
-        serde_json::from_value(value)?;
-    let entries = saved
-        .entries
-        .into_iter()
-        .map(
-            |(media_uri, provenance, playlist_entry_id, received_from_connect)| {
-                Ok(QueueEntry {
-                    received_from_connect,
-                    media_uri,
-                    playlist_entry_id,
-                    provenance: match provenance {
-                        SavedProvenance::Context(context, source_rank) => {
-                            let (id, title) =
-                                match saved.contexts.get(context).ok_or_else(|| {
-                                    LibraryError::InvalidStore(
-                                        "saved Queue context is missing".into(),
-                                    )
-                                })? {
-                                    SavedContext::Titled { id, title } => (id, Some(title.clone())),
-                                    SavedContext::Legacy(id) => (id, None),
-                                };
-                            QueueProvenance::Context {
-                                context_id: id.clone(),
-                                context_title: title,
-                                source_rank,
-                            }
-                        }
-                        SavedProvenance::Other(provenance) => provenance,
-                    },
-                })
-            },
-        )
-        .collect::<LibraryResult<Vec<_>>>()?;
-    Ok(QueueRestore {
-        entries: entries.into(),
-        ..Default::default()
-    })
+    if let Some(entries) = value
+        .get_mut("entries")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for entry in entries {
+            if let Some(uri) = entry.get("media_uri").and_then(serde_json::Value::as_str) {
+                let key = crate::tracks::remember_song(connection, uri, Default::default()).await?;
+                entry["track_key"] = serde_json::to_value(key)?;
+            }
+        }
+    }
+    Ok(serde_json::from_value(value)?)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -584,13 +584,13 @@ impl QueueInput {
                     *anchor_entry = None;
                 }
             }
-            Self::Query { anchor_uri, .. } => *anchor_uri = None,
+            Self::Query { anchor_key, .. } => *anchor_key = None,
             Self::PlaylistQuery {
-                anchor_uri,
+                anchor_key,
                 anchor_entry,
                 ..
             } => {
-                *anchor_uri = None;
+                *anchor_key = None;
                 *anchor_entry = None;
             }
             Self::Groups(inputs) => inputs.iter_mut().for_each(Self::clear_anchor),
@@ -676,54 +676,8 @@ impl Database {
                 "Queue materialization is limited to {QUEUE_CONTEXT_LIMIT} media URIs"
             )));
         }
-        if media_uris.is_empty() {
-            return Ok(Vec::new());
-        }
-        let mut connection = tokio::select! {
-            result = self.acquire_reader() => result?,
-            () = cancellation.cancelled() => return Err(LibraryError::ReadCancelled),
-        };
-        let requested = serde_json::to_string(media_uris)?;
-        let sql = format!(
-            "WITH requested AS (
-               SELECT value media_uri,key ordinal FROM json_each(?1)
-             ), {snapshots}
-               SELECT requested.media_uri,COALESCE(track.title,entry.title,queued.title,listen.track_title,requested.media_uri) title,
-                      COALESCE(track.display_artist,entry.artist,queued.artist,listen.artist_name,'') artist,
-                      COALESCE(track.display_album,entry.album,queued.album,listen.album_title,'') album,
-                      COALESCE(album.display_artist,entry.album_display_artist,queued.album_display_artist) album_display_artist,
-                      track.artwork_binding,COALESCE(track.duration_millis,entry.duration_millis,queued.duration_millis,listen.duration_millis,0) duration_millis,
-                      COALESCE(track.disc_number,entry.disc_number,queued.disc_number,listen.disc_number) disc_number,
-                      COALESCE(track.track_number,entry.track_number,queued.track_number,listen.track_number) track_number,
-                      COALESCE(track.year,entry.year,queued.year,listen.year) year,
-                      COALESCE(track.release_date,entry.release_date,queued.release_date,listen.release_date) release_date,
-                      COALESCE(track.source_format,entry.source_format,queued.source_format,listen.source_format) source_format,
-                      COALESCE(track.musicbrainz_recording_id,entry.musicbrainz_recording_id,queued.musicbrainz_recording_id,listen.musicbrainz_recording_id) musicbrainz_recording_id,
-                      COALESCE(track.musicbrainz_release_track_id,entry.musicbrainz_release_track_id,queued.musicbrainz_release_track_id,listen.musicbrainz_release_track_id) musicbrainz_release_track_id,
-                      COALESCE(album.musicbrainz_release_id,queued.musicbrainz_album_id) musicbrainz_album_id,
-                      COALESCE(album.musicbrainz_release_group_id,queued.musicbrainz_release_group_id) musicbrainz_release_group_id,
-                      COALESCE(
-                        (SELECT artist.musicbrainz_artist_id FROM track_artists credit
-                         JOIN artists artist USING(artist_key)
-                         WHERE credit.track_key=track.track_key ORDER BY credit.position LIMIT 1),
-                        (SELECT artist.musicbrainz_artist_id FROM album_artists credit
-                         JOIN artists artist USING(artist_key)
-                         WHERE credit.album_key=track.album_key ORDER BY credit.position LIMIT 1),
-                        queued.primary_artist_musicbrainz_id
-                      ) primary_artist_musicbrainz_id
-               FROM requested LEFT JOIN tracks track USING(media_uri)
-               LEFT JOIN albums album USING(album_key)
-               LEFT JOIN playlist_snapshots entry ON entry.media_uri=requested.media_uri
-               LEFT JOIN queue_occurrences queued ON queued.media_uri=requested.media_uri
-               LEFT JOIN listens listen ON listen.listen_key=(SELECT listen_key FROM listens WHERE media_uri=requested.media_uri ORDER BY started_at DESC,listen_key DESC LIMIT 1)
-               ORDER BY requested.ordinal",
-            snapshots = crate::playlists::PLAYLIST_URI_SNAPSHOTS,
-        );
-        let rows = sqlx::query_as::<_, QueueItem>(sqlx::AssertSqlSafe(sql.as_str()))
-            .bind(requested)
-            .fetch_all(&mut *connection)
-            .await?;
-        Ok(rows)
+        let mut connection = tokio::select! {result=self.acquire_reader()=>result?,()=cancellation.cancelled()=>return Err(LibraryError::ReadCancelled)};
+        queue_items_for_uris_on(&mut connection, media_uris).await
     }
 
     pub async fn prepared_queue_page(
@@ -797,30 +751,15 @@ impl Database {
         let mut reader = self.acquire_reader().await?;
         let mut transaction = reader.begin().await?;
         let filter = filter.trim().to_lowercase();
-        let sql = format!(
-            "WITH requested AS (SELECT CAST(key AS INTEGER) position,value media_uri FROM json_each(?1)), {snapshots}
-             SELECT requested.position FROM requested
-             LEFT JOIN tracks track USING(media_uri)
-             LEFT JOIN playlist_snapshots entry ON entry.media_uri=requested.media_uri
-             LEFT JOIN queue_occurrences metadata ON metadata.media_uri=requested.media_uri
-             LEFT JOIN listens listen ON listen.listen_key=(SELECT listen_key FROM listens WHERE media_uri=requested.media_uri ORDER BY started_at DESC,listen_key DESC LIMIT 1)
-             WHERE instr(track.normalized_search,?2)>0
-                OR instr(lower(COALESCE(track.title,entry.title,metadata.title,listen.track_title,requested.media_uri) || ' ' || COALESCE(track.display_artist,entry.artist,metadata.artist,listen.artist_name,'') || ' ' || COALESCE(track.display_album,entry.album,metadata.album,listen.album_title,'')),?2)>0
-             ORDER BY requested.position",
-            snapshots = crate::playlists::PLAYLIST_URI_SNAPSHOTS,
-        );
         let mut positions = Vec::new();
         let mut total = 0;
         for (page, order) in queue.order.chunks(4096).enumerate() {
-            let uris = order
+            let keys = order
                 .iter()
-                .map(|index| queue.entries[*index as usize].media_uri.as_ref())
+                .map(|i| queue.entries[*i as usize].track_key)
                 .collect::<Vec<_>>();
-            let matches = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(sql.as_str()))
-                .bind(serde_json::to_string(&uris)?)
-                .bind(&filter)
-                .fetch_all(&mut *transaction)
-                .await?;
+            let matches=sqlx::query_scalar::<_,i64>("SELECT CAST(requested.key AS INTEGER) FROM json_each(?1) requested JOIN tracks ON track_key=requested.value WHERE instr(normalized_search,?2)>0 ORDER BY CAST(requested.key AS INTEGER)")
+                .bind(serde_json::to_string(&keys)?).bind(&filter).fetch_all(&mut *transaction).await?;
             for position in matches {
                 if total >= offset && positions.len() < limit as usize {
                     positions.push(page * 4096 + position as usize);
@@ -898,7 +837,8 @@ impl Database {
         total: usize,
         current: usize,
     ) -> LibraryResult<QueueRestore> {
-        let mut reader = self.acquire_reader().await?;
+        let mut writer = self.writer().await?;
+        let reader = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         let mut entries = vec![None; total];
         let mut order = Vec::new();
         let mut rows = Vec::new();
@@ -930,18 +870,16 @@ impl Database {
                 row.received_from_connect = true;
                 *slot = Some(QueueEntry {
                     received_from_connect: true,
-                    media_uri: row.item.media_uri.clone().into(),
-                    playlist_entry_id: row.playlist_entry_id.clone().map(Into::into),
+                    track_key: persist_metadata(&mut *reader, &row.item).await?,
                     provenance: row.provenance.clone(),
                 });
+                row.track_key = slot.as_ref().map(|entry| entry.track_key);
                 if row.position == current {
-                    row.item.artwork_binding = sqlx::query_scalar::<_, Option<Vec<u8>>>(
-                        "SELECT artwork_binding FROM tracks WHERE media_uri=?1",
-                    )
-                    .bind(&row.item.media_uri)
-                    .fetch_optional(&mut *reader)
-                    .await?
-                    .flatten();
+                    let uris = track_uris_on(reader, &[slot.as_ref().unwrap().track_key]).await?;
+                    row.item = queue_items_for_uris_on(reader, &uris)
+                        .await?
+                        .pop()
+                        .expect("requested canonical queue song");
                     rows.push(Arc::new(row));
                 }
             }
@@ -1085,20 +1023,27 @@ impl Database {
         entries: &[(usize, QueueEntry)],
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<Arc<QueueRow>>> {
-        let uris = entries
+        if entries.len() > QUEUE_CONTEXT_LIMIT {
+            return Err(LibraryError::InvalidRequest(
+                "Queue window exceeds its context".into(),
+            ));
+        }
+        let mut connection = tokio::select! {result=self.acquire_reader()=>result?,()=cancellation.cancelled()=>return Err(LibraryError::ReadCancelled)};
+        let keys = entries
             .iter()
-            .map(|(_, entry)| entry.media_uri.to_string())
+            .map(|(_, entry)| entry.track_key)
             .collect::<Vec<_>>();
-        let items = self.queue_items_for_uris(&uris, cancellation).await?;
+        let uris = track_uris_on(&mut connection, &keys).await?;
+        let items = queue_items_for_uris_on(&mut connection, &uris).await?;
         Ok(entries
             .iter()
             .zip(items)
             .map(|((position, entry), item)| {
                 Arc::new(QueueRow {
                     occurrence_id: None,
+                    track_key: Some(entry.track_key),
                     position: *position,
                     item,
-                    playlist_entry_id: entry.playlist_entry_id.as_ref().map(ToString::to_string),
                     provenance: entry.provenance.clone(),
                     received_from_connect: entry.received_from_connect,
                 })
@@ -1176,29 +1121,17 @@ impl Database {
         queue: &QueueRestore,
         source: SourceKey,
     ) -> LibraryResult<Vec<usize>> {
-        let mut connection = self.acquire_reader().await?;
-        let Some(source_id) =
-            sqlx::query_scalar::<_, String>("SELECT object_id FROM sources WHERE source_key=?1")
-                .bind(source)
-                .fetch_optional(&mut *connection)
-                .await?
-        else {
-            return Ok(Vec::new());
-        };
-        let prefix = crate::keys::source_entity_prefix(&SourceId::new(source_id), "track");
+        let mut reader = self.acquire_reader().await?;
         let mut positions = Vec::new();
         for (page, order) in queue.order.chunks(4096).enumerate() {
-            let uris = order
+            let keys = order
                 .iter()
-                .map(|index| queue.entries[*index as usize].media_uri.as_ref())
+                .map(|i| queue.entries[*i as usize].track_key)
                 .collect::<Vec<_>>();
-            let matches = sqlx::query_scalar::<_, i64>(
-                "SELECT CAST(requested.key AS INTEGER) FROM json_each(?1) requested
-                 WHERE substr(requested.value,1,length(?2))=?2
-                    OR EXISTS(SELECT 1 FROM tracks WHERE source_key=?3 AND media_uri=requested.value)")
-                .bind(serde_json::to_string(&uris)?).bind(&prefix).bind(source).fetch_all(&mut *connection).await?;
+            let matching=sqlx::query_scalar::<_,i64>("SELECT CAST(requested.key AS INTEGER) FROM json_each(?1) requested JOIN tracks ON track_key=requested.value WHERE source_key=?2 ORDER BY CAST(requested.key AS INTEGER)")
+                .bind(serde_json::to_string(&keys)?).bind(source).fetch_all(&mut *reader).await?;
             positions.extend(
-                matches
+                matching
                     .into_iter()
                     .map(|position| page * 4096 + position as usize),
             );
@@ -1207,159 +1140,23 @@ impl Database {
     }
 }
 
-async fn playlist_queue_items(
-    connection: &mut sqlx::Transaction<'_, Sqlite>,
-    keys: &[crate::PlaylistEntryKey],
-) -> LibraryResult<Vec<(usize, QueueItem)>> {
-    if keys.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut query = crate::playlists::playlist_entries_query(keys);
-    query.push("entry.ordinal,entry.media_uri,
-        COALESCE(track.title,entry.title,'') title,
-        COALESCE(track.display_artist,entry.artist,'') artist,
-        COALESCE(track.display_album,entry.album,'') album,
-        COALESCE(album.display_artist,entry.album_display_artist) album_display_artist,
-        track.artwork_binding,COALESCE(track.duration_millis,entry.duration_millis,0) duration_millis,
-        COALESCE(track.disc_number,entry.disc_number) disc_number,
-        COALESCE(track.track_number,entry.track_number) track_number,
-        COALESCE(track.year,entry.year) year,
-        COALESCE(track.release_date,entry.release_date) release_date,
-        COALESCE(track.source_format,entry.source_format) source_format,
-        COALESCE(track.musicbrainz_recording_id,entry.musicbrainz_recording_id) musicbrainz_recording_id,
-        COALESCE(track.musicbrainz_release_track_id,entry.musicbrainz_release_track_id) musicbrainz_release_track_id,
-        NULL musicbrainz_album_id,NULL musicbrainz_release_group_id,NULL primary_artist_musicbrainz_id
-        FROM entries entry LEFT JOIN tracks track USING(media_uri)
-        LEFT JOIN albums album USING(album_key) ORDER BY entry.ordinal");
-    query
-        .build()
-        .persistent(false)
-        .fetch_all(&mut **connection)
-        .await?
-        .iter()
-        .map(|row| {
-            Ok((
-                row.try_get::<i64, _>("ordinal")? as usize,
-                QueueItem::from_row(row)?,
-            ))
-        })
-        .collect()
-}
-
 async fn capture_input(
     connection: &mut sqlx::Transaction<'_, Sqlite>,
     input: QueueInput,
     entries: &mut Vec<QueueEntry>,
     anchor: &mut Option<usize>,
 ) -> LibraryResult<()> {
-    let input = match input {
-        selection @ QueueInput::PlaylistSelection { .. } => {
-            let order =
-                crate::playlists::selected_playlist_entries_on(connection, &selection).await?;
-            let QueueInput::PlaylistSelection { context_id, .. } = selection else {
-                unreachable!()
-            };
-            QueueInput::PlaylistEntries {
-                order: order.into(),
-                context_id,
-            }
+    let mut append = |key, provenance, selected| {
+        if selected {
+            *anchor = Some(entries.len());
         }
-        QueueInput::TrackSelection {
-            query,
-            folder,
-            filter,
-            sort,
-            descending,
-            ranges,
-        } => {
-            for uri in crate::tracks::query_selected_track_uris_on(
-                connection, &query, folder, &filter, sort, descending, &ranges,
-            )
-            .await?
-            {
-                entries.push(QueueEntry {
-                    media_uri: uri.into(),
-                    playlist_entry_id: None,
-                    provenance: QueueProvenance::Manual,
-                    received_from_connect: false,
-                });
-            }
-            return Ok(());
-        }
-        QueueInput::Groups(inputs) => {
-            for input in inputs {
-                Box::pin(capture_input(connection, input, entries, anchor)).await?;
-            }
-            return Ok(());
-        }
-        QueueInput::Collection {
-            collection,
-            folder,
-            context_id,
-        } => {
-            let input = match collection {
-                QueueCollection::Playlist(key) => QueueInput::PlaylistQuery {
-                    key,
-                    folder,
-                    filter: String::new(),
-                    sort: crate::TrackSort::Position,
-                    descending: false,
-                    context_id,
-                    anchor_entry: None,
-                    anchor_uri: None,
-                },
-                collection => {
-                    let sort = if matches!(
-                        collection,
-                        QueueCollection::Album(_) | QueueCollection::AlbumKey(_)
-                    ) {
-                        crate::TrackSort::TrackNumber
-                    } else {
-                        crate::TrackSort::Title
-                    };
-                    QueueInput::Query {
-                        query: QueueQuery::Collection {
-                            collection,
-                            downloaded_only: false,
-                            favorites_only: false,
-                        },
-                        folder,
-                        filter: String::new(),
-                        sort,
-                        descending: false,
-                        context_id,
-                        anchor_uri: None,
-                    }
-                }
-            };
-            return Box::pin(capture_input(connection, input, entries, anchor)).await;
-        }
-        QueueInput::Smart {
-            key,
-            source,
-            folder,
-            now,
-            context_id,
-        } => {
-            return Box::pin(capture_input(
-                connection,
-                QueueInput::Query {
-                    query: QueueQuery::Smart { key, source, now },
-                    folder,
-                    filter: String::new(),
-                    sort: crate::TrackSort::Title,
-                    descending: false,
-                    context_id,
-                    anchor_uri: None,
-                },
-                entries,
-                anchor,
-            ))
-            .await;
-        }
-        input => input,
+        entries.push(QueueEntry {
+            track_key: key,
+            provenance,
+            received_from_connect: false,
+        });
     };
-    let (rows, context_id) = match input {
+    let (query, context_id, anchor_key, anchor_entry, ranges) = match input {
         QueueInput::Captured {
             entries: captured,
             anchor_index,
@@ -1368,198 +1165,54 @@ async fn capture_input(
             entries.extend(captured.iter().cloned());
             return Ok(());
         }
-        QueueInput::Query {
-            query,
-            folder,
-            filter,
-            sort,
-            descending,
-            context_id,
-            anchor_uri,
-        } => {
-            let rows = match query {
-                query @ (QueueQuery::Smart { .. } | QueueQuery::SmartDisplay { .. }) => {
-                    let uris = match query {
-                        QueueQuery::Smart { key, source, now } => {
-                            crate::smart_playlists::smart_uri_page(
-                                connection, source, key, folder, &filter, now, None,
-                            )
-                            .await?
-                        }
-                        QueueQuery::SmartDisplay { key, source } => {
-                            crate::smart_playlists::smart_sorted_uris_on(
-                                connection,
-                                source,
-                                key,
-                                folder,
-                                &filter,
-                                sort,
-                                descending,
-                                crate::smart_playlists::now(),
-                                None,
-                            )
-                            .await?
-                        }
-                        _ => unreachable!(),
-                    };
-                    uris.into_iter()
-                        .map(|uri| {
-                            let selected = anchor_uri.as_ref() == Some(&uri);
-                            (uri, None, selected)
-                        })
-                        .collect()
-                }
-                query => {
-                    let (mut query, downloaded_only) = match query {
-                        QueueQuery::Tracks {
-                            source,
-                            favorites_only,
-                            downloaded_only,
-                            ..
-                        } => (
-                            crate::tracks::track_query(
-                                source,
-                                sort,
-                                descending,
-                                favorites_only,
-                                folder,
-                                &filter,
-                            ),
-                            downloaded_only,
-                        ),
-                        QueueQuery::Collection {
-                            collection,
-                            favorites_only,
-                            downloaded_only,
-                        } => {
-                            let query = crate::collections::playback_query(
-                                connection,
-                                &collection,
-                                folder,
-                                &filter,
-                                sort,
-                                descending,
-                                favorites_only,
-                            )
-                            .await;
-                            let query = match query {
-                                Ok(query) => query,
-                                Err(LibraryError::Sqlite(sqlx::Error::RowNotFound))
-                                    if matches!(
-                                        collection,
-                                        QueueCollection::AlbumKey(_)
-                                            | QueueCollection::ArtistKey { .. }
-                                            | QueueCollection::Genre(_)
-                                            | QueueCollection::Mood(_)
-                                    ) =>
-                                {
-                                    return Ok(());
-                                }
-                                Err(error) => return Err(error),
-                            };
-                            (query, downloaded_only)
-                        }
-                        _ => unreachable!(),
-                    };
-                    if downloaded_only {
-                        crate::tracks::downloaded_filter(&mut query);
-                    }
-                    let anchor = anchor_uri
-                        .as_ref()
-                        .map(|uri| format!("{}={}", query.uri, crate::source_window::quote(uri)));
-                    query.members(connection, anchor).await?
-                }
-            };
-            (rows, context_id)
-        }
-        QueueInput::PlaylistQuery {
-            key,
-            folder,
-            filter,
-            sort,
-            descending,
-            context_id,
-            anchor_entry,
-            anchor_uri,
-        } => {
-            let query = crate::playlists::playlist_query(key, folder, sort, descending, &filter);
-            let anchor_entry = if let Some(entry) = anchor_entry {
-                sqlx::query_scalar::<_, crate::PlaylistEntryKey>(if key.raw() < 0 {
-                    "SELECT -playlist_entry_key FROM catalog.native_playlist_entries WHERE playlist_entry_key=-?1 AND playlist_key=-?2"
-                } else {
-                    "SELECT playlist_entry_key FROM main.playlist_entries WHERE playlist_entry_key=?1 AND playlist_key=?2"
-                }).bind(entry).bind(key).fetch_optional(&mut **connection).await?
-            } else {
-                None
-            };
-            let anchor = anchor_entry
-                .map(|entry| format!("{}={}", query.entry_key, entry.raw()))
-                .or_else(|| {
-                    anchor_uri
-                        .as_ref()
-                        .map(|uri| format!("{}={}", query.uri, crate::source_window::quote(uri)))
-                });
-            (query.members(connection, anchor).await?, context_id)
-        }
-        QueueInput::Source {
-            reference,
-            context_id,
-        } => (
-            crate::source_window::source_members(connection, &reference).await?,
-            context_id,
-        ),
-        QueueInput::PlaylistEntries { order, context_id } => {
-            for (chunk_index, keys) in order.chunks(QUEUE_CONTEXT_LIMIT).enumerate() {
-                for (ordinal, item) in playlist_queue_items(connection, keys).await? {
-                    let identity = playlist_identity(connection, keys[ordinal]).await?;
-                    persist_metadata(connection, &item).await?;
-                    entries.push(QueueEntry {
-                        media_uri: item.media_uri.into(),
-                        playlist_entry_id: identity.map(Into::into),
-                        provenance: QueueProvenance::Context {
-                            context_id: context_id.clone(),
-                            context_title: None,
-                            source_rank: chunk_index * QUEUE_CONTEXT_LIMIT + ordinal,
-                        },
-                        received_from_connect: false,
-                    });
-                }
+        QueueInput::Groups(inputs) => {
+            for input in inputs {
+                Box::pin(capture_input(connection, input, entries, anchor)).await?;
             }
             return Ok(());
         }
         QueueInput::Items(items) => {
             for (item, provenance) in items {
-                persist_metadata(connection, &item).await?;
-                entries.push(QueueEntry {
-                    media_uri: item.media_uri.into(),
-                    playlist_entry_id: None,
-                    provenance,
-                    received_from_connect: false,
-                });
+                let key = persist_metadata(connection, &item).await?;
+                append(key, provenance, false);
             }
             return Ok(());
         }
         QueueInput::Choices(choices) => {
             for choice in choices.iter().flatten() {
-                if let Some(item) = &choice.fallback {
-                    persist_metadata(connection, item).await?;
-                }
-                entries.push(QueueEntry {
-                    media_uri: choice.media_uri.clone().into(),
-                    playlist_entry_id: None,
-                    provenance: choice.provenance.clone(),
-                    received_from_connect: false,
-                });
+                let key = if let Some(item) = &choice.fallback {
+                    persist_metadata(connection, item).await?
+                } else {
+                    crate::tracks::remember_song(connection, &choice.media_uri, Default::default())
+                        .await?
+                };
+                append(key, choice.provenance.clone(), false);
             }
             return Ok(());
         }
         QueueInput::MediaUris { order, provenance } => {
-            entries.extend(order.iter().map(|uri| QueueEntry {
-                media_uri: uri.clone().into(),
-                playlist_entry_id: None,
-                provenance: provenance.clone(),
-                received_from_connect: false,
-            }));
+            for uri in order.iter() {
+                let key = crate::tracks::remember_song(connection, uri, Default::default()).await?;
+                append(key, provenance.clone(), false);
+            }
+            return Ok(());
+        }
+        QueueInput::Tracks {
+            order,
+            context_id,
+            source_start,
+        } => {
+            for (index, &key) in order.iter().enumerate() {
+                append(
+                    key,
+                    QueueProvenance::Context {
+                        context_id: context_id.clone(),
+                        context_title: None,
+                        source_rank: source_start + index,
+                    },
+                    false,
+                );
+            }
             return Ok(());
         }
         QueueInput::Uris {
@@ -1567,34 +1220,217 @@ async fn capture_input(
             context_id,
             source_start,
         } => {
-            entries.extend(order.iter().enumerate().map(|(index, uri)| QueueEntry {
-                media_uri: uri.clone().into(),
-                playlist_entry_id: None,
-                provenance: QueueProvenance::Context {
-                    context_id: context_id.clone(),
-                    context_title: None,
-                    source_rank: source_start + index,
-                },
-                received_from_connect: false,
-            }));
+            for (i, uri) in order.iter().enumerate() {
+                let key = crate::tracks::remember_song(connection, uri, Default::default()).await?;
+                append(
+                    key,
+                    QueueProvenance::Context {
+                        context_id: context_id.clone(),
+                        context_title: None,
+                        source_rank: source_start + i,
+                    },
+                    false,
+                );
+            }
             return Ok(());
         }
-        _ => unreachable!("source inputs normalized above"),
-    };
-    for (rank, (uri, identity, selected)) in rows.into_iter().enumerate() {
-        if selected {
-            *anchor = Some(entries.len());
+        QueueInput::PlaylistEntries { order, context_id } => {
+            let rows=sqlx::query_as::<_,(crate::TrackKey,i64)>("SELECT track_key,CAST(requested.key AS INTEGER) FROM json_each(?1) requested JOIN playlist_entries entry ON playlist_entry_key=requested.value ORDER BY CAST(requested.key AS INTEGER)")
+                .bind(serde_json::to_string(&order)?).fetch_all(&mut **connection).await?;
+            for (key, rank) in rows {
+                append(
+                    key,
+                    QueueProvenance::Context {
+                        context_id: context_id.clone(),
+                        context_title: None,
+                        source_rank: rank as usize,
+                    },
+                    false,
+                );
+            }
+            return Ok(());
         }
-        entries.push(QueueEntry {
-            media_uri: uri.into(),
-            playlist_entry_id: identity.map(Into::into),
-            provenance: QueueProvenance::Context {
-                context_id: context_id.clone(),
-                context_title: None,
-                source_rank: rank,
-            },
-            received_from_connect: false,
-        });
+        QueueInput::Source {
+            reference,
+            context_id,
+        } => {
+            for (rank, (uri, _, selected)) in
+                crate::source_window::source_members(connection, &reference)
+                    .await?
+                    .into_iter()
+                    .enumerate()
+            {
+                let key =
+                    crate::tracks::remember_song(connection, &uri, Default::default()).await?;
+                append(
+                    key,
+                    QueueProvenance::Context {
+                        context_id: context_id.clone(),
+                        context_title: None,
+                        source_rank: rank,
+                    },
+                    selected,
+                );
+            }
+            return Ok(());
+        }
+        QueueInput::TrackSelection {
+            query,
+            folder,
+            filter,
+            sort,
+            descending,
+            ranges,
+        } => (
+            crate::tracks::song_query(connection, &query, folder, &filter, sort, descending)
+                .await?,
+            None,
+            None,
+            None,
+            Some(ranges),
+        ),
+        QueueInput::PlaylistSelection {
+            key,
+            filter,
+            sort,
+            descending,
+            ranges,
+            context_id,
+        } => (
+            crate::playlists::playlist_query(key, None, sort, descending, &filter),
+            Some(context_id),
+            None,
+            None,
+            Some(ranges),
+        ),
+        QueueInput::Query {
+            query,
+            folder,
+            filter,
+            sort,
+            descending,
+            context_id,
+            anchor_key,
+        } => (
+            crate::tracks::song_query(connection, &query, folder, &filter, sort, descending)
+                .await?,
+            Some(context_id),
+            anchor_key,
+            None,
+            None,
+        ),
+        QueueInput::PlaylistQuery {
+            key,
+            folder,
+            filter,
+            sort,
+            descending,
+            context_id,
+            anchor_key,
+            anchor_entry,
+        } => {
+            let anchor_entry = if let Some(entry) = anchor_entry {
+                sqlx::query_scalar::<_,crate::PlaylistEntryKey>("SELECT playlist_entry_key FROM playlist_entries WHERE playlist_entry_key=?1 AND playlist_key=?2").bind(entry).bind(key).fetch_optional(&mut **connection).await?
+            } else {
+                None
+            };
+            (
+                crate::playlists::playlist_query(key, folder, sort, descending, &filter),
+                Some(context_id),
+                anchor_key,
+                anchor_entry,
+                None,
+            )
+        }
+        QueueInput::Collection {
+            collection,
+            folder,
+            context_id,
+        } => {
+            let sort = match collection {
+                QueueCollection::Playlist(_) => crate::TrackSort::Position,
+                QueueCollection::Album(_) | QueueCollection::AlbumKey(_) => {
+                    crate::TrackSort::TrackNumber
+                }
+                _ => crate::TrackSort::Title,
+            };
+            (
+                crate::collections::playback_query(
+                    connection,
+                    &collection,
+                    folder,
+                    "",
+                    sort,
+                    false,
+                    false,
+                )
+                .await?,
+                Some(context_id),
+                None,
+                None,
+                None,
+            )
+        }
+        QueueInput::Smart {
+            key,
+            source,
+            folder,
+            now,
+            context_id,
+        } => (
+            crate::smart_playlists::smart_query(
+                connection, source, key, folder, "", None, false, now,
+            )
+            .await?,
+            Some(context_id),
+            None,
+            None,
+            None,
+        ),
+    };
+    if let Some(ranges) = ranges {
+        let keys = crate::source_window::selected_values_on::<crate::TrackKey>(
+            connection,
+            &query,
+            "track.track_key",
+            &ranges,
+        )
+        .await?;
+        for (rank, key) in keys.into_iter().enumerate() {
+            append(
+                key,
+                context_id
+                    .as_ref()
+                    .map_or(QueueProvenance::Manual, |context_id| {
+                        QueueProvenance::Context {
+                            context_id: context_id.clone(),
+                            context_title: None,
+                            source_rank: rank,
+                        }
+                    }),
+                false,
+            );
+        }
+    } else {
+        let selected = anchor_entry
+            .map(|key| format!("{}={}", query.entry_key, key.raw()))
+            .or_else(|| anchor_key.map(|key| format!("track.track_key={}", key.raw())))
+            .unwrap_or_else(|| "0".into());
+        let sql = query.select(&format!("track.track_key,COALESCE(({selected}),0)"));
+        let rows = sqlx::query_as::<_, (crate::TrackKey, bool)>(sqlx::AssertSqlSafe(sql))
+            .fetch_all(&mut **connection)
+            .await?;
+        for (rank, (key, selected)) in rows.into_iter().enumerate() {
+            append(
+                key,
+                QueueProvenance::Context {
+                    context_id: context_id.clone().unwrap(),
+                    context_title: None,
+                    source_rank: rank,
+                },
+                selected,
+            );
+        }
     }
     Ok(())
 }
@@ -1619,20 +1455,7 @@ async fn persist_transfer_on(
     }
     Ok(())
 }
-async fn playlist_identity(
-    connection: &mut sqlx::SqliteConnection,
-    key: crate::PlaylistEntryKey,
-) -> LibraryResult<Option<String>> {
-    let sql = if key.raw() < 0 {
-        "SELECT json_array(source.object_id,playlist.object_id,entry.object_id) FROM catalog.native_playlist_entries entry JOIN catalog.native_playlists playlist USING(playlist_key) JOIN catalog.sources source USING(source_key) WHERE entry.playlist_entry_key=?1"
-    } else {
-        "SELECT json_array(source.object_id,playlist.object_id,entry.object_id) FROM main.playlist_entries entry JOIN main.playlists playlist USING(playlist_key) LEFT JOIN main.source_ids source USING(source_key) WHERE entry.playlist_entry_key=?1"
-    };
-    Ok(sqlx::query_scalar(sql)
-        .bind(key.raw().abs())
-        .fetch_optional(connection)
-        .await?)
-}
+
 async fn save_settings(
     connection: &mut sqlx::SqliteConnection,
     current: Option<usize>,
@@ -1644,7 +1467,7 @@ async fn save_settings(
         .bind(current.map(|index| index as i64)).bind(progress.max(0)).bind(repeat.as_str()).bind(shuffled).execute(connection).await?;
     Ok(())
 }
-async fn save_queue_on(
+pub(crate) async fn save_queue_on(
     connection: &mut sqlx::SqliteConnection,
     state: &QueueRestore,
 ) -> LibraryResult<()> {
@@ -1754,16 +1577,15 @@ async fn apply_queue_update_on(
             };
             rows.push((
                 **id as i64,
-                entry.media_uri.as_ref(),
-                entry.playlist_entry_id.as_deref(),
+                entry.track_key.raw(),
                 provenance,
                 context_key,
                 source_rank,
                 entry.received_from_connect,
             ));
         }
-        sqlx::query("INSERT INTO queue_entries(entry_id,media_uri,playlist_entry_id,provenance,context_key,source_rank,received_from_connect)
-            SELECT json_extract(value,'$[0]'),json_extract(value,'$[1]'),json_extract(value,'$[2]'),json_extract(value,'$[3]'),json_extract(value,'$[4]'),json_extract(value,'$[5]'),json_extract(value,'$[6]') FROM json_each(?1) WHERE true ON CONFLICT(entry_id) DO NOTHING")
+        sqlx::query("INSERT INTO queue_entries(entry_id,track_key,provenance,context_key,source_rank,received_from_connect)
+            SELECT json_extract(value,'$[0]'),json_extract(value,'$[1]'),json_extract(value,'$[2]'),json_extract(value,'$[3]'),json_extract(value,'$[4]'),json_extract(value,'$[5]') FROM json_each(?1) WHERE true ON CONFLICT(entry_id) DO UPDATE SET track_key=excluded.track_key")
             .bind(serde_json::to_string(&rows)?).execute(&mut *connection).await?;
     }
     for (kind, order) in [(0_i64, &update.ordinary), (1, &update.order)] {
@@ -1820,10 +1642,7 @@ async fn restore_queue_on(connection: &mut sqlx::SqliteConnection) -> LibraryRes
             None => serde_json::from_str(&row.try_get::<String, _>("provenance")?)?,
         };
         entries.push(QueueEntry {
-            media_uri: row.try_get::<String, _>("media_uri")?.into(),
-            playlist_entry_id: row
-                .try_get::<Option<String>, _>("playlist_entry_id")?
-                .map(Into::into),
+            track_key: row.try_get("track_key")?,
             provenance,
             received_from_connect: row.try_get("received_from_connect")?,
         });
@@ -1851,40 +1670,6 @@ async fn restore_queue_on(connection: &mut sqlx::SqliteConnection) -> LibraryRes
     Ok(state)
 }
 
-pub(crate) async fn migrate_queue_storage(
-    connection: &mut sqlx::SqliteConnection,
-) -> LibraryResult<()> {
-    let old: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='queue_saved' AND type='table')",
-    )
-    .fetch_one(&mut *connection)
-    .await?;
-    if !old {
-        return Ok(());
-    }
-    let mut transaction = connection.begin().await?;
-    let mut state =
-        sqlx::query_scalar::<_, String>("SELECT state FROM queue_saved WHERE singleton=1")
-            .fetch_optional(&mut *transaction)
-            .await?
-            .map(|json| decode_saved_queue(serde_json::from_str(&json)?))
-            .transpose()?
-            .unwrap_or_default();
-    if let Some(order) =
-        sqlx::query_scalar::<_, String>("SELECT state FROM queue_order WHERE singleton=1")
-            .fetch_optional(&mut *transaction)
-            .await?
-    {
-        state.order = serde_json::from_str(&order)?;
-    }
-    read_settings(&mut transaction, &mut state).await?;
-    save_queue_on(&mut transaction, &state).await?;
-    sqlx::raw_sql("DROP TABLE queue_saved; DROP TABLE queue_order;")
-        .execute(&mut *transaction)
-        .await?;
-    transaction.commit().await?;
-    Ok(())
-}
 async fn read_settings(
     connection: &mut sqlx::SqliteConnection,
     state: &mut QueueRestore,
@@ -1900,21 +1685,20 @@ async fn read_settings(
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct LegacyQueueRow {
+    #[serde(default)]
+    pub playlist_entry_id: Option<String>,
     pub occurrence: String,
     pub item: QueueItem,
     pub canonical_position: usize,
     #[serde(default)]
     pub source_index: Option<usize>,
-    #[serde(default)]
-    pub playlist_entry_id: Option<String>,
     pub provenance: QueueProvenance,
 }
 
 impl LegacyQueueRow {
-    fn entry(&self) -> QueueEntry {
+    fn entry(&self, track_key: crate::TrackKey) -> QueueEntry {
         QueueEntry {
-            media_uri: self.item.media_uri.clone().into(),
-            playlist_entry_id: self.playlist_entry_id.clone().map(Into::into),
+            track_key,
             provenance: self.provenance.clone(),
             received_from_connect: false,
         }
@@ -1928,6 +1712,13 @@ async fn migrate_saved(
 ) -> LibraryResult<QueueRestore> {
     let sources: Vec<LegacyQueueInstruction> = serde_json::from_value(value["sources"].clone())?;
     let pending: Vec<LegacyQueueCursor> = serde_json::from_value(value["pending"].clone())?;
+    let mut row_keys = HashMap::new();
+    for row in rows {
+        row_keys.insert(
+            row.item.media_uri.clone(),
+            persist_metadata(connection, &row.item).await?,
+        );
+    }
     let mut entries = Vec::new();
     let mut members: Vec<Vec<Option<usize>>> = Vec::new();
     let mut anchors = Vec::new();
@@ -1960,28 +1751,19 @@ async fn migrate_saved(
             }
         }
         if let QueueInput::Source { reference, .. } = &source.input {
-            let positions = mapping
-                .iter()
-                .flatten()
-                .map(|index| {
-                    (
-                        (
-                            entries[*index].media_uri.clone(),
-                            entries[*index].playlist_entry_id.clone(),
-                        ),
-                        *index,
-                    )
+            let positions = crate::source_window::source_members(connection, reference)
+                .await?
+                .into_iter()
+                .zip(mapping.iter())
+                .filter_map(|((uri, identity, _), index)| {
+                    index.map(|index| ((uri, identity), index))
                 })
-                .collect::<std::collections::HashMap<_, _>>();
+                .collect::<HashMap<_, _>>();
             mapping =
                 crate::source_window::legacy_source_members(connection, reference, source.seed)
                     .await?
                     .into_iter()
-                    .map(|(uri, identity, _)| {
-                        positions
-                            .get(&(uri.into(), identity.map(Into::into)))
-                            .copied()
-                    })
+                    .map(|(uri, identity, _)| positions.get(&(uri, identity)).copied())
                     .collect();
             anchor = None;
         }
@@ -2001,10 +1783,10 @@ async fn migrate_saved(
                     .copied()
                     .flatten()
             })
-            .filter(|index| entries[*index].media_uri.as_ref() == row.item.media_uri);
+            .filter(|index| entries[*index].track_key == row_keys[&row.item.media_uri]);
         let index = candidate.unwrap_or_else(|| {
             let index = entries.len();
-            entries.push(row.entry());
+            entries.push(row.entry(row_keys[&row.item.media_uri]));
             index
         });
         if value["current_index"].as_u64() == Some(position as u64) {
@@ -2069,17 +1851,36 @@ async fn migrate_saved(
     Ok(state)
 }
 pub(crate) async fn export_queue_jsonl_on(
-    connection: &mut sqlx::SqliteConnection,
+    connection: &mut SqliteConnection,
     mut output: impl std::io::Write,
 ) -> LibraryResult<()> {
     let state = restore_queue_on(connection).await?;
-    serde_json::to_writer(&mut output, &serde_json::json!({"version":4,"queue":state}))?;
+    let keys = state
+        .entries
+        .iter()
+        .map(|entry| entry.track_key)
+        .collect::<Vec<_>>();
+    let uris = track_uris_on(connection, &keys).await?;
+    let mut saved = serde_json::to_value(&state)?;
+    for (entry, uri) in saved["entries"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .zip(&uris)
+    {
+        entry.as_object_mut().unwrap().remove("track_key");
+        entry["media_uri"] = uri.clone().into();
+    }
+    serde_json::to_writer(&mut output, &serde_json::json!({"version":4,"queue":saved}))?;
     output.write_all(b"\n")?;
-    use futures_util::TryStreamExt;
-    let mut records = sqlx::query_as::<_, QueueItem>("SELECT metadata.*,NULL artwork_binding FROM queue_occurrences metadata ORDER BY queue_occurrence_key").fetch(connection);
-    while let Some(item) = records.try_next().await? {
-        serde_json::to_writer(&mut output, &item)?;
-        output.write_all(b"\n")?;
+    let mut seen = HashSet::new();
+    for page in uris.chunks(QUEUE_CONTEXT_LIMIT) {
+        for item in queue_items_for_uris_on(connection, page).await? {
+            if seen.insert(item.media_uri.clone()) {
+                serde_json::to_writer(&mut output, &item)?;
+                output.write_all(b"\n")?;
+            }
+        }
     }
     Ok(())
 }
@@ -2092,17 +1893,16 @@ pub(crate) async fn import_queue_jsonl_on(
     let header: serde_json::Value = serde_json::from_str(&line)?;
     let state = match header["version"].as_u64() {
         Some(4) => {
-            let state = serde_json::from_value(header["queue"].clone())?;
             while {
                 line.clear();
                 input.read_line(&mut line)? != 0
             } {
                 if !line.trim().is_empty() {
-                    let item: QueueItem = serde_json::from_str(&line)?;
-                    persist_metadata(connection, &item).await?;
+                    persist_metadata(connection, &serde_json::from_str::<QueueItem>(&line)?)
+                        .await?;
                 }
             }
-            state
+            decode_saved_queue(connection, header["queue"].clone()).await?
         }
         Some(version @ 1..=3) => {
             let mut rows: Vec<LegacyQueueRow> = if version == 3 {
@@ -2122,11 +1922,12 @@ pub(crate) async fn import_queue_jsonl_on(
                     }
                 }
             }
+            let mut keys = Vec::with_capacity(rows.len());
             for row in &rows {
-                persist_metadata(connection, &row.item).await?;
+                keys.push(persist_metadata(connection, &row.item).await?);
             }
             match version {
-                3 => serde_json::from_value(header["queue"].clone())?,
+                3 => decode_saved_queue(connection, header["queue"].clone()).await?,
                 2 => {
                     let mut transaction = connection.begin().await?;
                     let state =
@@ -2142,7 +1943,11 @@ pub(crate) async fn import_queue_jsonl_on(
                     repeat_mode: serde_json::from_value(header["repeat_mode"].clone())?,
                     shuffled: header["shuffled"].as_bool().unwrap_or(false),
                     order: (0..rows.len() as u32).collect(),
-                    entries: rows.iter().map(LegacyQueueRow::entry).collect(),
+                    entries: rows
+                        .iter()
+                        .zip(keys)
+                        .map(|(row, key)| row.entry(key))
+                        .collect(),
                     ..Default::default()
                 },
             }
@@ -2169,36 +1974,31 @@ impl QueuePlacement {
 }
 
 async fn persist_metadata(
-    connection: &mut sqlx::SqliteConnection,
+    connection: &mut SqliteConnection,
     item: &QueueItem,
-) -> LibraryResult<()> {
-    sqlx::query(metadata_upsert!(
-        "INSERT INTO queue_occurrences(
-            media_uri,title,artist,album,album_display_artist,duration_millis,
-            disc_number,track_number,year,release_date,source_format,
-            musicbrainz_recording_id,musicbrainz_release_track_id,musicbrainz_album_id,
-            musicbrainz_release_group_id,primary_artist_musicbrainz_id)
-        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)"
-    ))
-    .bind(&item.media_uri)
-    .bind(&item.title)
-    .bind(&item.artist)
-    .bind(&item.album)
-    .bind(&item.album_display_artist)
-    .bind(item.duration_millis)
-    .bind(item.disc_number)
-    .bind(item.track_number)
-    .bind(item.year)
-    .bind(&item.release_date)
-    .bind(&item.source_format)
-    .bind(&item.musicbrainz_recording_id)
-    .bind(&item.musicbrainz_release_track_id)
-    .bind(&item.musicbrainz_album_id)
-    .bind(&item.musicbrainz_release_group_id)
-    .bind(&item.primary_artist_musicbrainz_id)
-    .execute(connection)
-    .await?;
-    Ok(())
+) -> LibraryResult<crate::TrackKey> {
+    crate::tracks::remember_song(
+        connection,
+        &item.media_uri,
+        crate::tracks::SongMetadata {
+            title: Some(&item.title),
+            artist: Some(&item.artist),
+            album: Some(&item.album),
+            album_display_artist: item.album_display_artist.as_deref(),
+            duration_millis: Some(item.duration_millis),
+            disc_number: item.disc_number,
+            track_number: item.track_number,
+            year: item.year,
+            release_date: item.release_date.as_deref(),
+            source_format: item.source_format.as_deref(),
+            musicbrainz_recording_id: item.musicbrainz_recording_id.as_deref(),
+            musicbrainz_release_track_id: item.musicbrainz_release_track_id.as_deref(),
+            musicbrainz_album_id: item.musicbrainz_album_id.as_deref(),
+            musicbrainz_release_group_id: item.musicbrainz_release_group_id.as_deref(),
+            primary_artist_musicbrainz_id: item.primary_artist_musicbrainz_id.as_deref(),
+        },
+    )
+    .await
 }
 
 /// Fisher-Yates shuffle with SplitMix64, shared by queue capture and playback order.
@@ -2211,4 +2011,25 @@ pub fn shuffle_order<T>(values: &mut [T], mut seed: u64) {
         n ^= n >> 31;
         values.swap(i, ((u128::from(n) * (i as u128 + 1)) >> 64) as usize);
     }
+}
+
+async fn track_uris_on(
+    connection: &mut SqliteConnection,
+    keys: &[crate::TrackKey],
+) -> LibraryResult<Vec<String>> {
+    Ok(sqlx::query_scalar("SELECT media_uri FROM json_each(?1) requested JOIN tracks ON track_key=requested.value ORDER BY CAST(requested.key AS INTEGER)")
+        .bind(serde_json::to_string(keys)?).fetch_all(connection).await?)
+}
+
+async fn queue_items_for_uris_on(
+    connection: &mut SqliteConnection,
+    uris: &[String],
+) -> LibraryResult<Vec<QueueItem>> {
+    Ok(sqlx::query_as("SELECT requested.value media_uri,COALESCE(track.title,requested.value) title,COALESCE(track.display_artist,'') artist,COALESCE(track.display_album,'') album,
+        COALESCE(album.display_artist,track.album_display_artist) album_display_artist,track.artwork_binding,COALESCE(track.duration_millis,0) duration_millis,track.disc_number,track.track_number,
+        track.year,track.release_date,track.source_format,track.musicbrainz_recording_id,track.musicbrainz_release_track_id,
+        COALESCE(album.musicbrainz_release_id,track.musicbrainz_album_id) musicbrainz_album_id,COALESCE(album.musicbrainz_release_group_id,track.musicbrainz_release_group_id) musicbrainz_release_group_id,
+        COALESCE((SELECT artist.musicbrainz_artist_id FROM track_artists credit JOIN artists artist USING(artist_key) WHERE credit.track_key=track.track_key ORDER BY credit.position LIMIT 1),track.primary_artist_musicbrainz_id) primary_artist_musicbrainz_id
+        FROM json_each(?1) requested LEFT JOIN tracks track ON track.media_uri=requested.value LEFT JOIN albums album USING(album_key) ORDER BY CAST(requested.key AS INTEGER)")
+        .bind(serde_json::to_string(uris)?).fetch_all(connection).await?)
 }

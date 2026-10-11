@@ -16,18 +16,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn cue_receipts_migrate_the_backing_index() {
-        use sqlx::Connection;
+    async fn cue_receipts_share_the_backing_index_after_reopen() {
         let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("old.sqlite");
-        let mut connection = sqlx::SqliteConnection::connect_with(
-            &sqlx::sqlite::SqliteConnectOptions::new()
-                .filename(&path)
-                .create_if_missing(true),
-        )
-        .await
-        .unwrap();
-        sqlx::query("CREATE TABLE connect_media_files(media_uri TEXT NOT NULL,encoding TEXT NOT NULL,revision TEXT NOT NULL,path TEXT NOT NULL,managed INTEGER NOT NULL,hash TEXT,PRIMARY KEY(media_uri,encoding)) STRICT").execute(&mut connection).await.unwrap();
+        let path = root.path().join("library.sqlite");
+        let database = Database::open(&path).await.unwrap();
         let backing = url::Url::from_file_path(root.path().join("album.flac"))
             .unwrap()
             .to_string();
@@ -38,14 +30,19 @@ mod tests {
                 index * 1000,
                 (index + 1) * 1000,
             );
-            sqlx::query("INSERT INTO connect_media_files VALUES(?1,'original','v1',?2,1,'blob')")
-                .bind(uri)
-                .bind(&backing)
-                .execute(&mut connection)
+            database
+                .connect_save_media_file(&ConnectMediaFile {
+                    media_uri: uri,
+                    encoding: "original".into(),
+                    revision: "v1".into(),
+                    path: backing.clone(),
+                    managed: true,
+                    hash: Some("blob".into()),
+                })
                 .await
                 .unwrap();
         }
-        drop(connection);
+        database.close().await.unwrap();
         let database = Database::open(&path).await.unwrap();
         let mut reader = database.acquire_reader().await.unwrap();
         let count: i64 =
@@ -96,15 +93,24 @@ mod tests {
             database.playback_access(&uri).await.unwrap().unwrap().0,
             receipt.path
         );
-        assert!(
+        assert_eq!(
             database
                 .connect_track_reference(&uri)
                 .await
                 .unwrap()
-                .is_none()
+                .unwrap()["title"],
+            "Track"
         );
         database.connect_forget_media_file(&receipt).await.unwrap();
         assert!(database.playback_access(&uri).await.unwrap().is_none());
+        assert_eq!(
+            database
+                .connect_track_reference(&uri)
+                .await
+                .unwrap()
+                .unwrap()["title"],
+            "Track"
+        );
         assert_eq!(std::fs::read(original).unwrap(), b"original");
     }
 }
@@ -112,7 +118,7 @@ mod tests {
 impl Database {
     pub async fn connect_local_media_page(&self, after: &str) -> LibraryResult<Vec<String>> {
         let mut reader = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar("SELECT media_uri FROM catalog.tracks t WHERE media_uri>?1 AND ((media_uri>='file:' AND media_uri<'file;') OR (media_uri>='rufin:cue/' AND media_uri<'rufin:cue0') OR (media_uri>='rufin:document/' AND media_uri<'rufin:document0') OR EXISTS(SELECT 1 FROM catalog.local_files f WHERE f.source_key=t.source_key AND f.path=t.source_path AND f.path LIKE 'rufin-document:%') OR EXISTS(SELECT 1 FROM main.local_locators l WHERE l.media_uri=t.media_uri AND l.origin IN ('local','import') AND l.access_uri LIKE 'content://%') OR EXISTS(SELECT 1 FROM connect_collection c WHERE c.media_uri=t.media_uri AND json_extract(c.payload,'$.local_media')=1)) ORDER BY media_uri LIMIT ?2")
+        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT media_uri FROM ({}) needed JOIN tracks t USING(track_key) WHERE media_uri>?1 AND ((media_uri>='file:' AND media_uri<'file;') OR (media_uri>='rufin:cue/' AND media_uri<'rufin:cue0') OR (media_uri>='rufin:document/' AND media_uri<'rufin:document0') OR EXISTS(SELECT 1 FROM local_files f WHERE f.source_key=t.source_key AND f.path=t.source_path AND f.path LIKE 'rufin-document:%') OR EXISTS(SELECT 1 FROM main.local_locators l WHERE l.media_uri=t.media_uri AND l.origin IN ('local','import') AND l.access_uri LIKE 'content://%') OR EXISTS(SELECT 1 FROM connect_collection c WHERE c.media_uri=t.media_uri AND json_extract(c.payload,'$.local_media')=1)) ORDER BY media_uri LIMIT ?2", crate::connect::NEEDED_TRACK_KEYS)))
             .bind(after).bind(crate::CONNECT_PAGE_SIZE as i64)
             .fetch_all(&mut *reader).await?)
     }
@@ -211,8 +217,8 @@ impl Database {
         // Native scans set source_path; Connect never copies it from another device.
         // Playlist imports keep that path without configuring a folder.
         let path: Option<String> = sqlx::query_scalar(
-            "SELECT source_path FROM catalog.tracks t WHERE media_uri=?1 AND source_path IS NOT NULL
-             AND (?2 OR EXISTS(SELECT 1 FROM catalog.local_files f WHERE f.source_key=t.source_key AND f.path=t.source_path))",
+            "SELECT source_path FROM tracks t WHERE media_uri=?1 AND source_path IS NOT NULL
+             AND (?2 OR EXISTS(SELECT 1 FROM local_files f WHERE f.source_key=t.source_key AND f.path=t.source_path))",
         )
         .bind(uri)
         .bind(native)

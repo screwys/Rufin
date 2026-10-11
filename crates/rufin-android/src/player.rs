@@ -482,7 +482,7 @@ impl AndroidPlayer {
                                 &[],
                                 &credits,
                             ),
-                            source.to_string(),
+                            Some(source.to_string()),
                         )
                     }
                     Some((source, kind, _)) if kind == "artist" => {
@@ -502,7 +502,7 @@ impl AndroidPlayer {
                         (
                             DetailLinks::route(&name, Some(route)),
                             DetailLinks::default(),
-                            source.to_string(),
+                            Some(source.to_string()),
                         )
                     }
                     _ => {
@@ -557,7 +557,7 @@ impl AndroidPlayer {
                 }
                 Ok(Some(AndroidPlayerMetadata {
                     media_uri,
-                    source_id: Some(source_id),
+                    source_id,
                     artist_text: artists.display_text().to_string(),
                     artist_links,
                     album_text: album.display_text().to_string(),

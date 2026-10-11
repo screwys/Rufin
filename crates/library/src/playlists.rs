@@ -1,5 +1,5 @@
 //! Owns Playlist identity, exact duplicate occurrences, ordering, filtering, and edits.
-//! Playback queue state is a separate SQLite owner.
+//! Entries keep song references; song metadata belongs to the shared library.
 
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Connection, FromRow, QueryBuilder, Row, Sqlite, SqliteConnection};
@@ -13,6 +13,62 @@ use crate::{
 const PLAYLIST_ROW_LIMIT: usize = 128;
 const PLAYLIST_ENTRY_ROW_LIMIT: usize = 256;
 const PLAYLIST_DELETE_BATCH: usize = 400;
+
+pub(crate) async fn install_playlist_facts_on(
+    connection: &mut SqliteConnection,
+) -> LibraryResult<()> {
+    sqlx::raw_sql(r#"
+CREATE TRIGGER IF NOT EXISTS playlist_entry_facts_insert AFTER INSERT ON playlist_entries BEGIN
+    UPDATE playlists SET track_count=track_count+1,
+        duration_millis=duration_millis+COALESCE((SELECT duration_millis FROM tracks WHERE track_key=NEW.track_key),0),
+        downloaded_count=downloaded_count+EXISTS(SELECT 1 FROM local_locators WHERE origin='download' AND media_uri=(SELECT media_uri FROM tracks WHERE track_key=NEW.track_key))
+    WHERE playlist_key=NEW.playlist_key;
+END;
+CREATE TRIGGER IF NOT EXISTS playlist_entry_facts_delete AFTER DELETE ON playlist_entries BEGIN
+    UPDATE playlists SET track_count=track_count-1,
+        duration_millis=duration_millis-COALESCE((SELECT duration_millis FROM tracks WHERE track_key=OLD.track_key),0),
+        downloaded_count=downloaded_count-EXISTS(SELECT 1 FROM local_locators WHERE origin='download' AND media_uri=(SELECT media_uri FROM tracks WHERE track_key=OLD.track_key))
+    WHERE playlist_key=OLD.playlist_key;
+END;
+CREATE TRIGGER IF NOT EXISTS playlist_entry_facts_update AFTER UPDATE OF playlist_key,track_key ON playlist_entries
+WHEN (OLD.playlist_key,OLD.track_key) IS NOT (NEW.playlist_key,NEW.track_key) BEGIN
+    UPDATE playlists SET track_count=track_count-1,
+        duration_millis=duration_millis-COALESCE((SELECT duration_millis FROM tracks WHERE track_key=OLD.track_key),0),
+        downloaded_count=downloaded_count-EXISTS(SELECT 1 FROM local_locators WHERE origin='download' AND media_uri=(SELECT media_uri FROM tracks WHERE track_key=OLD.track_key))
+    WHERE playlist_key=OLD.playlist_key;
+    UPDATE playlists SET track_count=track_count+1,
+        duration_millis=duration_millis+COALESCE((SELECT duration_millis FROM tracks WHERE track_key=NEW.track_key),0),
+        downloaded_count=downloaded_count+EXISTS(SELECT 1 FROM local_locators WHERE origin='download' AND media_uri=(SELECT media_uri FROM tracks WHERE track_key=NEW.track_key))
+    WHERE playlist_key=NEW.playlist_key;
+END;
+CREATE TRIGGER IF NOT EXISTS playlist_song_facts_update AFTER UPDATE OF duration_millis,media_uri ON tracks
+WHEN (OLD.duration_millis,OLD.media_uri) IS NOT (NEW.duration_millis,NEW.media_uri) BEGIN
+    UPDATE playlists SET duration_millis=duration_millis+(COALESCE(NEW.duration_millis,0)-COALESCE(OLD.duration_millis,0))*(SELECT count(*) FROM playlist_entries WHERE playlist_key=playlists.playlist_key AND track_key=NEW.track_key),
+        downloaded_count=downloaded_count+((EXISTS(SELECT 1 FROM local_locators WHERE origin='download' AND media_uri=NEW.media_uri))-(EXISTS(SELECT 1 FROM local_locators WHERE origin='download' AND media_uri=OLD.media_uri)))*(SELECT count(*) FROM playlist_entries WHERE playlist_key=playlists.playlist_key AND track_key=NEW.track_key)
+    WHERE playlist_key IN (SELECT playlist_key FROM playlist_entries WHERE track_key=NEW.track_key);
+END;
+CREATE TRIGGER IF NOT EXISTS playlist_download_facts_insert AFTER INSERT ON local_locators
+WHEN NEW.origin='download' AND (SELECT count(*) FROM local_locators WHERE origin='download' AND media_uri=NEW.media_uri)=1 BEGIN
+    UPDATE playlists SET downloaded_count=downloaded_count+(SELECT count(*) FROM playlist_entries WHERE playlist_key=playlists.playlist_key AND track_key=(SELECT track_key FROM tracks WHERE media_uri=NEW.media_uri))
+    WHERE playlist_key IN (SELECT playlist_key FROM playlist_entries WHERE track_key=(SELECT track_key FROM tracks WHERE media_uri=NEW.media_uri));
+END;
+CREATE TRIGGER IF NOT EXISTS playlist_download_facts_delete AFTER DELETE ON local_locators
+WHEN OLD.origin='download' AND NOT EXISTS(SELECT 1 FROM local_locators WHERE origin='download' AND media_uri=OLD.media_uri) BEGIN
+    UPDATE playlists SET downloaded_count=downloaded_count-(SELECT count(*) FROM playlist_entries WHERE playlist_key=playlists.playlist_key AND track_key=(SELECT track_key FROM tracks WHERE media_uri=OLD.media_uri))
+    WHERE playlist_key IN (SELECT playlist_key FROM playlist_entries WHERE track_key=(SELECT track_key FROM tracks WHERE media_uri=OLD.media_uri));
+END;
+CREATE TRIGGER IF NOT EXISTS playlist_download_facts_update AFTER UPDATE OF media_uri,origin ON local_locators
+WHEN (OLD.media_uri,OLD.origin) IS NOT (NEW.media_uri,NEW.origin) BEGIN
+    UPDATE playlists SET downloaded_count=downloaded_count-(SELECT count(*) FROM playlist_entries WHERE playlist_key=playlists.playlist_key AND track_key=(SELECT track_key FROM tracks WHERE media_uri=OLD.media_uri))
+    WHERE OLD.origin='download' AND NOT EXISTS(SELECT 1 FROM local_locators WHERE origin='download' AND media_uri=OLD.media_uri)
+        AND playlist_key IN (SELECT playlist_key FROM playlist_entries WHERE track_key=(SELECT track_key FROM tracks WHERE media_uri=OLD.media_uri));
+    UPDATE playlists SET downloaded_count=downloaded_count+(SELECT count(*) FROM playlist_entries WHERE playlist_key=playlists.playlist_key AND track_key=(SELECT track_key FROM tracks WHERE media_uri=NEW.media_uri))
+    WHERE NEW.origin='download' AND (SELECT count(*) FROM local_locators WHERE origin='download' AND media_uri=NEW.media_uri)=1
+        AND playlist_key IN (SELECT playlist_key FROM playlist_entries WHERE track_key=(SELECT track_key FROM tracks WHERE media_uri=NEW.media_uri));
+END;
+"#).execute(connection).await?;
+    Ok(())
+}
 
 /// Stage a large removal on disk; change the playlist once after checks finish.
 pub struct PlaylistEntryRemovals {
@@ -70,6 +126,7 @@ pub struct PlaylistRow {
     pub playlist_key: PlaylistKey,
     pub source_key: Option<SourceKey>,
     pub source_id: Option<String>,
+    pub source_owned: bool,
     pub object_id: String,
     pub name: String,
     pub writable: bool,
@@ -94,6 +151,7 @@ impl<'row> FromRow<'row, SqliteRow> for PlaylistRow {
             playlist_key: row.try_get("playlist_key")?,
             source_key: row.try_get("source_key")?,
             source_id: row.try_get("source_id")?,
+            source_owned: row.try_get("source_owned")?,
             object_id: row.try_get("object_id")?,
             name: row.try_get("name")?,
             writable: row.try_get("writable")?,
@@ -110,6 +168,7 @@ impl<'row> FromRow<'row, SqliteRow> for PlaylistRow {
 
 #[derive(Clone, Debug, FromRow, PartialEq)]
 pub struct PlaylistEntryRow {
+    pub track_key: crate::TrackKey,
     pub audio_properties: crate::AudioProperties,
     pub source_path: Option<String>,
     pub source_name: Option<String>,
@@ -265,16 +324,18 @@ impl Database {
         &self,
         playlist: PlaylistKey,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<(Option<SourceKey>, Option<String>)>> {
+    ) -> LibraryResult<Option<(Option<SourceKey>, Option<String>, bool)>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(sqlx::query_as::<_, (Option<SourceKey>, Option<String>)>(
-            "SELECT playlist.source_key,source.object_id
+        Ok(
+            sqlx::query_as::<_, (Option<SourceKey>, Option<String>, bool)>(
+                "SELECT playlist.source_key,source.object_id,playlist.owner='source'
              FROM playlists playlist LEFT JOIN sources source USING(source_key)
              WHERE playlist.playlist_key=?1",
+            )
+            .bind(playlist)
+            .fetch_optional(&mut *connection)
+            .await?,
         )
-        .bind(playlist)
-        .fetch_optional(&mut *connection)
-        .await?)
     }
 
     pub async fn playlist_route_page(
@@ -332,13 +393,9 @@ impl Database {
     ) -> LibraryResult<Option<PlaylistKey>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         Ok(sqlx::query_scalar(
-            "SELECT playlist_key FROM main.playlists
-             WHERE source_key IS (SELECT source_key FROM main.source_ids WHERE object_id=?1)
-               AND (?1 IS NULL OR source_key IS NOT NULL) AND object_id=?2 AND name IS NOT NULL
-             UNION ALL
-             SELECT -playlist_key FROM catalog.native_playlists
-             WHERE source_key=(SELECT source_key FROM catalog.sources WHERE object_id=?1)
-               AND object_id=?2 LIMIT 1",
+            "SELECT playlist_key FROM playlists
+             WHERE source_key IS (SELECT source_key FROM sources WHERE object_id=?1)
+               AND (?1 IS NULL OR source_key IS NOT NULL) AND object_id=?2 AND name IS NOT NULL",
         )
         .bind(source_id.map(crate::SourceId::as_str))
         .bind(object_id)
@@ -356,7 +413,7 @@ impl Database {
         Ok(sqlx::query_scalar::<_, String>(
             "SELECT track.media_uri FROM tracks track
              WHERE track.source_key=?1
-               AND EXISTS (SELECT 1 FROM playlist_entries entry WHERE entry.media_uri=track.media_uri)
+               AND EXISTS (SELECT 1 FROM playlist_entries entry WHERE entry.track_key=track.track_key)
                AND (?2 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?2))
              ORDER BY track.sort_text,track.track_key",
         )
@@ -567,9 +624,9 @@ impl Database {
     ) -> LibraryResult<Vec<String>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         Ok(sqlx::query_scalar::<_, String>(
-            "SELECT entry.media_uri FROM playlist_entries entry
+            "SELECT track.media_uri FROM playlist_entries entry
              JOIN playlists playlist USING(playlist_key)
-             LEFT JOIN tracks track USING(media_uri)
+             JOIN tracks track USING(track_key)
              WHERE playlist.playlist_key=?1
                AND (playlist.source_key IS NULL OR ?2 IS NULL OR EXISTS (
                  SELECT 1 FROM track_folders scope
@@ -609,53 +666,37 @@ impl Database {
             if result.iter().any(|row| row.playlist_key == *key) {
                 continue;
             }
-            // Native identities are negative in the public view. Restrict the
-            // physical owner before joining so its positive-key index is usable.
-            let (entries, source_identity) = if key.raw() < 0 {
-                (
-                    "catalog.native_playlist_entries",
-                    "(SELECT object_id FROM sources WHERE source_key=playlist.source_key)",
-                )
-            } else {
-                (
-                    "main.playlist_entries",
-                    "(SELECT source.object_id FROM main.playlists owned JOIN main.source_ids source USING(source_key) WHERE owned.playlist_key=playlist.playlist_key)",
-                )
-            };
-            let Some(mut row) = sqlx::query_as::<_, PlaylistRow>(sqlx::AssertSqlSafe(format!(
-                "SELECT playlist.playlist_key,playlist.source_key,{source_identity} source_id,playlist.object_id,
+            let Some(mut row) = sqlx::query_as::<_, PlaylistRow>(
+                "SELECT playlist.playlist_key,playlist.source_key,source.object_id source_id,
+                        playlist.owner='source' source_owned,playlist.object_id,
                         playlist.name,playlist.writable,playlist.metadata_writable,playlist.artwork_binding,
-                        count(entry.playlist_entry_key) track_count,
-                        COALESCE(sum(COALESCE(track.duration_millis,entry.duration_millis)),0) duration_millis,
-                        count(CASE WHEN EXISTS(SELECT 1 FROM local_access_files access
-                          WHERE access.media_uri=entry.media_uri AND access.origin='download') THEN 1 END) downloaded_count
+                        playlist.track_count,playlist.duration_millis,playlist.downloaded_count
                  FROM playlists playlist
-                 LEFT JOIN {entries} entry ON entry.playlist_key=?2
-                 LEFT JOIN tracks track USING(media_uri)
-                 WHERE playlist.playlist_key=?1 GROUP BY playlist.playlist_key"
-            )))
-            .bind(key).bind(key.raw().checked_abs()).fetch_optional(&mut *connection).await? else {
+                 LEFT JOIN sources source USING(source_key)
+                 WHERE playlist.playlist_key=?1 AND playlist.name IS NOT NULL
+"
+            )
+            .bind(key).fetch_optional(&mut *connection).await? else {
                 continue;
             };
             if row.artwork_binding.is_none() {
                 row.representative_artwork =
                     crate::artwork::playlist_representative_artwork_on(connection, *key).await?;
             }
-            row.genres =
-                sqlx::query_as::<_, (crate::GenreKey, String)>(sqlx::AssertSqlSafe(format!(
-                    "SELECT genre.genre_key,genre.name FROM {entries} entry
-                 CROSS JOIN tracks track USING(media_uri)
+            row.genres = sqlx::query_as::<_, (crate::GenreKey, String)>(
+                "SELECT genre.genre_key,genre.name FROM playlist_entries entry
+                 CROSS JOIN tracks track USING(track_key)
                  CROSS JOIN track_genres relation USING(track_key)
                  JOIN genres genre USING(genre_key)
                  WHERE entry.playlist_key=?1 GROUP BY genre.genre_key
-                 ORDER BY count(*) DESC,genre.sort_text,genre.genre_key LIMIT 2"
-                )))
-                .bind(key.raw().checked_abs())
-                .fetch_all(&mut *connection)
-                .await?
-                .into_iter()
-                .map(|(genre_key, name)| PlaylistGenreLink { genre_key, name })
-                .collect();
+                 ORDER BY count(*) DESC,genre.sort_text,genre.genre_key LIMIT 2",
+            )
+            .bind(key)
+            .fetch_all(&mut *connection)
+            .await?
+            .into_iter()
+            .map(|(genre_key, name)| PlaylistGenreLink { genre_key, name })
+            .collect();
             result.push(row);
         }
         Ok(result)
@@ -705,7 +746,7 @@ impl Database {
             row.push_bind(*entry).push_bind(ordinal as i64);
         });
         query
-            .push(") SELECT entry.media_uri FROM requested JOIN playlist_entries entry USING(playlist_entry_key) WHERE entry.playlist_key=")
+            .push(") SELECT track.media_uri FROM requested JOIN playlist_entries entry USING(playlist_entry_key) JOIN tracks track USING(track_key) WHERE entry.playlist_key=")
             .push_bind(playlist)
             .push(" ORDER BY requested.ordinal");
         Ok(query
@@ -722,7 +763,7 @@ impl Database {
     ) -> LibraryResult<Vec<(PlaylistEntryKey, i64, String)>> {
         let mut connection = self.acquire_reader().await?;
         Ok(sqlx::query_as(
-            "SELECT playlist_entry_key,position,media_uri FROM main.playlist_entries
+            "SELECT playlist_entry_key,position,media_uri FROM playlist_entries JOIN tracks USING(track_key)
             WHERE playlist_key=?1 AND position>?2 ORDER BY position LIMIT ?3",
         )
         .bind(playlist)
@@ -739,7 +780,7 @@ impl Database {
     ) -> LibraryResult<Vec<String>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         Ok(sqlx::query_scalar(
-            "SELECT object_id FROM playlists WHERE source_key=?1 ORDER BY sort_text,playlist_key",
+            "SELECT object_id FROM playlists WHERE source_key=?1 AND name IS NOT NULL AND (owner='rufin' OR indexed) ORDER BY sort_text,playlist_key",
         )
         .bind(source)
         .fetch_all(&mut *connection)
@@ -755,7 +796,7 @@ impl Database {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         Ok(sqlx::query_scalar(
             "SELECT object_id FROM playlists
-             WHERE source_key=?1 AND playlist_key=?2",
+             WHERE source_key=?1 AND playlist_key=?2 AND owner='source'",
         )
         .bind(source)
         .bind(playlist)
@@ -790,7 +831,7 @@ impl Database {
             .push_bind(playlist)
             .push(" IS NULL OR NOT EXISTS(SELECT 1 FROM playlist_entries existing WHERE existing.playlist_key=")
             .push_bind(playlist)
-            .push(" AND existing.media_uri=requested.media_uri)) accepted FROM requested LEFT JOIN tracks track ON track.media_uri=requested.media_uri")
+            .push(" AND existing.track_key=track.track_key)) accepted FROM requested LEFT JOIN tracks track ON track.media_uri=requested.media_uri")
             .push(" ORDER BY requested.ordinal");
         let mut result = Vec::with_capacity(media_uris.len());
         for (object_id, track_source, accepted) in query
@@ -901,9 +942,10 @@ impl Database {
             "UPDATE main.playlists SET name=COALESCE(?3,name), normalized_name=COALESCE(lower(?3),normalized_name), sort_text=COALESCE(lower(?3),sort_text),
              artwork_bytes=CASE WHEN ?4 THEN ?5 ELSE artwork_bytes END,
              artwork_mime=CASE WHEN ?4 THEN ?6 ELSE artwork_mime END,
-             artwork_revision=CASE WHEN ?4 THEN ?7 ELSE artwork_revision END
-             WHERE ((?1 IS NULL AND source_key IS NULL) OR source_key=(SELECT durable.source_key FROM main.source_ids durable JOIN catalog.sources source USING(object_id) WHERE source.source_key=?1))
-               AND playlist_key=?2 AND ((?3 IS NOT NULL AND name IS NOT ?3) OR (?4 AND artwork_revision IS NOT ?7))",
+             artwork_revision=CASE WHEN ?4 THEN ?7 ELSE artwork_revision END,
+             artwork_binding=CASE WHEN ?4 THEN CASE WHEN ?7 IS NOT NULL THEN CAST(json_object('kind','playlist','source_id',(SELECT object_id FROM sources WHERE source_key=playlists.source_key),'object_id',object_id,'revision',?7) AS BLOB) END ELSE artwork_binding END
+             WHERE source_key IS ?1 AND owner='rufin'
+               AND playlist_key=?2 AND metadata_writable AND ((?3 IS NOT NULL AND name IS NOT ?3) OR (?4 AND artwork_revision IS NOT ?7))",
         ).bind(source).bind(playlist).bind(name).bind(artwork.is_some())
             .bind(image.map(|(bytes, _)| bytes)).bind(image.and_then(|(_, mime)| mime)).bind(revision)
             .execute(&mut *transaction).await?.rows_affected() == 1;
@@ -927,34 +969,23 @@ impl Database {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         let mut transaction = connection.begin().await?;
-        sqlx::query("INSERT OR IGNORE INTO main.source_ids(object_id) SELECT object_id FROM catalog.sources")
-            .execute(&mut *transaction).await?;
-        sqlx::query("INSERT INTO main.playlists(source_key,object_id,position)
-          SELECT durable.source_key,observed.object_id,(SELECT COALESCE(max(position)+1,0) FROM main.playlists)+row_number() OVER(ORDER BY observed.playlist_key)-1
-          FROM catalog.native_playlists observed JOIN catalog.sources source USING(source_key)
-          JOIN main.source_ids durable ON durable.object_id=source.object_id
-          WHERE NOT EXISTS(SELECT 1 FROM main.playlists owned WHERE owned.source_key=durable.source_key AND owned.object_id=observed.object_id)")
-          .execute(&mut *transaction).await?;
-        let visible = sqlx::query_as::<_, (PlaylistKey, PlaylistKey, i64)>(
-            "SELECT visible.playlist_key,owned.playlist_key,visible.position FROM playlists visible
-             LEFT JOIN catalog.sources source ON source.source_key=visible.source_key
-             LEFT JOIN main.source_ids durable ON durable.object_id=source.object_id
-             JOIN main.playlists owned ON owned.object_id=visible.object_id AND owned.source_key IS durable.source_key
-             WHERE ?1 IS NULL OR visible.source_key=?1 OR visible.source_key IS NULL
-             ORDER BY visible.position,visible.playlist_key",
+        let visible = sqlx::query_as::<_, (PlaylistKey, i64)>(
+            "SELECT playlist_key,position FROM playlists
+             WHERE name IS NOT NULL AND (owner='rufin' OR indexed) AND (?1 IS NULL OR source_key=?1 OR source_key IS NULL)
+             ORDER BY position,playlist_key",
         )
         .bind(source)
         .fetch_all(&mut *transaction)
         .await?;
-        let Some(dragged_index) = visible.iter().position(|(key, _, _)| *key == dragged) else {
+        let Some(dragged_index) = visible.iter().position(|(key, _)| *key == dragged) else {
             transaction.rollback().await?;
             return Ok(false);
         };
-        let Some(target_index) = visible.iter().position(|(key, _, _)| *key == target) else {
+        let Some(target_index) = visible.iter().position(|(key, _)| *key == target) else {
             transaction.rollback().await?;
             return Ok(false);
         };
-        let mut order = visible.iter().map(|(_, key, _)| *key).collect::<Vec<_>>();
+        let mut order = visible.iter().map(|(key, _)| *key).collect::<Vec<_>>();
         let dragged = order.remove(dragged_index);
         let insertion = if dragged_index < target_index {
             target_index - 1
@@ -969,13 +1000,13 @@ impl Database {
                 .unwrap_or_default();
         let offset = max_position + 1;
         sqlx::query(
-            "UPDATE main.playlists SET position=position+?2 WHERE ?1 IS NULL OR source_key=(SELECT durable.source_key FROM main.source_ids durable JOIN catalog.sources source USING(object_id) WHERE source.source_key=?1) OR source_key IS NULL",
+            "UPDATE main.playlists SET position=position+?2 WHERE name IS NOT NULL AND (owner='rufin' OR indexed) AND (?1 IS NULL OR source_key=?1 OR source_key IS NULL)",
         )
         .bind(source)
         .bind(offset)
         .execute(&mut *transaction)
         .await?;
-        for (key, (_, _, position)) in order.into_iter().zip(visible) {
+        for (key, (_, position)) in order.into_iter().zip(visible) {
             sqlx::query("UPDATE main.playlists SET position=?2 WHERE playlist_key=?1")
                 .bind(key)
                 .bind(position)
@@ -995,7 +1026,7 @@ impl Database {
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         Ok(sqlx::query(
             "DELETE FROM main.playlists
-             WHERE ((?1 IS NULL AND source_key IS NULL) OR source_key=(SELECT durable.source_key FROM main.source_ids durable JOIN catalog.sources source USING(object_id) WHERE source.source_key=?1))
+             WHERE source_key IS ?1 AND owner='rufin'
                AND playlist_key=?2",
         )
         .bind(source)
@@ -1202,7 +1233,7 @@ async fn editable_playlist_exists(
     Ok(sqlx::query_scalar::<_, i64>(
         "SELECT 1 FROM playlists
          WHERE ((?1 IS NULL AND source_key IS NULL) OR source_key=?1)
-           AND playlist_key=?2",
+           AND playlist_key=?2 AND owner='rufin' AND writable",
     )
     .bind(source)
     .bind(playlist)
@@ -1220,15 +1251,16 @@ async fn media_uris_exist(
         return Ok(true);
     }
     for media_uri in media_uris {
-        let Some(track_source) =
-            sqlx::query_scalar::<_, SourceKey>("SELECT source_key FROM tracks WHERE media_uri=?1")
-                .bind(media_uri)
-                .fetch_optional(&mut **transaction)
-                .await?
+        let Some(track_source) = sqlx::query_scalar::<_, Option<SourceKey>>(
+            "SELECT source_key FROM tracks WHERE media_uri=?1",
+        )
+        .bind(media_uri)
+        .fetch_optional(&mut **transaction)
+        .await?
         else {
             return Ok(false);
         };
-        if track_source != source {
+        if track_source != Some(source) {
             let source_id: String =
                 sqlx::query_scalar("SELECT object_id FROM sources WHERE source_key=?1")
                     .bind(source)
@@ -1242,34 +1274,9 @@ async fn media_uris_exist(
     Ok(true)
 }
 
-// Every branch is driven by the bounded requested URI set before the UNION. A
-// LEFT JOIN of the public compound view can otherwise materialize every entry.
-pub(crate) const PLAYLIST_URI_SNAPSHOTS: &str = r#"
-playlist_snapshot_candidates AS (
-    SELECT entry.* FROM requested
-    JOIN main.playlist_entries entry ON entry.playlist_entry_key=(
-        SELECT playlist_entry_key FROM main.playlist_entries WHERE media_uri=requested.media_uri
-        ORDER BY title IS NULL,snapshot_at DESC,playlist_entry_key DESC LIMIT 1)
-    UNION ALL
-    SELECT -entry.playlist_entry_key,-entry.playlist_key,entry.object_id,entry.media_uri,
-           entry.title,entry.artist,entry.album,entry.album_display_artist,entry.snapshot_at,
-           entry.duration_millis,entry.disc_number,entry.track_number,entry.year,entry.release_date,
-           entry.source_format,entry.musicbrainz_recording_id,entry.musicbrainz_release_track_id,entry.position
-    FROM requested JOIN catalog.native_playlist_entries entry ON entry.playlist_entry_key=(
-        SELECT playlist_entry_key FROM catalog.native_playlist_entries WHERE media_uri=requested.media_uri
-        ORDER BY title IS NULL,snapshot_at DESC,playlist_entry_key ASC LIMIT 1)
-),
-playlist_snapshot_ranked AS (
-    SELECT *,row_number() OVER(PARTITION BY media_uri ORDER BY title IS NULL,snapshot_at DESC,playlist_entry_key DESC) snapshot_rank
-    FROM playlist_snapshot_candidates
-),
-playlist_snapshots AS (SELECT * FROM playlist_snapshot_ranked WHERE snapshot_rank=1)
-"#;
-
 #[cfg(test)]
 mod point_projection_tests {
     use super::*;
-    use sqlx::Row;
 
     #[tokio::test]
     async fn small_native_playlist_reads_stay_bounded_as_unrelated_catalog_grows() {
@@ -1283,22 +1290,22 @@ mod point_projection_tests {
             .unwrap();
         let mut writer = database.writer().await.unwrap();
         let connection = writer.as_mut().unwrap();
-        sqlx::raw_sql("INSERT INTO catalog.sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'source','Source','source',zeroblob(32));
-          INSERT INTO catalog.native_playlists(playlist_key,source_key,object_id,name,normalized_name,sort_text)
-          VALUES(1,1,'small','Small','small','small'),(2,1,'large','Large','large','large');
+        sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'source','Source','source',zeroblob(32));
+          INSERT INTO playlists(playlist_key,source_key,owner,object_id,name,normalized_name,sort_text,position)
+          VALUES(1,1,'source','small','Small','small','small',0),(2,1,'source','large','Large','large','large',1);
           WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<15)
-          INSERT INTO catalog.tracks(track_key,source_key,object_id,title,normalized_search,display_album,display_artist,sort_text,duration_millis,media_uri,artwork_binding)
+          INSERT INTO tracks(track_key,source_key,object_id,title,normalized_search,display_album,display_artist,sort_text,duration_millis,media_uri,artwork_binding)
           SELECT x,1,CAST(x AS TEXT),'Title','title','','','title',1000,'track:'||x,X'01' FROM n;
-          INSERT INTO catalog.native_playlist_entries(playlist_key,object_id,media_uri,position)
-          SELECT 1,object_id,media_uri,track_key FROM tracks;")
+          INSERT INTO playlist_entries(playlist_key,object_id,track_key,position)
+          SELECT 1,object_id,track_key,track_key FROM tracks;")
             .execute(&mut *connection).await.unwrap();
         for grow in [false, true] {
             if grow {
                 sqlx::raw_sql("WITH RECURSIVE n(x) AS (VALUES(16) UNION ALL SELECT x+1 FROM n WHERE x<10000)
-                  INSERT INTO catalog.tracks(track_key,source_key,object_id,title,normalized_search,display_album,display_artist,sort_text,duration_millis,media_uri,artwork_binding)
+                  INSERT INTO tracks(track_key,source_key,object_id,title,normalized_search,display_album,display_artist,sort_text,duration_millis,media_uri,artwork_binding)
                   SELECT x,1,CAST(x AS TEXT),'Title','title','','','title',1000,'track:'||x,X'01' FROM n;
-                  INSERT INTO catalog.native_playlist_entries(playlist_key,object_id,media_uri,position)
-                  SELECT 2,object_id,media_uri,track_key FROM tracks;")
+                  INSERT INTO playlist_entries(playlist_key,object_id,track_key,position)
+                  SELECT 2,object_id,track_key,track_key FROM tracks;")
                     .execute(&mut *connection).await.unwrap();
             }
             let work = Arc::new(AtomicUsize::new(0));
@@ -1311,19 +1318,19 @@ mod point_projection_tests {
                     counter.fetch_add(100, Ordering::Relaxed);
                     true
                 });
-            let rows = Database::load_playlist_rows(connection, &[PlaylistKey::from_raw(-1)])
+            let rows = Database::load_playlist_rows(connection, &[PlaylistKey::from_raw(1)])
                 .await
                 .unwrap();
             let entry: String = sqlx::query_scalar(
-                "SELECT media_uri FROM playlist_entries WHERE playlist_entry_key=-1",
+                "SELECT media_uri FROM playlist_entries JOIN tracks USING(track_key) WHERE playlist_entry_key=1",
             )
             .fetch_one(&mut *connection)
             .await
             .unwrap();
-            let order: Vec<i64> = sqlx::query_scalar("SELECT playlist_entry_key FROM playlist_entries WHERE playlist_key=-1 ORDER BY position,playlist_entry_key")
+            let order: Vec<i64> = sqlx::query_scalar("SELECT playlist_entry_key FROM playlist_entries WHERE playlist_key=1 ORDER BY position,playlist_entry_key")
                 .fetch_all(&mut *connection).await.unwrap();
             for sort in [TrackSort::Artist, TrackSort::AlbumArtist] {
-                let query = playlist_query(PlaylistKey::from_raw(-1), None, sort, false, "");
+                let query = playlist_query(PlaylistKey::from_raw(1), None, sort, false, "");
                 let ordered = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(
                     query.select(&query.entry_key),
                 ))
@@ -1348,48 +1355,6 @@ mod point_projection_tests {
             );
         }
     }
-
-    #[tokio::test]
-    async fn latest_snapshots_probe_both_physical_uri_indexes_before_union() {
-        let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("library.sqlite3"))
-            .await
-            .unwrap();
-        let mut connection = database.acquire_reader().await.unwrap();
-        let sql = format!(
-            "EXPLAIN QUERY PLAN WITH requested(media_uri) AS (VALUES(?1)), {PLAYLIST_URI_SNAPSHOTS} SELECT * FROM playlist_snapshots"
-        );
-        let plan = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
-            .bind("https://example.test/known")
-            .fetch_all(&mut *connection)
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|row| row.get::<String, _>("detail"))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            plan.iter()
-                .filter(|detail| detail.contains("SEARCH entry USING INTEGER PRIMARY KEY"))
-                .count(),
-            2
-        );
-        assert!(
-            plan.iter()
-                .any(|detail| detail.contains("playlist_entries_media_idx")
-                    && detail.contains("media_uri=?"))
-        );
-        assert!(
-            plan.iter()
-                .any(|detail| detail.contains("native_playlist_entries_media")
-                    && detail.contains("media_uri=?"))
-        );
-        assert!(
-            !plan
-                .iter()
-                .any(|detail| detail.contains("LAST TERM OF ORDER BY")),
-            "snapshot ties must also come directly from the URI indexes"
-        );
-    }
 }
 
 pub(crate) fn playlist_entries_query(keys: &[PlaylistEntryKey]) -> QueryBuilder<Sqlite> {
@@ -1398,15 +1363,7 @@ pub(crate) fn playlist_entries_query(keys: &[PlaylistEntryKey]) -> QueryBuilder<
         row.push_bind(*key).push_bind(ordinal as i64);
     });
     query.push("),entries AS (
-        SELECT requested.ordinal,entry.* FROM requested JOIN main.playlist_entries entry
-          ON entry.playlist_entry_key=requested.playlist_entry_key WHERE requested.playlist_entry_key>0
-        UNION ALL
-        SELECT requested.ordinal,-entry.playlist_entry_key,-entry.playlist_key,entry.object_id,entry.media_uri,
-          entry.title,entry.artist,entry.album,entry.album_display_artist,entry.snapshot_at,
-          entry.duration_millis,entry.disc_number,entry.track_number,entry.year,entry.release_date,
-          entry.source_format,entry.musicbrainz_recording_id,entry.musicbrainz_release_track_id,entry.position
-        FROM requested JOIN catalog.native_playlist_entries entry
-          ON entry.playlist_entry_key=-requested.playlist_entry_key WHERE requested.playlist_entry_key<0
+        SELECT requested.ordinal,entry.* FROM requested JOIN playlist_entries entry USING(playlist_entry_key)
     ) SELECT ");
     query
 }
@@ -1420,46 +1377,33 @@ pub(crate) async fn load_playlist_entry_rows(
     }
     let mut query = playlist_entries_query(keys);
     query.push(crate::tracks::TRACK_LINK_COLUMNS);
-    query.push(concat!("entry.playlist_entry_key,entry.media_uri,entry.position,source.object_id source_id,
-                      COALESCE(track.title,entry.title,'') title,
-                      COALESCE(track.display_artist,entry.artist,'') artist,
-                      COALESCE(track.display_album,entry.album,'') album,
-                      COALESCE(album.display_artist,entry.album_display_artist) album_display_artist,
-                      track.artwork_binding,COALESCE(track.duration_millis,entry.duration_millis,0) duration_millis,
-                      COALESCE(track.disc_number,entry.disc_number) disc_number,
-                      COALESCE(track.track_number,entry.track_number) track_number,
-                      COALESCE(track.year,entry.year) year,
-                      COALESCE(track.release_date,entry.release_date) release_date,
-                      COALESCE(track.audio_properties,'{}') audio_properties,date(", crate::tracks::added_at!("track"), ",'unixepoch') date_added,track.bpm,track.source_path,source.display_name source_name,
+    query.push(format!(concat!("entry.track_key,entry.playlist_entry_key,track.media_uri,entry.position,source.object_id source_id,
+                      COALESCE(track.title,'') title,
+                      COALESCE(track.display_artist,'') artist,
+                      COALESCE(track.display_album,'') album,
+                      COALESCE(album.display_artist,track.album_display_artist) album_display_artist,
+                      track.artwork_binding,COALESCE(track.duration_millis,0) duration_millis,
+                      track.disc_number disc_number,
+                      track.track_number track_number,
+                      track.year year,
+                      track.release_date release_date,
+                      COALESCE(track.audio_properties,'{{}}') audio_properties,date(", crate::tracks::added_at!("track"), ",'unixepoch') date_added,track.bpm,track.source_path,source.display_name source_name,
                       (SELECT COALESCE(group_concat(name, ', '),'') FROM (
                          SELECT genre.name FROM track_genres credit JOIN genres genre USING(genre_key)
                          WHERE credit.track_key=track.track_key ORDER BY credit.position
                       )) genre,
-                      COALESCE((SELECT baseline.play_count FROM activity_baseline baseline
-                                WHERE baseline.source_key=track.source_key
-                                  AND baseline.track_object_id=track.object_id
-                                  AND baseline.period='lifetime' AND baseline.item_kind='track'),0)
-                        +COALESCE(track.local_play_count,(SELECT count(*) FROM listens listen WHERE listen.media_uri=entry.media_uri)) play_count,
-                      (SELECT max(value) FROM (
-                         SELECT baseline.last_played_at value FROM activity_baseline baseline
-                         WHERE baseline.source_key=track.source_key
-                           AND baseline.track_object_id=track.object_id
-                           AND baseline.period='lifetime' AND baseline.item_kind='track'
-                         UNION ALL SELECT (SELECT listen.started_at FROM listens listen
-                           WHERE listen.media_uri=entry.media_uri
-                           ORDER BY listen.started_at DESC,listen.listen_key DESC LIMIT 1)
-                      )) last_played,
-                      COALESCE(track.source_format,entry.source_format) source_format,
-                      COALESCE(track.musicbrainz_recording_id,entry.musicbrainz_recording_id) musicbrainz_recording_id,
-                      COALESCE(track.musicbrainz_release_track_id,entry.musicbrainz_release_track_id) musicbrainz_release_track_id,
-                      COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=entry.media_uri),track.source_favorite,0) favorite,
-                      COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=entry.media_uri),track.source_rating)/10 rating,
-                      EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=entry.media_uri AND access.origin='download') is_downloaded
+                      {plays} play_count,{last} last_played,
+                      track.source_format source_format,
+                      track.musicbrainz_recording_id musicbrainz_recording_id,
+                      track.musicbrainz_release_track_id musicbrainz_release_track_id,
+                      COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_favorite,0) favorite,
+                      COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_rating)/10 rating,
+                      EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download') is_downloaded
                FROM entries entry
-               LEFT JOIN tracks track USING(media_uri)
+               JOIN tracks track USING(track_key)
                LEFT JOIN sources source ON source.source_key=track.source_key
                LEFT JOIN albums album ON album.album_key=track.album_key
-               ORDER BY entry.ordinal"));
+               ORDER BY entry.ordinal"), plays=crate::tracks::displayed_stat("play_count"), last=crate::tracks::displayed_stat("last_played")));
     query
         .build()
         .persistent(false)
@@ -1488,11 +1432,15 @@ pub(crate) async fn create_playlist_identity(
     }
     Ok(sqlx::query_as(
         "INSERT INTO main.playlists(source_key,object_id,name,normalized_name,sort_text,position)
-         SELECT (SELECT durable.source_key FROM main.source_ids durable JOIN catalog.sources source USING(object_id) WHERE source.source_key=?1),id,?2,lower(?2),lower(?2),
+         SELECT ?1,id,?2,lower(?2),lower(?2),
                 (SELECT coalesce(max(position)+1,0) FROM playlists)
          FROM (SELECT 'rufin:playlist:'||lower(hex(randomblob(16))) id)
-         RETURNING playlist_key,object_id"
-    ).bind(source).bind(name).fetch_one(&mut **transaction).await?)
+         RETURNING playlist_key,object_id",
+    )
+    .bind(source)
+    .bind(name)
+    .fetch_one(&mut **transaction)
+    .await?)
 }
 
 async fn insert_playlist_media(
@@ -1505,28 +1453,19 @@ async fn insert_playlist_media(
     let initial_max = start - 1;
     let mut accepted = 0;
     for media_uri in media_uris {
+        let track =
+            crate::tracks::remember_song(transaction, media_uri, Default::default()).await?;
         let inserted = sqlx::query(
-            "INSERT INTO main.playlist_entries(
-                 playlist_key,object_id,media_uri,title,artist,
-                 album,album_display_artist,duration_millis,
-                 disc_number,track_number,year,release_date,source_format,
-                 musicbrainz_recording_id,musicbrainz_release_track_id,
-                 position
-             ) SELECT ?1,'rufin:entry:'||lower(hex(randomblob(16))),?2,
-                      track.title,track.display_artist,track.display_album,
-                      album.display_artist,track.duration_millis,track.disc_number,
-                      track.track_number,track.year,track.release_date,track.source_format,
-                      track.musicbrainz_recording_id,track.musicbrainz_release_track_id,?3
-               FROM (SELECT ?2 media_uri) requested
-               LEFT JOIN tracks track USING(media_uri) LEFT JOIN albums album USING(album_key)
-               WHERE ?4=0 OR NOT EXISTS (
-                   SELECT 1 FROM playlist_entries existing
-                   WHERE existing.playlist_key=?1 AND existing.media_uri=?2
-                     AND existing.position<=?5
-                 )",
+            "INSERT INTO playlist_entries(playlist_key,object_id,track_key,position)
+             SELECT ?1,'rufin:entry:'||lower(hex(randomblob(16))),?2,?3
+             WHERE ?4=0 OR NOT EXISTS (
+                 SELECT 1 FROM playlist_entries existing
+                 WHERE existing.playlist_key=?1 AND existing.track_key=?2
+                   AND existing.position<=?5
+             )",
         )
         .bind(playlist)
-        .bind(media_uri)
+        .bind(track)
         .bind(start + accepted as i64)
         .bind(skip_existing)
         .bind(initial_max)
@@ -1538,9 +1477,11 @@ async fn insert_playlist_media(
     Ok(accepted)
 }
 
-/// Rufin-authored names and global/native rank are durable; native observations are not.
+/// Playlist identity and rank in backups and exported files.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
 pub struct PlaylistIdentity {
+    #[serde(default)]
+    pub source_owned: bool,
     pub source_id: Option<String>,
     pub object_id: String,
     pub name: Option<String>,
@@ -1555,7 +1496,6 @@ pub struct PlaylistEntryWrite {
     pub artist: Option<String>,
     pub album: Option<String>,
     pub album_display_artist: Option<String>,
-    pub snapshot_at: i64,
     pub duration_millis: Option<i64>,
     pub disc_number: Option<i64>,
     pub track_number: Option<i64>,
@@ -1597,23 +1537,27 @@ pub(crate) async fn write_playlist_identity(
     } else {
         None
     };
-    // Reimporting an exact identity retains its current global rank and pins.
+    let source_owned = identity.source_owned || identity.name.is_none();
+    let owner = if source_owned { "source" } else { "rufin" };
     let existing = sqlx::query_scalar::<_, PlaylistKey>(
-        "SELECT playlist_key FROM main.playlists WHERE object_id=?1 AND source_key IS ?2",
+        "SELECT playlist_key FROM playlists WHERE object_id=?1 AND source_key IS ?2",
     )
     .bind(&identity.object_id)
     .bind(source)
     .fetch_optional(&mut *connection)
     .await?;
     if let Some(key) = existing {
-        sqlx::query("UPDATE main.playlists SET name=?2,normalized_name=lower(?2),sort_text=lower(?2) WHERE playlist_key=?1")
-            .bind(key).bind(&identity.name).execute(&mut *connection).await?;
+        if !source_owned {
+            sqlx::query("UPDATE playlists SET name=?2,normalized_name=lower(?2),sort_text=lower(?2) WHERE playlist_key=?1 AND owner='rufin'")
+                .bind(key).bind(&identity.name).execute(&mut *connection).await?;
+        }
         return Ok(key);
     }
-    Ok(sqlx::query_scalar("INSERT INTO main.playlists(source_key,object_id,name,normalized_name,sort_text,position)
-        VALUES(?1,?2,?3,lower(?3),lower(?3),CASE WHEN EXISTS(SELECT 1 FROM main.playlists WHERE position=?4)
-        THEN (SELECT COALESCE(max(position)+1,0) FROM main.playlists) ELSE ?4 END) RETURNING playlist_key")
-        .bind(source).bind(&identity.object_id).bind(&identity.name).bind(identity.position)
+    Ok(sqlx::query_scalar("INSERT INTO playlists(source_key,owner,object_id,name,normalized_name,sort_text,position,indexed)
+        VALUES(?1,?2,?3,?4,lower(?4),lower(?4),CASE WHEN EXISTS(SELECT 1 FROM playlists WHERE position=?5)
+        THEN (SELECT COALESCE(max(position)+1,0) FROM playlists) ELSE ?5 END,?6) RETURNING playlist_key")
+        .bind(source).bind(owner).bind(&identity.object_id).bind(&identity.name).bind(identity.position)
+        .bind(!source_owned)
         .fetch_one(connection).await?)
 }
 
@@ -1627,22 +1571,45 @@ pub(crate) async fn write_playlist_entry(
             "invalid playlist occurrence identity or order".into(),
         ));
     }
-    sqlx::query("INSERT INTO main.playlist_entries(playlist_key,object_id,media_uri,title,artist,album,
-        album_display_artist,snapshot_at,duration_millis,disc_number,track_number,year,release_date,
-        source_format,musicbrainz_recording_id,musicbrainz_release_track_id,position)
-        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
-        ON CONFLICT(playlist_key,object_id) DO UPDATE SET media_uri=excluded.media_uri,title=excluded.title,
-        artist=excluded.artist,album=excluded.album,album_display_artist=excluded.album_display_artist,
-        snapshot_at=excluded.snapshot_at,duration_millis=excluded.duration_millis,disc_number=excluded.disc_number,
-        track_number=excluded.track_number,year=excluded.year,release_date=excluded.release_date,
-        source_format=excluded.source_format,musicbrainz_recording_id=excluded.musicbrainz_recording_id,
-        musicbrainz_release_track_id=excluded.musicbrainz_release_track_id,position=excluded.position")
-        .bind(playlist).bind(&entry.object_id).bind(&entry.media_uri).bind(&entry.title).bind(&entry.artist)
-        .bind(&entry.album).bind(&entry.album_display_artist).bind(entry.snapshot_at).bind(entry.duration_millis)
-        .bind(entry.disc_number).bind(entry.track_number).bind(entry.year).bind(&entry.release_date)
-        .bind(&entry.source_format).bind(&entry.musicbrainz_recording_id).bind(&entry.musicbrainz_release_track_id)
-        .bind(entry.position).execute(connection).await?;
+    let track = remember_playlist_song(connection, entry).await?;
+    sqlx::query(
+        "INSERT INTO playlist_entries(playlist_key,object_id,track_key,position)
+        VALUES(?1,?2,?3,?4) ON CONFLICT(playlist_key,object_id)
+        DO UPDATE SET track_key=excluded.track_key,position=excluded.position",
+    )
+    .bind(playlist)
+    .bind(&entry.object_id)
+    .bind(track)
+    .bind(entry.position)
+    .execute(connection)
+    .await?;
     Ok(())
+}
+
+pub(crate) async fn remember_playlist_song(
+    connection: &mut SqliteConnection,
+    entry: &PlaylistEntryWrite,
+) -> LibraryResult<crate::TrackKey> {
+    crate::tracks::remember_song(
+        connection,
+        &entry.media_uri,
+        crate::tracks::SongMetadata {
+            title: entry.title.as_deref(),
+            artist: entry.artist.as_deref(),
+            album: entry.album.as_deref(),
+            album_display_artist: entry.album_display_artist.as_deref(),
+            duration_millis: entry.duration_millis,
+            disc_number: entry.disc_number,
+            track_number: entry.track_number,
+            year: entry.year,
+            release_date: entry.release_date.as_deref(),
+            source_format: entry.source_format.as_deref(),
+            musicbrainz_recording_id: entry.musicbrainz_recording_id.as_deref(),
+            musicbrainz_release_track_id: entry.musicbrainz_release_track_id.as_deref(),
+            ..Default::default()
+        },
+    )
+    .await
 }
 
 pub(crate) async fn export_playlist_order_jsonl_on(
@@ -1650,7 +1617,7 @@ pub(crate) async fn export_playlist_order_jsonl_on(
     mut output: impl std::io::Write,
 ) -> LibraryResult<u64> {
     use futures_util::TryStreamExt;
-    let mut rows=sqlx::query_as::<_,PlaylistIdentity>("SELECT source.object_id source_id,playlist.object_id,playlist.name,playlist.position FROM main.playlists playlist LEFT JOIN main.source_ids source USING(source_key) ORDER BY playlist.position").fetch(&mut *connection);
+    let mut rows=sqlx::query_as::<_,PlaylistIdentity>("SELECT playlist.owner='source' source_owned,source.object_id source_id,playlist.object_id,CASE WHEN playlist.owner='rufin' THEN playlist.name END name,playlist.position FROM main.playlists playlist LEFT JOIN sources source USING(source_key) ORDER BY playlist.position").fetch(&mut *connection);
     let mut count = 0;
     while let Some(row) = rows.try_next().await? {
         serde_json::to_writer(&mut output, &PlaylistRecord::Playlist(row))?;
@@ -1658,7 +1625,7 @@ pub(crate) async fn export_playlist_order_jsonl_on(
         count += 1;
     }
     drop(rows);
-    let mut images = sqlx::query_as::<_, PlaylistArtworkRecord>("SELECT source.object_id source_id,playlist.object_id,playlist.artwork_bytes bytes,playlist.artwork_mime content_type FROM main.playlists playlist LEFT JOIN main.source_ids source USING(source_key) WHERE playlist.artwork_bytes IS NOT NULL").fetch(&mut *connection);
+    let mut images = sqlx::query_as::<_, PlaylistArtworkRecord>("SELECT source.object_id source_id,playlist.object_id,playlist.artwork_bytes bytes,playlist.artwork_mime content_type FROM main.playlists playlist LEFT JOIN sources source USING(source_key) WHERE playlist.artwork_bytes IS NOT NULL").fetch(&mut *connection);
     while let Some(image) = images.try_next().await? {
         serde_json::to_writer(&mut output, &PlaylistRecord::Artwork(image))?;
         output.write_all(b"\n")?;
@@ -1686,7 +1653,7 @@ pub(crate) async fn import_playlists_jsonl_on(
             }
             PlaylistRecord::Artwork(image) => {
                 let revision = blake3::hash(&image.bytes).to_hex().to_string();
-                sqlx::query("UPDATE main.playlists SET artwork_bytes=?3,artwork_mime=?4,artwork_revision=?5 WHERE object_id=?1 AND source_key IS (SELECT source_key FROM main.source_ids WHERE object_id=?2)")
+                sqlx::query("UPDATE main.playlists SET artwork_bytes=?3,artwork_mime=?4,artwork_revision=?5,artwork_binding=CAST(json_object('kind','playlist','source_id',?2,'object_id',?1,'revision',?5) AS BLOB) WHERE owner='rufin' AND object_id=?1 AND source_key IS (SELECT source_key FROM sources WHERE object_id=?2)")
                     .bind(image.object_id).bind(image.source_id).bind(image.bytes).bind(image.content_type).bind(revision).execute(&mut *connection).await?;
             }
             PlaylistRecord::File(record) => {
@@ -1704,51 +1671,23 @@ pub(crate) fn playlist_query(
     descending: bool,
     filter: &str,
 ) -> crate::source_window::SourceQuery {
-    let native = key.raw() < 0;
     let mut query = crate::source_window::SourceQuery {
-        from: format!(
-            "{} entry JOIN {} playlist USING(playlist_key)",
-            if native {
-                "catalog.native_playlist_entries"
-            } else {
-                "main.playlist_entries"
-            },
-            if native {
-                "catalog.native_playlists"
-            } else {
-                "main.playlists"
-            }
-        ),
-        predicate: format!(
-            "entry.playlist_key={}",
-            key.raw()
-                .checked_abs()
-                .map_or_else(|| "NULL".into(), |key| key.to_string())
-        ),
-        uri: "entry.media_uri".into(),
-        entry_key: if native {
-            "-entry.playlist_entry_key"
-        } else {
-            "entry.playlist_entry_key"
-        }
-        .into(),
+        from: "playlist_entries entry JOIN playlists playlist USING(playlist_key) JOIN tracks track USING(track_key)".into(),
+        predicate: format!("entry.playlist_key={}", key.raw()),
+        uri: "track.media_uri".into(),
+        entry_key: "entry.playlist_entry_key".into(),
         order: sort.order_terms(descending, true),
     };
     let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
-    if sort != TrackSort::Position || !filter.is_empty() {
-        query
-            .from
-            .push_str(" LEFT JOIN tracks track ON track.media_uri=entry.media_uri");
-    }
     if sort != TrackSort::Position {
         query.order.push("entry.position ASC".into());
     }
     if let Some(folder) = folder {
-        query.predicate.push_str(&format!(" AND (playlist.source_key IS NULL OR EXISTS(SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.media_uri=entry.media_uri AND scope.folder_key={}))",folder.raw()));
+        query.predicate.push_str(&format!(" AND (playlist.source_key IS NULL OR EXISTS(SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.track_key=entry.track_key AND scope.folder_key={}))",folder.raw()));
     }
     if !filter.is_empty() {
         let filter = crate::source_window::quote(&filter);
-        query.predicate.push_str(&format!(" AND (instr(lower(COALESCE(track.title,entry.title,'')||' '||COALESCE(track.display_artist,entry.artist,'')||' '||COALESCE(track.display_album,entry.album,'')),{filter})>0 OR CAST(COALESCE(track.year,entry.year) AS TEXT)={filter})"));
+        query.predicate.push_str(&format!(" AND (instr(lower(COALESCE(track.title,'')||' '||COALESCE(track.display_artist,'')||' '||COALESCE(track.display_album,'')),{filter})>0 OR CAST(track.year AS TEXT)={filter})"));
     }
     query
 }
@@ -1762,18 +1701,15 @@ fn playlist_order_query(
     count: bool,
 ) -> QueryBuilder<Sqlite> {
     let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
-    let aggregate = matches!(sort, PlaylistSort::TrackCount | PlaylistSort::Duration);
+
     let mut query = QueryBuilder::<Sqlite>::new(if count {
         "SELECT count(*) FROM playlists playlist"
     } else {
         "SELECT playlist.playlist_key FROM playlists playlist"
     });
-    if aggregate {
-        query.push(" LEFT JOIN playlist_entries entry USING(playlist_key) LEFT JOIN tracks track USING(media_uri)");
-    }
-    query.push(" WHERE (playlist.source_key=").push_bind(source)
+    query.push(" WHERE playlist.name IS NOT NULL AND (playlist.owner='rufin' OR playlist.indexed) AND (playlist.source_key=").push_bind(source)
             .push(" OR playlist.source_key IS NULL) AND (playlist.source_key IS NULL OR ")
-            .push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM playlist_entries scoped_entry JOIN tracks scoped_track USING(media_uri) JOIN track_folders scope USING(track_key) WHERE scoped_entry.playlist_key=playlist.playlist_key AND scope.folder_key=").push_bind(folder).push("))");
+            .push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM playlist_entries scoped_entry JOIN tracks scoped_track USING(track_key) JOIN track_folders scope USING(track_key) WHERE scoped_entry.playlist_key=playlist.playlist_key AND scope.folder_key=").push_bind(folder).push("))");
     if !filter.is_empty() {
         query
             .push(" AND instr(playlist.normalized_name,")
@@ -1783,18 +1719,11 @@ fn playlist_order_query(
     if count {
         return query;
     }
-    if aggregate {
-        query.push(" AND (playlist.source_key IS NULL OR ").push_bind(folder)
-                .push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=")
-                .push_bind(folder).push(")) GROUP BY playlist.playlist_key");
-    }
     query.push(" ORDER BY ").push(match sort {
         PlaylistSort::Position => "playlist.position",
         PlaylistSort::Title => "playlist.sort_text",
-        PlaylistSort::TrackCount => "count(entry.playlist_entry_key)",
-        PlaylistSort::Duration => {
-            "COALESCE(sum(COALESCE(track.duration_millis,entry.duration_millis)),0)"
-        }
+        PlaylistSort::TrackCount => "playlist.track_count",
+        PlaylistSort::Duration => "playlist.duration_millis",
     });
     if descending {
         query.push(" DESC");

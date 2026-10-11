@@ -31,39 +31,25 @@ pub(crate) async fn publish_source_user_data(
     kind: &str,
     input: impl Fn(&mut QueryBuilder<Sqlite>),
 ) -> LibraryResult<bool> {
-    let incoming = "WITH incoming(source_key,object_id,favorite,rating_set,rating,play_count,skip_count,last_played) AS (";
-    let mut query = QueryBuilder::new(incoming);
+    let mut query = QueryBuilder::new(
+        "WITH incoming(source_key,object_id,favorite,rating_set,rating,play_count,skip_count,last_played) AS (",
+    );
     input(&mut query);
     query.push(format!(
         ") UPDATE {kind}s AS current SET
          source_favorite=COALESCE(incoming.favorite,current.source_favorite),
-         source_rating=CASE WHEN incoming.rating_set THEN incoming.rating ELSE current.source_rating END
+         source_rating=CASE WHEN incoming.rating_set THEN incoming.rating ELSE current.source_rating END,
+         source_play_count=COALESCE(incoming.play_count,current.source_play_count),
+         source_skip_count=COALESCE(incoming.skip_count,current.source_skip_count),
+         source_last_played=COALESCE(incoming.last_played,current.source_last_played)
          FROM incoming WHERE current.source_key=incoming.source_key AND current.object_id=incoming.object_id
          AND ((incoming.favorite IS NOT NULL AND current.source_favorite IS NOT incoming.favorite)
-           OR (incoming.rating_set AND current.source_rating IS NOT incoming.rating))"
+           OR (incoming.rating_set AND current.source_rating IS NOT incoming.rating)
+           OR (incoming.play_count IS NOT NULL AND current.source_play_count IS NOT incoming.play_count)
+           OR (incoming.skip_count IS NOT NULL AND current.source_skip_count IS NOT incoming.skip_count)
+           OR (incoming.last_played IS NOT NULL AND current.source_last_played IS NOT incoming.last_played))"
     ));
-    let mut changed = query
-        .build()
-        .execute(&mut *connection)
-        .await?
-        .rows_affected()
-        > 0;
-    if kind == "track" {
-        let mut query = QueryBuilder::new(incoming);
-        input(&mut query);
-        query.push(
-            ") INSERT INTO catalog.activity_baseline(source_key,track_object_id,play_count,skip_count,last_played_at)
-             SELECT incoming.source_key,incoming.object_id,COALESCE(incoming.play_count,0),
-                    COALESCE(incoming.skip_count,0),incoming.last_played
-             FROM incoming
-             WHERE (incoming.play_count IS NOT NULL OR incoming.skip_count IS NOT NULL OR incoming.last_played IS NOT NULL)
-             AND NOT EXISTS(SELECT 1 FROM activity_baseline current
-                 WHERE current.source_key=incoming.source_key AND current.track_object_id=incoming.object_id
-                   AND current.period='lifetime' AND current.item_kind='track')",
-        );
-        changed |= query.build().execute(connection).await?.rows_affected() > 0;
-    }
-    Ok(changed)
+    Ok(query.build().execute(connection).await?.rows_affected() > 0)
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]

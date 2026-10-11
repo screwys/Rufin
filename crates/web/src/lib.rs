@@ -314,6 +314,15 @@ async fn queue_play(
             ));
         }
     };
+    let anchor_key = if let Some(uri) = input.selection.get("anchor_uri").and_then(Value::as_str) {
+        products
+            .library
+            .track_key_by_uri(uri, &library::ReadCancellation::new())
+            .await
+            .map_err(internal)?
+    } else {
+        None
+    };
     let selection = match kind.as_str() {
         "track" => {
             #[derive(Deserialize)]
@@ -335,7 +344,6 @@ async fn queue_play(
                 sort: Option<String>,
                 #[serde(default)]
                 descending: bool,
-                anchor_uri: Option<String>,
                 anchor_entry: Option<library::PlaylistEntryKey>,
                 #[serde(default)]
                 album_artists: bool,
@@ -371,7 +379,7 @@ async fn queue_play(
                         "track_number"
                     }))?,
                     descending: input.descending,
-                    anchor_uri: input.anchor_uri,
+                    anchor_key,
                 }
             } else {
                 library::QueueInput::PlaylistQuery {
@@ -382,7 +390,7 @@ async fn queue_play(
                     sort: track_sort(input.sort.as_deref().unwrap_or("position"))?,
                     descending: input.descending,
                     anchor_entry: input.anchor_entry,
-                    anchor_uri: input.anchor_uri,
+                    anchor_key,
                 }
             }
         }
@@ -391,7 +399,6 @@ async fn queue_play(
             struct Smart {
                 id: library::SmartPlaylistKey,
                 source: Option<String>,
-                anchor_uri: Option<String>,
                 #[serde(default)]
                 q: String,
                 sort: Option<String>,
@@ -427,7 +434,7 @@ async fn queue_play(
                 sort: sort.unwrap_or(library::TrackSort::Title),
                 descending: input.descending,
                 context_id: "api".into(),
-                anchor_uri: input.anchor_uri,
+                anchor_key,
             }
         }
         "source" => {
@@ -442,7 +449,6 @@ async fn queue_play(
                 descending: bool,
                 #[serde(default)]
                 favorites: bool,
-                anchor_uri: Option<String>,
             }
             let input: Source = serde_json::from_value(input.selection).map_err(bad_request)?;
             let mut scope = HashMap::from([("source".into(), input.source)]);
@@ -462,7 +468,7 @@ async fn queue_play(
                 sort: track_sort(input.sort.as_deref().unwrap_or("title"))?,
                 descending: input.descending,
                 context_id: "api".into(),
-                anchor_uri: input.anchor_uri,
+                anchor_key,
             }
         }
         _ => return Err(bad_request("Unknown media kind")),

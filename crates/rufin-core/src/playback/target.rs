@@ -172,7 +172,7 @@ impl PlaybackTarget {
                 sort: *sort,
                 descending: *descending,
                 context_id,
-                anchor_uri: None,
+                anchor_key: None,
             };
         }
         if let Self::SmartPlaylist(key) = target {

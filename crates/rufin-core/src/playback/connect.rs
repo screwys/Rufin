@@ -24,7 +24,6 @@ pub(super) struct RufinPlayback {
     volume: Mutex<VolumeRequests>,
     volume_changed: Arc<tokio::sync::Notify>,
     revision: Mutex<Option<u64>>,
-    content_id: Mutex<String>,
     cancelled: AtomicBool,
     observer: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
@@ -49,7 +48,7 @@ impl RufinPlayback {
     }
 
     async fn refresh(&self) -> Result<(), String> {
-        let mut state = self.connection()?.receiver_state(&self.peer).await?;
+        let state = self.connection()?.receiver_state(&self.peer).await?;
         if self.cancelled.load(Ordering::Acquire) {
             return Ok(());
         }
@@ -62,52 +61,50 @@ impl RufinPlayback {
                 .iter()
                 .map(|row| (&row.media_uri, row.position))
                 .ne(state.rows.iter().map(|row| (&row.media_uri, row.position)));
-        if changed {
-            let uris = state
-                .rows
-                .iter()
-                .map(|row| row.media_uri.clone())
-                .collect::<Vec<_>>();
-            let bindings = self
+        let restore = if changed {
+            let mut page = self
                 .database
-                .queue_artwork_for_uris(&uris)
+                .read_queue(library::QueueReadRequest {
+                    input: library::QueueInput::Items(
+                        state
+                            .rows
+                            .iter()
+                            .map(|row| (row.item.clone(), row.provenance.clone()))
+                            .collect(),
+                    ),
+                    context_title: None,
+                    anchor_index: 0,
+                    random_start: None,
+                    shuffled: None,
+                })
                 .await
-                .map_err(string_error)?
-                .into_iter()
-                .collect::<std::collections::HashMap<_, _>>();
-            for row in &mut state.rows {
-                row.item.artwork_binding = bindings.get(&row.media_uri).cloned().flatten();
+                .map_err(string_error)?;
+            for (entry, row) in page.entries.iter_mut().zip(&state.rows) {
+                entry.received_from_connect = row.received_from_connect;
             }
-        }
-        let restore = changed.then(|| library::QueueRestore {
-            ids: Arc::from([]),
-            entries: state
-                .rows
-                .iter()
-                .map(|row| library::QueueEntry {
-                    media_uri: row.media_uri.clone().into(),
-                    playlist_entry_id: row.playlist_entry_id.clone().map(Into::into),
-                    provenance: row.provenance.clone(),
-                    received_from_connect: row.received_from_connect,
-                })
-                .collect(),
-            order: (0..state.rows.len() as u32).collect(),
-            current_index: state
-                .current
-                .and_then(|position| position.checked_sub(state.offset)),
-            rows: state
-                .rows
-                .iter()
-                .cloned()
-                .map(|mut row| {
-                    row.position -= state.offset;
-                    Arc::new(row)
-                })
-                .collect(),
-            progress_millis: state.position.min(i64::MAX as u64) as i64,
-            repeat_mode: state.repeat,
-            shuffled: state.shuffle,
-        });
+            let rows = self
+                .database
+                .queue_rows_for_entries(
+                    &page.entries.iter().cloned().enumerate().collect::<Vec<_>>(),
+                    &ReadCancellation::new(),
+                )
+                .await
+                .map_err(string_error)?;
+            Some(library::QueueRestore {
+                ids: Arc::from([]),
+                entries: page.entries.into(),
+                order: (0..state.rows.len() as u32).collect(),
+                current_index: state
+                    .current
+                    .and_then(|position| position.checked_sub(state.offset)),
+                rows,
+                progress_millis: state.position.min(i64::MAX as u64) as i64,
+                repeat_mode: state.repeat,
+                shuffled: state.shuffle,
+            })
+        } else {
+            None
+        };
         self.playback
             .observe_external(
                 self.output.clone(),
@@ -132,20 +129,12 @@ impl RufinPlayback {
             })
             .map_err(string_error)?;
         *self.revision.lock().unwrap_or_else(|p| p.into_inner()) = Some(state.revision);
-        *self.content_id.lock().unwrap_or_else(|p| p.into_inner()) = state.content_id;
         Ok(())
     }
 
     pub(super) async fn snapshot(&self) -> Result<Option<playback::Continuation>, String> {
         let _command = self.commands.lock().await;
         self.connection()?.receiver_queue(&self.peer).await
-    }
-
-    pub(super) fn content_id(&self) -> String {
-        self.content_id
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone()
     }
 
     pub(super) async fn stop_continuation(
@@ -253,7 +242,6 @@ impl PlaybackOwner {
             shuffle: view.controls.shuffle_enabled,
             auto_dj: view.controls.auto_dj_enabled,
             auto_dj_threshold: usize::from(self.settings.load().ui.auto_dj_refill_threshold),
-            content_id: active.queue_content_id().map_err(string_error)?,
         })
     }
 
@@ -435,7 +423,6 @@ impl PlaybackOwner {
             volume: Mutex::new(VolumeRequests::default()),
             volume_changed,
             revision: Mutex::new(None),
-            content_id: Mutex::new(String::new()),
             cancelled: AtomicBool::new(false),
             observer: Mutex::new(None),
         });

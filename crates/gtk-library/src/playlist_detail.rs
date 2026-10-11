@@ -37,7 +37,7 @@ pub use library::PlaylistDetailPage as PlaylistDetailData;
 
 pub struct SmartPlaylistDetailData {
     pub summary: SmartPlaylistRow,
-    projection: PreparedTrackProjection<library::SmartPlaylistTrackRow>,
+    projection: PreparedTrackProjection<library::TrackRow>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -180,7 +180,7 @@ impl CatalogUi {
         let settings = detail.projection.request.settings;
         let rows_database = self.library.clone();
         let load = Rc::new(
-            move |_: Vec<String>,
+            move |_: Vec<library::TrackKey>,
                   range: std::ops::Range<usize>,
                   request: TrackProjectionRequest,
                   cancellation: ReadCancellation| {
@@ -731,7 +731,7 @@ async fn prepare_smart_playlist_projection(
     request: TrackProjectionRequest,
     window: library::RouteSeedWindow,
     cancellation: &ReadCancellation,
-) -> Result<PreparedTrackProjection<library::SmartPlaylistTrackRow>, String> {
+) -> Result<PreparedTrackProjection<library::TrackRow>, String> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_secs() as i64);
@@ -821,6 +821,7 @@ mod tests {
         let owner = PlaylistDetailOwner::Saved {
             key: PlaylistKey::from_raw(1),
             summary: PlaylistRow {
+                source_owned: true,
                 writable: true,
                 metadata_writable: true,
                 playlist_key: PlaylistKey::from_raw(1),

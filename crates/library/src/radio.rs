@@ -82,7 +82,7 @@ impl Database {
                     .push_bind(key);
             }
             RadioSeed::Playlist(key) => {
-                query.push("SELECT COALESCE(playlist.source_key,(SELECT track.source_key FROM main.playlist_entries entry JOIN tracks track USING(media_uri) WHERE entry.playlist_key=playlist.playlist_key ORDER BY entry.position LIMIT 1)) source_key,CASE WHEN playlist.source_key IS NOT NULL THEN playlist.object_id END object_id FROM playlists playlist WHERE playlist.playlist_key=").push_bind(key);
+                query.push("SELECT COALESCE(playlist.source_key,(SELECT track.source_key FROM playlist_entries entry JOIN tracks track USING(track_key) WHERE entry.playlist_key=playlist.playlist_key ORDER BY entry.position LIMIT 1)) source_key,CASE WHEN playlist.owner='source' THEN playlist.object_id END object_id FROM playlists playlist WHERE playlist.playlist_key=").push_bind(key);
             }
         }
         query.push(") seed JOIN sources ON sources.source_key=seed.source_key");
@@ -112,7 +112,7 @@ impl Database {
             row.push_bind(id).push_bind(position as i64);
         });
         query.push(") SELECT track.media_uri FROM requested JOIN tracks track ON track.object_id=requested.object_id WHERE track.source_key=").push_bind(source)
-            .push(" AND track.media_uri NOT IN (SELECT media_uri FROM queue_entries)");
+            .push(" AND track.track_key NOT IN (SELECT track_key FROM queue_entries)");
         match seed {
             RadioSeed::Track(uri) => {
                 query.push(" AND track.media_uri<>").push_bind(uri);
@@ -124,7 +124,7 @@ impl Database {
                     .push(")");
             }
             RadioSeed::Playlist(key) => {
-                query.push(" AND track.media_uri IS NOT (SELECT entry.media_uri FROM playlist_entries entry JOIN tracks seed ON seed.media_uri=entry.media_uri WHERE entry.playlist_key=").push_bind(key)
+                query.push(" AND track.media_uri IS NOT (SELECT seed.media_uri FROM playlist_entries entry JOIN tracks seed USING(track_key) WHERE entry.playlist_key=").push_bind(key)
                     .push(" AND seed.source_key=").push_bind(source).push(" ORDER BY entry.position LIMIT 1)");
             }
             _ => {}
@@ -150,7 +150,7 @@ impl Database {
         require_radio_bounds(extra_excluded.len(), requested)?;
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let (seed_kind, seed_raw) = if let RadioSeed::Playlist(playlist) = seed {
-            let first = sqlx::query_scalar::<_, TrackKey>("SELECT track.track_key FROM playlist_entries entry JOIN tracks track ON track.media_uri=entry.media_uri AND track.source_key=?1 WHERE entry.playlist_key=?2 ORDER BY entry.position LIMIT 1")
+            let first = sqlx::query_scalar::<_, TrackKey>("SELECT track.track_key FROM playlist_entries entry JOIN tracks track ON track.track_key=entry.track_key AND track.source_key=?1 WHERE entry.playlist_key=?2 ORDER BY entry.position LIMIT 1")
                 .bind(source).bind(playlist).fetch_optional(&mut *connection).await?;
             (0, first.map(|key| key.raw()))
         } else {
@@ -173,7 +173,7 @@ impl Database {
             }
         };
         let max_key = sqlx::query_scalar::<_, i64>(
-            "SELECT COALESCE(max(track_key),0) FROM tracks WHERE source_key=?1",
+            "SELECT COALESCE(max(track_key),0) FROM tracks WHERE indexed AND source_key=?1",
         )
         .bind(source)
         .fetch_one(&mut *connection)
@@ -212,7 +212,7 @@ impl Database {
             }
             query.push(
                 "SELECT track.track_key,track.media_uri FROM tracks AS track
-             WHERE track.source_key=",
+             WHERE track.indexed AND track.source_key=",
             );
             query
                 .push_bind(source)
@@ -246,7 +246,7 @@ impl Database {
                     SELECT 1 FROM album_genres WHERE album_key=track.album_key AND genre_key IN seed_genres
                 ))");
             }
-            query.push(" AND track.media_uri NOT IN (SELECT media_uri FROM queue_entries)");
+            query.push(" AND track.track_key NOT IN (SELECT track_key FROM queue_entries)");
             if !extra_excluded.is_empty() || !result.is_empty() {
                 query.push(" AND track.media_uri NOT IN (");
                 let mut separated = query.separated(",");
@@ -301,7 +301,7 @@ impl Database {
         require_radio_bounds(extra_excluded.len(), requested)?;
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let max_key = sqlx::query_scalar::<_, i64>(
-            "SELECT COALESCE(max(track_key),0) FROM tracks WHERE source_key=?1",
+            "SELECT COALESCE(max(track_key),0) FROM tracks WHERE indexed AND source_key=?1",
         )
         .bind(source)
         .fetch_one(&mut *connection)
@@ -317,7 +317,7 @@ impl Database {
         loop {
             let mut query = QueryBuilder::<Sqlite>::new(
                 "SELECT track.track_key,track.media_uri FROM tracks AS track
-             WHERE track.source_key=",
+             WHERE track.indexed AND track.source_key=",
             );
             query
                 .push_bind(source)
@@ -355,30 +355,14 @@ impl Database {
                 .push_bind(criteria.played.code())
                 .push("=0 OR (")
                 .push_bind(criteria.played.code())
-                .push(
-                    "=1 AND NOT EXISTS (
-                 SELECT 1 FROM activity_baseline AS baseline
-                 WHERE baseline.source_key=track.source_key
-                   AND baseline.track_object_id=track.object_id
-                   AND baseline.period='lifetime' AND baseline.item_kind='track'
-                   AND baseline.play_count>0
-             ) AND NOT EXISTS (
-                 SELECT 1 FROM listens WHERE media_uri=track.media_uri
-             )) OR (",
-                )
+                .push("=1 AND (")
+                .push(crate::tracks::displayed_stat("play_count"))
+                .push(")=0) OR (")
                 .push_bind(criteria.played.code())
-                .push(
-                    "=2 AND (EXISTS (
-                 SELECT 1 FROM activity_baseline AS baseline
-                 WHERE baseline.source_key=track.source_key
-                   AND baseline.track_object_id=track.object_id
-                   AND baseline.period='lifetime' AND baseline.item_kind='track'
-                   AND baseline.play_count>0
-             ) OR EXISTS (
-                 SELECT 1 FROM listens WHERE media_uri=track.media_uri
-                    ))))",
-                );
-            query.push(" AND track.media_uri NOT IN (SELECT media_uri FROM queue_entries)");
+                .push("=2 AND (")
+                .push(crate::tracks::displayed_stat("play_count"))
+                .push(")>0))");
+            query.push(" AND track.track_key NOT IN (SELECT track_key FROM queue_entries)");
             if !extra_excluded.is_empty() {
                 query.push(" AND track.media_uri NOT IN (");
                 let mut separated = query.separated(",");

@@ -104,7 +104,7 @@ pub fn write_reviewed_metadata(
                     .map_err(string_error)
                     .and_then(|result| result.map_err(string_error));
                 }
-                let outcome = match (*outcome, &refresh) {
+                let outcome = match (outcome.clone(), &refresh) {
                     (library::ScanOutcome::Identical(publication), Ok(true)) => {
                         library::ScanOutcome::ArtworkChanged(publication)
                     }

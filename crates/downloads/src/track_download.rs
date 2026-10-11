@@ -1170,7 +1170,7 @@ pub(super) async fn attach_downloaded_files(
             .await
             .map_err(|error| error.to_string())?
         {
-            if track.source_key != source_key {
+            if track.source_key != Some(source_key) {
                 continue;
             }
             let Some(paths) = by_media

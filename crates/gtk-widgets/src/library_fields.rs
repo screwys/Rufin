@@ -99,25 +99,6 @@ impl TrackPresentation for library::HistoryRow {
     }
 }
 
-impl TrackPresentation for library::SmartPlaylistTrackRow {
-    fn track_number(&self) -> Option<i64> {
-        self.track_number
-    }
-    track_presentation_fields!();
-    fn links(&self, field: LibraryField) -> crate::detail_links::DetailLinks {
-        crate::detail_links::metadata_links(
-            field,
-            &self.field(field),
-            self.album_media_uri.as_deref(),
-            &self.artists,
-            &self.album_artists,
-        )
-    }
-    fn field(&self, field: LibraryField) -> String {
-        rufin_core::settings::presentation::smart_track_field(self, field)
-    }
-}
-
 impl TrackPresentation for QueuePageRow {
     fn media_uri(&self) -> &str {
         &self.media_uri

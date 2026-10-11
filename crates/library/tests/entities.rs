@@ -169,15 +169,20 @@ async fn track_sorts_keep_nulls_last_and_title_ties_in_both_directions() {
 }
 
 #[tokio::test]
-async fn repeated_album_cards_keep_scoped_counts_and_legacy_activity_precedence() {
+async fn repeated_album_cards_keep_whole_counts_and_separate_source_activity() {
     let fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
-    sqlx::raw_sql("DELETE FROM catalog.activity_baseline;
-      INSERT INTO main.legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at)
+    sqlx::raw_sql("UPDATE sources SET kind='subsonic';
+      INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at)
       VALUES('source','lifetime','track','track-0',7,0,100),('source','lifetime','track','track-1',99,0,900);
-      INSERT INTO catalog.activity_baseline(source_key,period,item_kind,track_object_id,play_count,skip_count,last_played_at)
-      SELECT source_key,'lifetime','track','track-1',3,0,200 FROM sources;")
+      UPDATE tracks SET source_play_count=3,source_last_played=200 WHERE object_id='track-1';")
         .execute(&mut raw).await.unwrap();
+    library::Scan::begin_items(&fixture.database, "source")
+        .await
+        .unwrap()
+        .finish()
+        .await
+        .unwrap();
     let cancel = ReadCancellation::new();
     let keys = [fixture.albums[0], fixture.albums[0]];
     let rows = fixture
@@ -188,10 +193,14 @@ async fn repeated_album_cards_keep_scoped_counts_and_legacy_activity_precedence(
     assert_eq!(rows.len(), 2);
     for row in &rows {
         assert_eq!(row.track_count, 2);
-        assert_eq!(row.play_count, 10);
+        assert_eq!(row.play_count, 3);
         assert_eq!(row.last_played, Some(200));
         assert_eq!(row.album_artists.len(), 1);
     }
+    sqlx::query("UPDATE sources SET kind='local'")
+        .execute(&mut raw)
+        .await
+        .unwrap();
     sqlx::query("DELETE FROM track_folders WHERE track_key=?1")
         .bind(fixture.tracks[1])
         .execute(&mut raw)
@@ -203,9 +212,9 @@ async fn repeated_album_cards_keep_scoped_counts_and_legacy_activity_precedence(
         .await
         .unwrap();
     for row in &rows {
-        assert_eq!(row.track_count, 1);
-        assert_eq!(row.play_count, 7);
-        assert_eq!(row.last_played, Some(100));
+        assert_eq!(row.track_count, 2);
+        assert_eq!(row.play_count, 106);
+        assert_eq!(row.last_played, Some(900));
     }
     let artist = fixture
         .database
@@ -218,12 +227,12 @@ async fn repeated_album_cards_keep_scoped_counts_and_legacy_activity_precedence(
         )
         .await
         .unwrap();
-    assert_eq!(artist[0].play_count, 7);
-    assert_eq!(artist[0].last_played, Some(100));
+    assert_eq!(artist[0].play_count, 106);
+    assert_eq!(artist[0].last_played, Some(900));
 }
 
 #[tokio::test]
-async fn named_card_batches_preserve_requested_rows_and_scoped_cover_order() {
+async fn named_card_batches_preserve_requested_rows_and_whole_cover_order() {
     let fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
     for (index, album) in fixture.albums.iter().enumerate() {
@@ -245,7 +254,7 @@ async fn named_card_batches_preserve_requested_rows_and_scoped_cover_order() {
     let cancel = ReadCancellation::new();
     for (folder, covers, count) in [
         (None, vec![vec![1], vec![2]], 4),
-        (Some(fixture.folder), vec![vec![1]], 2),
+        (Some(fixture.folder), vec![vec![1], vec![2]], 4),
     ] {
         let genres = fixture
             .database
@@ -319,7 +328,7 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
             genre.duration_millis,
             genre.downloaded_count
         ),
-        (0, 0, 0, 0)
+        (4, 2, 726000, 0)
     );
     assert!(genre.representative_artwork.is_empty());
     let mood = fixture
@@ -335,7 +344,7 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
             mood.duration_millis,
             mood.downloaded_count
         ),
-        (0, 0, 0)
+        (4, 726000, 0)
     );
     assert!(mood.representative_artwork.is_empty());
     let genre = fixture
@@ -346,7 +355,7 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
         .expect("existing genre detail");
     assert_eq!(
         (genre.track_count, genre.album_count, genre.duration_millis),
-        (0, 0, 0)
+        (4, 2, 726000)
     );
     assert!(genre.representative_artwork.is_empty());
     let mood = fixture
@@ -355,7 +364,7 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
         .await
         .unwrap()
         .expect("existing mood detail");
-    assert_eq!((mood.track_count, mood.duration_millis), (0, 0));
+    assert_eq!((mood.track_count, mood.duration_millis), (4, 726000));
     assert!(mood.representative_artwork.is_empty());
     for sort in [GenreSort::Title, GenreSort::TrackCount] {
         let (count, _, rows) = fixture
@@ -634,7 +643,7 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
         assert!(
             page.first_rows
                 .iter()
-                .all(|row| row.source_key == fixture.source)
+                .all(|row| row.source_key == Some(fixture.source))
         );
         assert_eq!(
             fixture
@@ -669,12 +678,19 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
         .await;
         assert_eq!(state.entries.len(), total);
         assert_eq!(
-            state
-                .entries
-                .iter()
-                .map(|entry| entry.media_uri.as_ref())
-                .collect::<Vec<_>>(),
-            order.iter().map(String::as_str).collect::<Vec<_>>()
+            fixture
+                .database
+                .track_uris(
+                    &state
+                        .entries
+                        .iter()
+                        .map(|entry| entry.track_key)
+                        .collect::<Vec<_>>(),
+                    &ReadCancellation::new()
+                )
+                .await
+                .unwrap(),
+            order
         );
         assert!(state.rows.len() <= 100);
     }
@@ -1260,6 +1276,12 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         .execute(&mut raw)
         .await
         .expect("separate direct Track Artist from Album Artist");
+    library::Scan::begin_items(&fixture.database, "source")
+        .await
+        .unwrap()
+        .finish()
+        .await
+        .unwrap();
     let album_artist_uri: String =
         sqlx::query_scalar("SELECT media_uri FROM artists WHERE artist_key=?1")
             .bind(fixture.artists[0])
@@ -1641,7 +1663,6 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
             "track-0",
             Some("album-a"),
             "Edited",
-            "edited album a artist a changed",
             "Album A",
             "Artist A",
             "edited",
@@ -1981,6 +2002,12 @@ async fn album_genres_supply_browsing_and_playback_without_changing_track_tags()
         .bind(vec![1u8])
         .bind(fixture.albums[0])
         .execute(&mut raw)
+        .await
+        .unwrap();
+    library::Scan::begin_items(&fixture.database, "source")
+        .await
+        .unwrap()
+        .finish()
         .await
         .unwrap();
     let cancel = ReadCancellation::new();

@@ -576,30 +576,17 @@ impl AndroidBrowseQuery {
                     let order = self
                         .history_rows(0, usize::MAX)
                         .await
-                        .map_err(error)?
-                        .into_iter()
-                        .map(|row| row.media_uri)
-                        .collect::<Vec<_>>();
+                        .map_err(error)?;
                     let anchor = order
                         .iter()
-                        .position(|uri| uri == &media_uri)
+                        .position(|row| row.media_uri == media_uri)
                         .ok_or_else(|| error("Track is no longer in this route"))?;
+                    let context: Arc<str> = format!("history:{}:{}", if self.history_current_only {self.selected().source_id.as_str()} else {"all"}, self.filter).into();
+                    let keys = order.into_iter().map(|row| row.track_key.map(library::TrackKey::from_raw)
+                        .ok_or_else(|| error("Track is no longer available"))).collect::<Result<Vec<_>,AndroidError>>()?;
                     self.queue.play(
                         playback::PlayRequest::captured(
-                            library::QueueInput::Uris {
-                                order: order.into(),
-                                context_id: format!(
-                                    "history:{}:{}",
-                                    if self.history_current_only {
-                                        self.selected().source_id.as_str()
-                                    } else {
-                                        "all"
-                                    },
-                                    self.filter
-                                )
-                                .into(),
-                                source_start: 0,
-                            },
+                            library::QueueInput::Tracks { order: keys.into(), context_id: context, source_start: 0 },
                             anchor,
                             placement,
                             false,
@@ -652,7 +639,7 @@ impl AndroidBrowseQuery {
                                 sort: self.album_tracks.sort_key.track_sort(),
                                 descending: self.album_tracks.descending,
                                 context_id: context.into(),
-                                anchor_uri: Some(media_uri),
+                                anchor_key: Some(track.track_key),
                             },
                             0,
                             placement,
@@ -700,19 +687,16 @@ impl AndroidBrowseQuery {
                         .map_err(error)?
                         .into_iter()
                         .filter(|row| row.kind == "track")
-                        .map(|row| row.media_uri)
                         .collect::<Vec<_>>();
                     let anchor = order
                         .iter()
-                        .position(|uri| uri == &media_uri)
+                        .position(|row| row.media_uri == media_uri)
                         .ok_or_else(|| error("Track is no longer in this route"))?;
+                    let keys = order.into_iter().map(|row| row.track_key.map(library::TrackKey::from_raw)
+                        .ok_or_else(|| error("Track is no longer available"))).collect::<Result<Vec<_>,AndroidError>>()?;
                     self.queue.play(
                         playback::PlayRequest::captured(
-                            library::QueueInput::Uris {
-                                order: order.into(),
-                                context_id: context,
-                                source_start: 0,
-                            },
+                            library::QueueInput::Tracks { order: keys.into(), context_id: context, source_start: 0 },
                             anchor,
                             placement,
                             false,
@@ -722,6 +706,7 @@ impl AndroidBrowseQuery {
                     );
                     return Ok(());
                 }
+                let anchor_key = self.database.track_key_by_uri(&media_uri, &ReadCancellation::new()).await.map_err(error)?;
                 let anchor_entry = if let Route::PlaylistDetail(key) = self.route {
                     self.database
                         .playlist_entries_page(
@@ -750,7 +735,7 @@ impl AndroidBrowseQuery {
                         descending: self.descending,
                         context_id: context,
                         anchor_entry,
-                        anchor_uri: Some(media_uri),
+                        anchor_key,
                     },
                     _ => library::QueueInput::Query {
                         query: match self.route {
@@ -772,7 +757,7 @@ impl AndroidBrowseQuery {
                         sort: self.sort.track_sort(),
                         descending: self.descending,
                         context_id: context,
-                        anchor_uri: Some(media_uri),
+                        anchor_key,
                     },
                 };
                 self.queue.play(

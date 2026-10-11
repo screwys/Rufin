@@ -2955,7 +2955,6 @@ mod tests {
             track_object_id,
             None,
             "Track",
-            "track artist album",
             "Album",
             "Artist",
             "track",

@@ -5,7 +5,6 @@ async fn track(scan: &mut Scan, favorite: Option<bool>, play_count: Option<i64>)
         "track",
         Some("album"),
         "Track",
-        "track",
         "Album",
         "Artist",
         "track",
@@ -321,8 +320,12 @@ async fn growing_and_reordering_a_playlist_preserves_occurrence_keys() {
             scan.finish().await.unwrap(),
             ScanOutcome::PlaylistsChanged(_)
         ));
-        let rows=sqlx::query_as::<_,(String,i64)>("SELECT object_id,playlist_entry_key FROM catalog.native_playlist_entries ORDER BY position")
-            .fetch_all(&mut raw).await.unwrap();
+        let rows = sqlx::query_as::<_, (String, i64)>(
+            "SELECT object_id,playlist_entry_key FROM playlist_entries ORDER BY position",
+        )
+        .fetch_all(&mut raw)
+        .await
+        .unwrap();
         assert_eq!(
             rows.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(),
             ids
@@ -337,8 +340,8 @@ async fn growing_and_reordering_a_playlist_preserves_occurrence_keys() {
 async fn unchanged_point_reads_do_not_rewrite_tracks_or_albums() {
     let (directory, database) = fixture().await;
     let mut raw = super::support::connection(&directory.path().join("library.sqlite3")).await;
-    sqlx::raw_sql("CREATE TRIGGER catalog.no_track_rewrite BEFORE UPDATE ON tracks BEGIN SELECT RAISE(FAIL,'unchanged track rewritten'); END;
-        CREATE TRIGGER catalog.no_album_rewrite BEFORE UPDATE ON albums BEGIN SELECT RAISE(FAIL,'unchanged album rewritten'); END;")
+    sqlx::raw_sql("CREATE TRIGGER no_track_rewrite BEFORE UPDATE ON tracks BEGIN SELECT RAISE(FAIL,'unchanged track rewritten'); END;
+        CREATE TRIGGER no_album_rewrite BEFORE UPDATE ON albums BEGIN SELECT RAISE(FAIL,'unchanged album rewritten'); END;")
         .execute(&mut raw).await.unwrap();
     let mut scan = Scan::begin_items(&database, "source").await.unwrap();
     track(&mut scan, None, None).await;

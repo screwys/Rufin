@@ -119,14 +119,14 @@ pub(crate) async fn finish_scan<T>(
     result: SourceResult<T>,
 ) -> SourceResult<(T, library::ScanOutcome)> {
     if result.is_err() {
-        scan.incomplete();
-        scan.discard_pending_artwork().await?;
+        scan.interrupted();
     }
     let outcome = scan.finish().await?;
-    result
-        .map(|value| (value, outcome))
-        .map_err(|error| SourceError::IncompleteScan {
+    match result {
+        Ok(value) => Ok((value, outcome)),
+        Err(error) => Err(SourceError::IncompleteScan {
             outcome,
             error: Box::new(error),
-        })
+        }),
+    }
 }

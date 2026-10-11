@@ -54,7 +54,14 @@ impl JellyfinEmbySource {
         &self,
         track: library::TrackRow,
     ) -> Result<TrackMetadata, SourceMetadataError> {
-        let raw = raw_id(self.kind, &track.object_id, "track")?;
+        let raw = raw_id(
+            self.kind,
+            track
+                .object_id
+                .as_deref()
+                .ok_or(SourceMetadataError::Unavailable)?,
+            "track",
+        )?;
         let (item, editor) = self.read_item_and_editor(raw).await?;
         let source_values = track_values(self.kind, &item, &track);
         let mut values = source_values.clone();
@@ -1132,10 +1139,10 @@ mod tests {
             audio_properties: Default::default(),
             source_name: String::new(),
             source_path: None,
-            source_id: "source".to_string(),
+            source_id: Some("source".to_string()),
             track_key: library::TrackKey::from_raw(1),
-            source_key: library::SourceKey::from_raw(1),
-            object_id: "jellyfin:track:track".to_string(),
+            source_key: Some(library::SourceKey::from_raw(1)),
+            object_id: Some("jellyfin:track:track".to_string()),
             album_key: None,
             album_media_uri: None,
             title: "Fallback".to_string(),

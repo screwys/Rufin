@@ -223,38 +223,6 @@ pub fn playlist_entry_field(entry: &library::PlaylistEntryRow, field: LibraryFie
     }
 }
 
-pub fn smart_track_field(row: &library::SmartPlaylistTrackRow, field: LibraryField) -> String {
-    match field {
-        LibraryField::Bitrate
-        | LibraryField::SampleRate
-        | LibraryField::BitDepth
-        | LibraryField::Channels => audio_property_field(&row.audio_properties, field),
-        LibraryField::Format => row.source_format.clone().unwrap_or_default(),
-        LibraryField::FilePath => row.source_path.clone().unwrap_or_default(),
-        LibraryField::Source => row.source_name.clone().unwrap_or_default(),
-        LibraryField::Title | LibraryField::TitleMerged => row.title.clone(),
-        LibraryField::Artist => row.artist.clone(),
-        LibraryField::Album => row.album.clone(),
-        LibraryField::AlbumArtist => row.album_display_artist.clone().unwrap_or_default(),
-        LibraryField::Year => optional_year(row.year),
-        LibraryField::ReleaseDate => row.release_date.clone().unwrap_or_default(),
-        LibraryField::DateAdded => row.date_added.clone().unwrap_or_default(),
-        LibraryField::LastPlayed => display_unix_date(row.last_played),
-        LibraryField::PlayCount => count(row.play_count),
-        LibraryField::UserRating => stored_rating(row.rating),
-        LibraryField::Genre => row.genre.clone(),
-        LibraryField::Bpm => row.bpm.map(|value| value.to_string()).unwrap_or_default(),
-        LibraryField::DiscNumber => row
-            .disc_number
-            .map(|value| value.to_string())
-            .unwrap_or_default(),
-        LibraryField::TrackNumber => optional_track_number(row.disc_number, row.track_number),
-        LibraryField::Duration => format_duration((row.duration_millis.max(0) / 1_000) as u32),
-        LibraryField::Favorite => favorite_text(row.favorite),
-        _ => String::new(),
-    }
-}
-
 pub fn audio_property_field(properties: &library::AudioProperties, field: LibraryField) -> String {
     match field {
         LibraryField::Bitrate => properties

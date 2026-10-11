@@ -74,7 +74,7 @@ pub enum Command {
     ActivateOccurrence(u64),
     Remove(usize),
     RemoveMany(QueueSelection),
-    Forget(Vec<String>),
+    Forget(Vec<library::TrackKey>),
     Reorder {
         selection: QueueSelection,
         target: playback::QueueReorderTarget,
@@ -111,6 +111,7 @@ pub enum Command {
     SetVisualizerEnabled(bool),
     StreamInputsChanged,
     CatalogChanged,
+    RekeySongs(Arc<[(library::TrackKey, library::TrackKey)]>),
 }
 
 impl Command {
@@ -509,12 +510,12 @@ impl Player {
                         .current_index
                         .and_then(|position| queue.order.get(position))
                         .and_then(|member| queue.entries.get(*member as usize))
-                        .map(|entry| &entry.media_uri)
+                        .map(|entry| entry.track_key)
                         == self
                             .sequence
                             .selected_index()
                             .and_then(|position| self.sequence.entry_at(position))
-                            .map(|entry| &entry.media_uri)
+                            .map(|entry| entry.track_key)
             })
         {
             observation.position_millis = Some(self.sequence.progress_millis());
@@ -890,8 +891,8 @@ impl Player {
     ) -> Result<(), SequenceError> {
         request.shuffled_start &=
             self.sequence.shuffle_enabled() && request.placement == Placement::Now;
-        if let Some((context, media_uri, rank)) = request.activation_context()
-            && self.activate_context(&context, &media_uri, rank, sample)
+        if let Some((context, track_key, rank)) = request.activation_context()
+            && self.activate_context(&context, track_key, rank, sample)
         {
             return Ok(());
         }
@@ -983,6 +984,11 @@ impl Player {
                 self.send_backend(BackendCommand::SetVisualizerEnabled(enabled));
             }),
             Command::StreamInputsChanged => Ok(self.stream_inputs_changed()),
+            Command::RekeySongs(pairs) => Ok({
+                let mut changed = false;
+                self.edit_queue(|sequence| changed = sequence.rekey_songs(&pairs));
+                self.dirty |= changed;
+            }),
             Command::CatalogChanged => Ok({
                 self.owner()
                     .refresh_artwork(self.playback.clone(), self.sequence.artwork_uris());
@@ -1368,14 +1374,21 @@ impl Player {
         let database = owner.database.clone();
         let playback = self.playback.clone();
         self.pending_hydration = Some(owner.runtime.spawn(async move {
-            let uris = entries
+            let requested = entries
                 .iter()
-                .map(|(_, entry)| entry.media_uri.to_string())
+                .enumerate()
+                .map(|(position, (_, entry))| (position, entry.clone()))
                 .collect::<Vec<_>>();
             let result = database
-                .queue_items_for_uris(&uris, &library::ReadCancellation::new())
+                .queue_rows_for_entries(&requested, &library::ReadCancellation::new())
                 .await
-                .map(|items| entries.into_iter().map(|(id, _)| id).zip(items).collect())
+                .map(|rows| {
+                    entries
+                        .into_iter()
+                        .map(|(id, _)| id)
+                        .zip(rows.into_iter().map(|row| row.item.clone()))
+                        .collect()
+                })
                 .map_err(super::string_error);
             playback.post(move |player, sample| player.complete_queue_metadata(result, sample));
         }));
@@ -1530,13 +1543,13 @@ impl Player {
     pub(super) fn activate_context(
         &mut self,
         context_id: &str,
-        media_uri: &str,
+        track_key: library::TrackKey,
         source_rank: usize,
         sample: &ClockSample,
     ) -> bool {
         let Some(index) = self
             .sequence
-            .context_index(context_id, media_uri, source_rank)
+            .context_index(context_id, track_key, source_rank)
         else {
             return false;
         };
@@ -1590,16 +1603,16 @@ impl Player {
         self.edit_queue(|sequence| sequence.remove(selection));
         self.changed_queue(removing_current, false, sample);
     }
-    fn forget(&mut self, uris: &[String], sample: &ClockSample) {
-        let uris = uris
+    fn forget(&mut self, keys: &[library::TrackKey], sample: &ClockSample) {
+        let keys = keys
             .iter()
-            .map(String::as_str)
+            .copied()
             .collect::<std::collections::HashSet<_>>();
         let ids = (0..self.sequence.total())
             .filter(|&position| {
                 self.sequence
                     .entry_at(position)
-                    .is_some_and(|entry| uris.contains(entry.media_uri.as_ref()))
+                    .is_some_and(|entry| keys.contains(&entry.track_key))
             })
             .collect::<Vec<_>>();
         let previous = self.sequence.selected_index();
@@ -2499,15 +2512,17 @@ impl Player {
             activity
         {
             let track = row.item.clone();
-            self.owner()
-                .record_activity(Box::new(playback::ActivityListen {
+            self.owner().record_activity(
+                row.track_key,
+                Box::new(playback::ActivityListen {
                     play_id: play_id.clone(),
                     item: track.clone(),
                     started_at_unix_seconds: started_at,
                     local_period,
                     listened_millis,
                     skipped: false,
-                }));
+                }),
+            );
         }
 
         if activity_qualified && let Some(current) = self.current_run.as_ref() {
@@ -2556,15 +2571,17 @@ impl Player {
                     current.started_at_unix_seconds,
                 )
             {
-                self.owner()
-                    .record_activity(Box::new(playback::ActivityListen {
+                self.owner().record_activity(
+                    current.row.track_key,
+                    Box::new(playback::ActivityListen {
                         play_id: current.play_id,
                         item: track,
                         started_at_unix_seconds: started_at,
                         local_period: period,
                         listened_millis: current.audible_millis,
                         skipped: true,
-                    }));
+                    }),
+                );
             }
         }
         if reason == RunEndReason::Completed {
@@ -2709,11 +2726,7 @@ impl Player {
                     Arc::new(CurrentMedia {
                         id: CurrentMediaId {
                             run: self.current_run(),
-                            media_uri: sequence
-                                .entry_at(entry.position)
-                                .expect("current queue member")
-                                .media_uri
-                                .clone(),
+                            media_uri: entry.media_uri.clone().into(),
                         },
                         row: projected_row(entry),
                     })

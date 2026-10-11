@@ -68,12 +68,12 @@ async fn paused_queue_writer_retains_only_latest_membership_and_one_wakeup() {
         assert_eq!(update.entries.len(), 511);
         assert_eq!(update.ordinary.as_ref().unwrap().rows.len(), 511);
         assert_eq!(update.order.as_ref().unwrap().rows.len(), 511);
+        let current = sequence.snapshot();
         assert!(
-            update.entries.values().all(|entry| {
-                entry
-                    .media_uri
-                    .starts_with(&format!("https://example.test/{replacement}/"))
-            }),
+            update
+                .entries
+                .values()
+                .all(|entry| current.entries.contains(entry)),
             "superseded membership must not remain in pending Store work"
         );
     }
@@ -182,16 +182,26 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
     assert!(work.is_empty());
 
     let mut failed = None;
+    let later = database
+        .read_queue(library::QueueReadRequest {
+            context_title: None,
+            input: QueueInput::MediaUris {
+                order: ["failed", "later"]
+                    .map(|suffix| format!("https://example.test/{suffix}"))
+                    .into(),
+                provenance: playback::Provenance::Manual,
+            },
+            anchor_index: 0,
+            random_start: None,
+            shuffled: None,
+        })
+        .await
+        .unwrap();
     database.clone().close().await.unwrap();
-    for suffix in ["failed", "later"] {
+    for (index, entry) in later.entries.into_iter().enumerate() {
         sequence.add_page(
             library::QueueReadPage {
-                entries: vec![library::QueueEntry {
-                    media_uri: format!("https://example.test/{suffix}").into(),
-                    playlist_entry_id: None,
-                    provenance: playback::Provenance::Manual,
-                    received_from_connect: false,
-                }],
+                entries: vec![entry],
                 rows: Vec::new(),
                 current_index: 0,
             },
@@ -200,7 +210,7 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
             None,
         );
         enqueue_queue_save(&pending, &sender, sequence.take_persistence().unwrap());
-        if suffix == "failed" {
+        if index == 0 {
             assert!(
                 save_pending_queue(&database, &pending, &mut failed)
                     .await

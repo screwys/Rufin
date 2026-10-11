@@ -13,11 +13,11 @@ async fn playlist_pin_import_reads_only_the_owning_sources_identities() {
         .unwrap();
     database.create_playlist(None, "Global", &[]).await.unwrap();
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("INSERT INTO catalog.native_playlists(source_key,object_id,name,normalized_name,sort_text) VALUES(?1,'native','A native','a native','a native')")
+    sqlx::query("INSERT INTO playlists(source_key,owner,position,object_id,name,normalized_name,sort_text) VALUES(?1,'source',(SELECT COALESCE(max(position)+1,0) FROM playlists),'native','A native','a native','a native')")
         .bind(fixture.source).execute(&mut raw).await.unwrap();
     let other: library::SourceKey = sqlx::query_scalar("INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('emby','Emby','emby',zeroblob(32)) RETURNING source_key")
         .fetch_one(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO catalog.native_playlists(source_key,object_id,name,normalized_name,sort_text) VALUES(?1,'other','Other','other','other')")
+    sqlx::query("INSERT INTO playlists(source_key,owner,position,object_id,name,normalized_name,sort_text) VALUES(?1,'source',(SELECT COALESCE(max(position)+1,0) FROM playlists),'other','Other','other','other')")
         .bind(other).execute(&mut raw).await.unwrap();
     drop(raw);
     let cancel = ReadCancellation::new();
@@ -41,10 +41,6 @@ async fn playlist_pin_import_reads_only_the_owning_sources_identities() {
 async fn playlist_destinations_keep_global_rank_without_a_current_source() {
     let fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("INSERT INTO main.source_ids(object_id) VALUES('other')")
-        .execute(&mut raw)
-        .await
-        .unwrap();
     let other: library::SourceKey = sqlx::query_scalar(
         "INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('other','Other','other',zeroblob(32)) RETURNING source_key",
     ).fetch_one(&mut raw).await.expect("other configured source");
@@ -410,11 +406,11 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
     );
 
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("DELETE FROM tracks WHERE media_uri=?1")
+    sqlx::query("UPDATE tracks SET indexed=0 WHERE media_uri=?1")
         .bind(&fixture.track_uris[1])
         .execute(&mut raw)
         .await
-        .expect("remove catalog row");
+        .expect("remove source membership");
     drop(raw);
     let entries = fixture
         .database
@@ -453,7 +449,7 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
             .playlist_owner(playlist, &ReadCancellation::new())
             .await
             .expect("read global Playlist owner"),
-        Some((None, None))
+        Some((None, None, false))
     );
     assert!(
         fixture
@@ -566,10 +562,6 @@ async fn provider_playlist_payload_resolves_uri_only_at_the_protocol_boundary() 
 async fn source_owned_playlist_additions_report_the_destination_without_partial_writes() {
     let fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("INSERT INTO main.source_ids(object_id) VALUES('destination')")
-        .execute(&mut raw)
-        .await
-        .unwrap();
     let destination: library::SourceKey = sqlx::query_scalar(
         "INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('destination','Destination','destination',zeroblob(32)) RETURNING source_key",
     ).fetch_one(&mut raw).await.unwrap();

@@ -34,14 +34,29 @@ pub async fn persist_queue(
     shuffled: bool,
 ) {
     let _ = source;
+    let captured = database
+        .read_queue(library::QueueReadRequest {
+            context_title: None,
+            input: library::QueueInput::Items(
+                occurrences
+                    .iter()
+                    .map(|row| (row.item.clone(), row.provenance.clone()))
+                    .collect(),
+            ),
+            anchor_index: current.unwrap_or(0),
+            random_start: None,
+            shuffled: None,
+        })
+        .await
+        .expect("capture Queue metadata");
     let state = library::QueueRestore {
-        entries: occurrences
-            .iter()
-            .map(|row| library::QueueEntry {
-                media_uri: row.media_uri.clone().into(),
-                playlist_entry_id: row.playlist_entry_id.clone().map(Into::into),
-                provenance: row.provenance.clone(),
-                received_from_connect: row.received_from_connect,
+        entries: captured
+            .entries
+            .into_iter()
+            .zip(occurrences)
+            .map(|(mut entry, row)| {
+                entry.received_from_connect = row.received_from_connect;
+                entry
             })
             .collect(),
         order: (0..occurrences.len() as u32).collect(),
@@ -51,14 +66,8 @@ pub async fn persist_queue(
         shuffled,
         ..Default::default()
     };
-    let mut output = serde_json::to_vec(&serde_json::json!({"version":4,"queue":state})).unwrap();
-    output.push(b'\n');
-    for row in occurrences {
-        serde_json::to_writer(&mut output, &row.item).unwrap();
-        output.push(b'\n');
-    }
     database
-        .import_queue_jsonl(std::io::Cursor::new(output))
+        .save_queue(&state)
         .await
         .expect("persist Queue records");
 }
@@ -132,20 +141,6 @@ pub async fn fixture() -> Fixture {
             &id,
             Some(album),
             title,
-            &format!(
-                "{} {} {} note",
-                title.to_lowercase(),
-                if album == "album-a" {
-                    "album a"
-                } else {
-                    "album b"
-                },
-                if artist == "artist-a" {
-                    "artist a"
-                } else {
-                    "artist b"
-                }
-            ),
             if album == "album-a" {
                 "Album A"
             } else {
@@ -273,20 +268,13 @@ pub async fn fixture() -> Fixture {
 }
 
 pub async fn connection(path: &std::path::Path) -> SqliteConnection {
-    let mut connection = SqliteConnection::connect_with(
+    SqliteConnection::connect_with(
         &SqliteConnectOptions::new()
             .filename(path)
             .create_if_missing(false),
     )
     .await
-    .expect("open fixture connection");
-    let catalog = path.with_extension("catalog.sqlite");
-    if catalog.exists() {
-        super::production_schema::attach_catalog(&mut connection, &catalog)
-            .await
-            .expect("use production projections");
-    }
-    connection
+    .expect("open fixture connection")
 }
 
 /// Capture complete membership with a bounded metadata projection.

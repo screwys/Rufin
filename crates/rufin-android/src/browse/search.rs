@@ -40,6 +40,7 @@ impl AndroidLibrary {
                 let source_id = library::source_entity_parts(&result.media_uri)
                     .map(|(source, _, _)| source.to_string());
                 AndroidBrowseRow {
+                    track_key: None,
                     kind: kind.into(),
                     playback_context_id,
                     key: result.media_uri.clone(),

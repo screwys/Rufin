@@ -93,7 +93,6 @@ pub struct Device {
     pub reachable: bool,
     pub has_playback: bool,
     #[serde(default)]
-    pub queue_content_id: Option<String>,
     pub enrolled: bool,
     pub connection: String,
 }
@@ -1874,7 +1873,6 @@ impl ConnectOwner {
                         name,
                         reachable: true,
                         has_playback: false,
-                        queue_content_id: None,
                         enrolled: true,
                         connection: String::new(),
                     });
@@ -1888,7 +1886,6 @@ impl ConnectOwner {
                             name,
                             reachable: true,
                             has_playback: false,
-                            queue_content_id: None,
                             enrolled: false,
                             connection: String::new(),
                         });
@@ -2151,7 +2148,6 @@ impl ConnectOwner {
                 name,
                 reachable: true,
                 has_playback: false,
-                queue_content_id: None,
                 enrolled: true,
                 connection: String::new(),
             });
@@ -2474,7 +2470,6 @@ impl ConnectOwner {
                 name: "Rufin".into(),
                 reachable: false,
                 has_playback: false,
-                queue_content_id: None,
                 enrolled: true,
                 connection: String::new(),
             });
@@ -2497,7 +2492,6 @@ impl ConnectOwner {
             if let Ok((route, answer)) = answer {
                 device.name = answer["name"].as_str().unwrap_or(&device.name).to_owned();
                 device.has_playback = answer["playback"].as_bool().unwrap_or(false);
-                device.queue_content_id = answer["queue_content_id"].as_str().map(str::to_owned);
                 device.reachable = true;
                 device.connection = connection_label(&route);
             } else {
@@ -2624,8 +2618,7 @@ impl ConnectOwner {
             }
             Request::Presence => {
                 let active = self.playback.has_continuation();
-                serde_json::json!({"name":self.status().settings.name,"playback":active,
-                    "queue_content_id":self.playback.queue_content_id().await?})
+                serde_json::json!({"name":self.status().settings.name,"playback":active})
             }
             Request::Continuation => {
                 let playback = Arc::clone(&self.playback);
@@ -2634,9 +2627,7 @@ impl ConnectOwner {
                         .await
                         .map_err(error)??
                         .ok_or("There is no playback to continue")?;
-                let mut value = serde_json::to_value(&snapshot.header).map_err(error)?;
-                value["queue_content_id"] =
-                    serde_json::json!(self.playback.queue_content_id().await?);
+                let value = serde_json::to_value(&snapshot.header).map_err(error)?;
                 let mut transfers = self.transfers.lock().unwrap_or_else(|p| p.into_inner());
                 transfers.retain(|_, (started, _)| started.elapsed() < Duration::from_secs(300));
                 transfers.insert(peer.to_owned(), (Instant::now(), snapshot));

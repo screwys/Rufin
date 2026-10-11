@@ -41,14 +41,7 @@ impl SourceQuery {
             "NULL".to_string()
         } else {
             self.predicate.push_str(" AND playlist.name IS NOT NULL");
-            let sources = if self.entry_key == "-entry.playlist_entry_key" {
-                "catalog.sources"
-            } else {
-                "main.source_ids"
-            };
-            format!(
-                "json_array((SELECT object_id FROM {sources} WHERE source_key=playlist.source_key),playlist.object_id,entry.object_id)"
-            )
+            "json_array((SELECT object_id FROM sources WHERE source_key=playlist.source_key),playlist.object_id,entry.object_id)".to_string()
         };
         let columns = format!(
             "{},{identity},COALESCE(({}),0)",
@@ -271,7 +264,7 @@ async fn source_members_on(
         let key = if query.entry_key == "NULL" {
             "track.track_key".to_string()
         } else {
-            format!("abs({})", query.entry_key)
+            query.entry_key.clone()
         };
         let hash = format!("({key}*1103515245)%2147483647");
         let mut pivot = (seed % 2147483647) as i64;

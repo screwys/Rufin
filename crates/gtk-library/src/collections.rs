@@ -30,7 +30,7 @@ use super::grid_cells::{
 };
 use super::table_sizing::{column_view_initial_width, route_column_view_initial_width};
 use crate::route_layout::{PRIMARY_ROUTE_MARGIN_END, PRIMARY_ROUTE_MARGIN_START};
-use crate::track_model::TrackCollectionModel;
+use crate::track_model::{CollectionTrack, TrackCollectionModel};
 use crate::track_selection::TrackSelection;
 use crate::track_selection::install_track_drag_source;
 use gtk_widgets::library_fields::TrackPresentation;
@@ -40,7 +40,7 @@ use gtk_widgets::library_fields::{
 use gtk_widgets::route::Route;
 use gtk_widgets::table_sizing::{ColumnViewWidthFit, install_column_view_width_fit};
 
-struct TrackTablePlayingStateInner<T: TrackPresentation> {
+struct TrackTablePlayingStateInner<T: CollectionTrack> {
     model: TrackCollectionModel<T>,
     handler_model: gtk_widgets::sparse_model::SparseObjectModel,
     model_handler: RefCell<Option<glib::SignalHandlerId>>,
@@ -50,7 +50,7 @@ struct TrackTablePlayingStateInner<T: TrackPresentation> {
 }
 
 #[derive(Clone)]
-pub struct TrackTablePlayingState<T: TrackPresentation = TrackRow> {
+pub struct TrackTablePlayingState<T: CollectionTrack = TrackRow> {
     inner: Rc<TrackTablePlayingStateInner<T>>,
 }
 
@@ -397,7 +397,7 @@ fn matching_context_rank(
         .map(|context| context.source_rank)
 }
 
-impl<T: TrackPresentation> TrackTablePlayingState<T> {
+impl<T: CollectionTrack> TrackTablePlayingState<T> {
     pub fn new(model: &TrackCollectionModel<T>, indicator: TrackRowPlayingIndicator) -> Self {
         let handler_model = model.list_model();
         let inner = Rc::new(TrackTablePlayingStateInner {
@@ -462,7 +462,7 @@ impl<T: TrackPresentation> TrackTablePlayingState<T> {
     }
 }
 
-impl<T: TrackPresentation> Drop for TrackTablePlayingStateInner<T> {
+impl<T: CollectionTrack> Drop for TrackTablePlayingStateInner<T> {
     fn drop(&mut self) {
         if let Some(handler) = self.model_handler.take() {
             self.handler_model.disconnect(handler);
@@ -529,7 +529,7 @@ pub fn artist_collection_projection(
         }),
     )
 }
-pub fn track_collection_projection<T: TrackPresentation>(
+pub fn track_collection_projection<T: CollectionTrack>(
     shell: &Rc<CatalogUi>,
     model: TrackCollectionModel<T>,
     key: LibraryListKey,
@@ -640,7 +640,7 @@ pub fn artist_grid(
         move |position| demand.demand_positions([position as usize]),
     )
 }
-pub fn track_grid<T: TrackPresentation>(
+pub fn track_grid<T: CollectionTrack>(
     shell: &Rc<CatalogUi>,
     model: TrackCollectionModel<T>,
     key: LibraryListKey,
@@ -971,10 +971,7 @@ impl CatalogUi {
     ) -> (gtk::Widget, Rc<dyn Fn()>) {
         let key = LibraryListKey::FullscreenTracks;
         let settings = self.settings.current.borrow().library_list(key);
-        let order = rows
-            .iter()
-            .map(|row| row.media_uri.clone())
-            .collect::<Vec<_>>();
+        let order = rows.iter().map(|row| row.track_key).collect::<Vec<_>>();
         let database = self.library.clone();
         let model = TrackCollectionModel::with_load(
             self.runtime.clone(),
@@ -987,7 +984,7 @@ impl CatalogUi {
                 let database = database.clone();
                 Box::pin(async move {
                     database
-                        .track_rows_by_uri(&keys, &cancellation)
+                        .track_rows(&keys, &cancellation)
                         .await
                         .map_err(|error| error.to_string())
                 })
@@ -1035,7 +1032,7 @@ impl CatalogUi {
     }
 }
 
-pub fn track_table<T: TrackPresentation>(
+pub fn track_table<T: CollectionTrack>(
     shell: &Rc<CatalogUi>,
     model: TrackCollectionModel<T>,
     key: LibraryListKey,

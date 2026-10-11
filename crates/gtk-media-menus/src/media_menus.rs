@@ -184,7 +184,7 @@ fn present_catalog_track_menu(
             "rating",
             &context_rating_row(
                 track.rating.and_then(|value| u8::try_from(value).ok()),
-                (menus.half_stars_enabled)(&track.media_uri, Some(&track.source_id)),
+                (menus.half_stars_enabled)(&track.media_uri, track.source_id.as_deref()),
                 surface.popover(),
                 move |rating| {
                     menus

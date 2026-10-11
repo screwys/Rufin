@@ -87,20 +87,12 @@ pub(super) async fn stage_track(
             .as_bytes(),
     );
     hash.update(&track.duration_seconds.to_le_bytes());
-    let normalized = format!(
-        "{} {} {} {}",
-        track.title,
-        track.album,
-        track.artist,
-        track.comment.as_deref().unwrap_or_default()
-    )
-    .to_lowercase();
+
     let inserted = scan
         .write_track(
             &track.id,
             track.album_id.as_deref(),
             &track.title,
-            &normalized,
             &track.album,
             &track.artist,
             &track

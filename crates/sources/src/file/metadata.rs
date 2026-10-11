@@ -1655,12 +1655,34 @@ mod tests {
             )
             .await
             .unwrap();
+        let key = database
+            .source_identity_key(source.source_id())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            database
+                .track_count(
+                    &library::TrackQuery {
+                        source: key,
+                        collection: None,
+                        folder: None,
+                        favorites_only: false,
+                        downloaded_only: false,
+                    },
+                    "",
+                    &library::ReadCancellation::new()
+                )
+                .await
+                .unwrap(),
+            0
+        );
         assert!(
             database
                 .track_row_by_uri(&uri, &library::ReadCancellation::new())
                 .await
                 .unwrap()
-                .is_none()
+                .is_some()
         );
         assert!(audio.exists());
     }
@@ -1744,12 +1766,34 @@ mod tests {
         );
         database.delete_playlist(None, second).await.unwrap();
         source.prune_imported_files(&database).await.unwrap();
+        let key = database
+            .source_identity_key(source.source_id())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            database
+                .track_count(
+                    &library::TrackQuery {
+                        source: key,
+                        collection: None,
+                        folder: None,
+                        favorites_only: false,
+                        downloaded_only: false,
+                    },
+                    "",
+                    &library::ReadCancellation::new()
+                )
+                .await
+                .unwrap(),
+            0
+        );
         assert!(
             database
                 .track_row_by_uri(&uri, &library::ReadCancellation::new())
                 .await
                 .unwrap()
-                .is_none()
+                .is_some()
         );
         assert!(audio.is_file());
     }

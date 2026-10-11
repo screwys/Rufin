@@ -686,38 +686,6 @@ impl SourceOwner {
                 .clear();
         }
         let current = self.shared.settings.load();
-        let catalog = self
-            .shared
-            .database
-            .connect_catalog_sources()
-            .await
-            .map_err(string_error)?;
-        for source in catalog {
-            if current
-                .sources
-                .configured
-                .iter()
-                .any(|item| item.configuration.source_id == source)
-            {
-                continue;
-            }
-            if let Some(key) = self
-                .shared
-                .database
-                .source_identity_key(&source)
-                .await
-                .map_err(string_error)?
-                && let Ok(playback) = self.shared.playback()
-            {
-                playback.forget_source(key).await?;
-            }
-            self.shared
-                .database
-                .connect_remove_source(&source)
-                .await
-                .map_err(string_error)?;
-            self.remove_source_resources(&source, None).await;
-        }
         self.shared.load_source_counts().await?;
         if sources_changed || self.shared.selected().is_none() {
             self.release_selected(true).await;
@@ -847,7 +815,11 @@ impl SourceOwner {
         let publication = self
             .shared
             .database
-            .reconcile_source(&source_id)
+            .reconcile_source(
+                &source_id,
+                &configured.configuration.kind,
+                &configured.configuration.name,
+            )
             .await
             .map_err(string_error)?;
         if cancelled.load(Ordering::Acquire) {
@@ -856,7 +828,7 @@ impl SourceOwner {
         self.install_selected(
             configured.clone(),
             None,
-            publication,
+            publication.clone(),
             Arc::clone(&cancelled),
         )
         .await?;
@@ -1114,7 +1086,7 @@ impl SourceOwner {
                     if let SourceError::IncompleteScan { outcome, .. } = &error {
                         self.publish_scan(
                             selected.source_id(),
-                            *outcome,
+                            outcome.clone(),
                             CatalogChange::Broad,
                             false,
                         )
@@ -1259,7 +1231,7 @@ impl SourceOwner {
         if let Ok(outcome) | Err(SourceError::IncompleteScan { outcome, .. }) = result {
             self.publish_scan(
                 source_id,
-                *outcome,
+                outcome.clone(),
                 if current {
                     CatalogChange::Acquired
                 } else {
@@ -1404,7 +1376,11 @@ impl SourceOwner {
             let publication = self
                 .shared
                 .database
-                .reconcile_source(&replacement.configuration.source_id)
+                .reconcile_source(
+                    &replacement.configuration.source_id,
+                    &replacement.configuration.kind,
+                    &replacement.configuration.name,
+                )
                 .await
                 .map_err(string_error)?;
             let selected = self.shared.selected().is_some_and(|selected| {
@@ -1547,9 +1523,18 @@ impl SourceOwner {
         if let ScanOutcome::Changed(publication)
         | ScanOutcome::PlaylistsChanged(publication)
         | ScanOutcome::ArtworkChanged(publication)
-        | ScanOutcome::Identical(publication) = outcome
+        | ScanOutcome::Identical(publication) = &outcome
         {
             crate::playlist_files::discover(self, source_id, publication.source).await;
+        }
+        if let ScanOutcome::Changed(publication)
+        | ScanOutcome::PlaylistsChanged(publication)
+        | ScanOutcome::ArtworkChanged(publication)
+        | ScanOutcome::Identical(publication) = &outcome
+            && !publication.song_rekeys.is_empty()
+            && let Ok(playback) = self.shared.playback()
+        {
+            playback.rekey_songs(publication.song_rekeys.clone());
         }
         tracing::debug!(?outcome, ?change, "accepting source scan result");
         let refresh_counts = matches!(outcome, ScanOutcome::Changed(_));
@@ -1582,7 +1567,7 @@ impl SourceOwner {
                     configured_source(&self.shared.settings.load().sources, source_id)
             {
                 match self
-                    .selected_state(configured, selected.source.clone(), publication)
+                    .selected_state(configured, selected.source.clone(), publication.clone())
                     .await
                 {
                     Ok(selected) => {
@@ -1949,7 +1934,7 @@ impl SourceOwner {
             let result = source.prepare_collection(&database, &media_uri).await;
             if let Ok(Some(outcome)) | Err(SourceError::IncompleteScan { outcome, .. }) = &result {
                 owner
-                    .accept_scan(source.source_id(), *outcome, CatalogChange::Broad)
+                    .accept_scan(source.source_id(), outcome.clone(), CatalogChange::Broad)
                     .await;
             }
             result.map(|_| ()).map_err(string_error)
@@ -2164,6 +2149,16 @@ impl SourceOwner {
                     enable_half_stars: false,
                 };
                 owner.persist_connected_source(&configured, credential)?;
+                owner
+                    .shared
+                    .database
+                    .reconcile_source(
+                        &configuration.source_id,
+                        &configuration.kind,
+                        &configuration.name,
+                    )
+                    .await
+                    .map_err(string_error)?;
                 owner.bind_plex_login(&configured, &mut source)?;
                 let source = Arc::new(source);
                 persisted_source_id = Some(configuration.source_id.clone());
@@ -2211,7 +2206,7 @@ impl SourceOwner {
                         .await;
                     return Ok(());
                 }
-                let publication = match outcome {
+                let publication = match outcome.clone() {
                     ScanOutcome::Changed(publication)
                     | ScanOutcome::PlaylistsChanged(publication)
                     | ScanOutcome::ArtworkChanged(publication)
@@ -3189,8 +3184,8 @@ impl ActiveSource {
             let result = source.live_search(&selected.database, &query, limit).await;
             if let Some(shared) = shared.upgrade() {
                 let outcome = match &result {
-                    Ok((_, outcome)) => *outcome,
-                    Err(SourceError::IncompleteScan { outcome, .. }) => Some(*outcome),
+                    Ok((_, outcome)) => outcome.clone(),
+                    Err(SourceError::IncompleteScan { outcome, .. }) => Some(outcome.clone()),
                     Err(_) => None,
                 };
                 if let Some(outcome) = outcome {
@@ -4374,13 +4369,13 @@ mod artwork_preparation_tests {
             panic!("initial publication")
         };
         for (outcome, visible) in [
-            (ScanOutcome::Identical(publication), false),
-            (ScanOutcome::ArtworkChanged(publication), false),
-            (ScanOutcome::Changed(publication), false),
+            (ScanOutcome::Identical(publication.clone()), false),
+            (ScanOutcome::ArtworkChanged(publication.clone()), false),
+            (ScanOutcome::Changed(publication.clone()), false),
             (
                 ScanOutcome::Changed(library::Publication {
                     tracks_added: true,
-                    ..publication
+                    ..publication.clone()
                 }),
                 true,
             ),
@@ -4402,11 +4397,11 @@ mod artwork_preparation_tests {
         for error in [
             SourceError::Network("connection refused".into()),
             SourceError::IncompleteScan {
-                outcome: ScanOutcome::Identical(publication),
+                outcome: ScanOutcome::Identical(publication.clone()),
                 error: Box::new(SourceError::Cancelled),
             },
             SourceError::IncompleteScan {
-                outcome: ScanOutcome::Identical(publication),
+                outcome: ScanOutcome::Identical(publication.clone()),
                 error: Box::new(SourceError::Network("connection timed out".into())),
             },
         ] {
@@ -4843,7 +4838,6 @@ mod artwork_preparation_tests {
                 "new-track",
                 Some("album"),
                 "New Track",
-                "new track",
                 "Cached Album",
                 "Artist",
                 "new track",
@@ -4883,7 +4877,7 @@ mod artwork_preparation_tests {
             .await
             .unwrap();
             let outcome = scan.finish().await.unwrap();
-            let ScanOutcome::Changed(updated_publication) = outcome else {
+            let ScanOutcome::Changed(updated_publication) = outcome.clone() else {
                 panic!("new folder publication")
             };
             owner

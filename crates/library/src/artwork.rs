@@ -11,11 +11,9 @@ pub(crate) async fn playlist_representative_artwork_on(
     connection: &mut sqlx::SqliteConnection,
     playlist: crate::PlaylistKey,
 ) -> LibraryResult<Vec<Vec<u8>>> {
-    if playlist.raw() < 0 {
-        return Ok(Vec::new());
-    }
-    let covers =
-        collection_artwork_sql("SELECT media_uri FROM main.playlist_entries WHERE playlist_key=?1");
+    let covers = collection_artwork_sql(
+        "SELECT track.media_uri FROM playlist_entries entry JOIN tracks track USING(track_key) JOIN playlists playlist USING(playlist_key) WHERE playlist.playlist_key=?1 AND playlist.owner='rufin'",
+    );
     Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT COALESCE(track.artwork_binding,album.artwork_binding)
          FROM ({covers}) selected JOIN tracks track USING(track_key)
@@ -119,7 +117,7 @@ impl Database {
             return Ok(sqlx::query_scalar("SELECT artwork_bytes FROM main.smart_playlists WHERE object_id=?1 AND artwork_revision=?2 AND artwork_bytes IS NOT NULL")
                 .bind(&image.object_id).bind(&image.revision).fetch_optional(&mut *connection).await?);
         }
-        Ok(sqlx::query_scalar("SELECT playlist.artwork_bytes FROM main.playlists playlist LEFT JOIN main.source_ids source USING(source_key) WHERE playlist.object_id=?1 AND source.object_id IS ?2 AND playlist.artwork_revision=?3 AND playlist.artwork_bytes IS NOT NULL")
+        Ok(sqlx::query_scalar("SELECT playlist.artwork_bytes FROM main.playlists playlist LEFT JOIN sources source USING(source_key) WHERE playlist.object_id=?1 AND source.object_id IS ?2 AND playlist.artwork_revision=?3 AND playlist.artwork_bytes IS NOT NULL")
             .bind(&image.object_id).bind(&image.source_id).bind(&image.revision).fetch_optional(&mut *connection).await?)
     }
 
@@ -128,7 +126,7 @@ impl Database {
         playlist: crate::PlaylistKey,
     ) -> LibraryResult<Vec<Vec<u8>>> {
         let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar("SELECT COALESCE(track.artwork_binding,album.artwork_binding) binding FROM playlist_entries entry JOIN tracks track USING(media_uri) LEFT JOIN albums album USING(album_key) WHERE entry.playlist_key=?1 AND binding IS NOT NULL GROUP BY binding ORDER BY random() LIMIT 4")
+        Ok(sqlx::query_scalar("SELECT COALESCE(track.artwork_binding,album.artwork_binding) binding FROM playlist_entries entry JOIN tracks track USING(track_key) LEFT JOIN albums album USING(album_key) WHERE entry.playlist_key=?1 AND binding IS NOT NULL GROUP BY binding ORDER BY random() LIMIT 4")
             .bind(playlist).fetch_all(&mut *connection).await?)
     }
 
@@ -178,7 +176,7 @@ impl Database {
                 query.push(" AND COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_favorite)=1");
             }
             RepresentativeArtworkScope::PlaylistTracks => {
-                query.push(" AND EXISTS (SELECT 1 FROM playlist_entries entry WHERE entry.media_uri=track.media_uri)");
+                query.push(" AND EXISTS (SELECT 1 FROM playlist_entries entry WHERE entry.track_key=track.track_key)");
             }
             RepresentativeArtworkScope::LatestAlbums(album_limit) => {
                 query.push(" AND track.album_key IN (SELECT latest.album_key FROM albums latest WHERE latest.source_key=").push_bind(source).push(" ORDER BY ").push(crate::tracks::added_at!("latest")).push(" DESC NULLS LAST,latest.album_key LIMIT ").push_bind(album_limit.clamp(1, 100) as i64).push(")");

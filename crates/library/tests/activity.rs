@@ -72,10 +72,12 @@ async fn overview_uses_full_duration_qualified_plays_and_calendar_comparisons() 
 async fn overview_keeps_monthly_baselines_and_bounds_history_results() {
     let fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("INSERT INTO catalog.activity_baseline(source_key,period,item_kind,track_object_id,play_count,skip_count)
-        VALUES(?1,'2025-06','track','track-0',9,2)")
+    sqlx::query("INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count)
+        SELECT object_id,'2025-06','track','track-0',9,2 FROM sources WHERE source_key=?1")
         .bind(fixture.source).execute(&mut raw).await.unwrap();
     for index in 0..7 {
+        sqlx::query("INSERT INTO tracks(media_uri,indexed,title,display_artist,display_album,duration_millis) VALUES(?1,0,?2,'Retained artist','Retained album',180000)")
+            .bind(format!("file:///retained-{index}.flac")).bind(format!("Retained {index}")).execute(&mut raw).await.unwrap();
         sqlx::query("INSERT INTO listens(media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped)
             VALUES(?1,?2,'Retained artist','Retained album',100,'2025-06',180000,1000,0)")
             .bind(format!("file:///retained-{index}.flac")).bind(format!("Retained {index}"))
@@ -248,10 +250,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     assert_eq!(history[0].duration_millis, 180_000);
     let window = fixture
         .database
-        .history_rows_by_uri(
-            &[listen.media_uri.clone(), listen.media_uri.clone()],
-            &cancel,
-        )
+        .history_rows(&[history[0].track_key, history[0].track_key], &cancel)
         .await
         .expect("read repeated History URIs");
     assert_eq!(window.len(), 2);
@@ -274,12 +273,12 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
             .await
             .expect("read accepted skip")
     );
-    sqlx::query("INSERT INTO catalog.activity_baseline(source_key,period,item_kind,track_object_id,play_count,skip_count,last_played_at) VALUES (?1,'lifetime','track','track-0',3,1,1600000000)")
+    sqlx::query("INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at) SELECT object_id,'lifetime','track','track-0',3,1,1600000000 FROM sources WHERE source_key=?1")
         .bind(fixture.source)
         .execute(&mut raw)
         .await
         .expect("seed recovered Activity baseline");
-    sqlx::query("INSERT INTO catalog.activity_baseline(source_key,period,item_kind,track_object_id,play_count,skip_count,last_played_at) VALUES (?1,'lifetime','track','track-1',2,0,1600000000)")
+    sqlx::query("UPDATE tracks SET source_play_count=2,source_last_played=1600000000 WHERE source_key=?1 AND object_id='track-1'")
         .bind(fixture.source).execute(&mut raw).await.unwrap();
     drop(raw);
     let never = fixture
@@ -336,7 +335,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     assert_eq!(
         fixture
             .database
-            .history_rows_by_uri(std::slice::from_ref(&listen.media_uri), &cancel)
+            .history_rows(&[catalog.track_key], &cancel)
             .await
             .unwrap(),
         history
@@ -448,6 +447,11 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
     let file = "file:///music/local.flac".to_string();
     let cue = library::cue_media_uri("segment", "file:///music/album.flac", 1000, 181000);
     let mut raw = connection(&fixture.path).await;
+    sqlx::query("UPDATE sources SET kind='local' WHERE source_key=?1")
+        .bind(fixture.source)
+        .execute(&mut raw)
+        .await
+        .unwrap();
     for (key, uri) in [(fixture.tracks[0], &file), (fixture.tracks[1], &cue)] {
         sqlx::query("UPDATE tracks SET media_uri=?2 WHERE track_key=?1")
             .bind(key)
@@ -475,9 +479,14 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
         listened_millis: 90000,
         skipped: false,
     };
+    let current_track = fixture
+        .database
+        .track_key_by_uri(&file, &ReadCancellation::new())
+        .await
+        .unwrap();
     let file_key = fixture
         .database
-        .record_listen(&listen, Some(&file), &[])
+        .record_listen(&listen, current_track, &[])
         .await
         .unwrap();
     assert_eq!(

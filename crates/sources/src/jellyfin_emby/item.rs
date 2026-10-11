@@ -92,19 +92,11 @@ pub(super) async fn stage_track(
     }
     audio.update(&track.duration_seconds.to_le_bytes());
     let key = *audio.finalize().as_bytes();
-    let normalized_search = format!(
-        "{} {} {} {}",
-        track.title,
-        track.album,
-        track.artist,
-        track.comment.as_deref().unwrap_or_default()
-    )
-    .to_lowercase();
+
     scan.write_track(
         &track.id,
         track.album_id.as_deref(),
         &track.title,
-        &normalized_search,
         &track.album,
         &track.artist,
         &track

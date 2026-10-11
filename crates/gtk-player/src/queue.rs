@@ -185,11 +185,7 @@ impl QueueState {
                     match (row.occurrence_id, previous.occurrence_id) {
                         (Some(id), Some(previous)) => id == previous,
                         (None, None) => {
-                            row.position == previous.position
-                                && row.media_uri == previous.media_uri
-                                && row.playlist_entry_id == previous.playlist_entry_id
-                                && row.provenance == previous.provenance
-                                && row.received_from_connect == previous.received_from_connect
+                            row.position == previous.position && row.media_uri == previous.media_uri
                         }
                         _ => false,
                     }
@@ -1471,7 +1467,7 @@ mod tests {
                     0,
                 ),
                 received_from_connect: false,
-                playlist_entry_id: None,
+                track_key: None,
                 provenance: library::QueueProvenance::Manual,
             }),
             audio_properties: Default::default(),

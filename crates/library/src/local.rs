@@ -387,7 +387,7 @@ impl Database {
         let count = if let Some(source_id) = source_id {
             sqlx::query_scalar::<_, i64>(
                 "SELECT count(*) FROM main.local_locators
-                 WHERE source_key=(SELECT source_key FROM main.source_ids WHERE object_id=?1)
+                 WHERE source_key=(SELECT source_key FROM main.sources WHERE object_id=?1)
                    AND origin='download'",
             )
             .bind(source_id)
@@ -430,8 +430,8 @@ impl Database {
     ) -> LibraryResult<Option<DownloadMetadata>> {
         let mut connection = self.acquire_reader().await?;
         Ok(sqlx::query_as(
-            "SELECT title,display_artist artist,display_album album,disc_number,track_number,
-                    duration_millis,source_format,loudness_analysis_key
+            "SELECT COALESCE(title,media_uri) title,COALESCE(display_artist,'') artist,COALESCE(display_album,'') album,COALESCE(disc_number,0) disc_number,COALESCE(track_number,0) track_number,
+                    COALESCE(duration_millis,0) duration_millis,source_format,loudness_analysis_key
              FROM tracks WHERE media_uri=?1",
         )
         .bind(media_uri)
@@ -487,14 +487,14 @@ impl Database {
             "SELECT requested.value,
                 (SELECT json_group_array(path) FROM (
                     SELECT CASE WHEN access_uri LIKE 'content:%' THEN access_uri ELSE path END AS path FROM main.local_locators WHERE media_uri IN (requested.value,json_extract(?2,'$[' || requested.key || ']'))
-                    UNION SELECT source_path FROM catalog.tracks
+                    UNION SELECT source_path FROM main.tracks
                       WHERE media_uri=requested.value AND source_path IS NOT NULL
                         AND (media_uri LIKE 'file:%' OR media_uri LIKE 'rufin:cue/%')
-                    UNION SELECT track.source_path FROM catalog.tracks track JOIN local_files file ON file.source_key=track.source_key AND file.path=track.source_path
+                    UNION SELECT track.source_path FROM main.tracks track JOIN local_files file ON file.source_key=track.source_key AND file.path=track.source_path
                       WHERE track.media_uri=requested.value AND track.source_path LIKE 'rufin-document:%')),
                 EXISTS(SELECT 1 FROM connect_collection WHERE media_uri=requested.value),
-                EXISTS(SELECT 1 FROM main.playlist_entries WHERE media_uri=requested.value)
-                    OR requested.value IN (SELECT media_uri FROM queue_entries WHERE NOT received_from_connect)
+                EXISTS(SELECT 1 FROM playlist_entries entry JOIN tracks track USING(track_key) WHERE track.media_uri=requested.value)
+                    OR EXISTS(SELECT 1 FROM queue_entries entry JOIN tracks track USING(track_key) WHERE track.media_uri=requested.value AND NOT entry.received_from_connect)
              FROM json_each(?1) requested",
         )
         .bind(serde_json::to_string(uris)?)
@@ -543,8 +543,8 @@ impl Database {
     ) -> LibraryResult<Vec<String>> {
         let mut connection = self.acquire_reader().await?;
         Ok(sqlx::query_scalar("SELECT json_extract(requested.value,'$[0]') FROM json_each(?1) requested
-            WHERE EXISTS(SELECT 1 FROM catalog.sources WHERE object_id=json_extract(requested.value,'$[1]') AND catalog_complete=1)
-              AND NOT EXISTS(SELECT 1 FROM catalog.tracks WHERE media_uri=json_extract(requested.value,'$[0]'))")
+            WHERE EXISTS(SELECT 1 FROM main.sources WHERE object_id=json_extract(requested.value,'$[1]') AND catalog_complete=1)
+              AND NOT EXISTS(SELECT 1 FROM main.tracks WHERE media_uri=json_extract(requested.value,'$[0]') AND indexed=1)")
             .bind(serde_json::to_string(media)?).fetch_all(&mut *connection).await?)
     }
 
@@ -596,7 +596,7 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<(usize, usize)> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let(album,track)=sqlx::query_as::<_,(i64,i64)>("SELECT (SELECT count(*) FROM albums WHERE source_key=?1),(SELECT count(*) FROM tracks WHERE source_key=?1)").bind(source).fetch_one(&mut *connection).await?;
+        let(album,track)=sqlx::query_as::<_,(i64,i64)>("SELECT (SELECT count(*) FROM albums WHERE source_key=?1 AND indexed=1),(SELECT count(*) FROM tracks WHERE source_key=?1 AND indexed=1)").bind(source).fetch_one(&mut *connection).await?;
         Ok((
             usize::try_from(album).unwrap_or_default(),
             usize::try_from(track).unwrap_or_default(),
@@ -609,8 +609,8 @@ impl Database {
         let mut connection = self.acquire_reader().await?;
         let rows = sqlx::query_as::<_, (String, i64, i64)>(
             "SELECT object_id,
-                (SELECT count(*) FROM albums WHERE source_key=source.source_key),
-                (SELECT count(*) FROM tracks WHERE source_key=source.source_key)
+                (SELECT count(*) FROM albums WHERE source_key=source.source_key AND indexed=1),
+                (SELECT count(*) FROM tracks WHERE source_key=source.source_key AND indexed=1)
              FROM sources source",
         )
         .fetch_all(&mut *connection)
@@ -652,7 +652,7 @@ impl Database {
     pub async fn clear_mapping_access(&self, source: SourceKey) -> LibraryResult<u64> {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        sqlx::query("DELETE FROM catalog.local_access_metadata WHERE access_uri IN (SELECT access_uri FROM local_access_files WHERE source_key=?1 AND origin='mapping')").bind(source).execute(&mut *connection).await?;
+        sqlx::query("DELETE FROM main.local_access_metadata WHERE access_uri IN (SELECT access_uri FROM local_access_files WHERE source_key=?1 AND origin='mapping') AND NOT EXISTS(SELECT 1 FROM local_locators other WHERE other.access_uri=local_access_metadata.access_uri AND (other.source_key IS NOT ?1 OR other.origin<>'mapping'))").bind(source).execute(&mut *connection).await?;
         let removed =
             sqlx::query("DELETE FROM main.local_locators WHERE local_access_file_key IN (SELECT local_access_file_key FROM local_access_files WHERE source_key=?1 AND origin='mapping')")
                 .bind(source)
@@ -674,7 +674,7 @@ impl Database {
     ) -> LibraryResult<Vec<MappingTrackRow>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         Ok(sqlx::query_as::<_, MappingTrackRow>(
-            "SELECT track_key,object_id,media_uri,source_path,title,display_album album,display_artist artist,disc_number,track_number,duration_millis
+            "SELECT track_key,object_id,media_uri,source_path,COALESCE(title,media_uri) title,COALESCE(display_album,'') album,COALESCE(display_artist,'') artist,COALESCE(disc_number,0) disc_number,COALESCE(track_number,0) track_number,COALESCE(duration_millis,0) duration_millis
              FROM tracks WHERE source_key=?1 AND source_path IS NOT NULL
                AND ((?3 IS NULL AND track_key>?2) OR source_path=?3)
              ORDER BY track_key LIMIT ?4",
@@ -768,7 +768,7 @@ impl Database {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         let mut transaction = connection.begin().await?;
-        sqlx::query("DELETE FROM catalog.local_access_metadata WHERE access_uri IN (SELECT access_uri FROM main.local_locators WHERE media_uri=?1 AND origin=?2 AND path<>?3)").bind(&access.media_uri).bind(access.origin.as_str()).bind(&access.path).execute(&mut *transaction).await?;
+        sqlx::query("DELETE FROM main.local_access_metadata WHERE access_uri IN (SELECT access_uri FROM main.local_locators WHERE media_uri=?1 AND origin=?2 AND path<>?3) AND NOT EXISTS(SELECT 1 FROM local_locators other WHERE other.access_uri=local_access_metadata.access_uri AND (other.media_uri<>?1 OR other.origin<>?2 OR other.path=?3))").bind(&access.media_uri).bind(access.origin.as_str()).bind(&access.path).execute(&mut *transaction).await?;
         sqlx::query(
             "DELETE FROM main.local_locators WHERE media_uri=?1 AND origin=?2 AND path<>?3",
         )
@@ -779,7 +779,7 @@ impl Database {
         .await?;
         let source_id = if let Some(source) = source {
             sqlx::query_scalar::<_, String>(
-                "SELECT object_id FROM catalog.sources WHERE source_key=?1",
+                "SELECT object_id FROM main.sources WHERE source_key=?1",
             )
             .bind(source)
             .fetch_optional(&mut *transaction)
@@ -800,9 +800,21 @@ impl Database {
             },
         )
         .await?;
-        transaction.commit().await?;
-        let mut transaction = connection.begin().await?;
-        sqlx::query("INSERT INTO catalog.local_access_metadata(access_uri,size_bytes,mtime_ns,
+        crate::tracks::remember_song(
+            &mut transaction,
+            &access.media_uri,
+            crate::tracks::SongMetadata {
+                title: Some(&access.title),
+                artist: Some(&access.artist),
+                album: Some(&access.album),
+                duration_millis: Some(access.duration_millis),
+                disc_number: Some(access.disc_number),
+                track_number: Some(access.track_number),
+                ..Default::default()
+            },
+        )
+        .await?;
+        sqlx::query("INSERT INTO main.local_access_metadata(access_uri,size_bytes,mtime_ns,
             device_id,inode,parser_version,title,normalized_title,album,normalized_album,artist,normalized_artist,
             disc_number,track_number,duration_millis,loudness_analysis_key)
             VALUES(?1,?2,?3,?4,?5,?6,?7,lower(?7),?8,lower(?8),?9,lower(?9),?10,?11,?12,?13)
@@ -834,6 +846,7 @@ impl Database {
                 recompute_album_loudness_key(&mut transaction, album).await?;
             }
         }
+        crate::collections::refresh_facts_on(&mut transaction).await?;
         transaction.commit().await?;
         Ok(key)
     }
@@ -860,7 +873,7 @@ impl Database {
             .bind(media_uri).fetch_optional(&mut *connection).await? {
             return Ok(Some(row));
         }
-        Ok(sqlx::query_as::<_, LocalAccessRow>("SELECT locator.local_access_file_key,locator.media_uri,locator.origin,locator.path,locator.root,locator.relative_path,metadata.size_bytes,metadata.mtime_ns,metadata.device_id,metadata.inode,metadata.parser_version,metadata.title,metadata.album,metadata.artist,metadata.disc_number,metadata.track_number,metadata.duration_millis,locator.access_uri FROM catalog.local_access_metadata metadata JOIN local_access_files locator USING(access_uri) WHERE locator.source_key=?1 AND metadata.normalized_title=lower(?2) AND metadata.normalized_album=lower(?3) AND metadata.normalized_artist=lower(?4) AND metadata.disc_number=?5 AND metadata.track_number=?6 AND metadata.duration_millis=?7 ORDER BY CASE locator.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,locator.local_access_file_key LIMIT 1")
+        Ok(sqlx::query_as::<_, LocalAccessRow>("SELECT locator.local_access_file_key,locator.media_uri,locator.origin,locator.path,locator.root,locator.relative_path,metadata.size_bytes,metadata.mtime_ns,metadata.device_id,metadata.inode,metadata.parser_version,metadata.title,metadata.album,metadata.artist,metadata.disc_number,metadata.track_number,metadata.duration_millis,locator.access_uri FROM main.local_access_metadata metadata JOIN local_access_files locator USING(access_uri) WHERE locator.source_key=?1 AND metadata.normalized_title=lower(?2) AND metadata.normalized_album=lower(?3) AND metadata.normalized_artist=lower(?4) AND metadata.disc_number=?5 AND metadata.track_number=?6 AND metadata.duration_millis=?7 ORDER BY CASE locator.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,locator.local_access_file_key LIMIT 1")
             .bind(source).bind(title).bind(album).bind(artist).bind(disc_number)
             .bind(track_number).bind(duration_millis).fetch_optional(&mut *connection).await?)
     }
@@ -913,7 +926,7 @@ impl Database {
         .bind(key)
         .fetch_optional(&mut *transaction)
         .await?;
-        sqlx::query("DELETE FROM catalog.local_access_metadata WHERE access_uri=(SELECT access_uri FROM main.local_locators WHERE local_access_file_key=?1)")
+        sqlx::query("DELETE FROM main.local_access_metadata WHERE access_uri=(SELECT access_uri FROM main.local_locators WHERE local_access_file_key=?1) AND NOT EXISTS(SELECT 1 FROM local_locators other WHERE other.access_uri=local_access_metadata.access_uri AND other.local_access_file_key<>?1)")
             .bind(key)
             .execute(&mut *transaction)
             .await?;
@@ -1093,11 +1106,12 @@ pub(crate) async fn write_local_locator(
     connection: &mut sqlx::SqliteConnection,
     locator: &LocalLocatorWrite,
 ) -> LibraryResult<LocalAccessFileKey> {
+    crate::tracks::remember_song(connection, &locator.media_uri, Default::default()).await?;
     let source = match &locator.source_id {
         Some(id) => Some(crate::db::write_source_identity(connection, id).await?),
         None => None,
     };
-    Ok(sqlx::query_scalar("INSERT INTO main.local_locators(source_key,media_uri,origin,path,root,relative_path,access_uri) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(source_key,path) DO UPDATE SET media_uri=excluded.media_uri,origin=excluded.origin,root=excluded.root,relative_path=excluded.relative_path,access_uri=excluded.access_uri ON CONFLICT(media_uri,origin) DO UPDATE SET source_key=excluded.source_key,path=excluded.path,root=excluded.root,relative_path=excluded.relative_path,access_uri=excluded.access_uri RETURNING local_access_file_key")
+    Ok(sqlx::query_scalar("INSERT INTO main.local_locators(source_key,media_uri,origin,path,root,relative_path,access_uri) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(media_uri,origin) DO UPDATE SET source_key=excluded.source_key,path=excluded.path,root=excluded.root,relative_path=excluded.relative_path,access_uri=excluded.access_uri RETURNING local_access_file_key")
         .bind(source).bind(&locator.media_uri).bind(&locator.origin).bind(&locator.path).bind(&locator.root).bind(&locator.relative_path).bind(&locator.access_uri).fetch_one(connection).await?)
 }
 
@@ -1107,7 +1121,7 @@ pub(crate) async fn export_local_locators_jsonl_on(
 ) -> LibraryResult<u64> {
     use futures_util::TryStreamExt;
     output.write_all(b"{\"version\":1}\n")?;
-    let mut rows = sqlx::query_as::<_, LocalLocatorWrite>("SELECT source.object_id source_id,locator.media_uri,locator.origin,locator.path,locator.root,locator.relative_path,locator.access_uri FROM main.local_locators locator LEFT JOIN main.source_ids source USING(source_key) WHERE locator.origin<>'download' ORDER BY locator.local_access_file_key").fetch(&mut *connection);
+    let mut rows = sqlx::query_as::<_, LocalLocatorWrite>("SELECT source.object_id source_id,locator.media_uri,locator.origin,locator.path,locator.root,locator.relative_path,locator.access_uri FROM main.local_locators locator LEFT JOIN main.sources source USING(source_key) WHERE locator.origin<>'download' ORDER BY locator.local_access_file_key").fetch(&mut *connection);
     let mut count = 0;
     while let Some(row) = rows.try_next().await? {
         serde_json::to_writer(&mut output, &row)?;
@@ -1152,7 +1166,7 @@ async fn read_local_locators(
     let mut count = 0;
     for line in lines {
         let locator = serde_json::from_str::<LocalLocatorWrite>(&line?)?;
-        if preserve_downloads && sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM main.local_locators WHERE origin='download' AND (media_uri=?1 OR path=?2))").bind(&locator.media_uri).bind(&locator.path).fetch_one(&mut *connection).await? { continue; }
+        if preserve_downloads && locator.origin=="download" && sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM main.local_locators WHERE origin='download' AND media_uri=?1)").bind(&locator.media_uri).fetch_one(&mut *connection).await? { continue; }
         write_local_locator(connection, &locator).await?;
         count += 1;
     }
@@ -1167,12 +1181,9 @@ impl Database {
     ) -> LibraryResult<Vec<(String, Option<String>)>> {
         let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
         Ok(sqlx::query_as(
-            "SELECT imported.media_uri,track.cue_path FROM (SELECT media_uri FROM main.playlist_entries
-            WHERE (?1 IS NULL OR playlist_key=?1) AND media_uri>?2
-              AND (media_uri LIKE 'file:%' OR media_uri LIKE 'rufin:cue/%')
-            UNION SELECT media_uri FROM catalog.native_playlist_entries
-            WHERE (?1 IS NULL OR -playlist_key=?1) AND media_uri>?2
-              AND (media_uri LIKE 'file:%' OR media_uri LIKE 'rufin:cue/%')
+            "SELECT imported.media_uri,track.cue_path FROM (SELECT track.media_uri FROM playlist_entries entry JOIN tracks track USING(track_key)
+            WHERE (?1 IS NULL OR entry.playlist_key=?1) AND track.media_uri>?2
+              AND (track.media_uri LIKE 'file:%' OR track.media_uri LIKE 'rufin:cue/%')
             UNION SELECT media_uri FROM user_media_state WHERE ?1 IS NULL AND media_uri>?2
               AND (favorite=1 OR rating IS NOT NULL)
               AND (media_uri LIKE 'file:%' OR media_uri LIKE 'rufin:cue/%')
@@ -1192,22 +1203,106 @@ impl Database {
     pub async fn merge_local_file_uris(
         &self,
         aliases: &[(String, String, String)],
-    ) -> LibraryResult<()> {
+    ) -> LibraryResult<Vec<(TrackKey, TrackKey)>> {
         if aliases.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         let mut transaction = connection.begin().await?;
+        let mut rekeys = Vec::new();
         for (previous, current, object_id) in aliases {
-            for table in ["main.playlist_entries", "catalog.native_playlist_entries"] {
-                sqlx::query(sqlx::AssertSqlSafe(format!(
-                    "UPDATE {table} SET media_uri=?2 WHERE media_uri=?1"
-                )))
-                .bind(previous)
-                .bind(current)
-                .execute(&mut *transaction)
-                .await?;
+            if previous == current {
+                continue;
+            }
+            let old_identity=sqlx::query_as::<_,(i64,String,String)>("SELECT track.source_key,source.object_id,track.object_id FROM tracks track JOIN sources source USING(source_key) WHERE track.media_uri=?1")
+                .bind(previous).fetch_optional(&mut *transaction).await?;
+            let old = sqlx::query_as::<_, (TrackKey, Option<i64>, bool)>(
+                "SELECT track_key,source_key,indexed FROM tracks WHERE media_uri=?1",
+            )
+            .bind(previous)
+            .fetch_optional(&mut *transaction)
+            .await?;
+            let current_key = if let Some(key) =
+                sqlx::query_scalar::<_, TrackKey>("SELECT track_key FROM tracks WHERE media_uri=?1")
+                    .bind(current)
+                    .fetch_optional(&mut *transaction)
+                    .await?
+            {
+                key
+            } else if let Some((old_key, _, _)) = old {
+                sqlx::query("UPDATE tracks SET media_uri=?2,object_id=CASE WHEN source_key IS NOT NULL THEN ?3 ELSE object_id END,source_path=CASE WHEN source_path IS NOT NULL THEN COALESCE(?4,source_path) ELSE NULL END WHERE track_key=?1")
+                    .bind(old_key).bind(current).bind(object_id).bind(crate::file_media_path(current).map(|path|path.to_string_lossy().into_owned())).execute(&mut *transaction).await?;
+                old_key
+            } else {
+                crate::tracks::remember_song(&mut transaction, current, Default::default()).await?
+            };
+            if let Some((old_key, source, indexed)) = old.filter(|(key, _, _)| *key != current_key)
+            {
+                sqlx::query("UPDATE tracks SET object_id=NULL,indexed=0 WHERE track_key=?1")
+                    .bind(old_key)
+                    .execute(&mut *transaction)
+                    .await?;
+                let fields = [
+                    "title",
+                    "display_artist",
+                    "display_album",
+                    "album_display_artist",
+                    "duration_millis",
+                    "disc_number",
+                    "track_number",
+                    "year",
+                    "release_date",
+                    "date_added",
+                    "source_format",
+                    "comment",
+                    "bpm",
+                    "musicbrainz_recording_id",
+                    "musicbrainz_release_track_id",
+                    "musicbrainz_album_id",
+                    "musicbrainz_release_group_id",
+                    "primary_artist_musicbrainz_id",
+                    "artwork_binding",
+                    "source_rating",
+                    "first_seen_at",
+                    "source_play_count",
+                    "source_skip_count",
+                    "source_last_played",
+                ];
+                let updates = fields
+                    .iter()
+                    .map(|field| format!("{field}=COALESCE(canonical.{field},previous.{field})"))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE tracks AS canonical SET {updates},source_key=COALESCE(canonical.source_key,?3),object_id=COALESCE(canonical.object_id,CASE WHEN ?3 IS NOT NULL THEN ?4 END),indexed=max(canonical.indexed,?5),album_key=CASE WHEN canonical.indexed=0 THEN COALESCE(canonical.album_key,previous.album_key) ELSE canonical.album_key END,source_favorite=CASE WHEN canonical.source_key IS NULL THEN previous.source_favorite ELSE canonical.source_favorite END,audio_properties=CASE WHEN canonical.source_key IS NULL THEN previous.audio_properties ELSE canonical.audio_properties END,source_path=COALESCE(canonical.source_path,CASE WHEN previous.source_path IS NOT NULL THEN ?6 END),source_loudness_analysis_key=CASE WHEN canonical.source_key IS NULL THEN previous.source_loudness_analysis_key ELSE canonical.source_loudness_analysis_key END,loudness_analysis_key=CASE WHEN canonical.source_key IS NULL THEN previous.loudness_analysis_key ELSE canonical.loudness_analysis_key END FROM tracks previous WHERE canonical.track_key=?1 AND previous.track_key=?2")))
+                    .bind(current_key).bind(old_key).bind(source).bind(object_id).bind(indexed).bind(crate::file_media_path(current).map(|path|path.to_string_lossy().into_owned())).execute(&mut *transaction).await?;
+                for table in [
+                    "track_artists",
+                    "track_genres",
+                    "track_moods",
+                    "track_folders",
+                ] {
+                    let relation = match table {
+                        "track_artists" => "artist_key",
+                        "track_genres" => "genre_key",
+                        "track_moods" => "mood_key",
+                        _ => "folder_key",
+                    };
+                    sqlx::query(sqlx::AssertSqlSafe(format!("INSERT OR IGNORE INTO {table}(track_key,{relation},position) SELECT ?2,{relation},position FROM {table} WHERE track_key=?1 AND NOT EXISTS(SELECT 1 FROM {table} target WHERE target.track_key=?2)")))
+                        .bind(old_key).bind(current_key).execute(&mut *transaction).await?;
+                }
+                sqlx::query("UPDATE playlist_entries SET track_key=?2 WHERE track_key=?1")
+                    .bind(old_key)
+                    .bind(current_key)
+                    .execute(&mut *transaction)
+                    .await?;
+                sqlx::query("UPDATE queue_entries SET track_key=?2 WHERE track_key=?1")
+                    .bind(old_key)
+                    .bind(current_key)
+                    .execute(&mut *transaction)
+                    .await?;
+                sqlx::query("UPDATE home_entries SET entity_key=?2 WHERE entity_kind='track' AND entity_key=?1").bind(old_key).bind(current_key).execute(&mut *transaction).await?;
+                rekeys.push((old_key, current_key));
             }
             sqlx::query(
                 "INSERT INTO main.user_media_state(media_uri,favorite,rating)
@@ -1246,14 +1341,7 @@ impl Database {
             .execute(&mut *transaction)
             .await?;
 
-            let old = sqlx::query_as::<_, (i64, String, String)>(
-                "SELECT track.source_key,source.object_id,track.object_id
-                 FROM tracks track JOIN sources source USING(source_key) WHERE track.media_uri=?1",
-            )
-            .bind(previous)
-            .fetch_optional(&mut *transaction)
-            .await?;
-            if let Some((old_source, old_source_id, old_object)) = old {
+            if let Some((old_source, old_source_id, old_object)) = old_identity {
                 let (source, source_id, object) = sqlx::query_as::<_, (i64, String, String)>(
                     "SELECT track.source_key,source.object_id,track.object_id
                      FROM tracks track JOIN sources source USING(source_key) WHERE track.media_uri=?1",
@@ -1271,40 +1359,67 @@ impl Database {
                         .execute(&mut *transaction).await?;
                     sqlx::query("DELETE FROM main.legacy_activity WHERE source_id=?1 AND track_object_id=?2 AND item_kind='track'")
                         .bind(&old_source_id).bind(&old_object).execute(&mut *transaction).await?;
-                    sqlx::query("INSERT INTO catalog.activity_baseline(source_key,period,item_kind,track_object_id,play_count,skip_count,last_played_at)
-                        SELECT ?3,period,item_kind,?4,play_count,skip_count,last_played_at
-                        FROM catalog.activity_baseline WHERE source_key=?1 AND track_object_id=?2 AND item_kind='track'
-                        ON CONFLICT(source_key,period,item_kind,track_object_id) DO UPDATE SET
-                            play_count=activity_baseline.play_count+excluded.play_count,
-                            skip_count=activity_baseline.skip_count+excluded.skip_count,
-                            last_played_at=COALESCE(max(activity_baseline.last_played_at,excluded.last_played_at),activity_baseline.last_played_at,excluded.last_played_at)")
-                        .bind(old_source).bind(&old_object).bind(source).bind(&object)
-                        .execute(&mut *transaction).await?;
-                    sqlx::query("DELETE FROM catalog.activity_baseline WHERE source_key=?1 AND track_object_id=?2 AND item_kind='track'")
-                        .bind(old_source).bind(&old_object).execute(&mut *transaction).await?;
                 }
             }
+            if let Some(path) = crate::file_media_path(current) {
+                let path = path.to_string_lossy().into_owned();
+                let existing:Option<(Option<String>,String,String)>=sqlx::query_as("SELECT source.object_id,locator.root,locator.relative_path FROM local_locators locator LEFT JOIN sources source USING(source_key) WHERE locator.media_uri=?1 AND locator.origin='import'").bind(previous).fetch_optional(&mut *transaction).await?;
+                let (source_id, root, relative_path) =
+                    existing.unwrap_or((None, String::new(), String::new()));
+                write_local_locator(
+                    &mut transaction,
+                    &LocalLocatorWrite {
+                        source_id,
+                        media_uri: previous.clone(),
+                        origin: "import".into(),
+                        path,
+                        root,
+                        relative_path,
+                        access_uri: current.clone(),
+                    },
+                )
+                .await?;
+                sqlx::query("UPDATE local_locators SET access_uri=?2,path=?3 WHERE media_uri=?1 AND access_uri=?1 AND origin='local'")
+                    .bind(previous).bind(current).bind(crate::file_media_path(current).map(|path|path.to_string_lossy().into_owned())).execute(&mut *transaction).await?;
+            }
+            sqlx::query("INSERT INTO lyrics_cache SELECT ?2,authority,role,language,script,cache_input_digest,lyrics,updated_at FROM lyrics_cache WHERE media_uri=?1 ON CONFLICT DO NOTHING").bind(previous).bind(current).execute(&mut *transaction).await?;
+            sqlx::query("DELETE FROM lyrics_cache WHERE media_uri=?1")
+                .bind(previous)
+                .execute(&mut *transaction)
+                .await?;
+            sqlx::query("INSERT INTO favorite_outbox(media_uri,favorite,previous_favorite,attempts,next_attempt_at) SELECT ?2,favorite,previous_favorite,attempts,next_attempt_at FROM favorite_outbox WHERE media_uri=?1 ON CONFLICT DO NOTHING").bind(previous).bind(current).execute(&mut *transaction).await?;
+            sqlx::query("DELETE FROM favorite_outbox WHERE media_uri=?1")
+                .bind(previous)
+                .execute(&mut *transaction)
+                .await?;
+            crate::tracks::refresh_song_search(&mut transaction, current_key).await?;
         }
+        crate::collections::refresh_facts_on(&mut transaction).await?;
         transaction.commit().await?;
-        Ok(())
+        Ok(rekeys)
     }
 
     pub async fn remove_unreferenced_import_access(&self, source_id: &str) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         let mut transaction = connection.begin().await?;
-        let unreferenced = "SELECT locator.access_uri FROM main.local_locators locator
-            JOIN main.source_ids source USING(source_key) WHERE source.object_id=?1 AND locator.origin='import'
-            AND NOT EXISTS(SELECT 1 FROM playlist_entries entry WHERE entry.media_uri=locator.media_uri)
+        let unreferenced = "SELECT locator.local_access_file_key FROM main.local_locators locator
+            JOIN main.sources source USING(source_key) WHERE source.object_id=?1 AND locator.origin='import'
+            AND NOT EXISTS(SELECT 1 FROM playlist_entries entry JOIN tracks track USING(track_key) WHERE track.media_uri=locator.media_uri)
+            AND NOT EXISTS(SELECT 1 FROM queue_entries entry JOIN tracks track USING(track_key) WHERE track.media_uri=locator.media_uri)
             AND NOT EXISTS(SELECT 1 FROM user_media_state state WHERE state.media_uri=locator.media_uri AND (state.favorite=1 OR state.rating IS NOT NULL))";
         sqlx::query(sqlx::AssertSqlSafe(format!(
-            "DELETE FROM catalog.local_access_metadata WHERE access_uri IN ({unreferenced})"
+            "WITH removable AS MATERIALIZED ({unreferenced}) DELETE FROM main.local_access_metadata WHERE access_uri IN (SELECT access_uri FROM local_locators JOIN removable USING(local_access_file_key)) AND NOT EXISTS(SELECT 1 FROM local_locators other WHERE other.access_uri=local_access_metadata.access_uri AND other.local_access_file_key NOT IN (SELECT local_access_file_key FROM removable))"
         )))
         .bind(source_id)
         .execute(&mut *transaction)
         .await?;
-        sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM main.local_locators WHERE origin='import' AND access_uri IN ({unreferenced})")))
-            .bind(source_id).execute(&mut *transaction).await?;
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM main.local_locators WHERE local_access_file_key IN ({unreferenced})"
+        )))
+        .bind(source_id)
+        .execute(&mut *transaction)
+        .await?;
         transaction.commit().await?;
         Ok(())
     }
@@ -1318,7 +1433,8 @@ impl Database {
         Ok(sqlx::query_scalar("SELECT track.object_id FROM tracks track JOIN sources source USING(source_key)
             WHERE source.object_id=?1 AND track.object_id>?2 AND track.source_path IS NOT NULL
               AND NOT EXISTS(SELECT 1 FROM local_files file WHERE file.source_key=track.source_key AND file.path=coalesce(track.cue_path,track.source_path))
-              AND NOT EXISTS(SELECT 1 FROM playlist_entries entry WHERE entry.media_uri=track.media_uri)
+              AND NOT EXISTS(SELECT 1 FROM playlist_entries entry WHERE entry.track_key=track.track_key)
+              AND NOT EXISTS(SELECT 1 FROM queue_entries entry WHERE entry.track_key=track.track_key)
               AND NOT EXISTS(SELECT 1 FROM user_media_state state WHERE state.media_uri=track.media_uri AND (state.favorite=1 OR state.rating IS NOT NULL))
             ORDER BY track.object_id LIMIT 128").bind(source_id).bind(after).fetch_all(&mut *connection).await?)
     }

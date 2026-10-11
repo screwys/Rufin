@@ -189,9 +189,7 @@ impl Playback {
     ) -> PlaybackResult<(Vec<(usize, Option<u64>, library::QueueEntry)>, usize)> {
         self.request(move |player, _| Ok(player.page_entries(offset, limit)))
     }
-    pub(crate) fn queue_content_id(&self) -> PlaybackResult<String> {
-        self.request(|player, _| Ok(player.sequence().content_id().to_owned()))
-    }
+
     pub(crate) fn continuation(&self) -> PlaybackResult<Option<playback::Continuation>> {
         self.request(|player, sample| Ok(player.continuation(sample)))
     }

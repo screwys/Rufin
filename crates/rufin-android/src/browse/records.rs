@@ -170,6 +170,7 @@ pub struct AndroidPinPage {
 
 #[derive(Clone, uniffi::Record)]
 pub struct AndroidBrowseRow {
+    pub track_key: Option<i64>,
     pub kind: String,
     pub key: String,
     pub media_uri: String,
@@ -204,6 +205,7 @@ impl From<library::SmartPlaylistRow> for AndroidBrowseRow {
             playlist_id: row.object_id.clone(),
         };
         Self {
+            track_key: None,
             kind: "smart_playlist".into(),
             playback_context_id: Some(
                 rufin_core::playback::PlaybackTarget::SmartPlaylist(row.smart_playlist_key)
@@ -247,6 +249,7 @@ impl From<library::PlaylistRow> for AndroidBrowseRow {
             playlist_id: row.object_id.clone(),
         };
         Self {
+            track_key: None,
             kind: "playlist".into(),
             playback_context_id: Some(
                 rufin_core::playback::PlaybackTarget::Playlist(row.playlist_key).context_id(),
@@ -287,6 +290,7 @@ impl From<library::GenreRow> for AndroidBrowseRow {
             genre_id: row.object_id.clone(),
         };
         Self {
+            track_key: None,
             kind: "genre".into(),
             playback_context_id: Some(
                 rufin_core::playback::PlaybackTarget::Genre(row.genre_key).context_id(),
@@ -323,6 +327,7 @@ impl From<library::GenreRow> for AndroidBrowseRow {
 impl From<library::MoodRow> for AndroidBrowseRow {
     fn from(row: library::MoodRow) -> Self {
         Self {
+            track_key: None,
             kind: "mood".into(),
             playback_context_id: Some(
                 rufin_core::playback::PlaybackTarget::Mood(row.mood_key).context_id(),
@@ -363,6 +368,7 @@ impl From<library::AlbumRow> for AndroidBrowseRow {
             }
         });
         Self {
+            track_key: None,
             kind: "album".into(),
             playback_context_id: Some(
                 rufin_core::playback::PlaybackTarget::Album(row.media_uri.clone()).context_id(),
@@ -415,6 +421,7 @@ impl From<library::HomeTrackRow> for AndroidBrowseRow {
 impl From<library::TrackRow> for AndroidBrowseRow {
     fn from(row: library::TrackRow) -> Self {
         Self {
+            track_key: Some(row.track_key.raw()),
             kind: "track".into(),
             playback_context_id: None,
             fields: Vec::new(),
@@ -434,7 +441,7 @@ impl From<library::TrackRow> for AndroidBrowseRow {
             section_refreshable: false,
             year: row.year,
             track_count: 1,
-            source_id: Some(row.source_id),
+            source_id: row.source_id,
             source_name: row.source_name,
             last_played: row.last_played,
             writable: false,

@@ -138,19 +138,11 @@ async fn stage_track_row(scan: &mut Scan, track: &ScannedTrack) -> SourceResult<
         .as_ref()
         .map(serde_json::to_vec)
         .transpose()?;
-    let normalized_search = format!(
-        "{} {} {} {}",
-        track.title,
-        track.album,
-        track.artist,
-        track.comment.as_deref().unwrap_or_default()
-    )
-    .to_lowercase();
+
     scan.write_track(
         &track.id,
         Some(&track.album_id),
         &track.title,
-        &normalized_search,
         &track.album,
         &track.artist,
         &track

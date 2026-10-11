@@ -63,7 +63,7 @@ impl Shell {
             let favorite = shell.projected_track_favorite(&media_uri, favorite);
             let half_stars = shell.half_stars_enabled(
                 &media_uri,
-                track.as_ref().map(|track| track.source_id.as_str()),
+                track.as_ref().and_then(|track| track.source_id.as_deref()),
             );
             let links = track.as_ref().map(|track| {
                 (

@@ -439,7 +439,7 @@ mod tests {
                 ),
                 position: 0,
                 received_from_connect: false,
-                playlist_entry_id: None,
+                track_key: None,
                 provenance: playback::Provenance::Manual,
             }),
         });

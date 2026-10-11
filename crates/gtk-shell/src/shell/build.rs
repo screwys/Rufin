@@ -150,12 +150,6 @@ pub async fn build(
         release_history,
     } = inputs;
     temporary_storage_banner.set_revealed(temporary_store);
-    let fresh_start_banner: adw::Banner = gtk_widgets::ui_resource::object(
-        &shell_root_builder,
-        shell_root_resource,
-        "fresh_start_banner",
-    );
-    fresh_start_banner.set_revealed(products.library.fresh_start());
     let settings = settings_handle.load();
     appearance.apply(&settings);
     info!(
@@ -517,12 +511,6 @@ pub async fn build(
             if let Err(error) = shell.products.release_updates.install_on_exit() {
                 tracing::warn!(%error, "could not start update on exit");
             }
-        }
-    });
-    let weak = Rc::downgrade(&shell);
-    fresh_start_banner.connect_button_clicked(move |_| {
-        if let Some(shell) = weak.upgrade() {
-            crate::preferences::backup::import_dialog(&shell.preferences);
         }
     });
     install_normal_navigation_activation(&shell);

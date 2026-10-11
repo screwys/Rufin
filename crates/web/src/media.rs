@@ -36,7 +36,7 @@ async fn metadata(
     }
     let row = products
         .library
-        .smart_playlist_track_rows(&[uri.to_owned()], &cancel)
+        .track_rows_by_uri(&[uri.to_owned()], &cancel)
         .await
         .map_err(internal)?
         .pop();

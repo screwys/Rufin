@@ -119,8 +119,7 @@ pub(super) async fn stage_item(scan: &mut Scan, item: &Value) -> SourceResult<()
             let source_path = part["file"].as_str();
             let format = media["container"].as_str().or(media["audioCodec"].as_str());
             let comment = item["summary"].as_str();
-            let search =
-                format!("{title} {album} {artist} {}", comment.unwrap_or_default()).to_lowercase();
+
             let mut hash = blake3::Hasher::new();
             for fact in [
                 object.as_str(),
@@ -135,7 +134,6 @@ pub(super) async fn stage_item(scan: &mut Scan, item: &Value) -> SourceResult<()
                 &object,
                 album_id.as_deref(),
                 title,
-                &search,
                 album,
                 artist,
                 &sort,

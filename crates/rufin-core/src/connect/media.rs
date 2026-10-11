@@ -858,15 +858,20 @@ impl ConnectOwner {
                     .map_err(error)??
                 }
             };
+            let key = self
+                .database
+                .track_key_by_uri(uri, &library::ReadCancellation::new())
+                .await
+                .map_err(error)?;
             let entry = position
                 .and_then(|position| queue.order.get(position))
                 .and_then(|member| queue.entries.get(*member as usize))
-                .filter(|entry| entry.media_uri.as_ref() == uri)
+                .filter(|entry| Some(entry.track_key) == key)
                 .or_else(|| {
                     queue
                         .entries
                         .iter()
-                        .find(|entry| entry.media_uri.as_ref() == uri)
+                        .find(|entry| Some(entry.track_key) == key)
                 })
                 .ok_or("The requested track is not the captured playback")?;
             let received = entry.received_from_connect;

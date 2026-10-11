@@ -93,7 +93,12 @@ impl AndroidBrowseQuery {
         let rank = usize::try_from(index)
             .map_err(error)?
             .saturating_sub(folder_count);
-        let input = self.folder_input(Some(media_uri)).await?;
+        let anchor_key = self
+            .database
+            .track_key_by_uri(&media_uri, &ReadCancellation::new())
+            .await
+            .map_err(error)?;
+        let (input, rank) = self.folder_input(anchor_key, rank).await?;
         self.queue.play(
             playback::PlayRequest::captured(input, rank, placement, false)
                 .with_context_title(context_title)
@@ -108,7 +113,7 @@ impl AndroidBrowseQuery {
         shuffled: bool,
         context_title: Option<Arc<library::QueueContextTitle>>,
     ) -> Result<(), AndroidError> {
-        let input = self.folder_input(None).await?;
+        let (input, _) = self.folder_input(None, 0).await?;
         self.queue.play(
             playback::PlayRequest::ordered(input, 0, placement, true)
                 .with_context_title(context_title)
@@ -118,8 +123,12 @@ impl AndroidBrowseQuery {
     }
 
     pub(super) async fn folder_target_uris(&self) -> Result<Vec<String>, AndroidError> {
-        match self.folder_input(None).await? {
-            library::QueueInput::Uris { order, .. } => Ok(order.to_vec()),
+        match self.folder_input(None, 0).await?.0 {
+            library::QueueInput::Tracks { order, .. } => self
+                .database
+                .track_uris(&order, &ReadCancellation::new())
+                .await
+                .map_err(error),
             library::QueueInput::Query {
                 folder,
                 filter,
@@ -149,8 +158,9 @@ impl AndroidBrowseQuery {
 
     async fn folder_input(
         &self,
-        anchor_uri: Option<String>,
-    ) -> Result<library::QueueInput, AndroidError> {
+        anchor_key: Option<library::TrackKey>,
+        anchor_index: usize,
+    ) -> Result<(library::QueueInput, usize), AndroidError> {
         let context: Arc<str> = format!(
             "android:{}:{}:{}",
             self.selected().source_id,
@@ -159,8 +169,8 @@ impl AndroidBrowseQuery {
         )
         .into();
         Ok(match self.folder_projection().await.map_err(error)? {
-            FolderProjection::Live { candidates, .. } => library::QueueInput::Uris {
-                order: self
+            FolderProjection::Live { candidates, .. } => {
+                let keys = self
                     .database
                     .live_folder_track_order(
                         self.selected().source_key,
@@ -171,25 +181,36 @@ impl AndroidBrowseQuery {
                         &ReadCancellation::new(),
                     )
                     .await
-                    .map_err(error)?
-                    .into(),
-                context_id: context,
-                source_start: 0,
-            },
-            FolderProjection::Cached(folder) => library::QueueInput::Query {
-                query: library::QueueQuery::Tracks {
-                    source: self.selected().source_key,
-                    downloaded_only: false,
-                    favorites_only: false,
-                    recursive: false,
+                    .map_err(error)?;
+                let anchor_index = anchor_key
+                    .and_then(|key| keys.iter().position(|candidate| *candidate == key))
+                    .unwrap_or(anchor_index.min(keys.len().saturating_sub(1)));
+                (
+                    library::QueueInput::Tracks {
+                        order: keys.into(),
+                        context_id: context,
+                        source_start: 0,
+                    },
+                    anchor_index,
+                )
+            }
+            FolderProjection::Cached(folder) => (
+                library::QueueInput::Query {
+                    query: library::QueueQuery::Tracks {
+                        source: self.selected().source_key,
+                        downloaded_only: false,
+                        favorites_only: false,
+                        recursive: false,
+                    },
+                    folder: *folder,
+                    filter: self.filter.clone(),
+                    sort: self.sort.track_sort(),
+                    descending: self.descending,
+                    context_id: context,
+                    anchor_key,
                 },
-                folder: *folder,
-                filter: self.filter.clone(),
-                sort: self.sort.track_sort(),
-                descending: self.descending,
-                context_id: context,
-                anchor_uri,
-            },
+                anchor_index,
+            ),
         })
     }
     pub(super) async fn folder_projection(&self) -> library::LibraryResult<&FolderProjection> {
@@ -291,6 +312,7 @@ impl AndroidBrowseQuery {
             name: name.clone(),
         });
         AndroidBrowseRow {
+            track_key: None,
             kind: "folder".into(),
             playback_context_id: None,
             key: id,

@@ -45,13 +45,6 @@
                   </object>
                 </child>
                 <child>
-                  <object class="AdwBanner" id="fresh_start_banner">
-                    <property name="title" translatable="yes">Rufin started with fresh user state because the saved database could not be used. Your settings and saved logins are unchanged.</property>
-                    <property name="button-label" translatable="yes">Import Backup</property>
-                    <property name="revealed">false</property>
-                  </object>
-                </child>
-                <child>
                   <object class="GtkOverlay" id="app_content_overlay">
                     <property name="hexpand">true</property>
                     <property name="vexpand">true</property>

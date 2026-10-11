@@ -157,7 +157,10 @@ impl PlexSource {
         &self,
         track: library::TrackRow,
     ) -> Result<crate::TrackMetadata, Error> {
-        let item = self.metadata(&track.object_id).await.map_err(error)?;
+        let item = self
+            .metadata(track.object_id.as_deref().ok_or(Error::Unavailable)?)
+            .await
+            .map_err(error)?;
         let values = TrackMetadataValues {
             title: text(&item, "title").unwrap_or(track.title),
             sort_title: text(&item, "titleSort"),

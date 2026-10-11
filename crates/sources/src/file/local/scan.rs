@@ -949,13 +949,13 @@ async fn stage_audio_batch(
     }
     persist_observations(scan, observations).await?;
     let accepted_count = accepted.len();
+    if !aliases.is_empty() {
+        scan.rekey_songs(database.merge_local_file_uris(&aliases).await?);
+    }
     scan.begin_batch().await?;
     stage_audio_tracks_batch(scan, &accepted).await?;
     scan.retain_local_media_paths(&retained).await?;
     scan.finish_batch().await?;
-    if !aliases.is_empty() {
-        database.merge_local_file_uris(&aliases).await?;
-    }
     Ok(accepted_count)
 }
 
@@ -1357,7 +1357,7 @@ pub(crate) async fn stage_imported_paths(
             uris.push((uri, cue, access));
         }
         if !aliases.is_empty() {
-            database.merge_local_file_uris(&aliases).await?;
+            scan.rekey_songs(database.merge_local_file_uris(&aliases).await?);
             uris.sort_unstable_by(|a, b| {
                 a.0.cmp(&b.0)
                     .then_with(|| a.2.is_none().cmp(&b.2.is_none()))

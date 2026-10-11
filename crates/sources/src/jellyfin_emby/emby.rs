@@ -312,7 +312,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(track.object_id, "emby:track:11");
+        assert_eq!(track.object_id.as_deref(), Some("emby:track:11"));
         assert_eq!(track.rating, Some(7));
         assert!(track.last_played.is_some());
         database

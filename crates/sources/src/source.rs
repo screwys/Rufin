@@ -87,11 +87,11 @@ struct CollectionFile {
 }
 
 impl MetadataOwner {
-    fn object_id(&self) -> &str {
+    fn object_id(&self) -> Option<&str> {
         match self {
-            Self::Track(row) => &row.object_id,
-            Self::Album(row) => &row.object_id,
-            Self::Artist(row) => &row.object_id,
+            Self::Track(row) => row.object_id.as_deref(),
+            Self::Album(row) => Some(&row.object_id),
+            Self::Artist(row) => Some(&row.object_id),
         }
     }
 
@@ -1264,7 +1264,7 @@ impl Source {
             .track_row_by_uri(media_uri, &library::ReadCancellation::new())
             .await?
             .ok_or(SourceError::NotFound)?;
-        if row.source_key != source {
+        if row.source_key != Some(source) {
             return Err(SourceError::NotFound);
         }
         if let Some(files) = self.file_source(row.source_path.as_deref()) {
@@ -1328,7 +1328,6 @@ impl Source {
         if track.cue_path.is_some() {
             return false;
         }
-        let source = track.source_key;
         if let Some(files) = self.file_source(track.source_path.as_deref()) {
             if let Some(access) = files.document_access() {
                 let path = track.source_path.as_deref().unwrap();
@@ -1352,10 +1351,7 @@ impl Source {
                     .is_some_and(crate::file::metadata::embedded_lyrics_format_writable);
         }
         match &self.implementation {
-            Implementation::Plex(_) => self
-                .metadata_file_target(database, source, &track)
-                .await
-                .is_ok(),
+            Implementation::Plex(_) => self.metadata_file_target(database, &track).await.is_ok(),
             Implementation::Files(_) => {
                 sidecar
                     || track
@@ -1366,11 +1362,10 @@ impl Source {
             Implementation::JellyfinEmby(provider)
                 if provider.kind == crate::ServerKind::Jellyfin =>
             {
-                true
+                track.object_id.is_some()
             }
             Implementation::JellyfinEmby(_) => {
-                let Ok((path, _)) = self.metadata_file_target(database, source, &track).await
-                else {
+                let Ok((path, _)) = self.metadata_file_target(database, &track).await else {
                     return false;
                 };
                 if sidecar {
@@ -1380,8 +1375,7 @@ impl Source {
                 }
             }
             Implementation::Local(_) | Implementation::OpenSubsonic(_) => {
-                let Ok((path, _)) = self.metadata_file_target(database, source, &track).await
-                else {
+                let Ok((path, _)) = self.metadata_file_target(database, &track).await else {
                     return false;
                 };
                 (!matches!(self.implementation, Implementation::OpenSubsonic(_))
@@ -1407,7 +1401,6 @@ impl Source {
             .await
             .map_err(metadata_database_error)?
             .ok_or(crate::SourceMetadataError::Unavailable)?;
-        let source = track.source_key;
         if track.cue_path.is_some() {
             return Err(crate::SourceMetadataError::Unavailable);
         }
@@ -1416,7 +1409,7 @@ impl Source {
         }
         match &self.implementation {
             Implementation::Plex(_) => {
-                self.write_file_lyrics(database, source, &track, lyrics, sidecar)
+                self.write_file_lyrics(database, &track, lyrics, sidecar)
                     .await
             }
             Implementation::Files(files) => {
@@ -1426,19 +1419,25 @@ impl Source {
                 if jellyfin.kind == crate::ServerKind::Jellyfin =>
             {
                 jellyfin
-                    .write_lyrics(&track.object_id, lyrics)
+                    .write_lyrics(
+                        track
+                            .object_id
+                            .as_deref()
+                            .ok_or(crate::SourceMetadataError::Unavailable)?,
+                        lyrics,
+                    )
                     .await
                     .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))
             }
             Implementation::Local(_) | Implementation::JellyfinEmby(_) => {
-                self.write_file_lyrics(database, source, &track, lyrics, sidecar)
+                self.write_file_lyrics(database, &track, lyrics, sidecar)
                     .await
             }
             Implementation::OpenSubsonic(_) => {
                 if !self.mapped_metadata_ready().await {
                     return Err(crate::SourceMetadataError::Unavailable);
                 }
-                self.write_file_lyrics(database, source, &track, lyrics, sidecar)
+                self.write_file_lyrics(database, &track, lyrics, sidecar)
                     .await
             }
         }
@@ -1453,12 +1452,11 @@ impl Source {
     async fn write_file_lyrics(
         &self,
         database: &Database,
-        source: library::SourceKey,
         track: &library::TrackRow,
         lyrics: &str,
         sidecar: bool,
     ) -> Result<(), crate::SourceMetadataError> {
-        let (path, _) = self.metadata_file_target(database, source, track).await?;
+        let (path, _) = self.metadata_file_target(database, track).await?;
         if sidecar {
             if !path.parent().is_some_and(std::path::Path::is_dir) {
                 return Err(crate::SourceMetadataError::Unavailable);
@@ -1550,9 +1548,7 @@ impl Source {
             Implementation::JellyfinEmby(jellyfin) => jellyfin.read_track_metadata(track).await?,
             Implementation::Plex(plex) => plex.read_track_metadata(track).await?,
             Implementation::Local(_) | Implementation::OpenSubsonic(_) => {
-                let (path, format) = self
-                    .metadata_file_target(database, track.source_key, &track)
-                    .await?;
+                let (path, format) = self.metadata_file_target(database, &track).await?;
                 if matches!(self.implementation, Implementation::OpenSubsonic(_))
                     && !self.mapped_metadata_ready().await
                 {
@@ -1778,30 +1774,36 @@ impl Source {
                     .await;
             }
             Implementation::Plex(plex) => {
+                let object_id = owner
+                    .object_id()
+                    .ok_or(crate::SourceMetadataError::Unavailable)?;
                 match &edit {
                     crate::MetadataEdit::Track(edit) => {
-                        plex.write_track_metadata(owner.object_id(), expected_revision, edit)
+                        plex.write_track_metadata(object_id, expected_revision, edit)
                             .await?
                     }
                     crate::MetadataEdit::Album(edit) => {
-                        plex.write_album_metadata(owner.object_id(), expected_revision, edit)
+                        plex.write_album_metadata(object_id, expected_revision, edit)
                             .await?
                     }
                     crate::MetadataEdit::Artist(edit) => {
-                        plex.write_artist_metadata(owner.object_id(), expected_revision, edit)
+                        plex.write_artist_metadata(object_id, expected_revision, edit)
                             .await?
                     }
                 }
                 (
-                    plex.write_artwork(owner.object_id(), edit.artwork()).await,
-                    raw_item_id(owner.object_id()).to_string(),
+                    plex.write_artwork(object_id, edit.artwork()).await,
+                    raw_item_id(object_id).to_string(),
                     tags_saved,
                 )
             }
             Implementation::JellyfinEmby(jellyfin) => {
+                let object_id = owner
+                    .object_id()
+                    .ok_or(crate::SourceMetadataError::Unavailable)?;
                 let raw = jellyfin
                     .write_metadata_value(
-                        owner.object_id(),
+                        object_id,
                         edit.kind(),
                         expected_revision,
                         application,
@@ -1860,7 +1862,7 @@ impl Source {
                     .await
                     .map_err(metadata_database_error)?;
                 for row in rows {
-                    if row.source_key != _source {
+                    if row.source_key != Some(_source) {
                         continue;
                     }
                     let Some((_, track, album)) = chunk
@@ -2142,9 +2144,7 @@ impl Source {
                 readable,
             });
         }
-        let (path, format) = self
-            .metadata_file_target(database, track.source_key, track)
-            .await?;
+        let (path, format) = self.metadata_file_target(database, track).await?;
         let track_cue_free = track.cue_path.is_none();
         tokio::task::spawn_blocking(move || {
             let readable = track_cue_free
@@ -2471,9 +2471,7 @@ impl Source {
     ) -> Result<ScanOutcome, crate::SourceMetadataError> {
         let targets = match owner {
             MetadataOwner::Track(track) => {
-                let (path, format) = self
-                    .metadata_file_target(database, track.source_key, track)
-                    .await?;
+                let (path, format) = self.metadata_file_target(database, track).await?;
                 MetadataTargets::Native(vec![MetadataFileTarget {
                     tag_writable: track.cue_path.is_none()
                         && crate::file::metadata::metadata_file_available(&path, format.as_deref()),
@@ -2544,8 +2542,12 @@ impl Source {
                             database,
                             self.source_id.as_str(),
                             &paths,
-                            matches!(owner, MetadataOwner::Album(_)).then(|| owner.object_id()),
-                            matches!(owner, MetadataOwner::Artist(_)).then(|| owner.object_id()),
+                            matches!(owner, MetadataOwner::Album(_))
+                                .then(|| owner.object_id())
+                                .flatten(),
+                            matches!(owner, MetadataOwner::Artist(_))
+                                .then(|| owner.object_id())
+                                .flatten(),
                         )
                         .await
                         .map_err(crate::operations::metadata_refresh_error)
@@ -2558,9 +2560,10 @@ impl Source {
                             let mut albums = std::collections::HashSet::new();
                             let mut items = Vec::new();
                             if !matches!(owner, MetadataOwner::Track(_)) {
-                                items.push(self.item_request_id(edit.kind(), owner.object_id()));
+                                let object_id = owner.object_id().ok_or(SourceError::NotFound)?;
+                                items.push(self.item_request_id(edit.kind(), object_id));
                                 if matches!(owner, MetadataOwner::Album(_)) {
-                                    albums.insert(owner.object_id().to_string());
+                                    albums.insert(object_id.to_string());
                                 }
                             }
                             // Song IDs still locate the files after their album IDs change.
@@ -2582,7 +2585,10 @@ impl Source {
                                 {
                                     items.push(self.item_request_id("album", &album));
                                 }
-                                items.push(self.item_request_id("track", &current.object_id));
+                                items.push(self.item_request_id(
+                                    "track",
+                                    current.object_id.as_deref().ok_or(SourceError::NotFound)?,
+                                ));
                                 if items.len() >= 128 {
                                     source
                                         .stage_items(&mut scan, std::mem::take(&mut items), true)
@@ -2690,9 +2696,7 @@ impl Source {
                 if self.file_source(row.source_path.as_deref()).is_some() {
                     return Ok(MetadataTargets::Documents);
                 }
-                let (path, format) = self
-                    .metadata_file_target(database, row.source_key, &row)
-                    .await?;
+                let (path, format) = self.metadata_file_target(database, &row).await?;
                 let tag_writable = row.cue_path.is_none()
                     && crate::file::metadata::metadata_file_available(&path, format.as_deref());
                 targets.push(MetadataFileTarget {
@@ -2736,7 +2740,6 @@ impl Source {
     async fn metadata_file_target(
         &self,
         database: &Database,
-        source: library::SourceKey,
         track: &library::TrackRow,
     ) -> Result<(PathBuf, Option<String>), crate::SourceMetadataError> {
         if track.cue_path.is_some() {
@@ -2764,6 +2767,7 @@ impl Source {
             return Ok(target);
         }
         if matches!(self.implementation, Implementation::OpenSubsonic(_))
+            && let Some(source) = track.source_key
             && let Some(source_path) = database
                 .mapping_track_source_path(
                     source,
@@ -4291,7 +4295,6 @@ mod refresh_laws {
             scan.write_track(
                 id,
                 None,
-                id,
                 id,
                 "Album",
                 "Artist",

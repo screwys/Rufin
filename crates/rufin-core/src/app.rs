@@ -66,23 +66,22 @@ where
             Err(error) if error.is_store_path_io() => {
                 warn!(%error, path=%store_path.display(), "could not use the durable Store path; startup will continue with temporary storage");
                 let directory = tempfile::Builder::new().prefix("rufin-store-").tempdir().map_err(string_error)?.keep();
-                library::Database::open_with_catalog(
+                library::Database::open_with_legacy_catalog(
                     directory.join("store.sqlite"), paths.catalog_file(),
                     &configured_source_ids,stored.sources.selected_source_id.as_ref(),
                 ).await.map(|database|(database,true))
             }
             Err(error) => Err(error),
     }.map_err(string_error)?;
-    if database.fresh_start() {
-        warn!(
-            "opened fresh user state; sources and saved logins are unchanged; user data can be restored from the backup hub"
-        );
-    }
     let library = Arc::new(database);
     library.set_distinct_track_covers(stored.ui.prefer_distinct_track_covers);
     for configured in &stored.sources.configured {
         if let Err(error) = library
-            .reconcile_source(&configured.configuration.source_id)
+            .reconcile_source(
+                &configured.configuration.source_id,
+                &configured.configuration.kind,
+                &configured.configuration.name,
+            )
             .await
         {
             warn!(%error, source_id=%configured.configuration.source_id, "could not reconcile configured source mapping");
