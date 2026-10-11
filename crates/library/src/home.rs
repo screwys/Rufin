@@ -390,7 +390,7 @@ async fn home_activity_tracks(
         let (current, legacy_field, aggregate, legacy_order) = match kind {
             HomeSectionKind::MostPlayed => (
                 "SELECT track_key,local_play_count value FROM tracks
-                    WHERE source_key=?1 AND local_play_count>0".into(),
+                    WHERE indexed=1 AND source_key=?1 AND local_play_count>0".into(),
                 "play_count", "sum", "",
             ),
             HomeSectionKind::RecentlyPlayed => (

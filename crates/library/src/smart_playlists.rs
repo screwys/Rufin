@@ -1406,7 +1406,7 @@ async fn smart_membership_sql(
             period.is_some() && matches!(positive, Some(F::PlayCount | F::SkipCount));
         let mut relation = if activity_first {
             format!("{period_name} activity CROSS JOIN tracks owner USING(media_uri)")
-        } else if let Some(field) = positive {
+        } else if let Some(field) = positive.filter(|field| *field == F::SkipCount || legacy) {
             let (candidates, column) = if field == F::SkipCount {
                 (
                     format!(
@@ -1416,7 +1416,7 @@ async fn smart_membership_sql(
                 )
             } else {
                 (
-                    "SELECT track_key FROM tracks WHERE local_play_count>0".into(),
+                    "SELECT track_key FROM tracks WHERE indexed=1 AND local_play_count>0".into(),
                     "play_count",
                 )
             };
@@ -1445,7 +1445,7 @@ async fn smart_membership_sql(
             format!(" ORDER BY sort_value {direction} NULLS LAST,owner.sort_text,owner.media_uri LIMIT {limit}")
         }).unwrap_or_default();
         sql.push_str(&format!(
-            ",result_{key} AS NOT MATERIALIZED (SELECT {key} definition_key,owner.track_key,owner.media_uri,owner.duration_millis,{descending} descending,owner.sort_text,{sort} sort_value FROM {relation} WHERE {scope} AND ({rules}){membership_order})"
+            ",result_{key} AS NOT MATERIALIZED (SELECT {key} definition_key,owner.track_key,owner.media_uri,{descending} descending,owner.sort_text,{sort} sort_value FROM {relation} WHERE {scope} AND ({rules}){membership_order})"
         ));
         members.push(format!("SELECT * FROM result_{key}"));
     }
@@ -1465,7 +1465,7 @@ async fn smart_membership_sql(
             WHERE old.period='lifetime' AND old.item_kind='track')");
     }
     if members.is_empty() {
-        members.push("SELECT NULL definition_key,NULL track_key,NULL media_uri,0 duration_millis,0 descending,NULL sort_text,NULL sort_value WHERE 0".into());
+        members.push("SELECT NULL definition_key,NULL track_key,NULL media_uri,0 descending,NULL sort_text,NULL sort_value WHERE 0".into());
     }
     sql.push_str(&format!(
         ",selected AS NOT MATERIALIZED ({})",
@@ -1656,8 +1656,16 @@ where
             SmartPlaylistListSort::Duration => "COALESCE(duration_millis,0)",
         };
         let direction = if descending { "DESC" } else { "ASC" };
+        let (duration, members) = if sort == SmartPlaylistListSort::Duration {
+            (
+                ",COALESCE(sum(track.duration_millis),0) duration_millis",
+                "selected JOIN tracks track USING(track_key)",
+            )
+        } else {
+            ("", "selected")
+        };
         let sql = format!(
-            "{policy},totals AS (SELECT definition_key,count(*) track_count,COALESCE(sum(duration_millis),0) duration_millis FROM selected GROUP BY definition_key)
+            "{policy},totals AS (SELECT definition_key,count(*) track_count{duration} FROM {members} GROUP BY definition_key)
                 SELECT definition_key FROM definitions LEFT JOIN totals USING(definition_key)
                 WHERE (current_scope=0 OR ?1 IS NULL OR track_count>0)
                   AND instr(normalized_name,lower(?2))>0

@@ -709,8 +709,10 @@ END;
 
 CREATE INDEX IF NOT EXISTS tracks_source_play_count_idx ON tracks(source_key,source_play_count DESC,sort_text,track_key) WHERE indexed=1 AND source_play_count>0;
 CREATE INDEX IF NOT EXISTS tracks_source_last_played_idx ON tracks(source_key,source_last_played DESC,track_key) WHERE indexed=1 AND source_last_played IS NOT NULL;
-CREATE INDEX IF NOT EXISTS tracks_local_play_count_idx ON tracks(source_key,local_play_count,sort_text,media_uri);
-CREATE INDEX IF NOT EXISTS tracks_global_local_play_count_idx ON tracks(local_play_count,sort_text,media_uri);
+CREATE INDEX IF NOT EXISTS tracks_local_play_order_idx ON tracks(source_key,indexed,local_play_count DESC,sort_text,media_uri);
+CREATE INDEX IF NOT EXISTS tracks_global_play_order_idx ON tracks(indexed,local_play_count DESC,sort_text,media_uri);
+DROP INDEX IF EXISTS tracks_local_play_count_idx;
+DROP INDEX IF EXISTS tracks_global_local_play_count_idx;
 CREATE INDEX IF NOT EXISTS tracks_local_shuffle_idx ON tracks(source_key,local_play_count,((track_key*1103515245)%2147483647),media_uri);
 CREATE INDEX IF NOT EXISTS tracks_global_local_shuffle_idx ON tracks(local_play_count,((track_key*1103515245)%2147483647),media_uri);
 CREATE INDEX IF NOT EXISTS tracks_shuffle_idx ON tracks(source_key,((track_key*1103515245)%2147483647),media_uri);

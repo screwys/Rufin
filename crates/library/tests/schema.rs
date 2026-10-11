@@ -20,7 +20,11 @@ async fn reopening_without_statistics_preserves_library_order() {
         .await
         .unwrap();
     let mut raw = super::support::connection(&fixture.path).await;
-    sqlx::raw_sql("DROP TABLE IF EXISTS sqlite_stat1")
+    sqlx::raw_sql("DROP TABLE IF EXISTS sqlite_stat1;
+        DROP INDEX tracks_local_play_order_idx;
+        DROP INDEX tracks_global_play_order_idx;
+        CREATE INDEX tracks_local_play_count_idx ON tracks(source_key,local_play_count,sort_text,media_uri);
+        CREATE INDEX tracks_global_local_play_count_idx ON tracks(local_play_count,sort_text,media_uri)")
         .execute(&mut raw)
         .await
         .unwrap();
