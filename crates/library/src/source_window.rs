@@ -1,8 +1,5 @@
 //! Shared ordering and bounded reads for source projections.
-use crate::{
-    FolderKey, LibraryResult, PlaylistEntryKey, PlaylistKey, QueueCollection, QueueQuery,
-    QueueScope, QueueSource, SourceId, SourceKey, TrackSort,
-};
+use crate::{FolderKey, LibraryResult, QueueCollection, QueueScope, QueueSource, SourceKey};
 use sqlx::SqliteConnection;
 pub(crate) fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
@@ -33,6 +30,34 @@ impl SourceQuery {
             self.predicate,
             self.order.join(",")
         )
+    }
+
+    pub async fn members(
+        mut self,
+        connection: &mut SqliteConnection,
+        anchor: Option<String>,
+    ) -> LibraryResult<Vec<(String, Option<String>, bool)>> {
+        let identity = if self.entry_key == "NULL" {
+            "NULL".to_string()
+        } else {
+            self.predicate.push_str(" AND playlist.name IS NOT NULL");
+            let sources = if self.entry_key == "-entry.playlist_entry_key" {
+                "catalog.sources"
+            } else {
+                "main.source_ids"
+            };
+            format!(
+                "json_array((SELECT object_id FROM {sources} WHERE source_key=playlist.source_key),playlist.object_id,entry.object_id)"
+            )
+        };
+        let columns = format!(
+            "{},{identity},COALESCE(({}),0)",
+            self.uri,
+            anchor.unwrap_or_else(|| "0".into())
+        );
+        Ok(sqlx::query_as(sqlx::AssertSqlSafe(self.select(&columns)))
+            .fetch_all(connection)
+            .await?)
     }
 }
 
@@ -266,154 +291,5 @@ async fn source_members_on(
             format!("{key} ASC"),
         ];
     }
-    let identity = if query.entry_key == "NULL" {
-        "NULL".to_string()
-    } else {
-        let sources = if query.entry_key == "-entry.playlist_entry_key" {
-            "catalog.sources"
-        } else {
-            "main.source_ids"
-        };
-        format!(
-            "json_array((SELECT object_id FROM {sources} WHERE source_key=playlist.source_key),playlist.object_id,entry.object_id)"
-        )
-    };
-    let columns = format!(
-        "{},{identity},COALESCE(({}),0)",
-        query.uri,
-        anchor.unwrap_or_else(|| "0".into())
-    );
-    Ok(sqlx::query_as(sqlx::AssertSqlSafe(query.select(&columns)))
-        .fetch_all(connection)
-        .await?)
-}
-pub(crate) async fn canonical_query(
-    connection: &mut SqliteConnection,
-    query: QueueQuery,
-    folder: Option<FolderKey>,
-    filter: String,
-    sort: TrackSort,
-    descending: bool,
-    anchor_uri: Option<String>,
-) -> LibraryResult<Option<QueueSource>> {
-    let scope = match query {
-        QueueQuery::Tracks {
-            source,
-            favorites_only,
-            downloaded_only,
-            recursive,
-        } => {
-            let Some(source) = sqlx::query_scalar::<_, String>(
-                "SELECT object_id FROM sources WHERE source_key=?1",
-            )
-            .bind(source)
-            .fetch_optional(&mut *connection)
-            .await?
-            else {
-                return Ok(None);
-            };
-            let folder = if let Some(key) = folder {
-                let Some(id) = sqlx::query_scalar::<_, String>(
-                    "SELECT object_id FROM folders WHERE folder_key=?1",
-                )
-                .bind(key)
-                .fetch_optional(&mut *connection)
-                .await?
-                else {
-                    return Ok(None);
-                };
-                Some(id)
-            } else {
-                None
-            };
-            QueueScope::Tracks {
-                source: SourceId::new(source),
-                folder,
-                favorites_only,
-                downloaded_only,
-                recursive,
-            }
-        }
-        QueueQuery::Collection {
-            collection,
-            favorites_only,
-            downloaded_only,
-        } => {
-            let Some(reference) =
-                crate::collections::canonical_collection_on(connection, &collection, folder)
-                    .await?
-            else {
-                return Ok(None);
-            };
-            QueueScope::Collection {
-                reference,
-                favorites_only,
-                downloaded_only,
-            }
-        }
-        query @ (QueueQuery::Smart { .. } | QueueQuery::SmartDisplay { .. }) => {
-            let (key, source, now, display_sort) = match query {
-                QueueQuery::Smart { key, source, now } => (key, source, now, None),
-                QueueQuery::SmartDisplay { key, source } => {
-                    (key, source, crate::smart_playlists::now(), Some(sort))
-                }
-                _ => unreachable!(),
-            };
-            let Some(reference) =
-                crate::smart_playlists::smart_source_reference(connection, key, source, folder)
-                    .await?
-            else {
-                return Ok(None);
-            };
-            QueueScope::Smart {
-                reference,
-                now,
-                display_sort,
-            }
-        }
-    };
-    Ok(Some(QueueSource {
-        scope,
-        filter,
-        sort,
-        descending,
-        anchor_uri,
-    }))
-}
-
-pub(crate) async fn canonical_playlist_query(
-    connection: &mut SqliteConnection,
-    key: PlaylistKey,
-    folder: Option<FolderKey>,
-    filter: String,
-    sort: TrackSort,
-    descending: bool,
-    anchor_entry: Option<PlaylistEntryKey>,
-    anchor_uri: Option<String>,
-) -> LibraryResult<Option<QueueSource>> {
-    let Some(reference) = crate::collections::canonical_collection_on(
-        connection,
-        &QueueCollection::Playlist(key),
-        folder,
-    )
-    .await?
-    else {
-        return Ok(None);
-    };
-    let anchor_entry = if let Some(entry) = anchor_entry {
-        sqlx::query_scalar::<_,String>(if key.raw()<0 {"SELECT object_id FROM catalog.native_playlist_entries WHERE playlist_entry_key=-?1 AND playlist_key=-?2"} else {"SELECT object_id FROM main.playlist_entries WHERE playlist_entry_key=?1 AND playlist_key=?2"}).bind(entry).bind(key).fetch_optional(connection).await?
-    } else {
-        None
-    };
-    Ok(Some(QueueSource {
-        scope: QueueScope::Playlist {
-            reference,
-            sort,
-            anchor_entry,
-        },
-        filter,
-        sort: TrackSort::Title,
-        descending,
-        anchor_uri,
-    }))
+    query.members(connection, anchor).await
 }

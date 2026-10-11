@@ -1292,56 +1292,6 @@ async fn capture_input(
             }
             return Ok(());
         }
-        QueueInput::Query {
-            query,
-            folder,
-            filter,
-            sort,
-            descending,
-            context_id,
-            anchor_uri,
-        } => {
-            let Some(reference) = crate::source_window::canonical_query(
-                connection, query, folder, filter, sort, descending, anchor_uri,
-            )
-            .await?
-            else {
-                return Ok(());
-            };
-            QueueInput::Source {
-                reference,
-                context_id,
-            }
-        }
-        QueueInput::PlaylistQuery {
-            key,
-            folder,
-            filter,
-            sort,
-            descending,
-            context_id,
-            anchor_entry,
-            anchor_uri,
-        } => {
-            let Some(reference) = crate::source_window::canonical_playlist_query(
-                connection,
-                key,
-                folder,
-                filter,
-                sort,
-                descending,
-                anchor_entry,
-                anchor_uri,
-            )
-            .await?
-            else {
-                return Ok(());
-            };
-            QueueInput::Source {
-                reference,
-                context_id,
-            }
-        }
         QueueInput::Collection {
             collection,
             folder,
@@ -1409,35 +1359,155 @@ async fn capture_input(
         }
         input => input,
     };
-    match input {
+    let (rows, context_id) = match input {
         QueueInput::Captured {
             entries: captured,
             anchor_index,
         } => {
             *anchor = Some(entries.len() + anchor_index);
             entries.extend(captured.iter().cloned());
+            return Ok(());
+        }
+        QueueInput::Query {
+            query,
+            folder,
+            filter,
+            sort,
+            descending,
+            context_id,
+            anchor_uri,
+        } => {
+            let rows = match query {
+                query @ (QueueQuery::Smart { .. } | QueueQuery::SmartDisplay { .. }) => {
+                    let uris = match query {
+                        QueueQuery::Smart { key, source, now } => {
+                            crate::smart_playlists::smart_uri_page(
+                                connection, source, key, folder, &filter, now, None,
+                            )
+                            .await?
+                        }
+                        QueueQuery::SmartDisplay { key, source } => {
+                            crate::smart_playlists::smart_sorted_uris_on(
+                                connection,
+                                source,
+                                key,
+                                folder,
+                                &filter,
+                                sort,
+                                descending,
+                                crate::smart_playlists::now(),
+                                None,
+                            )
+                            .await?
+                        }
+                        _ => unreachable!(),
+                    };
+                    uris.into_iter()
+                        .map(|uri| {
+                            let selected = anchor_uri.as_ref() == Some(&uri);
+                            (uri, None, selected)
+                        })
+                        .collect()
+                }
+                query => {
+                    let (mut query, downloaded_only) = match query {
+                        QueueQuery::Tracks {
+                            source,
+                            favorites_only,
+                            downloaded_only,
+                            ..
+                        } => (
+                            crate::tracks::track_query(
+                                source,
+                                sort,
+                                descending,
+                                favorites_only,
+                                folder,
+                                &filter,
+                            ),
+                            downloaded_only,
+                        ),
+                        QueueQuery::Collection {
+                            collection,
+                            favorites_only,
+                            downloaded_only,
+                        } => {
+                            let query = crate::collections::playback_query(
+                                connection,
+                                &collection,
+                                folder,
+                                &filter,
+                                sort,
+                                descending,
+                                favorites_only,
+                            )
+                            .await;
+                            let query = match query {
+                                Ok(query) => query,
+                                Err(LibraryError::Sqlite(sqlx::Error::RowNotFound))
+                                    if matches!(
+                                        collection,
+                                        QueueCollection::AlbumKey(_)
+                                            | QueueCollection::ArtistKey { .. }
+                                            | QueueCollection::Genre(_)
+                                            | QueueCollection::Mood(_)
+                                    ) =>
+                                {
+                                    return Ok(());
+                                }
+                                Err(error) => return Err(error),
+                            };
+                            (query, downloaded_only)
+                        }
+                        _ => unreachable!(),
+                    };
+                    if downloaded_only {
+                        crate::tracks::downloaded_filter(&mut query);
+                    }
+                    let anchor = anchor_uri
+                        .as_ref()
+                        .map(|uri| format!("{}={}", query.uri, crate::source_window::quote(uri)));
+                    query.members(connection, anchor).await?
+                }
+            };
+            (rows, context_id)
+        }
+        QueueInput::PlaylistQuery {
+            key,
+            folder,
+            filter,
+            sort,
+            descending,
+            context_id,
+            anchor_entry,
+            anchor_uri,
+        } => {
+            let query = crate::playlists::playlist_query(key, folder, sort, descending, &filter);
+            let anchor_entry = if let Some(entry) = anchor_entry {
+                sqlx::query_scalar::<_, crate::PlaylistEntryKey>(if key.raw() < 0 {
+                    "SELECT -playlist_entry_key FROM catalog.native_playlist_entries WHERE playlist_entry_key=-?1 AND playlist_key=-?2"
+                } else {
+                    "SELECT playlist_entry_key FROM main.playlist_entries WHERE playlist_entry_key=?1 AND playlist_key=?2"
+                }).bind(entry).bind(key).fetch_optional(&mut **connection).await?
+            } else {
+                None
+            };
+            let anchor = anchor_entry
+                .map(|entry| format!("{}={}", query.entry_key, entry.raw()))
+                .or_else(|| {
+                    anchor_uri
+                        .as_ref()
+                        .map(|uri| format!("{}={}", query.uri, crate::source_window::quote(uri)))
+                });
+            (query.members(connection, anchor).await?, context_id)
         }
         QueueInput::Source {
             reference,
             context_id,
-        } => {
-            let rows = crate::source_window::source_members(connection, &reference).await?;
-            for (rank, (uri, identity, selected)) in rows.into_iter().enumerate() {
-                if selected {
-                    *anchor = Some(entries.len());
-                }
-                entries.push(QueueEntry {
-                    media_uri: uri.into(),
-                    playlist_entry_id: identity.map(Into::into),
-                    provenance: QueueProvenance::Context {
-                        context_id: context_id.clone(),
-                        context_title: None,
-                        source_rank: rank,
-                    },
-                    received_from_connect: false,
-                });
-            }
-        }
+        } => (
+            crate::source_window::source_members(connection, &reference).await?,
+            context_id,
+        ),
         QueueInput::PlaylistEntries { order, context_id } => {
             for (chunk_index, keys) in order.chunks(QUEUE_CONTEXT_LIMIT).enumerate() {
                 for (ordinal, item) in playlist_queue_items(connection, keys).await? {
@@ -1455,6 +1525,7 @@ async fn capture_input(
                     });
                 }
             }
+            return Ok(());
         }
         QueueInput::Items(items) => {
             for (item, provenance) in items {
@@ -1466,6 +1537,7 @@ async fn capture_input(
                     received_from_connect: false,
                 });
             }
+            return Ok(());
         }
         QueueInput::Choices(choices) => {
             for choice in choices.iter().flatten() {
@@ -1479,6 +1551,7 @@ async fn capture_input(
                     received_from_connect: false,
                 });
             }
+            return Ok(());
         }
         QueueInput::MediaUris { order, provenance } => {
             entries.extend(order.iter().map(|uri| QueueEntry {
@@ -1487,6 +1560,7 @@ async fn capture_input(
                 provenance: provenance.clone(),
                 received_from_connect: false,
             }));
+            return Ok(());
         }
         QueueInput::Uris {
             order,
@@ -1503,8 +1577,24 @@ async fn capture_input(
                 },
                 received_from_connect: false,
             }));
+            return Ok(());
         }
         _ => unreachable!("source inputs normalized above"),
+    };
+    for (rank, (uri, identity, selected)) in rows.into_iter().enumerate() {
+        if selected {
+            *anchor = Some(entries.len());
+        }
+        entries.push(QueueEntry {
+            media_uri: uri.into(),
+            playlist_entry_id: identity.map(Into::into),
+            provenance: QueueProvenance::Context {
+                context_id: context_id.clone(),
+                context_title: None,
+                source_rank: rank,
+            },
+            received_from_connect: false,
+        });
     }
     Ok(())
 }

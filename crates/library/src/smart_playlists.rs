@@ -30,54 +30,6 @@ pub struct SmartSourceReference {
     pub folder_object_id: Option<String>,
 }
 
-pub(crate) async fn smart_source_reference(
-    connection: &mut SqliteConnection,
-    key: SmartPlaylistKey,
-    source: Option<SourceKey>,
-    folder: Option<FolderKey>,
-) -> LibraryResult<Option<SmartSourceReference>> {
-    let Some(object_id) = sqlx::query_scalar::<_, String>(
-        "SELECT object_id FROM smart_playlists WHERE smart_playlist_key=?1",
-    )
-    .bind(key)
-    .fetch_optional(&mut *connection)
-    .await?
-    else {
-        return Ok(None);
-    };
-    let source_id = if let Some(source) = source {
-        let Some(id) =
-            sqlx::query_scalar::<_, String>("SELECT object_id FROM sources WHERE source_key=?1")
-                .bind(source)
-                .fetch_optional(&mut *connection)
-                .await?
-        else {
-            return Ok(None);
-        };
-        Some(crate::SourceId::new(id))
-    } else {
-        None
-    };
-    let folder_object_id = if let Some(folder) = folder {
-        let Some(id) =
-            sqlx::query_scalar::<_, String>("SELECT object_id FROM folders WHERE folder_key=?1")
-                .bind(folder)
-                .fetch_optional(&mut *connection)
-                .await?
-        else {
-            return Ok(None);
-        };
-        Some(id)
-    } else {
-        None
-    };
-    Ok(Some(SmartSourceReference {
-        object_id,
-        source_id,
-        folder_object_id,
-    }))
-}
-
 pub(crate) async fn smart_members_ref(
     connection: &mut SqliteConnection,
     reference: &SmartSourceReference,
@@ -1554,31 +1506,23 @@ mod source_window_tests {
             current: true,
             ..SmartPlaylistDefinition::default()
         };
-        let key=sqlx::query_scalar::<_,SmartPlaylistKey>("INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position) VALUES('smart','Smart','smart',?1,0) RETURNING smart_playlist_key").bind(serde_json::to_string(&definition).unwrap()).fetch_one(&mut *connection).await.unwrap();
-        let source = sqlx::query_scalar::<_, SourceKey>("SELECT source_key FROM sources")
-            .fetch_one(&mut *connection)
+        sqlx::query("INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position) VALUES('smart','Smart','smart',?1,0)")
+            .bind(serde_json::to_string(&definition).unwrap())
+            .execute(&mut *connection)
             .await
             .unwrap();
-        let folder = sqlx::query_scalar::<_, FolderKey>("SELECT folder_key FROM folders")
-            .fetch_one(&mut *connection)
-            .await
-            .unwrap();
-        let genre = sqlx::query_scalar::<_, crate::GenreKey>("SELECT genre_key FROM genres")
-            .fetch_one(&mut *connection)
-            .await
-            .unwrap();
-        let smart = smart_source_reference(connection, key, Some(source), Some(folder))
-            .await
-            .unwrap()
-            .unwrap();
-        let collection = crate::collections::canonical_collection_on(
-            connection,
-            &crate::QueueCollection::Genre(genre),
-            Some(folder),
-        )
-        .await
-        .unwrap()
-        .unwrap();
+        let smart = SmartSourceReference {
+            object_id: "smart".into(),
+            source_id: Some(crate::SourceId::new("source")),
+            folder_object_id: Some("folder".into()),
+        };
+        let collection = crate::collections::CollectionSourceReference {
+            collection: crate::collections::CollectionIdentity::Genre {
+                source_id: crate::SourceId::new("source"),
+                object_id: "genre".into(),
+            },
+            folder: Some((crate::SourceId::new("source"), "folder".into())),
+        };
         sqlx::raw_sql("DELETE FROM sources; UPDATE smart_playlists SET smart_playlist_key=500; INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (99,'source','Source','source',zeroblob(32)); INSERT INTO genres(genre_key,source_key,object_id,name,normalized_name,sort_text) VALUES(88,99,'genre','Genre','genre','genre'); INSERT INTO folders(folder_key,source_key,object_id,name,normalized_name,sort_text) VALUES(77,99,'folder','Folder','folder','folder');").execute(&mut *connection).await.unwrap();
         let (key, source, folder) = resolve_smart_reference(connection, &smart)
             .await
@@ -2133,7 +2077,7 @@ fn matches_smart_text(row: &SqliteRow, filter: &str) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn smart_uri_page(
+pub(crate) async fn smart_uri_page(
     connection: &mut SqliteConnection,
     source: Option<SourceKey>,
     key: SmartPlaylistKey,

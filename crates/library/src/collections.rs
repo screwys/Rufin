@@ -49,91 +49,6 @@ pub struct CollectionSourceReference {
     pub folder: Option<(crate::SourceId, String)>,
 }
 
-pub(crate) async fn canonical_collection_on(
-    connection: &mut SqliteConnection,
-    collection: &crate::QueueCollection,
-    folder: Option<FolderKey>,
-) -> LibraryResult<Option<CollectionSourceReference>> {
-    use crate::QueueCollection as C;
-    let collection = match collection {
-        C::Album(uri) => CollectionIdentity::Album(uri.clone()),
-        C::Artist {
-            media_uri,
-            album_artist,
-        } => CollectionIdentity::Artist {
-            media_uri: media_uri.clone(),
-            album_artist: *album_artist,
-        },
-        C::AlbumKey(key) => {
-            let Some(uri) =
-                sqlx::query_scalar::<_, String>("SELECT media_uri FROM albums WHERE album_key=?1")
-                    .bind(key)
-                    .fetch_optional(&mut *connection)
-                    .await?
-            else {
-                return Ok(None);
-            };
-            CollectionIdentity::Album(uri)
-        }
-        C::ArtistKey { key, album_artist } => {
-            let Some(media_uri) = sqlx::query_scalar::<_, String>(
-                "SELECT media_uri FROM artists WHERE artist_key=?1",
-            )
-            .bind(key)
-            .fetch_optional(&mut *connection)
-            .await?
-            else {
-                return Ok(None);
-            };
-            CollectionIdentity::Artist {
-                media_uri,
-                album_artist: *album_artist,
-            }
-        }
-        C::Genre(key) => {
-            let Some((source,id))=sqlx::query_as::<_,(String,String)>("SELECT source.object_id,genre.object_id FROM genres genre JOIN sources source USING(source_key) WHERE genre.genre_key=?1").bind(key).fetch_optional(&mut *connection).await? else{return Ok(None);};
-            CollectionIdentity::Genre {
-                source_id: crate::SourceId::new(source),
-                object_id: id,
-            }
-        }
-        C::Mood(key) => {
-            let Some((source,id))=sqlx::query_as::<_,(String,String)>("SELECT source.object_id,mood.object_id FROM moods mood JOIN sources source USING(source_key) WHERE mood.mood_key=?1").bind(key).fetch_optional(&mut *connection).await? else{return Ok(None);};
-            CollectionIdentity::Mood {
-                source_id: crate::SourceId::new(source),
-                object_id: id,
-            }
-        }
-        C::Playlist(key) => {
-            let native = key.raw() < 0;
-            let query = if native {
-                "SELECT source.object_id,playlist.object_id FROM catalog.native_playlists playlist JOIN sources source USING(source_key) WHERE playlist.playlist_key=-?1"
-            } else {
-                "SELECT source.object_id,playlist.object_id FROM main.playlists playlist LEFT JOIN main.source_ids source USING(source_key) WHERE playlist.playlist_key=?1"
-            };
-            let Some((source, id)) = sqlx::query_as::<_, (Option<String>, String)>(query)
-                .bind(key)
-                .fetch_optional(&mut *connection)
-                .await?
-            else {
-                return Ok(None);
-            };
-            CollectionIdentity::Playlist {
-                source_id: source.map(crate::SourceId::new),
-                object_id: id,
-                native,
-            }
-        }
-    };
-    let folder = if let Some(folder) = folder {
-        let Some((source,id))=sqlx::query_as::<_,(String,String)>("SELECT source.object_id,folder.object_id FROM folders folder JOIN sources source USING(source_key) WHERE folder.folder_key=?1").bind(folder).fetch_optional(connection).await? else{return Ok(None);};
-        Some((crate::SourceId::new(source), id))
-    } else {
-        None
-    };
-    Ok(Some(CollectionSourceReference { collection, folder }))
-}
-
 pub(crate) async fn resolve_collection_reference(
     connection: &mut SqliteConnection,
     reference: &CollectionSourceReference,
@@ -1920,7 +1835,6 @@ impl Database {
         transaction.commit().await?;
         Ok(mood)
     }
-
 }
 
 pub(crate) async fn load_artist_rows(
