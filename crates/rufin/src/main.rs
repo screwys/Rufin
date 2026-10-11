@@ -16,12 +16,7 @@ use tracing::info;
 const UPDATED_RESTART_VERSION_ENV: &str = "RUFIN_UPDATED_RESTART_VERSION";
 
 fn main() -> ExitCode {
-    if !rufin_controller::configure_allocator() {
-        let _ = writeln!(
-            io::stderr().lock(),
-            "Could not apply all system allocator settings"
-        );
-    }
+    rufin_controller::configure_allocator();
     let headless = env::args_os().nth(1).as_deref() == Some(OsStr::new("--headless"));
     #[cfg(target_os = "windows")]
     if headless {
@@ -59,7 +54,7 @@ fn main() -> ExitCode {
     }
     let (diagnostics, _stderr_guard) = diagnostics::Diagnostics::install(paths::state_dir());
     let _desktop_platform = desktop_integration::Platform::initialize();
-    info!(pid = std::process::id(), "starting Rufin native shell");
+    info!("starting Rufin native shell");
 
     let initial_settings = settings.load().ui.clone();
     let bootstrap = move || async move {

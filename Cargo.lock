@@ -4937,7 +4937,6 @@ dependencies = [
  "blake3",
  "chrono",
  "futures-util",
- "libsqlite3-sys",
  "percent-encoding",
  "process-memory",
  "proptest",
