@@ -1570,6 +1570,9 @@ fn playlist_order_query(
     if descending {
         query.push(" DESC");
     }
-    query.push(",playlist.sort_text,playlist.playlist_key");
+    if sort != PlaylistSort::Title {
+        query.push(",playlist.sort_text");
+    }
+    query.push(",playlist.playlist_key");
     query
 }

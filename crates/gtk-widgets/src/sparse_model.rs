@@ -334,8 +334,8 @@ pub fn connect_sparse_bind(
                     .item()
                     .and_then(|item| item.downcast::<SparseObjectItem>().ok())
                     .is_none_or(|item| item.is_ready());
-                set_sparse_child_ready(item, ready);
                 render(item.upcast_ref());
+                set_sparse_child_ready(item, ready);
             }),
         );
     });

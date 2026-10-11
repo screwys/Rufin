@@ -343,14 +343,6 @@ pub async fn build(
             },
             {
                 let weak = weak.clone();
-                Box::new(move |generation| {
-                    if let Some(shell) = weak.upgrade() {
-                        shell.try_finish_route_loading(generation);
-                    }
-                })
-            },
-            {
-                let weak = weak.clone();
                 Box::new(move || {
                     if let Some(shell) = weak.upgrade() {
                         let player = shell.player_ui.selected_playback().as_deref().cloned();

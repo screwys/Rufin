@@ -378,7 +378,7 @@ fn folder_page(
         let track_sparse = Rc::clone(&track_sparse);
         let stack = table_stack.clone();
         Rc::new(
-            move |request: crate::track_model::TrackProjectionRequest,
+            move |request: library::SongQuery,
                   result: library::LibraryResult<(
                 Vec<FolderLink>,
                 SparseSource<library::TrackKey>,
@@ -393,7 +393,7 @@ fn folder_page(
                     "content"
                 });
                 if applied_query.borrow().is_some() {
-                    applied_query.replace(request.query);
+                    applied_query.replace(Some(request));
                 }
                 folder_sparse.replace_order(folders);
                 track_sparse.replace_prepared(
@@ -413,8 +413,7 @@ fn folder_page(
     canonical_folders.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     let canonical_folders: Arc<[FolderLink]> = canonical_folders.into();
     let load = Arc::new(
-        move |request: crate::track_model::TrackProjectionRequest,
-              cancellation: ReadCancellation| {
+        move |request: library::SongQuery, cancellation: ReadCancellation| {
             let database = Arc::clone(&database);
             let source = source.clone();
             let folders = Arc::clone(&canonical_folders);
@@ -425,9 +424,9 @@ fn folder_page(
                             .live_folder_track_order(
                                 source_key,
                                 &candidates,
-                                &request.query().filter,
-                                request.settings.sort_key.track_sort(),
-                                request.settings.descending,
+                                &request.filter,
+                                request.sort.expect("folder sort"),
+                                request.descending,
                                 &cancellation,
                             )
                             .await?
@@ -437,7 +436,7 @@ fn folder_page(
                     FolderTrackSource::CachedFolder(_) => {
                         let page = database
                             .song_route_page(
-                                request.query(),
+                                &request,
                                 library::RouteSeedWindow::top(),
                                 &cancellation,
                             )
@@ -445,7 +444,7 @@ fn folder_page(
                         (SparseSource::Query { count: page.count }, page.first_rows)
                     }
                 };
-                let normalized = request.query().filter.to_lowercase();
+                let normalized = request.filter.to_lowercase();
                 let mut folders: Vec<FolderLink> = folders
                     .iter()
                     .filter(|folder| {
@@ -453,7 +452,7 @@ fn folder_page(
                     })
                     .cloned()
                     .collect();
-                if request.settings.descending {
+                if request.descending {
                     folders.reverse();
                 }
                 Ok((folders, tracks, first_rows))
@@ -469,10 +468,8 @@ fn folder_page(
     let request = {
         let shell = Rc::downgrade(shell);
         let folder_sparse = Rc::clone(&folder_sparse);
-        let previous = RefCell::new(crate::track_model::TrackProjectionRequest {
-            query: Some(query),
-            settings,
-        });
+        let previous = RefCell::new(query);
+        let previous_fields = RefCell::new(settings.row_fields);
         Rc::new(move |query: String, refresh: bool| {
             let Some(shell) = shell.upgrade() else { return };
             let settings = shell
@@ -480,23 +477,21 @@ fn folder_page(
                 .current
                 .borrow()
                 .library_list(LibraryListKey::Folders);
-            let request = crate::track_model::TrackProjectionRequest {
-                query: Some(library::SongQuery {
-                    filter: query,
-                    sort: Some(settings.sort_key.track_sort()),
-                    descending: settings.descending,
-                    ..previous.borrow().query().clone()
-                }),
-                settings,
+            let request = library::SongQuery {
+                filter: query,
+                sort: Some(settings.sort_key.track_sort()),
+                descending: settings.descending,
+                ..previous.borrow().clone()
             };
-            let name_changed = folder_name_field(&previous.borrow().settings.row_fields)
-                != folder_name_field(&request.settings.row_fields);
-            table.apply_fields(&request.settings.row_fields);
-            gtk_widgets::display::apply(&table.widget(), &request.settings.display);
+            let name_changed = folder_name_field(&previous_fields.borrow())
+                != folder_name_field(&settings.row_fields);
+            table.apply_fields(&settings.row_fields);
+            gtk_widgets::display::apply(&table.widget(), &settings.display);
             if name_changed {
                 folder_sparse.update_matching(|_| true, |_| {});
             }
-            let query_changed = !previous.borrow().same_query(&request);
+            previous_fields.replace(settings.row_fields);
+            let query_changed = *previous.borrow() != request;
             previous.replace(request.clone());
             if refresh || query_changed {
                 read.request_with(request);

@@ -972,7 +972,6 @@ impl CatalogUi {
         rows: Vec<TrackRow>,
     ) -> (gtk::Widget, Rc<dyn Fn()>) {
         let key = LibraryListKey::FullscreenTracks;
-        let settings = self.settings.current.borrow().library_list(key);
         let order = rows.iter().map(|row| row.track_key).collect::<Vec<_>>();
         let database = self.library.clone();
         let model = TrackCollectionModel::with_load(
@@ -981,7 +980,6 @@ impl CatalogUi {
             None,
             0,
             rows,
-            settings,
             Rc::new(move |keys, _, _, cancellation| {
                 let database = database.clone();
                 Box::pin(async move {

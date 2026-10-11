@@ -97,37 +97,97 @@ pub(super) fn clamp_route_position(position: f64, lower: f64, upper: f64, page_s
     position.clamp(lower, (upper - page_size).max(lower))
 }
 
-mod restore_owner_imp {
+mod surface_imp {
     use std::cell::{Cell, RefCell};
 
     use gtk::{glib, prelude::*, subclass::prelude::*};
 
     #[derive(Default)]
-    pub struct RoutePositionRestoreOwner {
+    pub struct RouteSurface {
         pub(super) adjustment: RefCell<Option<gtk::Adjustment>>,
         pub(super) target: Cell<Option<f64>>,
-        pub(super) ready: RefCell<Option<std::rc::Rc<dyn Fn()>>>,
+        pub(super) allocated: RefCell<Option<Box<dyn Fn()>>>,
+        pub(super) ready: RefCell<Option<Box<dyn Fn(&gtk::Widget)>>>,
+        pending: RefCell<Vec<(glib::WeakRef<gtk::Widget>, glib::SignalHandlerId)>>,
     }
 
     #[glib::object_subclass]
-    impl ObjectSubclass for RoutePositionRestoreOwner {
-        const NAME: &'static str = "RufinRoutePositionRestoreOwner";
-        type Type = super::RoutePositionRestoreOwner;
+    impl ObjectSubclass for RouteSurface {
+        const NAME: &'static str = "RufinRouteSurface";
+        type Type = super::RouteSurface;
         type ParentType = gtk::Widget;
     }
 
-    impl ObjectImpl for RoutePositionRestoreOwner {
+    impl ObjectImpl for RouteSurface {
         fn dispose(&self) {
             self.adjustment.take();
             self.target.take();
+            self.allocated.take();
             self.ready.take();
+            self.clear_pending();
             while let Some(child) = self.obj().first_child() {
                 child.unparent();
             }
         }
     }
 
-    impl WidgetImpl for RoutePositionRestoreOwner {
+    impl RouteSurface {
+        fn clear_pending(&self) {
+            for (widget, handler) in self.pending.take() {
+                if let Some(widget) = widget.upgrade() {
+                    widget.disconnect(handler);
+                }
+            }
+        }
+
+        fn pending_changed(&self) {
+            if self.pending.borrow().iter().any(|(widget, _)| {
+                widget
+                    .upgrade()
+                    .is_some_and(|widget| super::presentation_pending(&widget))
+            }) {
+                return;
+            }
+            self.obj().queue_allocate();
+        }
+
+        fn watch_pending(&self) {
+            if self.ready.borrow().is_none() {
+                return;
+            }
+            self.clear_pending();
+            let root = self.obj();
+            let Some(child) = root.first_child() else {
+                return;
+            };
+            let mut pending = Vec::new();
+            let viewport =
+                gtk::graphene::Rect::new(0.0, 0.0, root.width() as f32, root.height() as f32);
+            super::visible_pending(&child, root.upcast_ref(), &viewport, &mut pending);
+            if pending.is_empty() {
+                if let Some(ready) = self.ready.take() {
+                    ready(root.upcast_ref());
+                }
+                return;
+            }
+            self.pending.replace(
+                pending
+                    .into_iter()
+                    .map(|widget| {
+                        let owner = root.downgrade();
+                        let handler = widget.connect_css_classes_notify(move |_| {
+                            if let Some(owner) = owner.upgrade() {
+                                owner.imp().pending_changed();
+                            }
+                        });
+                        (widget.downgrade(), handler)
+                    })
+                    .collect(),
+            );
+        }
+    }
+
+    impl WidgetImpl for RouteSurface {
         fn request_mode(&self) -> gtk::SizeRequestMode {
             self.obj()
                 .first_child()
@@ -158,14 +218,15 @@ mod restore_owner_imp {
                     adjustment.upper(),
                     adjustment.page_size(),
                 ));
-                // Apply the restored viewport before admitting visible artwork.
+                // Allocate the restored viewport before checking its rows and covers.
                 // Queuing this owner during allocation does not schedule another
                 // call to size_allocate when only its descendants need layout.
                 child.allocate(width, height, baseline, None);
             }
-            if let Some(ready) = self.ready.take() {
-                ready();
+            if let Some(allocated) = self.allocated.take() {
+                allocated();
             }
+            self.watch_pending();
         }
 
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
@@ -177,22 +238,23 @@ mod restore_owner_imp {
 }
 
 gtk::glib::wrapper! {
-    pub struct RoutePositionRestoreOwner(
-        ObjectSubclass<restore_owner_imp::RoutePositionRestoreOwner>
+    pub struct RouteSurface(
+        ObjectSubclass<surface_imp::RouteSurface>
     )
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
-pub(super) fn prepare_route_position_before_snapshot(
+pub(super) fn mount_route_surface(
     child: &impl IsA<gtk::Widget>,
     adjustment: Option<&gtk::Adjustment>,
     target: Option<f64>,
-    ready: impl Fn() + 'static,
-) -> gtk::Widget {
+    allocated: impl Fn() + 'static,
+    ready: impl Fn(&gtk::Widget) + 'static,
+) -> RouteSurface {
     use gtk::subclass::prelude::ObjectSubclassIsExt;
 
-    let owner: RoutePositionRestoreOwner = gtk::glib::Object::new();
+    let owner: RouteSurface = gtk::glib::Object::new();
     owner.set_hexpand(child.hexpands());
     owner.set_vexpand(child.vexpands());
     owner.set_halign(child.halign());
@@ -200,9 +262,55 @@ pub(super) fn prepare_route_position_before_snapshot(
     owner.set_accessible_role(gtk::AccessibleRole::Presentation);
     owner.imp().adjustment.replace(adjustment.cloned());
     owner.imp().target.set(target);
-    owner.imp().ready.replace(Some(std::rc::Rc::new(ready)));
+    owner.imp().allocated.replace(Some(Box::new(allocated)));
+    owner.imp().ready.replace(Some(Box::new(ready)));
     child.set_parent(&owner);
-    owner.upcast()
+    owner
+}
+
+impl RouteSurface {
+    pub(super) fn is_ready(&self) -> bool {
+        use gtk::subclass::prelude::ObjectSubclassIsExt;
+        self.imp().ready.borrow().is_none()
+    }
+}
+
+// These classes belong to the row and cover presentation owners, not the theme.
+fn presentation_pending(widget: &gtk::Widget) -> bool {
+    widget.has_css_class("row-pending")
+        || widget.has_css_class("track-skeleton")
+        || widget.has_css_class("cover-pending")
+}
+
+fn visible_pending(
+    widget: &gtk::Widget,
+    root: &gtk::Widget,
+    clip: &gtk::graphene::Rect,
+    pending: &mut Vec<gtk::Widget>,
+) {
+    if !widget.is_visible() || !widget.is_child_visible() {
+        return;
+    }
+    let Some(bounds) = widget.compute_bounds(root) else {
+        return;
+    };
+    let Some(intersection) = bounds.intersection(clip) else {
+        return;
+    };
+    if presentation_pending(widget) {
+        pending.push(widget.clone());
+        return;
+    }
+    let clip = if widget.overflow() == gtk::Overflow::Hidden || widget.is::<gtk::ScrolledWindow>() {
+        &intersection
+    } else {
+        clip
+    };
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        child = current.next_sibling();
+        visible_pending(&current, root, clip, pending);
+    }
 }
 
 #[cfg(test)]

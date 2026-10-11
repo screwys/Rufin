@@ -69,7 +69,7 @@ pub enum AlbumCollectionOrder {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[expect(
     clippy::large_enum_variant,
     reason = "album detail rows are supplied through the bounded sparse-model window"
@@ -277,31 +277,12 @@ impl AlbumCollectionModels {
         }
     }
 
-    pub fn replace_order(&self, order: AlbumCollectionOrder) {
-        if let Some(rows) = &self.rows {
-            if let AlbumCollectionOrder::Rows(count) = order {
-                rows.replace_order(SparseSource::Query { count });
-            }
-        } else if let Some(detail) = &self.detail.sparse
-            && let AlbumCollectionOrder::Detail {
-                media_uris,
-                albums,
-                albums_with_genres,
-            } = order
-        {
-            self.detail.albums.replace(albums.into_iter().collect());
-            self.detail
-                .albums_with_genres
-                .replace(albums_with_genres.into_iter().collect());
-            detail.replace_order(media_uris);
-        }
-    }
-
     pub fn replace_prepared(
         &self,
         order: AlbumCollectionOrder,
         first_row_position: usize,
         first_rows: Vec<AlbumRow>,
+        first_detail_rows: Vec<AlbumDetailRouteRow>,
     ) -> bool {
         if let Some(rows) = &self.rows {
             let AlbumCollectionOrder::Rows(count) = order else {
@@ -318,8 +299,31 @@ impl AlbumCollectionModels {
         if !first_rows.is_empty() {
             return false;
         }
-        self.replace_order(order);
-        true
+        let AlbumCollectionOrder::Detail {
+            media_uris,
+            albums,
+            albums_with_genres,
+        } = order
+        else {
+            return false;
+        };
+        let Some(detail) = &self.detail.sparse else {
+            return false;
+        };
+        self.detail.albums.replace(albums.into_iter().collect());
+        self.detail
+            .albums_with_genres
+            .replace(albums_with_genres.into_iter().collect());
+        detail.replace_prepared_at(
+            media_uris,
+            first_row_position,
+            first_detail_rows,
+            Vec::new(),
+            |row| match row {
+                AlbumDetailRouteRow::Album(row) => row.media_uri.clone(),
+                AlbumDetailRouteRow::Track(row) => row.media_uri.clone(),
+            },
+        )
     }
 
     pub fn update_favorite(&self, media_uri: &str, favorite: bool) -> bool {
@@ -1999,6 +2003,7 @@ pub async fn load_album_collection(
     folder: Option<library::FolderKey>,
     settings: &rufin_core::settings::LibraryListSettings,
     favorites_only: bool,
+    filter: &str,
     window: library::RouteSeedWindow,
     cancellation: &library::ReadCancellation,
 ) -> library::LibraryResult<(
@@ -2013,7 +2018,7 @@ pub async fn load_album_collection(
                 source_key,
                 folder,
                 favorites_only,
-                "",
+                filter,
                 settings.sort_key.album_sort(),
                 settings.descending,
                 cancellation,
@@ -2043,7 +2048,7 @@ pub async fn load_album_collection(
                 source_key,
                 folder,
                 favorites_only,
-                "",
+                filter,
                 settings.sort_key.album_sort(),
                 settings.descending,
                 window,

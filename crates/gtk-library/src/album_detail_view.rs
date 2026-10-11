@@ -29,7 +29,7 @@ use crate::release_kind::album_release_kind_label;
 use crate::route_layout::{
     PRIMARY_ROUTE_MARGIN_START, ROUTE_TOP_MARGIN, detail_route_wrapper, detail_showcase_cover_size,
 };
-use crate::track_model::{PreparedTrackProjection, TrackCollectionModel, TrackProjectionRequest};
+use crate::track_model::TrackCollectionModel;
 use gtk_media_menus::media_menus::present_album_context_menu;
 use gtk_widgets::detail_links::{DetailLinkBinding, album_artist_links};
 use gtk_widgets::route::Route;
@@ -59,15 +59,8 @@ impl CatalogUi {
             (self.route_width)(),
             PRIMARY_ROUTE_MARGIN_START,
         );
-        let model = TrackCollectionModel::new(
-            Arc::clone(&self.library),
-            self.runtime.clone(),
-            page,
-            self.settings
-                .current
-                .borrow()
-                .library_list(LibraryListKey::AlbumDetailTracks),
-        );
+        let model =
+            TrackCollectionModel::new(Arc::clone(&self.library), self.runtime.clone(), page);
         let (tracks_widget, track_projection, track_toolbar) = self.scrolling_track_projection(
             model,
             LibraryListKey::AlbumDetailTracks,
@@ -201,23 +194,7 @@ impl CatalogUi {
         );
         route_stack.set_visible_child_name("content");
 
-        let database = Arc::clone(&self.library);
-        let load = move |request: TrackProjectionRequest, cancellation| {
-            let database = Arc::clone(&database);
-            async move {
-                let page = database
-                    .song_route_page(
-                        request.query(),
-                        library::RouteSeedWindow::top(),
-                        &cancellation,
-                    )
-                    .await
-                    .map_err(|error| error.to_string())?;
-                Ok::<_, String>(PreparedTrackProjection::from_page(page, request))
-            }
-        };
-        let refresh =
-            track_projection.connect_read(self, |request| request, load, "mounted Album route");
+        let refresh = track_projection.connect_read(self, "mounted Album route");
         let layout_cycle = track_toolbar.layout_cycle();
         let resume = {
             let shell = Rc::downgrade(self);
@@ -241,12 +218,12 @@ impl CatalogUi {
                     .current
                     .borrow()
                     .library_list(LibraryListKey::AlbumDetailTracks);
-                let previous = track_projection.projection_request();
+                let previous = track_projection.query();
                 track_projection
                     .apply_library_list_settings(LibraryListKey::AlbumDetailTracks, &settings);
                 track_toolbar.apply(LibraryListKey::AlbumDetailTracks, &settings);
-                let tracks = track_projection.projection_request();
-                if !previous.same_query(&tracks) {
+                let tracks = track_projection.query();
+                if previous != tracks {
                     refresh();
                 }
             })

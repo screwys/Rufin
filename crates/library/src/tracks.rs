@@ -297,12 +297,12 @@ impl<'row> FromRow<'row, SqliteRow> for TrackRow {
 }
 
 #[derive(Clone, Debug)]
-pub struct TrackRoutePage {
+pub struct TrackRoutePage<T = TrackRow> {
     pub query: crate::SongQuery,
     pub count: usize,
     pub disc_sections: Vec<(u32, i64)>,
     pub first_row_position: usize,
-    pub first_rows: Vec<TrackRow>,
+    pub first_rows: Vec<T>,
 }
 
 impl Database {

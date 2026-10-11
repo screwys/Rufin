@@ -25,7 +25,6 @@ use super::detail_showcase::{
 };
 use super::routes::SearchableTrackOptions;
 use crate::route_layout::PRIMARY_ROUTE_MARGIN_START;
-use crate::track_model::PreparedTrackProjection;
 use gtk_media_menus::media_menus::present_artist_context_menu;
 use gtk_widgets::route::Route;
 
@@ -182,17 +181,13 @@ impl CatalogUi {
                 Rc::new(
                     move |generation,
                           detail: ArtistOverviewData,
-                          request,
                           album_settings: LibraryListSettings| {
                         let Some(shell) = shell.upgrade() else { return };
                         if !lane.finish(generation) {
                             return;
                         }
                         header.replace(&shell, detail.summary.clone());
-                        favorite.replace_prepared(PreparedTrackProjection::from_page(
-                            detail.favorite_tracks,
-                            request,
-                        ));
+                        favorite.replace_page(detail.favorite_tracks);
                         let present = !favorite.source_is_empty();
                         releases.set_favorite_present(present);
                         let height = 30 + favorite.source_count().min(4) as i32 * 64;
@@ -220,7 +215,6 @@ impl CatalogUi {
                     .current
                     .borrow()
                     .library_list(LibraryListKey::ArtistAlbums);
-                let request = favorite.projection_request();
                 let (generation, cancellation) = refresh_lane.begin();
                 let database = Arc::clone(&shell.library);
                 let source_task = source;
@@ -247,7 +241,7 @@ impl CatalogUi {
                     let Some(apply) = apply.upgrade() else {
                         return;
                     };
-                    apply(generation, detail, request, album_settings);
+                    apply(generation, detail, album_settings);
                 });
             }) as Rc<dyn Fn()>
         };
@@ -264,7 +258,7 @@ impl CatalogUi {
                     .current
                     .borrow()
                     .library_list(LibraryListKey::ArtistTracks);
-                let previous = favorite.projection_request();
+                let previous = favorite.query();
                 favorite.apply_library_list_settings(LibraryListKey::ArtistTracks, &track_settings);
                 favorite_toolbar.apply(LibraryListKey::ArtistTracks, &track_settings);
                 let album_settings = shell
@@ -273,7 +267,7 @@ impl CatalogUi {
                     .borrow()
                     .library_list(LibraryListKey::ArtistAlbums);
                 let release_query_changed = releases.apply_library_list_settings(&album_settings);
-                if !previous.same_query(&favorite.projection_request()) {
+                if previous != favorite.query() {
                     refresh();
                 } else if release_query_changed {
                     request_artist_release_orders(
@@ -503,12 +497,10 @@ impl CatalogUi {
         } else {
             "artist-tracks"
         };
-        let settings = self.settings.current.borrow().library_list(key);
         let model = crate::track_model::TrackCollectionModel::new(
             Arc::clone(&self.library),
             self.runtime.clone(),
             page,
-            settings,
         );
         let (tracks_widget, tracks, toolbar) = self.scrolling_track_projection(
             model,
@@ -536,26 +528,7 @@ impl CatalogUi {
         ));
         root.append(&tracks_widget);
         let layout_cycle = toolbar.layout_cycle();
-        let database = Arc::clone(&self.library);
-        let refresh = tracks.connect_read(
-            self,
-            |request| request,
-            move |request, cancellation| {
-                let database = Arc::clone(&database);
-                async move {
-                    let page = database
-                        .song_route_page(
-                            request.query(),
-                            library::RouteSeedWindow::top(),
-                            &cancellation,
-                        )
-                        .await
-                        .map_err(|error| error.to_string())?;
-                    Ok(PreparedTrackProjection::from_page(page, request))
-                }
-            },
-            "mounted artist tracks",
-        );
+        let refresh = tracks.connect_read(self, "mounted artist tracks");
         let resume = {
             let shell = Rc::downgrade(self);
             let projection = Rc::clone(&tracks);
@@ -563,10 +536,10 @@ impl CatalogUi {
             Rc::new(move || {
                 let Some(shell) = shell.upgrade() else { return };
                 let settings = shell.settings.current.borrow().library_list(key);
-                let previous = projection.projection_request();
+                let previous = projection.query();
                 projection.apply_library_list_settings(key, &settings);
                 toolbar.apply(key, &settings);
-                if !previous.same_query(&projection.projection_request()) {
+                if previous != projection.query() {
                     refresh();
                 }
             })

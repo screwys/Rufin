@@ -11,7 +11,6 @@ use library::{
 use localization::{msgid, track_count_text};
 
 use crate::CatalogUi;
-use crate::track_model::{PreparedTrackProjection, TrackProjectionRequest};
 use crate::{LibraryListKey, LibraryListSettings};
 use gtk_widgets::artwork::presentation::stable_seed;
 use gtk_widgets::format_duration_units;
@@ -37,7 +36,7 @@ pub use library::PlaylistDetailPage as PlaylistDetailData;
 
 pub struct SmartPlaylistDetailData {
     pub summary: SmartPlaylistRow,
-    projection: PreparedTrackProjection<library::TrackRow>,
+    projection: library::TrackRoutePage,
 }
 
 #[derive(Clone, PartialEq)]
@@ -162,8 +161,6 @@ impl CatalogUi {
         self: &Rc<Self>,
         key: SmartPlaylistKey,
         detail: Option<SmartPlaylistDetailData>,
-        source: Option<library::SourceKey>,
-        folder: Option<library::FolderKey>,
     ) -> MountedRoute {
         let Some(detail) = detail else {
             return MountedRoute::static_widget(crate::route_layout::placeholder_view(
@@ -172,35 +169,19 @@ impl CatalogUi {
             ));
         };
         (self.update_smart_playlist_pin)(&detail.summary);
+        let library::SongScope::Smart { source, .. } = detail.projection.query.scope else {
+            unreachable!("smart playlist page owns a smart song query")
+        };
+        let folder = detail.projection.query.folder;
         let owner = PlaylistDetailOwner::Smart {
             key,
             summary: detail.summary,
         };
         let list_key = owner.key();
-        let settings = detail.projection.request.settings;
-        let rows_database = self.library.clone();
-        let load = Rc::new(
-            move |_: Vec<library::TrackKey>,
-                  range: std::ops::Range<usize>,
-                  request: TrackProjectionRequest,
-                  cancellation: ReadCancellation| {
-                let database = rows_database.clone();
-                Box::pin(async move {
-                    database
-                        .song_rows(request.query(), range.start, range.len(), &cancellation)
-                        .await
-                        .map_err(|error| error.to_string())
-                }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
-            },
-        );
-        let model = crate::track_model::TrackCollectionModel::with_load(
+        let model = crate::track_model::TrackCollectionModel::new(
+            Arc::clone(&self.library),
             self.runtime.clone(),
-            detail.projection.order,
-            detail.projection.request.query,
-            detail.projection.first_row_position,
-            detail.projection.first_rows,
-            settings,
-            load,
+            detail.projection,
         );
         let play_model = model.clone();
         let play_queue = self.queue.clone();
@@ -220,36 +201,16 @@ impl CatalogUi {
             owner.context_id(),
         );
         let item_navigation = tracks.item_navigation();
-        let database = self.library.clone();
-        let refresh_order = tracks.connect_read(
-            self,
-            move |request| request,
-            move |request: TrackProjectionRequest, cancellation| {
-                let database = database.clone();
-                async move {
-                    prepare_smart_playlist_projection(
-                        &database,
-                        source,
-                        key,
-                        folder,
-                        request,
-                        library::RouteSeedWindow::top(),
-                        &cancellation,
-                    )
-                    .await
-                }
-            },
-            "mounted Smart Playlist route",
-        );
+        let refresh_order = tracks.connect_read(self, "mounted Smart Playlist route");
         let apply_tracks = tracks.clone();
         let apply_toolbar = toolbar.clone();
         let apply_refresh = refresh_order.clone();
         let apply = Rc::new(move |settings: &LibraryListSettings| {
-            let previous = apply_tracks.projection_request();
+            let previous = apply_tracks.query();
             apply_tracks.apply_library_list_settings(list_key, settings);
             apply_toolbar.apply(list_key, settings);
-            let request = apply_tracks.projection_request();
-            if !previous.same_query(&request) {
+            let request = apply_tracks.query();
+            if previous != request {
                 apply_refresh();
             }
         }) as Rc<dyn Fn(&LibraryListSettings)>;
@@ -687,44 +648,23 @@ pub async fn load_smart_playlist_detail(
     else {
         return Ok(None);
     };
-    let projection = prepare_smart_playlist_projection(
-        database,
-        source,
-        key,
-        folder,
-        TrackProjectionRequest {
-            query: Some(library::SongQuery {
+    let projection = database
+        .song_route_page(
+            &library::SongQuery {
                 folder,
                 sort: Some(settings.sort_key.track_sort()),
                 descending: settings.descending,
                 ..library::SongQuery::new(library::SongScope::Smart { key, source, now })
-            }),
-            settings,
-        },
-        window,
-        cancellation,
-    )
-    .await?;
+            },
+            window,
+            cancellation,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
     Ok(Some(SmartPlaylistDetailData {
         summary,
         projection,
     }))
-}
-
-async fn prepare_smart_playlist_projection(
-    database: &Database,
-    _source: Option<library::SourceKey>,
-    _key: SmartPlaylistKey,
-    _folder: Option<library::FolderKey>,
-    request: TrackProjectionRequest,
-    window: library::RouteSeedWindow,
-    cancellation: &ReadCancellation,
-) -> Result<PreparedTrackProjection<library::TrackRow>, String> {
-    let page = database
-        .song_route_page(request.query(), window, cancellation)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(PreparedTrackProjection::from_page(page, request))
 }
 
 pub fn playlist_cover_size(width: i32) -> i32 {

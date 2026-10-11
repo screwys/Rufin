@@ -1,7 +1,6 @@
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
-    sync::Arc,
 };
 
 use adw::prelude::*;
@@ -18,7 +17,6 @@ use gtk_widgets::mounted_route::MountedRoute;
 
 use super::detail_showcase::detail_radio_button;
 use super::grouped_detail::GroupedDetailData;
-use crate::track_model::PreparedTrackProjection;
 use gtk_media_menus::media_menus::CollectionPlay;
 use gtk_media_menus::media_menus::{present_genre_context_menu, present_mood_context_menu};
 
@@ -207,26 +205,7 @@ impl CatalogUi {
             play_label: id.play_label(),
         });
         let tracks = Rc::new(grouped.tracks().clone());
-        let database = Arc::clone(&self.library);
-        let refresh = tracks.connect_read(
-            self,
-            |request| request,
-            move |request, cancellation| {
-                let database = Arc::clone(&database);
-                async move {
-                    let page = database
-                        .song_route_page(
-                            request.query(),
-                            library::RouteSeedWindow::top(),
-                            &cancellation,
-                        )
-                        .await
-                        .map_err(|error| error.to_string())?;
-                    Ok(PreparedTrackProjection::from_page(page, request))
-                }
-            },
-            "mounted named detail",
-        );
+        let refresh = tracks.connect_read(self, "mounted named detail");
         let resume = {
             let shell = Rc::downgrade(self);
             let projection = Rc::clone(&tracks);
@@ -234,9 +213,9 @@ impl CatalogUi {
             Rc::new(move || {
                 let Some(shell) = shell.upgrade() else { return };
                 let settings = shell.settings.current.borrow().library_list(id.key());
-                let previous = projection.projection_request();
+                let previous = projection.query();
                 projection.apply_library_list_settings(id.key(), &settings);
-                if !previous.same_query(&projection.projection_request()) {
+                if previous != projection.query() {
                     refresh();
                 }
             })

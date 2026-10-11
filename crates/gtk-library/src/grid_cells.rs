@@ -486,6 +486,7 @@ where
         let child =
             cards::collection_grid_card_inset(&cell.widget(), COLLECTION_GRID_MIN_CARD_WIDTH);
         child.apply_display(&setup_display.borrow());
+        child.add_css_class("row-pending");
         child.set_sensitive(false);
         child.set_can_target(false);
         child.set_cell(cell);
@@ -502,9 +503,11 @@ where
         bind_sparse_item(
             item,
             Rc::new(move |item| {
+                if let Some(child) = item.child() {
+                    child.add_css_class("row-pending");
+                }
                 with_grid_cell::<Cell, _>(item, |cell| {
                     if let Some(value) = item_at_from_item::<T>(item) {
-                        cell.set_ready(true);
                         if let Some(child) = item.child() {
                             child.set_sensitive(true);
                             child.set_can_target(true);
@@ -515,6 +518,10 @@ where
                         item.set_activatable(activatable);
                         item.set_selectable(activatable);
                         cell.bind(item.position(), value);
+                        cell.set_ready(true);
+                        if let Some(child) = item.child() {
+                            child.remove_css_class("row-pending");
+                        }
                     } else {
                         item.set_activatable(false);
                         item.set_selectable(false);
@@ -538,7 +545,11 @@ where
         unbind_sparse_item(item);
         item.set_activatable(false);
         item.set_selectable(false);
+        if let Some(child) = item.child() {
+            child.add_css_class("row-pending");
+        }
         with_grid_cell::<Cell, _>(item, |cell| {
+            cell.set_ready(false);
             cell.clear();
         });
     });

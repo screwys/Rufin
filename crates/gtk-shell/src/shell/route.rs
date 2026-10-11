@@ -20,7 +20,7 @@ use tracing::{debug, warn};
 use super::Shell;
 use super::navigation::update_navigation_selection;
 use super::route_position::{
-    RoutePositionKey, RoutePositionMemory, prepare_route_position_before_snapshot,
+    RoutePositionKey, RoutePositionMemory, RouteSurface, mount_route_surface,
 };
 use crate::{LibraryListKey, LibraryListSettings};
 use gtk_library::route_layout::{primary_route_scroll_adjustment, route_boundary};
@@ -97,7 +97,6 @@ fn route_is_current(shell: &Shell, route: &Route, source: SourceKey) -> bool {
 pub(crate) struct RouteViewport {
     pub(super) route_host: gtk::Stack,
     route_loading: gtk::Box,
-    route_cover_generation: Cell<u64>,
     mounted_route: RefCell<Option<MountedRouteEntry>>,
     position_memory: RefCell<RoutePositionMemory>,
     catalog: RefCell<Option<Rc<gtk_library::CatalogUi>>>,
@@ -108,7 +107,7 @@ pub(crate) struct RouteViewport {
 struct MountedRouteEntry {
     route: Route,
     view: MountedRoute,
-    surface: gtk::Widget,
+    surface: RouteSurface,
     position_key: Option<RoutePositionKey>,
     scroll_adjustment: Option<gtk::Adjustment>,
 }
@@ -118,7 +117,6 @@ impl RouteViewport {
         Self {
             route_host,
             route_loading,
-            route_cover_generation: Cell::new(0),
             mounted_route: RefCell::new(None),
             position_memory: RefCell::new(RoutePositionMemory::default()),
             catalog: RefCell::new(None),
@@ -551,10 +549,12 @@ impl Shell {
             .is_some_and(|entry| entry.route == route);
         if !force && mounted_current {
             self.cancel_root_order_read();
-            // Repeat navigation must preserve the mounted view's deferred artwork.
-            self.route_viewport
-                .route_loading
-                .set_visible(self.route_viewport.route_cover_generation.get() != 0);
+            let current = self.route_viewport.mounted_route.borrow();
+            self.route_viewport.route_loading.set_visible(
+                current
+                    .as_ref()
+                    .is_some_and(|entry| !entry.surface.is_ready()),
+            );
             return;
         }
 
@@ -918,6 +918,7 @@ impl Shell {
                     folder,
                     &settings,
                     favorites_only,
+                    "",
                     window,
                     &cancellation,
                 )
@@ -1015,7 +1016,7 @@ impl Shell {
                 )
                 .await
             },
-            move |shell, detail| shell.smart_playlist_detail_route(key, detail, source, folder),
+            move |shell, detail| shell.smart_playlist_detail_route(key, detail),
         );
     }
 
@@ -1454,7 +1455,6 @@ impl Shell {
     ) {
         let replacement_started = render_started.as_ref().map(|_| Instant::now());
         let previous = self.begin_mounted_route_replacement();
-        let route_loading_generation = self.begin_route_loading_gate();
         let model_started = render_started.as_ref().map(|_| Instant::now());
         let catalog = self.build_catalog(&route, source_id.as_ref());
         catalog.refresh_current_route_now_playing_selections(route_current_track(
@@ -1470,7 +1470,8 @@ impl Shell {
         let widget = view.widget();
         if let Some(previous) = previous {
             if gtk::prelude::RootExt::focus(&self.chrome.window).is_some_and(|focus| {
-                focus == previous.surface || focus.is_ancestor(&previous.surface)
+                focus == *previous.surface.upcast_ref::<gtk::Widget>()
+                    || focus.is_ancestor(&previous.surface)
             }) {
                 // Clear focus before removal so GTK does not move it into the new page.
                 gtk::prelude::RootExt::set_focus(&self.chrome.window, None::<&gtk::Widget>);
@@ -1491,25 +1492,16 @@ impl Shell {
         let boundary = route_boundary(widget);
         let ready_shell = Rc::downgrade(self);
         let ready_view = view.clone();
-        let surface = prepare_route_position_before_snapshot(
+        let surface = mount_route_surface(
             &boundary,
             scroll_adjustment.as_ref(),
             restore_position
                 .filter(|position| position.value > 0.0)
                 .map(|position| position.value),
-            move || {
-                ready_view.resume_initial_demand();
-                let Some(cover_generation) = route_loading_generation else {
-                    return;
-                };
-                if let Some(shell) = ready_shell.upgrade()
-                    && shell.route_viewport.route_cover_generation.get() == cover_generation
-                {
-                    shell.artwork.close_route_cover_registration(
-                        cover_generation,
-                        shell.route_viewport.route_host.upcast_ref(),
-                    );
-                    shell.try_finish_route_loading(cover_generation);
+            move || ready_view.resume_initial_demand(),
+            move |surface| {
+                if let Some(shell) = ready_shell.upgrade() {
+                    shell.finish_route_loading(surface, render_started);
                 }
             },
         );
@@ -1555,42 +1547,31 @@ impl Shell {
         }
     }
 
-    fn begin_route_loading_gate(self: &Rc<Self>) -> Option<u64> {
-        if !self.startup.route_revealed.get() {
-            return None;
-        }
-        self.route_viewport.route_loading.set_visible(true);
-        let generation = self.artwork.begin_route_cover_prime();
-        self.route_viewport.route_cover_generation.set(generation);
-        debug!(generation, "route artwork loading started");
-        Some(generation)
-    }
-
-    pub(in crate::shell) fn try_finish_route_loading(&self, cover_generation: u64) {
-        if self.route_viewport.route_cover_generation.get() == cover_generation
-            && self.artwork.route_cover_prime_ready(cover_generation)
-        {
-            self.finish_route_loading(cover_generation);
-        }
-    }
-
-    fn finish_route_loading(&self, cover_generation: u64) {
-        if self.route_viewport.route_cover_generation.get() != cover_generation {
+    fn finish_route_loading(self: &Rc<Self>, surface: &gtk::Widget, started: RouteTiming) {
+        if self.route_viewport.order_cancellation.borrow().is_some() {
             return;
         }
-        self.route_viewport.route_loading.set_visible(false);
-        self.route_viewport.route_cover_generation.set(0);
-        self.artwork.finish_route_cover_prime_gate();
-        debug!(
-            generation = cover_generation,
-            "route artwork loading finished"
-        );
+        let ready = self
+            .route_viewport
+            .mounted_route
+            .borrow()
+            .as_ref()
+            .is_some_and(|entry| {
+                entry.surface.upcast_ref::<gtk::Widget>() == surface
+                    && entry.route == *self.navigation.routes.borrow().current()
+            });
+        if ready {
+            self.route_viewport.route_loading.set_visible(false);
+            self.try_reveal_startup_route();
+            debug!(
+                total_ms = started.map(elapsed_ms),
+                "visible route window ready"
+            );
+        }
     }
 
     fn cancel_route_loading(&self) {
-        self.route_viewport.route_cover_generation.set(0);
         self.route_viewport.route_loading.set_visible(false);
-        self.artwork.finish_route_cover_prime_gate();
     }
 
     pub(crate) fn apply_favorite_settlement_to_mounted_route(
@@ -1634,6 +1615,14 @@ impl Shell {
 
     pub(crate) fn has_active_mounted_route(&self) -> bool {
         self.route_viewport.mounted_route.borrow().is_some()
+    }
+
+    pub(super) fn mounted_route_is_ready(&self) -> bool {
+        self.route_viewport
+            .mounted_route
+            .borrow()
+            .as_ref()
+            .is_some_and(|entry| entry.surface.is_ready())
     }
 
     fn begin_mounted_route_replacement(&self) -> Option<MountedRouteEntry> {

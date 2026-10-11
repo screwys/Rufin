@@ -26,48 +26,10 @@ impl CollectionTrack for library::HistoryRow {
 
 const TRACK_OVERSCAN: usize = 64;
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct TrackProjectionRequest {
-    pub query: Option<library::SongQuery>,
-    pub settings: LibraryListSettings,
-}
-
-impl TrackProjectionRequest {
-    pub fn query(&self) -> &library::SongQuery {
-        self.query.as_ref().expect("query-backed track route")
-    }
-    pub fn same_query(&self, other: &Self) -> bool {
-        self.query == other.query
-            && self.settings.sort_key == other.settings.sort_key
-            && self.settings.descending == other.settings.descending
-    }
-}
-
-#[derive(Clone)]
-pub struct PreparedTrackProjection<T = TrackRow> {
-    pub order: SparseSource<TrackKey>,
-    pub disc_sections: Vec<(u32, i64)>,
-    pub first_row_position: usize,
-    pub first_rows: Vec<T>,
-    pub request: TrackProjectionRequest,
-}
-
-impl PreparedTrackProjection {
-    pub fn from_page(page: library::TrackRoutePage, request: TrackProjectionRequest) -> Self {
-        Self {
-            order: SparseSource::Query { count: page.count },
-            disc_sections: page.disc_sections,
-            first_row_position: page.first_row_position,
-            first_rows: page.first_rows,
-            request,
-        }
-    }
-}
-
 struct TrackModelState<T: CollectionTrack> {
     sparse: Rc<SparseRouteModel<TrackKey, T>>,
-    request: RefCell<TrackProjectionRequest>,
-    applied: Rc<RefCell<TrackProjectionRequest>>,
+    query: RefCell<Option<library::SongQuery>>,
+    applied: Rc<RefCell<Option<library::SongQuery>>>,
 }
 
 #[derive(Clone)]
@@ -78,7 +40,6 @@ impl TrackCollectionModel {
         database: Arc<Database>,
         runtime: tokio::runtime::Handle,
         page: library::TrackRoutePage,
-        settings: LibraryListSettings,
     ) -> Self {
         let model = Self::with_load(
             runtime,
@@ -86,12 +47,16 @@ impl TrackCollectionModel {
             Some(page.query.clone()),
             page.first_row_position,
             page.first_rows,
-            settings,
             Rc::new(move |_, range, request, cancellation| {
                 let database = database.clone();
                 Box::pin(async move {
                     database
-                        .song_rows(request.query(), range.start, range.len(), &cancellation)
+                        .song_rows(
+                            request.as_ref().expect("query-backed track route"),
+                            range.start,
+                            range.len(),
+                            &cancellation,
+                        )
                         .await
                         .map_err(|error| error.to_string())
                 })
@@ -109,22 +74,18 @@ impl<T: CollectionTrack> TrackCollectionModel<T> {
         query: Option<library::SongQuery>,
         first_row_position: usize,
         first_rows: Vec<T>,
-        settings: LibraryListSettings,
         load: Rc<
             dyn Fn(
                 Vec<TrackKey>,
                 std::ops::Range<usize>,
-                TrackProjectionRequest,
+                Option<library::SongQuery>,
                 library::ReadCancellation,
             ) -> std::pin::Pin<
                 Box<dyn std::future::Future<Output = Result<Vec<T>, String>> + Send>,
             >,
         >,
     ) -> Self {
-        let applied = Rc::new(RefCell::new(TrackProjectionRequest {
-            query: query.clone(),
-            settings: settings.clone(),
-        }));
+        let applied = Rc::new(RefCell::new(query.clone()));
         let load_request = applied.clone();
         let sparse = SparseRouteModel::new(
             order,
@@ -139,10 +100,7 @@ impl<T: CollectionTrack> TrackCollectionModel<T> {
         Self(Rc::new(TrackModelState {
             sparse,
             applied,
-            request: RefCell::new(TrackProjectionRequest {
-                query: query.clone(),
-                settings,
-            }),
+            query: RefCell::new(query),
         }))
     }
 
@@ -167,7 +125,13 @@ impl<T: CollectionTrack> TrackCollectionModel<T> {
             )
         } else {
             library::SongSelection::Query {
-                query: self.0.applied.borrow().query().clone(),
+                query: self
+                    .0
+                    .applied
+                    .borrow()
+                    .as_ref()
+                    .expect("query-backed track route")
+                    .clone(),
                 ranges: Some(gtk_widgets::selection::selected_ranges(positions)),
             }
         }
@@ -181,28 +145,21 @@ impl<T: CollectionTrack> TrackCollectionModel<T> {
         self.0.sparse.len()
     }
 
-    pub fn settings(&self) -> LibraryListSettings {
-        self.0.request.borrow().settings.clone()
-    }
-
-    pub fn projection_request(&self) -> TrackProjectionRequest {
-        let mut request = self.0.request.borrow_mut();
-        if let Some(library::SongQuery {
-            scope: library::SongScope::Smart { now, .. },
-            ..
-        }) = request.query.as_mut()
-        {
+    pub fn query(&self) -> library::SongQuery {
+        let mut query = self.0.query.borrow_mut();
+        let query = query.as_mut().expect("query-backed track route");
+        if let library::SongScope::Smart { now, .. } = &mut query.scope {
             *now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |duration| duration.as_secs() as i64);
         }
-        request.clone()
+        query.clone()
     }
 
     pub fn set_query(&self, query: &str) -> bool {
         let query = query.trim();
-        let mut request = self.0.request.borrow_mut();
-        let Some(current) = request.query.as_mut() else {
+        let mut request = self.0.query.borrow_mut();
+        let Some(current) = request.as_mut() else {
             return false;
         };
         if current.filter == query {
@@ -213,34 +170,28 @@ impl<T: CollectionTrack> TrackCollectionModel<T> {
     }
 
     pub fn set_scope(&self, scope: library::SongScope) {
-        if let Some(query) = self.0.request.borrow_mut().query.as_mut() {
+        if let Some(query) = self.0.query.borrow_mut().as_mut() {
             query.scope = scope;
         }
     }
 
-    pub fn apply_settings(&self, settings: LibraryListSettings) -> bool {
-        let mut request = self.0.request.borrow_mut();
-        if request.settings == settings {
-            return false;
-        }
-        if let Some(query) = request.query.as_mut() {
+    pub fn apply_settings(&self, settings: &LibraryListSettings) {
+        if let Some(query) = self.0.query.borrow_mut().as_mut() {
             query.sort = Some(settings.sort_key.track_sort());
             query.descending = settings.descending;
         }
-        request.settings = settings;
-        true
     }
 
-    pub fn replace_prepared(&self, prepared: PreparedTrackProjection<T>) -> bool {
-        if !self.0.request.borrow().same_query(&prepared.request) {
+    pub fn replace_page(&self, page: library::TrackRoutePage<T>) -> bool {
+        if self.0.query.borrow().as_ref() != Some(&page.query) {
             return false;
         }
-        self.0.applied.replace(prepared.request.clone());
+        self.0.applied.replace(Some(page.query));
         self.0.sparse.replace_prepared_at(
-            prepared.order,
-            prepared.first_row_position,
-            prepared.first_rows,
-            prepared.disc_sections,
+            SparseSource::Query { count: page.count },
+            page.first_row_position,
+            page.first_rows,
+            page.disc_sections,
             |row| row.key(),
         )
     }
@@ -283,7 +234,15 @@ impl<T: CollectionTrack> TrackCollectionModel<T> {
             return;
         }
         let selection = order.keys().map_or_else(
-            || self.0.applied.borrow().query().clone().selection(),
+            || {
+                self.0
+                    .applied
+                    .borrow()
+                    .as_ref()
+                    .expect("query-backed track route")
+                    .clone()
+                    .selection()
+            },
             |keys| library::SongSelection::Tracks(Arc::clone(keys)),
         );
         let constructor = if collection_start {
@@ -311,15 +270,12 @@ impl<T: CollectionTrack> TrackCollectionModel<T> {
     }
 
     pub fn visible_context_id(&self, context_base: &str) -> String {
-        let request = self.0.applied.borrow();
+        let query = self.0.applied.borrow();
         format!(
             "{context_base}|query={}|sort={:?}|descending={}|result={}",
-            request
-                .query
-                .as_ref()
-                .map_or("", |query| query.filter.as_str()),
-            request.settings.sort_key,
-            request.settings.descending,
+            query.as_ref().map_or("", |query| query.filter.as_str()),
+            query.as_ref().and_then(|query| query.sort),
+            query.as_ref().is_some_and(|query| query.descending),
             self.0.sparse.order_id()
         )
     }
@@ -403,10 +359,9 @@ mod tests {
             Some(query),
             0,
             vec![row.clone()],
-            settings,
             Rc::new(|_, _, _, _| panic!("seeded rows must not request hydration")),
         );
-        let pending = model.projection_request();
+        let pending = model.query();
         assert_eq!(
             model.position_for_current_uri("test:track", Some(0)),
             Some(0)
@@ -419,26 +374,26 @@ mod tests {
             model.position_for_current_uri("test:missing", Some(0)),
             None
         );
-        let mut presentation = model.settings();
+        let mut presentation = settings.clone();
         presentation.layout = rufin_core::settings::LibraryLayout::Grid;
         presentation.row_fields.reverse();
-        model.apply_settings(presentation.clone());
+        model.apply_settings(&presentation);
         let mut updated = row;
         updated.title = "After".into();
-        let prepared = PreparedTrackProjection {
+        let prepared = library::TrackRoutePage {
             disc_sections: Vec::new(),
-            order: SparseSource::Query { count: 1 },
+            count: 1,
             first_row_position: 0,
             first_rows: vec![updated.clone()],
-            request: pending,
+            query: pending,
         };
-        assert!(model.replace_prepared(prepared.clone()));
-        assert_eq!(model.settings(), presentation);
+        assert!(model.replace_page(prepared.clone()));
+        assert_eq!(model.query(), prepared.query);
         assert_eq!(model.sparse_model().ready(0).unwrap().title, "After");
 
         // A later catalog publication has the same query but new row data.
         updated.title = "Catalog update".into();
-        assert!(model.replace_prepared(PreparedTrackProjection {
+        assert!(model.replace_page(library::TrackRoutePage {
             disc_sections: Vec::new(),
             first_rows: vec![updated],
             ..prepared.clone()
@@ -450,13 +405,13 @@ mod tests {
 
         let visible_context = model.visible_context_id("history");
         presentation.descending = !presentation.descending;
-        model.apply_settings(presentation);
+        model.apply_settings(&presentation);
         assert_eq!(model.visible_context_id("history"), visible_context);
-        assert!(!model.replace_prepared(prepared.clone()));
-        model.apply_settings(prepared.request.settings.clone());
+        assert!(!model.replace_page(prepared.clone()));
+        model.apply_settings(&settings);
         model.set_query("different search");
         assert_eq!(model.visible_context_id("history"), visible_context);
-        assert!(!model.replace_prepared(prepared));
+        assert!(!model.replace_page(prepared));
         assert_eq!(
             model.sparse_model().ready(0).unwrap().title,
             "Catalog update"

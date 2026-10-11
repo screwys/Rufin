@@ -107,7 +107,7 @@ impl Shell {
     fn startup_route_ready_for_width(&self, width: i32) -> bool {
         self.startup.reveal_deadline.borrow().is_some()
             && !self.startup.route_revealed.get()
-            && self.has_active_mounted_route()
+            && self.mounted_route_is_ready()
             && self.startup.route_allocated.get()
             && width > 1
             && self.navigation.pin_cancellation.borrow().is_none()

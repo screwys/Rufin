@@ -77,7 +77,9 @@ impl AlbumSort {
             Self::Favorite => "COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite)".to_string(),
         };
         let direction = if descending { "DESC" } else { "ASC" };
-        if self == Self::AlbumArtist {
+        if self == Self::Title {
+            format!("{field} {direction},album.album_key")
+        } else if self == Self::AlbumArtist {
             format!(
                 "(album.album_artist_sort IS NULL),{field} {direction},(album.year IS NULL),album.year,album.sort_text,album.album_key"
             )
@@ -125,23 +127,18 @@ fn album_scope(
     scope
 }
 
-const GENRE_TRACKS: &str = "track.indexed=1 AND track.track_key IN (
-    SELECT track_key FROM track_genres WHERE genre_key=genre.genre_key
-    UNION SELECT track_key FROM album_genres JOIN tracks USING(album_key) WHERE genre_key=genre.genre_key)";
-const MOOD_TRACKS: &str = "track.indexed=1 AND EXISTS(SELECT 1 FROM track_moods WHERE track_key=track.track_key AND mood_key=mood.mood_key)";
-
 fn named_scope(kind: &str, source: SourceKey, folder: Option<FolderKey>, filter: &str) -> String {
     let mut scope = format!("{kind}.indexed=1 AND {kind}.source_key={}", source.raw());
-    let members = if kind == "genre" {
-        GENRE_TRACKS
-    } else {
-        MOOD_TRACKS
-    };
-    if kind == "genre" || folder.is_some() {
-        let folder = folder.map(|folder| format!(" AND EXISTS(SELECT 1 FROM track_folders WHERE track_key=track.track_key AND folder_key={})",folder.raw())).unwrap_or_default();
+    if let Some(folder) = folder {
         scope.push_str(&format!(
-            " AND EXISTS(SELECT 1 FROM tracks track WHERE {members}{folder})"
+            " AND (EXISTS(SELECT 1 FROM track_{kind}s credit JOIN tracks track USING(track_key) JOIN track_folders scope USING(track_key) WHERE credit.{kind}_key={kind}.{kind}_key AND track.indexed=1 AND scope.folder_key={})", folder.raw()
         ));
+        if kind == "genre" {
+            scope.push_str(&format!(" OR EXISTS(SELECT 1 FROM album_genres credit JOIN tracks track USING(album_key) JOIN track_folders scope USING(track_key) WHERE credit.genre_key=genre.genre_key AND track.indexed=1 AND scope.folder_key={})", folder.raw()));
+        }
+        scope.push(')');
+    } else if kind == "genre" {
+        scope.push_str(" AND genre.track_count>0");
     }
     let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
     if !filter.is_empty() {
@@ -384,12 +381,38 @@ pub enum AlbumReleaseResult {
     Missing,
 }
 
-fn push_artist_role_scope(
-    query: &mut QueryBuilder<Sqlite>,
-    album_artist: bool,
+fn artist_scope(
+    source: SourceKey,
     folder: Option<FolderKey>,
-) {
-    query.push(" AND ((").push_bind(!album_artist).push(" AND EXISTS (SELECT 1 FROM track_artists role JOIN tracks track USING(track_key) WHERE track.indexed=1 AND role.artist_key=artist.artist_key)) OR (").push_bind(album_artist).push(" AND EXISTS (SELECT 1 FROM album_artists role JOIN albums album USING(album_key) WHERE album.indexed=1 AND role.artist_key=artist.artist_key))) AND (").push_bind(folder).push(" IS NULL OR ((").push_bind(!album_artist).push(" AND EXISTS (SELECT 1 FROM track_artists role JOIN tracks track USING(track_key) JOIN track_folders scope USING(track_key) WHERE track.indexed=1 AND role.artist_key=artist.artist_key AND scope.folder_key=").push_bind(folder).push(")) OR (").push_bind(album_artist).push(" AND EXISTS (SELECT 1 FROM album_artists role JOIN tracks track USING(album_key) JOIN track_folders scope USING(track_key) WHERE track.indexed=1 AND role.artist_key=artist.artist_key AND scope.folder_key=").push_bind(folder).push("))))");
+    album_artist: bool,
+    favorites_only: bool,
+    filter: &str,
+) -> String {
+    let mut scope = format!("artist.indexed=1 AND artist.source_key={}", source.raw());
+    scope.push_str(if album_artist {
+        " AND EXISTS(SELECT 1 FROM album_artists role JOIN albums album USING(album_key) WHERE album.indexed=1 AND role.artist_key=artist.artist_key)"
+    } else {
+        " AND artist.track_count>0"
+    });
+    if let Some(folder) = folder {
+        let members = if album_artist {
+            "album_artists role JOIN tracks track USING(album_key)"
+        } else {
+            "track_artists role JOIN tracks track USING(track_key)"
+        };
+        scope.push_str(&format!(" AND EXISTS(SELECT 1 FROM {members} JOIN track_folders scope USING(track_key) WHERE track.indexed=1 AND role.artist_key=artist.artist_key AND scope.folder_key={})", folder.raw()));
+    }
+    if favorites_only {
+        scope.push_str(" AND COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=artist.media_uri),artist.source_favorite)=1");
+    }
+    let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
+    if !filter.is_empty() {
+        scope.push_str(&format!(
+            " AND instr(artist.normalized_name,{})>0",
+            crate::source_window::quote(&filter)
+        ));
+    }
+    scope
 }
 
 impl Database {
@@ -630,19 +653,12 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<i64> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
-        let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT count(*) FROM artists artist WHERE artist.indexed=1 AND artist.source_key=",
-        );
-        query.push_bind(source);
-        push_artist_role_scope(&mut query, album_artists_only, folder);
-        query.push(" AND (").push_bind(!favorites_only)
-            .push(" OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=artist.media_uri),artist.source_favorite)=1) AND instr(artist.normalized_name,")
-            .push_bind(filter).push(")>0");
-        Ok(query
-            .build_query_scalar()
-            .fetch_one(&mut *connection)
-            .await?)
+        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT count(*) FROM artists artist WHERE {}",
+            artist_scope(source, folder, album_artists_only, favorites_only, filter)
+        )))
+        .fetch_one(&mut *connection)
+        .await?)
     }
 
     pub async fn genre_count(
@@ -2110,19 +2126,10 @@ where
     } else {
         ArtistSort::Title
     };
-    let mut query = QueryBuilder::<Sqlite>::new("SELECT artist.artist_key FROM artists artist");
-    query
-        .push(" WHERE artist.indexed=1 AND artist.source_key=")
-        .push_bind(source);
-    push_artist_role_scope(&mut query, album_artists_only, folder);
-    query.push(" AND (").push_bind(!favorites_only)
-        .push(" OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=artist.media_uri),artist.source_favorite)=1)");
-    if !filter.is_empty() {
-        query
-            .push(" AND instr(artist.normalized_name,")
-            .push_bind(filter)
-            .push(")>0");
-    }
+    let mut query = QueryBuilder::<Sqlite>::new(format!(
+        "SELECT artist.artist_key FROM artists artist WHERE {}",
+        artist_scope(source, folder, album_artists_only, favorites_only, &filter)
+    ));
     let role = if album_artists_only {
         "album_artist_"
     } else {
@@ -2150,7 +2157,10 @@ where
     if nulls_last {
         query.push(" NULLS LAST");
     }
-    query.push(",artist.sort_text,artist.artist_key");
+    if sort != ArtistSort::Title {
+        query.push(",artist.sort_text");
+    }
+    query.push(",artist.artist_key");
     if let Some((offset, limit)) = page {
         query
             .push(" LIMIT ")
@@ -2181,8 +2191,13 @@ where
         GenreSort::AlbumCount => "genre.album_count",
         GenreSort::TrackCount => "genre.track_count",
     };
+    let tie = if sort == GenreSort::Title {
+        ""
+    } else {
+        ",genre.sort_text"
+    };
     let mut sql = format!(
-        "SELECT genre.genre_key FROM genres genre WHERE {} ORDER BY {field} {},genre.sort_text,genre.genre_key",
+        "SELECT genre.genre_key FROM genres genre WHERE {} ORDER BY {field} {}{tie},genre.genre_key",
         named_scope("genre", source, folder, filter),
         if descending && filter.trim().is_empty() {
             "DESC"
@@ -2236,8 +2251,13 @@ where
             MoodSort::Duration => "mood.duration_millis",
         }
     };
+    let tie = if field == "mood.sort_text" {
+        ""
+    } else {
+        ",mood.sort_text"
+    };
     let mut sql = format!(
-        "SELECT mood.mood_key FROM moods mood WHERE {} ORDER BY {field} {},mood.sort_text,mood.mood_key",
+        "SELECT mood.mood_key FROM moods mood WHERE {} ORDER BY {field} {}{tie},mood.mood_key",
         named_scope("mood", source, folder, filter),
         if descending && filter.trim().is_empty() {
             "DESC"
