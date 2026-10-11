@@ -355,7 +355,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                         );
                         assert_eq!(
                             database
-                                .artist_album_projection_order(
+                                .artist_release_page(
                                     fixture.source,
                                     fixture.artists[0],
                                     true,
@@ -363,26 +363,41 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                                     filter,
                                     sort,
                                     descending,
-                                    &cancel
+                                    None,
+                                    0,
+                                    64,
+                                    &cancel,
                                 )
                                 .await
-                                .unwrap(),
+                                .unwrap()
+                                .into_iter()
+                                .map(|(_, row)| row.album_key)
+                                .collect::<Vec<_>>(),
                             order
                         );
                         assert_eq!(
                             database
-                                .album_detail_route_order(
+                                .album_detail_page(
                                     fixture.source,
                                     folder,
                                     false,
                                     filter,
                                     sort,
                                     descending,
+                                    0,
+                                    0,
+                                    128,
                                     &cancel
                                 )
                                 .await
                                 .unwrap()
-                                .1,
+                                .into_iter()
+                                .filter_map(|row| match row {
+                                    library::AlbumDetailRow::Album { album, .. } =>
+                                        Some(album.media_uri),
+                                    library::AlbumDetailRow::Track { .. } => None,
+                                })
+                                .collect::<Vec<_>>(),
                             if folder.is_some() {
                                 vec![fixture.album_uris[0].clone()]
                             } else {
@@ -2335,7 +2350,7 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
     assert_eq!(
         fixture
             .database
-            .artist_album_projection_order(
+            .artist_release_page(
                 fixture.source,
                 track_artist.artist_key,
                 false,
@@ -2343,16 +2358,22 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
                 "",
                 library::AlbumSort::Title,
                 false,
+                None,
+                0,
+                64,
                 &cancel,
             )
             .await
-            .unwrap(),
+            .unwrap()
+            .into_iter()
+            .map(|(_, row)| row.album_key)
+            .collect::<Vec<_>>(),
         [fixture.albums[0]]
     );
     assert_eq!(
         fixture
             .database
-            .artist_album_projection_order(
+            .artist_release_page(
                 fixture.source,
                 album_artist.artist_key,
                 true,
@@ -2360,10 +2381,16 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
                 "",
                 library::AlbumSort::Title,
                 false,
+                None,
+                0,
+                64,
                 &cancel,
             )
             .await
-            .unwrap(),
+            .unwrap()
+            .into_iter()
+            .map(|(_, row)| row.album_key)
+            .collect::<Vec<_>>(),
         [fixture.albums[0]]
     );
 
@@ -2570,7 +2597,7 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
     assert_eq!(
         fixture
             .database
-            .artist_album_projection_order(
+            .artist_release_page(
                 fixture.source,
                 album_only,
                 true,
@@ -2578,10 +2605,16 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
                 "",
                 library::AlbumSort::Title,
                 false,
+                None,
+                0,
+                64,
                 &cancel,
             )
             .await
-            .expect("Album Artist Albums"),
+            .expect("Album Artist Albums")
+            .into_iter()
+            .map(|(_, row)| row.album_key)
+            .collect::<Vec<_>>(),
         [fixture.albums[0]]
     );
 }
@@ -3620,6 +3653,68 @@ async fn artist_and_home_activity_follow_membership_even_without_listen_source_i
             .collect::<Vec<_>>(),
         [fixture.track_uris[0].as_str()]
     );
+
+    sqlx::query("INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at)
+        SELECT source.object_id,'lifetime','track',track.object_id,
+            CASE track.track_key WHEN ?2 THEN 4 WHEN ?3 THEN 1 ELSE 20 END,0,
+            CASE track.track_key WHEN ?2 THEN 50 WHEN ?3 THEN 500 ELSE 600 END
+        FROM tracks track JOIN sources source USING(source_key)
+        WHERE track.source_key=?1 AND track.track_key IN(?2,?3,?4)")
+        .bind(fixture.source).bind(fixture.tracks[0]).bind(fixture.tracks[1]).bind(fixture.tracks[2])
+        .execute(&mut raw).await.unwrap();
+    sqlx::query("UPDATE tracks SET source_play_count=9,source_last_played=700 WHERE track_key=?1")
+        .bind(fixture.tracks[1])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    for kind in ["local", "files", "webdav", "smb", "documents", "subsonic"] {
+        sqlx::query("UPDATE sources SET kind=?2 WHERE source_key=?1")
+            .bind(fixture.source)
+            .bind(kind)
+            .execute(&mut raw)
+            .await
+            .unwrap();
+        let home = fixture
+            .database
+            .home_page(
+                fixture.source,
+                Some(fixture.folder),
+                0,
+                0,
+                &[
+                    library::HomeBlockKind::MostPlayed,
+                    library::HomeBlockKind::RecentlyPlayed,
+                ],
+                &cancel,
+            )
+            .await
+            .unwrap();
+        let most = home
+            .most_played
+            .tracks
+            .iter()
+            .map(|row| (row.track.track_key, row.track.play_count))
+            .collect::<Vec<_>>();
+        let recent = home
+            .recently_played
+            .tracks
+            .iter()
+            .map(|row| (row.track.track_key, row.track.last_played))
+            .collect::<Vec<_>>();
+        if kind == "subsonic" {
+            assert_eq!(most, [(fixture.tracks[1], 9)]);
+            assert_eq!(recent, [(fixture.tracks[1], Some(700))]);
+        } else {
+            assert_eq!(most, [(fixture.tracks[0], 6), (fixture.tracks[1], 1)]);
+            assert_eq!(
+                recent,
+                [
+                    (fixture.tracks[1], Some(500)),
+                    (fixture.tracks[0], Some(200))
+                ]
+            );
+        }
+    }
 }
 
 #[tokio::test]

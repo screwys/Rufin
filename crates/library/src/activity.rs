@@ -979,6 +979,7 @@ pub(crate) fn history_query(
         order: vec![format!("listen.started_at {direction}"), format!("listen.listen_key {direction}")],
         uri: "track.media_uri".into(),
         entry_key: "NULL".into(),
+        arguments: Default::default(),
     }
 }
 
@@ -988,15 +989,18 @@ pub(crate) async fn load_history_page(
     offset: usize,
     limit: usize,
 ) -> LibraryResult<Vec<HistoryRow>> {
+    use sqlx::Arguments;
+    let first_parameter = query.arguments.len() + 1;
+    let second_parameter = first_parameter + 1;
     let sql = format!(
-        "{} LIMIT ?1 OFFSET ?2",
+        "{} LIMIT ?{first_parameter} OFFSET ?{second_parameter}",
         query.select(&format!(
             "{} {HISTORY_ROW_COLUMNS}",
             crate::tracks::TRACK_LINK_COLUMNS
         ))
     );
     history_rows(
-        sqlx::query(sqlx::AssertSqlSafe(sql))
+        sqlx::query_with(sqlx::AssertSqlSafe(sql), query.arguments.clone())
             .bind(limit.min(HISTORY_LIMIT as usize) as i64)
             .bind(offset.min(i64::MAX as usize) as i64)
             .persistent(false)

@@ -516,6 +516,7 @@ listview.album-detail-list row,
 listview.album-detail-list row:hover,
 listview.album-detail-list row:selected {
   background: transparent;
+  padding: 0;
 }
 
 listview.artist-release-list,

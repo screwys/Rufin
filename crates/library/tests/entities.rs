@@ -757,39 +757,40 @@ async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
         [fixture.artists[1]]
     );
 
-    let (order, albums, albums_with_genres) = fixture
+    let rows = fixture
         .database
-        .album_detail_route_order(
+        .album_detail_page(
             fixture.source,
             None,
             true,
             "",
             AlbumSort::Title,
             false,
+            0,
+            0,
+            64,
             &cancellation,
         )
         .await
-        .expect("favorite Album detail order");
-
-    assert_eq!(albums_with_genres, [fixture.album_uris[0].clone()]);
-    assert_eq!(albums, [fixture.album_uris[0].clone()]);
+        .expect("favorite Album detail page");
     assert_eq!(
-        order
-            .iter()
-            .filter(|media_uri| {
-                library::source_entity_parts(media_uri).is_some_and(|(_, kind, _)| kind == "album")
+        rows.iter()
+            .filter_map(|row| match row {
+                library::AlbumDetailRow::Album { album, .. } => Some(album.media_uri.as_str()),
+                library::AlbumDetailRow::Track { .. } => None,
             })
-            .map(String::as_str)
             .collect::<Vec<_>>(),
         [fixture.album_uris[0].as_str()]
     );
+    assert!(
+        matches!(&rows[0], library::AlbumDetailRow::Album { album, .. } if !album.genres.is_empty())
+    );
     assert_eq!(
-        order
-            .iter()
-            .filter(|media_uri| {
-                library::source_entity_parts(media_uri).is_some_and(|(_, kind, _)| kind == "track")
+        rows.iter()
+            .filter_map(|row| match row {
+                library::AlbumDetailRow::Track { track, .. } => Some(track.media_uri.as_str()),
+                library::AlbumDetailRow::Album { .. } => None,
             })
-            .map(String::as_str)
             .collect::<Vec<_>>(),
         fixture.track_uris[..2]
     );

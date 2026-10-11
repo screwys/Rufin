@@ -1522,6 +1522,7 @@ pub(crate) fn playlist_query(
         predicate: format!("entry.playlist_key={}", key.raw()),
         uri: "track.media_uri".into(),
         entry_key: "entry.playlist_entry_key".into(),
+        arguments: Default::default(),
         order: sort.order_terms(descending, true),
     };
     if sort != TrackSort::Position {

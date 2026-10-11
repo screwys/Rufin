@@ -1,12 +1,52 @@
+use std::sync::Arc;
+
 use crate::runtime::SelectedLibrary;
 use library::{FolderKey, LibraryError, LibraryResult, ReadCancellation};
 
+#[derive(Clone)]
 pub enum FolderProjection {
     Live {
-        folders: Vec<sources::LiveFolder>,
-        candidates: Vec<String>,
+        folders: Arc<[sources::LiveFolder]>,
+        objects: Arc<[String]>,
     },
     Cached(Option<FolderKey>),
+}
+
+impl FolderProjection {
+    pub fn song_query(&self, source: library::SourceKey) -> library::SongQuery {
+        let mut query = library::SongQuery::new(match self {
+            Self::Live { objects, .. } => library::SongScope::Objects {
+                source,
+                ids: Arc::clone(objects),
+            },
+            Self::Cached(_) => library::SongScope::Tracks(source),
+        });
+        if let Self::Cached(folder) = self {
+            query.folder = *folder;
+        }
+        query
+    }
+
+    pub fn live_folders<'a>(
+        &'a self,
+        filter: &'a str,
+        descending: bool,
+    ) -> impl Iterator<Item = &'a sources::LiveFolder> {
+        let folders = match self {
+            Self::Live { folders, .. } => folders.as_ref(),
+            Self::Cached(_) => &[],
+        };
+        let filter = filter.trim().to_lowercase();
+        (0..folders.len())
+            .map(move |index| {
+                &folders[if descending {
+                    folders.len() - 1 - index
+                } else {
+                    index
+                }]
+            })
+            .filter(move |folder| folder.name.to_lowercase().contains(&filter))
+    }
 }
 
 pub async fn resolve_folder(
@@ -20,14 +60,16 @@ pub async fn resolve_folder(
     );
     match live.recv().await {
         Ok(Ok(page)) => {
-            let candidates = selected
+            let known = selected
                 .database
-                .track_media_uris_by_objects(selected.source_key, &page.tracks, cancellation)
+                .track_object_count(selected.source_key, &page.tracks, cancellation)
                 .await?;
-            if candidates.len() == page.tracks.len() {
+            if known as usize == page.tracks.len() {
+                let mut folders = page.folders;
+                folders.sort_by_cached_key(|folder| folder.name.to_lowercase());
                 return Ok(FolderProjection::Live {
-                    folders: page.folders,
-                    candidates,
+                    folders: folders.into(),
+                    objects: page.tracks.into(),
                 });
             }
             tracing::debug!("live Folder is newer than its accepted cache; using fallback");

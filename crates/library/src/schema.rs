@@ -297,6 +297,7 @@ CREATE TABLE IF NOT EXISTS albums (
 CREATE INDEX IF NOT EXISTS albums_artist_order_idx ON albums(source_key,(album_artist_sort IS NULL),album_artist_sort,(year IS NULL),year,sort_text,album_key);
 CREATE INDEX IF NOT EXISTS albums_artist_desc_order_idx ON albums(source_key,(album_artist_sort IS NULL),album_artist_sort DESC,(year IS NULL),year,sort_text,album_key);
 CREATE INDEX IF NOT EXISTS albums_year_order_idx ON albums(source_key,year,sort_text,album_key);
+CREATE INDEX IF NOT EXISTS albums_release_order_idx ON albums(source_key,release_date DESC,year DESC,sort_text,album_key) WHERE indexed=1;
 CREATE INDEX IF NOT EXISTS albums_order_idx ON albums(source_key, sort_text, album_key);
 CREATE INDEX IF NOT EXISTS albums_source_favorites_idx ON albums(source_key, object_id) WHERE source_favorite=1;
 
@@ -447,6 +448,7 @@ CREATE TABLE IF NOT EXISTS genres (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS genres_order_idx ON genres(source_key, sort_text, genre_key);
+CREATE INDEX IF NOT EXISTS genres_track_count_order_idx ON genres(source_key,track_count DESC,sort_text,genre_key) WHERE indexed=1;
 
 CREATE INDEX IF NOT EXISTS genres_artwork_idx ON genres(source_key, artwork_binding)
     WHERE artwork_binding IS NOT NULL;
@@ -705,6 +707,8 @@ WHEN (OLD.source_key,OLD.indexed) IS NOT (NEW.source_key,NEW.indexed) BEGIN
     UPDATE sources SET track_count=track_count+NEW.indexed WHERE source_key=NEW.source_key;
 END;
 
+CREATE INDEX IF NOT EXISTS tracks_source_play_count_idx ON tracks(source_key,source_play_count DESC,sort_text,track_key) WHERE indexed=1 AND source_play_count>0;
+CREATE INDEX IF NOT EXISTS tracks_source_last_played_idx ON tracks(source_key,source_last_played DESC,track_key) WHERE indexed=1 AND source_last_played IS NOT NULL;
 CREATE INDEX IF NOT EXISTS tracks_local_play_count_idx ON tracks(source_key,local_play_count,sort_text,media_uri);
 CREATE INDEX IF NOT EXISTS tracks_global_local_play_count_idx ON tracks(local_play_count,sort_text,media_uri);
 CREATE INDEX IF NOT EXISTS tracks_local_shuffle_idx ON tracks(source_key,local_play_count,((track_key*1103515245)%2147483647),media_uri);

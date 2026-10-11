@@ -1,6 +1,5 @@
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet};
-use std::ops::Range;
+use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
@@ -51,7 +50,6 @@ const ALBUM_DETAIL_MIN_COVER: i32 = 102;
 const ALBUM_DETAIL_NARROW_WIDTH: i32 = 360;
 const ALBUM_DETAIL_META_SPACING: i32 = 6;
 const ALBUM_DETAIL_META_LABEL_HEIGHT: i32 = 20;
-const ALBUM_DETAIL_MAX_RENDERED_ROWS: usize = 96;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct AlbumDetailRowMetrics {
@@ -60,48 +58,15 @@ struct AlbumDetailRowMetrics {
     spacing: i32,
 }
 
-pub enum AlbumCollectionOrder {
-    Rows(usize),
-    Detail {
-        media_uris: Vec<String>,
-        albums: Vec<String>,
-        albums_with_genres: Vec<String>,
-    },
-}
+use library::AlbumDetailRow;
 
-#[derive(Clone, Debug, PartialEq)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "album detail rows are supplied through the bounded sparse-model window"
-)]
-pub enum AlbumDetailRouteRow {
-    Album(AlbumRow),
-    Track(TrackRow),
-}
+type AlbumDetailKey = (bool, i64);
 
-pub fn album_detail_rows_for_items(
-    items: Vec<String>,
-    albums: Vec<AlbumRow>,
-    tracks: Vec<TrackRow>,
-) -> Result<Vec<AlbumDetailRouteRow>, String> {
-    let mut albums = albums
-        .into_iter()
-        .map(|row| (row.media_uri.clone(), row))
-        .collect::<BTreeMap<_, _>>();
-    let mut tracks = tracks
-        .into_iter()
-        .map(|row| (row.media_uri.clone(), row))
-        .collect::<BTreeMap<_, _>>();
-    items
-        .into_iter()
-        .map(|media_uri| {
-            albums
-                .remove(&media_uri)
-                .map(AlbumDetailRouteRow::Album)
-                .or_else(|| tracks.remove(&media_uri).map(AlbumDetailRouteRow::Track))
-                .ok_or_else(|| "Album detail row is no longer current".to_string())
-        })
-        .collect()
+fn detail_key(row: &AlbumDetailRow) -> AlbumDetailKey {
+    match row {
+        AlbumDetailRow::Album { album, .. } => (true, album.album_key.raw()),
+        AlbumDetailRow::Track { track, .. } => (false, track.track_key.raw()),
+    }
 }
 
 #[derive(Clone)]
@@ -112,18 +77,12 @@ pub struct AlbumCollectionModels {
 
 #[derive(Clone)]
 pub struct AlbumDetailModel {
-    sparse: Option<Rc<SparseRouteModel<String, AlbumDetailRouteRow>>>,
-    albums: Rc<RefCell<BTreeSet<String>>>,
-    albums_with_genres: Rc<RefCell<BTreeSet<String>>>,
+    sparse: Option<Rc<SparseRouteModel<AlbumDetailKey, AlbumDetailRow>>>,
 }
 
 impl AlbumDetailModel {
     fn empty() -> Self {
-        Self {
-            sparse: None,
-            albums: Rc::new(RefCell::new(BTreeSet::new())),
-            albums_with_genres: Rc::new(RefCell::new(BTreeSet::new())),
-        }
+        Self { sparse: None }
     }
 
     pub fn list_model(&self) -> SparseObjectModel {
@@ -141,10 +100,10 @@ impl AlbumDetailModel {
 impl AlbumCollectionModels {
     pub fn new(
         selected: &rufin_core::runtime::SelectedLibrary,
-        order: AlbumCollectionOrder,
+        count: usize,
         first_row_position: usize,
         first_rows: Vec<AlbumRow>,
-        first_detail_rows: Vec<AlbumDetailRouteRow>,
+        first_detail_rows: Vec<AlbumDetailRow>,
         layout: LibraryLayout,
         favorites_only: bool,
         request: Rc<RefCell<crate::routes::CollectionReadRequest>>,
@@ -152,49 +111,47 @@ impl AlbumCollectionModels {
         let source = selected.source_key;
         let folder = selected.music_folder_key;
         if layout == LibraryLayout::Detail {
-            let AlbumCollectionOrder::Detail {
-                media_uris,
-                albums,
-                albums_with_genres,
-            } = order
-            else {
-                unreachable!("Album detail layout requires its flattened identity order")
-            };
             let database = Arc::clone(&selected.database);
             let load = Rc::new(
-                move |items: Vec<String>,
-                      _: std::ops::Range<usize>,
+                move |_: Vec<AlbumDetailKey>,
+                      range: std::ops::Range<usize>,
                       cancellation: library::ReadCancellation| {
                     let database = Arc::clone(&database);
+                    let request = request.borrow().clone();
                     Box::pin(async move {
-                        let (albums, tracks) = database
-                            .album_detail_route_rows(source, &items, folder, &cancellation)
+                        database
+                            .album_detail_page(
+                                source,
+                                folder,
+                                favorites_only,
+                                &request.query,
+                                request.settings.sort_key.album_sort(),
+                                request.settings.descending,
+                                ALBUM_DETAIL_INLINE_TRACK_ROWS,
+                                range.start,
+                                range.len(),
+                                &cancellation,
+                            )
                             .await
-                            .map_err(|error| error.to_string())?;
-                        album_detail_rows_for_items(items, albums, tracks)
+                            .map_err(|error| error.to_string())
                     })
                         as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
                 },
             );
-            let sparse = SparseRouteModel::new(media_uris, 24, selected.runtime.clone(), load);
-            sparse.seed_matching_at(first_row_position, first_detail_rows, |row| match row {
-                AlbumDetailRouteRow::Album(row) => row.media_uri.clone(),
-                AlbumDetailRouteRow::Track(row) => row.media_uri.clone(),
-            });
+            let sparse = SparseRouteModel::new(
+                SparseSource::Query { count },
+                24,
+                selected.runtime.clone(),
+                load,
+            );
+            sparse.seed_matching_at(first_row_position, first_detail_rows, detail_key);
             return Self {
                 rows: None,
                 detail: AlbumDetailModel {
                     sparse: Some(sparse),
-                    albums: Rc::new(RefCell::new(albums.into_iter().collect())),
-                    albums_with_genres: Rc::new(RefCell::new(
-                        albums_with_genres.into_iter().collect(),
-                    )),
                 },
             };
         }
-        let AlbumCollectionOrder::Rows(count) = order else {
-            unreachable!("Album row/grid layout requires its Album key order")
-        };
         let database = Arc::clone(&selected.database);
         let load: gtk_widgets::media_drag::CollectionRowsLoad<
             crate::routes::CollectionReadRequest,
@@ -279,15 +236,12 @@ impl AlbumCollectionModels {
 
     pub fn replace_prepared(
         &self,
-        order: AlbumCollectionOrder,
+        count: usize,
         first_row_position: usize,
         first_rows: Vec<AlbumRow>,
-        first_detail_rows: Vec<AlbumDetailRouteRow>,
+        first_detail_rows: Vec<AlbumDetailRow>,
     ) -> bool {
         if let Some(rows) = &self.rows {
-            let AlbumCollectionOrder::Rows(count) = order else {
-                return false;
-            };
             return rows.replace_prepared_at(
                 SparseSource::Query { count },
                 first_row_position,
@@ -296,33 +250,15 @@ impl AlbumCollectionModels {
                 |row| row.album_key,
             );
         }
-        if !first_rows.is_empty() {
-            return false;
-        }
-        let AlbumCollectionOrder::Detail {
-            media_uris,
-            albums,
-            albums_with_genres,
-        } = order
-        else {
-            return false;
-        };
         let Some(detail) = &self.detail.sparse else {
             return false;
         };
-        self.detail.albums.replace(albums.into_iter().collect());
-        self.detail
-            .albums_with_genres
-            .replace(albums_with_genres.into_iter().collect());
         detail.replace_prepared_at(
-            media_uris,
+            SparseSource::Query { count },
             first_row_position,
             first_detail_rows,
             Vec::new(),
-            |row| match row {
-                AlbumDetailRouteRow::Album(row) => row.media_uri.clone(),
-                AlbumDetailRouteRow::Track(row) => row.media_uri.clone(),
-            },
+            detail_key,
         )
     }
 
@@ -334,13 +270,13 @@ impl AlbumCollectionModels {
             rows.update_ready(position as usize, |row| row.favorite = favorite)
         } else if let Some(detail) = &self.detail.sparse {
             let Some(position) = detail.ready_position(|row| {
-                matches!(row, AlbumDetailRouteRow::Album(album) if album.media_uri == media_uri)
+                matches!(row, AlbumDetailRow::Album { album, .. } if album.media_uri == media_uri)
             })
             else {
                 return false;
             };
             detail.update_ready(position as usize, |row| {
-                if let AlbumDetailRouteRow::Album(album) = row {
+                if let AlbumDetailRow::Album { album, .. } = row {
                     album.favorite = favorite;
                 }
             })
@@ -370,867 +306,562 @@ pub struct AlbumDetailVirtualList {
 }
 
 struct AlbumDetailVirtualListInner {
-    display: RefCell<rufin_core::settings::layout::DisplaySettings>,
     shell: Weak<CatalogUi>,
-    model: AlbumDetailModel,
+    list: gtk::ListView,
     fields: Vec<LibraryField>,
-    widget: gtk::Box,
-    top_spacer: gtk::Box,
-    rows_widget: gtk::Box,
-    bottom_spacer: gtk::Box,
-    layout: RefCell<AlbumDetailLayout>,
-    rendered: RefCell<Option<Range<usize>>>,
-    demanded_items: RefCell<Vec<glib::Object>>,
-    keyboard_position: Cell<Option<usize>>,
-    selection: AlbumDetailTrackSelection,
     width: Cell<i32>,
-    scheduled: Cell<bool>,
-    model_handler: RefCell<Option<(SparseObjectModel, glib::SignalHandlerId)>>,
-    adjustment_handlers: RefCell<Option<AlbumDetailAdjustmentHandlers>>,
-    focus_handler: RefCell<Option<(glib::WeakRef<gtk::Root>, glib::SignalHandlerId)>>,
+    display: RefCell<rufin_core::settings::layout::DisplaySettings>,
+    playing: RefCell<(Option<String>, bool)>,
+    cells: RefCell<HashMap<usize, Rc<AlbumDetailCell>>>,
 }
 
-struct AlbumDetailAdjustmentHandlers {
-    adjustment: glib::WeakRef<gtk::Adjustment>,
-    value_changed: glib::SignalHandlerId,
-    changed: glib::SignalHandlerId,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct AlbumDetailSpan {
-    track_height: i32,
-    album_position: usize,
-    first_track_position: usize,
-    first_visual_row: usize,
-    track_count: usize,
-    top: i32,
-    lead_height: i32,
-}
-
-impl AlbumDetailSpan {
-    fn bottom(self) -> i32 {
-        self.top
-            .saturating_add(self.lead_height)
-            .saturating_add(
-                i32::try_from(
-                    self.track_count
-                        .saturating_sub(ALBUM_DETAIL_INLINE_TRACK_ROWS),
-                )
-                .unwrap_or(i32::MAX)
-                .saturating_mul(self.track_height),
-            )
-            .saturating_add(if self.track_count > ALBUM_DETAIL_INLINE_TRACK_ROWS {
-                16
-            } else {
-                0
-            })
+impl AlbumDetailVirtualListInner {
+    fn cells(&self) -> Vec<Rc<AlbumDetailCell>> {
+        self.cells.borrow().values().cloned().collect()
     }
-
-    fn visual_row_count(self) -> usize {
-        1_usize.saturating_add(
-            self.track_count
-                .saturating_sub(ALBUM_DETAIL_INLINE_TRACK_ROWS),
-        )
-    }
-}
-
-#[derive(Clone, Debug)]
-enum AlbumDetailVisualItem {
-    Lead {
-        album_position: usize,
-        inline_tracks: Range<usize>,
-        last_in_album: bool,
-    },
-    Track {
-        track_position: usize,
-        index: usize,
-        last_in_album: bool,
-    },
-}
-
-#[derive(Clone, Debug)]
-struct PositionedAlbumDetailItem {
-    item: AlbumDetailVisualItem,
-    top: i32,
-    height: i32,
-}
-
-impl PositionedAlbumDetailItem {
-    fn bottom(&self) -> i32 {
-        self.top.saturating_add(self.height)
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-struct AlbumDetailLayout {
-    spans: Vec<AlbumDetailSpan>,
-    visual_row_count: usize,
-    total_height: i32,
-}
-
-impl AlbumDetailLayout {
-    fn build(
-        model: &AlbumDetailModel,
-        width: i32,
-        display: &rufin_core::settings::layout::DisplaySettings,
-    ) -> Self {
-        let order = model
-            .sparse
-            .as_ref()
-            .and_then(|sparse| sparse.order().keys().cloned())
-            .unwrap_or_else(|| Arc::new([]));
-        Self::from_order(
-            &order,
-            &model.albums.borrow(),
-            &model.albums_with_genres.borrow(),
-            width,
-            display,
-        )
-    }
-
-    fn from_order(
-        order: &[String],
-        albums: &BTreeSet<String>,
-        albums_with_genres: &BTreeSet<String>,
-        width: i32,
-        display: &rufin_core::settings::layout::DisplaySettings,
-    ) -> Self {
-        let cover_size = album_detail_row_metrics_for_width(width).cover_size;
-        let mut position = 0_usize;
-        let mut first_visual_row = 0_usize;
-        let mut top = 0_i32;
-        let mut spans = Vec::new();
-        while position < order.len() {
-            let album_position = position;
-            if !albums.contains(&order[position]) {
-                position = position.saturating_add(1);
-                continue;
-            }
-            let has_genres = albums_with_genres.contains(&order[position]);
-            position = position.saturating_add(1);
-            let first_track_position = position;
-            while position < order.len() && !albums.contains(&order[position]) {
-                position = position.saturating_add(1);
-            }
-            let track_count = position.saturating_sub(first_track_position);
-            let inline_count = track_count.min(ALBUM_DETAIL_INLINE_TRACK_ROWS);
-            let lead_height = album_detail_lead_content_height(
-                cover_size,
-                3 + usize::from(has_genres),
-                inline_count,
-                display,
-            )
-            .saturating_add(12)
-            .saturating_add(if track_count <= ALBUM_DETAIL_INLINE_TRACK_ROWS {
-                16
-            } else {
-                0
-            });
-            let span = AlbumDetailSpan {
-                track_height: display_track_height(display),
-                album_position,
-                first_track_position,
-                first_visual_row,
-                track_count,
-                top,
-                lead_height,
-            };
-            first_visual_row = first_visual_row.saturating_add(span.visual_row_count());
-            top = span.bottom();
-            spans.push(span);
-        }
-        Self {
-            spans,
-            visual_row_count: first_visual_row,
-            total_height: top.max(1),
-        }
-    }
-
-    fn row(&self, visual_position: usize) -> Option<PositionedAlbumDetailItem> {
-        if visual_position >= self.visual_row_count {
-            return None;
-        }
-        let span = *self.spans.get(
-            self.spans
-                .partition_point(|span| span.first_visual_row <= visual_position)
-                .checked_sub(1)?,
-        )?;
-        let offset = visual_position.saturating_sub(span.first_visual_row);
-        if offset == 0 {
-            let inline_count = span.track_count.min(ALBUM_DETAIL_INLINE_TRACK_ROWS);
-            return Some(PositionedAlbumDetailItem {
-                item: AlbumDetailVisualItem::Lead {
-                    album_position: span.album_position,
-                    inline_tracks: span.first_track_position
-                        ..span.first_track_position.saturating_add(inline_count),
-                    last_in_album: span.track_count <= ALBUM_DETAIL_INLINE_TRACK_ROWS,
-                },
-                top: span.top,
-                height: span.lead_height,
-            });
-        }
-        let continuation = offset.saturating_sub(1);
-        let continuation_count = span
-            .track_count
-            .saturating_sub(ALBUM_DETAIL_INLINE_TRACK_ROWS);
-        if continuation >= continuation_count {
-            return None;
-        }
-        let last_in_album = continuation.saturating_add(1) == continuation_count;
-        Some(PositionedAlbumDetailItem {
-            item: AlbumDetailVisualItem::Track {
-                track_position: span
-                    .first_track_position
-                    .saturating_add(ALBUM_DETAIL_INLINE_TRACK_ROWS)
-                    .saturating_add(continuation),
-                index: ALBUM_DETAIL_INLINE_TRACK_ROWS.saturating_add(continuation),
-                last_in_album,
-            },
-            top: span.top.saturating_add(span.lead_height).saturating_add(
-                i32::try_from(continuation)
-                    .unwrap_or(i32::MAX)
-                    .saturating_mul(span.track_height),
-            ),
-            height: span
-                .track_height
-                .saturating_add(if last_in_album { 16 } else { 0 }),
-        })
-    }
-
-    fn row_at_height(&self, height: f64) -> Option<usize> {
-        if self.visual_row_count == 0 {
-            return None;
-        }
-        let height = height.max(0.0).min(f64::from(self.total_height));
-        let span = *self.spans.get(
-            self.spans
-                .partition_point(|span| f64::from(span.bottom()) <= height)
-                .min(self.spans.len().saturating_sub(1)),
-        )?;
-        let within = (height - f64::from(span.top)).max(0.0);
-        if within < f64::from(span.lead_height)
-            || span.track_count <= ALBUM_DETAIL_INLINE_TRACK_ROWS
-        {
-            return Some(span.first_visual_row);
-        }
-        let continuation = ((within - f64::from(span.lead_height)) / f64::from(span.track_height))
-            .floor()
-            .max(0.0) as usize;
-        Some(
-            span.first_visual_row
-                + 1
-                + continuation.min(
-                    span.track_count
-                        .saturating_sub(ALBUM_DETAIL_INLINE_TRACK_ROWS + 1),
-                ),
-        )
-    }
-
-    fn visible_range(&self, top: f64, bottom: f64) -> Range<usize> {
-        if self.visual_row_count == 0 {
-            return 0..0;
-        }
-        let top = top.max(0.0).min(f64::from(self.total_height));
-        let bottom = bottom.max(top).min(f64::from(self.total_height));
-        let start = self.row_at_height(top).unwrap_or(0);
-        let exclusive_bottom = if bottom > top { bottom - 0.5 } else { bottom };
-        let end = self
-            .row_at_height(exclusive_bottom)
-            .map_or(start, |position| position.saturating_add(1))
-            .min(self.visual_row_count)
-            .min(start.saturating_add(ALBUM_DETAIL_MAX_RENDERED_ROWS));
-        start..end
-    }
-
-    fn demand_positions(&self, visual: Range<usize>) -> Vec<usize> {
-        let mut positions = Vec::with_capacity(visual.len().saturating_mul(2));
-        for visual_position in visual {
-            let Some(row) = self.row(visual_position) else {
-                continue;
-            };
-            match row.item {
-                AlbumDetailVisualItem::Lead {
-                    album_position,
-                    inline_tracks,
-                    ..
-                } => {
-                    positions.push(album_position);
-                    positions.extend(inline_tracks);
-                }
-                AlbumDetailVisualItem::Track { track_position, .. } => {
-                    positions.push(track_position)
-                }
-            }
-        }
-        positions.sort_unstable();
-        positions.dedup();
-        positions
-    }
-
-    fn visual_range_depends_on(&self, visual: &Range<usize>, underlying: &Range<usize>) -> bool {
-        self.demand_positions(visual.clone())
-            .into_iter()
-            .any(|position| underlying.contains(&position))
-    }
-}
-
-#[derive(Clone, Default)]
-struct AlbumDetailTrackSelection {
-    selected: Rc<RefCell<Option<String>>>,
-    paused: Rc<Cell<bool>>,
-    visible: Rc<RefCell<Vec<AlbumDetailTrackBinding>>>,
-}
-
-struct AlbumDetailTrackBinding {
-    media_uri: String,
-    row: glib::WeakRef<gtk::Widget>,
-}
-
-impl AlbumDetailTrackSelection {
-    fn bind(&self, row: &gtk::Widget, media_uri: &str) {
-        apply_album_detail_track_selection(
-            row,
-            self.selected.borrow().as_deref() == Some(media_uri),
-            self.paused.get(),
-        );
-        self.visible.borrow_mut().push(AlbumDetailTrackBinding {
-            media_uri: media_uri.to_string(),
-            row: row.downgrade(),
-        });
-    }
-
-    fn update(&self, media_uri: Option<&str>, paused: bool) {
-        self.selected
-            .replace(media_uri.map(std::string::ToString::to_string));
-        self.paused.set(paused);
-        self.visible.borrow_mut().retain(|binding| {
-            let Some(row) = binding.row.upgrade() else {
-                return false;
-            };
-            apply_album_detail_track_selection(
-                &row,
-                media_uri == Some(binding.media_uri.as_str()),
-                paused,
-            );
-            true
-        });
-    }
-
-    fn prune_visible(&self) {
-        self.visible
-            .borrow_mut()
-            .retain(|binding| binding.row.upgrade().is_some());
-    }
-}
-
-fn apply_album_detail_track_selection(row: &gtk::Widget, selected: bool, paused: bool) {
-    gtk_widgets::recycled_cells::set_track_playing(row, selected, paused);
 }
 
 impl AlbumDetailVirtualList {
     fn new(shell: &Rc<CatalogUi>, model: AlbumDetailModel, fields: Vec<LibraryField>) -> Self {
-        let widget = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        widget.add_css_class("track-table");
-        widget.add_css_class("album-detail-list");
-        widget.set_hexpand(true);
-        widget.set_halign(gtk::Align::Fill);
-        widget.set_vexpand(false);
-        widget.set_focusable(true);
-        let top_spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let rows_widget = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        rows_widget.set_hexpand(true);
-        rows_widget.set_halign(gtk::Align::Fill);
-        let bottom_spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        widget.append(&top_spacer);
-        widget.append(&rows_widget);
-        widget.append(&bottom_spacer);
-
-        let width = Cell::new((shell.route_width)().max(1));
-        let selection = AlbumDetailTrackSelection::default();
+        let factory = gtk::SignalListItemFactory::new();
+        let list = gtk::ListView::new(None::<gtk::NoSelection>, None::<gtk::SignalListItemFactory>);
+        list.add_css_class("track-table");
+        list.add_css_class("album-detail-list");
+        list.set_hexpand(true);
         let inner = Rc::new(AlbumDetailVirtualListInner {
-            display: RefCell::new(detail_display(shell)),
             shell: Rc::downgrade(shell),
-            model: model.clone(),
+            list,
             fields,
-            widget,
-            top_spacer,
-            rows_widget,
-            bottom_spacer,
-            layout: RefCell::new(AlbumDetailLayout::build(
-                &model,
-                width.get(),
-                &detail_display(shell),
-            )),
-            rendered: RefCell::new(None),
-            demanded_items: RefCell::new(Vec::new()),
-            keyboard_position: Cell::new(None),
-            selection: selection.clone(),
-            width,
-            scheduled: Cell::new(false),
-            model_handler: RefCell::new(None),
-            adjustment_handlers: RefCell::new(None),
-            focus_handler: RefCell::new(None),
+            width: Cell::new((shell.route_width)().max(1)),
+            display: RefCell::new(detail_display(shell)),
+            playing: RefCell::new((None, false)),
+            cells: RefCell::new(HashMap::new()),
         });
-        inner.apply_extent();
-
         let weak = Rc::downgrade(&inner);
-        inner.widget.connect_root_notify(move |_| {
-            if let Some(inner) = weak.upgrade() {
-                inner.bind_focus_scrolling();
-            }
-        });
-
-        let object_model = model.list_model();
-        let weak = Rc::downgrade(&inner);
-        let handler = object_model.connect_items_changed(move |_, _, _, _| {
-            let Some(inner) = weak.upgrade() else {
+        factory.connect_setup(move |_, object| {
+            let (Some(inner), Some(item)) =
+                (weak.upgrade(), object.downcast_ref::<gtk::ListItem>())
+            else {
                 return;
             };
-            inner.rebuild_layout();
-            AlbumDetailVirtualListInner::queue_render(&inner);
+            let Some(shell) = inner.shell.upgrade() else {
+                return;
+            };
+            item.set_selectable(false);
+            item.set_activatable(false);
+            let cell = Rc::new(AlbumDetailCell::new(&shell, &inner.fields));
+            cell.item.replace(Some(item.downgrade()));
+            let display = inner.display.borrow().clone();
+            cell.resize(inner.width.get(), &display);
+            item.set_child(Some(&cell.widget));
+            inner
+                .cells
+                .borrow_mut()
+                .insert(item.as_ptr() as usize, cell);
         });
-        inner.model_handler.replace(Some((object_model, handler)));
-        if let Some(sparse) = model.sparse.as_ref() {
-            let weak = Rc::downgrade(&inner);
-            sparse.connect_ready_changed(move |position, count| {
-                let Some(inner) = weak.upgrade() else {
-                    return;
-                };
-                let changed = position as usize..(position as usize).saturating_add(count as usize);
-                if inner.rendered.borrow().as_ref().is_some_and(|rendered| {
-                    inner
-                        .layout
-                        .borrow()
-                        .visual_range_depends_on(rendered, &changed)
-                }) {
-                    inner.rendered.borrow_mut().take();
-                    AlbumDetailVirtualListInner::queue_render(&inner);
-                }
-            });
-        }
-
+        let weak = Rc::downgrade(&inner);
+        gtk_widgets::sparse_model::connect_sparse_bind(&factory, move |object| {
+            let (Some(inner), Some(item)) =
+                (weak.upgrade(), object.downcast_ref::<gtk::ListItem>())
+            else {
+                return;
+            };
+            let cell = inner.cells.borrow().get(&(item.as_ptr() as usize)).cloned();
+            if let Some(cell) = cell
+                && let Some(shell) = inner.shell.upgrade()
+            {
+                cell.bind(
+                    &shell,
+                    gtk_widgets::sparse_model::item_at_from_item::<AlbumDetailRow>(item),
+                );
+                let display = inner.display.borrow().clone();
+                cell.resize(inner.width.get(), &display);
+                let playing = inner.playing.borrow().clone();
+                cell.playing(playing.0.as_deref(), playing.1);
+            }
+        });
+        let weak = Rc::downgrade(&inner);
+        factory.connect_unbind(move |_, object| {
+            let Some(inner) = weak.upgrade() else { return };
+            let cell = inner
+                .cells
+                .borrow()
+                .get(&(object.as_ptr() as usize))
+                .cloned();
+            if let Some(cell) = cell
+                && let Some(shell) = inner.shell.upgrade()
+            {
+                cell.bind(&shell, None);
+            }
+        });
+        let weak = Rc::downgrade(&inner);
+        factory.connect_teardown(move |_, object| {
+            if let Some(inner) = weak.upgrade() {
+                inner.cells.borrow_mut().remove(&(object.as_ptr() as usize));
+            }
+        });
         let weak = Rc::downgrade(&inner);
         shell.register_current_route_track_selection(Rc::new(move |current| {
             let Some(inner) = weak.upgrade() else {
                 return false;
             };
-            inner.selection.update(
-                current.map(|current| current.media_uri.as_str()),
-                current.is_some_and(|current| current.paused),
-            );
+            let uri = current.map(|current| current.media_uri.clone());
+            let paused = current.is_some_and(|current| current.paused);
+            inner.playing.replace((uri.clone(), paused));
+            for cell in inner.cells() {
+                cell.playing(uri.as_deref(), paused);
+            }
             true
         }));
+        inner.list.set_factory(Some(&factory));
+        inner
+            .list
+            .set_model(Some(&gtk::NoSelection::new(Some(model.list_model()))));
         Self { inner }
     }
 
     pub fn widget(&self) -> gtk::Widget {
-        self.inner.widget.clone().upcast()
+        self.inner.list.clone().upcast()
     }
 
     pub fn apply_display(&self, display: &rufin_core::settings::layout::DisplaySettings) {
-        if *self.inner.display.borrow() == *display {
-            return;
+        if *self.inner.display.borrow() != *display {
+            self.inner.display.replace(display.clone());
+            for cell in self.inner.cells() {
+                cell.resize(self.inner.width.get(), display);
+            }
         }
-        self.inner.display.replace(display.clone());
-        self.inner.rebuild_layout();
-        self.inner.render();
-    }
-
-    pub fn attach_scroller(&self, scroller: &gtk::ScrolledWindow) {
-        self.inner.disconnect_adjustment();
-        let adjustment = scroller.vadjustment();
-        let weak = Rc::downgrade(&self.inner);
-        let value_changed = adjustment.connect_value_changed(move |_| {
-            if let Some(inner) = weak.upgrade() {
-                AlbumDetailVirtualListInner::queue_render(&inner);
-            }
-        });
-        let weak = Rc::downgrade(&self.inner);
-        let changed = adjustment.connect_changed(move |_| {
-            if let Some(inner) = weak.upgrade() {
-                AlbumDetailVirtualListInner::queue_render(&inner);
-            }
-        });
-        self.inner
-            .adjustment_handlers
-            .replace(Some(AlbumDetailAdjustmentHandlers {
-                adjustment: adjustment.downgrade(),
-                value_changed,
-                changed,
-            }));
-        self.inner.render();
-        AlbumDetailVirtualListInner::queue_render(&self.inner);
     }
 
     pub fn fit_allocation(&self, width: i32) {
-        if width <= 1 {
-            return;
+        if width > 1 && self.inner.width.replace(width) != width {
+            let display = self.inner.display.borrow().clone();
+            for cell in self.inner.cells() {
+                cell.resize(width, &display);
+            }
         }
-        let previous_width = self.inner.width.replace(width);
-        if previous_width == width {
-            return;
-        }
-        if album_detail_geometry_changes(previous_width, width) {
-            self.inner.rebuild_layout();
-        } else {
-            self.inner.rendered.borrow_mut().take();
-        }
-        self.inner.render();
+    }
+
+    pub fn item_scroll(&self) -> gtk_widgets::mounted_route::NativeListScroll {
+        let inner = Rc::downgrade(&self.inner);
+        gtk_widgets::mounted_route::NativeListScroll::new(
+            self.inner.list.clone(),
+            Rc::new(move || {
+                let Some(inner) = inner.upgrade() else {
+                    return Vec::new();
+                };
+                inner
+                    .cells()
+                    .into_iter()
+                    .filter_map(|cell| {
+                        let item = cell.item.borrow().as_ref()?.upgrade()?;
+                        item.item()?;
+                        Some((item.position(), cell.widget.clone().upcast()))
+                    })
+                    .collect()
+            }),
+            true,
+        )
     }
 
     pub fn navigate(&self, direction: gtk::DirectionType) -> glib::Propagation {
-        let forward = matches!(
-            direction,
-            gtk::DirectionType::Down | gtk::DirectionType::Right
-        );
-        let backward = matches!(direction, gtk::DirectionType::Up | gtk::DirectionType::Left);
-        if !forward && !backward {
-            return glib::Propagation::Stop;
-        }
-        let layout = self.inner.layout.borrow();
-        let mut position = match (self.inner.keyboard_position.get(), forward) {
-            (None, true) => 0,
-            (None, false) => layout.visual_row_count.saturating_sub(1),
-            (Some(position), true) => position.saturating_add(1),
-            (Some(position), false) => position.saturating_sub(1),
-        };
-        loop {
-            let Some(row) = layout.row(position) else {
-                return glib::Propagation::Stop;
-            };
-            if matches!(row.item, AlbumDetailVisualItem::Track { .. }) {
-                self.inner.keyboard_position.set(Some(position));
-                if let Some(adjustment) = self.inner.adjustment() {
-                    let maximum =
-                        (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
-                    adjustment.set_value(f64::from(row.top).clamp(adjustment.lower(), maximum));
-                }
-                self.inner.widget.grab_focus();
-                return glib::Propagation::Stop;
-            }
-            if forward {
-                position = position.saturating_add(1);
-            } else if position == 0 {
-                return glib::Propagation::Stop;
-            } else {
-                position -= 1;
-            }
-        }
-    }
-}
-
-fn album_detail_geometry_changes(previous_width: i32, width: i32) -> bool {
-    album_detail_row_metrics_for_width(previous_width).cover_size
-        != album_detail_row_metrics_for_width(width).cover_size
-}
-
-impl AlbumDetailVirtualListInner {
-    fn bind_focus_scrolling(&self) {
-        self.disconnect_focus();
-        let Some(root) = self.widget.root() else {
-            return;
-        };
-        let Some(viewport) = self.widget.parent().and_downcast::<gtk::Viewport>() else {
-            return;
-        };
-        // Reveal keyboard focus without scrolling when a pointer-dismissed menu
-        // restores focus, or when focus returns to the full virtual collection.
-        viewport.set_scroll_to_focus(false);
-        let widget = self.widget.downgrade();
-        let viewport = viewport.downgrade();
-        let handler = root.connect_notify_local(Some("focus-widget"), move |root, _| {
-            let (Some(widget), Some(viewport), Some(focus)) =
-                (widget.upgrade(), viewport.upgrade(), root.focus())
-            else {
-                return;
-            };
-            if focus.state_flags().contains(gtk::StateFlags::FOCUS_VISIBLE)
-                && focus.is_ancestor(&widget)
-                && focus.native() == widget.native()
-            {
-                viewport.scroll_to(&focus, None::<gtk::ScrollInfo>);
-            }
-        });
-        self.focus_handler
-            .replace(Some((root.downgrade(), handler)));
-    }
-
-    fn disconnect_focus(&self) {
-        if let Some((root, handler)) = self.focus_handler.borrow_mut().take()
-            && let Some(root) = root.upgrade()
+        if self
+            .inner
+            .list
+            .state_flags()
+            .contains(gtk::StateFlags::FOCUS_WITHIN)
         {
-            root.disconnect(handler);
+            return glib::Propagation::Proceed;
         }
-    }
-
-    fn rebuild_layout(&self) {
-        self.layout.replace(AlbumDetailLayout::build(
-            &self.model,
-            self.width.get(),
-            &self.display.borrow(),
-        ));
-        self.rendered.borrow_mut().take();
-        self.apply_extent();
-    }
-
-    fn apply_extent(&self) {
-        self.widget
-            .set_height_request(self.layout.borrow().total_height);
-    }
-
-    fn adjustment(&self) -> Option<gtk::Adjustment> {
-        self.adjustment_handlers
-            .borrow()
-            .as_ref()
-            .and_then(|handlers| handlers.adjustment.upgrade())
-    }
-
-    fn queue_render(inner: &Rc<Self>) {
-        if inner.scheduled.replace(true) {
-            return;
-        }
-        let weak = Rc::downgrade(inner);
-        glib::idle_add_local_once(move || {
-            let Some(inner) = weak.upgrade() else {
-                return;
-            };
-            inner.scheduled.set(false);
-            inner.render();
-        });
-    }
-
-    fn render(&self) {
-        let Some(adjustment) = self.adjustment() else {
-            return;
+        let Some(model) = self.inner.list.model() else {
+            return glib::Propagation::Stop;
         };
-        let layout = self.layout.borrow();
-        let overscan = f64::from(album_detail_virtual_overscan_height());
-        let top = (adjustment.value() - overscan).max(0.0);
-        let bottom = (adjustment.value() + adjustment.page_size() + overscan)
-            .min(f64::from(layout.total_height))
-            .max(top);
-        let visible = layout.visible_range(top, bottom);
-        if !album_detail_window_changed(self.rendered.borrow().as_ref(), &visible) {
-            return;
+        if let Some(position) = gtk_widgets::mounted_route::item_navigation_entry_position(
+            gtk::INVALID_LIST_POSITION,
+            model.n_items(),
+            direction,
+        ) {
+            self.inner
+                .list
+                .scroll_to(position, gtk::ListScrollFlags::FOCUS, None);
+            self.inner.list.grab_focus();
         }
-        let previous = self.rendered.replace(Some(visible.clone()));
-        let focus = self.widget.root().and_then(|root| root.focus());
-        let mut position = previous.as_ref().map_or(0, |range| range.start);
-        let mut child = self.rows_widget.first_child();
-        while let Some(row) = child {
-            child = row.next_sibling();
-            if previous.is_none() || !visible.contains(&position) {
-                if focus
-                    .as_ref()
-                    .is_some_and(|focus| *focus == row || focus.is_ancestor(&row))
-                {
-                    // Preserve the list's scroll position when its focused row leaves.
-                    self.widget.grab_focus();
-                }
-                self.rows_widget.remove(&row);
-            }
-            position += 1;
-        }
-        let top_height = layout.row(visible.start).map_or(0, |row| row.top);
-        let bottom_start = visible
-            .end
-            .checked_sub(1)
-            .and_then(|position| layout.row(position))
-            .map_or(top_height, |row| row.bottom());
-        self.top_spacer.set_height_request(top_height.max(0));
-        self.bottom_spacer
-            .set_height_request(layout.total_height.saturating_sub(bottom_start).max(0));
-        let rows = visible
-            .clone()
-            .filter_map(|position| layout.row(position).map(|row| (position, row)))
+        glib::Propagation::Stop
+    }
+}
+
+struct AlbumDetailCell {
+    widget: gtk::Box,
+    item: RefCell<Option<glib::WeakRef<gtk::ListItem>>>,
+    meta: gtk::Box,
+    meta_contents: gtk::Box,
+    cover: super::cards::AlbumCover,
+    labels: Vec<(gtk::ScrolledWindow, gtk::Label)>,
+    artist_links: gtk_widgets::detail_links::DetailLinkBinding,
+    separator: gtk::Widget,
+    track_area: gtk::Box,
+    header: gtk::Box,
+    header_cells: Vec<gtk::Widget>,
+    tracks: Vec<AlbumTrackSlot>,
+    fields: Vec<LibraryField>,
+    lead: Cell<bool>,
+    has_genres: Cell<bool>,
+    last: Cell<bool>,
+    track_count: Cell<usize>,
+}
+
+impl AlbumDetailCell {
+    fn new(shell: &Rc<CatalogUi>, fields: &[LibraryField]) -> Self {
+        let widget = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        widget.add_css_class("album-detail-row");
+        widget.set_hexpand(true);
+        widget.set_halign(gtk::Align::Fill);
+        widget.set_margin_start(4);
+        widget.set_margin_end(4);
+        let meta = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let meta_contents = gtk::Box::new(gtk::Orientation::Vertical, ALBUM_DETAIL_META_SPACING);
+        let cover = super::cards::AlbumCover::new(shell);
+        meta_contents.append(&cover.widget);
+        let labels = ["track-title", "muted", "muted", "muted"]
+            .into_iter()
+            .map(|class| {
+                let clip = album_meta_label("", class, 1);
+                let label = clip
+                    .child()
+                    .and_downcast::<gtk::Label>()
+                    .expect("album metadata label");
+                meta_contents.append(&clip);
+                (clip, label)
+            })
             .collect::<Vec<_>>();
-        let demand = layout.demand_positions(visible);
-        drop(layout);
-        let Some(shell) = self.shell.upgrade() else {
-            return;
-        };
-        let Some(sparse) = self.model.sparse.as_ref() else {
-            return;
-        };
-        // Retain visible items so page completion can find the remaining demand.
-        let model = sparse.list_model();
-        self.demanded_items.replace(
-            demand
-                .into_iter()
-                .filter_map(|position| model.item(position as u32))
-                .collect(),
+        let artist_links = gtk_widgets::detail_links::DetailLinkBinding::new(
+            &labels[1].1,
+            shell.route_navigation(),
         );
-        self.selection.prune_visible();
-        let mut retained = self.rows_widget.first_child();
-        let mut preceding: Option<gtk::Widget> = None;
-        for (position, row) in rows {
-            if previous
-                .as_ref()
-                .is_some_and(|range| range.contains(&position))
-            {
-                preceding = retained;
-                retained = preceding.as_ref().and_then(gtk::Widget::next_sibling);
-                continue;
+        meta.append(&meta_contents);
+        widget.append(&meta);
+        let separator = album_detail_separator(1);
+        widget.append(&separator);
+        let track_area = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        track_area.set_hexpand(true);
+        let (header, header_cells) = album_track_header(fields);
+        track_area.append(&header);
+        let tracks = (0..ALBUM_DETAIL_INLINE_TRACK_ROWS)
+            .map(|_| {
+                let slot = AlbumTrackSlot::new(shell, fields);
+                track_area.append(&slot.widget);
+                slot
+            })
+            .collect();
+        widget.append(&track_area);
+        Self {
+            widget,
+            item: RefCell::new(None),
+            meta,
+            meta_contents,
+            cover,
+            labels,
+            artist_links,
+            separator,
+            track_area,
+            header,
+            header_cells,
+            tracks,
+            fields: fields.to_vec(),
+            lead: Cell::new(false),
+            has_genres: Cell::new(false),
+            last: Cell::new(false),
+            track_count: Cell::new(0),
+        }
+    }
+
+    fn bind(&self, shell: &CatalogUi, row: Option<AlbumDetailRow>) {
+        let mut values = Vec::new();
+        self.lead.set(false);
+        self.has_genres.set(false);
+        self.last.set(false);
+        match row {
+            Some(AlbumDetailRow::Album {
+                album,
+                tracks,
+                last,
+            }) => {
+                self.lead.set(true);
+                self.last.set(last);
+                self.has_genres.set(!album.genres.is_empty());
+                self.cover.bind(shell, Some(&album));
+                self.labels[0].1.set_text(&album.title);
+                self.artist_links
+                    .bind(gtk_widgets::detail_links::album_artist_links(&album));
+                let mut facts = album
+                    .year
+                    .map(|year| year.to_string())
+                    .into_iter()
+                    .collect::<Vec<_>>();
+                facts.push(track_count_text(album.track_count.max(0) as u64));
+                facts.push(gtk_widgets::format_duration_units(
+                    (album.duration_millis.max(0) / 1000) as u32,
+                ));
+                self.labels[2].1.set_text(&facts.join(" • "));
+                self.labels[3].1.set_text(
+                    &album
+                        .genres
+                        .iter()
+                        .map(|genre| genre.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
+                values.extend(tracks.into_iter().enumerate());
             }
-            let child = match &row.item {
-                AlbumDetailVisualItem::Lead {
-                    album_position,
-                    inline_tracks,
-                    last_in_album,
-                } => {
-                    let album =
-                        sparse
-                            .ready(*album_position as u32)
-                            .and_then(|row| match row.as_ref() {
-                                AlbumDetailRouteRow::Album(album) => Some(album.clone()),
-                                AlbumDetailRouteRow::Track(_) => None,
-                            });
-                    let tracks = inline_tracks
-                        .clone()
-                        .map(|position| {
-                            sparse
-                                .ready(position as u32)
-                                .and_then(|row| match row.as_ref() {
-                                    AlbumDetailRouteRow::Track(track) => Some(track.clone()),
-                                    AlbumDetailRouteRow::Album(_) => None,
-                                })
-                        })
-                        .collect::<Option<Vec<_>>>();
-                    match (album, tracks) {
-                        (Some(album), Some(tracks)) => album_lead_row(
-                            &shell,
-                            &album,
-                            &tracks,
-                            *last_in_album,
-                            self.width.get(),
-                            &self.selection,
-                            &self.fields,
-                        ),
-                        _ => {
-                            album_detail_placeholder(&row, self.width.get(), &self.display.borrow())
-                        }
+            Some(AlbumDetailRow::Track { track, index, last }) => {
+                self.last.set(last);
+                self.cover.bind(shell, None);
+                values.push((index, track));
+            }
+            None => self.cover.bind(shell, None),
+        }
+        self.track_count.set(values.len());
+        self.meta_contents.set_visible(self.lead.get());
+        self.labels[3].0.set_visible(self.has_genres.get());
+        self.separator.set_visible(!values.is_empty());
+        self.widget
+            .set_margin_top(if self.lead.get() { 12 } else { 0 });
+        self.widget
+            .set_margin_bottom(if self.last.get() { 16 } else { 0 });
+        let mut values = values.into_iter();
+        for slot in &self.tracks {
+            slot.bind(shell, values.next());
+        }
+    }
+
+    fn resize(&self, width: i32, display: &rufin_core::settings::layout::DisplaySettings) {
+        let metrics = album_detail_row_metrics_for_width(width);
+        self.widget.set_spacing(metrics.spacing);
+        self.meta.set_width_request(metrics.meta_width);
+        self.cover.resize(metrics.cover_size);
+        for (clip, _) in &self.labels {
+            clip.set_width_request(metrics.meta_width);
+            clip.set_min_content_width(metrics.meta_width);
+            clip.set_max_content_width(metrics.meta_width);
+        }
+        let widths = album_track_field_widths(&self.fields, album_track_area_width(width, metrics));
+        self.track_area
+            .set_width_request(album_track_area_width(width, metrics));
+        self.header
+            .set_visible(self.lead.get() && self.track_count.get() > 0 && display.show_header);
+        for (cell, (_, width)) in self.header_cells.iter().zip(&widths) {
+            cell.set_width_request(*width);
+        }
+        for slot in &self.tracks {
+            slot.resize(&widths, display_track_height(display));
+        }
+        let height = if self.lead.get() {
+            album_detail_ready_height(
+                width,
+                self.has_genres.get(),
+                self.track_count.get(),
+                display,
+            )
+        } else {
+            display_track_height(display)
+        };
+        self.widget.set_height_request(height);
+        self.separator.set_height_request(height);
+    }
+
+    fn playing(&self, uri: Option<&str>, paused: bool) {
+        for slot in &self.tracks {
+            slot.playing(uri, paused);
+        }
+    }
+}
+
+struct AlbumTrackSlot {
+    widget: gtk::Box,
+    current: Rc<RefCell<Option<Rc<TrackRow>>>>,
+    cells: Vec<(gtk::Widget, AlbumTrackField)>,
+}
+
+enum AlbumTrackField {
+    Text(LibraryField, gtk::Label),
+    Index(gtk::Overlay),
+    Image(ArtworkTile),
+    Favorite(gtk::Button),
+}
+
+impl AlbumTrackSlot {
+    fn new(shell: &Rc<CatalogUi>, fields: &[LibraryField]) -> Self {
+        let widget = gtk::Box::new(gtk::Orientation::Horizontal, ALBUM_DETAIL_TRACK_COLUMN_GAP);
+        widget.add_css_class("album-detail-track-row");
+        widget.set_hexpand(true);
+        let current = Rc::new(RefCell::new(None::<Rc<TrackRow>>));
+        let menu_shell = Rc::downgrade(shell);
+        let row = Rc::clone(&current);
+        let menu: gtk_widgets::interactions::ContextMenuOpen = Rc::new(move |target, position| {
+            let row = row.borrow().clone();
+            if let Some(shell) = menu_shell.upgrade()
+                && let Some(track) = row
+            {
+                present_track_context_menu(target, &shell, track.media_uri.clone(), position);
+            }
+        });
+        install_context_menu_openers(&widget, Rc::clone(&menu));
+        let row = Rc::clone(&current);
+        let click_shell = Rc::downgrade(shell);
+        let click = gtk::GestureClick::new();
+        click.set_propagation_phase(gtk::PropagationPhase::Capture);
+        click.set_button(1);
+        click.connect_pressed(move |gesture, presses, _, _| {
+            let row = row.borrow().clone();
+            if album_detail_play_click(presses)
+                && let Some(shell) = click_shell.upgrade()
+                && let Some(track) = row
+            {
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                play_album_track(&shell, track.album_key, track.track_key);
+            }
+        });
+        widget.add_controller(click);
+        let cells = fields
+            .iter()
+            .map(|field| {
+                let (child, binding) = match field {
+                    LibraryField::Tools => {
+                        let button = row_favorite_icon_button("Favorite track");
+                        let actions =
+                            gtk_widgets::recycled_cells::RowActions::with_favorite(&button);
+                        install_context_menu_openers(&actions, Rc::clone(&menu));
+                        let row = Rc::downgrade(&current);
+                        shell.register_dynamic_favorite_button(
+                            Rc::new(move || {
+                                Some(gtk_widgets::favorites::track_favorite_key(
+                                    &row.upgrade()?.borrow().as_ref()?.media_uri,
+                                ))
+                            }),
+                            &button,
+                        );
+                        let row = Rc::clone(&current);
+                        let favorite_shell = Rc::downgrade(shell);
+                        button.connect_clicked(move |button| {
+                            let row = row.borrow().clone();
+                            if let Some(shell) = favorite_shell.upgrade()
+                                && let Some(track) = row
+                            {
+                                shell.set_favorite_with_feedback(
+                                    library::FavoriteTarget::Track(track.media_uri.clone()),
+                                    !favorite_button_is_active(button),
+                                    Some(button),
+                                );
+                            }
+                        });
+                        (actions.upcast(), AlbumTrackField::Favorite(button))
+                    }
+                    LibraryField::Image => {
+                        let tile = ArtworkTile::new(32);
+                        (tile.widget(), AlbumTrackField::Image(tile))
+                    }
+                    LibraryField::RowIndex => {
+                        let row = Rc::clone(&current);
+                        let play_shell = Rc::downgrade(shell);
+                        let cell = super::columns::track_row_index_cell("", move |_| {
+                            let row = row.borrow().clone();
+                            if let Some(shell) = play_shell.upgrade()
+                                && let Some(track) = row
+                            {
+                                play_album_track(&shell, track.album_key, track.track_key);
+                            }
+                        });
+                        (cell.clone().upcast(), AlbumTrackField::Index(cell))
+                    }
+                    field => {
+                        let label = album_track_label("", *field, 1);
+                        label.set_hexpand(true);
+                        (label.clone().upcast(), AlbumTrackField::Text(*field, label))
+                    }
+                };
+                let cell = fixed_album_track_cell(1, ALBUM_TRACK_HEIGHT, child);
+                widget.append(&cell);
+                (cell, binding)
+            })
+            .collect();
+        Self {
+            widget,
+            current,
+            cells,
+        }
+    }
+
+    fn bind(&self, shell: &CatalogUi, value: Option<(usize, TrackRow)>) {
+        self.widget.set_visible(value.is_some());
+        let index = value.as_ref().map_or(0, |(index, _)| *index);
+        self.current.replace(value.map(|(_, track)| Rc::new(track)));
+        if index % 2 == 1 {
+            self.widget.add_css_class("display-even");
+        } else {
+            self.widget.remove_css_class("display-even");
+        }
+        let current = self.current.borrow().clone();
+        for (_, cell) in &self.cells {
+            match cell {
+                AlbumTrackField::Text(field, label) => {
+                    label.set_text(&current.as_ref().map_or_else(String::new, |track| {
+                        album_detail_track_text(track, index, *field)
+                    }))
+                }
+                AlbumTrackField::Index(cell) => super::columns::set_track_row_index_text(
+                    cell,
+                    &current
+                        .as_ref()
+                        .map_or_else(String::new, |_| (index + 1).to_string()),
+                ),
+                AlbumTrackField::Favorite(button) => set_favorite_button_active(
+                    button,
+                    current.as_ref().is_some_and(|track| track.favorite),
+                ),
+                AlbumTrackField::Image(tile) => {
+                    if let Some(track) = current.as_ref() {
+                        shell.artwork.bind_artwork_tile(
+                            tile,
+                            opaque_artwork(track.artwork_binding.as_deref()),
+                            32,
+                            THUMB_COVER_SIZE,
+                        );
+                    } else {
+                        shell.artwork.clear_artwork_tile(tile);
                     }
                 }
-                AlbumDetailVisualItem::Track {
-                    track_position,
-                    index,
-                    last_in_album,
-                } => match sparse.ready(*track_position as u32).as_deref() {
-                    Some(AlbumDetailRouteRow::Track(track)) => album_continuation_row(
-                        &shell,
-                        track,
-                        *index,
-                        *last_in_album,
-                        self.width.get(),
-                        &self.selection,
-                        &self.fields,
-                    ),
-                    _ => album_detail_placeholder(&row, self.width.get(), &self.display.borrow()),
-                },
+            }
+        }
+    }
+
+    fn resize(&self, widths: &[(LibraryField, i32)], height: i32) {
+        self.widget.set_height_request(height);
+        for ((cell, _), (_, width)) in self.cells.iter().zip(widths) {
+            cell.set_size_request(*width, height);
+        }
+    }
+
+    fn playing(&self, uri: Option<&str>, paused: bool) {
+        let playing = self
+            .current
+            .borrow()
+            .as_ref()
+            .is_some_and(|track| uri == Some(track.media_uri.as_str()));
+        for (_, cell) in &self.cells {
+            let widget = match cell {
+                AlbumTrackField::Index(cell) => cell.upcast_ref(),
+                AlbumTrackField::Text(LibraryField::Title | LibraryField::TitleMerged, label) => {
+                    label.upcast_ref()
+                }
+                _ => continue,
             };
-            let host = gtk::Box::new(gtk::Orientation::Vertical, 0);
-            host.set_height_request(row.height);
-            host.set_hexpand(true);
-            host.append(&child);
-            self.rows_widget
-                .insert_child_after(&host, preceding.as_ref());
-            preceding = Some(host.upcast());
+            gtk_widgets::recycled_cells::set_track_playing(widget, playing, paused);
         }
     }
-
-    fn disconnect_adjustment(&self) {
-        let Some(handlers) = self.adjustment_handlers.borrow_mut().take() else {
-            return;
-        };
-        let Some(adjustment) = handlers.adjustment.upgrade() else {
-            return;
-        };
-        adjustment.disconnect(handlers.value_changed);
-        adjustment.disconnect(handlers.changed);
-    }
 }
 
-impl Drop for AlbumDetailVirtualListInner {
-    fn drop(&mut self) {
-        if let Some((model, handler)) = self.model_handler.get_mut().take() {
-            model.disconnect(handler);
-        }
-        self.disconnect_adjustment();
-        self.disconnect_focus();
-    }
-}
-
-fn album_detail_window_changed(rendered: Option<&Range<usize>>, visible: &Range<usize>) -> bool {
-    rendered != Some(visible)
-}
-
-fn album_detail_virtual_overscan_height() -> i32 {
-    ALBUM_TRACK_HEIGHT * 8
-}
-
-fn album_detail_placeholder(
-    row: &PositionedAlbumDetailItem,
-    width: i32,
-    display: &rufin_core::settings::layout::DisplaySettings,
-) -> gtk::Widget {
-    let metrics = album_detail_row_metrics_for_width(width);
-    let (lead, track_count, last_in_album) = match &row.item {
-        AlbumDetailVisualItem::Lead {
-            inline_tracks,
-            last_in_album,
-            ..
-        } => (true, inline_tracks.len(), *last_in_album),
-        AlbumDetailVisualItem::Track { last_in_album, .. } => (false, 1, *last_in_album),
-    };
-    let placeholder = gtk::Box::new(gtk::Orientation::Horizontal, metrics.spacing);
-    placeholder.set_margin_start(4);
-    placeholder.set_margin_end(4);
-    placeholder.set_margin_top(if lead { 12 } else { 0 });
-    placeholder.set_margin_bottom(if last_in_album { 16 } else { 0 });
-    placeholder.set_hexpand(true);
-    placeholder.set_halign(gtk::Align::Fill);
-    placeholder.set_sensitive(false);
-    placeholder.set_can_target(false);
-
-    let meta = gtk::Box::new(gtk::Orientation::Vertical, ALBUM_DETAIL_META_SPACING);
-    meta.set_width_request(metrics.meta_width);
-    if lead {
-        let cover = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        cover.set_size_request(metrics.cover_size, metrics.cover_size);
-        cover.add_css_class("collection-grid-cover-skeleton");
-        meta.append(&cover);
-        for fraction in [3, 2] {
-            let bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-            bar.set_size_request(
-                metrics.meta_width * fraction / 4,
-                ALBUM_DETAIL_META_LABEL_HEIGHT,
-            );
-            bar.set_halign(gtk::Align::Start);
-            bar.add_css_class("track-skeleton");
-            meta.append(&bar);
-        }
-    }
-    placeholder.append(&meta);
-    // Match the separator and gaps without drawing a loading divider.
-    let separator = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    separator.set_width_request(ALBUM_DETAIL_SEPARATOR_WIDTH);
-    placeholder.append(&separator);
-    let tracks = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    tracks.set_hexpand(true);
-    tracks.set_valign(gtk::Align::Start);
-    if lead && display.show_header && track_count > 0 {
-        tracks.set_margin_top(ALBUM_DETAIL_TRACK_HEADER_HEIGHT);
-    }
-    let track_width = album_track_area_width(width, metrics);
-    for _ in 0..track_count {
-        let bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        bar.set_size_request(track_width * 2 / 3, display_track_height(display));
-        bar.set_halign(gtk::Align::Start);
-        bar.add_css_class("track-skeleton");
-        tracks.append(&bar);
-    }
-    placeholder.append(&tracks);
-    placeholder.upcast()
+fn album_detail_play_click(presses: i32) -> bool {
+    presses >= 2 && presses % 2 == 0
 }
 
 fn album_detail_row_metrics_for_width(route_width: i32) -> AlbumDetailRowMetrics {
@@ -1263,57 +894,6 @@ fn album_detail_row_metrics_for_width(route_width: i32) -> AlbumDetailRowMetrics
         meta_width: cover_size,
         spacing,
     }
-}
-
-fn album_lead_row(
-    shell: &Rc<CatalogUi>,
-    album: &AlbumRow,
-    inline_tracks: &[TrackRow],
-    last_in_album: bool,
-    width: i32,
-    selection: &AlbumDetailTrackSelection,
-    fields: &[LibraryField],
-) -> gtk::Widget {
-    let metrics = album_detail_row_metrics_for_width(width);
-    let track_width = album_track_area_width(width, metrics);
-    let field_widths = album_track_field_widths(fields, track_width);
-    let content_height = album_detail_ready_height(
-        width,
-        !album.genres.is_empty(),
-        inline_tracks.len(),
-        &detail_display(shell),
-    );
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, metrics.spacing);
-    row.add_css_class("album-detail-row");
-    row.set_hexpand(true);
-    row.set_halign(gtk::Align::Fill);
-    row.set_margin_top(12);
-    row.set_margin_bottom(if last_in_album { 16 } else { 0 });
-    row.set_margin_start(4);
-    row.set_margin_end(4);
-    row.set_height_request(content_height);
-    row.append(&album_lead_meta(shell, album, metrics));
-
-    let track_area = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    track_area.set_hexpand(true);
-    track_area.set_width_request(track_width);
-    if !inline_tracks.is_empty() {
-        row.append(&album_detail_separator(content_height));
-        if detail_display(shell).show_header {
-            track_area.append(&album_track_header(&field_widths));
-        }
-        for (index, track) in inline_tracks.iter().enumerate() {
-            track_area.append(&album_track_cells(
-                shell,
-                track,
-                index,
-                &field_widths,
-                selection,
-            ));
-        }
-    }
-    row.append(&track_area);
-    row.upcast()
 }
 
 fn album_detail_lead_content_height(
@@ -1359,91 +939,6 @@ fn album_detail_ready_height(
     )
 }
 
-fn album_continuation_row(
-    shell: &Rc<CatalogUi>,
-    track: &TrackRow,
-    index: usize,
-    last_in_album: bool,
-    width: i32,
-    selection: &AlbumDetailTrackSelection,
-    fields: &[LibraryField],
-) -> gtk::Widget {
-    let metrics = album_detail_row_metrics_for_width(width);
-    let field_widths = album_track_field_widths(fields, album_track_area_width(width, metrics));
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, metrics.spacing);
-    row.add_css_class("album-detail-row");
-    row.set_hexpand(true);
-    row.set_halign(gtk::Align::Fill);
-    row.set_margin_bottom(if last_in_album { 16 } else { 0 });
-    row.set_margin_start(4);
-    row.set_margin_end(4);
-    row.set_height_request(display_track_height(&detail_display(shell)));
-    let spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    spacer.set_width_request(metrics.meta_width);
-    row.append(&spacer);
-    row.append(&album_detail_separator(display_track_height(
-        &detail_display(shell),
-    )));
-    row.append(&album_track_cells(
-        shell,
-        track,
-        index,
-        &field_widths,
-        selection,
-    ));
-    row.upcast()
-}
-
-fn album_lead_meta(
-    shell: &Rc<CatalogUi>,
-    album: &AlbumRow,
-    metrics: AlbumDetailRowMetrics,
-) -> gtk::Widget {
-    let meta = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    meta.set_width_request(metrics.meta_width);
-    meta.set_hexpand(false);
-    let cover = super::cards::album_cover_overlay(shell, album, metrics.cover_size);
-    meta.append(&cover);
-    let title = album_meta_label(&album.title, "track-title", metrics.meta_width);
-    meta.append(&title);
-    let artist = album_meta_label(&album.display_artist, "muted", metrics.meta_width);
-    if let Ok(label) = artist
-        .child()
-        .and_then(|child| child.downcast::<gtk::Label>().ok())
-        .ok_or(())
-    {
-        gtk_widgets::detail_links::DetailLinkBinding::new(&label, shell.route_navigation())
-            .bind(gtk_widgets::detail_links::album_artist_links(album));
-    }
-    meta.append(&artist);
-    let mut facts = Vec::new();
-    if let Some(year) = album.year {
-        facts.push(year.to_string());
-    }
-    facts.push(track_count_text(album.track_count.max(0) as u64));
-    facts.push(gtk_widgets::format_duration_units(
-        (album.duration_millis.max(0) / 1_000) as u32,
-    ));
-    meta.append(&album_meta_label(
-        &facts.join(" • "),
-        "muted",
-        metrics.meta_width,
-    ));
-    if !album.genres.is_empty() {
-        meta.append(&album_meta_label(
-            &album
-                .genres
-                .iter()
-                .map(|genre| genre.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", "),
-            "muted",
-            metrics.meta_width,
-        ));
-    }
-    meta.upcast()
-}
-
 fn album_meta_label(text: &str, class: &str, width: i32) -> gtk::ScrolledWindow {
     let label = gtk::Label::new(Some(text));
     label.add_css_class(class);
@@ -1470,157 +965,35 @@ fn album_detail_separator(height: i32) -> gtk::Widget {
     separator.upcast()
 }
 
-fn album_track_header(field_widths: &[(LibraryField, i32)]) -> gtk::Widget {
+fn album_track_header(fields: &[LibraryField]) -> (gtk::Box, Vec<gtk::Widget>) {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, ALBUM_DETAIL_TRACK_COLUMN_GAP);
     row.add_css_class("album-detail-track-cells");
     row.add_css_class("table-header");
     row.set_height_request(ALBUM_DETAIL_TRACK_HEADER_HEIGHT);
-    for (field, width) in field_widths {
-        let label = if *field == LibraryField::Duration {
-            let image = gtk::Image::from_icon_name("rufin-preferences-system-time-symbolic");
-            image.set_tooltip_text(Some(&localization::tr("Duration")));
-            image.upcast()
-        } else if *field == LibraryField::Tools {
-            gtk::Box::new(gtk::Orientation::Horizontal, 0).upcast()
-        } else {
-            let label = album_track_label(
-                &localization::tr(gtk_widgets::settings::library_field_title(*field)),
-                *field,
-                *width,
-            );
-            label.remove_css_class("track-list-title");
-            label.upcast()
-        };
-        row.append(&fixed_album_track_cell(
-            *width,
-            ALBUM_DETAIL_TRACK_HEADER_HEIGHT,
-            label,
-        ));
-    }
-    row.upcast()
-}
-
-fn album_track_cells(
-    shell: &Rc<CatalogUi>,
-    track: &TrackRow,
-    index: usize,
-    field_widths: &[(LibraryField, i32)],
-    selection: &AlbumDetailTrackSelection,
-) -> gtk::Widget {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, ALBUM_DETAIL_TRACK_COLUMN_GAP);
-    row.add_css_class("album-detail-track-row");
-    if index % 2 == 1 {
-        row.add_css_class("display-even");
-    }
-    row.set_height_request(display_track_height(&detail_display(shell)));
-    row.set_hexpand(true);
-    for (field, width) in field_widths {
-        row.append(&album_track_cell(
-            shell, track, index, *field, *width, selection,
-        ));
-    }
-    let menu_shell = Rc::clone(shell);
-    let menu_uri = track.media_uri.clone();
-    install_context_menu_openers(
-        &row,
-        Rc::new(move |target, position| {
-            present_track_context_menu(target, &menu_shell, menu_uri.clone(), position);
-        }),
-    );
-    let click_shell = Rc::clone(shell);
-    let click_album = track.album_key;
-    let click_key = track.track_key;
-    let click = gtk::GestureClick::new();
-    click.set_propagation_phase(gtk::PropagationPhase::Capture);
-    click.set_button(1);
-    click.connect_pressed(move |gesture, presses, _, _| {
-        if album_detail_play_click(presses) {
-            gesture.set_state(gtk::EventSequenceState::Claimed);
-            play_album_track(&click_shell, click_album, click_key);
-        }
-    });
-    row.add_controller(click);
-    row.upcast()
-}
-
-fn album_detail_play_click(presses: i32) -> bool {
-    presses >= 2 && presses % 2 == 0
-}
-
-fn album_track_cell(
-    shell: &Rc<CatalogUi>,
-    track: &TrackRow,
-    index: usize,
-    field: LibraryField,
-    width: i32,
-    selection: &AlbumDetailTrackSelection,
-) -> gtk::Widget {
-    let height = display_track_height(&detail_display(shell));
-    match field {
-        LibraryField::Tools => {
-            let button = row_favorite_icon_button("Favorite track");
-            let actions = gtk_widgets::recycled_cells::RowActions::with_favorite(&button);
-            let menu_shell = Rc::clone(shell);
-            let menu_uri = track.media_uri.clone();
-            install_context_menu_openers(
-                &actions,
-                Rc::new(move |target, position| {
-                    present_track_context_menu(target, &menu_shell, menu_uri.clone(), position);
-                }),
-            );
-            set_favorite_button_active(&button, track.favorite);
-            shell.register_favorite_button(
-                gtk_widgets::favorites::track_favorite_key(&track.media_uri),
-                &button,
-            );
-            let favorite_shell = Rc::clone(shell);
-            let media_uri = track.media_uri.clone();
-            button.connect_clicked(move |button| {
-                favorite_shell.set_favorite_with_feedback(
-                    library::FavoriteTarget::Track(media_uri.clone()),
-                    !favorite_button_is_active(button),
-                    Some(button),
+    let cells = fields
+        .iter()
+        .map(|field| {
+            let label = if *field == LibraryField::Duration {
+                let image = gtk::Image::from_icon_name("rufin-preferences-system-time-symbolic");
+                image.set_tooltip_text(Some(&localization::tr("Duration")));
+                image.upcast()
+            } else if *field == LibraryField::Tools {
+                gtk::Box::new(gtk::Orientation::Horizontal, 0).upcast()
+            } else {
+                let label = album_track_label(
+                    &localization::tr(gtk_widgets::settings::library_field_title(*field)),
+                    *field,
+                    1,
                 );
-            });
-            fixed_album_track_cell(width, height, actions.upcast())
-        }
-        LibraryField::Image => {
-            let cover = ArtworkTile::new(32);
-            shell.artwork.bind_artwork_tile(
-                &cover,
-                opaque_artwork(track.artwork_binding.as_deref()),
-                32,
-                THUMB_COVER_SIZE,
-            );
-            fixed_album_track_cell(width, height, cover.widget())
-        }
-        LibraryField::RowIndex => {
-            let shell = Rc::clone(shell);
-            let uri = track.media_uri.clone();
-            let play_key = track.track_key;
-            let album = track.album_key;
-            let cell = super::columns::track_row_index_cell(&(index + 1).to_string(), move |_| {
-                play_album_track(&shell, album, play_key);
-            });
-            selection.bind(cell.upcast_ref(), &uri);
-            fixed_album_track_cell(width, height, cell.upcast())
-        }
-        LibraryField::Title | LibraryField::TitleMerged => {
-            let label = album_track_label(&track.title, field, 1);
-            label.set_hexpand(true);
-            let cell = fixed_album_track_cell(width, height, label.clone().upcast())
-                .downcast::<gtk::Box>()
-                .expect("album track cell");
-            cell.set_spacing(5);
-            selection.bind(label.upcast_ref(), &track.media_uri);
-            cell.upcast()
-        }
-        _ => fixed_album_track_cell(
-            width,
-            height,
-            album_track_label(&album_detail_track_text(track, index, field), field, width).upcast(),
-        ),
-    }
+                label.remove_css_class("track-list-title");
+                label.upcast()
+            };
+            let cell = fixed_album_track_cell(1, ALBUM_DETAIL_TRACK_HEADER_HEIGHT, label);
+            row.append(&cell);
+            cell
+        })
+        .collect();
+    (row, cells)
 }
 
 fn album_track_label(text: &str, field: LibraryField, width: i32) -> gtk::Label {
@@ -1832,168 +1205,18 @@ mod tests {
         assert!(album_detail_play_click(4));
     }
 
-    fn two_album_order(
-        first_tracks: i64,
-        second_tracks: i64,
-    ) -> (Vec<String>, BTreeSet<String>, BTreeSet<String>) {
-        let source = library::SourceId::new("source");
-        let first_album = library::source_entity_uri(&source, "album", "first");
-        let second_album = library::source_entity_uri(&source, "album", "second");
-        let mut order = vec![first_album.clone()];
-        order.extend(
-            (1..=first_tracks)
-                .map(|index| library::source_entity_uri(&source, "track", &index.to_string())),
-        );
-        order.push(second_album.clone());
-        order.extend(
-            (first_tracks + 1..=first_tracks + second_tracks)
-                .map(|index| library::source_entity_uri(&source, "track", &index.to_string())),
-        );
-        (
-            order,
-            [first_album, second_album.clone()].into_iter().collect(),
-            [second_album].into_iter().collect(),
-        )
-    }
-
     #[test]
-    fn album_detail_layout_keeps_full_order_and_one_compact_span_per_album() {
-        let (order, albums, albums_with_genres) = two_album_order(240, 3);
-        let layout = AlbumDetailLayout::from_order(
-            &order,
-            &albums,
-            &albums_with_genres,
-            720,
-            &Default::default(),
-        );
-        assert_eq!(order.len(), 245);
-        assert_eq!(layout.spans.len(), 2);
-        assert_eq!(layout.spans[0].album_position, 0);
-        assert_eq!(layout.spans[0].first_track_position, 1);
-        assert_eq!(layout.spans[0].track_count, 240);
-        assert_eq!(layout.spans[1].album_position, 241);
-        assert_eq!(layout.spans[1].track_count, 3);
-    }
-
-    #[test]
-    fn album_detail_ready_and_placeholder_extent_share_the_checkpoint_formula() {
+    fn album_detail_header_keeps_space_for_genres_and_inline_tracks() {
         let width = 720;
         let cover = album_detail_row_metrics_for_width(width).cover_size;
         let expected_meta = cover
             + 4 * (ALBUM_DETAIL_META_LABEL_HEIGHT + ALBUM_DETAIL_META_SPACING)
             + ALBUM_DETAIL_META_LABEL_HEIGHT;
         let expected_tracks = ALBUM_DETAIL_TRACK_HEADER_HEIGHT + 3 * ALBUM_TRACK_HEIGHT;
-        let ready_with_genres = album_detail_ready_height(width, true, 3, &Default::default());
-        assert_eq!(ready_with_genres, expected_meta.max(expected_tracks));
         assert_eq!(
-            album_detail_ready_height(width, false, 3, &Default::default()),
-            album_detail_ready_height(width, false, 3, &Default::default())
+            album_detail_ready_height(width, true, 3, &Default::default()),
+            expected_meta.max(expected_tracks),
         );
-    }
-
-    #[test]
-    fn album_detail_layout_preserves_exact_extent_with_arithmetic_continuations() {
-        let (order, albums, albums_with_genres) = two_album_order(10, 2);
-        let width = 720;
-        let layout = AlbumDetailLayout::from_order(
-            &order,
-            &albums,
-            &albums_with_genres,
-            width,
-            &Default::default(),
-        );
-        assert_eq!(layout.spans.len(), 2);
-        assert_eq!(layout.visual_row_count, 4);
-        assert_eq!(layout.total_height, layout.spans[1].bottom());
-        for pair in layout.spans.windows(2) {
-            assert_eq!(pair[0].bottom(), pair[1].top);
-        }
-        let last_continuation = layout.row(2).expect("last continuation");
-        assert!(matches!(
-            last_continuation.item,
-            AlbumDetailVisualItem::Track {
-                track_position: 10,
-                index: 9,
-                last_in_album: true,
-            }
-        ));
-        assert_eq!(last_continuation.height, ALBUM_TRACK_HEIGHT + 16);
-    }
-
-    #[test]
-    fn album_detail_visible_range_is_bounded_and_tracks_scroll_height() {
-        let (order, albums, albums_with_genres) = two_album_order(256, 3);
-        let layout = AlbumDetailLayout::from_order(
-            &order,
-            &albums,
-            &albums_with_genres,
-            720,
-            &Default::default(),
-        );
-        let range = layout.visible_range(100.0, 100_000.0);
-        assert_eq!(range.len(), ALBUM_DETAIL_MAX_RENDERED_ROWS);
-        assert!(range.end <= layout.visual_row_count);
-
-        let exact = layout.visible_range(
-            f64::from(layout.row(40).unwrap().top),
-            f64::from(layout.row(43).unwrap().bottom()),
-        );
-        assert_eq!(exact, 40..44);
-    }
-
-    #[test]
-    fn album_detail_two_window_demand_is_exact_and_each_page_is_at_most_64() {
-        let (order, albums, albums_with_genres) = two_album_order(130, 1);
-        let layout = AlbumDetailLayout::from_order(
-            &order,
-            &albums,
-            &albums_with_genres,
-            720,
-            &Default::default(),
-        );
-        let demanded = layout.demand_positions(54..66);
-        let windows = demanded
-            .iter()
-            .map(|position| position / 64 * 64)
-            .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(windows, [0, 64].into_iter().collect());
-        assert!(
-            windows
-                .iter()
-                .all(|start| (*start..(*start + 64).min(order.len())).len() <= 64)
-        );
-        assert!(demanded.windows(2).all(|pair| pair[1] > pair[0]));
-    }
-
-    #[test]
-    fn album_detail_settled_window_does_not_schedule_an_identical_render() {
-        let rendered = 40..64;
-        assert!(!album_detail_window_changed(Some(&rendered), &(40..64)));
-        assert!(album_detail_window_changed(Some(&rendered), &(41..65)));
-        assert!(album_detail_window_changed(None, &(40..64)));
-    }
-
-    #[test]
-    fn album_detail_layout_uses_current_width_and_same_width_is_settled() {
-        let (order, albums, albums_with_genres) = two_album_order(8, 2);
-        let narrow = AlbumDetailLayout::from_order(
-            &order,
-            &albums,
-            &albums_with_genres,
-            420,
-            &Default::default(),
-        );
-        let wide = AlbumDetailLayout::from_order(
-            &order,
-            &albums,
-            &albums_with_genres,
-            1_200,
-            &Default::default(),
-        );
-        assert_ne!(narrow.total_height, wide.total_height);
-        assert!(!album_detail_window_changed(Some(&(0..2)), &(0..2)));
-        assert!(!album_detail_geometry_changes(720, 800));
-        assert!(album_detail_geometry_changes(420, 1_200));
     }
 }
 
@@ -2006,42 +1229,35 @@ pub async fn load_album_collection(
     filter: &str,
     window: library::RouteSeedWindow,
     cancellation: &library::ReadCancellation,
-) -> library::LibraryResult<(
-    AlbumCollectionOrder,
-    usize,
-    Vec<AlbumRow>,
-    Vec<AlbumDetailRouteRow>,
-)> {
+) -> library::LibraryResult<(usize, usize, Vec<AlbumRow>, Vec<AlbumDetailRow>)> {
     if settings.layout == crate::LibraryLayout::Detail {
-        let (media_uris, album_uris, albums_with_genres) = database
-            .album_detail_route_order(
+        let count = database
+            .album_detail_count(
+                source_key,
+                folder,
+                favorites_only,
+                filter,
+                ALBUM_DETAIL_INLINE_TRACK_ROWS,
+                cancellation,
+            )
+            .await?
+            .max(0) as usize;
+        let seed = window.range(count);
+        let first_detail_rows = database
+            .album_detail_page(
                 source_key,
                 folder,
                 favorites_only,
                 filter,
                 settings.sort_key.album_sort(),
                 settings.descending,
+                ALBUM_DETAIL_INLINE_TRACK_ROWS,
+                seed.start,
+                seed.len(),
                 cancellation,
             )
             .await?;
-        let seed = window.range(media_uris.len());
-        let first_row_position = seed.start;
-        let items = media_uris[seed].to_vec();
-        let (albums, tracks) = database
-            .album_detail_route_rows(source_key, &items, folder, cancellation)
-            .await?;
-        let first_detail_rows = album_detail_rows_for_items(items, albums, tracks)
-            .map_err(library::LibraryError::InvalidRequest)?;
-        Ok::<_, library::LibraryError>((
-            AlbumCollectionOrder::Detail {
-                media_uris,
-                albums: album_uris,
-                albums_with_genres,
-            },
-            first_row_position,
-            Vec::new(),
-            first_detail_rows,
-        ))
+        Ok((count, seed.start, Vec::new(), first_detail_rows))
     } else {
         let (order, first_row_position, first_rows) = database
             .album_route_page(
@@ -2055,11 +1271,6 @@ pub async fn load_album_collection(
                 cancellation,
             )
             .await?;
-        Ok((
-            AlbumCollectionOrder::Rows(order),
-            first_row_position,
-            first_rows,
-            Vec::new(),
-        ))
+        Ok((order, first_row_position, first_rows, Vec::new()))
     }
 }

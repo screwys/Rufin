@@ -167,7 +167,6 @@ fn release_selected_source(shell: &Rc<Shell>) {
     shell.chrome.topbar.search_session.set_selected(None);
     shell.clear_mounted_routes();
     shell.release_selected_navigation();
-    shell.artwork.finish_startup_cover_prime_gate();
     let released = shell.selected_ui.take();
     drop(released);
     shell.rebuild_sidebar_navigation();
@@ -252,7 +251,6 @@ fn finish_source_assignment(
 
     if source_changed {
         shell.clear_mounted_routes();
-        shell.artwork.finish_startup_cover_prime_gate();
         if matches!(
             shell.navigation.routes.borrow().current(),
             Route::History | Route::Playlists | Route::SmartPlaylists

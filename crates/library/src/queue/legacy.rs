@@ -252,9 +252,12 @@ impl SourceQuery {
             self.uri,
             anchor.unwrap_or_else(|| "0".into())
         );
-        Ok(sqlx::query_as(sqlx::AssertSqlSafe(self.select(&columns)))
-            .fetch_all(connection)
-            .await?)
+        Ok(sqlx::query_as_with(
+            sqlx::AssertSqlSafe(self.select(&columns)),
+            self.arguments.clone(),
+        )
+        .fetch_all(connection)
+        .await?)
     }
 }
 
@@ -400,10 +403,13 @@ async fn source_members_on(
         let hash = format!("({key}*1103515245)%2147483647");
         let mut pivot = (seed % 2147483647) as i64;
         if let Some(anchor) = &anchor
-            && let Some(value) = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
-                "SELECT {hash} FROM {} WHERE {} AND ({anchor}) LIMIT 1",
-                query.from, query.predicate
-            )))
+            && let Some(value) = sqlx::query_scalar_with::<_, i64, _>(
+                sqlx::AssertSqlSafe(format!(
+                    "SELECT {hash} FROM {} WHERE {} AND ({anchor}) LIMIT 1",
+                    query.from, query.predicate
+                )),
+                query.arguments.clone(),
+            )
             .fetch_optional(&mut *connection)
             .await?
         {
@@ -554,12 +560,13 @@ async fn smart_members_ref(
         now,
     )
     .await?;
-    Ok(
-        sqlx::query_scalar(sqlx::AssertSqlSafe(query.select(&query.uri)))
-            .persistent(false)
-            .fetch_all(connection)
-            .await?,
+    Ok(sqlx::query_scalar_with(
+        sqlx::AssertSqlSafe(query.select(&query.uri)),
+        query.arguments.clone(),
     )
+    .persistent(false)
+    .fetch_all(connection)
+    .await?)
 }
 
 async fn resolve_smart_reference(

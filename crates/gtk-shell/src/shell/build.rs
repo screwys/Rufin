@@ -178,7 +178,7 @@ pub async fn build(
     let startup = StartupState {
         route_revealed: Cell::new(!defer_initial_route),
         initial_launch: Cell::new(defer_initial_route),
-        route_allocated: Cell::new(false),
+        content: RefCell::new(None),
         reveal_deadline: RefCell::new(None),
     };
     let playback_state = PlaybackState {
@@ -331,14 +331,6 @@ pub async fn build(
                             |surface| surface.scale(),
                         )
                     })
-                })
-            },
-            {
-                let weak = weak.clone();
-                Box::new(move || {
-                    if let Some(shell) = weak.upgrade() {
-                        shell.try_reveal_startup_route();
-                    }
                 })
             },
             {

@@ -1489,9 +1489,12 @@ impl Database {
         let sql = format!(
             "WITH export_rows AS ({rows}) SELECT 'm3u:' || result_position object_id,media_uri,title,display_artist artist,display_album album,album_display_artist,duration_millis,disc_number,track_number,year,release_date,source_format,musicbrainz_recording_id,musicbrainz_release_track_id,result_position-1 position FROM export_rows ORDER BY result_position"
         );
-        let mut rows = sqlx::query_as::<_, crate::PlaylistEntryWrite>(AssertSqlSafe(sql))
-            .persistent(false)
-            .fetch(&mut *connection);
+        let mut rows = sqlx::query_as_with::<_, crate::PlaylistEntryWrite, _>(
+            AssertSqlSafe(sql),
+            query.arguments.clone(),
+        )
+        .persistent(false)
+        .fetch(&mut *connection);
         while let Some(entry) = rows.try_next().await? {
             output.entry(&entry)?;
         }
@@ -1520,6 +1523,7 @@ pub(crate) async fn smart_query(
             .unwrap_or_else(|| vec![SMART_RESULT_ORDER.into()]),
         uri: "track.media_uri".into(),
         entry_key: "NULL".into(),
+        arguments: Default::default(),
     };
     crate::tracks::track_filter(&mut query, None, filter, false);
     Ok(query)

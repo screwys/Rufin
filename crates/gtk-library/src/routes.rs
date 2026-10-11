@@ -10,7 +10,7 @@ use gtk_widgets::localization::bind_search_placeholder;
 use gtk_widgets::mounted_route::{LatestMountedRouteRead, MountedRoute};
 use localization::msgid;
 
-use super::album_detail::{AlbumCollectionModels, AlbumCollectionOrder};
+use super::album_detail::AlbumCollectionModels;
 use super::collections::{
     album_collection_projection, artist_collection_projection, library_route_inset,
     track_collection_projection,
@@ -247,10 +247,10 @@ impl CatalogUi {
         self: &Rc<Self>,
 
         favorites_only: bool,
-        order: AlbumCollectionOrder,
+        order: usize,
         first_row_position: usize,
         first_rows: Vec<library::AlbumRow>,
-        first_detail_rows: Vec<super::album_detail::AlbumDetailRouteRow>,
+        first_detail_rows: Vec<library::AlbumDetailRow>,
         selected: rufin_core::runtime::SelectedLibrary,
     ) -> MountedRoute {
         let key = LibraryListKey::Albums;
@@ -303,10 +303,10 @@ impl CatalogUi {
                 move |request: CollectionReadRequest,
                       result: Result<
                     (
-                        AlbumCollectionOrder,
+                        usize,
                         usize,
                         Vec<library::AlbumRow>,
-                        Vec<super::album_detail::AlbumDetailRouteRow>,
+                        Vec<library::AlbumDetailRow>,
                     ),
                     String,
                 >| {
@@ -459,6 +459,7 @@ impl CatalogUi {
         page.mounted_route(resume)
             .with_download_change(downloads)
             .with_item_navigation(content.item_navigation())
+            .with_item_scroll(content.item_scroll())
             .with_initial_demand({
                 let models = models.clone();
                 Rc::new(move || {

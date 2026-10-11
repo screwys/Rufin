@@ -1,4 +1,4 @@
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -62,71 +62,9 @@ pub struct ArtworkState {
     service: artwork::Artwork,
     settings: Rc<SettingsState>,
     scale: Box<dyn Fn() -> f64>,
-    startup_ready: Box<dyn Fn()>,
     playback_ready: Box<dyn Fn()>,
-    startup_prime: ArtworkPrime,
     textures: RefCell<TextureCache>,
     animations: RefCell<animation::Animations>,
-}
-
-#[derive(Default)]
-struct ArtworkPrime {
-    active: Cell<bool>,
-    generation: Cell<u64>,
-    pending: Cell<usize>,
-}
-
-impl ArtworkPrime {
-    fn begin(&self) -> u64 {
-        self.generation
-            .set(self.generation.get().wrapping_add(1).max(1));
-        self.pending.set(0);
-        self.active.set(true);
-        self.generation.get()
-    }
-
-    fn reserve(&self) -> Option<u64> {
-        if !self.active.get() {
-            return None;
-        }
-        self.pending.set(self.pending.get().saturating_add(1));
-        Some(self.generation.get())
-    }
-
-    fn release(&self, generation: u64) -> bool {
-        if !self.active.get() || self.generation.get() != generation {
-            return false;
-        }
-        self.pending.set(self.pending.get().saturating_sub(1));
-        self.pending.get() == 0
-    }
-
-    fn finish(&self) {
-        self.active.set(false);
-        self.pending.set(0);
-        self.generation
-            .set(self.generation.get().wrapping_add(1).max(1));
-    }
-
-    fn pending(&self) -> usize {
-        self.active.get().then_some(self.pending.get()).unwrap_or(0)
-    }
-}
-
-struct StartupArtworkLease {
-    shell: std::rc::Weak<ArtworkState>,
-    generation: u64,
-}
-
-impl Drop for StartupArtworkLease {
-    fn drop(&mut self) {
-        let Some(shell) = self.shell.upgrade() else {
-            return;
-        };
-        if shell.startup_prime.release(self.generation) {
-            (shell.startup_ready)();
-        }
-    }
 }
 
 impl ArtworkState {
@@ -134,16 +72,13 @@ impl ArtworkState {
         service: artwork::Artwork,
         settings: Rc<SettingsState>,
         scale: Box<dyn Fn() -> f64>,
-        startup_ready: Box<dyn Fn()>,
         playback_ready: Box<dyn Fn()>,
     ) -> Rc<Self> {
         Rc::new(Self {
             service,
             settings,
             scale,
-            startup_ready,
             playback_ready,
-            startup_prime: Default::default(),
             textures: RefCell::new(Default::default()),
             animations: RefCell::new(Default::default()),
         })
@@ -351,7 +286,6 @@ impl ArtworkState {
         });
         let tile_weak = tile.downgrade();
         let shell = Rc::downgrade(self);
-        let mut startup_prime = self.reserve_startup_cover_prime();
         let request = glib::spawn_future_local(async move {
             let preview = match preview {
                 Some(artwork::ArtworkLoad::Ready(loaded)) => Some(loaded),
@@ -373,7 +307,6 @@ impl ArtworkState {
                 if let Some(shell) = shell.upgrade() {
                     (shell.playback_ready)();
                 }
-                drop(startup_prime.take());
             }
             let outcome = pending.finish().await;
             let Some(tile) = tile_weak.upgrade() else {
@@ -398,7 +331,6 @@ impl ArtworkState {
             if ready && refresh_desktop_on_ready {
                 (shell.playback_ready)();
             }
-            drop(startup_prime);
         });
         tile.replace_artwork_request(request);
     }
@@ -433,26 +365,6 @@ impl ArtworkState {
         let path = self.service.cache_only_file(&request)?;
         Some(PlaybackArtworkPath { path })
     }
-
-    pub fn begin_startup_cover_prime(&self) {
-        self.startup_prime.begin();
-    }
-
-    pub fn startup_cover_prime_pending_count(&self) -> usize {
-        self.startup_prime.pending()
-    }
-
-    pub fn finish_startup_cover_prime_gate(&self) {
-        self.startup_prime.finish();
-    }
-
-    fn reserve_startup_cover_prime(self: &Rc<Self>) -> Option<StartupArtworkLease> {
-        let generation = self.startup_prime.reserve()?;
-        Some(StartupArtworkLease {
-            shell: Rc::downgrade(self),
-            generation,
-        })
-    }
 }
 
 fn artwork_external_policy(settings: &UiSettings) -> artwork::ExternalPolicy {
@@ -469,9 +381,7 @@ fn cache_only_artwork_external_policy() -> artwork::ExternalPolicy {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ArtworkPrime, cache_only_artwork_external_policy, cover_decode_size, cover_request_sizes,
-    };
+    use super::{cache_only_artwork_external_policy, cover_decode_size, cover_request_sizes};
 
     #[test]
     fn cover_decode_size_uses_the_surface_scale_without_exceeding_the_fetch_size() {
@@ -500,27 +410,6 @@ mod tests {
         assert!(policy.allow_cached);
         assert!(!policy.allow_network);
         assert!(!policy.allow_musicbrainz);
-    }
-
-    #[test]
-    fn startup_artwork_completion_only_releases_its_own_reveal_gate() {
-        let prime = ArtworkPrime::default();
-        prime.begin();
-        let first = prime.reserve().expect("first cover joins startup gate");
-        let second = prime.reserve().expect("second cover joins startup gate");
-        assert_eq!(prime.pending(), 2);
-        assert!(!prime.release(first));
-        assert_eq!(prime.pending(), 1);
-
-        prime.begin();
-        let current = prime.reserve().expect("replacement cover joins new gate");
-        assert!(!prime.release(second));
-        assert_eq!(prime.pending(), 1);
-        assert!(prime.release(current));
-        assert_eq!(prime.pending(), 0);
-
-        prime.finish();
-        assert_eq!(prime.pending(), 0);
     }
 }
 

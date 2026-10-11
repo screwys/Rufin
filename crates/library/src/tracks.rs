@@ -439,141 +439,20 @@ impl Database {
         )
     }
 
-    pub async fn track_media_uris_by_objects(
+    pub async fn track_object_count(
         &self,
         source: SourceKey,
         object_ids: &[String],
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<String>> {
-        if object_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut result = Vec::with_capacity(object_ids.len());
-        for page in object_ids.chunks(TRACK_ROW_LIMIT) {
-            let mut query = QueryBuilder::<Sqlite>::new("WITH requested(object_id,position) AS (");
-            query.push_values(page.iter().enumerate(), |mut row, (position, object_id)| {
-                row.push_bind(object_id).push_bind(position as i64);
-            });
-            query.push(
-                ") SELECT track.media_uri FROM requested
-                 JOIN tracks track ON track.object_id=requested.object_id
-                 WHERE track.source_key=",
-            );
-            query.push_bind(source).push(" ORDER BY requested.position");
-            result.extend(
-                query
-                    .build_query_scalar::<String>()
-                    .persistent(false)
-                    .fetch_all(&mut *connection)
-                    .await?,
-            );
-        }
-        Ok(result)
-    }
-
-    pub async fn live_folder_track_order(
-        &self,
-        source: SourceKey,
-        candidates: &[String],
-        filter: &str,
-        sort: TrackSort,
-        descending: bool,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<TrackKey>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut query = track_query(source, sort, descending, false, None, filter);
-        query
-            .predicate
-            .push_str(" AND track.media_uri IN (SELECT value FROM json_each(?1))");
-        Ok(
-            sqlx::query_scalar::<_, TrackKey>(sqlx::AssertSqlSafe(query.select("track.track_key")))
-                .bind(serde_json::to_string(candidates)?)
-                .persistent(false)
-                .fetch_all(&mut *connection)
-                .await?,
-        )
-    }
-
-    pub async fn live_folder_track_count(
-        &self,
-        source: SourceKey,
-        candidates: &[String],
-        filter: &str,
-        cancellation: &ReadCancellation,
     ) -> LibraryResult<i64> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut query = track_query(source, TrackSort::Title, false, false, None, filter);
-        query
-            .predicate
-            .push_str(" AND track.media_uri IN (SELECT value FROM json_each(?1))");
-        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT count(*) FROM {} WHERE {}",
-            query.from, query.predicate
-        )))
-        .bind(serde_json::to_string(candidates)?)
-        .fetch_one(&mut *connection)
-        .await?)
-    }
-
-    pub async fn live_folder_track_sections(
-        &self,
-        source: SourceKey,
-        candidates: &[String],
-        filter: &str,
-        sort: TrackSort,
-        descending: bool,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<crate::ScrollSection>> {
-        if !crate::scroll_sections::text_sort(sort) {
-            return Ok(Vec::new());
+        if object_ids.is_empty() {
+            return Ok(0);
         }
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut query = track_query(source, sort, descending, false, None, filter);
-        query
-            .predicate
-            .push_str(" AND track.media_uri IN (SELECT value FROM json_each(?1))");
-        let sql = crate::scroll_sections::section_sql(
-            &query.select("track.track_key"),
-            crate::scroll_sections::order_text(&query.order[0]),
-        );
-        crate::scroll_sections::decode_sections(
-            sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
-                .bind(serde_json::to_string(candidates)?)
-                .fetch_all(&mut *connection)
-                .await?,
-        )
-    }
-
-    pub async fn live_folder_track_page(
-        &self,
-        source: SourceKey,
-        candidates: &[String],
-        filter: &str,
-        sort: TrackSort,
-        descending: bool,
-        offset: usize,
-        limit: usize,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<TrackRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let mut query = track_query(source, sort, descending, false, None, filter);
-        query
-            .predicate
-            .push_str(" AND track.media_uri IN (SELECT value FROM json_each(?1))");
-        let keys = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "{} LIMIT ?2 OFFSET ?3",
-            query.select("track.track_key")
-        )))
-        .bind(serde_json::to_string(candidates)?)
-        .bind(limit.min(TRACK_ROW_LIMIT) as i64)
-        .bind(offset.min(i64::MAX as usize) as i64)
-        .fetch_all(&mut *transaction)
-        .await?;
-        let rows = load_track_rows(&mut transaction, &keys).await?;
-        transaction.commit().await?;
-        Ok(rows)
+        Ok(sqlx::query_scalar(
+            "SELECT count(*) FROM json_each(?1) requested JOIN tracks track ON track.source_key=?2 AND track.object_id=requested.value",
+        ).bind(serde_json::to_string(object_ids)?).bind(source)
+            .fetch_one(&mut *connection).await?)
     }
 
     pub async fn track_rows(
@@ -611,6 +490,7 @@ pub(crate) fn track_query(
         order: sort.order_terms(descending, false),
         uri: "track.media_uri".into(),
         entry_key: "NULL".into(),
+        arguments: Default::default(),
     };
     track_filter(&mut query, folder, filter, favorites_only);
 
@@ -920,44 +800,108 @@ mod tests {
         let object_ids = (0..300)
             .map(|index| format!("track-{index:03}"))
             .collect::<Vec<_>>();
-        let media_uris = database
-            .track_media_uris_by_objects(source, &object_ids, &ReadCancellation::new())
-            .await
-            .expect("map complete large Folder identity order");
-        assert_eq!(media_uris.len(), object_ids.len());
-        assert!(media_uris.windows(2).all(|pair| pair[0] < pair[1]));
-        let mut reversed = media_uris.clone();
-        reversed.reverse();
-        let ordered = database
-            .live_folder_track_order(
+        let cancel = ReadCancellation::new();
+        assert_eq!(
+            database
+                .track_object_count(source, &object_ids, &cancel)
+                .await
+                .unwrap(),
+            300
+        );
+        let query = crate::SongQuery {
+            filter: "track".into(),
+            sort: Some(TrackSort::Title),
+            ..crate::SongQuery::new(crate::SongScope::Objects {
                 source,
-                &reversed,
-                "track",
-                TrackSort::Title,
-                false,
-                &ReadCancellation::new(),
-            )
-            .await
-            .expect("sort complete provider-live Folder order");
+                ids: object_ids.into_iter().rev().collect::<Vec<_>>().into(),
+            })
+        };
+        assert_eq!(database.song_count(&query, &cancel).await.unwrap(), 300);
+        let mut ordered = Vec::new();
+        for offset in (0..300).step_by(64) {
+            ordered.extend(
+                database
+                    .song_rows(&query, offset, 64, &cancel)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|row| row.track_key),
+            );
+        }
         assert_eq!(
             ordered,
             (0..300)
                 .map(|index| TrackKey::from_raw(index + 1))
                 .collect::<Vec<_>>()
         );
-        assert!(
+        assert_eq!(
             database
-                .live_folder_track_order(
-                    source,
-                    &reversed,
-                    "missing",
-                    TrackSort::Title,
-                    false,
-                    &ReadCancellation::new(),
+                .selected_track_keys(&query.clone().selection(), &cancel)
+                .await
+                .unwrap(),
+            ordered
+        );
+        assert_eq!(
+            database
+                .selected_track_keys(
+                    &crate::SongSelection::Query {
+                        query: query.clone(),
+                        ranges: Some(vec![1..3, 129..132]),
+                    },
+                    &cancel
                 )
                 .await
-                .expect("filter provider-live Folder order")
+                .unwrap(),
+            [2, 3, 130, 131, 132].map(TrackKey::from_raw),
+        );
+        assert_eq!(
+            database
+                .song_sections(&query, &cancel)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|section| (section.title, section.index))
+                .collect::<Vec<_>>(),
+            [("T".to_string(), 0)],
+        );
+        assert!(
+            database
+                .song_disc_sections(
+                    &crate::SongQuery {
+                        sort: Some(TrackSort::TrackNumber),
+                        ..query.clone()
+                    },
+                    &cancel
+                )
+                .await
+                .unwrap()
                 .is_empty()
+        );
+        assert_eq!(
+            database
+                .song_count(
+                    &crate::SongQuery {
+                        favorites_only: true,
+                        ..query.clone()
+                    },
+                    &cancel
+                )
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            database
+                .song_count(
+                    &crate::SongQuery {
+                        filter: "missing".into(),
+                        ..query
+                    },
+                    &cancel
+                )
+                .await
+                .unwrap(),
+            0
         );
     }
 }

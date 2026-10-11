@@ -12,6 +12,7 @@ use crate::{LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings};
 use gtk_widgets::layout::width_allocation_owner;
 use gtk_widgets::mounted_route::MountedRouteSearchTarget;
 
+use super::artist::{ArtistReleasePage, ArtistReleaseQuery};
 use super::cards;
 use super::collections::library_route_inset;
 use super::columns::AlbumTableCell;
@@ -21,7 +22,9 @@ use crate::route_layout::{
     PRIMARY_ROUTE_HORIZONTAL_INSET, ROUTE_TOP_MARGIN, detail_route_scroller,
 };
 use gtk_widgets::library_fields::COLLECTION_GRID_MIN_CARD_WIDTH;
-use gtk_widgets::sparse_model::{SparseObjectItem, SparseRouteModel, connect_sparse_bind};
+use gtk_widgets::sparse_model::{
+    SparseObjectItem, SparseRouteModel, SparseSource, connect_sparse_bind,
+};
 
 const ARTIST_RELEASE_SECTION_GAP: i32 = 18;
 const ARTIST_RELEASE_HEADER_GAP: i32 = 10;
@@ -35,10 +38,13 @@ pub struct ArtistReleaseRoutePreamble {
 
 pub struct ArtistReleaseProjections {
     sections: Rc<Vec<Rc<ArtistAlbumProjection>>>,
-    orders: RefCell<[Vec<library::AlbumKey>; 6]>,
+    query: Rc<RefCell<ArtistReleaseQuery>>,
+    counts: Rc<Cell<[usize; 6]>>,
+    selection: gtk::SelectionModel,
     pub sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumRow>>,
     lane: Rc<super::named_detail::NamedOrderLane>,
     surface: gtk::Widget,
+    scroll: gtk_widgets::mounted_route::NativeListScroll,
     layout: Rc<Cell<LibraryLayout>>,
     favorite: Option<gtk::Widget>,
     favorite_present: Cell<bool>,
@@ -201,6 +207,7 @@ mod artist_route_list_cell_imp {
 
     #[derive(Default)]
     pub(super) struct ArtistRouteListCell {
+        pub(super) item: RefCell<Option<glib::WeakRef<gtk::ListItem>>>,
         pub(super) grid_cells: RefCell<Vec<ArtistGridSlot>>,
         pub(super) grid_columns: Cell<usize>,
         pub(super) kind: Cell<ArtistCellKind>,
@@ -318,9 +325,11 @@ impl ArtistRouteListCell {
     }
 
     fn clear_content(&self, remove: bool) {
+        self.remove_css_class("row-pending");
         let imp = self.imp();
         for slot in imp.grid_cells.borrow().iter() {
             slot.cell.clear();
+            slot.widget.remove_css_class("row-pending");
             slot.widget.set_visible(false);
         }
         imp.bound_items.borrow_mut().clear();
@@ -500,10 +509,8 @@ impl ArtistAlbumProjection {
         self.rows.clone().upcast()
     }
 
-    fn set_range(self: &Rc<Self>, start: usize, count: usize, authoritative: bool) {
-        if authoritative {
-            self.source_present.set(count != 0);
-        }
+    fn set_range(self: &Rc<Self>, start: usize, count: usize, source_count: usize) {
+        self.source_present.set(source_count != 0);
         self.start.set(start);
         self.count.set(count);
         self.refresh_body();
@@ -589,12 +596,9 @@ impl ArtistAlbumProjection {
 impl ArtistReleaseProjections {
     pub fn new(
         shell: &Rc<CatalogUi>,
-        source: library::SourceKey,
         preamble: ArtistReleaseRoutePreamble,
         titles: [&'static str; 6],
-        orders: [Vec<library::AlbumKey>; 6],
-        first_row_position: usize,
-        first_rows: Vec<library::AlbumRow>,
+        page: ArtistReleasePage,
     ) -> Self {
         let settings = shell
             .settings
@@ -603,32 +607,49 @@ impl ArtistReleaseProjections {
             .library_list(LibraryListKey::ArtistAlbums);
         let layout = Rc::new(Cell::new(normalized_artist_layout(settings.layout)));
         let columns = Rc::new(Cell::new(1));
-        let flat_order = orders.iter().flatten().copied().collect::<Vec<_>>();
+        let ArtistReleasePage {
+            query,
+            counts,
+            source_counts,
+            first_row_position,
+            first_rows,
+        } = page;
+        let query = Rc::new(RefCell::new(query));
+        let counts = Rc::new(Cell::new(counts));
         let database = Arc::clone(&shell.library);
-        let folder = None;
+        let load_query = Rc::clone(&query);
+        let load_counts = Rc::clone(&counts);
         let load = Rc::new(
-            move |keys: Vec<library::AlbumKey>,
-                  _: std::ops::Range<usize>,
+            move |_: Vec<library::AlbumKey>,
+                  range: std::ops::Range<usize>,
                   cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&database);
+                let query = load_query.borrow().clone();
+                let counts = load_counts.get();
                 Box::pin(async move {
-                    database
-                        .album_rows(source, &keys, folder, &cancellation)
+                    query
+                        .rows(&database, counts, range, &cancellation)
                         .await
                         .map_err(|error| error.to_string())
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
             },
         );
-        let sparse = SparseRouteModel::new(flat_order, 32, shell.runtime.clone(), load);
+        let sparse = SparseRouteModel::new(
+            SparseSource::Query {
+                count: counts.get().iter().sum(),
+            },
+            32,
+            shell.runtime.clone(),
+            load,
+        );
         sparse.seed_matching_at(first_row_position, first_rows, |row| row.album_key);
-        let orders = RefCell::new(orders);
         let mut start = 0_usize;
         let sections = Rc::new(
             titles
                 .into_iter()
                 .enumerate()
                 .map(|(index, title)| {
-                    let count = orders.borrow()[index].len();
+                    let count = counts.get()[index];
                     let section = ArtistAlbumProjection::new(
                         shell,
                         title,
@@ -638,6 +659,7 @@ impl ArtistReleaseProjections {
                         Rc::clone(&layout),
                         Rc::clone(&columns),
                     );
+                    section.source_present.set(source_counts[index] != 0);
                     start += count;
                     section
                 })
@@ -686,12 +708,19 @@ impl ArtistReleaseProjections {
         }
         let rows = gtk::FlattenListModel::new(Some(model_sections));
         let grid_fields = Rc::new(RefCell::new(settings.grid_fields.clone()));
-        let (list, apply_grid_fields) = artist_route_list(shell, rows, Rc::clone(&grid_fields));
-        let selection = list.model().expect("Artist selection").downgrade();
+        let (list, apply_grid_fields, scroll) = artist_route_list(
+            shell,
+            rows,
+            Rc::clone(&grid_fields),
+            Rc::clone(&query),
+            Rc::clone(&counts),
+        );
+        let selection = list.model().expect("Artist selection");
+        let weak_selection = selection.downgrade();
         sparse
             .list_model()
             .connect_items_changed(move |_, _, _, _| {
-                if let Some(selection) = selection.upgrade() {
+                if let Some(selection) = weak_selection.upgrade() {
                     selection.unselect_all();
                 }
             });
@@ -735,10 +764,13 @@ impl ArtistReleaseProjections {
         }
         Self {
             sections,
-            orders,
+            query,
+            counts,
+            selection,
             sparse,
             lane: Rc::new(super::named_detail::NamedOrderLane::new()),
             surface: owner.upcast(),
+            scroll,
             layout,
             favorite: favorite_widget,
             favorite_present: Cell::new(favorite_present),
@@ -747,6 +779,10 @@ impl ArtistReleaseProjections {
             grid_fields,
             empty,
         }
+    }
+
+    pub fn item_scroll(&self) -> gtk_widgets::mounted_route::NativeListScroll {
+        self.scroll.clone()
     }
 
     pub fn widget(&self) -> gtk::Widget {
@@ -765,48 +801,42 @@ impl ArtistReleaseProjections {
         self.sparse.resume_initial_demand();
     }
 
-    pub fn replace_section_order(
-        &self,
-        index: usize,
-        order: Vec<library::AlbumKey>,
-        authoritative: bool,
-    ) {
-        if index >= self.sections.len() {
-            return;
-        }
-        self.orders.borrow_mut()[index] = order;
-        self.publish_orders(authoritative, None);
+    pub fn query(&self, settings: &LibraryListSettings) -> ArtistReleaseQuery {
+        let mut query = self.query.borrow().clone();
+        query.filters =
+            std::array::from_fn(|index| self.sections[index].search.text().trim().to_string());
+        query.sort = settings.sort_key.album_sort();
+        query.descending = settings.descending;
+        query
     }
 
-    pub fn replace_orders(
-        &self,
-        orders: [Vec<library::AlbumKey>; 6],
-        first_rows: Vec<library::AlbumRow>,
-        authoritative: bool,
-    ) {
-        self.orders.replace(orders);
-        self.publish_orders(authoritative, Some(first_rows));
-    }
-
-    fn publish_orders(&self, authoritative: bool, first_rows: Option<Vec<library::AlbumRow>>) {
-        let orders = self.orders.borrow();
-        let flat = orders.iter().flatten().copied().collect::<Vec<_>>();
-        if let Some(first_rows) = first_rows {
-            if !self
-                .sparse
-                .replace_prepared(flat.clone(), first_rows, |row| row.album_key)
-            {
-                self.sparse.replace_order(flat);
-            }
-        } else {
-            self.sparse.replace_order(flat);
+    pub fn replace_page(&self, page: ArtistReleasePage) {
+        let ArtistReleasePage {
+            query,
+            counts,
+            source_counts,
+            first_row_position,
+            first_rows,
+        } = page;
+        if *self.query.borrow() != query || self.counts.get() != counts {
+            self.selection.unselect_all();
         }
+        self.query.replace(query);
+        self.counts.set(counts);
+        self.sparse.replace_prepared_at(
+            SparseSource::Query {
+                count: counts.iter().sum(),
+            },
+            first_row_position,
+            first_rows,
+            Vec::new(),
+            |row| row.album_key,
+        );
         let mut start = 0;
-        for (section, order) in self.sections.iter().zip(orders.iter()) {
-            section.set_range(start, order.len(), authoritative);
-            start += order.len();
+        for (index, section) in self.sections.iter().enumerate() {
+            section.set_range(start, counts[index], source_counts[index]);
+            start += counts[index];
         }
-        drop(orders);
         self.sync_empty();
     }
 
@@ -898,10 +928,17 @@ fn artist_route_list(
     shell: &Rc<CatalogUi>,
     model: gtk::FlattenListModel,
     fields: Rc<RefCell<Vec<LibraryField>>>,
-) -> (gtk::ListView, Rc<dyn Fn(&[LibraryField])>) {
+    query: Rc<RefCell<ArtistReleaseQuery>>,
+    counts: Rc<Cell<[usize; 6]>>,
+) -> (
+    gtk::ListView,
+    Rc<dyn Fn(&[LibraryField])>,
+    gtk_widgets::mounted_route::NativeListScroll,
+) {
     let activate_model = model.clone();
     let selection_models = model.model().expect("Artist section models");
     let selection = gtk_widgets::selection::PositionSelectionModel::new(model);
+    let database = Arc::clone(&shell.library);
     selection.set_collection_selection(Box::new(move |target, positions| {
         let Some(library::SongSelection::Query {
             query:
@@ -928,11 +965,11 @@ fn artist_route_list(
                 && !section.source_is_empty()
             {
                 let section_positions = positions.copy();
-                section_positions.intersect(&gtk::Bitset::new_range(
-                    offset + 2,
-                    section.count.get() as u32,
-                ));
-                section_positions.shift_left(offset + 2);
+                let first =
+                    offset + 1 + u32::from(section.applied_settings.borrow().display.show_header);
+                section_positions
+                    .intersect(&gtk::Bitset::new_range(first, section.count.get() as u32));
+                section_positions.shift_left(first);
                 section_positions.shift_right(section.start.get() as u32);
                 selected.union(&section_positions);
                 sparse = Some(Rc::clone(&section.sparse));
@@ -944,17 +981,29 @@ fn artist_route_list(
         if selected.size() < 2 || !selected.contains(dragged) {
             return None;
         }
-        Some(gtk_widgets::media_drag::CollectionTargets::Ready(
-            gtk_widgets::selection::selected_values(
-                sparse.order().keys().expect("artist release keys"),
-                &selected,
-            )
-            .into_iter()
-            .map(|key| {
-                gtk_widgets::selection::collection_play_request(library::SongScope::Album(key))
-            })
-            .collect(),
-        ))
+        let query = query.borrow().clone();
+        let counts = counts.get();
+        let database = Arc::clone(&database);
+        Some(gtk_widgets::media_drag::CollectionTargets::Query {
+            ranges: gtk_widgets::selection::selected_ranges(&selected),
+            load: Arc::new(move |range| {
+                let database = Arc::clone(&database);
+                let query = query.clone();
+                Box::pin(async move {
+                    Ok(query
+                        .rows(&database, counts, range, &library::ReadCancellation::new())
+                        .await
+                        .map_err(|error| error.to_string())?
+                        .into_iter()
+                        .map(|row| {
+                            gtk_widgets::selection::collection_play_request(
+                                library::SongScope::Album(row.album_key),
+                            )
+                        })
+                        .collect())
+                })
+            }),
+        })
     }));
     let factory = gtk::SignalListItemFactory::new();
     let cells = Rc::new(RefCell::new(
@@ -966,6 +1015,7 @@ fn artist_route_list(
             return;
         };
         let root = ArtistRouteListCell::new();
+        root.imp().item.replace(Some(item.downgrade()));
         item.set_activatable(false);
         item.set_selectable(false);
         item.set_child(Some(&root));
@@ -984,6 +1034,7 @@ fn artist_route_list(
             return;
         };
         state.imp().bound_items.borrow_mut().clear();
+        state.remove_css_class("row-pending");
         let table = matches!(row, ArtistRouteRow::AlbumTable { .. });
         item.set_selectable(table);
         item.set_activatable(table);
@@ -1020,6 +1071,7 @@ fn artist_route_list(
                     state.remove_css_class("display-even");
                 }
                 state.set_margin_bottom(if last { ARTIST_RELEASE_SECTION_GAP } else { 0 });
+                state.add_css_class("row-pending");
                 let value = section
                     .sparse
                     .list_model()
@@ -1032,6 +1084,9 @@ fn artist_route_list(
                     cell.downcast_ref::<AlbumTableCell>()
                         .unwrap()
                         .bind((position - section.start.get()) as u32, row.clone());
+                }
+                if row.is_some() {
+                    state.remove_css_class("row-pending");
                 }
                 state.imp().bound_items.borrow_mut().extend(value);
             }
@@ -1094,10 +1149,12 @@ fn artist_route_list(
                     }
                     if offset >= len {
                         slot.cell.clear();
+                        slot.widget.remove_css_class("row-pending");
                         slot.widget.set_visible(false);
                         continue;
                     }
                     slot.widget.set_visible(true);
+                    slot.widget.add_css_class("row-pending");
                     let position = start + offset;
                     let value = model
                         .item(position as u32)
@@ -1107,6 +1164,7 @@ fn artist_route_list(
                         .and_then(|item| item.value::<Arc<library::AlbumRow>>())
                     {
                         slot.cell.bind(position as u32, (*album).clone());
+                        slot.widget.remove_css_class("row-pending");
                     } else {
                         slot.cell.clear();
                     }
@@ -1167,7 +1225,23 @@ fn artist_route_list(
             })
         });
     }) as Rc<dyn Fn(&[LibraryField])>;
-    (list, apply_fields)
+    let scroll = gtk_widgets::mounted_route::NativeListScroll::new(
+        list.clone(),
+        Rc::new(move || {
+            cells
+                .borrow()
+                .iter()
+                .filter_map(|cell| {
+                    let cell = cell.upgrade()?;
+                    let item = cell.imp().item.borrow().as_ref()?.upgrade()?;
+                    item.item()?;
+                    Some((item.position(), cell.upcast()))
+                })
+                .collect()
+        }),
+        false,
+    );
+    (list, apply_fields, scroll)
 }
 
 fn remove_box_children(root: &impl IsA<gtk::Box>) {

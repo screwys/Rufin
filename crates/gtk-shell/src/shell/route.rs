@@ -20,7 +20,7 @@ use tracing::{debug, warn};
 use super::Shell;
 use super::navigation::update_navigation_selection;
 use super::route_position::{
-    RoutePositionKey, RoutePositionMemory, RouteSurface, mount_route_surface,
+    RoutePosition, RoutePositionKey, RoutePositionMemory, RouteSurface, mount_route_surface,
 };
 use crate::{LibraryListKey, LibraryListSettings};
 use gtk_library::route_layout::{primary_route_scroll_adjustment, route_boundary};
@@ -183,31 +183,21 @@ impl RouteStack {
 
 impl Shell {
     fn route_seed_window(&self, route: &Route) -> library::RouteSeedWindow {
-        let mounted_relative = self
-            .route_viewport
-            .mounted_route
-            .borrow()
-            .as_ref()
-            .filter(|entry| entry.route == *route)
-            .and_then(|entry| entry.scroll_adjustment.as_ref())
-            .map(|adjustment| {
-                let scrollable = (adjustment.upper() - adjustment.page_size()).max(0.0);
-                if scrollable <= f64::EPSILON {
-                    0.0
-                } else {
-                    (adjustment.value() / scrollable).clamp(0.0, 1.0)
-                }
+        let mounted = self.route_viewport.mounted_route.borrow();
+        let current = mounted.as_ref().filter(|entry| entry.route == *route);
+        let position = current
+            .and_then(|entry| {
+                entry.scroll_adjustment.as_ref().map(|adjustment| {
+                    RoutePosition::capture(adjustment, entry.view.item_scroll().as_ref())
+                })
+            })
+            .or_else(|| {
+                self.route_viewport
+                    .position_memory
+                    .borrow_mut()
+                    .restore(&RoutePositionKey::new(route.clone()))
             });
-        let relative = mounted_relative.or_else(|| {
-            self.route_viewport
-                .position_memory
-                .borrow_mut()
-                .restore(&RoutePositionKey::new(route.clone()))
-                .map(|position| position.relative())
-        });
-        relative.map_or_else(library::RouteSeedWindow::top, |relative| {
-            library::RouteSeedWindow::relative(relative)
-        })
+        position.map_or_else(library::RouteSeedWindow::top, RoutePosition::window)
     }
 
     fn queue_application_route<T, E, F, Fut, B>(
@@ -722,12 +712,13 @@ impl Shell {
                     route,
                     render_started,
                     "Folder route",
-                    move |_window, cancellation| async move {
+                    move |window, cancellation| async move {
                         Ok::<_, std::convert::Infallible>(
                             gtk_library::folders::prepare_folder_route(
                                 &load_selected,
                                 &load_path,
                                 &settings,
+                                window,
                                 &cancellation,
                             )
                             .await,
@@ -1096,8 +1087,7 @@ impl Shell {
                     );
                 };
                 let artist = detail.summary.artist_key;
-                let source = detail.summary.source_key;
-                shell.artist_detail_view(artist, album_artist, Some(detail), source)
+                shell.artist_detail_view(artist, album_artist, Some(detail))
             },
         );
     }
@@ -1146,9 +1136,7 @@ impl Shell {
                         )),
                     );
                 };
-                let source = detail.summary.source_key;
-                let artist = detail.summary.artist_key;
-                shell.artist_discography_view(artist, album_artist, Some(detail), source)
+                shell.artist_discography_view(Some(detail))
             },
         );
     }
@@ -1495,9 +1483,8 @@ impl Shell {
         let surface = mount_route_surface(
             &boundary,
             scroll_adjustment.as_ref(),
-            restore_position
-                .filter(|position| position.value > 0.0)
-                .map(|position| position.value),
+            restore_position,
+            view.item_scroll(),
             move || ready_view.resume_initial_demand(),
             move |surface| {
                 if let Some(shell) = ready_shell.upgrade() {
@@ -1518,6 +1505,7 @@ impl Shell {
             }));
         debug_assert!(displaced.is_none());
         self.route_viewport.route_host.set_visible_child(&surface);
+        self.prepare_startup_content_readiness();
         if let (
             Some(render_started),
             Some(replacement_started),
@@ -1542,9 +1530,7 @@ impl Shell {
     }
 
     fn show_route_loading(&self) {
-        if self.startup.route_revealed.get() {
-            self.route_viewport.route_loading.set_visible(true);
-        }
+        self.route_viewport.route_loading.set_visible(true);
     }
 
     fn finish_route_loading(self: &Rc<Self>, surface: &gtk::Widget, started: RouteTiming) {
@@ -1635,9 +1621,7 @@ impl Shell {
         {
             self.route_viewport.position_memory.borrow_mut().record(
                 key.clone(),
-                adjustment.value(),
-                adjustment.upper(),
-                adjustment.page_size(),
+                RoutePosition::capture(adjustment, previous.view.item_scroll().as_ref()),
             );
         }
         self.clear_favorite_controls();

@@ -18,74 +18,124 @@ use gtk_widgets::library_fields::{COLLECTION_GRID_CARD_MARGIN, COLLECTION_GRID_M
 use gtk_widgets::localization::{bind_widget_accessible_label, bind_widget_tooltip};
 use gtk_widgets::route::Route;
 
-pub fn album_cover_overlay(
-    shell: &Rc<CatalogUi>,
-    album: &library::AlbumRow,
-    size: i32,
-) -> gtk::Widget {
-    let album_button = gtk::Button::new();
-    album_button.add_css_class("album-cover-button");
-    album_button.add_css_class("flat");
-    constrain_cover_widget(&album_button, size);
-    album_button.set_overflow(gtk::Overflow::Hidden);
-    let tile = ArtworkTile::new_sized(size, size);
-    shell.artwork.bind_artwork_tile(
-        &tile,
-        album
-            .artwork_binding
-            .as_deref()
-            .map(ArtworkBinding::opaque)
-            .unwrap_or_default(),
-        crate::route_layout::detail_showcase_cover_size(i32::MAX),
-        LARGE_COVER_SIZE,
-    );
-    album_button.set_child(Some(&tile.widget()));
-    let open_shell = Rc::clone(shell);
-    let album_uri = album.media_uri.clone();
-    album_button
-        .connect_clicked(move |_| open_shell.navigate(Route::AlbumDetail(album_uri.clone())));
+pub struct AlbumCover {
+    pub widget: gtk::Overlay,
+    button: gtk::Button,
+    tile: ArtworkTile,
+    favorite: gtk::Button,
+    current: Rc<std::cell::RefCell<Option<library::AlbumRow>>>,
+}
 
-    let menu_shell = Rc::clone(shell);
-    let menu_album = album.clone();
-    let open_menu: ContextMenuOpen = Rc::new(move |target, position| {
-        present_album_context_menu(
-            target,
-            &menu_shell.media_menus,
-            menu_album.clone(),
-            None,
-            None,
-            position,
-        );
-    });
-    let (controls, favorite) = cover_hover_controls_with_favorite(0, "Play album", album.favorite);
-    for (button, placement) in [
-        (&controls.play, QueuePlacement::Now),
-        (&controls.play_next, QueuePlacement::Next),
-        (&controls.play_last, QueuePlacement::Last),
-    ] {
-        let play_shell = Rc::clone(shell);
-        let target = gtk_widgets::selection::album_play_request(&album);
+impl AlbumCover {
+    pub fn new(shell: &Rc<CatalogUi>) -> Self {
+        let current = Rc::new(std::cell::RefCell::new(None::<library::AlbumRow>));
+        let button = gtk::Button::new();
+        button.add_css_class("album-cover-button");
+        button.add_css_class("flat");
+        button.set_overflow(gtk::Overflow::Hidden);
+        let tile = ArtworkTile::new_sized(1, 1);
+        button.set_child(Some(&tile.widget()));
+        let open_shell = Rc::downgrade(shell);
+        let row = Rc::clone(&current);
         button.connect_clicked(move |_| {
-            (play_shell.media_menus.play_target)(&target, placement, false)
+            if let Some(shell) = open_shell.upgrade()
+                && let Some(album) = row.borrow().clone()
+            {
+                shell.navigate(Route::AlbumDetail(album.media_uri.clone()));
+            }
         });
-    }
-    let favorite_key = album.media_uri.clone();
-    shell.register_dynamic_favorite_button(
-        Rc::new(move || Some(gtk_widgets::favorites::album_favorite_key(&favorite_key))),
-        &favorite,
-    );
-    let favorite_shell = Rc::clone(shell);
-    let favorite_media_uri = album.media_uri.clone();
-    favorite.connect_clicked(move |button| {
-        favorite_shell.set_favorite_with_feedback(
-            library::FavoriteTarget::Album(favorite_media_uri.clone()),
-            !favorite_button_is_active(button),
-            Some(button),
+        let menu_shell = Rc::downgrade(shell);
+        let row = Rc::clone(&current);
+        let open_menu: ContextMenuOpen = Rc::new(move |target, position| {
+            if let Some(shell) = menu_shell.upgrade()
+                && let Some(album) = row.borrow().clone()
+            {
+                present_album_context_menu(
+                    target,
+                    &shell.media_menus,
+                    album.clone(),
+                    None,
+                    None,
+                    position,
+                );
+            }
+        });
+        let (controls, favorite) = cover_hover_controls_with_favorite(0, "Play album", false);
+        for (control, placement) in [
+            (&controls.play, QueuePlacement::Now),
+            (&controls.play_next, QueuePlacement::Next),
+            (&controls.play_last, QueuePlacement::Last),
+        ] {
+            let play_shell = Rc::downgrade(shell);
+            let row = Rc::clone(&current);
+            control.connect_clicked(move |_| {
+                if let Some(shell) = play_shell.upgrade()
+                    && let Some(album) = row.borrow().clone()
+                {
+                    (shell.media_menus.play_target)(
+                        &gtk_widgets::selection::album_play_request(&album),
+                        placement,
+                        false,
+                    );
+                }
+            });
+        }
+        let row = Rc::downgrade(&current);
+        shell.register_dynamic_favorite_button(
+            Rc::new(move || {
+                Some(gtk_widgets::favorites::album_favorite_key(
+                    &row.upgrade()?.borrow().as_ref()?.media_uri,
+                ))
+            }),
+            &favorite,
         );
-    });
-    let overlay = showcase_cover_overlay(&album_button.clone().upcast(), controls, Some(open_menu));
-    constrain_cover_widget(&overlay, size);
-    overlay.upcast()
+        let favorite_shell = Rc::downgrade(shell);
+        let row = Rc::clone(&current);
+        favorite.connect_clicked(move |button| {
+            if let Some(shell) = favorite_shell.upgrade()
+                && let Some(album) = row.borrow().clone()
+            {
+                shell.set_favorite_with_feedback(
+                    library::FavoriteTarget::Album(album.media_uri.clone()),
+                    !favorite_button_is_active(button),
+                    Some(button),
+                );
+            }
+        });
+        let widget = showcase_cover_overlay(&button.clone().upcast(), controls, Some(open_menu));
+        Self {
+            widget,
+            button,
+            tile,
+            favorite,
+            current,
+        }
+    }
+
+    pub fn bind(&self, shell: &CatalogUi, album: Option<&library::AlbumRow>) {
+        self.current.replace(album.cloned());
+        if let Some(album) = album {
+            shell.artwork.bind_artwork_tile(
+                &self.tile,
+                album
+                    .artwork_binding
+                    .as_deref()
+                    .map(ArtworkBinding::opaque)
+                    .unwrap_or_default(),
+                crate::route_layout::detail_showcase_cover_size(i32::MAX),
+                LARGE_COVER_SIZE,
+            );
+            gtk_widgets::favorites::set_favorite_button_active(&self.favorite, album.favorite);
+        } else {
+            shell.artwork.clear_artwork_tile(&self.tile);
+        }
+    }
+
+    pub fn resize(&self, size: i32) {
+        constrain_cover_widget(&self.button, size);
+        constrain_cover_widget(&self.widget, size);
+        self.tile.set_square_size(size);
+    }
 }
 
 pub mod collection_grid_cover_view_imp {

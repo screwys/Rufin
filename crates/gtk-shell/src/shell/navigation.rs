@@ -818,11 +818,19 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
         reconcile_sidebar_pin_widgets(shell, &retained);
     }
     if pins.is_empty() {
+        shell
+            .navigation_view
+            .sidebar_modes
+            .remove_css_class("row-pending");
         shell.navigation.pin_items.borrow_mut().clear();
         reconcile_sidebar_pin_widgets(shell, &[]);
         shell.try_reveal_startup_route();
         return;
     }
+    shell
+        .navigation_view
+        .sidebar_modes
+        .add_css_class("row-pending");
     let cancellation = library::ReadCancellation::new();
     shell
         .navigation
@@ -954,6 +962,10 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
             }
         }
         shell.navigation.pin_cancellation.borrow_mut().take();
+        shell
+            .navigation_view
+            .sidebar_modes
+            .remove_css_class("row-pending");
         shell.try_reveal_startup_route();
     });
 }

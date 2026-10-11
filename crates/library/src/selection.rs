@@ -2,7 +2,7 @@
 
 use std::{ops::Range, sync::Arc};
 
-use sqlx::{Connection, SqliteConnection};
+use sqlx::{Arguments, Connection, SqliteConnection};
 
 use crate::{
     AlbumKey, ArtistKey, Database, FolderKey, GenreKey, HistoryRow, LibraryError, LibraryResult,
@@ -15,6 +15,10 @@ use crate::{
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SongScope {
     Tracks(SourceKey),
+    Objects {
+        source: SourceKey,
+        ids: Arc<[String]>,
+    },
     Album(AlbumKey),
     Artist {
         key: ArtistKey,
@@ -117,6 +121,10 @@ pub(crate) async fn song_query_on(
         scope => {
             let predicate = match scope {
                 SongScope::Tracks(key) => format!("track.source_key={}", key.raw()),
+                SongScope::Objects { source, .. } => format!(
+                    "track.source_key={} AND track.object_id IN (SELECT value FROM json_each(?1))",
+                    source.raw(),
+                ),
                 SongScope::Album(key) => format!("track.album_key={}", key.raw()),
                 SongScope::Artist { key, album_artist } => {
                     let (field, table) = if *album_artist {
@@ -139,12 +147,19 @@ pub(crate) async fn song_query_on(
                 ),
                 _ => unreachable!(),
             };
+            let mut arguments = sqlx::sqlite::SqliteArguments::default();
+            if let SongScope::Objects { ids, .. } = scope {
+                arguments
+                    .add(serde_json::to_string(ids)?)
+                    .map_err(sqlx::Error::Encode)?;
+            }
             let mut query = SourceQuery {
                 from: "tracks track".into(),
                 predicate: format!("track.indexed=1 AND ({predicate})"),
                 order: sort.order_terms(input.descending, false),
                 uri: "track.media_uri".into(),
                 entry_key: "NULL".into(),
+                arguments,
             };
             crate::tracks::track_filter(&mut query, input.folder, &input.filter, false);
             query
@@ -188,11 +203,11 @@ async fn count_on(connection: &mut SqliteConnection, input: &SongQuery) -> Libra
         )
         .await?;
         // These sets are disjoint, so each can use its favorite index.
-        return Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        return Ok(sqlx::query_scalar_with(sqlx::AssertSqlSafe(format!(
             "SELECT (SELECT count(*) FROM tracks track WHERE {} AND track.source_favorite=1
                 AND COALESCE((SELECT favorite FROM user_media_state state WHERE state.media_uri=track.media_uri),1)=1)
              + (SELECT count(*) FROM user_media_state state CROSS JOIN tracks track ON track.media_uri=state.media_uri
-                WHERE state.favorite=1 AND track.source_favorite=0 AND {})", query.predicate, query.predicate)))
+                WHERE state.favorite=1 AND track.source_favorite=0 AND {})", query.predicate, query.predicate)), query.arguments.clone())
             .fetch_one(connection).await?);
     }
     song_query_on(connection, input)
@@ -279,6 +294,9 @@ impl Database {
         limit: usize,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<TrackRow>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let query = song_query_on(&mut transaction, query).await?;
@@ -350,7 +368,7 @@ impl Database {
             },
         );
         crate::scroll_sections::decode_sections(
-            sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+            sqlx::query_scalar_with(sqlx::AssertSqlSafe(sql), query.arguments.clone())
                 .persistent(false)
                 .fetch_all(&mut *connection)
                 .await?,

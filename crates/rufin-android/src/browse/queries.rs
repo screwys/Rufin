@@ -322,13 +322,12 @@ impl AndroidBrowseQuery {
                 let filter = &self.filter;
                 if self.album_detail_layout() {
                     return Ok(db
-                        .album_detail_route_count(
+                        .album_detail_count(
                             self.selected().source_key,
                             folder,
                             self.favorites(),
                             filter,
-                            self.sort.album_sort(),
-                            self.descending,
+                            0,
                             &cancel,
                         )
                         .await

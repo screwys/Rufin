@@ -13,7 +13,7 @@ use super::Shell;
 pub(super) struct StartupState {
     pub(super) route_revealed: Cell<bool>,
     pub(super) initial_launch: Cell<bool>,
-    pub(super) route_allocated: Cell<bool>,
+    pub(super) content: RefCell<Option<Rc<super::route_position::VisibleContent>>>,
     pub(super) reveal_deadline: RefCell<Option<glib::SourceId>>,
 }
 
@@ -23,7 +23,6 @@ impl Shell {
     pub(crate) fn enter_startup_loading(self: &Rc<Self>) {
         self.startup.initial_launch.set(false);
         self.startup.route_revealed.set(false);
-        self.startup.route_allocated.set(false);
         self.cancel_startup_route_reveal();
         self.clear_mounted_routes();
         self.render_startup_loading_view();
@@ -54,9 +53,7 @@ impl Shell {
             return;
         }
 
-        self.startup.route_allocated.set(false);
         self.update_layout();
-        self.artwork.begin_startup_cover_prime();
         self.prepare_startup_route_content();
         let shell = Rc::clone(self);
         let deadline = glib::timeout_add_local_once(
@@ -64,15 +61,12 @@ impl Shell {
             move || {
                 shell.startup.reveal_deadline.borrow_mut().take();
                 if shell.startup.route_revealed.get() {
-                    shell.artwork.finish_startup_cover_prime_gate();
                     return;
                 }
-                let pending_covers = shell.artwork.startup_cover_prime_pending_count();
-                if pending_covers > 0 {
+                if !shell.mounted_route_is_ready() {
                     warn!(
-                        pending_covers,
                         elapsed_ms = STARTUP_ROUTE_REVEAL_MAX_MS,
-                        "startup route cover prime expired"
+                        "startup page is still loading"
                     );
                 }
                 shell.reveal_startup_route();
@@ -98,7 +92,10 @@ impl Shell {
         {
             return;
         }
-        self.startup.route_allocated.set(true);
+        let content = self.startup.content.borrow().clone();
+        if let Some(content) = content {
+            content.check();
+        }
         if self.startup_route_ready_for_width(width) {
             self.commit_startup_route_reveal();
         }
@@ -108,10 +105,14 @@ impl Shell {
         self.startup.reveal_deadline.borrow().is_some()
             && !self.startup.route_revealed.get()
             && self.mounted_route_is_ready()
-            && self.startup.route_allocated.get()
+            && self
+                .startup
+                .content
+                .borrow()
+                .as_ref()
+                .is_some_and(|content| content.is_ready())
             && width > 1
             && self.navigation.pin_cancellation.borrow().is_none()
-            && self.artwork.startup_cover_prime_pending_count() == 0
     }
 
     fn commit_startup_route_reveal(self: &Rc<Self>) {
@@ -124,11 +125,23 @@ impl Shell {
         }
     }
 
+    pub(super) fn prepare_startup_content_readiness(&self) {
+        if self.startup.route_revealed.get() || self.startup.content.borrow().is_some() {
+            return;
+        }
+        self.startup
+            .content
+            .replace(Some(super::route_position::VisibleContent::new(
+                self.layout_state.owner.upcast_ref(),
+                || {},
+            )));
+    }
+
     pub(crate) fn cancel_startup_route_reveal(&self) {
         if let Some(deadline) = self.startup.reveal_deadline.borrow_mut().take() {
             deadline.remove();
         }
-        self.artwork.finish_startup_cover_prime_gate();
+        self.startup.content.take();
     }
     pub(crate) fn prepare_startup_route_content(self: &Rc<Self>) {
         if self.has_active_mounted_route() || self.startup.route_revealed.get() {

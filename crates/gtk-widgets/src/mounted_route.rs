@@ -285,12 +285,85 @@ mod latest_mounted_route_read_tests {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ItemScrollPosition {
+    pub position: u32,
+    pub offset: f64,
+    pub query_position: Option<usize>,
+}
+
+#[derive(Clone)]
+pub struct NativeListScroll {
+    pub list: gtk::ListView,
+    items: Rc<dyn Fn() -> Vec<(u32, gtk::Widget)>>,
+    query_positions: bool,
+}
+
+impl NativeListScroll {
+    pub fn new(
+        list: gtk::ListView,
+        items: Rc<dyn Fn() -> Vec<(u32, gtk::Widget)>>,
+        query_positions: bool,
+    ) -> Self {
+        Self {
+            list,
+            items,
+            query_positions,
+        }
+    }
+
+    pub fn capture(&self) -> Option<ItemScrollPosition> {
+        (self.items)()
+            .into_iter()
+            .filter_map(|(position, widget)| {
+                let bounds = widget.compute_bounds(&self.list)?;
+                (widget.is_mapped()
+                    && bounds.y() < self.list.height() as f32
+                    && bounds.y() + bounds.height() > 0.0)
+                    .then_some(ItemScrollPosition {
+                        position,
+                        offset: f64::from(bounds.y()),
+                        query_position: self.query_positions.then_some(position as usize),
+                    })
+            })
+            .min_by(|left, right| left.offset.total_cmp(&right.offset))
+    }
+
+    pub fn scroll_to(&self, position: u32) {
+        let count = self.list.model().map_or(0, |model| model.n_items());
+        if count > 0 {
+            self.list
+                .scroll_to(position.min(count - 1), gtk::ListScrollFlags::NONE, None);
+        }
+    }
+
+    pub fn restore_offset(&self, saved: ItemScrollPosition) {
+        let Some((_, widget)) = (self.items)()
+            .into_iter()
+            .find(|(position, _)| *position == saved.position)
+        else {
+            return;
+        };
+        let (Some(bounds), Some(adjustment)) =
+            (widget.compute_bounds(&self.list), self.list.vadjustment())
+        else {
+            return;
+        };
+        let value = adjustment.value() + f64::from(bounds.y()) - saved.offset;
+        adjustment.set_value(value.clamp(
+            adjustment.lower(),
+            (adjustment.upper() - adjustment.page_size()).max(adjustment.lower()),
+        ));
+    }
+}
+
 #[derive(Clone)]
 pub struct MountedRoute {
     pub widget: gtk::Widget,
     pub resume: MountedRouteResume,
     pub catalog_refresh: MountedRouteResume,
     pub item_navigation: Option<MountedRouteItemNavigation>,
+    pub item_scroll: Option<Rc<dyn Fn() -> Option<NativeListScroll>>>,
     pub search: Option<MountedRouteSearchProvider>,
     pub layout_cycle: Option<MountedRouteCommand>,
     pub tab_cycle: Option<MountedRouteCommand>,
@@ -307,6 +380,7 @@ impl MountedRoute {
             catalog_refresh: Rc::clone(&resume),
             resume,
             item_navigation: None,
+            item_scroll: None,
             search: None,
             layout_cycle: None,
             tab_cycle: None,
@@ -329,6 +403,15 @@ impl MountedRoute {
     pub fn with_item_navigation(mut self, item_navigation: MountedRouteItemNavigation) -> Self {
         self.item_navigation = Some(item_navigation);
         self
+    }
+
+    pub fn with_item_scroll(mut self, scroll: Rc<dyn Fn() -> Option<NativeListScroll>>) -> Self {
+        self.item_scroll = Some(scroll);
+        self
+    }
+
+    pub fn item_scroll(&self) -> Option<NativeListScroll> {
+        self.item_scroll.as_ref().and_then(|scroll| scroll())
     }
 
     pub fn with_search(mut self, search: gtk::SearchEntry) -> Self {

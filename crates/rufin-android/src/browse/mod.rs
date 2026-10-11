@@ -398,6 +398,10 @@ impl AndroidBrowseQuery {
         self.songs
             .get_or_try_init(|| async {
                 let cancel = ReadCancellation::new();
+                let mut folder = self
+                    .selected
+                    .as_ref()
+                    .and_then(|selected| selected.music_folder_key);
                 let scope = match &self.route {
                     Route::Tracks => SongScope::Tracks(self.selected().source_key),
                     Route::Favorites if self.category == CollectionCategory::Tracks => {
@@ -443,12 +447,14 @@ impl AndroidBrowseQuery {
                         source: self.selected.as_ref().map(|selected| selected.source_key),
                         now: self.now,
                     },
-                    Route::Folders { .. } => match self.folder_projection().await? {
-                        FolderProjection::Cached(_) => {
-                            SongScope::Tracks(self.selected().source_key)
-                        }
-                        FolderProjection::Live { .. } => return Ok(None),
-                    },
+                    Route::Folders { .. } => {
+                        let query = self
+                            .folder_projection()
+                            .await?
+                            .song_query(self.selected().source_key);
+                        folder = query.folder;
+                        query.scope
+                    }
                     Route::History => SongScope::History {
                         source: self
                             .history_current_only
@@ -457,15 +463,7 @@ impl AndroidBrowseQuery {
                     _ => return Ok(None),
                 };
                 let mut query = SongQuery::new(scope);
-                query.folder = self
-                    .selected
-                    .as_ref()
-                    .and_then(|selected| selected.music_folder_key);
-                if matches!(self.route, Route::Folders { .. }) {
-                    if let FolderProjection::Cached(folder) = self.folder_projection().await? {
-                        query.folder = *folder;
-                    }
-                }
+                query.folder = folder;
                 query.filter = self.filter.clone();
                 query.sort = Some(self.sort.track_sort());
                 query.descending = self.descending;

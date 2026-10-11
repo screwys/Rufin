@@ -362,6 +362,7 @@ mod tests {
 pub fn collection_play_request(scope: library::SongScope) -> playback::PlayRequest {
     let context = match &scope {
         library::SongScope::Tracks(key) => format!("tracks:{key}"),
+        library::SongScope::Objects { source, .. } => format!("objects:{source}"),
         library::SongScope::Album(key) => format!("album:{key}"),
         library::SongScope::Artist { key, album_artist } => format!(
             "{}:{key}",

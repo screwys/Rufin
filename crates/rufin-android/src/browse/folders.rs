@@ -4,56 +4,35 @@ impl AndroidBrowseQuery {
     pub(super) async fn folder_sections(&self) -> Result<Vec<AndroidScrollSection>, AndroidError> {
         let source = self.selected().source_key;
         let cancel = ReadCancellation::new();
-        let (mut folders, tracks) = match self.folder_projection().await.map_err(error)? {
-            FolderProjection::Live {
-                folders,
-                candidates,
-            } => (
-                self.database
-                    .ordered_name_sections(
-                        &folders
-                            .iter()
-                            .map(|folder| folder.name.clone())
-                            .collect::<Vec<_>>(),
-                        &cancel,
-                    )
-                    .await
-                    .map_err(error)?,
-                self.database
-                    .live_folder_track_sections(
-                        source,
-                        candidates,
-                        &self.filter,
-                        self.sort.track_sort(),
-                        self.descending,
-                        &cancel,
-                    )
-                    .await
-                    .map_err(error)?,
-            ),
-            FolderProjection::Cached(folder) => (
-                self.database
-                    .folder_section_positions(
-                        source,
-                        *folder,
-                        &self.filter,
-                        self.descending,
-                        &cancel,
-                    )
-                    .await
-                    .map_err(error)?,
-                self.database
-                    .song_sections(
-                        self.song_query()
-                            .await
-                            .map_err(error)?
-                            .expect("Cached folder query"),
-                        &cancel,
-                    )
-                    .await
-                    .map_err(error)?,
-            ),
+        let projection = self.folder_projection().await.map_err(error)?;
+        let mut folders = match projection {
+            FolderProjection::Live { .. } => self
+                .database
+                .ordered_name_sections(
+                    projection
+                        .live_folders(&self.filter, self.descending)
+                        .map(|folder| folder.name.as_str()),
+                    &cancel,
+                )
+                .await
+                .map_err(error)?,
+            FolderProjection::Cached(folder) => self
+                .database
+                .folder_section_positions(source, *folder, &self.filter, self.descending, &cancel)
+                .await
+                .map_err(error)?,
         };
+        let tracks = self
+            .database
+            .song_sections(
+                self.song_query()
+                    .await
+                    .map_err(error)?
+                    .expect("Folder query"),
+                &cancel,
+            )
+            .await
+            .map_err(error)?;
         let (count, _) = self.folder_counts().await.map_err(error)?;
         for mut section in tracks {
             section.index += count as u64;
@@ -105,86 +84,42 @@ impl AndroidBrowseQuery {
     }
 
     pub(super) async fn folder_selection(&self) -> Result<SongSelection, AndroidError> {
-        Ok(match self.folder_projection().await.map_err(error)? {
-            FolderProjection::Live { candidates, .. } => SongSelection::Tracks(
-                self.database
-                    .live_folder_track_order(
-                        self.selected().source_key,
-                        candidates,
-                        &self.filter,
-                        self.sort.track_sort(),
-                        self.descending,
-                        &ReadCancellation::new(),
-                    )
-                    .await
-                    .map_err(error)?
-                    .into(),
-            ),
-            FolderProjection::Cached(_) => self
-                .song_query()
-                .await
-                .map_err(error)?
-                .expect("Cached folder query")
-                .clone()
-                .selection(),
-        })
+        Ok(self
+            .song_query()
+            .await
+            .map_err(error)?
+            .expect("Folder query")
+            .clone()
+            .selection())
     }
+
     pub(super) async fn folder_projection(&self) -> library::LibraryResult<&FolderProjection> {
         self.folder_projection
             .get_or_try_init(|| async {
-                let selected = self.selected();
                 let Route::Folders { path } = &self.route else {
                     unreachable!("Folder route")
                 };
-                let projection = rufin_core::source::folders::resolve_folder(
-                    selected,
+                rufin_core::source::folders::resolve_folder(
+                    self.selected(),
                     path.last().map(|item| item.id.as_str()),
                     &ReadCancellation::new(),
                 )
-                .await?;
-                match projection {
-                    FolderProjection::Live {
-                        folders,
-                        candidates,
-                    } => {
-                        let filter = self.filter.trim().to_lowercase();
-                        let mut folders = folders
-                            .into_iter()
-                            .filter(|folder| folder.name.to_lowercase().contains(&filter))
-                            .collect::<Vec<_>>();
-                        folders.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-                        if self.descending {
-                            folders.reverse();
-                        }
-                        Ok(FolderProjection::Live {
-                            folders,
-                            candidates,
-                        })
-                    }
-                    cached => Ok(cached),
-                }
+                .await
             })
             .await
     }
 
     pub(super) async fn folder_counts(&self) -> library::LibraryResult<(usize, i64)> {
-        let source = self.selected().source_key;
         let cancel = ReadCancellation::new();
-        match self.folder_projection().await? {
-            FolderProjection::Live {
-                folders,
-                candidates,
-            } => Ok((
-                folders.len(),
-                self.database
-                    .live_folder_track_count(source, candidates, &self.filter, &cancel)
-                    .await?,
-            )),
+        let projection = self.folder_projection().await?;
+        let folders = match projection {
+            FolderProjection::Live { .. } => projection
+                .live_folders(&self.filter, self.descending)
+                .count(),
             FolderProjection::Cached(folder) => {
-                let (folders, _) = self
-                    .database
+                self.database
                     .filtered_folder_page(
-                        source,
+                        self.selected().source_key,
                         *folder,
                         &self.filter,
                         self.descending,
@@ -192,18 +127,16 @@ impl AndroidBrowseQuery {
                         0,
                         &cancel,
                     )
-                    .await?;
-                Ok((
-                    folders,
-                    self.database
-                        .song_count(
-                            self.song_query().await?.expect("Cached folder query"),
-                            &cancel,
-                        )
-                        .await?,
-                ))
+                    .await?
+                    .0
             }
-        }
+        };
+        Ok((
+            folders,
+            self.database
+                .song_count(self.song_query().await?.expect("Folder query"), &cancel)
+                .await?,
+        ))
     }
 
     fn folder_row(
@@ -257,34 +190,21 @@ impl AndroidBrowseQuery {
     ) -> library::LibraryResult<Vec<AndroidBrowseRow>> {
         let source = self.selected().source_key;
         let cancel = ReadCancellation::new();
-        let (folder_count, mut rows, tracks) = match self.folder_projection().await? {
-            FolderProjection::Live {
-                folders,
-                candidates,
-            } => {
-                let rows = folders
-                    .iter()
+        let projection = self.folder_projection().await?;
+        let (folder_count, mut rows) = match projection {
+            FolderProjection::Live { .. } => (
+                projection
+                    .live_folders(&self.filter, self.descending)
+                    .count(),
+                projection
+                    .live_folders(&self.filter, self.descending)
                     .skip(offset)
                     .take(limit)
                     .map(|folder| {
                         self.folder_row(folder.object_id.clone(), folder.name.clone(), None)
                     })
-                    .collect::<Vec<_>>();
-                let tracks = self
-                    .database
-                    .live_folder_track_page(
-                        source,
-                        candidates,
-                        &self.filter,
-                        self.sort.track_sort(),
-                        self.descending,
-                        offset.saturating_sub(folders.len()),
-                        limit.saturating_sub(rows.len()),
-                        &cancel,
-                    )
-                    .await?;
-                (folders.len(), rows, tracks)
-            }
+                    .collect::<Vec<_>>(),
+            ),
             FolderProjection::Cached(folder) => {
                 let (count, folders) = self
                     .database
@@ -298,24 +218,26 @@ impl AndroidBrowseQuery {
                         &cancel,
                     )
                     .await?;
-                let rows = folders
-                    .into_iter()
-                    .map(|folder| {
-                        self.folder_row(folder.object_id, folder.name, folder.artwork_binding)
-                    })
-                    .collect::<Vec<_>>();
-                let tracks = self
-                    .database
-                    .song_rows(
-                        self.song_query().await?.expect("Cached folder query"),
-                        offset.saturating_sub(count),
-                        limit.saturating_sub(rows.len()),
-                        &cancel,
-                    )
-                    .await?;
-                (count, rows, tracks)
+                (
+                    count,
+                    folders
+                        .into_iter()
+                        .map(|folder| {
+                            self.folder_row(folder.object_id, folder.name, folder.artwork_binding)
+                        })
+                        .collect(),
+                )
             }
         };
+        let tracks = self
+            .database
+            .song_rows(
+                self.song_query().await?.expect("Folder query"),
+                offset.saturating_sub(folder_count),
+                limit.saturating_sub(rows.len()),
+                &cancel,
+            )
+            .await?;
         rows.extend(tracks.into_iter().enumerate().map(|(index, track)| {
             self.track_row(track, offset.saturating_sub(folder_count) + index)
         }));

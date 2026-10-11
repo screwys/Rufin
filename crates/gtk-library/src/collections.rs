@@ -168,13 +168,6 @@ impl LibraryPresentationProjection {
         }
     }
 
-    fn attach_scroller(&self, scroller: &gtk::ScrolledWindow) {
-        match self {
-            Self::AlbumDetail(detail) => detail.attach_scroller(scroller),
-            Self::Row(_) | Self::Grid(_) => {}
-        }
-    }
-
     fn fit_scroller_allocation(&self, scroller: &gtk::ScrolledWindow, width: i32) {
         match self {
             Self::Row(table) => table.width_fit.fit_scroller_allocation(scroller, width),
@@ -248,6 +241,16 @@ impl LibraryCollectionProjection {
         width_owner.clone().upcast()
     }
 
+    pub fn item_scroll(
+        &self,
+    ) -> Rc<dyn Fn() -> Option<gtk_widgets::mounted_route::NativeListScroll>> {
+        let presentation = Rc::clone(&self.presentation);
+        Rc::new(move || match &*presentation.borrow() {
+            LibraryPresentationProjection::AlbumDetail(detail) => Some(detail.item_scroll()),
+            LibraryPresentationProjection::Row(_) | LibraryPresentationProjection::Grid(_) => None,
+        })
+    }
+
     pub fn item_navigation(&self) -> MountedRouteItemNavigation {
         let presentation = Rc::clone(&self.presentation);
         Rc::new(move |direction| presentation.borrow().navigate(direction))
@@ -277,7 +280,6 @@ impl LibraryCollectionProjection {
         active.set_margin_start(if row { 0 } else { margin_start });
         active.set_margin_end(if row { 0 } else { margin_end });
         scroller.set_child(Some(&active));
-        self.presentation.borrow().attach_scroller(scroller);
         let presentation = Rc::clone(&self.presentation);
         let resize_scroller = scroller.clone();
         let width_owner = allocation_owner(scroller, move |width, _| {
@@ -359,7 +361,6 @@ impl LibraryCollectionProjection {
                         widget.set_margin_start(if row { 0 } else { margin_start });
                         widget.set_margin_end(if row { 0 } else { margin_end });
                         scroller.set_child(Some(&widget));
-                        presentation.attach_scroller(&scroller);
                     }
                 }
             }

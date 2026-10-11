@@ -337,39 +337,32 @@ impl AndroidBrowseQuery {
         let sort = self.sort;
         let descending = self.descending;
         if self.album_detail_layout() {
-            let info = db
-                .album_detail_route_page_info(
+            return Ok(db
+                .album_detail_page(
                     self.selected().source_key,
                     folder,
                     self.favorites(),
                     filter,
                     sort.album_sort(),
                     descending,
+                    0,
                     offset,
                     limit,
                     &cancel,
                 )
-                .await?;
-            let ids = info.iter().map(|(uri, _)| uri.clone()).collect::<Vec<_>>();
-            let (albums, tracks) = db
-                .album_detail_route_rows(self.selected().source_key, &ids, folder, &cancel)
-                .await?;
-            let mut rows = std::collections::HashMap::with_capacity(ids.len());
-            for album in albums {
-                let mut row: AndroidBrowseRow = album.into();
-                row.kind = "album_header".into();
-                rows.insert(row.media_uri.clone(), row);
-            }
-            for track in tracks {
-                let rank = info
-                    .iter()
-                    .find(|(uri, _)| uri == &track.media_uri)
-                    .expect("Loaded Detail track identity")
-                    .1;
-                let row = self.track_row(track, rank.saturating_sub(1) as usize);
-                rows.insert(row.media_uri.clone(), row);
-            }
-            return Ok(ids.into_iter().filter_map(|id| rows.remove(&id)).collect());
+                .await?
+                .into_iter()
+                .map(|item| match item {
+                    library::AlbumDetailRow::Album { album, .. } => {
+                        let mut row: AndroidBrowseRow = album.into();
+                        row.kind = "album_header".into();
+                        row
+                    }
+                    library::AlbumDetailRow::Track { track, index, .. } => {
+                        self.track_row(track, index)
+                    }
+                })
+                .collect());
         }
         match &self.route {
             Route::Albums | Route::Favorites

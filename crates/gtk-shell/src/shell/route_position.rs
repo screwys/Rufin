@@ -2,6 +2,7 @@ use std::collections::{HashMap, VecDeque};
 
 use gtk::prelude::*;
 
+use gtk_widgets::mounted_route::{ItemScrollPosition, NativeListScroll};
 use gtk_widgets::route::Route;
 
 const ROUTE_POSITION_CAPACITY: usize = 64;
@@ -38,21 +39,13 @@ impl RoutePositionMemory {
         }
     }
 
-    pub(super) fn record(&mut self, key: RoutePositionKey, value: f64, upper: f64, page_size: f64) {
-        if self.capacity == 0 || !value.is_finite() || !upper.is_finite() || !page_size.is_finite()
-        {
+    pub(super) fn record(&mut self, key: RoutePositionKey, position: RoutePosition) {
+        if self.capacity == 0 {
             return;
         }
 
         self.recency.retain(|candidate| candidate != &key);
-        self.positions.insert(
-            key.clone(),
-            RoutePosition {
-                value,
-                upper,
-                page_size,
-            },
-        );
+        self.positions.insert(key.clone(), position);
         self.recency.push_back(key);
         while self.positions.len() > self.capacity {
             let Some(oldest) = self.recency.pop_front() else {
@@ -78,11 +71,28 @@ impl RoutePositionMemory {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct RoutePosition {
     pub(super) value: f64,
+    item: Option<ItemScrollPosition>,
     upper: f64,
     page_size: f64,
 }
 
 impl RoutePosition {
+    pub(super) fn capture(adjustment: &gtk::Adjustment, items: Option<&NativeListScroll>) -> Self {
+        Self {
+            value: adjustment.value(),
+            upper: adjustment.upper(),
+            page_size: adjustment.page_size(),
+            item: items.and_then(NativeListScroll::capture),
+        }
+    }
+
+    pub(super) fn window(self) -> library::RouteSeedWindow {
+        self.item.and_then(|item| item.query_position).map_or_else(
+            || library::RouteSeedWindow::relative(self.relative()),
+            library::RouteSeedWindow::position,
+        )
+    }
+
     pub(super) fn relative(self) -> f64 {
         let scrollable = (self.upper - self.page_size).max(0.0);
         if scrollable <= f64::EPSILON {
@@ -105,10 +115,10 @@ mod surface_imp {
     #[derive(Default)]
     pub struct RouteSurface {
         pub(super) adjustment: RefCell<Option<gtk::Adjustment>>,
-        pub(super) target: Cell<Option<f64>>,
+        pub(super) target: Cell<Option<super::RoutePosition>>,
+        pub(super) items: RefCell<Option<super::NativeListScroll>>,
         pub(super) allocated: RefCell<Option<Box<dyn Fn()>>>,
-        pub(super) ready: RefCell<Option<Box<dyn Fn(&gtk::Widget)>>>,
-        pending: RefCell<Vec<(glib::WeakRef<gtk::Widget>, glib::SignalHandlerId)>>,
+        pub(super) readiness: RefCell<Option<std::rc::Rc<super::VisibleContent>>>,
     }
 
     #[glib::object_subclass]
@@ -122,68 +132,12 @@ mod surface_imp {
         fn dispose(&self) {
             self.adjustment.take();
             self.target.take();
+            self.items.take();
             self.allocated.take();
-            self.ready.take();
-            self.clear_pending();
+            self.readiness.take();
             while let Some(child) = self.obj().first_child() {
                 child.unparent();
             }
-        }
-    }
-
-    impl RouteSurface {
-        fn clear_pending(&self) {
-            for (widget, handler) in self.pending.take() {
-                if let Some(widget) = widget.upgrade() {
-                    widget.disconnect(handler);
-                }
-            }
-        }
-
-        fn pending_changed(&self) {
-            if self.pending.borrow().iter().any(|(widget, _)| {
-                widget
-                    .upgrade()
-                    .is_some_and(|widget| super::presentation_pending(&widget))
-            }) {
-                return;
-            }
-            self.obj().queue_allocate();
-        }
-
-        fn watch_pending(&self) {
-            if self.ready.borrow().is_none() {
-                return;
-            }
-            self.clear_pending();
-            let root = self.obj();
-            let Some(child) = root.first_child() else {
-                return;
-            };
-            let mut pending = Vec::new();
-            let viewport =
-                gtk::graphene::Rect::new(0.0, 0.0, root.width() as f32, root.height() as f32);
-            super::visible_pending(&child, root.upcast_ref(), &viewport, &mut pending);
-            if pending.is_empty() {
-                if let Some(ready) = self.ready.take() {
-                    ready(root.upcast_ref());
-                }
-                return;
-            }
-            self.pending.replace(
-                pending
-                    .into_iter()
-                    .map(|widget| {
-                        let owner = root.downgrade();
-                        let handler = widget.connect_css_classes_notify(move |_| {
-                            if let Some(owner) = owner.upgrade() {
-                                owner.imp().pending_changed();
-                            }
-                        });
-                        (widget.downgrade(), handler)
-                    })
-                    .collect(),
-            );
         }
     }
 
@@ -212,21 +166,27 @@ mod surface_imp {
                 return;
             }
             if let (Some(target), Some(adjustment)) = (self.target.take(), self.adjustment.take()) {
-                adjustment.set_value(super::clamp_route_position(
-                    target,
-                    adjustment.lower(),
-                    adjustment.upper(),
-                    adjustment.page_size(),
-                ));
-                // Allocate the restored viewport before checking its rows and covers.
-                // Queuing this owner during allocation does not schedule another
-                // call to size_allocate when only its descendants need layout.
+                if let (Some(item), Some(items)) = (target.item, self.items.take()) {
+                    items.scroll_to(item.position);
+                    child.allocate(width, height, baseline, None);
+                    items.restore_offset(item);
+                } else {
+                    adjustment.set_value(super::clamp_route_position(
+                        target.value,
+                        adjustment.lower(),
+                        adjustment.upper(),
+                        adjustment.page_size(),
+                    ));
+                }
+                // Readiness must inspect the restored viewport after native layout.
                 child.allocate(width, height, baseline, None);
             }
             if let Some(allocated) = self.allocated.take() {
                 allocated();
             }
-            self.watch_pending();
+            if let Some(readiness) = self.readiness.borrow().clone() {
+                readiness.check();
+            }
         }
 
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
@@ -248,7 +208,8 @@ gtk::glib::wrapper! {
 pub(super) fn mount_route_surface(
     child: &impl IsA<gtk::Widget>,
     adjustment: Option<&gtk::Adjustment>,
-    target: Option<f64>,
+    target: Option<RoutePosition>,
+    items: Option<NativeListScroll>,
     allocated: impl Fn() + 'static,
     ready: impl Fn(&gtk::Widget) + 'static,
 ) -> RouteSurface {
@@ -262,8 +223,17 @@ pub(super) fn mount_route_surface(
     owner.set_accessible_role(gtk::AccessibleRole::Presentation);
     owner.imp().adjustment.replace(adjustment.cloned());
     owner.imp().target.set(target);
+    owner.imp().items.replace(items);
     owner.imp().allocated.replace(Some(Box::new(allocated)));
-    owner.imp().ready.replace(Some(Box::new(ready)));
+    let weak = owner.downgrade();
+    owner
+        .imp()
+        .readiness
+        .replace(Some(VisibleContent::new(owner.upcast_ref(), move || {
+            if let Some(owner) = weak.upgrade() {
+                ready(owner.upcast_ref());
+            }
+        })));
     child.set_parent(&owner);
     owner
 }
@@ -271,7 +241,93 @@ pub(super) fn mount_route_surface(
 impl RouteSurface {
     pub(super) fn is_ready(&self) -> bool {
         use gtk::subclass::prelude::ObjectSubclassIsExt;
-        self.imp().ready.borrow().is_none()
+        self.imp()
+            .readiness
+            .borrow()
+            .as_ref()
+            .is_some_and(|readiness| readiness.is_ready())
+    }
+}
+
+pub(super) struct VisibleContent {
+    root: gtk::glib::WeakRef<gtk::Widget>,
+    ready: std::cell::RefCell<Option<Box<dyn Fn()>>>,
+    pending: std::cell::RefCell<Vec<(gtk::glib::WeakRef<gtk::Widget>, gtk::glib::SignalHandlerId)>>,
+}
+
+impl VisibleContent {
+    pub(super) fn new(root: &gtk::Widget, ready: impl Fn() + 'static) -> std::rc::Rc<Self> {
+        std::rc::Rc::new(Self {
+            root: root.downgrade(),
+            ready: std::cell::RefCell::new(Some(Box::new(ready))),
+            pending: Default::default(),
+        })
+    }
+
+    pub(super) fn is_ready(&self) -> bool {
+        self.ready.borrow().is_none()
+    }
+
+    fn clear_pending(&self) {
+        for (widget, handler) in self.pending.take() {
+            if let Some(widget) = widget.upgrade() {
+                widget.disconnect(handler);
+            }
+        }
+    }
+
+    fn pending_changed(&self) {
+        if !self.pending.borrow().iter().any(|(widget, _)| {
+            widget
+                .upgrade()
+                .is_some_and(|widget| presentation_pending(&widget))
+        }) && let Some(root) = self.root.upgrade()
+        {
+            root.queue_allocate();
+        }
+    }
+
+    pub(super) fn check(self: &std::rc::Rc<Self>) {
+        if self.is_ready() {
+            return;
+        }
+        let Some(root) = self
+            .root
+            .upgrade()
+            .filter(|root| root.width() > 1 && root.height() > 1)
+        else {
+            return;
+        };
+        self.clear_pending();
+        let mut pending = Vec::new();
+        let clip = gtk::graphene::Rect::new(0.0, 0.0, root.width() as f32, root.height() as f32);
+        visible_pending(&root, &root, &clip, &mut pending);
+        if pending.is_empty() {
+            if let Some(ready) = self.ready.take() {
+                ready();
+            }
+        } else {
+            self.pending.replace(
+                pending
+                    .into_iter()
+                    .map(|widget| {
+                        let owner = std::rc::Rc::downgrade(self);
+                        let handler = widget.connect_css_classes_notify(move |_| {
+                            if let Some(owner) = owner.upgrade() {
+                                owner.pending_changed();
+                            }
+                        });
+                        (widget.downgrade(), handler)
+                    })
+                    .collect(),
+            );
+        }
+    }
+}
+
+impl Drop for VisibleContent {
+    fn drop(&mut self) {
+        self.clear_pending();
     }
 }
 
@@ -317,7 +373,7 @@ fn visible_pending(
 mod tests {
     use gtk_widgets::route::Route;
 
-    use super::{RoutePositionKey, RoutePositionMemory, clamp_route_position};
+    use super::{RoutePosition, RoutePositionKey, RoutePositionMemory, clamp_route_position};
 
     #[test]
     fn position_memory_is_bounded_and_clears_with_the_source() {
@@ -326,10 +382,42 @@ mod tests {
         let albums = RoutePositionKey::new(Route::Albums);
         let mut memory = RoutePositionMemory::with_capacity(2);
 
-        memory.record(home.clone(), 120.0, 1_000.0, 400.0);
-        memory.record(tracks.clone(), 240.0, 1_000.0, 400.0);
-        memory.record(home.clone(), 180.0, 1_000.0, 400.0);
-        memory.record(albums.clone(), 360.0, 1_000.0, 400.0);
+        memory.record(
+            home.clone(),
+            RoutePosition {
+                value: 120.0,
+                upper: 1_000.0,
+                page_size: 400.0,
+                item: None,
+            },
+        );
+        memory.record(
+            tracks.clone(),
+            RoutePosition {
+                value: 240.0,
+                upper: 1_000.0,
+                page_size: 400.0,
+                item: None,
+            },
+        );
+        memory.record(
+            home.clone(),
+            RoutePosition {
+                value: 180.0,
+                upper: 1_000.0,
+                page_size: 400.0,
+                item: None,
+            },
+        );
+        memory.record(
+            albums.clone(),
+            RoutePosition {
+                value: 360.0,
+                upper: 1_000.0,
+                page_size: 400.0,
+                item: None,
+            },
+        );
 
         assert_eq!(
             memory.restore(&home).map(|position| position.value),
@@ -358,6 +446,7 @@ mod tests {
     fn restored_position_retains_its_relative_extent() {
         let position = super::RoutePosition {
             value: 300.0,
+            item: None,
             upper: 1_000.0,
             page_size: 400.0,
         };

@@ -96,7 +96,6 @@ pub struct SparseRouteModel<K, R> {
     generation: Cell<u64>,
     running: Cell<Option<u64>>,
     demand_deferred: Cell<bool>,
-    initial_window: Cell<Option<usize>>,
     cancellation: RefCell<Option<(u64, ReadCancellation)>>,
     demand_source: RefCell<Option<glib::JoinHandle<()>>>,
 }
@@ -882,7 +881,6 @@ where
             generation: Cell::new(1),
             running: Cell::new(None),
             demand_deferred: Cell::new(false),
-            initial_window: Cell::new(None),
             cancellation: RefCell::new(None),
             demand_source: RefCell::new(None),
         });
@@ -931,23 +929,16 @@ where
         }
         self.model.seed_at::<K, R>(first, rows);
         self.demand_deferred.set(first > 0);
-        self.initial_window
-            .set((first > 0).then(|| window_first(first)));
         true
     }
 
     pub fn resume_initial_demand(self: &Rc<Self>) {
-        self.demand_deferred.set(false);
-        let Some(initial) = self.initial_window.take() else {
+        if !self.demand_deferred.replace(false) {
             return;
-        };
-        let demanded = self
-            .model
-            .cold_live_windows()
-            .into_iter()
-            .filter(|window| window.abs_diff(initial) <= SPARSE_WINDOW_SIZE)
-            .collect();
-        self.windows.borrow_mut().replace(demanded);
+        }
+        self.windows
+            .borrow_mut()
+            .replace(self.model.cold_live_windows());
         self.start();
     }
 

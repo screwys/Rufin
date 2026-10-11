@@ -14,6 +14,24 @@ use crate::{
 
 const COLLECTION_ROW_LIMIT: usize = 128;
 
+#[derive(Clone, Debug, PartialEq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "rows are held only for a visible page"
+)]
+pub enum AlbumDetailRow {
+    Album {
+        album: AlbumRow,
+        tracks: Vec<TrackRow>,
+        last: bool,
+    },
+    Track {
+        track: TrackRow,
+        index: usize,
+        last: bool,
+    },
+}
+
 #[derive(Clone, Debug, FromRow)]
 pub struct GenreChoice {
     pub genre_key: GenreKey,
@@ -170,12 +188,6 @@ pub enum AlbumReleaseClass {
     Single,
     Collection,
     Other,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct AlbumReleaseClassification {
-    pub album_key: AlbumKey,
-    pub class: AlbumReleaseClass,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -450,11 +462,19 @@ impl Database {
         )
     }
 
-    pub async fn ordered_name_sections(
+    pub async fn ordered_name_sections<'a>(
         &self,
-        names: &[String],
+        names: impl Iterator<Item = &'a str>,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<crate::ScrollSection>> {
+        let mut encoded = String::from("[");
+        for (index, name) in names.enumerate() {
+            if index != 0 {
+                encoded.push(',');
+            }
+            encoded.push_str(&serde_json::to_string(name)?);
+        }
+        encoded.push(']');
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let sql = crate::scroll_sections::section_sql(
             "SELECT value FROM json_each(?1) item ORDER BY item.key",
@@ -462,7 +482,7 @@ impl Database {
         );
         crate::scroll_sections::decode_sections(
             sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
-                .bind(serde_json::to_string(names)?)
+                .bind(encoded)
                 .fetch_all(&mut *connection)
                 .await?,
         )
@@ -685,7 +705,7 @@ impl Database {
         use crate::SongScope as C;
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let query = match scope {
-            C::Tracks(key) => return Ok(Some(*key)),
+            C::Tracks(key) | C::Objects { source: key, .. } => return Ok(Some(*key)),
             C::Smart { source, .. } => return Ok(*source),
             C::History { source } => {
                 sqlx::query_scalar("SELECT source_key FROM sources WHERE object_id=?1")
@@ -709,40 +729,6 @@ impl Database {
             .bind(key),
         };
         Ok(query.fetch_optional(&mut *connection).await?)
-    }
-
-    pub async fn album_release_classifications(
-        &self,
-        source: SourceKey,
-        keys: &[AlbumKey],
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<AlbumReleaseClassification>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut classifications = Vec::with_capacity(keys.len());
-        for batch in keys.chunks(COLLECTION_ROW_LIMIT) {
-            let mut query = QueryBuilder::<Sqlite>::new("WITH requested(album_key,position) AS (");
-            query.push_values(batch.iter().enumerate(), |mut row, (position, key)| {
-                row.push_bind(*key).push_bind(position as i64);
-            });
-            query.push("),").push(album_release_cte(
-                "SELECT DISTINCT album_key FROM requested",
-            ));
-            query.push(" SELECT classified.album_key,classified.class_code FROM classified JOIN albums album USING(album_key) JOIN requested USING(album_key) WHERE album.source_key=")
-                .push_bind(source)
-                .push(" GROUP BY classified.album_key ORDER BY min(requested.position)");
-            let rows = query
-                .build_query_as::<(AlbumKey, i64)>()
-                .persistent(false)
-                .fetch_all(&mut *connection)
-                .await?;
-            classifications.extend(rows.into_iter().map(|(album_key, class)| {
-                AlbumReleaseClassification {
-                    album_key,
-                    class: release_class_from_code(class),
-                }
-            }));
-        }
-        Ok(classifications)
     }
 
     pub async fn album_key_by_object(
@@ -939,62 +925,27 @@ impl Database {
         Ok(rows)
     }
 
-    pub async fn album_detail_route_order(
+    pub async fn album_detail_count(
         &self,
         source: SourceKey,
         folder: Option<FolderKey>,
         favorites_only: bool,
         filter: &str,
-        sort: AlbumSort,
-        descending: bool,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<(Vec<String>, Vec<String>, Vec<String>)> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let route =
-            album_detail_route_sql(source, folder, favorites_only, filter, sort, descending);
-        let rows = sqlx::query_as::<_, (String, Option<bool>)>(sqlx::AssertSqlSafe(format!(
-            "{route} SELECT media_uri,album_has_genres FROM flattened ORDER BY album_rank,item_rank"
-        )))
-        .fetch_all(&mut *connection)
-        .await;
-        let rows = rows?;
-        let albums_with_genres = rows
-            .iter()
-            .filter_map(|(uri, has_genres)| has_genres.unwrap_or(false).then(|| uri.clone()))
-            .collect();
-        let albums = rows
-            .iter()
-            .filter_map(|(uri, has_genres)| has_genres.map(|_| uri.clone()))
-            .collect();
-        Ok((
-            rows.into_iter().map(|(uri, _)| uri).collect(),
-            albums,
-            albums_with_genres,
-        ))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub async fn album_detail_route_count(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        favorites_only: bool,
-        filter: &str,
-        sort: AlbumSort,
-        descending: bool,
+        inline_tracks: usize,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<i64> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let _ = (sort, descending);
         Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT count(*)+COALESCE(sum((SELECT count(*) FROM tracks item WHERE {})),0) FROM albums album WHERE {}",
-            album_track_scope(folder), album_scope(source, folder, favorites_only, filter)
+            "SELECT COALESCE(sum(1+max({}-{},0)),0) FROM albums album WHERE {}",
+            album_detail_track_count(folder),
+            inline_tracks,
+            album_scope(source, folder, favorites_only, filter)
         )))
         .fetch_one(&mut *connection)
         .await?)
     }
 
-    pub async fn album_detail_route_page_info(
+    pub async fn album_detail_page(
         &self,
         source: SourceKey,
         folder: Option<FolderKey>,
@@ -1002,21 +953,100 @@ impl Database {
         filter: &str,
         sort: AlbumSort,
         descending: bool,
+        inline_tracks: usize,
         offset: usize,
         limit: usize,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<(String, i64)>> {
+    ) -> LibraryResult<Vec<AlbumDetailRow>> {
+        let offset = offset.min(i64::MAX as usize);
+        let end = offset
+            .saturating_add(limit.min(COLLECTION_ROW_LIMIT))
+            .min(i64::MAX as usize);
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let route =
-            album_detail_route_sql(source, folder, favorites_only, filter, sort, descending);
-        let sql = format!(
-            "{route} SELECT media_uri,item_rank FROM flattened ORDER BY album_rank,item_rank LIMIT ?1 OFFSET ?2"
-        );
-        Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql))
-            .bind(limit.min(COLLECTION_ROW_LIMIT) as i64)
-            .bind(offset.min(i64::MAX as usize) as i64)
-            .fetch_all(&mut *connection)
-            .await?)
+        let mut transaction = connection.begin().await?;
+        let spans = sqlx::query_as::<_, (AlbumKey, i64, i64)>(sqlx::AssertSqlSafe(format!(
+            "{} SELECT album_key,track_count,first_position FROM spans
+             WHERE first_position<?1 AND first_position+max(track_count-{inline_tracks},0)>=?2
+             ORDER BY first_position",
+            album_detail_spans_sql(
+                source,
+                folder,
+                favorites_only,
+                filter,
+                sort,
+                descending,
+                inline_tracks,
+                end,
+            )
+        )))
+        .bind(end.min(i64::MAX as usize) as i64)
+        .bind(offset.min(i64::MAX as usize) as i64)
+        .fetch_all(&mut *transaction)
+        .await?;
+        let mut items = Vec::new();
+        let mut albums = Vec::new();
+        let mut tracks = Vec::new();
+        for (album, track_count, first_position) in spans {
+            let first_position = first_position as usize;
+            let track_count = track_count as usize;
+            let header = first_position >= offset;
+            if header {
+                albums.push(album);
+            }
+            let first_track = first_position.saturating_add(1);
+            let start = if header {
+                0
+            } else {
+                inline_tracks.saturating_add(offset.saturating_sub(first_track))
+            };
+            let count = inline_tracks
+                .saturating_add(end.saturating_sub(first_track))
+                .min(track_count)
+                .saturating_sub(start);
+            let scope = album_track_scope(folder).replace("album.album_key", "?1");
+            let keys = sqlx::query_scalar::<_, TrackKey>(sqlx::AssertSqlSafe(format!(
+                "SELECT item.track_key FROM tracks item WHERE {scope}
+                 ORDER BY item.disc_number,item.track_number,item.sort_text,item.track_key LIMIT ?2 OFFSET ?3"
+            )))
+            .bind(album)
+            .bind(count as i64)
+            .bind(start as i64)
+            .fetch_all(&mut *transaction)
+            .await?;
+            tracks.extend(&keys);
+            items.push((album, header, start, track_count, keys));
+        }
+        let mut albums = load_album_rows(&mut transaction, source, &albums, folder)
+            .await?
+            .into_iter()
+            .map(|row| (row.album_key, row))
+            .collect::<BTreeMap<_, _>>();
+        let mut tracks = load_track_rows(&mut transaction, &tracks)
+            .await?
+            .into_iter()
+            .map(|row| (row.track_key, row))
+            .collect::<BTreeMap<_, _>>();
+        let mut rows = Vec::new();
+        for (key, header, start, track_count, keys) in items {
+            let mut loaded = keys.into_iter().filter_map(|key| tracks.remove(&key));
+            if header && let Some(album) = albums.remove(&key) {
+                rows.push(AlbumDetailRow::Album {
+                    album,
+                    tracks: loaded.by_ref().take(inline_tracks).collect(),
+                    last: track_count <= inline_tracks,
+                });
+            }
+            for (position, track) in loaded.enumerate() {
+                let index = position + start.max(inline_tracks);
+                rows.push(AlbumDetailRow::Track {
+                    track,
+                    index,
+                    last: index + 1 == track_count,
+                });
+            }
+        }
+        transaction.commit().await?;
+        Ok(rows)
     }
 
     pub async fn artist_route_page(
@@ -1244,36 +1274,6 @@ impl Database {
         .bind(object_id)
         .fetch_optional(&mut *connection)
         .await?)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub async fn artist_album_projection_order(
-        &self,
-        source: SourceKey,
-        artist: ArtistKey,
-        album_artist: bool,
-        folder: Option<FolderKey>,
-        filter: &str,
-        sort: AlbumSort,
-        descending: bool,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<AlbumKey>> {
-        let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(
-            sqlx::query_scalar::<_, AlbumKey>(sqlx::AssertSqlSafe(format!(
-                "{ARTIST_ALBUM_SCOPE} ORDER BY {}",
-                sort.order_sql(descending, folder)
-            )))
-            .bind(source)
-            .bind(artist)
-            .bind(album_artist)
-            .bind(folder)
-            .bind(filter.is_empty())
-            .bind(filter)
-            .fetch_all(&mut *connection)
-            .await?,
-        )
     }
 
     pub async fn artist_release_counts(
@@ -1622,74 +1622,6 @@ impl Database {
         ))
     }
 
-    pub async fn album_detail_route_rows(
-        &self,
-        source: SourceKey,
-        items: &[String],
-        folder: Option<FolderKey>,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<(Vec<AlbumRow>, Vec<TrackRow>)> {
-        if items.len() > COLLECTION_ROW_LIMIT {
-            return Err(row_limit("Album detail route"));
-        }
-        let album_uris = items
-            .iter()
-            .filter(|uri| {
-                crate::source_entity_parts(uri).is_some_and(|(_, kind, _)| kind == "album")
-            })
-            .map(String::as_str)
-            .collect::<Vec<_>>();
-        let track_uris = items
-            .iter()
-            .filter(|uri| {
-                !crate::source_entity_parts(uri).is_some_and(|(_, kind, _)| kind == "album")
-            })
-            .map(String::as_str)
-            .collect::<Vec<_>>();
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let albums = if album_uris.is_empty() {
-            Vec::new()
-        } else {
-            let mut query = QueryBuilder::<Sqlite>::new("WITH requested(media_uri) AS (");
-            query.push_values(album_uris, |mut row, uri| {
-                row.push_bind(uri);
-            });
-            query.push(
-                ") SELECT album.album_key FROM requested JOIN albums album USING(media_uri)
-                 WHERE album.source_key=",
-            );
-            query.push_bind(source);
-            query
-                .build_query_scalar::<AlbumKey>()
-                .persistent(false)
-                .fetch_all(&mut *transaction)
-                .await?
-        };
-        let tracks = if track_uris.is_empty() {
-            Vec::new()
-        } else {
-            let mut query = QueryBuilder::<Sqlite>::new("WITH requested(media_uri) AS (");
-            query.push_values(track_uris, |mut row, uri| {
-                row.push_bind(uri);
-            });
-            query.push(
-                ") SELECT track.track_key FROM requested JOIN tracks track USING(media_uri)
-                 WHERE track.source_key=",
-            );
-            query.push_bind(source);
-            query
-                .build_query_scalar::<TrackKey>()
-                .persistent(false)
-                .fetch_all(&mut *transaction)
-                .await?
-        };
-        let albums = load_album_rows(&mut transaction, source, &albums, folder).await?;
-        let tracks = load_track_rows(&mut transaction, &tracks).await?;
-        transaction.commit().await?;
-        Ok((albums, tracks))
-    }
-
     pub async fn genre_detail(
         &self,
         source: SourceKey,
@@ -1770,10 +1702,10 @@ pub(crate) async fn album_disc_sections(
         return Ok(Vec::new());
     }
     let direction = if descending { "DESC" } else { "ASC" };
-    let counts = sqlx::query_as::<_, (i64, i64)>(sqlx::AssertSqlSafe(format!(
+    let counts = sqlx::query_as_with::<_, (i64, i64), _>(sqlx::AssertSqlSafe(format!(
         "SELECT track.disc_number,COUNT(*) FROM {} WHERE {} GROUP BY track.disc_number ORDER BY track.disc_number {direction}",
         query.from, query.predicate,
-    ))).fetch_all(connection).await?;
+    )), query.arguments.clone()).fetch_all(connection).await?;
     if counts.iter().filter(|(disc, _)| *disc > 0).count() <= 1 {
         return Ok(Vec::new());
     }
@@ -1987,28 +1919,38 @@ async fn collection_key_by_object(
         .await?)
 }
 
-fn album_detail_route_sql(
+fn album_detail_track_count(folder: Option<FolderKey>) -> String {
+    if folder.is_none() {
+        "album.track_count".to_string()
+    } else {
+        format!(
+            "(SELECT count(*) FROM tracks item WHERE {})",
+            album_track_scope(folder)
+        )
+    }
+}
+
+fn album_detail_spans_sql(
     source: SourceKey,
     folder: Option<FolderKey>,
     favorites_only: bool,
     filter: &str,
     sort: AlbumSort,
     descending: bool,
+    inline_tracks: usize,
+    end: usize,
 ) -> String {
     let order = sort.order_sql(descending, folder);
     let scope = album_scope(source, folder, favorites_only, filter);
-    let tracks = album_track_scope(folder);
+    let track_count = album_detail_track_count(folder);
     format!("WITH ordered AS (
-        SELECT album.album_key,album.media_uri,
-            EXISTS(SELECT 1 FROM album_genres relation WHERE relation.album_key=album.album_key) has_genres,
+        SELECT album.album_key,{track_count} track_count,
             row_number() OVER (ORDER BY {order}) album_rank
-        FROM albums album WHERE {scope}
-      ), flattened(media_uri,album_has_genres,album_rank,item_rank) AS (
-        SELECT media_uri,has_genres,album_rank,0 FROM ordered
-        UNION ALL
-        SELECT item.media_uri,NULL,album.album_rank,
-            row_number() OVER (PARTITION BY item.album_key ORDER BY item.disc_number,item.track_number,item.sort_text,item.track_key)
-        FROM ordered album JOIN tracks item ON {tracks}
+        FROM albums album WHERE {scope} ORDER BY {order} LIMIT {end}
+      ), spans AS (
+        SELECT album_key,track_count,
+            COALESCE(sum(1+max(track_count-{inline_tracks},0)) OVER (ORDER BY album_rank ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) first_position
+        FROM ordered
       )")
 }
 

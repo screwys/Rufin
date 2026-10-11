@@ -43,9 +43,9 @@ pub use activity::{
 pub use artwork::{ArtistArtworkBinding, PlaylistArtworkBinding, RepresentativeArtworkScope};
 pub use backup::{BackupRestoreReport, StateGroups};
 pub use collections::{
-    AlbumArtistLink, AlbumGenreLink, AlbumReleaseCandidate, AlbumReleaseClass,
-    AlbumReleaseClassification, AlbumReleaseResult, AlbumRow, AlbumSort, ArtistRow, ArtistSort,
-    FolderRow, GenreChoice, GenreRow, GenreSort, MoodRow, MoodSort,
+    AlbumArtistLink, AlbumDetailRow, AlbumGenreLink, AlbumReleaseCandidate, AlbumReleaseClass,
+    AlbumReleaseResult, AlbumRow, AlbumSort, ArtistRow, ArtistSort, FolderRow, GenreChoice,
+    GenreRow, GenreSort, MoodRow, MoodSort,
 };
 pub use connect::{CONNECT_PAGE_SIZE, ConnectChange, ConnectRecord, ConnectRoot};
 pub use db::{Database, ReadCancellation};
@@ -133,36 +133,42 @@ pub type LibraryResult<T> = Result<T, LibraryError>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RouteSeedWindow {
-    pub(crate) relative: f64,
-    pub(crate) limit: usize,
+    relative: f64,
+    position: Option<usize>,
 }
 
 impl RouteSeedWindow {
     const LIMIT: usize = 64;
 
     pub fn top() -> Self {
-        Self::new(0.0, Self::LIMIT)
+        Self::relative(0.0)
     }
 
     pub fn relative(relative: f64) -> Self {
-        Self::new(relative, Self::LIMIT)
-    }
-
-    fn new(relative: f64, limit: usize) -> Self {
         Self {
             relative: if relative.is_finite() {
                 relative.clamp(0.0, 1.0)
             } else {
                 0.0
             },
-            limit: limit.max(1),
+            position: None,
+        }
+    }
+
+    pub fn position(position: usize) -> Self {
+        Self {
+            relative: 0.0,
+            position: Some(position),
         }
     }
 
     pub fn range(self, len: usize) -> std::ops::Range<usize> {
-        let position = ((len.saturating_sub(1)) as f64 * self.relative).round() as usize;
-        let start = position / self.limit * self.limit;
-        start.min(len)..start.saturating_add(self.limit).min(len)
+        let position = self
+            .position
+            .unwrap_or_else(|| ((len.saturating_sub(1)) as f64 * self.relative).round() as usize)
+            .min(len.saturating_sub(1));
+        let start = position / Self::LIMIT * Self::LIMIT;
+        start.min(len)..start.saturating_add(Self::LIMIT).min(len)
     }
 }
 
@@ -185,5 +191,8 @@ mod route_seed_tests {
         assert_eq!(RouteSeedWindow::relative(0.5).range(1_000), 448..512);
         assert_eq!(RouteSeedWindow::relative(1.0).range(1_000), 960..1_000);
         assert_eq!(RouteSeedWindow::relative(0.5).range(0), 0..0);
+        assert_eq!(RouteSeedWindow::position(750).range(1_000), 704..768);
+        assert_eq!(RouteSeedWindow::position(750).range(500), 448..500);
+        assert_eq!(RouteSeedWindow::position(750).range(0), 0..0);
     }
 }
