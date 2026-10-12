@@ -62,8 +62,58 @@ impl SourceConfiguration {
         Ok(url.into())
     }
 
-    pub fn detail_folder_uri(&self, first: &str, last: &str) -> SourceResult<String> {
+    pub fn detail_folder_uri(&self, first: &str, last: &str) -> SourceResult<Option<String>> {
         if self.kind == "local" {
+            if first.starts_with("rufin-document:") || last.starts_with("rufin-document:") {
+                if !first.starts_with("rufin-document:") || !last.starts_with("rufin-document:") {
+                    return Ok(None);
+                }
+                let first = Url::parse(first).map_err(url_error)?;
+                let last = Url::parse(last).map_err(url_error)?;
+                if first.host_str() != last.host_str() {
+                    return Ok(None);
+                }
+                let config = crate::file::local::LocalSourceConfig::from_configuration(self)?;
+                let Some(root) = config
+                    .document_roots
+                    .iter()
+                    .find(|root| Some(root.id.as_str()) == first.host_str())
+                else {
+                    return Ok(None);
+                };
+                let first = first
+                    .path()
+                    .rsplit_once('/')
+                    .map_or("", |(parent, _)| parent);
+                let last = last
+                    .path()
+                    .rsplit_once('/')
+                    .map_or("", |(parent, _)| parent);
+                let common = first
+                    .split('/')
+                    .zip(last.split('/'))
+                    .take_while(|(a, b)| a == b)
+                    .map(|(part, _)| part)
+                    .last()
+                    .unwrap_or_default();
+                let common = percent_encoding::percent_decode_str(common)
+                    .decode_utf8()
+                    .map_err(|error| SourceError::Other(error.to_string()))?;
+                let uri = match common.rsplit_once('\u{1f}') {
+                    Some((_, uri)) => percent_encoding::percent_decode_str(uri)
+                        .decode_utf8()
+                        .map_err(|error| SourceError::Other(error.to_string()))?
+                        .into_owned(),
+                    None => root.uri.clone(),
+                };
+                // MediaStore's flat audio collection is not a browsable document folder.
+                let folder = Url::parse(&uri).map_err(url_error)?;
+                return Ok(folder
+                    .path_segments()
+                    .is_some_and(|mut parts| parts.next() == Some("tree"))
+                    .then_some(uri));
+            }
+
             let first = Path::new(first).parent().ok_or(SourceError::NotFound)?;
             let last = Path::new(last).parent().ok_or(SourceError::NotFound)?;
             let common = first
@@ -71,10 +121,10 @@ impl SourceConfiguration {
                 .find(|path| last.starts_with(path))
                 .ok_or(SourceError::NotFound)?;
             return Url::from_directory_path(common)
-                .map(String::from)
+                .map(|uri| Some(String::from(uri)))
                 .map_err(|_| SourceError::NotFound);
         }
-        crate::file::remote::detail_folder_uri(self, first, last)
+        crate::file::remote::detail_folder_uri(self, first, last).map(Some)
     }
 }
 
@@ -282,6 +332,7 @@ mod tests {
             .join("Artist & Friends/Album/Disc 2/z.flac");
         let uri = source
             .detail_folder_uri(first.to_str().unwrap(), last.to_str().unwrap())
+            .unwrap()
             .unwrap();
         assert_eq!(
             Url::parse(&uri).unwrap().to_file_path().unwrap(),
@@ -290,10 +341,66 @@ mod tests {
         let sibling = directory.path().join("Artist & Friends/Album Two/z.flac");
         let uri = source
             .detail_folder_uri(first.to_str().unwrap(), sibling.to_str().unwrap())
+            .unwrap()
             .unwrap();
         assert_eq!(
             Url::parse(&uri).unwrap().to_file_path().unwrap(),
             directory.path().join("Artist & Friends")
+        );
+        let source = SourceConfiguration::local(crate::SourceId::new("local"), "Local", Vec::new())
+            .unwrap()
+            .with_document_roots(vec![
+                crate::DocumentRoot {
+                    id: "documents".into(),
+                    uri: "content://provider/tree/root".into(),
+                    name: "Files".into(),
+                },
+                crate::DocumentRoot {
+                    id: "music".into(),
+                    uri: "content://media/external/audio/media".into(),
+                    name: "Music".into(),
+                },
+            ])
+            .unwrap();
+        let folder = "content://provider/tree/root/document/album%2Fopaque-id";
+        let parent = encode(&format!("Album & Friends\u{1f}{}", encode(folder)));
+        assert_eq!(
+            source
+                .detail_folder_uri(
+                    &format!("rufin-document://documents/{parent}/one.flac"),
+                    &format!("rufin-document://documents/{parent}/two.flac"),
+                )
+                .unwrap()
+                .as_deref(),
+            Some(folder)
+        );
+        assert_eq!(
+            source
+                .detail_folder_uri(
+                    &format!("rufin-document://documents/{parent}/one.flac"),
+                    "rufin-document://documents/other/two.flac",
+                )
+                .unwrap()
+                .as_deref(),
+            Some("content://provider/tree/root")
+        );
+        assert_eq!(
+            source
+                .detail_folder_uri(
+                    "rufin-document://music/one.flac",
+                    "rufin-document://music/two.flac"
+                )
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            source
+                .detail_folder_uri(
+                    "rufin-document://music/one.flac",
+                    "rufin-document://documents/two.flac"
+                )
+                .unwrap(),
+            None
         );
     }
 
@@ -343,6 +450,7 @@ mod tests {
                         &format!("{namespace}Artist%20One/Album/Disc%201/a.flac"),
                         &format!("{namespace}Artist%20One/Album/Disc%202/z.flac"),
                     )
+                    .unwrap()
                     .unwrap(),
                 expected
             );
@@ -352,6 +460,7 @@ mod tests {
                         &format!("{namespace}A/a.flac"),
                         &format!("{namespace}Z/z.flac")
                     )
+                    .unwrap()
                     .unwrap(),
                 current,
             );

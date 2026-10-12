@@ -184,7 +184,10 @@ impl From<&PlaybackView> for AndroidPlaybackState {
                 }
                 .into()
             }),
-            source_labels: rufin_core::settings::presentation::now_playing_labels(current),
+            source_labels: rufin_core::settings::presentation::now_playing_labels(
+                current,
+                output_name.as_deref(),
+            ),
             position_millis: transport.position_millis,
             position_observed_at_millis: transport.position_observed_at_millis,
             position_advancing: transport.state == TransportStatus::Playing,

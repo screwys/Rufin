@@ -206,6 +206,38 @@ impl AndroidBrowseQuery {
                 let configuration = library::source_entity_parts(&uri)
                     .and_then(|(source_id, _, _)| self.source.configuration(&source_id));
                 let link_settings = self.settings.load().external_site_links;
+                let local_folder_link = link_settings.enabled
+                    && link_settings.server
+                    && configuration
+                        .as_ref()
+                        .is_some_and(|source| source.is_local());
+                let folder_uri = if local_folder_link {
+                    match db
+                        .collection_source_path_bounds(&uri, album_artist, folder)
+                        .await
+                        .map_err(error)?
+                    {
+                        Some((first, last)) => configuration
+                            .as_ref()
+                            .unwrap()
+                            .detail_folder_uri(&first, &last)
+                            .map_err(error)?,
+                        None => None,
+                    }
+                } else {
+                    None
+                };
+                let present_links = |links: Vec<rufin_core::detail_links::DetailLink>| {
+                    links
+                        .into_iter()
+                        .filter_map(|mut link| {
+                            if local_folder_link && link.url.is_none() {
+                                link.url = Some(folder_uri.clone()?);
+                            }
+                            Some(link.into())
+                        })
+                        .collect::<Vec<AndroidDetailLink>>()
+                };
                 if matches!(self.route, Route::AlbumDetail(_)) {
                     let Some(album) = db
                         .album_row_by_media_uri(&uri, &cancel)
@@ -214,14 +246,11 @@ impl AndroidBrowseQuery {
                     else {
                         return Ok(None);
                     };
-                    let links = rufin_core::detail_links::album_external_links(
+                    let links = present_links(rufin_core::detail_links::album_external_links(
                         &link_settings,
                         configuration.as_ref(),
                         &album,
-                    )
-                    .into_iter()
-                    .map(Into::into)
-                    .collect();
+                    ));
                     let show_track_images = self.display.row_fields.iter().any(|field| {
                         matches!(field, LibraryField::Image | LibraryField::TitleMerged)
                     });
@@ -269,14 +298,11 @@ impl AndroidBrowseQuery {
                 query.favorites_only = true;
                 let favorite_total =
                     db.song_count(&query, &cancel).await.map_err(error)?.max(0) as u64;
-                let links = rufin_core::detail_links::artist_external_links(
+                let links = present_links(rufin_core::detail_links::artist_external_links(
                     &link_settings,
                     configuration.as_ref(),
                     &artist,
-                )
-                .into_iter()
-                .map(Into::into)
-                .collect();
+                ));
                 let album_count = artist.album_count.max(0) as u64;
                 let track_count = artist.track_count.max(0) as u64;
                 let mut row = artist_row(artist, album_artist);

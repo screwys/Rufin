@@ -1163,7 +1163,7 @@ mod playback_refresh_tests {
         assert_eq!(presentation.album, "Album");
         assert_eq!(
             presentation.meta,
-            ["Local", "FLAC", "2026", "24 bit", "96 kHz"]
+            ["2026", "FLAC", "24 bit", "96 kHz", "Local"]
         );
         let mut streaming = current_change.clone();
         let current = Arc::make_mut(streaming.transport.current.as_mut().unwrap());
@@ -1174,7 +1174,14 @@ mod playback_refresh_tests {
         });
         assert_eq!(
             NowPlayingPresentation::new(Some(&streaming)).meta,
-            ["Streaming", "MP3", "2026"]
+            ["2026", "MP3", "Streaming"]
+        );
+        assert_eq!(
+            rufin_core::settings::presentation::now_playing_labels(
+                streaming.transport.current.as_deref(),
+                Some("Living room")
+            ),
+            ["2026", "MP3", "Living room", "Streaming"]
         );
         assert_eq!(
             fullscreen_playback_refresh(Some(&current_change), &streaming),

@@ -1995,7 +1995,8 @@ impl SourceOwner {
                 .ok_or_else(source_access_unavailable)?;
             configuration
                 .detail_folder_uri(&first, &last)
-                .map_err(string_error)
+                .map_err(string_error)?
+                .ok_or_else(|| SourceError::NotFound.to_string())
         })
     }
 

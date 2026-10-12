@@ -381,7 +381,6 @@
                                     <property name="column-spacing">4</property>
                                     <property name="row-spacing">4</property>
                                     <property name="selection-mode">none</property>
-                                    <property name="max-children-per-line">4</property>
                                     <property name="halign">start</property>
                                     <property name="valign">center</property>
                                     <style>

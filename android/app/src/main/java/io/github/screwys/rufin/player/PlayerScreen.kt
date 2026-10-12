@@ -332,16 +332,11 @@ private fun PlayerControls(player: PlayerConnection, modifier: Modifier) {
     }
 }
 
-private data class PlayerSourceFacts(val labels: List<String>, val output: String?)
-
 @Composable
 private fun PlayerSourceInfo(player: PlayerConnection) {
-    val facts by remember(player) { derivedStateOf { player.playback?.let {
-        PlayerSourceFacts(it.sourceLabels, it.outputName)
-    } } }
-    val current = facts ?: return
+    val labels by remember(player) { derivedStateOf { player.playback?.sourceLabels.orEmpty() } }
     FlowRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)) {
-        (current.labels + listOfNotNull(current.output)).forEach { label ->
+        labels.forEach { label ->
             Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

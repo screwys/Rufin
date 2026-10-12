@@ -42,7 +42,10 @@ pub fn audio_source_label(format: Option<&str>, path: Option<&str>) -> Option<St
     })
 }
 
-pub fn now_playing_labels(media: Option<&playback::CurrentMedia>) -> Vec<String> {
+pub fn now_playing_labels(
+    media: Option<&playback::CurrentMedia>,
+    output_name: Option<&str>,
+) -> Vec<String> {
     let Some(media) = media else {
         return Vec::new();
     };
@@ -58,13 +61,6 @@ pub fn now_playing_labels(media: Option<&playback::CurrentMedia>) -> Vec<String>
                     == Some(format)
             })
     });
-    if let Some(stream) = &media.stream {
-        labels.push(localization::tr(if stream.local {
-            msgid("Local")
-        } else {
-            msgid("Streaming")
-        }));
-    }
     let format = if same_format {
         original
     } else {
@@ -73,13 +69,13 @@ pub fn now_playing_labels(media: Option<&playback::CurrentMedia>) -> Vec<String>
             .as_ref()
             .and_then(|stream| audio_source_label(stream.format.as_deref(), None))
     };
-    labels.extend(format);
     labels.extend(
         media
             .year
             .filter(|year| *year > 0)
             .map(|year| year.to_string()),
     );
+    labels.extend(format);
     if same_format {
         labels.extend(
             media
@@ -95,6 +91,14 @@ pub fn now_playing_labels(media: Option<&playback::CurrentMedia>) -> Vec<String>
                 .filter(|rate| *rate > 0)
                 .map(|rate| format!("{} kHz", f64::from(rate) / 1000.0)),
         );
+    }
+    labels.extend(output_name.map(str::to_owned));
+    if let Some(stream) = &media.stream {
+        labels.push(localization::tr(if stream.local {
+            msgid("Local")
+        } else {
+            msgid("Streaming")
+        }));
     }
     labels
 }

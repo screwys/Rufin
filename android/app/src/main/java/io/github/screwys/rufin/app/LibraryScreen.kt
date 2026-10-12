@@ -1,5 +1,9 @@
 package io.github.screwys.rufin.app
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.DocumentsContract
+
 import io.github.screwys.rufin.R
 import io.github.screwys.rufin.settings.LocalTranslationRevision
 import io.github.screwys.rufin.settings.LocalReduceMotion
@@ -44,7 +48,6 @@ import io.github.screwys.rufin.ui.LocalPlayerBottomPadding
 
 import android.os.Build
 import android.app.Activity
-import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -551,8 +554,16 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
                 browse::open, onMenu, { item, placement, shuffled -> browse.play(item, placement, shuffled) }, browse::favorite,
                 onPlaylist, { route, title -> browse.openRoute(route, title, browse.library?.routeKind(route).orEmpty(), summary.row.title) },
                 onLink = { link -> model.runAction {
-                    val uri = link.url ?: page.sourceUri() ?: return@runAction
-                    context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(uri)))
+                    var uri = Uri.parse(link.url ?: page.sourceUri() ?: return@runAction)
+                    val intent = Intent(Intent.ACTION_VIEW)
+                    if (uri.scheme == "content") {
+                        if (DocumentsContract.isTreeUri(uri) && !DocumentsContract.isDocumentUri(context, uri)) {
+                            uri = DocumentsContract.buildDocumentUriUsingTree(uri, DocumentsContract.getTreeDocumentId(uri))
+                        }
+                        intent.setDataAndType(uri, DocumentsContract.Document.MIME_TYPE_DIR)
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+                    } else intent.data = uri
+                    context.startActivity(intent)
                 } }, onScrolled, onRadio = { browse.radio(it, "now") })
             return@Column
         }

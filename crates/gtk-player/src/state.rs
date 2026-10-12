@@ -50,7 +50,7 @@ impl NowPlayingPresentation {
                 .and_then(|entry| entry.artwork_binding.as_deref())
                 .map(ArtworkBinding::opaque)
                 .unwrap_or_default(),
-            meta: now_playing_labels(current),
+            meta: now_playing_labels(current, None),
             title,
             artist,
             album,
