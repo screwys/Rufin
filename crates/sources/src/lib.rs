@@ -61,12 +61,8 @@ pub use jellyfin_emby::{
 };
 pub use library::SourceId;
 pub use operations::{
-    AlbumMetadata, AlbumMetadataEdit, AlbumMetadataMixed, AlbumMetadataValues,
-    AlbumMetadataWritable, ArtistMetadata, ArtistMetadataEdit, ArtistMetadataMixed,
-    ArtistMetadataValues, ArtistMetadataWritable, ArtworkChange, ArtworkEdit, ArtworkEditing,
-    ArtworkStorage, ImageBytes, MetadataChanges, MetadataEdit, MetadataField, MetadataFieldKind,
-    SourceMetadataError, TrackMetadata, TrackMetadataEdit, TrackMetadataValues,
-    TrackMetadataWritable,
+    ArtworkChange, ArtworkEdit, ArtworkEditing, ArtworkStorage, ImageBytes, MetadataChanges,
+    MetadataDraft, MetadataEdit, MetadataField, MetadataFieldKind, SourceMetadataError,
 };
 pub use source::*;
 

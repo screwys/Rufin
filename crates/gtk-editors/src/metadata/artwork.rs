@@ -1,4 +1,4 @@
-use super::{Editor, MetadataDraft, MetadataField, refresh_save_state};
+use super::{Editor, refresh_save_state};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -169,23 +169,15 @@ impl Drop for ArtworkEditor {
 
 pub(super) fn connect(source: &Arc<SourceOwner>, editor: &Rc<Editor>) {
     seed_search(editor);
-    let fields: &[MetadataField] = match editor.draft.as_ref() {
-        MetadataDraft::Track(_) => &[
-            MetadataField::Artist,
-            MetadataField::AlbumArtist,
-            MetadataField::Album,
-        ],
-        MetadataDraft::Album(_) => &[
-            MetadataField::Title,
-            MetadataField::Artist,
-            MetadataField::AlbumArtist,
-        ],
-        MetadataDraft::Artist(_) => &[MetadataField::Title],
+    let fields: &[&str] = match editor.draft.kind {
+        sources::SourceEntityKind::Track => &["artist", "album_artist", "album"],
+        sources::SourceEntityKind::Album => &["title", "artist", "album_artist"],
+        sources::SourceEntityKind::Artist => &["title"],
     };
     for entry in editor
         .entries
         .iter()
-        .filter(|entry| fields.contains(&entry.field))
+        .filter(|entry| fields.contains(&entry.field.as_str()))
     {
         let weak = Rc::downgrade(editor);
         entry.entry.connect_changed(move |_| {
@@ -227,7 +219,7 @@ pub(super) fn connect(source: &Arc<SourceOwner>, editor: &Rc<Editor>) {
         editor.artwork.selected.replace(
             editor
                 .draft
-                .artwork()
+                .artwork
                 .binding
                 .is_some()
                 .then_some(ArtworkChange::Remove),
@@ -301,7 +293,7 @@ fn draft_search_fields(editor: &Editor) -> (String, Option<String>) {
 }
 
 fn load_current(source: &Arc<SourceOwner>, editor: &Rc<Editor>) {
-    let editing = editor.draft.artwork().clone();
+    let editing = editor.draft.artwork.clone();
     let source = Arc::downgrade(source);
     let weak = Rc::downgrade(editor);
     let task = gtk::glib::spawn_future_local(async move {

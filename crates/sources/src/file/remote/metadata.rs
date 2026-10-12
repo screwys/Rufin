@@ -5,10 +5,9 @@ use tokio::io::AsyncReadExt;
 
 use super::FileSource;
 use crate::file::remote::input::{FileInput, FileInputServer};
-use crate::{SourceError, SourceMetadataError, SourceResult, TrackMetadata};
+use crate::{MetadataDraft, SourceError, SourceMetadataError, SourceResult};
 
 pub(crate) use crate::file::metadata::WorkingFile;
-use crate::file::metadata::{CollectionTracks, hash_file_revision};
 
 impl FileSource {
     pub(crate) async fn write_tags(
@@ -37,7 +36,7 @@ impl FileSource {
         &self,
         database: &library::Database,
         track: &library::TrackRow,
-    ) -> Result<TrackMetadata, SourceMetadataError> {
+    ) -> Result<MetadataDraft, SourceMetadataError> {
         if track.cue_path.is_some()
             || track.source_format.as_deref().is_some_and(|format| {
                 !crate::file::metadata::metadata_file_available(
@@ -71,12 +70,15 @@ impl FileSource {
                 .map_err(|error| SourceMetadataError::Write(error.to_string()))?
                 .map_err(metadata_error)?;
             if !entry.writable {
-                metadata.writable = Default::default();
+                metadata
+                    .fields
+                    .iter_mut()
+                    .for_each(|field| field.writable = false);
                 metadata.artwork.can_embed = false;
             }
         }
         metadata.revision = copy.revision;
-        if metadata.writable == Default::default() {
+        if !metadata.fields.iter().any(|field| field.writable) {
             return Ok(crate::file::metadata::readonly_track_metadata(
                 track,
                 metadata.revision,
@@ -118,7 +120,7 @@ impl FileSource {
                 .small_file(&input, path, 32 * 1024 * 1024)
                 .await
                 .map_err(metadata_error)?;
-            *edit.artwork_mut() = Some(crate::ArtworkEdit {
+            edit.artwork = Some(crate::ArtworkEdit {
                 change: crate::ArtworkChange::Replace(Arc::new(crate::ImageBytes {
                     bytes,
                     content_type: crate::file::artwork::content_type(std::path::Path::new(path)),
@@ -127,14 +129,15 @@ impl FileSource {
             });
         }
         let folder_artwork = if edit
-            .artwork()
+            .artwork
+            .as_ref()
             .is_some_and(|art| art.storage == crate::ArtworkStorage::Folder)
         {
-            edit.artwork_mut().take()
+            edit.artwork.take()
         } else {
             None
         };
-        let changed = edit.tags_changed() || edit.artwork().is_some();
+        let changed = !edit.changes.is_empty() || edit.artwork.as_ref().is_some();
         let edit = Arc::new(edit);
         let mut scan = library::Scan::begin_items(database, self.source_id.as_str())
             .await
@@ -186,7 +189,7 @@ impl FileSource {
                     &mut scan,
                     &relative,
                     artwork,
-                    edit.artist_name(),
+                    crate::file::metadata::artist_name(&edit, previous_artist),
                     folder_image.as_deref(),
                 )
                 .await?;
@@ -775,48 +778,6 @@ impl FileSource {
             .revision)
     }
 
-    async fn fold_collection<T, F: std::future::Future<Output = Result<T, SourceMetadataError>>>(
-        &self,
-        database: &library::Database,
-        uri: &str,
-        mut value: T,
-        mut accept: impl FnMut(T, library::TrackRow, Option<WorkingFile>) -> F,
-    ) -> Result<(T, String, usize), SourceMetadataError> {
-        if library::source_entity_parts(uri).is_none_or(|(source, kind, _)| {
-            source != self.source_id || !matches!(kind.as_str(), "album" | "artist")
-        }) {
-            return Err(SourceMetadataError::Unavailable);
-        }
-        let mut count = 0;
-        let mut hash = blake3::Hasher::new();
-        let mut tracks = CollectionTracks::new(database, uri);
-        while let Some(track) = tracks.next().await? {
-            let media_uri = track.media_uri.clone();
-            if track.cue_path.is_some()
-                || track.source_format.as_deref().is_some_and(|format| {
-                    !crate::file::metadata::metadata_file_available(
-                        std::path::Path::new(""),
-                        Some(format),
-                    )
-                })
-            {
-                let input = self.input().await.map_err(metadata_error)?;
-                let revision = self.track_revision(database, &input, &media_uri).await?;
-                hash_file_revision(&mut hash, &media_uri, revision.as_deref());
-                value = accept(value, track, None).await?;
-            } else {
-                let copy = self.working_file(database, &track).await?;
-                hash_file_revision(&mut hash, &media_uri, copy.revision.as_deref());
-                value = accept(value, track, Some(copy)).await?;
-            }
-            count += 1;
-        }
-        if count == 0 {
-            return Err(SourceMetadataError::Unavailable);
-        }
-        Ok((value, hash.finalize().to_hex().to_string(), count))
-    }
-
     pub(crate) async fn refresh(
         &self,
         database: &library::Database,
@@ -834,91 +795,5 @@ impl FileSource {
             .stage_catalog(database, &mut scan, &|_| {}, cancelled)
             .await;
         crate::finish_scan(scan, result).await
-    }
-
-    pub(crate) async fn read_album_metadata(
-        &self,
-        database: &library::Database,
-        owner: library::AlbumRow,
-    ) -> Result<crate::AlbumMetadata, SourceMetadataError> {
-        let owner = &owner;
-        let (combined, revision, count) = self
-            .fold_collection(
-                database,
-                &owner.media_uri,
-                None::<crate::AlbumMetadata>,
-                |combined, track, copy| {
-                    let owner = owner.clone();
-                    async move {
-                        let Some(copy) = copy else {
-                            let mut metadata = combined.unwrap_or_else(|| {
-                                crate::file::metadata::readonly_album_metadata(&owner, None)
-                            });
-                            metadata.writable = Default::default();
-                            metadata.artwork.can_embed = false;
-                            return Ok(Some(metadata));
-                        };
-                        tokio::task::spawn_blocking(move || {
-                            crate::file::metadata::read_album_file(
-                                &owner,
-                                combined,
-                                &copy.file,
-                                track.source_format.as_deref(),
-                            )
-                        })
-                        .await
-                        .map_err(|e| SourceMetadataError::Write(e.to_string()))?
-                        .map(Some)
-                    }
-                },
-            )
-            .await?;
-        let mut metadata = combined.ok_or(SourceMetadataError::Unavailable)?;
-        metadata.revision = Some(revision);
-        metadata.track_count = count;
-        Ok(metadata)
-    }
-
-    pub(crate) async fn read_artist_metadata(
-        &self,
-        database: &library::Database,
-        owner: library::ArtistRow,
-    ) -> Result<crate::ArtistMetadata, SourceMetadataError> {
-        let owner = &owner;
-        let (combined, revision, count) = self
-            .fold_collection(
-                database,
-                &owner.media_uri,
-                None::<crate::ArtistMetadata>,
-                |combined, track, copy| {
-                    let owner = owner.clone();
-                    async move {
-                        let Some(copy) = copy else {
-                            let mut metadata = combined.unwrap_or_else(|| {
-                                crate::file::metadata::readonly_artist_metadata(&owner, None)
-                            });
-                            metadata.writable = Default::default();
-                            metadata.artwork.can_embed = false;
-                            return Ok(Some(metadata));
-                        };
-                        tokio::task::spawn_blocking(move || {
-                            crate::file::metadata::read_artist_file(
-                                &owner,
-                                combined,
-                                &copy.file,
-                                track.source_format.as_deref(),
-                            )
-                        })
-                        .await
-                        .map_err(|e| SourceMetadataError::Write(e.to_string()))?
-                        .map(Some)
-                    }
-                },
-            )
-            .await?;
-        let mut metadata = combined.ok_or(SourceMetadataError::Unavailable)?;
-        metadata.revision = Some(revision);
-        metadata.track_count = count;
-        Ok(metadata)
     }
 }

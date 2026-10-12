@@ -1041,10 +1041,17 @@ mod tests {
                 Some("2004-05"),
                 "{name}"
             );
-            let mut metadata = crate::file::metadata::read_track_metadata(&path, Some("mp3"))
+            let metadata = crate::file::metadata::read_track_metadata(&path, Some("mp3"))
                 .expect("read audio metadata");
-            assert!(metadata.writable.title, "{name}");
-            metadata.values.title = "Updated".into();
+            assert!(
+                metadata
+                    .fields
+                    .iter()
+                    .find(|field| field.key == "title")
+                    .unwrap()
+                    .writable,
+                "{name}"
+            );
             crate::file::metadata::write_metadata(
                 &[crate::file::metadata::MetadataFileTarget {
                     path: (&path).to_path_buf(),
@@ -1053,27 +1060,34 @@ mod tests {
                 }],
                 metadata.revision.as_deref().expect("file revision"),
                 "",
-                &crate::MetadataEdit::Track(
-                    (*&crate::TrackMetadataEdit {
-                        extra: Default::default(),
-                        artwork: None,
-                        values: metadata.values,
-                        changed: crate::TrackMetadataWritable {
-                            title: true,
-                            ..Default::default()
-                        },
-                    })
-                        .clone(),
-                ),
+                &crate::MetadataEdit {
+                    kind: crate::SourceEntityKind::Track,
+                    changes: [("title".into(), "Updated".into())].into(),
+                    artwork: None,
+                },
                 None,
             )
             .expect("write audio metadata");
             let updated = crate::file::metadata::read_track_metadata(&path, Some("mp3"))
                 .expect("read updated audio metadata");
-            assert_eq!(updated.values.title, "Updated", "{name}");
             assert_eq!(
-                updated.values.comment.as_deref(),
-                Some("Retained comment"),
+                updated
+                    .fields
+                    .iter()
+                    .find(|field| field.key == "title")
+                    .unwrap()
+                    .value,
+                "Updated",
+                "{name}"
+            );
+            assert_eq!(
+                updated
+                    .fields
+                    .iter()
+                    .find(|field| field.key == "comment")
+                    .unwrap()
+                    .value,
+                "Retained comment",
                 "{name}"
             );
         }

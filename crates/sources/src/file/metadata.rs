@@ -8,12 +8,12 @@ use std::time::UNIX_EPOCH;
 use ::lofty::config::WriteOptions;
 use ::lofty::file::TaggedFileExt;
 use ::lofty::picture::{MimeType, Picture, PictureType};
-use ::lofty::prelude::{Accessor, TagExt};
+use ::lofty::prelude::TagExt;
 use ::lofty::tag::items::popularimeter::{Popularimeter, StarRating};
 use ::lofty::tag::{ItemKey, Tag};
 
-use super::lofty::{MetadataWriter, bpm_key, read_lofty_for_edit};
-use crate::{AlbumMetadataEdit, ArtistMetadataEdit, SourceMetadataError, TrackMetadataEdit};
+use super::lofty::{MetadataWriter, read_lofty_for_edit};
+use crate::{MetadataDraft, MetadataEdit, MetadataField, SourceEntityKind, SourceMetadataError};
 
 mod fields;
 
@@ -105,7 +105,7 @@ pub(crate) fn write_metadata(
     edit: &crate::MetadataEdit,
     folder_image: Option<&Path>,
 ) -> Result<(), SourceMetadataError> {
-    let current = if matches!(edit, crate::MetadataEdit::Track(_)) {
+    let current = if edit.kind == SourceEntityKind::Track {
         revision(&targets[0].path)?
     } else {
         combined_revision(targets.iter().map(|target| &target.path))?
@@ -114,20 +114,22 @@ pub(crate) fn write_metadata(
         return Err(SourceMetadataError::Conflict);
     }
     let embedded = edit
-        .artwork()
+        .artwork
+        .as_ref()
         .is_some_and(|art| art.storage == crate::ArtworkStorage::Embedded);
-    if targets.iter().any(|target| !target.tag_writable) && (edit.tags_changed() || embedded) {
+    if targets.iter().any(|target| !target.tag_writable) && (!edit.changes.is_empty() || embedded) {
         return Err(SourceMetadataError::Unavailable);
     }
     if edit
-        .artwork()
+        .artwork
+        .as_ref()
         .is_some_and(|art| art.storage == crate::ArtworkStorage::Server)
     {
         return Err(SourceMetadataError::Unavailable);
     }
     let mut prepared = Vec::new();
     let mut mp4_image = None;
-    if edit.tags_changed() || embedded {
+    if !edit.changes.is_empty() || embedded {
         for target in targets {
             prepared.push(prepare_file(
                 &target.path,
@@ -152,8 +154,8 @@ pub(crate) fn write_metadata(
     finish_artwork(
         prepared,
         targets,
-        edit.artwork().or(renamed_artwork.as_ref()),
-        edit.artist_name(),
+        edit.artwork.as_ref().or(renamed_artwork.as_ref()),
+        artist_name(edit, previous_artist),
         folder_image,
     )
 }
@@ -183,25 +185,29 @@ fn apply_metadata(
     mp4_image: &mut Option<std::sync::Arc<crate::ImageBytes>>,
 ) -> Result<(), SourceMetadataError> {
     let picture = embedded_picture(
-        edit.artwork(),
+        edit.artwork.as_ref(),
         tag,
         writer,
-        edit.artist_name(),
+        artist_name(edit, previous_artist),
         previous_artist,
         mp4_image,
     )?;
     if edit
-        .artwork()
+        .artwork
+        .as_ref()
         .is_some_and(|art| art.storage == crate::ArtworkStorage::Embedded)
     {
-        replace_picture(tag, picture, edit.artist_name(), previous_artist);
+        replace_picture(
+            tag,
+            picture,
+            artist_name(edit, previous_artist),
+            previous_artist,
+        );
     }
-    match edit {
-        crate::MetadataEdit::Track(edit) => apply_track_edit(tag, writer, edit),
-        crate::MetadataEdit::Album(edit) => apply_album_edit(tag, edit),
-        crate::MetadataEdit::Artist(edit) => apply_artist_edit(tag, previous_artist, edit),
+    if edit.kind == SourceEntityKind::Artist {
+        apply_artist_edit(tag, previous_artist, &edit.changes);
     }
-    fields::apply(tag, writer, edit.extra())
+    fields::apply(tag, writer, edit)
 }
 
 pub(crate) fn artist_image_needs_rename(
@@ -209,7 +215,9 @@ pub(crate) fn artist_image_needs_rename(
     previous_artist: &str,
     image: Option<&Path>,
 ) -> bool {
-    matches!(edit, crate::MetadataEdit::Artist(edit) if edit.changed.name && edit.artwork.is_none())
+    edit.kind == SourceEntityKind::Artist
+        && edit.changes.contains_key("title")
+        && edit.artwork.is_none()
         && image
             .and_then(Path::file_stem)
             .and_then(|stem| stem.to_str())
@@ -218,139 +226,15 @@ pub(crate) fn artist_image_needs_rename(
             })
 }
 
-fn apply_track_edit(tag: &mut Tag, writer: MetadataWriter, edit: &TrackMetadataEdit) {
-    let values = &edit.values;
-    let changed = &edit.changed;
-    if changed.title {
-        tag.set_title(values.title.trim().to_string());
-    }
-    if changed.sort_title {
-        set_text(
-            tag,
-            ItemKey::TrackTitleSortOrder,
-            values.sort_title.as_deref(),
-        );
-    }
-    if changed.artist {
-        set_text(tag, ItemKey::TrackArtist, values.artist.as_deref());
-    }
-    if changed.album {
-        set_text(tag, ItemKey::AlbumTitle, values.album.as_deref());
-    }
-    if changed.album_artist {
-        set_text(tag, ItemKey::AlbumArtist, values.album_artist.as_deref());
-    }
-    if changed.track_number {
-        set_number(tag, ItemKey::TrackNumber, values.track_number);
-    }
-    if changed.disc_number {
-        set_number(tag, ItemKey::DiscNumber, values.disc_number);
-    }
-    if changed.year {
-        set_number(tag, ItemKey::RecordingDate, values.year);
-    }
-    if changed.genre {
-        set_text(tag, ItemKey::Genre, values.genre.as_deref());
-    }
-    if changed.comment {
-        set_text(tag, ItemKey::Comment, values.comment.as_deref());
-    }
-    if changed.bpm {
-        tag.remove_key(ItemKey::Bpm);
-        tag.remove_key(ItemKey::IntegerBpm);
-        if let (Some(value), Some(key)) =
-            (values.bpm, bpm_key(writer.file_type().primary_tag_type()))
-        {
-            tag.insert_text(key, value.to_string());
-        }
-    }
-    if changed.musicbrainz_recording_id {
-        set_text(
-            tag,
-            ItemKey::MusicBrainzRecordingId,
-            values.musicbrainz_recording_id.as_deref(),
-        );
-    }
-    if changed.musicbrainz_release_track_id {
-        set_text(
-            tag,
-            ItemKey::MusicBrainzTrackId,
-            values.musicbrainz_release_track_id.as_deref(),
-        );
-    }
-    if changed.musicbrainz_album_id {
-        set_text(
-            tag,
-            ItemKey::MusicBrainzReleaseId,
-            values.musicbrainz_album_id.as_deref(),
-        );
-    }
-    if changed.musicbrainz_release_group_id {
-        set_text(
-            tag,
-            ItemKey::MusicBrainzReleaseGroupId,
-            values.musicbrainz_release_group_id.as_deref(),
-        );
-    }
-    if changed.musicbrainz_artist_id {
-        set_text(
-            tag,
-            ItemKey::MusicBrainzArtistId,
-            values.musicbrainz_artist_id.as_deref(),
-        );
-    }
+pub(crate) fn artist_name<'a>(edit: &'a MetadataEdit, previous: &'a str) -> Option<&'a str> {
+    (edit.kind == SourceEntityKind::Artist)
+        .then(|| edit.changes.get("title").map_or(previous, String::as_str))
 }
 
-fn apply_album_edit(tag: &mut Tag, edit: &AlbumMetadataEdit) {
-    let values = &edit.values;
-    let changed = &edit.changed;
-    if changed.title {
-        set_text(tag, ItemKey::AlbumTitle, Some(&values.title));
-    }
-    if changed.sort_title {
-        set_text(
-            tag,
-            ItemKey::AlbumTitleSortOrder,
-            values.sort_title.as_deref(),
-        );
-    }
-    if changed.artist {
-        set_text(tag, ItemKey::TrackArtist, values.artist.as_deref());
-    }
-    if changed.album_artist {
-        set_text(tag, ItemKey::AlbumArtist, values.album_artist.as_deref());
-    }
-    if changed.year {
-        set_number(tag, ItemKey::RecordingDate, values.year);
-    }
-    if changed.genre {
-        set_text(tag, ItemKey::Genre, values.genre.as_deref());
-    }
-    if changed.comment {
-        set_text(tag, ItemKey::Comment, values.comment.as_deref());
-    }
-    if changed.musicbrainz_album_id {
-        set_text(
-            tag,
-            ItemKey::MusicBrainzReleaseId,
-            values.musicbrainz_album_id.as_deref(),
-        );
-    }
-    if changed.musicbrainz_release_group_id {
-        set_text(
-            tag,
-            ItemKey::MusicBrainzReleaseGroupId,
-            values.musicbrainz_release_group_id.as_deref(),
-        );
-    }
-}
-
-fn apply_artist_edit(tag: &mut Tag, previous_name: &str, edit: &ArtistMetadataEdit) {
-    let values = &edit.values;
-    let changed = &edit.changed;
-    if changed.name {
+fn apply_artist_edit(tag: &mut Tag, previous_name: &str, changes: &crate::MetadataChanges) {
+    if let Some(name) = changes.get("title") {
         let previous = format!("Artist: {}", previous_name.trim());
-        let current = format!("Artist: {}", values.name.trim());
+        let current = format!("Artist: {}", name.trim());
         for index in 0..tag.pictures().len() {
             let picture = &tag.pictures()[index];
             if matches!(
@@ -395,11 +279,11 @@ fn apply_artist_edit(tag: &mut Tag, previous_name: &str, edit: &ArtistMetadataEd
         if !matches {
             continue;
         }
-        if changed.name {
+        if let Some(name) = changes.get("title") {
             for key in names {
                 let names = tag
                     .get_strings(*key)
-                    .map(|value| replace_name(value, previous_name, &values.name))
+                    .map(|value| replace_name(value, previous_name, name))
                     .collect::<Vec<_>>();
                 tag.remove_key(*key);
                 for name in names {
@@ -410,30 +294,24 @@ fn apply_artist_edit(tag: &mut Tag, previous_name: &str, edit: &ArtistMetadataEd
                 }
             }
         }
-        if changed.sort_name {
+        if let Some(value) = changes.get("sort_title") {
             set_artist_value(
                 tag,
                 sort,
                 &role_names,
                 previous_name,
-                values.sort_name.as_deref(),
+                (!value.is_empty()).then_some(value.as_str()),
             );
         }
-        if changed.musicbrainz_artist_id {
+        if let Some(value) = changes.get("musicbrainz_artist_id") {
             set_artist_value(
                 tag,
                 id,
                 &role_names,
                 previous_name,
-                values.musicbrainz_artist_id.as_deref(),
+                (!value.is_empty()).then_some(value.as_str()),
             );
         }
-    }
-    if changed.genre {
-        set_text(tag, ItemKey::Genre, values.genre.as_deref());
-    }
-    if changed.comment {
-        set_text(tag, ItemKey::Comment, values.comment.as_deref());
     }
 }
 
@@ -1024,14 +902,6 @@ fn set_text(tag: &mut Tag, key: ItemKey, value: Option<&str>) {
     }
 }
 
-fn set_number(tag: &mut Tag, key: ItemKey, value: Option<u16>) {
-    set_text(
-        tag,
-        key,
-        value.as_ref().map(|value| value.to_string()).as_deref(),
-    );
-}
-
 fn replace_name(value: &str, previous: &str, replacement: &str) -> String {
     super::media::split_names(value)
         .into_iter()
@@ -1138,9 +1008,7 @@ fn write_error(error: impl std::fmt::Display) -> SourceMetadataError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        AlbumMetadataValues, AlbumMetadataWritable, TrackMetadataValues, TrackMetadataWritable,
-    };
+    use lofty::prelude::Accessor;
 
     #[test]
     fn repeated_album_edits_replace_the_previous_tag_in_a_working_copy() {
@@ -1167,17 +1035,10 @@ mod tests {
                 .unwrap();
         }
         for title in ["First album", "A longer second album title", "Short"] {
-            let edit = crate::AlbumMetadataEdit {
-                extra: Default::default(),
+            let edit = MetadataEdit {
+                kind: SourceEntityKind::Album,
+                changes: [("title".into(), title.into())].into(),
                 artwork: None,
-                values: crate::AlbumMetadataValues {
-                    title: title.into(),
-                    ..Default::default()
-                },
-                changed: crate::AlbumMetadataWritable {
-                    title: true,
-                    ..Default::default()
-                },
             };
             let paths = [file.to_path_buf()];
             let revision = combined_revision(&paths).unwrap();
@@ -1192,12 +1053,20 @@ mod tests {
                     .collect::<Vec<_>>(),
                 &revision,
                 "",
-                &crate::MetadataEdit::Album((*&edit).clone()),
+                &edit,
                 None,
             )
             .unwrap();
             let observed = read_track_metadata(&file, Some("wav")).unwrap();
-            assert_eq!(observed.values.album.as_deref(), Some(title));
+            assert_eq!(
+                observed
+                    .fields
+                    .iter()
+                    .find(|field| field.key == "album")
+                    .unwrap()
+                    .value,
+                title
+            );
             let saved = std::fs::read(&file).unwrap();
             assert_eq!(
                 u32::from_le_bytes(saved[4..8].try_into().unwrap()) as usize + 8,
@@ -1221,30 +1090,14 @@ mod tests {
         }
     }
 
-    fn track_edit(values: TrackMetadataValues) -> TrackMetadataEdit {
-        TrackMetadataEdit {
-            extra: Default::default(),
+    fn track_edit(changes: &[(&str, &str)]) -> MetadataEdit {
+        MetadataEdit {
+            kind: SourceEntityKind::Track,
+            changes: changes
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect(),
             artwork: None,
-            values,
-            changed: TrackMetadataWritable {
-                title: true,
-                sort_title: true,
-                artist: true,
-                album: true,
-                album_artist: true,
-                track_number: true,
-                disc_number: true,
-                year: true,
-                genre: true,
-                comment: true,
-                bpm: true,
-                locked: true,
-                musicbrainz_recording_id: true,
-                musicbrainz_release_track_id: true,
-                musicbrainz_album_id: true,
-                musicbrainz_release_group_id: true,
-                musicbrainz_artist_id: true,
-            },
         }
     }
 
@@ -1262,13 +1115,14 @@ mod tests {
         fs::write(&path, silent_wav()).expect("write WAV");
         assert!(super::metadata_file_available(&path, Some("wav")));
         let before = revision(&path).expect("file revision");
-        let values = TrackMetadataValues {
-            title: "Updated title".to_string(),
-            artist: Some("Updated artist".to_string()),
-            album: Some("Updated album".to_string()),
-            track_number: Some(3),
-            ..TrackMetadataValues::default()
-        };
+        let edit = track_edit(&[
+            ("title", "Updated title"),
+            ("artist", "Updated artist"),
+            ("album", "Updated album"),
+            ("track_number", "3"),
+            ("recording_date", "2020-04-03"),
+            ("musicbrainz_recording_id", "recording"),
+        ]);
 
         write_metadata(
             &[crate::file::metadata::MetadataFileTarget {
@@ -1278,15 +1132,28 @@ mod tests {
             }],
             &before,
             "",
-            &crate::MetadataEdit::Track((*&track_edit(values)).clone()),
+            &edit,
             None,
         )
         .expect("write metadata");
         let read = super::read_track_metadata(&path, Some("wav")).expect("read metadata");
-        assert!(read.writable.title);
-        assert_eq!(read.values.title, "Updated title");
-        assert_eq!(read.values.artist.as_deref(), Some("Updated artist"));
-        assert_eq!(read.values.track_number, Some(3));
+        assert!(
+            read.fields
+                .iter()
+                .find(|field| field.key == "title")
+                .unwrap()
+                .writable
+        );
+        let values = read
+            .fields
+            .into_iter()
+            .map(|field| (field.key, field.value))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(values["title"], "Updated title");
+        assert_eq!(values["artist"], "Updated artist");
+        assert_eq!(values["track_number"], "3");
+        assert_eq!(values["recording_date"], "2020-04-03");
+        assert_eq!(values["musicbrainz_recording_id"], "recording");
     }
 
     #[test]
@@ -1299,24 +1166,24 @@ mod tests {
         crate::Source::write_direct_file_metadata(
             &uri,
             metadata.revision.as_deref().unwrap(),
-            &track_edit(TrackMetadataValues {
-                title: "Direct original".to_string(),
-                ..TrackMetadataValues::default()
-            }),
+            &track_edit(&[("title", "Direct original")]),
         )
         .unwrap();
         assert_eq!(
             crate::Source::read_direct_file_metadata(&uri)
                 .unwrap()
-                .values
-                .title,
+                .fields
+                .into_iter()
+                .find(|field| field.key == "title")
+                .unwrap()
+                .value,
             "Direct original"
         );
         assert!(
             crate::Source::write_direct_file_metadata(
                 &format!("{uri}#cue=1"),
                 "",
-                &track_edit(TrackMetadataValues::default())
+                &track_edit(&[])
             )
             .is_err()
         );
@@ -1337,13 +1204,7 @@ mod tests {
             }],
             &before,
             "",
-            &crate::MetadataEdit::Track(
-                (*&track_edit(TrackMetadataValues {
-                    title: "Track title".to_string(),
-                    ..TrackMetadataValues::default()
-                }))
-                    .clone(),
-            ),
+            &track_edit(&[("title", "Track title")]),
             None,
         )
         .expect("seed metadata");
@@ -1356,8 +1217,11 @@ mod tests {
         assert_eq!(
             super::read_track_metadata(&path, Some("wav"))
                 .expect("read metadata")
-                .values
-                .title,
+                .fields
+                .into_iter()
+                .find(|field| field.key == "title")
+                .unwrap()
+                .value,
             "Track title"
         );
 
@@ -1402,15 +1266,11 @@ mod tests {
                 }],
                 &before,
                 "",
-                &crate::MetadataEdit::Track(
-                    (*&track_edit(TrackMetadataValues {
-                        title: path.file_stem().unwrap().to_string_lossy().into_owned(),
-                        album: Some("Before".to_string()),
-                        genre: Some(format!("Genre {index}")),
-                        ..TrackMetadataValues::default()
-                    }))
-                        .clone(),
-                ),
+                &track_edit(&[
+                    ("title", &path.file_stem().unwrap().to_string_lossy()),
+                    ("album", "Before"),
+                    ("genre", &format!("Genre {index}")),
+                ]),
                 None,
             )
             .expect("seed Track metadata");
@@ -1432,23 +1292,15 @@ mod tests {
                 .collect::<Vec<_>>(),
             &before,
             "",
-            &crate::MetadataEdit::Album(
-                (*&AlbumMetadataEdit {
-                    extra: Default::default(),
-                    artwork: None,
-                    values: AlbumMetadataValues {
-                        title: "After".to_string(),
-                        album_artist: Some("Album Artist".to_string()),
-                        ..AlbumMetadataValues::default()
-                    },
-                    changed: AlbumMetadataWritable {
-                        title: true,
-                        album_artist: true,
-                        ..AlbumMetadataWritable::default()
-                    },
-                })
-                    .clone(),
-            ),
+            &MetadataEdit {
+                kind: SourceEntityKind::Album,
+                changes: [
+                    ("title".into(), "After".into()),
+                    ("album_artist".into(), "Album Artist".into()),
+                ]
+                .into(),
+                artwork: None,
+            },
             None,
         )
         .expect("write Album metadata");
@@ -1456,12 +1308,15 @@ mod tests {
         for (index, path) in paths.iter().enumerate() {
             let values = read_track_metadata(path, Some("wav"))
                 .expect("read Album metadata")
-                .values;
-            assert_eq!(values.album.as_deref(), Some("After"));
-            assert_eq!(values.album_artist.as_deref(), Some("Album Artist"));
+                .fields
+                .into_iter()
+                .map(|field| (field.key, field.value))
+                .collect::<std::collections::BTreeMap<_, _>>();
+            assert_eq!(values["album"], "After");
+            assert_eq!(values["album_artist"], "Album Artist");
             assert_eq!(
-                values.genre.as_deref(),
-                Some(format!("Genre {index}").as_str()),
+                values["genre"],
+                format!("Genre {index}"),
                 "an untouched mixed aggregate field keeps each Track's value"
             );
         }
@@ -1485,13 +1340,7 @@ mod tests {
             }],
             &stale,
             "",
-            &crate::MetadataEdit::Track(
-                (*&track_edit(TrackMetadataValues {
-                    title: "Should not replace".to_string(),
-                    ..TrackMetadataValues::default()
-                }))
-                    .clone(),
-            ),
+            &track_edit(&[("title", "Should not replace")]),
             None,
         );
 
@@ -1852,138 +1701,54 @@ fn read_metadata_file(
     Ok((tagged, writer))
 }
 
+fn read_file(
+    kind: SourceEntityKind,
+    path: &Path,
+    format: Option<&str>,
+    artist: Option<&str>,
+) -> Result<MetadataDraft, SourceMetadataError> {
+    let (tagged, writer) = read_metadata_file(path, format)?;
+    let tag = tagged
+        .as_ref()
+        .and_then(|file| file.primary_tag().or_else(|| file.first_tag()));
+    let scope = match kind {
+        SourceEntityKind::Track => 1,
+        SourceEntityKind::Album => 2,
+        SourceEntityKind::Artist => 4,
+    };
+    let mut values = fields::read(tag, writer, scope);
+    if let Some(name) = artist {
+        values.splice(0..0, artist_fields(tag, writer, name));
+    } else if writer.is_none() && kind == SourceEntityKind::Track {
+        if let Some(title) = values
+            .iter_mut()
+            .find(|field| field.key == "title" && field.value.is_empty())
+        {
+            title.value = path
+                .file_stem()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+        }
+    }
+    let mut metadata = MetadataDraft::new(kind, values);
+    metadata.track_count = 1;
+    metadata.artwork.can_embed = artwork_embeddable(path, format, artist.is_some());
+    metadata.revision = Some(revision(path)?);
+    Ok(metadata)
+}
+
 pub(crate) fn read_track_metadata(
     path: &Path,
     source_format: Option<&str>,
-) -> Result<crate::TrackMetadata, SourceMetadataError> {
-    let (tagged, writer) = read_metadata_file(path, source_format)?;
-    let tag = tagged
-        .as_ref()
-        .and_then(|file| file.primary_tag().or_else(|| file.first_tag()));
-    let text = |key| {
-        tag.and_then(|tag| tag.get_string(key))
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string)
-    };
-    let number = |key| text(key).and_then(|value| value.parse::<u16>().ok());
-    let mut values = crate::TrackMetadataValues {
-        title: tag
-            .and_then(|tag| tag.title())
-            .map(|value| value.trim().to_string())
-            .unwrap_or_default(),
-        sort_title: text(ItemKey::TrackTitleSortOrder),
-        artist: tag
-            .and_then(|tag| tag.artist())
-            .map(|value| value.trim().to_string()),
-        album: tag
-            .and_then(|tag| tag.album())
-            .map(|value| value.trim().to_string()),
-        album_artist: text(ItemKey::AlbumArtist),
-        track_number: tag.and_then(|tag| tag.track()).map(|value| value as u16),
-        disc_number: tag.and_then(|tag| tag.disk()).map(|value| value as u16),
-        year: tag.and_then(|tag| tag.date()).map(|value| value.year),
-        genre: tag
-            .and_then(|tag| tag.genre())
-            .map(|value| value.trim().to_string()),
-        comment: tag
-            .and_then(|tag| tag.comment())
-            .map(|value| value.trim().to_string()),
-        bpm: number(ItemKey::IntegerBpm).or_else(|| number(ItemKey::Bpm)),
-        locked: None,
-        musicbrainz_recording_id: text(ItemKey::MusicBrainzRecordingId),
-        musicbrainz_release_track_id: text(ItemKey::MusicBrainzTrackId),
-        musicbrainz_album_id: text(ItemKey::MusicBrainzReleaseId),
-        musicbrainz_release_group_id: text(ItemKey::MusicBrainzReleaseGroupId),
-        musicbrainz_artist_id: text(ItemKey::MusicBrainzArtistId),
-    };
-    if writer.is_none() && values.title.is_empty() {
-        values.title = path
-            .file_stem()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
-    }
-    let can = |key| writer.is_some_and(|writer| writer.metadata_key_is_writable(key));
-    let writable = crate::TrackMetadataWritable {
-        title: can(ItemKey::TrackTitle),
-        sort_title: can(ItemKey::TrackTitleSortOrder),
-        artist: can(ItemKey::TrackArtist),
-        album: can(ItemKey::AlbumTitle),
-        album_artist: can(ItemKey::AlbumArtist),
-        track_number: can(ItemKey::TrackNumber),
-        disc_number: can(ItemKey::DiscNumber),
-        year: can(ItemKey::RecordingDate),
-        genre: can(ItemKey::Genre),
-        comment: can(ItemKey::Comment),
-        bpm: writer.is_some_and(|writer| {
-            super::lofty::bpm_key(writer.file_type().primary_tag_type()).is_some()
-        }),
-        locked: false,
-        musicbrainz_recording_id: can(ItemKey::MusicBrainzRecordingId),
-        musicbrainz_release_track_id: can(ItemKey::MusicBrainzTrackId),
-        musicbrainz_album_id: can(ItemKey::MusicBrainzReleaseId),
-        musicbrainz_release_group_id: can(ItemKey::MusicBrainzReleaseGroupId),
-        musicbrainz_artist_id: can(ItemKey::MusicBrainzArtistId),
-    };
-    Ok(crate::TrackMetadata {
-        extra: fields::read(tag, writer, 1),
-        artwork: crate::ArtworkEditing {
-            can_embed: artwork_embeddable(path, source_format, false),
-            ..Default::default()
-        },
-        writable,
-        source_search: false,
-        revision: Some(revision(path)?),
-        source_values: values.clone(),
-        values,
-        rufin_filled: crate::TrackMetadataWritable::default(),
-    })
+) -> Result<MetadataDraft, SourceMetadataError> {
+    read_file(SourceEntityKind::Track, path, source_format, None)
 }
 
-fn album_values(tag: Option<&Tag>) -> crate::AlbumMetadataValues {
-    let text = |key| {
-        tag.and_then(|tag| tag.get_string(key))
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string)
-    };
-    crate::AlbumMetadataValues {
-        title: tag
-            .and_then(|tag| tag.album())
-            .map(|value| value.trim().to_string())
-            .unwrap_or_default(),
-        sort_title: text(ItemKey::AlbumTitleSortOrder),
-        artist: text(ItemKey::TrackArtist),
-        album_artist: text(ItemKey::AlbumArtist),
-        year: tag.and_then(|tag| tag.date()).map(|value| value.year),
-        genre: tag
-            .and_then(|tag| tag.genre())
-            .map(|value| value.trim().to_string()),
-        comment: tag
-            .and_then(|tag| tag.comment())
-            .map(|value| value.trim().to_string()),
-        locked: None,
-        musicbrainz_album_id: text(ItemKey::MusicBrainzReleaseId),
-        musicbrainz_release_group_id: text(ItemKey::MusicBrainzReleaseGroupId),
-    }
-}
-
-pub(crate) fn read_artist_metadata_values(
-    path: &Path,
-    source_format: Option<&str>,
-    fallback_name: &str,
-) -> Result<
-    (
-        crate::ArtistMetadataValues,
-        crate::ArtistMetadataWritable,
-        Vec<crate::MetadataField>,
-    ),
-    crate::SourceMetadataError,
-> {
-    let (tagged, writer) = read_metadata_file(path, source_format)?;
-    let tag = tagged
-        .as_ref()
-        .and_then(|file| file.primary_tag().or_else(|| file.first_tag()));
+fn artist_fields(
+    tag: Option<&Tag>,
+    writer: Option<MetadataWriter>,
+    name: &str,
+) -> Vec<MetadataField> {
     let names = |key| {
         tag.into_iter()
             .flat_map(|tag| tag.get_strings(key))
@@ -2003,63 +1768,55 @@ pub(crate) fn read_artist_metadata_values(
         ),
     ]
     .into_iter()
-    .filter_map(|(name, sort, id)| {
-        let mut role_names = names(name);
-        if name == ItemKey::TrackArtist {
+    .filter_map(|(key, sort, id)| {
+        let mut values = names(key);
+        if key == ItemKey::TrackArtist {
             let credits = names(ItemKey::TrackArtists);
             if !credits.is_empty() {
-                role_names = credits;
+                values = credits;
             }
         }
-        role_names
+        values
             .iter()
-            .any(|name| name.eq_ignore_ascii_case(fallback_name))
-            .then_some((name, sort, id, role_names))
+            .any(|value| value.eq_ignore_ascii_case(name))
+            .then_some((key, sort, id, values))
     })
     .collect::<Vec<_>>();
-    let selected_text = |key, role_names: &[String]| {
-        let values = tag
-            .into_iter()
-            .flat_map(|tag| tag.get_strings(key))
-            .flat_map(|value| value.split([';', '/']).map(str::trim).map(str::to_string))
-            .collect::<Vec<_>>();
-        let position = role_names
+    let selected_text = |key, names: &[String]| {
+        let position = names
             .iter()
-            .position(|name| name.eq_ignore_ascii_case(fallback_name))?;
-        values
-            .into_iter()
+            .position(|value| value.eq_ignore_ascii_case(name))?;
+        tag.into_iter()
+            .flat_map(|tag| tag.get_strings(key))
+            .flat_map(|value| value.split([';', '/']).map(str::trim))
             .nth(position)
             .filter(|value| !value.is_empty())
+            .map(str::to_string)
     };
     let can = |key| writer.is_some_and(|writer| writer.metadata_key_is_writable(key));
-    let writable = crate::ArtistMetadataWritable {
-        name: !roles.is_empty() && roles.iter().all(|(name, _, _, _)| can(*name)),
-        sort_name: !roles.is_empty() && roles.iter().all(|(_, sort, _, _)| can(*sort)),
-        musicbrainz_artist_id: !roles.is_empty() && roles.iter().all(|(_, _, id, _)| can(*id)),
-        genre: can(ItemKey::Genre),
-        comment: can(ItemKey::Comment),
-        locked: false,
-    };
-    Ok((
-        crate::ArtistMetadataValues {
-            name: fallback_name.to_string(),
-            sort_name: roles
+    vec![
+        MetadataField::new(
+            "title",
+            name,
+            !roles.is_empty() && roles.iter().all(|(key, _, _, _)| can(*key)),
+        ),
+        MetadataField::new(
+            "sort_title",
+            roles
                 .iter()
-                .find_map(|(_, sort, _, names)| selected_text(*sort, names)),
-            genre: tag
-                .and_then(|tag| tag.genre())
-                .map(|value| value.trim().to_string()),
-            comment: tag
-                .and_then(|tag| tag.comment())
-                .map(|value| value.trim().to_string()),
-            locked: None,
-            musicbrainz_artist_id: roles
+                .find_map(|(_, key, _, names)| selected_text(*key, names))
+                .unwrap_or_default(),
+            !roles.is_empty() && roles.iter().all(|(_, key, _, _)| can(*key)),
+        ),
+        MetadataField::new(
+            "musicbrainz_artist_id",
+            roles
                 .iter()
-                .find_map(|(_, _, id, names)| selected_text(*id, names)),
-        },
-        writable,
-        fields::read(tag, writer, 4),
-    ))
+                .find_map(|(_, _, key, names)| selected_text(*key, names))
+                .unwrap_or_default(),
+            !roles.is_empty() && roles.iter().all(|(_, _, key, _)| can(*key)),
+        ),
+    ]
 }
 
 pub(crate) struct MetadataFileTarget {
@@ -2071,199 +1828,213 @@ pub(crate) struct MetadataFileTarget {
 pub(crate) fn readonly_track_metadata(
     track: &library::TrackRow,
     revision: Option<String>,
-) -> crate::TrackMetadata {
-    let values = crate::TrackMetadataValues {
-        title: track.title.clone(),
-        artist: Some(track.artist.clone()).filter(|value| !value.is_empty()),
-        album: Some(track.album.clone()).filter(|value| !value.is_empty()),
-        album_artist: track.album_display_artist.clone(),
-        track_number: u16::try_from(track.track_number)
-            .ok()
-            .filter(|value| *value > 0),
-        disc_number: u16::try_from(track.disc_number)
-            .ok()
-            .filter(|value| *value > 0),
-        year: track.year.and_then(|value| u16::try_from(value).ok()),
-        genre: Some(
-            track
-                .genres
-                .iter()
-                .map(|genre| genre.name.as_str())
-                .collect::<Vec<_>>()
-                .join("; "),
-        )
-        .filter(|value| !value.is_empty()),
-        comment: track.comment.clone(),
-        bpm: track.bpm.and_then(|value| u16::try_from(value).ok()),
-        musicbrainz_recording_id: track.musicbrainz_recording_id.clone(),
-        musicbrainz_release_track_id: track.musicbrainz_release_track_id.clone(),
-        musicbrainz_album_id: track.musicbrainz_album_id.clone(),
-        musicbrainz_release_group_id: track.musicbrainz_release_group_id.clone(),
-        musicbrainz_artist_id: track.primary_artist_musicbrainz_id.clone(),
-        ..Default::default()
-    };
-    crate::TrackMetadata {
-        extra: Vec::new(),
-        artwork: Default::default(),
-        values: values.clone(),
-        source_values: values,
-        writable: Default::default(),
-        rufin_filled: Default::default(),
-        source_search: false,
-        revision,
-    }
+) -> MetadataDraft {
+    let mut metadata = MetadataDraft::new(
+        SourceEntityKind::Track,
+        [
+            ("title", track.title.clone()),
+            ("artist", track.artist.clone()),
+            ("album", track.album.clone()),
+            (
+                "album_artist",
+                track.album_display_artist.clone().unwrap_or_default(),
+            ),
+            (
+                "track_number",
+                (track.track_number > 0)
+                    .then(|| track.track_number.to_string())
+                    .unwrap_or_default(),
+            ),
+            (
+                "disc_number",
+                (track.disc_number > 0)
+                    .then(|| track.disc_number.to_string())
+                    .unwrap_or_default(),
+            ),
+            (
+                "recording_date",
+                track
+                    .year
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+            ),
+            (
+                "genre",
+                track
+                    .genres
+                    .iter()
+                    .map(|genre| genre.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            ),
+            ("comment", track.comment.clone().unwrap_or_default()),
+            (
+                "bpm",
+                track.bpm.map(|value| value.to_string()).unwrap_or_default(),
+            ),
+            (
+                "musicbrainz_recording_id",
+                track.musicbrainz_recording_id.clone().unwrap_or_default(),
+            ),
+            (
+                "musicbrainz_release_track_id",
+                track
+                    .musicbrainz_release_track_id
+                    .clone()
+                    .unwrap_or_default(),
+            ),
+            (
+                "musicbrainz_album_id",
+                track.musicbrainz_album_id.clone().unwrap_or_default(),
+            ),
+            (
+                "musicbrainz_release_group_id",
+                track
+                    .musicbrainz_release_group_id
+                    .clone()
+                    .unwrap_or_default(),
+            ),
+            (
+                "musicbrainz_artist_id",
+                track
+                    .primary_artist_musicbrainz_id
+                    .clone()
+                    .unwrap_or_default(),
+            ),
+        ]
+        .into_iter()
+        .map(|(key, value)| MetadataField::new(key, value, false))
+        .collect(),
+    );
+    metadata.revision = revision;
+    metadata.track_count = 1;
+    metadata
 }
 
 pub(crate) fn readonly_album_metadata(
     album: &library::AlbumRow,
     revision: Option<String>,
-) -> crate::AlbumMetadata {
-    let values = crate::AlbumMetadataValues {
-        title: album.title.clone(),
-        artist: Some(album.display_artist.clone()),
-        album_artist: Some(album.display_artist.clone()),
-        year: album.year.and_then(|year| u16::try_from(year).ok()),
-        genre: Some(
-            album
-                .genres
-                .iter()
-                .map(|genre| genre.name.as_str())
-                .collect::<Vec<_>>()
-                .join("; "),
-        )
-        .filter(|genre| !genre.is_empty()),
-        musicbrainz_album_id: album.musicbrainz_release_id.clone(),
-        musicbrainz_release_group_id: album.musicbrainz_release_group_id.clone(),
-        ..Default::default()
-    };
-    crate::AlbumMetadata {
-        extra: Vec::new(),
-        artwork: Default::default(),
-        values: values.clone(),
-        source_values: values,
-        writable: Default::default(),
-        rufin_filled: Default::default(),
-        mixed: Default::default(),
-        source_search: false,
-        revision,
-        track_count: usize::try_from(album.track_count).unwrap_or_default(),
-    }
+) -> MetadataDraft {
+    let mut metadata = MetadataDraft::new(
+        SourceEntityKind::Album,
+        [
+            ("title", album.title.clone()),
+            ("artist", album.display_artist.clone()),
+            ("album_artist", album.display_artist.clone()),
+            (
+                "recording_date",
+                album
+                    .year
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+            ),
+            (
+                "genre",
+                album
+                    .genres
+                    .iter()
+                    .map(|genre| genre.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            ),
+            (
+                "musicbrainz_album_id",
+                album.musicbrainz_release_id.clone().unwrap_or_default(),
+            ),
+            (
+                "musicbrainz_release_group_id",
+                album
+                    .musicbrainz_release_group_id
+                    .clone()
+                    .unwrap_or_default(),
+            ),
+        ]
+        .into_iter()
+        .map(|(key, value)| MetadataField::new(key, value, false))
+        .collect(),
+    );
+    metadata.revision = revision;
+    metadata.track_count = album.track_count.max(0) as usize;
+    metadata
 }
 
 pub(crate) fn readonly_artist_metadata(
     artist: &library::ArtistRow,
     revision: Option<String>,
-) -> crate::ArtistMetadata {
-    let values = crate::ArtistMetadataValues {
-        name: artist.name.clone(),
-        musicbrainz_artist_id: artist.musicbrainz_artist_id.clone(),
-        ..Default::default()
-    };
-    crate::ArtistMetadata {
-        extra: Vec::new(),
-        artwork: Default::default(),
-        values: values.clone(),
-        source_values: values,
-        writable: Default::default(),
-        rufin_filled: Default::default(),
-        mixed: Default::default(),
-        source_search: false,
-        revision,
-        track_count: usize::try_from(artist.track_count).unwrap_or_default(),
-    }
+) -> MetadataDraft {
+    let mut metadata = MetadataDraft::new(
+        SourceEntityKind::Artist,
+        vec![
+            MetadataField::new("title", artist.name.clone(), false),
+            MetadataField::new(
+                "musicbrainz_artist_id",
+                artist.musicbrainz_artist_id.clone().unwrap_or_default(),
+                false,
+            ),
+        ],
+    );
+    metadata.revision = revision;
+    metadata.track_count = artist.track_count.max(0) as usize;
+    metadata
 }
 
 pub(crate) fn read_album_file(
     album: &library::AlbumRow,
-    current: Option<crate::AlbumMetadata>,
-    path: &std::path::Path,
+    current: Option<MetadataDraft>,
+    path: &Path,
     format: Option<&str>,
-) -> Result<crate::AlbumMetadata, crate::SourceMetadataError> {
-    let (tagged, writer) = read_metadata_file(path, format)?;
-    let tag = tagged
-        .as_ref()
-        .and_then(|file| file.primary_tag().or_else(|| file.first_tag()));
-    let can = |key| writer.is_some_and(|writer| writer.metadata_key_is_writable(key));
-    let extra = fields::read(tag, writer, 2);
-    let mut values = album_values(tag);
-    if let Some(mut metadata) = current {
-        fields::merge(&mut metadata.extra, extra);
-        metadata.artwork.can_embed &= artwork_embeddable(path, format, false);
-        metadata.mixed.title |= values.title != metadata.source_values.title;
-        metadata.mixed.sort_title |= values.sort_title != metadata.source_values.sort_title;
-        metadata.mixed.artist |= values.artist != metadata.source_values.artist;
-        metadata.mixed.album_artist |= values.album_artist != metadata.source_values.album_artist;
-        metadata.mixed.year |= values.year != metadata.source_values.year;
-        metadata.mixed.genre |= values.genre != metadata.source_values.genre;
-        metadata.mixed.comment |= values.comment != metadata.source_values.comment;
-        metadata.mixed.musicbrainz_album_id |=
-            values.musicbrainz_album_id != metadata.source_values.musicbrainz_album_id;
-        metadata.mixed.musicbrainz_release_group_id |= values.musicbrainz_release_group_id
-            != metadata.source_values.musicbrainz_release_group_id;
-        metadata.writable.title &= can(ItemKey::AlbumTitle);
-        metadata.writable.sort_title &= can(ItemKey::AlbumTitleSortOrder);
-        metadata.writable.artist &= can(ItemKey::TrackArtist);
-        metadata.writable.album_artist &= can(ItemKey::AlbumArtist);
-        metadata.writable.year &= can(ItemKey::RecordingDate);
-        metadata.writable.genre &= can(ItemKey::Genre);
-        metadata.writable.comment &= can(ItemKey::Comment);
-        metadata.writable.musicbrainz_album_id &= can(ItemKey::MusicBrainzReleaseId);
-        metadata.writable.musicbrainz_release_group_id &= can(ItemKey::MusicBrainzReleaseGroupId);
-        metadata.track_count += 1;
-        return Ok(metadata);
+) -> Result<MetadataDraft, SourceMetadataError> {
+    let mut next = read_file(SourceEntityKind::Album, path, format, None)?;
+    if current.is_none() {
+        for field in &mut next.fields {
+            if field.value.is_empty() {
+                match field.key.as_str() {
+                    "title" => field.value = album.title.clone(),
+                    "artist" | "album_artist" => field.value = album.display_artist.clone(),
+                    _ => {}
+                }
+            }
+        }
+        next.suggest("musicbrainz_album_id", album.musicbrainz_release_id.clone());
+        next.suggest(
+            "musicbrainz_release_group_id",
+            album.musicbrainz_release_group_id.clone(),
+        );
     }
-    if values.title.is_empty() {
-        values.title = album.title.clone();
+    Ok(merge_file(current, next))
+}
+
+pub(crate) fn read_artist_file(
+    artist: &library::ArtistRow,
+    current: Option<MetadataDraft>,
+    path: &Path,
+    format: Option<&str>,
+) -> Result<MetadataDraft, SourceMetadataError> {
+    let mut next = read_file(SourceEntityKind::Artist, path, format, Some(&artist.name))?;
+    if current.is_none() {
+        next.suggest(
+            "musicbrainz_artist_id",
+            artist.musicbrainz_artist_id.clone(),
+        );
     }
-    if values.album_artist.is_none() {
-        values.album_artist = Some(album.display_artist.clone());
+    Ok(merge_file(current, next))
+}
+
+fn merge_file(current: Option<MetadataDraft>, next: MetadataDraft) -> MetadataDraft {
+    if let Some(mut current) = current {
+        fields::merge(&mut current.fields, next.fields);
+        current.artwork.can_embed &= next.artwork.can_embed;
+        current.track_count += 1;
+        current
+    } else {
+        next
     }
-    if values.artist.is_none() {
-        values.artist = Some(album.display_artist.clone());
-    }
-    let source_values = values.clone();
-    let mut rufin_filled = crate::AlbumMetadataWritable::default();
-    if values.musicbrainz_album_id.is_none() && album.musicbrainz_release_id.is_some() {
-        values.musicbrainz_album_id = album.musicbrainz_release_id.clone();
-        rufin_filled.musicbrainz_album_id = true;
-    }
-    if values.musicbrainz_release_group_id.is_none() && album.musicbrainz_release_group_id.is_some()
-    {
-        values.musicbrainz_release_group_id = album.musicbrainz_release_group_id.clone();
-        rufin_filled.musicbrainz_release_group_id = true;
-    }
-    Ok(crate::AlbumMetadata {
-        extra,
-        artwork: crate::ArtworkEditing {
-            can_embed: artwork_embeddable(path, format, false),
-            ..Default::default()
-        },
-        writable: crate::AlbumMetadataWritable {
-            title: can(ItemKey::AlbumTitle),
-            sort_title: can(ItemKey::AlbumTitleSortOrder),
-            artist: can(ItemKey::TrackArtist),
-            album_artist: can(ItemKey::AlbumArtist),
-            year: can(ItemKey::RecordingDate),
-            genre: can(ItemKey::Genre),
-            comment: can(ItemKey::Comment),
-            locked: false,
-            musicbrainz_album_id: can(ItemKey::MusicBrainzReleaseId),
-            musicbrainz_release_group_id: can(ItemKey::MusicBrainzReleaseGroupId),
-        },
-        source_search: false,
-        revision: None,
-        source_values,
-        values,
-        rufin_filled,
-        track_count: 1,
-        mixed: crate::AlbumMetadataMixed::default(),
-    })
 }
 
 pub(crate) fn album_metadata_from_targets(
     album: library::AlbumRow,
     targets: &[MetadataFileTarget],
-) -> Result<crate::AlbumMetadata, crate::SourceMetadataError> {
+) -> Result<MetadataDraft, SourceMetadataError> {
     let revision = Some(combined_revision(
         targets.iter().map(|target| &target.path),
     )?);
@@ -2279,61 +2050,15 @@ pub(crate) fn album_metadata_from_targets(
             target.format.as_deref(),
         )?);
     }
-    let mut metadata = metadata.ok_or(crate::SourceMetadataError::Unavailable)?;
+    let mut metadata = metadata.ok_or(SourceMetadataError::Unavailable)?;
     metadata.revision = revision;
     Ok(metadata)
-}
-pub(crate) fn read_artist_file(
-    artist: &library::ArtistRow,
-    current: Option<crate::ArtistMetadata>,
-    path: &std::path::Path,
-    format: Option<&str>,
-) -> Result<crate::ArtistMetadata, crate::SourceMetadataError> {
-    let (mut values, writable, extra) =
-        crate::file::metadata::read_artist_metadata_values(path, format, &artist.name)?;
-    if let Some(mut metadata) = current {
-        fields::merge(&mut metadata.extra, extra);
-        metadata.artwork.can_embed &= artwork_embeddable(path, format, true);
-        metadata.mixed.sort_name |= values.sort_name != metadata.source_values.sort_name;
-        metadata.mixed.genre |= values.genre != metadata.source_values.genre;
-        metadata.mixed.comment |= values.comment != metadata.source_values.comment;
-        metadata.mixed.musicbrainz_artist_id |=
-            values.musicbrainz_artist_id != metadata.source_values.musicbrainz_artist_id;
-        metadata.writable.name &= writable.name;
-        metadata.writable.sort_name &= writable.sort_name;
-        metadata.writable.genre &= writable.genre;
-        metadata.writable.comment &= writable.comment;
-        metadata.writable.musicbrainz_artist_id &= writable.musicbrainz_artist_id;
-        metadata.track_count += 1;
-        return Ok(metadata);
-    }
-    let source_values = values.clone();
-    let mut rufin_filled = crate::ArtistMetadataWritable::default();
-    if values.musicbrainz_artist_id.is_none() && artist.musicbrainz_artist_id.is_some() {
-        values.musicbrainz_artist_id = artist.musicbrainz_artist_id.clone();
-        rufin_filled.musicbrainz_artist_id = true;
-    }
-    Ok(crate::ArtistMetadata {
-        extra,
-        artwork: crate::ArtworkEditing {
-            can_embed: artwork_embeddable(path, format, true),
-            ..Default::default()
-        },
-        writable,
-        source_search: false,
-        revision: None,
-        source_values,
-        values,
-        rufin_filled,
-        track_count: 1,
-        mixed: crate::ArtistMetadataMixed::default(),
-    })
 }
 
 pub(crate) fn artist_metadata_from_targets(
     artist: library::ArtistRow,
     targets: &[MetadataFileTarget],
-) -> Result<crate::ArtistMetadata, crate::SourceMetadataError> {
+) -> Result<MetadataDraft, SourceMetadataError> {
     let revision = Some(combined_revision(
         targets.iter().map(|target| &target.path),
     )?);
@@ -2349,7 +2074,7 @@ pub(crate) fn artist_metadata_from_targets(
             target.format.as_deref(),
         )?);
     }
-    let mut metadata = metadata.ok_or(crate::SourceMetadataError::Unavailable)?;
+    let mut metadata = metadata.ok_or(SourceMetadataError::Unavailable)?;
     metadata.revision = revision;
     Ok(metadata)
 }

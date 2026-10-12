@@ -1,25 +1,55 @@
+use lofty::prelude::Accessor;
 use lofty::tag::{ItemKey, Tag, TagType};
 
 use super::super::lofty::MetadataWriter;
-use crate::{MetadataChanges, MetadataField, MetadataFieldKind, SourceMetadataError};
+use crate::{
+    MetadataEdit, MetadataField, MetadataFieldKind, SourceEntityKind, SourceMetadataError,
+};
 
 struct Field {
     key: &'static str,
-    label: &'static str,
+    label: Option<&'static str>,
     item: ItemKey,
     kind: MetadataFieldKind,
     scopes: u8,
 }
 
 macro_rules! fields {
-    ($(($key:literal, $label:literal, $item:ident, $kind:ident, $scopes:literal)),* $(,)?) => {
-        const FIELDS: &[Field] = &[$(Field { key: $key, label: $label, item: ItemKey::$item,
-            kind: MetadataFieldKind::$kind, scopes: $scopes }),*];
+    ($($definition:tt),* $(,)?) => { const FIELDS: &[Field] = &[$(fields!(@field $definition)),*]; };
+    (@field ($key:literal, $item:ident, $kind:ident, $scopes:literal)) => {
+        Field { key: $key, label: None, item: ItemKey::$item,
+            kind: MetadataFieldKind::$kind, scopes: $scopes }
+    };
+    (@field ($key:literal, $label:literal, $item:ident, $kind:ident, $scopes:literal)) => {
+        Field { key: $key, label: Some($label), item: ItemKey::$item,
+            kind: MetadataFieldKind::$kind, scopes: $scopes }
     };
 }
 
 // Scope bits are track, album and artist. Artist identity remains in its role-aware editor.
 fields![
+    ("title", TrackTitle, Text, 1),
+    ("title", AlbumTitle, Text, 2),
+    ("sort_title", TrackTitleSortOrder, Text, 1),
+    ("sort_title", AlbumTitleSortOrder, Text, 2),
+    ("artist", TrackArtist, Text, 3),
+    ("album", AlbumTitle, Text, 1),
+    ("album_artist", AlbumArtist, Text, 3),
+    ("track_number", TrackNumber, Number, 1),
+    ("disc_number", DiscNumber, Number, 1),
+    ("genre", Genre, Text, 7),
+    ("comment", Comment, Text, 7),
+    ("bpm", IntegerBpm, Number, 1),
+    ("musicbrainz_recording_id", MusicBrainzRecordingId, Text, 1),
+    ("musicbrainz_release_track_id", MusicBrainzTrackId, Text, 1),
+    ("musicbrainz_album_id", MusicBrainzReleaseId, Text, 3),
+    (
+        "musicbrainz_release_group_id",
+        MusicBrainzReleaseGroupId,
+        Text,
+        3
+    ),
+    ("musicbrainz_artist_id", MusicBrainzArtistId, Text, 1),
     ("recording_date", "Date", RecordingDate, Date, 3),
     ("release_date", "Release date", ReleaseDate, Date, 3),
     (
@@ -59,16 +89,23 @@ fields![
 ];
 
 fn writable(writer: MetadataWriter, field: &Field) -> bool {
-    writer.metadata_key_is_writable(field.item)
-        && canonical(writer.file_type().primary_tag_type(), field.item)
+    if field.key == "bpm" {
+        super::super::lofty::bpm_key(writer.file_type().primary_tag_type()).is_some()
+    } else {
+        writer.metadata_key_is_writable(field.item)
+            && (field.label.is_none()
+                || canonical(writer.file_type().primary_tag_type(), field.item))
+    }
 }
 
 fn canonical(tag_type: TagType, key: ItemKey) -> bool {
-    matches!(key, ItemKey::TrackTotal | ItemKey::DiscTotal)
-        || key
-            .map_key(tag_type)
-            .and_then(|key| ItemKey::from_key(tag_type, key))
-            .is_none_or(|canonical| canonical == key)
+    matches!(
+        key,
+        ItemKey::TrackNumber | ItemKey::DiscNumber | ItemKey::TrackTotal | ItemKey::DiscTotal
+    ) || key
+        .map_key(tag_type)
+        .and_then(|key| ItemKey::from_key(tag_type, key))
+        .is_none_or(|canonical| canonical == key)
 }
 
 pub(super) fn read(
@@ -80,25 +117,40 @@ pub(super) fn read(
         .iter()
         .filter(|field| field.scopes & scope != 0)
         .filter_map(|field| {
-            if tag.is_some_and(|tag| !canonical(tag.tag_type(), field.item)) {
+            if field.label.is_some()
+                && tag.is_some_and(|tag| !canonical(tag.tag_type(), field.item))
+            {
                 return None;
             }
             let writable = writer.is_some_and(|writer| writable(writer, field));
-            let mut value = tag
-                .into_iter()
-                .flat_map(|tag| tag.get_strings(field.item))
-                .collect::<Vec<_>>()
-                .join("; ");
+            let mut value = match field.key {
+                "track_number" => tag.and_then(Tag::track).map(|value| value.to_string()),
+                "disc_number" => tag.and_then(Tag::disk).map(|value| value.to_string()),
+                "bpm" => tag
+                    .and_then(|tag| {
+                        tag.get_string(ItemKey::IntegerBpm)
+                            .or_else(|| tag.get_string(ItemKey::Bpm))
+                    })
+                    .map(str::to_string),
+                _ => Some(
+                    tag.into_iter()
+                        .flat_map(|tag| tag.get_strings(field.item))
+                        .collect::<Vec<_>>()
+                        .join("; "),
+                ),
+            }
+            .unwrap_or_default();
             if field.kind == MetadataFieldKind::Boolean && !value.is_empty() {
                 value = (value == "1").to_string();
             }
-            (writable || !value.is_empty()).then(|| MetadataField {
-                key: field.key.into(),
-                label: field.label.into(),
-                kind: field.kind,
-                value,
-                writable,
-                mixed: false,
+            (field.label.is_none() || writable || !value.is_empty()).then(|| {
+                let mut metadata =
+                    MetadataField::new(field.key, value.trim().to_string(), writable);
+                if let Some(label) = field.label {
+                    metadata.label = label.into();
+                }
+                metadata.kind = field.kind;
+                metadata
             })
         })
         .collect()
@@ -126,29 +178,64 @@ pub(super) fn merge(current: &mut Vec<MetadataField>, next: Vec<MetadataField>) 
 pub(super) fn apply(
     tag: &mut Tag,
     writer: MetadataWriter,
-    changes: &MetadataChanges,
+    edit: &MetadataEdit,
 ) -> Result<(), SourceMetadataError> {
-    for (key, value) in changes {
+    let scope = match edit.kind {
+        SourceEntityKind::Track => 1,
+        SourceEntityKind::Album => 2,
+        SourceEntityKind::Artist => 4,
+    };
+    for (key, value) in &edit.changes {
+        if scope == 4
+            && matches!(
+                key.as_str(),
+                "title" | "sort_title" | "musicbrainz_artist_id"
+            )
+        {
+            continue;
+        }
         let field = FIELDS
             .iter()
-            .find(|field| field.key == key)
+            .find(|field| field.key == key && field.scopes & scope != 0)
             .filter(|field| writable(writer, field))
             .ok_or(SourceMetadataError::Unavailable)?;
         let value = value.trim();
+        let label = field
+            .label
+            .map(str::to_string)
+            .unwrap_or_else(|| MetadataField::new(key, "", false).label);
+        if key == "title" && value.is_empty() {
+            return Err(SourceMetadataError::Write("Add a title".into()));
+        }
         if field.kind == MetadataFieldKind::Number && !value.is_empty() {
-            let number = value.parse::<u32>().map_err(|_| {
-                SourceMetadataError::Write(format!("Invalid {}: {value}", field.label))
-            })?;
+            let number = value
+                .parse::<u32>()
+                .map_err(|_| SourceMetadataError::Write(format!("Invalid {}: {value}", label)))?;
+            if matches!(key.as_str(), "track_number" | "disc_number" | "bpm")
+                && (number == 0 || number > u32::from(u16::MAX))
+            {
+                return Err(SourceMetadataError::Write(format!(
+                    "Invalid {label}: {value}"
+                )));
+            }
             if writer.file_type().primary_tag_type() == TagType::Mp4Ilst
                 && number > u32::from(u16::MAX)
             {
                 return Err(SourceMetadataError::Write(format!(
                     "{} exceeds the MP4 limit: {value}",
-                    field.label
+                    label
                 )));
             }
         }
-        tag.remove_key(field.item);
+        let item = if key == "bpm" {
+            tag.remove_key(ItemKey::Bpm);
+            tag.remove_key(ItemKey::IntegerBpm);
+            super::super::lofty::bpm_key(writer.file_type().primary_tag_type())
+                .ok_or(SourceMetadataError::Unavailable)?
+        } else {
+            field.item
+        };
+        tag.remove_key(item);
         if !value.is_empty() {
             match field.kind {
                 MetadataFieldKind::Boolean => {
@@ -158,11 +245,11 @@ pub(super) fn apply(
                         _ => {
                             return Err(SourceMetadataError::Write(format!(
                                 "Invalid {}: {value}",
-                                field.label
+                                label
                             )));
                         }
                     };
-                    tag.insert_text(field.item, value.into());
+                    tag.insert_text(item, value.into());
                 }
                 MetadataFieldKind::List => {
                     for value in value
@@ -172,13 +259,20 @@ pub(super) fn apply(
                     {
                         // ID3 credits use TIPL instead of ordinary key mappings.
                         tag.push_unchecked(lofty::tag::TagItem::new(
-                            field.item,
+                            item,
                             lofty::tag::ItemValue::Text(value.into()),
                         ));
                     }
                 }
                 _ => {
-                    tag.insert_text(field.item, value.into());
+                    if field.label.is_none() {
+                        tag.insert_unchecked(lofty::tag::TagItem::new(
+                            item,
+                            lofty::tag::ItemValue::Text(value.into()),
+                        ));
+                    } else {
+                        tag.insert_text(item, value.into());
+                    }
                 }
             }
         }

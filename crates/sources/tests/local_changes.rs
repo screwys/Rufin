@@ -1007,26 +1007,21 @@ async fn local_metadata_save_publishes_album_identity_changes() {
         .await
         .unwrap()
         .remove(0);
-    let mut metadata = source
+    let metadata = source
         .read_album_metadata(&database, &album.media_uri)
         .await
         .unwrap();
-    metadata.values.title = "After".to_string();
     source
         .write_metadata(
             &database,
             &album.media_uri,
             metadata.revision.as_deref().unwrap(),
             None,
-            sources::MetadataEdit::Album(sources::AlbumMetadataEdit {
-                extra: Default::default(),
+            sources::MetadataEdit {
+                kind: sources::SourceEntityKind::Album,
+                changes: [("title".into(), "After".into())].into(),
                 artwork: None,
-                values: metadata.values,
-                changed: sources::AlbumMetadataWritable {
-                    title: true,
-                    ..Default::default()
-                },
-            }),
+            },
         )
         .await
         .unwrap();
@@ -1045,12 +1040,11 @@ async fn local_metadata_save_publishes_album_identity_changes() {
             &uri,
             metadata.revision.as_deref().unwrap(),
             None,
-            sources::MetadataEdit::Track(sources::TrackMetadataEdit {
-                extra: Default::default(),
+            sources::MetadataEdit {
+                kind: sources::SourceEntityKind::Track,
+                changes: Default::default(),
                 artwork: None,
-                values: metadata.values,
-                changed: Default::default(),
-            }),
+            },
         )
         .await
         .unwrap();
@@ -1097,17 +1091,16 @@ async fn local_metadata_save_publishes_album_identity_changes() {
                 &album.media_uri,
                 metadata.revision.as_deref().unwrap(),
                 None,
-                sources::MetadataEdit::Album(sources::AlbumMetadataEdit {
-                    extra: [
+                sources::MetadataEdit {
+                    kind: sources::SourceEntityKind::Album,
+                    changes: [
                         ("recording_date".to_string(), date.to_string()),
                         ("release_date".to_string(), release.to_string()),
                         ("original_release_date".to_string(), original.to_string()),
                     ]
                     .into(),
                     artwork: None,
-                    values: metadata.values,
-                    changed: Default::default(),
-                }),
+                },
             )
             .await
             .unwrap();
@@ -1131,7 +1124,7 @@ async fn local_metadata_save_publishes_album_identity_changes() {
             ] {
                 assert_eq!(
                     metadata
-                        .extra
+                        .fields
                         .iter()
                         .find(|field| field.key == key)
                         .unwrap()
@@ -1444,23 +1437,18 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
         object_id
     );
     let uri = &changed_order[0];
-    let mut metadata = source.read_track_metadata(&database, uri).await.unwrap();
-    metadata.values.title = "After rename".into();
+    let metadata = source.read_track_metadata(&database, uri).await.unwrap();
     source
         .write_metadata(
             &database,
             uri,
             metadata.revision.as_deref().unwrap(),
             None,
-            sources::MetadataEdit::Track(sources::TrackMetadataEdit {
-                extra: Default::default(),
+            sources::MetadataEdit {
+                kind: sources::SourceEntityKind::Track,
+                changes: [("title".into(), "After rename".into())].into(),
                 artwork: None,
-                values: metadata.values,
-                changed: sources::TrackMetadataWritable {
-                    title: true,
-                    ..Default::default()
-                },
-            }),
+            },
         )
         .await
         .unwrap();

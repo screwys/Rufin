@@ -4690,10 +4690,11 @@ mod artwork_preparation_tests {
                 .unwrap();
             tokio::time::timeout(Duration::from_secs(2), async {
                 assert!(
-                    crate::metadata::identify_track_metadata(
+                    crate::metadata::identify_metadata(
                         &owner,
                         "file:///music/song.flac".into(),
-                        sources::TrackMetadataValues::default()
+                        sources::SourceEntityKind::Track,
+                        sources::MetadataChanges::new()
                     )
                     .recv()
                     .await
@@ -4702,10 +4703,11 @@ mod artwork_preparation_tests {
                     .is_none()
                 );
                 assert!(
-                    crate::metadata::identify_album_metadata(
+                    crate::metadata::identify_metadata(
                         &owner,
                         library::source_entity_uri(&source_id, "album", "album"),
-                        sources::AlbumMetadataValues::default()
+                        sources::SourceEntityKind::Album,
+                        sources::MetadataChanges::new()
                     )
                     .recv()
                     .await
@@ -4714,10 +4716,11 @@ mod artwork_preparation_tests {
                     .is_none()
                 );
                 assert!(
-                    crate::metadata::identify_artist_metadata(
+                    crate::metadata::identify_metadata(
                         &owner,
                         library::source_entity_uri(&source_id, "artist", "artist"),
-                        sources::ArtistMetadataValues::default()
+                        sources::SourceEntityKind::Artist,
+                        sources::MetadataChanges::new()
                     )
                     .recv()
                     .await

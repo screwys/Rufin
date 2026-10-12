@@ -1,16 +1,13 @@
 use super::*;
 use crate::remote_json::{field, id, items};
 use crate::{
-    AlbumMetadataValues, ArtistMetadataValues, SourceMetadataError as Error, TrackMetadataValues,
+    MetadataDraft, MetadataEdit, MetadataField, SourceEntityKind, SourceMetadataError as Error,
 };
 fn error(error: SourceError) -> Error {
     Error::Write(error.to_string())
 }
 fn text(item: &Value, key: &str) -> Option<String> {
     item[key].as_str().map(str::to_string)
-}
-fn genre(item: &Value) -> Option<String> {
-    tags(item, "Genre")
 }
 fn tags(item: &Value, key: &str) -> Option<String> {
     let names: Vec<_> = items(&item[key])
@@ -98,19 +95,40 @@ fn extra_fields(item: &Value, writable: bool, scope: u8) -> Vec<crate::MetadataF
             .unwrap_or_default(),
             writable,
             mixed: false,
+            suggestion: None,
         })
         .collect()
 }
 
-fn extra_edits(changes: &crate::MetadataChanges, fields: &mut Vec<(&'static str, String)>) {
-    for (key, value) in changes {
-        if let Some((key, _, _, _, _)) =
-            EXTRA_FIELDS.iter().find(|(field, _, _, _, _)| field == key)
-        {
-            fields.push((key, value.clone()));
-        }
+// Each ordinary field has one native read key and, when supported, one write key.
+const FIELDS: &[(&str, &str, &str, u8, u8)] = &[
+    ("title", "title", "title", 7, 7),
+    ("sort_title", "titleSort", "titleSort", 7, 7),
+    ("artist", "originalTitle", "originalTitle", 3, 1),
+    ("album", "parentTitle", "", 1, 0),
+    ("album_artist", "grandparentTitle", "", 3, 0),
+    ("track_number", "index", "index", 1, 1),
+    ("disc_number", "parentIndex", "parentIndex", 1, 1),
+    ("year", "year", "year", 3, 2),
+    ("genre", "Genre", "genre[0].tag", 7, 7),
+    ("comment", "summary", "summary", 7, 7),
+    ("bpm", "", "", 1, 0),
+    ("locked", "", "", 7, 0),
+    ("musicbrainz_recording_id", "", "", 1, 0),
+    ("musicbrainz_release_track_id", "", "", 1, 0),
+    ("musicbrainz_album_id", "", "", 3, 0),
+    ("musicbrainz_release_group_id", "", "", 3, 0),
+    ("musicbrainz_artist_id", "", "", 5, 0),
+];
+
+fn scope(kind: SourceEntityKind) -> u8 {
+    match kind {
+        SourceEntityKind::Track => 1,
+        SourceEntityKind::Album => 2,
+        SourceEntityKind::Artist => 4,
     }
 }
+
 impl PlexSource {
     pub(crate) async fn write_artwork(
         &self,
@@ -156,113 +174,82 @@ impl PlexSource {
     pub(crate) async fn read_track_metadata(
         &self,
         track: library::TrackRow,
-    ) -> Result<crate::TrackMetadata, Error> {
-        let item = self
-            .metadata(track.object_id.as_deref().ok_or(Error::Unavailable)?)
-            .await
-            .map_err(error)?;
-        let values = TrackMetadataValues {
-            title: text(&item, "title").unwrap_or(track.title),
-            sort_title: text(&item, "titleSort"),
-            artist: text(&item, "originalTitle").or_else(|| text(&item, "grandparentTitle")),
-            album: text(&item, "parentTitle"),
-            album_artist: text(&item, "grandparentTitle"),
-            track_number: field(&item, "index"),
-            disc_number: field(&item, "parentIndex"),
-            year: field(&item, "year")
-                .filter(|year| *year > 0)
-                .or_else(|| field(&item, "parentYear").filter(|year| *year > 0)),
-            genre: genre(&item),
-            comment: text(&item, "summary"),
-            ..Default::default()
-        };
-        let yes = self.config.owned;
-        Ok(crate::TrackMetadata {
-            extra: extra_fields(&item, yes, 1),
-            artwork: Default::default(),
-            writable: crate::TrackMetadataWritable {
-                title: yes,
-                sort_title: yes,
-                artist: yes,
-                track_number: yes,
-                disc_number: yes,
-                genre: yes,
-                comment: yes,
-                ..Default::default()
-            },
-            source_search: false,
-            revision: Some(revision(&item)),
-            source_values: values.clone(),
-            values,
-            rufin_filled: Default::default(),
-        })
+    ) -> Result<MetadataDraft, Error> {
+        self.read_metadata(
+            track.object_id.as_deref().ok_or(Error::Unavailable)?,
+            SourceEntityKind::Track,
+            &track.title,
+            1,
+        )
+        .await
     }
     pub(crate) async fn read_album_metadata(
         &self,
         album: library::AlbumRow,
-    ) -> Result<crate::AlbumMetadata, Error> {
-        let item = self.metadata(&album.object_id).await.map_err(error)?;
-        let values = AlbumMetadataValues {
-            title: text(&item, "title").unwrap_or(album.title),
-            sort_title: text(&item, "titleSort"),
-            album_artist: text(&item, "parentTitle"),
-            year: field(&item, "year"),
-            genre: genre(&item),
-            comment: text(&item, "summary"),
-            ..Default::default()
-        };
-        let yes = self.config.owned;
-        Ok(crate::AlbumMetadata {
-            extra: extra_fields(&item, yes, 2),
-            artwork: Default::default(),
-            writable: crate::AlbumMetadataWritable {
-                title: yes,
-                sort_title: yes,
-                year: yes,
-                genre: yes,
-                comment: yes,
-                ..Default::default()
-            },
-            source_search: false,
-            revision: Some(revision(&item)),
-            source_values: values.clone(),
-            values,
-            rufin_filled: Default::default(),
-            track_count: album.track_count.max(0) as usize,
-            mixed: Default::default(),
-        })
+    ) -> Result<MetadataDraft, Error> {
+        self.read_metadata(
+            &album.object_id,
+            SourceEntityKind::Album,
+            &album.title,
+            album.track_count.max(0) as usize,
+        )
+        .await
     }
     pub(crate) async fn read_artist_metadata(
         &self,
         artist: library::ArtistRow,
-    ) -> Result<crate::ArtistMetadata, Error> {
-        let item = self.metadata(&artist.object_id).await.map_err(error)?;
-        let values = ArtistMetadataValues {
-            name: text(&item, "title").unwrap_or(artist.name),
-            sort_name: text(&item, "titleSort"),
-            genre: genre(&item),
-            comment: text(&item, "summary"),
-            ..Default::default()
-        };
-        let yes = self.config.owned;
-        Ok(crate::ArtistMetadata {
-            extra: extra_fields(&item, yes, 4),
-            artwork: Default::default(),
-            writable: crate::ArtistMetadataWritable {
-                name: yes,
-                sort_name: yes,
-                genre: yes,
-                comment: yes,
-                ..Default::default()
-            },
-            source_search: false,
-            revision: Some(revision(&item)),
-            source_values: values.clone(),
-            values,
-            rufin_filled: Default::default(),
-            track_count: artist.track_count.max(0) as usize,
-            mixed: Default::default(),
-        })
+    ) -> Result<MetadataDraft, Error> {
+        self.read_metadata(
+            &artist.object_id,
+            SourceEntityKind::Artist,
+            &artist.name,
+            artist.track_count.max(0) as usize,
+        )
+        .await
+    }
+    async fn read_metadata(
+        &self,
+        object: &str,
+        kind: SourceEntityKind,
+        title: &str,
+        count: usize,
+    ) -> Result<MetadataDraft, Error> {
+        let item = self.metadata(object).await.map_err(error)?;
+        let scope = scope(kind);
+        let mut fields = FIELDS
+            .iter()
+            .filter(|(_, _, _, scopes, _)| scopes & scope != 0)
+            .map(|&(key, native, _, _, writable)| {
+                let value = match key {
+                    "title" => text(&item, native).or_else(|| Some(title.to_owned())),
+                    "artist" if kind == SourceEntityKind::Track => {
+                        text(&item, native).or_else(|| text(&item, "grandparentTitle"))
+                    }
+                    "artist" => None,
+                    "album_artist" if kind == SourceEntityKind::Album => text(&item, "parentTitle"),
+                    "track_number" | "disc_number" | "year" => {
+                        let value: Option<u16> = field(&item, native);
+                        let value = if key == "year" && kind == SourceEntityKind::Track {
+                            value
+                                .filter(|v| *v > 0)
+                                .or_else(|| field::<u16>(&item, "parentYear").filter(|v| *v > 0))
+                        } else {
+                            value
+                        };
+                        value.map(|v| v.to_string())
+                    }
+                    "genre" => tags(&item, native),
+                    _ => text(&item, native),
+                }
+                .unwrap_or_default();
+                MetadataField::new(key, value, self.config.owned && writable & scope != 0)
+            })
+            .collect::<Vec<_>>();
+        fields.extend(extra_fields(&item, self.config.owned, scope));
+        let mut draft = MetadataDraft::new(kind, fields);
+        draft.revision = Some(revision(&item));
+        draft.track_count = count;
+        Ok(draft)
     }
     async fn write_fields(
         &self,
@@ -330,95 +317,36 @@ impl PlexSource {
         .await
         .map_err(error)
     }
-    pub(crate) async fn write_track_metadata(
+    pub(crate) async fn write_metadata(
         &self,
         object: &str,
         expected: &str,
-        edit: &crate::TrackMetadataEdit,
+        edit: &MetadataEdit,
     ) -> Result<(), Error> {
-        let mut fields = Vec::new();
-        let v = &edit.values;
-        let c = &edit.changed;
-        if c.title {
-            fields.push(("title", v.title.clone()));
-        }
-        if c.sort_title {
-            fields.push(("titleSort", v.sort_title.clone().unwrap_or_default()));
-        }
-        if c.artist {
-            fields.push(("originalTitle", v.artist.clone().unwrap_or_default()));
-        }
-        if c.track_number {
-            fields.push((
-                "index",
-                v.track_number.map(|v| v.to_string()).unwrap_or_default(),
-            ));
-        }
-        if c.disc_number {
-            fields.push((
-                "parentIndex",
-                v.disc_number.map(|v| v.to_string()).unwrap_or_default(),
-            ));
-        }
-        if c.comment {
-            fields.push(("summary", v.comment.clone().unwrap_or_default()));
-        }
-        if c.genre {
-            fields.push(("genre[0].tag", v.genre.clone().unwrap_or_default()));
-        }
-        extra_edits(&edit.extra, &mut fields);
-        self.write_fields(object, expected, "10", fields).await
-    }
-    pub(crate) async fn write_album_metadata(
-        &self,
-        object: &str,
-        expected: &str,
-        edit: &crate::AlbumMetadataEdit,
-    ) -> Result<(), Error> {
-        let mut fields = Vec::new();
-        let v = &edit.values;
-        let c = &edit.changed;
-        if c.title {
-            fields.push(("title", v.title.clone()));
-        }
-        if c.sort_title {
-            fields.push(("titleSort", v.sort_title.clone().unwrap_or_default()));
-        }
-        if c.year {
-            fields.push(("year", v.year.map(|v| v.to_string()).unwrap_or_default()));
-        }
-        if c.comment {
-            fields.push(("summary", v.comment.clone().unwrap_or_default()));
-        }
-        if c.genre {
-            fields.push(("genre[0].tag", v.genre.clone().unwrap_or_default()));
-        }
-        extra_edits(&edit.extra, &mut fields);
-        self.write_fields(object, expected, "9", fields).await
-    }
-    pub(crate) async fn write_artist_metadata(
-        &self,
-        object: &str,
-        expected: &str,
-        edit: &crate::ArtistMetadataEdit,
-    ) -> Result<(), Error> {
-        let mut fields = Vec::new();
-        let v = &edit.values;
-        let c = &edit.changed;
-        if c.name {
-            fields.push(("title", v.name.clone()));
-        }
-        if c.sort_name {
-            fields.push(("titleSort", v.sort_name.clone().unwrap_or_default()));
-        }
-        if c.comment {
-            fields.push(("summary", v.comment.clone().unwrap_or_default()));
-        }
-        if c.genre {
-            fields.push(("genre[0].tag", v.genre.clone().unwrap_or_default()));
-        }
-        extra_edits(&edit.extra, &mut fields);
-        self.write_fields(object, expected, "8", fields).await
+        let scope = scope(edit.kind);
+        let fields = edit
+            .changes
+            .iter()
+            .filter_map(|(key, value)| {
+                FIELDS
+                    .iter()
+                    .find(|(field, _, _, _, writable)| *field == key && writable & scope != 0)
+                    .map(|(_, _, native, _, _)| *native)
+                    .or_else(|| {
+                        EXTRA_FIELDS
+                            .iter()
+                            .find(|(field, _, _, _, scopes)| *field == key && scopes & scope != 0)
+                            .map(|(field, _, _, _, _)| *field)
+                    })
+                    .map(|native| (native, value.clone()))
+            })
+            .collect();
+        let kind = match edit.kind {
+            SourceEntityKind::Track => "10",
+            SourceEntityKind::Album => "9",
+            SourceEntityKind::Artist => "8",
+        };
+        self.write_fields(object, expected, kind, fields).await
     }
 }
 
@@ -445,20 +373,13 @@ mod tests {
             .mount(&server)
             .await;
         source
-            .write_album_metadata(
+            .write_metadata(
                 "plex:album:album",
                 "5",
-                &crate::AlbumMetadataEdit {
-                    extra: Default::default(),
+                &crate::MetadataEdit {
+                    kind: SourceEntityKind::Album,
                     artwork: None,
-                    values: AlbumMetadataValues {
-                        title: "After".into(),
-                        ..Default::default()
-                    },
-                    changed: crate::AlbumMetadataWritable {
-                        title: true,
-                        ..Default::default()
-                    },
+                    changes: [("title".into(), "After".into())].into(),
                 },
             )
             .await

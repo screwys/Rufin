@@ -9017,6 +9017,7 @@ dependencies = [
  "image",
  "jxl-image-rs-integration",
  "library",
+ "localization",
  "lofty",
  "lyrics",
  "md-5 0.10.6",

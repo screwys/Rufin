@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use rufin_core::{
-    metadata::{self, MetadataEditor, MetadataField, MetadataItemId},
+    metadata::{self, MetadataEditor, MetadataItemId},
     runtime::SourceHandle,
 };
 use sources::{ArtworkChange, ArtworkEdit, ArtworkStorage, ImageBytes, SourceMetadataError};
@@ -174,7 +174,7 @@ impl AndroidLibrary {
             .map_err(|value| AndroidMetadataError::Failure {
                 reason: value.to_string(),
             })??;
-        let storage = draft.artwork().storage;
+        let storage = draft.artwork.storage;
         Ok(Arc::new(AndroidMetadataEditor {
             source: self.source.clone(),
             runtime: self.runtime.clone(),
@@ -202,7 +202,7 @@ impl AndroidMetadataEditor {
                 .fields()
                 .into_iter()
                 .map(|field| AndroidMetadataField {
-                    id: serde_json::to_string(&field.field).expect("Metadata field identifier"),
+                    id: field.key.clone(),
                     label: field.label,
                     value: field.value,
                     kind: match field.kind {
@@ -215,35 +215,34 @@ impl AndroidMetadataEditor {
                     .into(),
                     writable: field.writable,
                     mixed: field.mixed,
-                    identified: editor.is_identified(field.field),
+                    identified: editor.is_identified(&field.key),
                 })
                 .collect(),
             locked: editor.locked(),
-            lock_writable: editor.writable(MetadataField::Locked),
+            lock_writable: editor.writable("locked"),
             has_changes: editor.has_changes() || state.artwork.is_some(),
-            can_identify: editor.values().is_ok_and(|values| {
-                metadata::identification_available(
-                    editor.draft.source_search(),
-                    self.external_lookup_allowed,
-                    &values,
-                )
-            }),
+            can_identify: metadata::identification_available(
+                editor.draft.source_search,
+                self.external_lookup_allowed,
+                editor.draft.kind,
+                &editor.values(),
+            ),
             committed: editor.committed(),
-            track_count: editor.draft.track_count() as u64,
+            track_count: editor.draft.track_count as u64,
             scope_summary: localization::trn_with(
                 "Changes apply to {count} track",
                 "Changes apply to {count} tracks",
-                editor.draft.track_count() as u64,
-                &[("count", &editor.draft.track_count().to_string())],
+                editor.draft.track_count as u64,
+                &[("count", &editor.draft.track_count.to_string())],
             ),
             artwork_revision: state.artwork_revision,
             max_artwork_bytes: metadata::MAX_ARTWORK_BYTES as u64,
             artwork_storage: state.storage.into(),
-            can_embed_artwork: editor.draft.artwork().can_embed,
+            can_embed_artwork: editor.draft.artwork.can_embed,
             can_remove_artwork: match &state.artwork {
                 Some(ArtworkChange::Replace(_)) => true,
                 Some(ArtworkChange::Remove) => false,
-                None => editor.draft.artwork().binding.is_some(),
+                None => editor.draft.artwork.binding.is_some(),
             },
             has_current_artwork: state.current.is_some(),
             external_lookup_allowed: self.external_lookup_allowed,
@@ -254,18 +253,17 @@ impl AndroidMetadataEditor {
 
     pub fn set_field(&self, id: String, value: String) -> Result<(), AndroidError> {
         let mut state = self.state()?;
-        let field: MetadataField = serde_json::from_str(&id).map_err(error)?;
-        let available = state.editor.has_field(field) && state.editor.writable(field);
+        let available = state.editor.has_field(&id) && state.editor.writable(&id);
         if !available {
             return Err(error("This source cannot edit this field"));
         }
-        state.editor.set_text(field, value);
+        state.editor.set_text(&id, value);
         Ok(())
     }
 
     pub fn set_locked(&self, locked: bool) -> Result<(), AndroidError> {
         let mut state = self.state()?;
-        if !state.editor.writable(MetadataField::Locked) {
+        if !state.editor.writable("locked") {
             return Err(error("This source cannot edit this field"));
         }
         state.editor.set_locked(locked);
@@ -274,34 +272,44 @@ impl AndroidMetadataEditor {
 
     pub fn undo_identified(&self, id: String) -> Result<(), AndroidError> {
         let mut state = self.state()?;
-        let field = serde_json::from_str(&id).map_err(error)?;
-        state.editor.undo_identified(field);
+        state.editor.undo_identified(&id);
         Ok(())
     }
 
     pub async fn identify(&self) -> Result<(), AndroidError> {
         let receiver = {
             let state = self.state()?;
-            let values = state.editor.values().map_err(error)?;
+            let values = state.editor.values();
             if !metadata::identification_available(
-                state.editor.draft.source_search(),
+                state.editor.draft.source_search,
                 self.external_lookup_allowed,
+                state.editor.draft.kind,
                 &values,
             ) {
                 return Ok(());
             }
-            values.identify(&self.source, self.media_uri.clone())
+            metadata::identify_metadata(
+                &self.source,
+                self.media_uri.clone(),
+                state.editor.draft.kind,
+                values,
+            )
         };
         if let Some(identified) = self
             .runtime
-            .spawn(async move { receiver.recv().await })
+            .spawn(async move {
+                receiver
+                    .recv()
+                    .await
+                    .unwrap_or_else(|_| Err("Metadata editing is no longer available".into()))
+            })
             .await
             .map_err(error)?
             .map_err(error)?
         {
             self.state()?
                 .editor
-                .apply_identified(identified.values, identified.token);
+                .apply_identified(identified.changes, identified.token);
         }
         Ok(())
     }
@@ -323,10 +331,10 @@ impl AndroidMetadataEditor {
                 .edit(artwork)
                 .map_err(|message| AndroidMetadataError::Failure { reason: message })?;
             (
-                state.editor.draft.revision(),
+                state.editor.draft.revision.clone(),
                 state.editor.token(),
                 edit,
-                state.editor.draft.artwork().binding.clone(),
+                state.editor.draft.artwork.binding.clone(),
             )
         };
         let receiver = metadata::write_reviewed_metadata(
@@ -360,7 +368,7 @@ impl AndroidMetadataEditor {
     }
 
     pub async fn load_current_artwork(&self) -> Result<(), AndroidError> {
-        let binding = self.state()?.editor.draft.artwork().binding.clone();
+        let binding = self.state()?.editor.draft.artwork.binding.clone();
         let Some(binding) = binding else {
             return Ok(());
         };
@@ -416,7 +424,7 @@ impl AndroidMetadataEditor {
         state.artwork = state
             .editor
             .draft
-            .artwork()
+            .artwork
             .binding
             .is_some()
             .then_some(ArtworkChange::Remove);
@@ -426,7 +434,7 @@ impl AndroidMetadataEditor {
 
     pub fn set_artwork_storage(&self, storage: AndroidArtworkStorage) -> Result<(), AndroidError> {
         let mut state = self.state()?;
-        let editing = state.editor.draft.artwork();
+        let editing = &state.editor.draft.artwork;
         if editing.storage == ArtworkStorage::Server
             || storage == AndroidArtworkStorage::Server
             || storage == AndroidArtworkStorage::Embedded && !editing.can_embed
