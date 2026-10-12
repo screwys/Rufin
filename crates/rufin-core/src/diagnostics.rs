@@ -143,7 +143,7 @@ const NORMAL_FILTER: &str = concat!(
     "scrobbling=info,",
     "secrets=info,",
     "sources=info,",
-    "ui=info,",
+    "gtk_=info,",
     "lofty=error"
 );
 const DEBUG_FILTER: &str = concat!(
@@ -159,7 +159,7 @@ const DEBUG_FILTER: &str = concat!(
     "scrobbling=debug,",
     "secrets=debug,",
     "sources=debug,",
-    "ui=debug,",
+    "gtk_=debug,",
     "lofty=error"
 );
 
@@ -1028,6 +1028,8 @@ mod tests {
 
         tracing::subscriber::with_default(subscriber, || {
             tracing::debug!(target: "h2::codec", "transport frame");
+            tracing::debug!(target: "gtk_shell::shell::route", route = "Home", "navigate");
+            tracing::debug!(target: "gtk_library::routes", "route rows ready");
             tracing::debug!(target: "sources", endpoint = "/rest/getSongs", "source request");
             tracing::debug!(
                 target: "sources",
@@ -1047,6 +1049,8 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .snapshot();
         assert!(snapshot.contains("source request"));
+        assert!(snapshot.contains("navigate route=Home"));
+        assert!(snapshot.contains("route rows ready"));
         assert!(snapshot.contains("url=https://<server>/Users/abc/Views?keys=api_key"));
         assert!(
             snapshot.contains(
