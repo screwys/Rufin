@@ -9,6 +9,11 @@ use sqlx_core::transaction::TransactionManager;
 
 mod artwork;
 mod entities;
+mod input;
+pub use input::{
+    AlbumInput, AlbumRelationsInput, ArtistInput, GenreInput, LoudnessInput, TrackInput,
+    TrackRelationsInput,
+};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
@@ -2312,9 +2317,14 @@ mod tests {
         let mut scan = Scan::begin(&database, "source", "Source", "source", None)
             .await
             .expect("next acquisition gets the released permit");
-        scan.write_genre("genre", "Genre", "genre", Some("genre"), None)
-            .await
-            .expect("write before writer failure");
+        scan.write_genre(&GenreInput {
+            object_id: "genre".into(),
+            name: "Genre".into(),
+            sort_text: Some("genre".into()),
+            ..Default::default()
+        })
+        .await
+        .expect("write before writer failure");
         database.fail_writer().await.expect("fail fixed writer");
         assert!(matches!(
             scan.write_mood("mood", "Mood", "mood", "mood").await,

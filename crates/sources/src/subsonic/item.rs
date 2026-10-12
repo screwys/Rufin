@@ -12,28 +12,28 @@ pub(super) async fn stage_album(
         .as_ref()
         .map(|image| crate::native_artwork_binding(scan.source_id(), image))
         .transpose()?;
-    scan.write_album(
-        &album.id,
-        &album.title,
-        &album.title.to_lowercase(),
-        &album.artist,
-        &album
-            .sort_name
-            .as_deref()
-            .unwrap_or(&album.title)
-            .to_lowercase(),
-        Some(i64::from(album.year)).filter(|year| *year > 0),
-        album.release_date.as_deref(),
-        album.date_added.as_deref(),
-        album.musicbrainz_album_id.as_deref(),
-        album.musicbrainz_release_group_id.as_deref(),
-        album.is_compilation,
-        artwork.as_deref(),
-        album.favorite,
-        album.user_rating.map(i64::from),
-        None,
-    )
-    .await?;
+    let sort_text = album
+        .sort_name
+        .as_deref()
+        .unwrap_or(&album.title)
+        .to_lowercase();
+    let input = library::AlbumInput {
+        object_id: album.id,
+        title: album.title,
+        display_artist: album.artist,
+        sort_text,
+        year: Some(i64::from(album.year)).filter(|year| *year > 0),
+        release_date: album.release_date,
+        date_added: album.date_added,
+        musicbrainz_release_id: album.musicbrainz_album_id,
+        musicbrainz_release_group_id: album.musicbrainz_release_group_id,
+        is_compilation: album.is_compilation,
+        artwork_binding: artwork,
+        favorite: album.favorite,
+        rating: album.user_rating.map(i64::from),
+        ..Default::default()
+    };
+    scan.write_album(&input).await?;
     let effective_album_artists = if album.relations.album_artists.is_empty() {
         &album.relations.artists
     } else {
@@ -48,18 +48,18 @@ pub(super) async fn stage_album(
     scan.write_album_relations(
         &effective_album_artists
             .iter()
-            .map(|artist| (album.id.as_str(), artist.id.as_str()))
+            .map(|artist| (input.object_id.as_str(), artist.id.as_str()))
             .collect::<Vec<_>>(),
         &album
             .relations
             .genres
             .iter()
-            .map(|genre| (album.id.as_str(), genre.id.as_str()))
+            .map(|genre| (input.object_id.as_str(), genre.id.as_str()))
             .collect::<Vec<_>>(),
         &album
             .release_types
             .iter()
-            .map(|value| (album.id.as_str(), value.as_str()))
+            .map(|value| (input.object_id.as_str(), value.as_str()))
             .collect::<Vec<_>>(),
     )
     .await?;
@@ -88,48 +88,44 @@ pub(super) async fn stage_track(
     );
     hash.update(&track.duration_seconds.to_le_bytes());
 
-    let inserted = scan
-        .write_track(
-            &track.id,
-            track.album_id.as_deref(),
-            &track.title,
-            &track.album,
-            &track.artist,
-            &track
-                .sort_name
-                .as_deref()
-                .unwrap_or(&track.title)
-                .to_lowercase(),
-            i64::from(track.duration_seconds) * 1000,
-            i64::from(track.disc_number),
-            i64::from(track.track_number),
-            Some(i64::from(track.year)).filter(|year| *year > 0),
-            track.release_date.as_deref(),
-            track.date_added.as_deref(),
-            None,
-            track.source_format.as_deref(),
-            track.comment.as_deref(),
-            track.bpm.map(i64::from),
-            track.musicbrainz_recording_id.as_deref(),
-            track.musicbrainz_release_track_id.as_deref(),
-            None,
-            None,
-            None,
-            artwork.as_deref(),
-            track.favorite,
-            track.user_rating.map(i64::from),
-            None,
-            track.play_count.map(i64::from),
-            track.skip_count.map(i64::from),
-            track.last_played,
-            track.source_path.as_deref(),
-            *hash.finalize().as_bytes(),
-            &track.audio_properties,
-        )
-        .await?;
+    let sort_text = track
+        .sort_name
+        .as_deref()
+        .unwrap_or(&track.title)
+        .to_lowercase();
+    let input = library::TrackInput {
+        object_id: track.id,
+        album_object_id: track.album_id,
+        title: track.title,
+        display_album: track.album,
+        display_artist: track.artist,
+        sort_text,
+        duration_millis: i64::from(track.duration_seconds) * 1000,
+        disc_number: i64::from(track.disc_number),
+        track_number: i64::from(track.track_number),
+        year: Some(i64::from(track.year)).filter(|year| *year > 0),
+        release_date: track.release_date,
+        date_added: track.date_added,
+        source_format: track.source_format,
+        comment: track.comment,
+        bpm: track.bpm.map(i64::from),
+        musicbrainz_recording_id: track.musicbrainz_recording_id,
+        musicbrainz_release_track_id: track.musicbrainz_release_track_id,
+        artwork_binding: artwork,
+        favorite: track.favorite,
+        rating: track.user_rating.map(i64::from),
+        source_play_count: track.play_count.map(i64::from),
+        source_skip_count: track.skip_count.map(i64::from),
+        source_last_played: track.last_played,
+        source_path: track.source_path,
+        loudness_analysis_key: *hash.finalize().as_bytes(),
+        audio_properties: track.audio_properties,
+        ..Default::default()
+    };
+    let inserted = scan.write_track(&input).await?;
     if track.replay_gain_track_db.is_some() {
         scan.write_track_source_loudness(
-            &track.id,
+            &input.object_id,
             None,
             None,
             track.replay_gain_track_db,
@@ -137,7 +133,7 @@ pub(super) async fn stage_track(
         )
         .await?;
     }
-    if let Some(album_id) = track.album_id.as_deref()
+    if let Some(album_id) = input.album_object_id.as_deref()
         && track.replay_gain_album_db.is_some()
     {
         scan.write_album_source_loudness(
@@ -172,28 +168,28 @@ pub(super) async fn stage_track(
             .relations
             .artists
             .iter()
-            .map(|artist| (track.id.as_str(), artist.id.as_str()))
+            .map(|artist| (input.object_id.as_str(), artist.id.as_str()))
             .collect::<Vec<_>>(),
         &track
             .relations
             .genres
             .iter()
-            .map(|genre| (track.id.as_str(), genre.id.as_str()))
+            .map(|genre| (input.object_id.as_str(), genre.id.as_str()))
             .collect::<Vec<_>>(),
         &track
             .relations
             .moods
             .iter()
-            .map(|mood| (track.id.as_str(), mood.id.as_str()))
+            .map(|mood| (input.object_id.as_str(), mood.id.as_str()))
             .collect::<Vec<_>>(),
     )
     .await?;
     if let Some(folders) = &track.relations.music_folders {
         scan.replace_track_folders(
-            &track.id,
+            &input.object_id,
             &folders
                 .iter()
-                .map(|folder| library::ScanLink::new(&track.id, folder, 0))
+                .map(|folder| library::ScanLink::new(&input.object_id, folder, 0))
                 .collect::<Vec<_>>(),
         )
         .await?;
@@ -210,22 +206,20 @@ pub(super) async fn stage_artist(
         .as_ref()
         .map(|image| crate::native_artwork_binding(scan.source_id(), image))
         .transpose()?;
-    scan.write_artist(
-        &artist.id,
-        &artist.name,
-        &artist.name.to_lowercase(),
-        Some(
-            &artist
-                .sort_name
-                .as_deref()
-                .unwrap_or(&artist.name)
-                .to_lowercase(),
-        ),
-        artist.musicbrainz_artist_id.as_deref(),
-        artwork.as_deref(),
-        artist.favorite,
-        artist.user_rating.map(i64::from),
-    )
+    let sort_text = artist
+        .sort_name
+        .as_deref()
+        .unwrap_or(&artist.name)
+        .to_lowercase();
+    scan.write_artist(&library::ArtistInput {
+        object_id: artist.id,
+        name: artist.name,
+        sort_text: Some(sort_text),
+        musicbrainz_artist_id: artist.musicbrainz_artist_id,
+        artwork_binding: artwork,
+        favorite: artist.favorite,
+        rating: artist.user_rating.map(i64::from),
+    })
     .await
 }
 pub(super) async fn stage_genre(
@@ -237,46 +231,37 @@ pub(super) async fn stage_genre(
         .as_ref()
         .map(|image| crate::native_artwork_binding(scan.source_id(), image))
         .transpose()?;
-    scan.write_genre(
-        &genre.id,
-        &genre.name,
-        &genre.name.to_lowercase(),
-        Some(&genre.name.to_lowercase()),
-        artwork.as_deref(),
-    )
+    let sort_text = genre.name.to_lowercase();
+    scan.write_genre(&library::GenreInput {
+        object_id: genre.id,
+        name: genre.name,
+        sort_text: Some(sort_text),
+        artwork_binding: artwork,
+    })
     .await
 }
 async fn stage_artist_credit(
     scan: &mut library::Scan,
     artist: &ArtistCredit,
 ) -> library::LibraryResult<()> {
-    scan.write_artist(
-        &artist.id,
-        &artist.name,
-        &artist.name.to_lowercase(),
-        artist
-            .sort_name
-            .as_ref()
-            .map(|name| name.to_lowercase())
-            .as_deref(),
-        artist.musicbrainz_artist_id.as_deref(),
-        None,
-        None,
-        None,
-    )
+    scan.write_artist(&library::ArtistInput {
+        object_id: artist.id.clone(),
+        name: artist.name.clone(),
+        sort_text: artist.sort_name.as_ref().map(|name| name.to_lowercase()),
+        musicbrainz_artist_id: artist.musicbrainz_artist_id.clone(),
+        ..Default::default()
+    })
     .await
 }
 async fn stage_genre_credit(
     scan: &mut library::Scan,
     genre: &GenreCredit,
 ) -> library::LibraryResult<()> {
-    scan.write_genre(
-        &genre.id,
-        &genre.name,
-        &genre.name.to_lowercase(),
-        None,
-        None,
-    )
+    scan.write_genre(&library::GenreInput {
+        object_id: genre.id.clone(),
+        name: genre.name.clone(),
+        ..Default::default()
+    })
     .await
 }
 

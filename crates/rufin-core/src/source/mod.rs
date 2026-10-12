@@ -4427,16 +4427,12 @@ mod artwork_preparation_tests {
             let mut scan = library::Scan::begin_items(&database, source_id.as_str())
                 .await
                 .unwrap();
-            scan.write_artist(
-                "artist",
-                "Artist",
-                "artist",
-                None,
-                None,
-                Some(&binding),
-                None,
-                None,
-            )
+            scan.write_artist(&library::ArtistInput {
+                object_id: "artist".into(),
+                name: "Artist".into(),
+                artwork_binding: Some(binding.to_vec()),
+                ..Default::default()
+            })
             .await
             .unwrap();
             let outcome = scan.finish().await.unwrap();
@@ -4610,23 +4606,14 @@ mod artwork_preparation_tests {
                 library::Scan::begin(&database, source_id.as_str(), "Music", "music", None)
                     .await
                     .unwrap();
-            scan.write_album(
-                "album",
-                "Cached Album",
-                "cached album",
-                "Artist",
-                "cached album",
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                false,
-                None,
-                None,
-            )
+            scan.write_album(&library::AlbumInput {
+                object_id: "album".into(),
+                title: "Cached Album".into(),
+                display_artist: "Artist".into(),
+                sort_text: "cached album".into(),
+                favorite: Some(false),
+                ..Default::default()
+            })
             .await
             .unwrap();
             let ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
@@ -4789,39 +4776,20 @@ mod artwork_preparation_tests {
             scan.write_folder("new-folder", "New Folder", "new folder", "new folder", None)
                 .await
                 .unwrap();
-            scan.write_track(
-                "new-track",
-                Some("album"),
-                "New Track",
-                "Cached Album",
-                "Artist",
-                "new track",
-                1_000,
-                1,
-                1,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                false,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                [0; 32],
-                &library::AudioProperties::default(),
-            )
+            scan.write_track(&library::TrackInput {
+                object_id: "new-track".into(),
+                album_object_id: Some("album".into()),
+                title: "New Track".into(),
+                display_album: "Cached Album".into(),
+                display_artist: "Artist".into(),
+                sort_text: "new track".into(),
+                duration_millis: 1_000,
+                disc_number: 1,
+                track_number: 1,
+                favorite: Some(false),
+                loudness_analysis_key: [0; 32],
+                ..Default::default()
+            })
             .await
             .unwrap();
             scan.write_track_folders(&[library::ScanLink {

@@ -107,27 +107,25 @@ async fn stage_album(scan: &mut Scan, track: &ScannedTrack) -> SourceResult<()> 
         .as_ref()
         .map(serde_json::to_vec)
         .transpose()?;
-    scan.write_album(
-        &track.album_id,
-        &track.album,
-        &track.album.to_lowercase(),
-        &track.album_artist,
-        &track
+    scan.write_album(&library::AlbumInput {
+        object_id: track.album_id.clone(),
+        title: track.album.clone(),
+        display_artist: track.album_artist.clone(),
+        sort_text: track
             .sort_album
             .as_deref()
             .unwrap_or(&track.album)
             .to_lowercase(),
-        Some(i64::from(track.year)).filter(|year| *year > 0),
-        track.release_date.as_deref(),
-        None,
-        track.musicbrainz_album_id.as_deref(),
-        track.musicbrainz_release_group_id.as_deref(),
-        track.is_compilation,
-        album_artwork.as_deref(),
-        false,
-        None,
-        Some(scan.accepted_at()),
-    )
+        year: Some(i64::from(track.year)).filter(|year| *year > 0),
+        release_date: track.release_date.clone(),
+        musicbrainz_release_id: track.musicbrainz_album_id.clone(),
+        musicbrainz_release_group_id: track.musicbrainz_release_group_id.clone(),
+        is_compilation: track.is_compilation,
+        artwork_binding: album_artwork,
+        favorite: Some(false),
+        first_seen_at: Some(scan.accepted_at()),
+        ..Default::default()
+    })
     .await?;
     Ok(())
 }
@@ -139,43 +137,40 @@ async fn stage_track_row(scan: &mut Scan, track: &ScannedTrack) -> SourceResult<
         .map(serde_json::to_vec)
         .transpose()?;
 
-    scan.write_track(
-        &track.id,
-        Some(&track.album_id),
-        &track.title,
-        &track.album,
-        &track.artist,
-        &track
+    scan.write_track(&library::TrackInput {
+        object_id: track.id.clone(),
+        album_object_id: Some(track.album_id.clone()),
+        title: track.title.clone(),
+        display_album: track.album.clone(),
+        display_artist: track.artist.clone(),
+        sort_text: track
             .sort_title
             .as_deref()
             .unwrap_or(&track.title)
             .to_lowercase(),
-        i64::from(track.duration_seconds) * 1_000,
-        i64::from(track.disc_number),
-        i64::from(track.track_number),
-        Some(i64::from(track.year)).filter(|year| *year > 0),
-        track.release_date.as_deref(),
-        None,
-        track.local_uri.as_deref(),
-        track.source_format.as_deref(),
-        track.comment.as_deref(),
-        track.bpm.map(i64::from),
-        track.musicbrainz_recording_id.as_deref(),
-        track.musicbrainz_release_track_id.as_deref(),
-        track.cue_path.as_deref(),
-        track.cue_start_millis,
-        track.cue_end_millis,
-        artwork.as_deref(),
-        false,
-        track.user_rating.map(i64::from),
-        Some(scan.accepted_at()),
-        None,
-        None,
-        None,
-        Some(&track.source_path),
-        audio_key(track),
-        &track.audio_properties,
-    )
+        duration_millis: i64::from(track.duration_seconds) * 1_000,
+        disc_number: i64::from(track.disc_number),
+        track_number: i64::from(track.track_number),
+        year: Some(i64::from(track.year)).filter(|year| *year > 0),
+        release_date: track.release_date.clone(),
+        media_uri: track.local_uri.clone(),
+        source_format: track.source_format.clone(),
+        comment: track.comment.clone(),
+        bpm: track.bpm.map(i64::from),
+        musicbrainz_recording_id: track.musicbrainz_recording_id.clone(),
+        musicbrainz_release_track_id: track.musicbrainz_release_track_id.clone(),
+        cue_path: track.cue_path.clone(),
+        cue_start_millis: track.cue_start_millis,
+        cue_end_millis: track.cue_end_millis,
+        artwork_binding: artwork,
+        favorite: Some(false),
+        rating: track.user_rating.map(i64::from),
+        first_seen_at: Some(scan.accepted_at()),
+        source_path: Some(track.source_path.clone()),
+        loudness_analysis_key: audio_key(track),
+        audio_properties: track.audio_properties.clone(),
+        ..Default::default()
+    })
     .await?;
     Ok(())
 }
@@ -206,13 +201,12 @@ async fn stage_loudness(scan: &mut Scan, track: &ScannedTrack) -> SourceResult<(
 
 async fn stage_genre(scan: &mut Scan, genre: &media::NamedCredit) -> SourceResult<()> {
     Ok(scan
-        .write_genre(
-            &genre.id,
-            &genre.name,
-            &genre.name.to_lowercase(),
-            Some(&genre.name.to_lowercase()),
-            None,
-        )
+        .write_genre(&library::GenreInput {
+            object_id: genre.id.clone(),
+            name: genre.name.clone(),
+            sort_text: Some(genre.name.to_lowercase()),
+            ..Default::default()
+        })
         .await?)
 }
 
@@ -229,22 +223,19 @@ async fn stage_mood(scan: &mut Scan, mood: &media::NamedCredit) -> SourceResult<
 
 async fn stage_artist(scan: &mut Scan, artist: &media::ArtistCredit) -> SourceResult<()> {
     Ok(scan
-        .write_artist(
-            &artist.id,
-            &artist.name,
-            &artist.name.to_lowercase(),
-            Some(
-                &artist
+        .write_artist(&library::ArtistInput {
+            object_id: artist.id.clone(),
+            name: artist.name.clone(),
+            sort_text: Some(
+                artist
                     .sort_name
                     .as_deref()
                     .unwrap_or(&artist.name)
                     .to_lowercase(),
             ),
-            artist.musicbrainz_artist_id.as_deref(),
-            None,
-            None,
-            None,
-        )
+            musicbrainz_artist_id: artist.musicbrainz_artist_id.clone(),
+            ..Default::default()
+        })
         .await?)
 }
 

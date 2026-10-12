@@ -222,39 +222,29 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     let mut scan = library::Scan::begin_items(&fixture.database, "source")
         .await
         .unwrap();
-    scan.write_track(
-        "track-0",
-        Some("album-a"),
-        "Alpha",
-        "Album A",
-        "Artist A",
-        "alpha",
-        180_000,
-        1,
-        1,
-        Some(2020),
-        None,
-        Some("2024-01-02"),
-        None,
-        Some("FLAC"),
-        Some("Note"),
-        Some(100),
-        None,
-        None,
-        Some("/music/changed.cue"),
-        Some(1_000),
-        Some(181_000),
-        None,
-        false,
-        Some(5),
-        None,
-        None,
-        None,
-        None,
-        None,
-        [99; 32],
-        &library::AudioProperties::default(),
-    )
+    scan.write_track(&library::TrackInput {
+        object_id: "track-0".into(),
+        album_object_id: Some("album-a".into()),
+        title: "Alpha".into(),
+        display_album: "Album A".into(),
+        display_artist: "Artist A".into(),
+        sort_text: "alpha".into(),
+        duration_millis: 180_000,
+        disc_number: 1,
+        track_number: 1,
+        year: Some(2020),
+        date_added: Some("2024-01-02".into()),
+        source_format: Some("FLAC".into()),
+        comment: Some("Note".into()),
+        bpm: Some(100),
+        cue_path: Some("/music/changed.cue".into()),
+        cue_start_millis: Some(1_000),
+        cue_end_millis: Some(181_000),
+        favorite: Some(false),
+        rating: Some(5),
+        loudness_analysis_key: [99; 32],
+        ..Default::default()
+    })
     .await
     .expect("refresh Track CUE identity");
     scan.write_track_relations(
@@ -396,23 +386,18 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         ("album-a", "Album A", "Artist A", "album a", "2024-01-02"),
         ("album-b", "Album B", "Artist B", "album b", "2023-01-02"),
     ] {
-        scan.write_album(
-            id,
-            title,
-            sort,
-            artist,
-            sort,
-            Some(2024),
-            Some(date),
-            Some(date),
-            None,
-            None,
-            Some(id == "album-a"),
-            None,
-            false,
-            None,
-            None,
-        )
+        scan.write_album(&library::AlbumInput {
+            object_id: id.to_owned(),
+            title: title.to_owned(),
+            display_artist: artist.to_owned(),
+            sort_text: sort.to_owned(),
+            year: Some(2024),
+            release_date: Some(date.to_owned()),
+            date_added: Some(date.to_owned()),
+            is_compilation: Some(id == "album-a"),
+            favorite: Some(false),
+            ..Default::default()
+        })
         .await
         .expect("stage Album");
     }
@@ -422,43 +407,30 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         (2, "album-a", "Artist B", "Gamma"),
         (3, "album-b", "Artist B", "Delta"),
     ] {
-        scan.write_track(
-            &format!("track-{index}"),
-            Some(album_id),
-            title,
-            if album_id == "album-a" {
+        scan.write_track(&library::TrackInput {
+            object_id: format!("track-{index}"),
+            album_object_id: Some(album_id.to_owned()),
+            title: title.to_owned(),
+            display_album: (if album_id == "album-a" {
                 "Album A"
             } else {
                 "Album B"
-            },
-            artist,
-            &title.to_lowercase(),
-            180_000 + index * 1_000,
-            1,
-            index + 1,
-            Some(2020 + index),
-            None,
-            Some("2024-01-02"),
-            None,
-            Some("FLAC"),
-            Some("Note"),
-            Some(100 + index),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            false,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            [index as u8 + 10; 32],
-            &library::AudioProperties::default(),
-        )
+            })
+            .to_owned(),
+            display_artist: artist.to_owned(),
+            sort_text: title.to_lowercase(),
+            duration_millis: 180_000 + index * 1_000,
+            disc_number: 1,
+            track_number: index + 1,
+            year: Some(2020 + index),
+            date_added: Some("2024-01-02".into()),
+            source_format: Some("FLAC".into()),
+            comment: Some("Note".into()),
+            bpm: Some(100 + index),
+            favorite: Some(false),
+            loudness_analysis_key: [index as u8 + 10; 32],
+            ..Default::default()
+        })
         .await
         .expect("stage Track");
     }

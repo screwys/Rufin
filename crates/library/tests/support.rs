@@ -84,47 +84,48 @@ pub async fn fixture() -> Fixture {
         ("album-a", "Album A", "Artist A", "album a", "2024-01-02"),
         ("album-b", "Album B", "Artist B", "album b", "2023-01-02"),
     ] {
-        scan.write_album(
-            id,
-            title,
-            sort,
-            artist,
-            sort,
-            Some(2024),
-            Some(date),
-            Some(date),
-            None,
-            Some(if id == "album-a" {
-                "group-a"
-            } else {
-                "group-b"
-            }),
-            Some(id == "album-a"),
-            None,
-            false,
-            None,
-            None,
-        )
+        scan.write_album(&library::AlbumInput {
+            object_id: id.to_owned(),
+            title: title.to_owned(),
+            display_artist: artist.to_owned(),
+            sort_text: sort.to_owned(),
+            year: Some(2024),
+            release_date: Some(date.to_owned()),
+            date_added: Some(date.to_owned()),
+            musicbrainz_release_group_id: Some(
+                (if id == "album-a" {
+                    "group-a"
+                } else {
+                    "group-b"
+                })
+                .to_owned(),
+            ),
+            is_compilation: Some(id == "album-a"),
+            favorite: Some(false),
+            ..Default::default()
+        })
         .await
         .expect("stage Album");
     }
     for (id, name) in [("artist-a", "Artist A"), ("artist-b", "Artist B")] {
-        scan.write_artist(
-            id,
-            name,
-            &name.to_lowercase(),
-            Some(&name.to_lowercase()),
-            None,
-            None,
-            Some(false),
-            None,
-        )
+        scan.write_artist(&library::ArtistInput {
+            object_id: id.to_owned(),
+            name: name.to_owned(),
+            sort_text: Some(name.to_lowercase()),
+            favorite: Some(false),
+            ..Default::default()
+        })
         .await
         .expect("stage Artist");
     }
-    scan.write_genre("genre", "Rock", "rock", Some("rock"), None)
-        .await
-        .expect("stage Genre");
+    scan.write_genre(&library::GenreInput {
+        object_id: "genre".into(),
+        name: "Rock".into(),
+        sort_text: Some("rock".into()),
+        ..Default::default()
+    })
+    .await
+    .expect("stage Genre");
     scan.write_mood("mood", "Energetic", "energetic", "energetic")
         .await
         .expect("stage Mood");
@@ -138,47 +139,36 @@ pub async fn fixture() -> Fixture {
         (3, "album-b", "artist-b", "Delta", false),
     ] {
         let id = format!("track-{index}");
-        scan.write_track(
-            &id,
-            Some(album),
-            title,
-            if album == "album-a" {
+        scan.write_track(&library::TrackInput {
+            object_id: id.to_owned(),
+            album_object_id: Some(album.to_owned()),
+            title: title.to_owned(),
+            display_album: (if album == "album-a" {
                 "Album A"
             } else {
                 "Album B"
-            },
-            if artist == "artist-a" {
+            })
+            .to_owned(),
+            display_artist: (if artist == "artist-a" {
                 "Artist A"
             } else {
                 "Artist B"
-            },
-            &title.to_lowercase(),
-            180_000 + index * 1_000,
-            1,
-            index + 1,
-            Some(2020 + index),
-            None,
-            Some("2024-01-02"),
-            None,
-            Some("FLAC"),
-            Some("Note"),
-            Some(100 + index),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            favorite,
-            Some(5 + index),
-            None,
-            None,
-            None,
-            None,
-            None,
-            [index as u8 + 1; 32],
-            &library::AudioProperties::default(),
-        )
+            })
+            .to_owned(),
+            sort_text: title.to_lowercase(),
+            duration_millis: 180_000 + index * 1_000,
+            disc_number: 1,
+            track_number: index + 1,
+            year: Some(2020 + index),
+            date_added: Some("2024-01-02".into()),
+            source_format: Some("FLAC".into()),
+            comment: Some("Note".into()),
+            bpm: Some(100 + index),
+            favorite: Some(favorite),
+            rating: Some(5 + index),
+            loudness_analysis_key: [index as u8 + 1; 32],
+            ..Default::default()
+        })
         .await
         .expect("stage Track");
         scan.write_track_relations(&[(&id, artist)], &[(&id, "genre")], &[(&id, "mood")])

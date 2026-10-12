@@ -1794,39 +1794,20 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
         let mut scan = library::Scan::begin(&database, "source", "Source", "source", None)
             .await
             .unwrap();
-        scan.write_track(
-            &object,
-            None,
-            "Changed tags",
-            "",
-            "Artist",
-            "changed tags",
-            100000,
-            1,
-            1,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            false,
-            Some(999),
-            None,
-            None,
-            None,
-            None,
-            None,
-            [0; 32],
-            &library::AudioProperties::default(),
-        )
+        scan.write_track(&library::TrackInput {
+            object_id: object.to_owned(),
+            title: "Changed tags".into(),
+            display_album: "".into(),
+            display_artist: "Artist".into(),
+            sort_text: "changed tags".into(),
+            duration_millis: 100000,
+            disc_number: 1,
+            track_number: 1,
+            favorite: Some(false),
+            rating: Some(999),
+            loudness_analysis_key: [0; 32],
+            ..Default::default()
+        })
         .await
         .unwrap();
         scan.finish().await.unwrap();

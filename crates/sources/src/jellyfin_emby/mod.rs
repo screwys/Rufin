@@ -1,5 +1,5 @@
 use crate::config::{decode_provider_payload, require_payload_version};
-use crate::policy::{raw_item_id, stable_hash};
+use crate::policy::raw_item_id;
 use crate::remote_json::{field, id, items};
 use crate::{
     ConnectedSource, CredentialHostInput, ImageBytes, JellyfinEmbySettingsInput,
@@ -8,8 +8,8 @@ use crate::{
 };
 use item::{
     ALBUM_FIELDS, ImageRef, MIXED_ITEM_FIELDS, PLAYLIST_FIELDS, TRACK_FIELDS, album_from_item,
-    artist_from_item, genre_from_item, is_audio_item, playlist_from_item, primary_image_ref,
-    stage_album, stage_artist, stage_genre, stage_track, track_from_item,
+    artist_from_item, genre_from_item, home_entry_from_item, is_audio_item, playlist_from_item,
+    primary_image_ref, track_from_item,
 };
 use lyrics::{LyricsBundle, LyricsDocument, LyricsLine, LyricsOrigin, LyricsRole};
 use playback::{RepeatMode, ResolvedStream, SourceReportFact, SourceReportPhase, StreamQuality};

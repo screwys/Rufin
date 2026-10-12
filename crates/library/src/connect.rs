@@ -1371,70 +1371,41 @@ mod tests {
         let mut scan = Scan::begin(&source, "server", "Server", "server", None)
             .await
             .unwrap();
-        scan.write_album(
-            "album",
-            "Album",
-            "album",
-            "Artist",
-            "album",
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(art),
-            false,
-            None,
-            None,
-        )
+        scan.write_album(&crate::AlbumInput {
+            object_id: "album".into(),
+            title: "Album".into(),
+            display_artist: "Artist".into(),
+            sort_text: "album".into(),
+            artwork_binding: Some(art.to_vec()),
+            favorite: Some(false),
+            ..Default::default()
+        })
         .await
         .unwrap();
-        scan.write_artist(
-            "artist",
-            "Artist",
-            "artist",
-            Some("artist"),
-            None,
-            Some(art),
-            None,
-            None,
-        )
+        scan.write_artist(&crate::ArtistInput {
+            object_id: "artist".into(),
+            name: "Artist".into(),
+            sort_text: Some("artist".into()),
+            artwork_binding: Some(art.to_vec()),
+            ..Default::default()
+        })
         .await
         .unwrap();
-        scan.write_track(
-            "track",
-            Some("album"),
-            "Track",
-            "Album",
-            "Artist",
-            "track",
-            180000,
-            1,
-            1,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(art),
-            false,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            [1; 32],
-            &crate::AudioProperties::default(),
-        )
+        scan.write_track(&crate::TrackInput {
+            object_id: "track".into(),
+            album_object_id: Some("album".into()),
+            title: "Track".into(),
+            display_album: "Album".into(),
+            display_artist: "Artist".into(),
+            sort_text: "track".into(),
+            duration_millis: 180000,
+            disc_number: 1,
+            track_number: 1,
+            artwork_binding: Some(art.to_vec()),
+            favorite: Some(false),
+            loudness_analysis_key: [1; 32],
+            ..Default::default()
+        })
         .await
         .unwrap();
         scan.write_track_relations(&[("track", "artist")], &[], &[])

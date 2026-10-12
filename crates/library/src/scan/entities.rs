@@ -1,4 +1,4 @@
-use super::Scan;
+use super::{AlbumInput, ArtistInput, GenreInput, Scan, TrackInput};
 use crate::{
     LibraryError, LibraryResult, SourceId, cue_media_uri, normalize_direct_media_uri,
     source_entity_uri,
@@ -22,50 +22,43 @@ pub(super) const ALBUM_SUPPLIED: &str = "
     (album.source_rating IS NOT NULL)*128";
 
 impl Scan {
-    #[allow(clippy::too_many_arguments)]
-    pub async fn write_album(
-        &mut self,
-        object_id: &str,
-        title: &str,
-        normalized_title: &str,
-        display_artist: &str,
-        sort_text: &str,
-        year: Option<i64>,
-        release_date: Option<&str>,
-        date_added: Option<&str>,
-        musicbrainz_release_id: Option<&str>,
-        musicbrainz_release_group_id: Option<&str>,
-        is_compilation: Option<bool>,
-        artwork_binding: Option<&[u8]>,
-        favorite: impl Into<Option<bool>>,
-        rating: Option<i64>,
-        first_seen_at: Option<i64>,
-    ) -> LibraryResult<()> {
+    pub async fn write_album(&mut self, input: &AlbumInput) -> LibraryResult<()> {
+        let object_id = input.object_id.as_str();
+        let normalized_title = input.title.to_lowercase();
         self.require_id("album", object_id)?;
         let media_uri = source_entity_uri(&SourceId::new(&self.source_id), "album", object_id);
-        let rating = rating
+        let rating = input
+            .rating
             .filter(|rating| (0..=10).contains(rating))
             .map(|rating| rating * 10);
         self.require_row_bytes(&[
             object_id.as_bytes(),
-            title.as_bytes(),
+            input.title.as_bytes(),
             normalized_title.as_bytes(),
-            display_artist.as_bytes(),
-            sort_text.as_bytes(),
-            release_date.unwrap_or_default().as_bytes(),
-            date_added.unwrap_or_default().as_bytes(),
-            musicbrainz_release_id.unwrap_or_default().as_bytes(),
-            musicbrainz_release_group_id.unwrap_or_default().as_bytes(),
-            artwork_binding.unwrap_or_default(),
+            input.display_artist.as_bytes(),
+            input.sort_text.as_bytes(),
+            input.release_date.as_deref().unwrap_or_default().as_bytes(),
+            input.date_added.as_deref().unwrap_or_default().as_bytes(),
+            input
+                .musicbrainz_release_id
+                .as_deref()
+                .unwrap_or_default()
+                .as_bytes(),
+            input
+                .musicbrainz_release_group_id
+                .as_deref()
+                .unwrap_or_default()
+                .as_bytes(),
+            input.artwork_binding.as_deref().unwrap_or_default(),
         ])?;
         let first = self.observe("album", object_id).await?;
-        let supplied = i64::from(year.is_some()) * YEAR
-            | i64::from(release_date.is_some()) * RELEASE_DATE
-            | i64::from(date_added.is_some()) * DATE_ADDED
-            | i64::from(musicbrainz_release_id.is_some()) * RELEASE_ID
-            | i64::from(musicbrainz_release_group_id.is_some()) * RELEASE_GROUP_ID
-            | i64::from(is_compilation == Some(true)) * COMPILATION_TRUE
-            | i64::from(is_compilation == Some(false)) * COMPILATION_FALSE
+        let supplied = i64::from(input.year.is_some()) * YEAR
+            | i64::from(input.release_date.is_some()) * RELEASE_DATE
+            | i64::from(input.date_added.is_some()) * DATE_ADDED
+            | i64::from(input.musicbrainz_release_id.is_some()) * RELEASE_ID
+            | i64::from(input.musicbrainz_release_group_id.is_some()) * RELEASE_GROUP_ID
+            | i64::from(input.is_compilation == Some(true)) * COMPILATION_TRUE
+            | i64::from(input.is_compilation == Some(false)) * COMPILATION_FALSE
             | i64::from(rating.is_some()) * RATING;
         let changed = self.execute_result(
             sqlx::query(
@@ -106,17 +99,17 @@ impl Scan {
             )
             .bind(object_id)
             .bind(media_uri)
-            .bind(title)
+            .bind(input.title.as_str())
             .bind(normalized_title)
-            .bind(display_artist)
-            .bind(sort_text)
-            .bind(year)
-            .bind(release_date)
-            .bind(date_added)
-            .bind(musicbrainz_release_id)
-            .bind(musicbrainz_release_group_id)
-            .bind(is_compilation)
-            .bind(first_seen_at)
+            .bind(input.display_artist.as_str())
+            .bind(input.sort_text.as_str())
+            .bind(input.year)
+            .bind(input.release_date.as_deref())
+            .bind(input.date_added.as_deref())
+            .bind(input.musicbrainz_release_id.as_deref())
+            .bind(input.musicbrainz_release_group_id.as_deref())
+            .bind(input.is_compilation)
+            .bind(input.first_seen_at)
             .bind(self.source)
             .bind(first),
         ).await?.rows_affected() > 0;
@@ -128,74 +121,84 @@ impl Scan {
              WHERE album.source_key=?4 AND album.object_id=?1 AND seen.kind='album' AND seen.object_id=?1
                AND ((?2 IS NOT NULL AND album.source_favorite IS NOT ?2)
                  OR (seen.supplied & 128=0 AND ?3 IS NOT NULL AND album.source_rating IS NOT ?3))")
-            .bind(object_id).bind(favorite.into()).bind(rating).bind(self.source))
+            .bind(object_id).bind(input.favorite).bind(rating).bind(self.source))
             .await?.rows_affected() > 0;
         self.execute(sqlx::query("UPDATE temp.scan_seen SET supplied=supplied | ?2 WHERE kind='album' AND object_id=?1")
             .bind(object_id).bind(supplied)).await?;
-        self.remember_artwork("album", object_id, artwork_binding, first)
-            .await
+        self.remember_artwork("album", object_id, input.artwork_binding.as_deref(), first)
+            .await?;
+        if let Some(relations) = &input.relations {
+            let artists = if relations.album_artists.is_empty() {
+                &relations.artists
+            } else {
+                &relations.album_artists
+            };
+            for artist in artists {
+                self.write_artist(artist).await?;
+            }
+            for genre in &relations.genres {
+                self.write_genre(genre).await?;
+            }
+            self.write_album_relations(
+                &artists
+                    .iter()
+                    .map(|artist| (object_id, artist.object_id.as_str()))
+                    .collect::<Vec<_>>(),
+                &relations
+                    .genres
+                    .iter()
+                    .map(|genre| (object_id, genre.object_id.as_str()))
+                    .collect::<Vec<_>>(),
+                &relations
+                    .release_types
+                    .iter()
+                    .map(|release_type| (object_id, release_type.as_str()))
+                    .collect::<Vec<_>>(),
+            )
+            .await?;
+        }
+        Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub async fn write_track(
-        &mut self,
-        object_id: &str,
-        album_object_id: Option<&str>,
-        title: &str,
-        display_album: &str,
-        display_artist: &str,
-        sort_text: &str,
-        duration_millis: i64,
-        disc_number: i64,
-        track_number: i64,
-        year: Option<i64>,
-        release_date: Option<&str>,
-        date_added: Option<&str>,
-        media_uri: Option<&str>,
-        source_format: Option<&str>,
-        comment: Option<&str>,
-        bpm: Option<i64>,
-        musicbrainz_recording_id: Option<&str>,
-        musicbrainz_release_track_id: Option<&str>,
-        cue_path: Option<&str>,
-        cue_start_millis: Option<i64>,
-        cue_end_millis: Option<i64>,
-        artwork_binding: Option<&[u8]>,
-        favorite: impl Into<Option<bool>>,
-        rating: Option<i64>,
-        first_seen_at: Option<i64>,
-        source_play_count: Option<i64>,
-        source_skip_count: Option<i64>,
-        source_last_played: Option<i64>,
-        source_path: Option<&str>,
-        loudness_analysis_key: [u8; 32],
-        audio_properties: &crate::AudioProperties,
-    ) -> LibraryResult<bool> {
+    pub async fn write_track(&mut self, input: &TrackInput) -> LibraryResult<bool> {
+        let object_id = input.object_id.as_str();
+        let album_object_id = input.album_object_id.as_deref();
+        let title = input.title.as_str();
+        let display_album = input.display_album.as_str();
+        let display_artist = input.display_artist.as_str();
+        let comment = input.comment.as_deref();
         let normalized_search = format!(
             "{title} {display_artist} {display_album} {} {}",
             comment.unwrap_or_default(),
-            year.map(|value| value.to_string()).unwrap_or_default()
+            input
+                .year
+                .map(|value| value.to_string())
+                .unwrap_or_default()
         )
         .to_lowercase();
-        let audio_properties = serde_json::to_string(audio_properties)?;
+        let audio_properties = serde_json::to_string(&input.audio_properties)?;
         self.require_id("track", object_id)?;
-        let direct_uri = media_uri.and_then(normalize_direct_media_uri);
-        let media_uri = match (direct_uri, cue_start_millis, cue_end_millis) {
+        let direct_uri = input
+            .media_uri
+            .as_deref()
+            .and_then(normalize_direct_media_uri);
+        let media_uri = match (direct_uri, input.cue_start_millis, input.cue_end_millis) {
             (Some(file_uri), Some(start), Some(end)) => {
                 cue_media_uri(object_id, &file_uri, start, end)
             }
             (Some(uri), None, None) => uri,
             _ => source_entity_uri(&SourceId::new(&self.source_id), "track", object_id),
         };
-        let rating = rating
+        let rating = input
+            .rating
             .filter(|rating| (0..=10).contains(rating))
             .map(|rating| rating * 10);
         if let Some(album_id) = album_object_id {
             self.require_id("album", album_id)?;
         }
-        if source_play_count.is_some_and(|value| value < 0)
-            || source_skip_count.is_some_and(|value| value < 0)
-            || source_last_played.is_some_and(|value| value < 0)
+        if input.source_play_count.is_some_and(|value| value < 0)
+            || input.source_skip_count.is_some_and(|value| value < 0)
+            || input.source_last_played.is_some_and(|value| value < 0)
         {
             self.failed = true;
             return Err(LibraryError::InvalidScan(
@@ -209,22 +212,35 @@ impl Scan {
             normalized_search.as_bytes(),
             display_album.as_bytes(),
             display_artist.as_bytes(),
-            sort_text.as_bytes(),
-            release_date.unwrap_or_default().as_bytes(),
-            date_added.unwrap_or_default().as_bytes(),
+            input.sort_text.as_bytes(),
+            input.release_date.as_deref().unwrap_or_default().as_bytes(),
+            input.date_added.as_deref().unwrap_or_default().as_bytes(),
             media_uri.as_bytes(),
-            source_path.unwrap_or_default().as_bytes(),
-            source_format.unwrap_or_default().as_bytes(),
+            input.source_path.as_deref().unwrap_or_default().as_bytes(),
+            input
+                .source_format
+                .as_deref()
+                .unwrap_or_default()
+                .as_bytes(),
             audio_properties.as_bytes(),
             comment.unwrap_or_default().as_bytes(),
-            musicbrainz_recording_id.unwrap_or_default().as_bytes(),
-            musicbrainz_release_track_id.unwrap_or_default().as_bytes(),
-            cue_path.unwrap_or_default().as_bytes(),
-            artwork_binding.unwrap_or_default(),
-            loudness_analysis_key.as_slice(),
+            input
+                .musicbrainz_recording_id
+                .as_deref()
+                .unwrap_or_default()
+                .as_bytes(),
+            input
+                .musicbrainz_release_track_id
+                .as_deref()
+                .unwrap_or_default()
+                .as_bytes(),
+            input.cue_path.as_deref().unwrap_or_default().as_bytes(),
+            input.artwork_binding.as_deref().unwrap_or_default(),
+            input.loudness_analysis_key.as_slice(),
         ])?;
         let existed = self.contains_entity("track", object_id, true).await?;
         if !self.observe("track", object_id).await? {
+            self.write_track_details(input).await?;
             return Ok(false);
         }
         self.changes.metadata |= self
@@ -292,25 +308,25 @@ impl Scan {
             .bind(normalized_search)
             .bind(display_album)
             .bind(display_artist)
-            .bind(sort_text)
-            .bind(duration_millis)
-            .bind(disc_number)
-            .bind(track_number)
-            .bind(year)
-            .bind(release_date)
-            .bind(date_added)
+            .bind(input.sort_text.as_str())
+            .bind(input.duration_millis)
+            .bind(input.disc_number)
+            .bind(input.track_number)
+            .bind(input.year)
+            .bind(input.release_date.as_deref())
+            .bind(input.date_added.as_deref())
             .bind(&media_uri)
-            .bind(source_path)
-            .bind(source_format)
+            .bind(input.source_path.as_deref())
+            .bind(input.source_format.as_deref())
             .bind(comment)
-            .bind(bpm)
-            .bind(musicbrainz_recording_id)
-            .bind(musicbrainz_release_track_id)
-            .bind(cue_path)
-            .bind(cue_start_millis)
-            .bind(cue_end_millis)
-            .bind(first_seen_at)
-            .bind(loudness_analysis_key.as_slice())
+            .bind(input.bpm)
+            .bind(input.musicbrainz_recording_id.as_deref())
+            .bind(input.musicbrainz_release_track_id.as_deref())
+            .bind(input.cue_path.as_deref())
+            .bind(input.cue_start_millis)
+            .bind(input.cue_end_millis)
+            .bind(input.first_seen_at)
+            .bind(input.loudness_analysis_key.as_slice())
             .bind(audio_properties)
             .bind(self.source),
         ).await?.rows_affected() > 0;
@@ -320,7 +336,7 @@ impl Scan {
             "UPDATE tracks SET source_favorite=COALESCE(?2,source_favorite),source_rating=?3
              WHERE source_key=?4 AND object_id=?1
                AND ((?2 IS NOT NULL AND source_favorite IS NOT ?2) OR source_rating IS NOT ?3)")
-            .bind(object_id).bind(favorite.into()).bind(rating).bind(self.source))
+            .bind(object_id).bind(input.favorite).bind(rating).bind(self.source))
             .await?.rows_affected() > 0;
         if let Some(album) = album_object_id {
             self.execute(sqlx::query(
@@ -329,20 +345,69 @@ impl Scan {
                  ON CONFLICT(track_id) DO UPDATE SET album_id=excluded.album_id")
                 .bind(object_id).bind(album).bind(self.source)).await?;
         }
-        if source_play_count.is_some()
-            || source_skip_count.is_some()
-            || source_last_played.is_some()
+        if input.source_play_count.is_some()
+            || input.source_skip_count.is_some()
+            || input.source_last_played.is_some()
         {
             self.changes.user_data |= self.execute_result(sqlx::query(
                 "UPDATE tracks SET source_play_count=?3,source_skip_count=?4,source_last_played=?5
                  WHERE source_key=?1 AND object_id=?2
                    AND (source_play_count,source_skip_count,source_last_played) IS NOT (?3,?4,?5)")
-                .bind(self.source).bind(object_id).bind(source_play_count)
-                .bind(source_skip_count).bind(source_last_played)).await?.rows_affected() > 0;
+                .bind(self.source).bind(object_id).bind(input.source_play_count)
+                .bind(input.source_skip_count).bind(input.source_last_played)).await?.rows_affected() > 0;
         }
-        self.remember_artwork("track", object_id, artwork_binding, true)
+        self.remember_artwork("track", object_id, input.artwork_binding.as_deref(), true)
             .await?;
+        self.write_track_details(input).await?;
         Ok(true)
+    }
+
+    async fn write_track_details(&mut self, input: &TrackInput) -> LibraryResult<()> {
+        if let Some(loudness) = input.source_loudness {
+            self.write_track_source_loudness(
+                &input.object_id,
+                loudness.integrated_lufs,
+                loudness.true_peak,
+                loudness.replay_gain_db,
+                loudness.replay_gain_peak,
+            )
+            .await?;
+        }
+        if let Some(album_id) = &input.album_object_id
+            && let Some(loudness) = input.album_loudness
+        {
+            self.write_album_source_loudness(
+                album_id,
+                loudness.integrated_lufs,
+                loudness.true_peak,
+                loudness.replay_gain_db,
+                loudness.replay_gain_peak,
+            )
+            .await?;
+        }
+        if let Some(relations) = &input.relations {
+            for artist in relations.artists.iter().chain(&relations.album_artists) {
+                self.write_artist(artist).await?;
+            }
+            for genre in &relations.genres {
+                self.write_genre(genre).await?;
+            }
+            self.write_track_relations(
+                &relations
+                    .artists
+                    .iter()
+                    .map(|artist| (input.object_id.as_str(), artist.object_id.as_str()))
+                    .collect::<Vec<_>>(),
+                &relations
+                    .genres
+                    .iter()
+                    .map(|genre| (input.object_id.as_str(), genre.object_id.as_str()))
+                    .collect::<Vec<_>>(),
+                &[],
+            )
+            .await?;
+        }
+        Ok(())
     }
 
     pub async fn write_track_source_loudness(
@@ -385,29 +450,27 @@ impl Scan {
 
     /// Full artist records supply their effective sort name, including the display-name fallback.
     /// Sparse credits leave it absent so they retain the existing artist sort name.
-    pub async fn write_artist(
-        &mut self,
-        object_id: &str,
-        name: &str,
-        normalized_name: &str,
-        sort_text: Option<&str>,
-        musicbrainz_artist_id: Option<&str>,
-        artwork_binding: Option<&[u8]>,
-        favorite: Option<bool>,
-        rating: Option<i64>,
-    ) -> LibraryResult<()> {
+    pub async fn write_artist(&mut self, input: &ArtistInput) -> LibraryResult<()> {
+        let object_id = input.object_id.as_str();
+        let sort_text = input.sort_text.as_deref();
+        let normalized_name = input.name.to_lowercase();
         self.require_id("artist", object_id)?;
         let media_uri = source_entity_uri(&SourceId::new(&self.source_id), "artist", object_id);
-        let rating = rating
+        let rating = input
+            .rating
             .filter(|rating| (0..=10).contains(rating))
             .map(|rating| rating * 10);
         self.require_row_bytes(&[
             object_id.as_bytes(),
-            name.as_bytes(),
+            input.name.as_bytes(),
             normalized_name.as_bytes(),
             sort_text.unwrap_or_default().as_bytes(),
-            musicbrainz_artist_id.unwrap_or_default().as_bytes(),
-            artwork_binding.unwrap_or_default(),
+            input
+                .musicbrainz_artist_id
+                .as_deref()
+                .unwrap_or_default()
+                .as_bytes(),
+            input.artwork_binding.as_deref().unwrap_or_default(),
         ])?;
         let first = self.observe("artist", object_id).await?;
         let changed = self.execute_result(sqlx::query(
@@ -426,8 +489,8 @@ impl Scan {
                 artists.musicbrainz_artist_id)
              IS NOT (excluded.media_uri,excluded.name,excluded.normalized_name,excluded.sort_text,
                 excluded.musicbrainz_artist_id)")
-            .bind(object_id).bind(media_uri).bind(name).bind(normalized_name).bind(sort_text)
-            .bind(musicbrainz_artist_id).bind(self.source))
+            .bind(object_id).bind(media_uri).bind(input.name.as_str()).bind(normalized_name).bind(sort_text)
+            .bind(input.musicbrainz_artist_id.as_deref()).bind(self.source))
             .await?.rows_affected() > 0;
         self.changes.metadata |= changed;
         self.changes.user_data |= self
@@ -440,7 +503,7 @@ impl Scan {
                  OR ((?4 OR ?3 IS NOT NULL) AND source_rating IS NOT ?3))",
                 )
                 .bind(object_id)
-                .bind(favorite)
+                .bind(input.favorite)
                 .bind(rating)
                 .bind(sort_text.is_some())
                 .bind(self.source),
@@ -448,20 +511,20 @@ impl Scan {
             .await?
             .rows_affected()
             > 0;
-        if first && favorite.is_none() {
+        if first && input.favorite.is_none() {
             self.execute(
                 sqlx::query("INSERT OR IGNORE INTO temp.scan_unresolved_artists VALUES(?1)")
                     .bind(object_id),
             )
             .await?;
-        } else if favorite.is_some() {
+        } else if input.favorite.is_some() {
             self.execute(
                 sqlx::query("DELETE FROM temp.scan_unresolved_artists WHERE object_id=?1")
                     .bind(object_id),
             )
             .await?;
         }
-        self.remember_artwork("artist", object_id, artwork_binding, first)
+        self.remember_artwork("artist", object_id, input.artwork_binding.as_deref(), first)
             .await
     }
 
@@ -486,21 +549,16 @@ impl Scan {
         Ok(rows)
     }
 
-    pub async fn write_genre(
-        &mut self,
-        object_id: &str,
-        name: &str,
-        normalized_name: &str,
-        sort_text: Option<&str>,
-        artwork_binding: Option<&[u8]>,
-    ) -> LibraryResult<()> {
+    pub async fn write_genre(&mut self, input: &GenreInput) -> LibraryResult<()> {
+        let object_id = input.object_id.as_str();
+        let normalized_name = input.name.to_lowercase();
         self.require_id("genre", object_id)?;
         self.require_row_bytes(&[
             object_id.as_bytes(),
-            name.as_bytes(),
+            input.name.as_bytes(),
             normalized_name.as_bytes(),
-            sort_text.unwrap_or_default().as_bytes(),
-            artwork_binding.unwrap_or_default(),
+            input.sort_text.as_deref().unwrap_or_default().as_bytes(),
+            input.artwork_binding.as_deref().unwrap_or_default(),
         ])?;
         let first = self.observe("genre", object_id).await?;
         let changed = self.execute_result(sqlx::query(
@@ -513,10 +571,10 @@ impl Scan {
                 name=excluded.name,normalized_name=excluded.normalized_name,sort_text=excluded.sort_text
              WHERE (genres.name,genres.normalized_name,genres.sort_text)
                 IS NOT (excluded.name,excluded.normalized_name,excluded.sort_text)")
-            .bind(object_id).bind(name).bind(normalized_name).bind(sort_text).bind(self.source))
+            .bind(object_id).bind(input.name.as_str()).bind(normalized_name).bind(input.sort_text.as_deref()).bind(self.source))
             .await?.rows_affected() > 0;
         self.changes.metadata |= changed;
-        self.remember_artwork("genre", object_id, artwork_binding, first)
+        self.remember_artwork("genre", object_id, input.artwork_binding.as_deref(), first)
             .await
     }
 

@@ -102,16 +102,13 @@ mod tests {
         let mut scan = library::Scan::begin(&database, source.as_str(), "Source", "source", None)
             .await
             .unwrap();
-        scan.write_artist(
-            "artist",
-            "Artist",
-            "artist",
-            Some("artist"),
-            None,
-            Some(&binding),
-            None,
-            None,
-        )
+        scan.write_artist(&library::ArtistInput {
+            object_id: "artist".into(),
+            name: "Artist".into(),
+            sort_text: Some("artist".into()),
+            artwork_binding: Some(binding.to_vec()),
+            ..Default::default()
+        })
         .await
         .unwrap();
         let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
@@ -144,16 +141,13 @@ mod tests {
         let mut scan = library::Scan::begin_items(&database, source.as_str())
             .await
             .unwrap();
-        scan.write_artist(
-            "second",
-            "Second",
-            "second",
-            Some("second"),
-            None,
-            Some(&second_binding),
-            None,
-            None,
-        )
+        scan.write_artist(&library::ArtistInput {
+            object_id: "second".into(),
+            name: "Second".into(),
+            sort_text: Some("second".into()),
+            artwork_binding: Some(second_binding.to_vec()),
+            ..Default::default()
+        })
         .await
         .unwrap();
         let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {

@@ -364,22 +364,28 @@ mod tests {
                     .await
                     .unwrap();
             for (id, name) in [("3272", "AG! Calling"), ("other", "Another Album")] {
-                stage_album(
-                    &mut scan,
-                    album_from_item(kind, &serde_json::json!({"Id":id,"Name":name})).unwrap(),
+                scan.write_album(
+                    &album_from_item(
+                        kind,
+                        scan.source_id(),
+                        &serde_json::json!({"Id":id,"Name":name}),
+                    )
+                    .unwrap()
+                    .unwrap(),
                 )
                 .await
                 .unwrap();
             }
-            stage_track(
-                &mut scan,
-                track_from_item(
+            scan.write_track(
+                &track_from_item(
                     kind,
+                    scan.source_id(),
                     &serde_json::json!({
                         "Id":"track","Name":"Track","AlbumId":"3272","Type":"Audio",
                         "UserData":{"PlayCount":7,"Rating":8}
                     }),
                 )
+                .unwrap()
                 .unwrap(),
             )
             .await
@@ -411,7 +417,8 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap();
-            assert_eq!((track.rating, track.play_count), (Some(8), 7));
+            assert_eq!((track.rating, track.play_count), (Some(8), 8));
+            let source_key = track.source_key.unwrap();
             for (raw, favorite) in [("3272", true), ("other", false)] {
                 let uri = library::source_entity_uri(
                     &crate::SourceId::new("source"),
@@ -480,7 +487,19 @@ mod tests {
                     .await
                     .unwrap();
                 if removed {
-                    assert!(track.is_none());
+                    assert!(track.is_some());
+                    assert!(
+                        database
+                            .song_route_page(
+                                &library::SongQuery::new(library::SongScope::Tracks(source_key)),
+                                library::RouteSeedWindow::top(),
+                                &cancellation,
+                            )
+                            .await
+                            .unwrap()
+                            .first_rows
+                            .is_empty()
+                    );
                 } else {
                     let track = track.unwrap();
                     assert_eq!(track.title, "Moved");
@@ -509,15 +528,33 @@ mod tests {
                     .album_row_by_media_uri(&uri, &cancellation)
                     .await
                     .unwrap()
-                    .is_none()
+                    .is_some()
+            );
+            assert!(
+                database
+                    .album_route_page(
+                        source_key,
+                        None,
+                        false,
+                        "",
+                        library::AlbumSort::Title,
+                        false,
+                        library::RouteSeedWindow::top(),
+                        &cancellation,
+                    )
+                    .await
+                    .unwrap()
+                    .2
+                    .iter()
+                    .all(|album| album.media_uri != uri)
             );
             let mut full =
                 library::Scan::begin(&database, "source", kind.name(), kind.source_kind(), None)
                     .await
                     .unwrap();
-            stage_album(&mut full, album_from_item(kind, &serde_json::json!({
+            full.write_album(&album_from_item(kind, full.source_id(), &serde_json::json!({
                 "Id":"other","Name":"Album","Type":"MusicAlbum","UserData":{"IsFavorite":true}
-            })).unwrap()).await.unwrap();
+            })).unwrap().unwrap()).await.unwrap();
             assert!(matches!(
                 full.finish().await.unwrap(),
                 library::ScanOutcome::Identical(_)

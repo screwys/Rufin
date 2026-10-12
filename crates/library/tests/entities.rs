@@ -1131,23 +1131,19 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     let mut scan = library::Scan::begin_items(&fixture.database, "source")
         .await
         .unwrap();
-    scan.write_album(
-        "album-a",
-        "Album A",
-        "album a",
-        "Artist A",
-        "album a",
-        Some(2024),
-        Some("2024-01-02"),
-        Some("2024-01-02"),
-        None,
-        Some("group-a2"),
-        Some(true),
-        None,
-        false,
-        None,
-        None,
-    )
+    scan.write_album(&library::AlbumInput {
+        object_id: "album-a".into(),
+        title: "Album A".into(),
+        display_artist: "Artist A".into(),
+        sort_text: "album a".into(),
+        year: Some(2024),
+        release_date: Some("2024-01-02".into()),
+        date_added: Some("2024-01-02".into()),
+        musicbrainz_release_group_id: Some("group-a2".into()),
+        is_compilation: Some(true),
+        favorite: Some(false),
+        ..Default::default()
+    })
     .await
     .unwrap();
     scan.write_album_relations(
@@ -1582,39 +1578,26 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
         let mut scan = library::Scan::begin_items(&fixture.database, "source")
             .await
             .unwrap();
-        scan.write_track(
-            "track-0",
-            Some("album-a"),
-            "Edited",
-            "Album A",
-            "Artist A",
-            "edited",
-            181_000,
-            1,
-            1,
-            Some(2025),
-            None,
-            Some("2025-01-01"),
-            None,
-            Some("FLAC"),
-            Some("Changed"),
-            Some(121),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            false,
-            Some(5),
-            None,
-            None,
-            None,
-            None,
-            None,
-            [1; 32],
-            &library::AudioProperties::default(),
-        )
+        scan.write_track(&library::TrackInput {
+            object_id: "track-0".into(),
+            album_object_id: Some("album-a".into()),
+            title: "Edited".into(),
+            display_album: "Album A".into(),
+            display_artist: "Artist A".into(),
+            sort_text: "edited".into(),
+            duration_millis: 181_000,
+            disc_number: 1,
+            track_number: 1,
+            year: Some(2025),
+            date_added: Some("2025-01-01".into()),
+            source_format: Some("FLAC".into()),
+            comment: Some("Changed".into()),
+            bpm: Some(121),
+            favorite: Some(false),
+            rating: Some(5),
+            loudness_analysis_key: [1; 32],
+            ..Default::default()
+        })
         .await
         .expect("refresh Track metadata");
         scan.write_track_relations(
@@ -1624,23 +1607,16 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
         )
         .await
         .unwrap();
-        scan.write_album(
-            "album-a",
-            "Edited Album",
-            "edited album",
-            "Artist A",
-            "edited album",
-            Some(2025),
-            None,
-            None,
-            None,
-            None,
-            Some(true),
-            None,
-            false,
-            None,
-            None,
-        )
+        scan.write_album(&library::AlbumInput {
+            object_id: "album-a".into(),
+            title: "Edited Album".into(),
+            display_artist: "Artist A".into(),
+            sort_text: "edited album".into(),
+            year: Some(2025),
+            is_compilation: Some(true),
+            favorite: Some(false),
+            ..Default::default()
+        })
         .await
         .expect("refresh Album metadata");
         scan.write_album_relations(
@@ -1650,16 +1626,13 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
         )
         .await
         .unwrap();
-        scan.write_artist(
-            "artist-a",
-            "Edited Artist",
-            "edited artist",
-            Some("edited artist"),
-            None,
-            None,
-            Some(false),
-            None,
-        )
+        scan.write_artist(&library::ArtistInput {
+            object_id: "artist-a".into(),
+            name: "Edited Artist".into(),
+            sort_text: Some("edited artist".into()),
+            favorite: Some(false),
+            ..Default::default()
+        })
         .await
         .expect("refresh Artist metadata");
         match scan.finish().await.unwrap() {

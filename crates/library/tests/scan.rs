@@ -15,16 +15,12 @@ async fn publication_keeps_tracks_and_known_credits_beside_missing_related_objec
     let mut scan = Scan::begin(&database, "source", "Source", "source", None)
         .await
         .unwrap();
-    scan.write_artist(
-        "artist-one",
-        "Known Artist",
-        "known artist",
-        Some("known artist"),
-        None,
-        None,
-        None,
-        None,
-    )
+    scan.write_artist(&library::ArtistInput {
+        object_id: "artist-one".into(),
+        name: "Known Artist".into(),
+        sort_text: Some("known artist".into()),
+        ..Default::default()
+    })
     .await
     .unwrap();
     write_track(&mut scan, "track-one", "One", 0).await;
@@ -90,39 +86,21 @@ async fn remote_relocation_keeps_media_identity_and_updates_observed_access() {
         let mut scan = Scan::begin(&database, source_id.as_str(), "DAV", "dav", None)
             .await
             .unwrap();
-        scan.write_track(
-            "stable-track",
-            None,
-            "A track",
-            "Album",
-            "Artist",
-            "a track",
-            2000,
-            1,
-            1,
-            None,
-            None,
-            None,
-            None,
-            Some("FLAC"),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            false,
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(&observation.path),
-            [1; 32],
-            &library::AudioProperties::default(),
-        )
+        scan.write_track(&library::TrackInput {
+            object_id: "stable-track".into(),
+            title: "A track".into(),
+            display_album: "Album".into(),
+            display_artist: "Artist".into(),
+            sort_text: "a track".into(),
+            duration_millis: 2000,
+            disc_number: 1,
+            track_number: 1,
+            source_format: Some("FLAC".into()),
+            favorite: Some(false),
+            source_path: Some(observation.path.to_owned()),
+            loudness_analysis_key: [1; 32],
+            ..Default::default()
+        })
         .await
         .unwrap();
         scan.write_local_files(&[(observation.clone(), Vec::new())])
@@ -360,33 +338,27 @@ async fn artist_names_and_sort_names_survive_sparse_credits_and_reset_with_compl
     let mut scan = Scan::begin(&database, "source", "Source", "source", None)
         .await
         .unwrap();
-    scan.write_artist(
-        "artist",
-        "The Cure",
-        "the cure",
-        Some("cure, the"),
-        None,
-        None,
-        Some(false),
-        None,
-    )
+    scan.write_artist(&library::ArtistInput {
+        object_id: "artist".into(),
+        name: "The Cure".into(),
+        sort_text: Some("cure, the".into()),
+        favorite: Some(false),
+        ..Default::default()
+    })
     .await
     .unwrap();
-    scan.write_artist(
-        "artist", "the cure", "the cure", None, None, None, None, None,
-    )
+    scan.write_artist(&library::ArtistInput {
+        object_id: "artist".into(),
+        name: "the cure".into(),
+        ..Default::default()
+    })
     .await
     .unwrap();
-    scan.write_artist(
-        "fallback",
-        "Missing Sort",
-        "missing sort",
-        None,
-        None,
-        None,
-        None,
-        None,
-    )
+    scan.write_artist(&library::ArtistInput {
+        object_id: "fallback".into(),
+        name: "Missing Sort".into(),
+        ..Default::default()
+    })
     .await
     .unwrap();
     scan.finish().await.unwrap();
@@ -406,14 +378,19 @@ async fn artist_names_and_sort_names_survive_sparse_credits_and_reset_with_compl
 
     for sort in [None, Some("the cure"), Some("cure, the")] {
         let mut scan = Scan::begin_items(&database, "source").await.unwrap();
-        scan.write_artist(
-            "artist", "The Cure", "the cure", sort, None, None, None, None,
-        )
+        scan.write_artist(&library::ArtistInput {
+            object_id: "artist".into(),
+            name: "The Cure".into(),
+            sort_text: sort.map(str::to_owned),
+            ..Default::default()
+        })
         .await
         .unwrap();
-        scan.write_artist(
-            "artist", "The Cure", "the cure", None, None, None, None, None,
-        )
+        scan.write_artist(&library::ArtistInput {
+            object_id: "artist".into(),
+            name: "The Cure".into(),
+            ..Default::default()
+        })
         .await
         .unwrap();
         scan.finish().await.unwrap();
@@ -441,16 +418,15 @@ async fn sparse_artist_credits_preserve_metadata_and_complete_records_can_clear_
     let mut scan = Scan::begin(&database, "source", "Source", "source", None)
         .await
         .unwrap();
-    scan.write_artist(
-        "artist",
-        "Artist",
-        "artist",
-        Some("artist"),
-        Some("mbid"),
-        None,
-        Some(false),
-        Some(8),
-    )
+    scan.write_artist(&library::ArtistInput {
+        object_id: "artist".into(),
+        name: "Artist".into(),
+        sort_text: Some("artist".into()),
+        musicbrainz_artist_id: Some("mbid".into()),
+        favorite: Some(false),
+        rating: Some(8),
+        ..Default::default()
+    })
     .await
     .unwrap();
     scan.finish().await.unwrap();
@@ -462,25 +438,30 @@ async fn sparse_artist_credits_preserve_metadata_and_complete_records_can_clear_
                 .await
                 .unwrap()
         };
-        scan.write_artist("artist", "Artist", "artist", None, None, None, None, None)
-            .await
-            .unwrap();
+        scan.write_artist(&library::ArtistInput {
+            object_id: "artist".into(),
+            name: "Artist".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
         if !point {
-            scan.write_artist(
-                "artist",
-                "Artist",
-                "artist",
-                Some("artist"),
-                None,
-                None,
-                Some(false),
-                None,
-            )
+            scan.write_artist(&library::ArtistInput {
+                object_id: "artist".into(),
+                name: "Artist".into(),
+                sort_text: Some("artist".into()),
+                favorite: Some(false),
+                ..Default::default()
+            })
             .await
             .unwrap();
-            scan.write_artist("artist", "Artist", "artist", None, None, None, None, None)
-                .await
-                .unwrap();
+            scan.write_artist(&library::ArtistInput {
+                object_id: "artist".into(),
+                name: "Artist".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         }
         let outcome = scan.finish().await.unwrap();
         if point {
@@ -520,44 +501,42 @@ async fn write_small_catalog(
     )
     .await
     .expect("begin scan");
-    scan.write_album(
-        "album-one",
-        "Album One",
-        "album one",
-        "Artist One",
-        "album one",
-        Some(2025),
-        Some("2025-01-01"),
-        Some("2025-01-02"),
-        Some("release-one"),
-        Some("release-group-one"),
-        Some(false),
-        Some(b"album-art"),
-        false,
-        Some(7),
-        Some(10),
-    )
+    scan.write_album(&library::AlbumInput {
+        object_id: "album-one".into(),
+        title: "Album One".into(),
+        display_artist: "Artist One".into(),
+        sort_text: "album one".into(),
+        year: Some(2025),
+        release_date: Some("2025-01-01".into()),
+        date_added: Some("2025-01-02".into()),
+        musicbrainz_release_id: Some("release-one".into()),
+        musicbrainz_release_group_id: Some("release-group-one".into()),
+        is_compilation: Some(false),
+        artwork_binding: Some(b"album-art".to_vec()),
+        favorite: Some(false),
+        rating: Some(7),
+        first_seen_at: Some(10),
+        ..Default::default()
+    })
     .await
     .expect("stage album");
-    scan.write_artist(
-        "artist-one",
-        "Artist One",
-        "artist one",
-        Some("artist one"),
-        Some("artist-mbid-one"),
-        Some(b"artist-art"),
-        Some(false),
-        None,
-    )
+    scan.write_artist(&library::ArtistInput {
+        object_id: "artist-one".into(),
+        name: "Artist One".into(),
+        sort_text: Some("artist one".into()),
+        musicbrainz_artist_id: Some("artist-mbid-one".into()),
+        artwork_binding: Some(b"artist-art".to_vec()),
+        favorite: Some(false),
+        ..Default::default()
+    })
     .await
     .expect("stage artist");
-    scan.write_genre(
-        "genre-one",
-        "Genre One",
-        "genre one",
-        Some("genre one"),
-        Some(genre_artwork),
-    )
+    scan.write_genre(&library::GenreInput {
+        object_id: "genre-one".into(),
+        name: "Genre One".into(),
+        sort_text: Some("genre one".into()),
+        artwork_binding: Some(genre_artwork.to_vec()),
+    })
     .await
     .expect("stage genre");
     scan.write_mood("mood-one", "Mood One", "mood one", "mood one")
@@ -598,39 +577,37 @@ async fn write_small_catalog(
 async fn write_track(scan: &mut Scan, object_id: &str, title: &str, position: i64) {
     let normalized = format!("{} album one artist one note", title.to_lowercase());
     let media_uri = format!("file:///music/{object_id}.flac");
-    scan.write_track(
-        object_id,
-        Some("album-one"),
-        title,
-        "Album One",
-        "Artist One",
-        &normalized,
-        180_000,
-        1,
-        position + 1,
-        Some(2025),
-        Some("2025-01-01"),
-        Some("2025-01-02"),
-        Some(&media_uri),
-        Some("FLAC"),
-        Some("Note"),
-        Some(120),
-        Some("recording-one"),
-        Some("release-track-one"),
-        Some("/music/album.cue"),
-        Some(1_000),
-        Some(181_000),
-        Some(format!("art-{object_id}").as_bytes()),
-        false,
-        None,
-        Some(10 + position),
-        Some(20 + position),
-        Some(position),
-        Some(1_700_000_000 + position),
-        None,
-        [position as u8 + 1; 32],
-        &library::AudioProperties::default(),
-    )
+    scan.write_track(&library::TrackInput {
+        object_id: object_id.to_owned(),
+        album_object_id: Some("album-one".into()),
+        title: title.to_owned(),
+        display_album: "Album One".into(),
+        display_artist: "Artist One".into(),
+        sort_text: normalized,
+        duration_millis: 180_000,
+        disc_number: 1,
+        track_number: position + 1,
+        year: Some(2025),
+        release_date: Some("2025-01-01".into()),
+        date_added: Some("2025-01-02".into()),
+        media_uri: Some(media_uri),
+        source_format: Some("FLAC".into()),
+        comment: Some("Note".into()),
+        bpm: Some(120),
+        musicbrainz_recording_id: Some("recording-one".into()),
+        musicbrainz_release_track_id: Some("release-track-one".into()),
+        cue_path: Some("/music/album.cue".into()),
+        cue_start_millis: Some(1_000),
+        cue_end_millis: Some(181_000),
+        artwork_binding: Some(format!("art-{object_id}").into_bytes()),
+        favorite: Some(false),
+        first_seen_at: Some(10 + position),
+        source_play_count: Some(20 + position),
+        source_skip_count: Some(position),
+        source_last_played: Some(1_700_000_000 + position),
+        loudness_analysis_key: [position as u8 + 1; 32],
+        ..Default::default()
+    })
     .await
     .expect("stage track");
     scan.write_track_relations(
@@ -936,46 +913,44 @@ async fn point_album_artwork_updates_cached_members_without_replacing_distinct_c
         ] {
             let mut point = Scan::begin_items(&database, "source-one").await.unwrap();
             point
-                .write_artist(
-                    "artist-one",
-                    "Artist One",
-                    "artist one",
-                    Some("artist one"),
-                    Some("artist-mbid-one"),
-                    Some(b"artist-art"),
-                    Some(false),
-                    None,
-                )
+                .write_artist(&library::ArtistInput {
+                    object_id: "artist-one".into(),
+                    name: "Artist One".into(),
+                    sort_text: Some("artist one".into()),
+                    musicbrainz_artist_id: Some("artist-mbid-one".into()),
+                    artwork_binding: Some(b"artist-art".to_vec()),
+                    favorite: Some(false),
+                    ..Default::default()
+                })
                 .await
                 .unwrap();
             point
-                .write_genre(
-                    "genre-one",
-                    "Genre One",
-                    "genre one",
-                    Some("genre one"),
-                    Some(b"genre-art"),
-                )
+                .write_genre(&library::GenreInput {
+                    object_id: "genre-one".into(),
+                    name: "Genre One".into(),
+                    sort_text: Some("genre one".into()),
+                    artwork_binding: Some(b"genre-art".to_vec()),
+                })
                 .await
                 .unwrap();
             point
-                .write_album(
-                    "album-one",
-                    title,
-                    "album one",
-                    "Artist One",
-                    "album one",
-                    Some(2025),
-                    Some("2025-01-01"),
-                    Some("2025-01-02"),
-                    Some("release-one"),
-                    Some("release-group-one"),
-                    Some(false),
-                    Some(artwork),
-                    false,
-                    Some(7),
-                    Some(10),
-                )
+                .write_album(&library::AlbumInput {
+                    object_id: "album-one".into(),
+                    title: title.to_owned(),
+                    display_artist: "Artist One".into(),
+                    sort_text: "album one".into(),
+                    year: Some(2025),
+                    release_date: Some("2025-01-01".into()),
+                    date_added: Some("2025-01-02".into()),
+                    musicbrainz_release_id: Some("release-one".into()),
+                    musicbrainz_release_group_id: Some("release-group-one".into()),
+                    is_compilation: Some(false),
+                    artwork_binding: Some(artwork.to_vec()),
+                    favorite: Some(false),
+                    rating: Some(7),
+                    first_seen_at: Some(10),
+                    ..Default::default()
+                })
                 .await
                 .unwrap();
             point
@@ -1076,10 +1051,15 @@ async fn complete_scans_remove_unseen_items_after_partial_updates() {
         if !authoritative {
             scan.incomplete();
         }
-        for name in names {
-            scan.write_genre(name, name, name, Some(name), None)
-                .await
-                .unwrap();
+        for &name in names {
+            scan.write_genre(&library::GenreInput {
+                object_id: name.to_owned(),
+                name: name.to_owned(),
+                sort_text: Some(name.to_owned()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         }
         let outcome = scan.finish().await.unwrap();
         assert!(if authoritative {
@@ -1099,7 +1079,12 @@ async fn complete_scans_remove_unseen_items_after_partial_updates() {
     }
     let mut point = Scan::begin_items(&database, "source").await.unwrap();
     point
-        .write_genre("a", "Live name", "live name", Some("live name"), None)
+        .write_genre(&library::GenreInput {
+            object_id: "a".into(),
+            name: "Live name".into(),
+            sort_text: Some("live name".into()),
+            ..Default::default()
+        })
         .await
         .unwrap();
     point.finish().await.unwrap();
@@ -1107,7 +1092,12 @@ async fn complete_scans_remove_unseen_items_after_partial_updates() {
         .await
         .unwrap();
     complete
-        .write_genre("a", "a", "a", Some("a"), None)
+        .write_genre(&library::GenreInput {
+            object_id: "a".into(),
+            name: "a".into(),
+            sort_text: Some("a".into()),
+            ..Default::default()
+        })
         .await
         .unwrap();
     assert!(matches!(
@@ -1158,9 +1148,14 @@ async fn identical_and_artwork_only_incomplete_scans_retain_unseen_local_files()
         let mut scan = Scan::begin(&database, "local", "Local", "local", None)
             .await
             .unwrap();
-        scan.write_genre("genre", "Genre", "genre", Some("genre"), Some(artwork))
-            .await
-            .unwrap();
+        scan.write_genre(&library::GenreInput {
+            object_id: "genre".into(),
+            name: "Genre".into(),
+            sort_text: Some("genre".into()),
+            artwork_binding: Some(artwork.to_vec()),
+        })
+        .await
+        .unwrap();
         if index > 0 {
             scan.incomplete();
         }
@@ -1228,55 +1223,39 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         .expect("begin failed scan");
     failed.begin_batch().await.expect("begin first batch");
     failed
-        .write_genre("kept", "Kept", "kept", Some("kept"), None)
+        .write_genre(&library::GenreInput {
+            object_id: "kept".into(),
+            name: "Kept".into(),
+            sort_text: Some("kept".into()),
+            ..Default::default()
+        })
         .await
         .expect("write a useful record");
     failed.finish_batch().await.expect("commit first batch");
     failed.begin_batch().await.expect("begin later batch");
     failed
-        .write_genre(
-            "rolled-back",
-            "Rolled back",
-            "rolled back",
-            Some("rolled back"),
-            None,
-        )
+        .write_genre(&library::GenreInput {
+            object_id: "rolled-back".into(),
+            name: "Rolled back".into(),
+            sort_text: Some("rolled back".into()),
+            ..Default::default()
+        })
         .await
         .expect("write before the invalid record");
     failed
-        .write_track(
-            "",
-            None,
-            "Bad",
-            "",
-            "",
-            "bad",
-            0,
-            0,
-            0,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            false,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            [0; 32],
-            &library::AudioProperties::default(),
-        )
+        .write_track(&library::TrackInput {
+            object_id: "".into(),
+            title: "Bad".into(),
+            display_album: "".into(),
+            display_artist: "".into(),
+            sort_text: "bad".into(),
+            duration_millis: 0,
+            disc_number: 0,
+            track_number: 0,
+            favorite: Some(false),
+            loudness_analysis_key: [0; 32],
+            ..Default::default()
+        })
         .await
         .expect_err("empty identity fails the current batch");
     assert!(matches!(
@@ -1302,13 +1281,12 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         .await
         .expect("begin completed batch");
     cancelled
-        .write_genre(
-            "also-kept",
-            "Also kept",
-            "also kept",
-            Some("also kept"),
-            None,
-        )
+        .write_genre(&library::GenreInput {
+            object_id: "also-kept".into(),
+            name: "Also kept".into(),
+            sort_text: Some("also kept".into()),
+            ..Default::default()
+        })
         .await
         .expect("write before cancellation");
     cancelled
@@ -1320,13 +1298,12 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         .await
         .expect("begin interrupted batch");
     cancelled
-        .write_genre(
-            "cancelled",
-            "Cancelled",
-            "cancelled",
-            Some("cancelled"),
-            None,
-        )
+        .write_genre(&library::GenreInput {
+            object_id: "cancelled".into(),
+            name: "Cancelled".into(),
+            sort_text: Some("cancelled".into()),
+            ..Default::default()
+        })
         .await
         .expect("write interrupted record");
     drop(cancelled);
@@ -1345,7 +1322,12 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         .expect("begin oversized scan");
     let oversized_name = "x".repeat(8 * 1024 * 1024 + 1);
     oversized
-        .write_genre("genre", &oversized_name, "genre", Some("genre"), None)
+        .write_genre(&library::GenreInput {
+            object_id: "genre".into(),
+            name: oversized_name,
+            sort_text: Some("genre".into()),
+            ..Default::default()
+        })
         .await
         .expect_err("oversized row fails staging");
     assert_eq!(
@@ -1357,39 +1339,20 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         .await
         .expect("begin invalid scan");
     invalid
-        .write_track(
-            "orphan-track",
-            Some("missing-album"),
-            "Orphan",
-            "Missing",
-            "Artist",
-            "orphan",
-            1,
-            1,
-            1,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            false,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            [1; 32],
-            &library::AudioProperties::default(),
-        )
+        .write_track(&library::TrackInput {
+            object_id: "orphan-track".into(),
+            album_object_id: Some("missing-album".into()),
+            title: "Orphan".into(),
+            display_album: "Missing".into(),
+            display_artist: "Artist".into(),
+            sort_text: "orphan".into(),
+            duration_millis: 1,
+            disc_number: 1,
+            track_number: 1,
+            favorite: Some(false),
+            loudness_analysis_key: [1; 32],
+            ..Default::default()
+        })
         .await
         .expect("stage song with unavailable album relationship");
     assert!(matches!(
@@ -1417,33 +1380,22 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         .await
         .expect("begin update alongside a favorite change");
     interleaved
-        .write_genre(
-            "new-genre",
-            "New genre",
-            "new genre",
-            Some("new genre"),
-            None,
-        )
+        .write_genre(&library::GenreInput {
+            object_id: "new-genre".into(),
+            name: "New genre".into(),
+            sort_text: Some("new genre".into()),
+            ..Default::default()
+        })
         .await
         .expect("write newly acquired metadata");
     interleaved
-        .write_album(
-            "album-one",
-            "Album One",
-            "album one",
-            "Artist One",
-            "album one",
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
+        .write_album(&library::AlbumInput {
+            object_id: "album-one".into(),
+            title: "Album One".into(),
+            display_artist: "Artist One".into(),
+            sort_text: "album one".into(),
+            ..Default::default()
+        })
         .await
         .expect("read the first file of an album without its dates");
     interleaved
@@ -1807,29 +1759,22 @@ async fn artist_credits_preserve_favorites_and_explicit_false_clears_them() {
         .enumerate()
     {
         let mut scan = Scan::begin_items(&database, "source-one").await.unwrap();
-        scan.write_artist(
-            "artist-one",
-            "Artist",
-            "artist",
-            Some("artist"),
-            None,
-            None,
+        scan.write_artist(&library::ArtistInput {
+            object_id: "artist-one".into(),
+            name: "Artist".into(),
+            sort_text: Some("artist".into()),
             favorite,
-            None,
-        )
+            ..Default::default()
+        })
         .await
         .unwrap();
         // A credit arriving after a complete record must not overwrite its state.
-        scan.write_artist(
-            "artist-one",
-            "Artist",
-            "artist",
-            Some("artist"),
-            None,
-            None,
-            None,
-            None,
-        )
+        scan.write_artist(&library::ArtistInput {
+            object_id: "artist-one".into(),
+            name: "Artist".into(),
+            sort_text: Some("artist".into()),
+            ..Default::default()
+        })
         .await
         .unwrap();
         scan.finish().await.unwrap();
@@ -1850,19 +1795,20 @@ async fn sparse_names_keep_casing_but_do_not_require_complete_metadata_for_renam
     let mut scan = Scan::begin(&database, "source", "Source", "source", None)
         .await
         .unwrap();
-    scan.write_genre("genre", "Rock", "rock", Some("rock"), None)
-        .await
-        .unwrap();
-    scan.write_artist(
-        "artist",
-        "Artist",
-        "artist",
-        Some("artist"),
-        None,
-        None,
-        None,
-        None,
-    )
+    scan.write_genre(&library::GenreInput {
+        object_id: "genre".into(),
+        name: "Rock".into(),
+        sort_text: Some("rock".into()),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    scan.write_artist(&library::ArtistInput {
+        object_id: "artist".into(),
+        name: "Artist".into(),
+        sort_text: Some("artist".into()),
+        ..Default::default()
+    })
     .await
     .unwrap();
     scan.finish().await.unwrap();
@@ -1875,25 +1821,20 @@ async fn sparse_names_keep_casing_but_do_not_require_complete_metadata_for_renam
         let mut scan = Scan::begin_items(&database, "source").await.unwrap();
         let artist_sort = artist.to_lowercase();
         let genre_sort = genre.to_lowercase();
-        scan.write_artist(
-            "artist",
-            artist,
-            &artist_sort,
-            complete.then_some(artist_sort.as_str()),
-            None,
-            None,
-            None,
-            None,
-        )
+        scan.write_artist(&library::ArtistInput {
+            object_id: "artist".into(),
+            name: artist.to_owned(),
+            sort_text: complete.then_some(artist_sort),
+            ..Default::default()
+        })
         .await
         .unwrap();
-        scan.write_genre(
-            "genre",
-            genre,
-            &genre_sort,
-            complete.then_some(genre_sort.as_str()),
-            None,
-        )
+        scan.write_genre(&library::GenreInput {
+            object_id: "genre".into(),
+            name: genre.to_owned(),
+            sort_text: complete.then_some(genre_sort),
+            ..Default::default()
+        })
         .await
         .unwrap();
         scan.finish().await.unwrap();

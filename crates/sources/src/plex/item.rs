@@ -42,56 +42,50 @@ pub(super) async fn stage_item(scan: &mut Scan, item: &Value) -> SourceResult<()
         .iter()
         .filter_map(|v| v["id"].as_str())
         .find_map(|v| v.strip_prefix("mbid://"));
-    match kind {
+    let object = match kind {
         "artist" => {
-            scan.write_artist(
-                &object,
-                title,
-                &title.to_lowercase(),
-                Some(&sort),
-                mbid,
-                artwork.as_deref(),
-                Some(false),
+            let input = library::ArtistInput {
+                object_id: object,
+                name: title.to_owned(),
+                sort_text: Some(sort),
+                musicbrainz_artist_id: mbid.map(str::to_owned),
+                artwork_binding: artwork,
+                favorite: Some(false),
                 rating,
-            )
-            .await?
+            };
+            scan.write_artist(&input).await?;
+            input.object_id
         }
         "album" => {
             let artist = item["parentTitle"].as_str().unwrap_or("Unknown Artist");
-            scan.write_album(
-                &object,
-                title,
-                &title.to_lowercase(),
-                artist,
-                &sort,
+            let input = library::AlbumInput {
+                object_id: object,
+                title: title.to_owned(),
+                display_artist: artist.to_owned(),
+                sort_text: sort,
                 year,
-                release.as_deref(),
-                added_date.as_deref(),
-                mbid,
-                None,
-                field::<i64>(item, "compilation").map(|v| v != 0),
-                artwork.as_deref(),
-                false,
+                release_date: release,
+                date_added: added_date,
+                musicbrainz_release_id: mbid.map(str::to_owned),
+                is_compilation: field::<i64>(item, "compilation").map(|v| v != 0),
+                artwork_binding: artwork,
+                favorite: Some(false),
                 rating,
-                added,
-            )
-            .await?;
+                first_seen_at: added,
+                ..Default::default()
+            };
+            scan.write_album(&input).await?;
             if let Some(raw_artist) = id(&item["parentRatingKey"]) {
-                let artist_id = plex_id("artist", &raw_artist);
-                scan.write_artist(
-                    &artist_id,
-                    artist,
-                    &artist.to_lowercase(),
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                )
-                .await?;
-                scan.write_album_relations(&[(&object, &artist_id)], &[], &[])
+                let artist = library::ArtistInput {
+                    object_id: plex_id("artist", &raw_artist),
+                    name: artist.to_owned(),
+                    ..Default::default()
+                };
+                scan.write_artist(&artist).await?;
+                scan.write_album_relations(&[(&input.object_id, &artist.object_id)], &[], &[])
                     .await?;
             }
+            input.object_id
         }
         "track" => {
             let artist = item["originalTitle"]
@@ -130,45 +124,41 @@ pub(super) async fn stage_item(scan: &mut Scan, item: &Value) -> SourceResult<()
                 hash.update(fact.as_bytes());
             }
             hash.update(&duration.to_le_bytes());
-            scan.write_track(
-                &object,
-                album_id.as_deref(),
-                title,
-                album,
-                artist,
-                &sort,
-                duration,
-                field::<i64>(item, "parentIndex").unwrap_or(1).max(0),
-                field::<i64>(item, "index").unwrap_or_default().max(0),
+            let input = library::TrackInput {
+                object_id: object,
+                album_object_id: album_id,
+                title: title.to_owned(),
+                display_album: album.to_owned(),
+                display_artist: artist.to_owned(),
+                sort_text: sort,
+                duration_millis: duration,
+                disc_number: field::<i64>(item, "parentIndex").unwrap_or(1).max(0),
+                track_number: field::<i64>(item, "index").unwrap_or_default().max(0),
                 year,
-                release.as_deref(),
-                added_date.as_deref(),
-                None,
-                format,
-                comment,
-                field(item, "bpm"),
-                mbid,
-                None,
-                None,
-                None,
-                None,
-                artwork.as_deref(),
-                false,
+                release_date: release,
+                date_added: added_date,
+                source_format: format.map(str::to_owned),
+                comment: comment.map(str::to_owned),
+                bpm: field(item, "bpm"),
+                musicbrainz_recording_id: mbid.map(str::to_owned),
+                artwork_binding: artwork,
+                favorite: Some(false),
                 rating,
-                added,
-                field::<i64>(item, "viewCount").filter(|v| *v >= 0),
-                field::<i64>(item, "skipCount").filter(|v| *v >= 0),
-                field::<i64>(item, "lastViewedAt").filter(|v| *v >= 0),
-                source_path,
-                *hash.finalize().as_bytes(),
-                &audio_properties,
-            )
-            .await?;
+                first_seen_at: added,
+                source_play_count: field::<i64>(item, "viewCount").filter(|v| *v >= 0),
+                source_skip_count: field::<i64>(item, "skipCount").filter(|v| *v >= 0),
+                source_last_played: field::<i64>(item, "lastViewedAt").filter(|v| *v >= 0),
+                source_path: source_path.map(str::to_owned),
+                loudness_analysis_key: *hash.finalize().as_bytes(),
+                audio_properties,
+                ..Default::default()
+            };
+            scan.write_track(&input).await?;
             if let Some(stream) = stream {
                 let number = |key| field::<f64>(stream, key).filter(|v| v.is_finite());
                 if number("loudness").is_some() || number("gain").is_some() {
                     scan.write_track_source_loudness(
-                        &object,
+                        &input.object_id,
                         number("loudness"),
                         None,
                         number("gain"),
@@ -176,7 +166,7 @@ pub(super) async fn stage_item(scan: &mut Scan, item: &Value) -> SourceResult<()
                     )
                     .await?;
                 }
-                if let Some(album_id) = &album_id
+                if let Some(album_id) = &input.album_object_id
                     && number("albumGain").is_some()
                 {
                     scan.write_album_source_loudness(
@@ -190,20 +180,14 @@ pub(super) async fn stage_item(scan: &mut Scan, item: &Value) -> SourceResult<()
                 }
             }
             if let Some(raw_artist) = id(&item["grandparentRatingKey"]) {
-                let artist_id = plex_id("artist", &raw_artist);
                 let album_artist = item["grandparentTitle"].as_str().unwrap_or(artist);
-                scan.write_artist(
-                    &artist_id,
-                    album_artist,
-                    &album_artist.to_lowercase(),
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                )
-                .await?;
-                scan.write_track_relations(&[(&object, &artist_id)], &[], &[])
+                let artist = library::ArtistInput {
+                    object_id: plex_id("artist", &raw_artist),
+                    name: album_artist.to_owned(),
+                    ..Default::default()
+                };
+                scan.write_artist(&artist).await?;
+                scan.write_track_relations(&[(&input.object_id, &artist.object_id)], &[], &[])
                     .await?;
             }
             if let Some(section) = id(&item["librarySectionID"]) {
@@ -221,11 +205,12 @@ pub(super) async fn stage_item(scan: &mut Scan, item: &Value) -> SourceResult<()
                     scan.write_folder_reference(&folder_id).await?;
                 }
                 scan.replace_track_folders(
-                    &object,
-                    &[library::ScanLink::new(&object, &folder_id, 0)],
+                    &input.object_id,
+                    &[library::ScanLink::new(&input.object_id, &folder_id, 0)],
                 )
                 .await?;
             }
+            input.object_id
         }
         "playlist" => {
             scan.write_playlist(
@@ -241,29 +226,29 @@ pub(super) async fn stage_item(scan: &mut Scan, item: &Value) -> SourceResult<()
                 .unwrap_or(false);
             scan.write_playlist_permissions(&object, !smart, !smart)
                 .await?;
+            object
         }
         _ => return Ok(()),
-    }
+    };
     for genre in items(&item["Genre"]) {
         let Some(name) = genre["tag"].as_str().filter(|v| !v.is_empty()) else {
             continue;
         };
-        let genre_id = plex_id("genre", &name.to_lowercase());
-        scan.write_genre(
-            &genre_id,
-            name,
-            &name.to_lowercase(),
-            Some(&name.to_lowercase()),
-            None,
-        )
-        .await?;
+        let sort_text = name.to_lowercase();
+        let genre = library::GenreInput {
+            object_id: plex_id("genre", &sort_text),
+            name: name.to_owned(),
+            sort_text: Some(sort_text),
+            ..Default::default()
+        };
+        scan.write_genre(&genre).await?;
         match kind {
             "track" => {
-                scan.write_track_relations(&[], &[(&object, &genre_id)], &[])
+                scan.write_track_relations(&[], &[(&object, &genre.object_id)], &[])
                     .await?
             }
             "album" => {
-                scan.write_album_relations(&[], &[(&object, &genre_id)], &[])
+                scan.write_album_relations(&[], &[(&object, &genre.object_id)], &[])
                     .await?
             }
             _ => (),

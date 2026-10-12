@@ -696,23 +696,25 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(reads.load(Ordering::Relaxed), expected_reads);
-            let playlist = database
-                .playlist_key_by_object(
-                    publication.source,
-                    "subsonic:playlist:playlist",
+            let rows = database
+                .playlist_page(
+                    Some(publication.source),
+                    None,
+                    library::PlaylistSort::Position,
+                    false,
+                    "",
+                    0,
+                    2,
                     &cancellation,
                 )
                 .await
                 .unwrap();
             if next == 5 {
-                assert!(playlist.is_none());
+                assert!(rows.is_empty());
                 continue;
             }
-            let playlist = playlist.unwrap();
-            let rows = database
-                .playlist_rows(&[playlist], &cancellation)
-                .await
-                .unwrap();
+            assert_eq!(rows.len(), 1);
+            let playlist = rows[0].playlist_key;
             assert_eq!(rows[0].name, if next == 1 { "Renamed" } else { "Playlist" });
             assert_eq!(rows[0].artwork_binding.is_some(), next <= 1);
             assert_eq!(
@@ -861,15 +863,10 @@ mod tests {
             );
             assert_eq!(
                 database
-                    .playlist_key_by_object(
-                        publication.source,
-                        "subsonic:playlist:playlist",
-                        &cancellation
-                    )
+                    .playlist_count(Some(publication.source), None, "", &cancellation)
                     .await
-                    .unwrap()
-                    .is_some(),
-                next != 1
+                    .unwrap(),
+                i64::from(next != 1)
             );
         }
         assert!(matches!(
@@ -977,7 +974,12 @@ mod tests {
                 .await
                 .unwrap();
                 previous
-                    .write_genre("cached-genre", "Cached", "cached", Some("cached"), None)
+                    .write_genre(&library::GenreInput {
+                        object_id: "cached-genre".into(),
+                        name: "Cached".into(),
+                        sort_text: Some("cached".into()),
+                        ..Default::default()
+                    })
                     .await
                     .unwrap();
                 previous
@@ -1074,19 +1076,23 @@ mod tests {
                 folders_available
             );
             if folders_available {
+                let removed = library::source_entity_uri(
+                    &crate::SourceId::new("source"),
+                    "track",
+                    "subsonic:track:removed",
+                );
                 assert!(
-                    database
-                        .track_row_by_uri(
-                            &library::source_entity_uri(
-                                &crate::SourceId::new("source"),
-                                "track",
-                                "subsonic:track:removed"
-                            ),
+                    !database
+                        .selected_track_uris(
+                            &library::SongQuery::new(library::SongScope::Tracks(
+                                publication.source
+                            ))
+                            .selection(),
                             &cancellation
                         )
                         .await
                         .unwrap()
-                        .is_none()
+                        .contains(&removed)
                 );
                 assert!(
                     database
@@ -1095,16 +1101,21 @@ mod tests {
                         .unwrap()
                         .is_some()
                 );
-                assert!(
+                let playlist = database
+                    .playlist_key_by_object(publication.source, "cached-playlist", &cancellation)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
                     database
-                        .playlist_key_by_object(
-                            publication.source,
-                            "cached-playlist",
-                            &cancellation
+                        .selected_track_uris(
+                            &library::SongQuery::new(library::SongScope::Playlist(playlist))
+                                .selection(),
+                            &cancellation,
                         )
                         .await
-                        .unwrap()
-                        .is_some()
+                        .unwrap(),
+                    vec![removed]
                 );
                 assert_eq!(home.recently_played.albums.len(), 1);
                 for id in ["one", "two"] {

@@ -2942,39 +2942,20 @@ mod tests {
         let mut scan = library::Scan::begin(&database, source_id, "Source", "source", None)
             .await
             .expect("begin source scan");
-        scan.write_track(
-            track_object_id,
-            None,
-            "Track",
-            "Album",
-            "Artist",
-            "track",
-            180_000,
-            1,
-            1,
-            None,
-            None,
-            None,
-            None,
-            Some("FLAC"),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            false,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            [7; 32],
-            &library::AudioProperties::default(),
-        )
+        scan.write_track(&library::TrackInput {
+            object_id: track_object_id.to_owned(),
+            title: "Track".into(),
+            display_album: "Album".into(),
+            display_artist: "Artist".into(),
+            sort_text: "track".into(),
+            duration_millis: 180_000,
+            disc_number: 1,
+            track_number: 1,
+            source_format: Some("FLAC".into()),
+            favorite: Some(false),
+            loudness_analysis_key: [7; 32],
+            ..Default::default()
+        })
         .await
         .expect("stage Track");
         let publication = match scan.finish().await.expect("publish source") {

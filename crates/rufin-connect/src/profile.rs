@@ -2066,7 +2066,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn artwork_added_to_an_existing_profile_reaches_the_catalog() {
+    async fn artwork_added_to_an_existing_profile_reaches_saved_tracks() {
         let directory = tempfile::tempdir().unwrap();
         let host = ProfileStore::open(
             &directory.path().join("host.sqlite"),
@@ -2092,29 +2092,31 @@ mod tests {
         let mut scan = library::Scan::begin(&source, "server", "Server", "server", None)
             .await
             .unwrap();
-        scan.write_artist(
-            "artist",
-            "Artist",
-            "artist",
-            Some("artist"),
-            None,
-            Some(art),
-            None,
-            None,
-        )
+        scan.write_track(&library::TrackInput {
+            object_id: "track".into(),
+            title: "Track".into(),
+            display_artist: "Artist".into(),
+            sort_text: "track".into(),
+            artwork_binding: Some(art.to_vec()),
+            ..Default::default()
+        })
         .await
         .unwrap();
         scan.finish().await.unwrap();
+        let uri = library::source_entity_uri(&library::SourceId::new("server"), "track", "track");
+        source
+            .create_playlist(None, "Saved", std::slice::from_ref(&uri))
+            .await
+            .unwrap();
         source.connect_initialize_profile().await.unwrap();
         while source.connect_seed_page().await.unwrap() {}
-        let mut old = source
-            .connect_changes()
-            .await
-            .unwrap()
-            .into_iter()
-            .find(|change| change.record.kind == "artist")
-            .unwrap()
-            .record;
+        let mut changes = source.connect_changes().await.unwrap();
+        let track = changes
+            .iter()
+            .position(|change| change.record.kind == "track")
+            .unwrap();
+        let mut old = changes.remove(track).record;
+        source.connect_acknowledge(&changes).await.unwrap();
         let value = old.value.as_mut().unwrap().as_object_mut().unwrap();
         value.remove("artwork_binding");
         value.insert("future_field".into(), json!("retained"));
@@ -2123,11 +2125,14 @@ mod tests {
         let (records, changed) = guest.project(&destination).await.unwrap();
         assert!(changed);
         guest.acknowledge_projection(&records).await.unwrap();
-        let cached = destination
-            .cached_source("server", &library::ReadCancellation::new())
-            .await
-            .unwrap()
-            .unwrap();
+        let cancellation = library::ReadCancellation::new();
+        assert!(
+            destination
+                .cached_source("server", &cancellation)
+                .await
+                .unwrap()
+                .is_none()
+        );
         // Bounded library backfill adds the newly captured field to the existing document.
         assert_eq!(host.capture(&source).await.unwrap(), 1);
         deliver(&host, &guest).await;
@@ -2140,14 +2145,13 @@ mod tests {
         assert!(!guest.project(&destination).await.unwrap().1);
         guest.acknowledge_projection(&records).await.unwrap();
         assert!(!guest.projection_pending().await.unwrap());
-        let bindings = destination
-            .artwork_preparation_page(cached.source, None, 20, &library::ReadCancellation::new())
-            .await
-            .unwrap();
-        assert_eq!(bindings.len(), 1);
-        let artist: library::ArtistArtworkBinding = serde_json::from_slice(&bindings[0]).unwrap();
-        assert_eq!(artist.artist_name, "Artist");
-        assert_eq!(artist.source.as_deref(), Some(art.as_slice()));
+        assert_eq!(
+            destination
+                .track_artwork_bindings(std::slice::from_ref(&uri), &cancellation)
+                .await
+                .unwrap(),
+            vec![art.to_vec()]
+        );
     }
 
     #[tokio::test]

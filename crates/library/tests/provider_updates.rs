@@ -1,39 +1,29 @@
 use library::{Database, Freshness, ReadCancellation, Scan, ScanLink, ScanOutcome};
 
 async fn track(scan: &mut Scan, favorite: Option<bool>, play_count: Option<i64>) {
-    scan.write_track(
-        "track",
-        Some("album"),
-        "Track",
-        "Album",
-        "Artist",
-        "track",
-        180000,
-        1,
-        1,
-        Some(2025),
-        Some("2025-01-01"),
-        None,
-        None,
-        Some("FLAC"),
-        Some("Comment"),
-        Some(120),
-        Some("recording"),
-        Some("release-track"),
-        None,
-        None,
-        None,
-        None,
+    scan.write_track(&library::TrackInput {
+        object_id: "track".into(),
+        album_object_id: Some("album".into()),
+        title: "Track".into(),
+        display_album: "Album".into(),
+        display_artist: "Artist".into(),
+        sort_text: "track".into(),
+        duration_millis: 180000,
+        disc_number: 1,
+        track_number: 1,
+        year: Some(2025),
+        release_date: Some("2025-01-01".into()),
+        source_format: Some("FLAC".into()),
+        comment: Some("Comment".into()),
+        bpm: Some(120),
+        musicbrainz_recording_id: Some("recording".into()),
+        musicbrainz_release_track_id: Some("release-track".into()),
         favorite,
-        Some(8),
-        None,
-        play_count,
-        None,
-        None,
-        None,
-        [1; 32],
-        &library::AudioProperties::default(),
-    )
+        rating: Some(8),
+        source_play_count: play_count,
+        loudness_analysis_key: [1; 32],
+        ..Default::default()
+    })
     .await
     .unwrap();
 }
@@ -52,35 +42,25 @@ async fn fixture() -> (tempfile::TempDir, Database) {
     )
     .await
     .unwrap();
-    scan.write_album(
-        "album",
-        "Album",
-        "album",
-        "Artist",
-        "album",
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        true,
-        Some(8),
-        None,
-    )
+    scan.write_album(&library::AlbumInput {
+        object_id: "album".into(),
+        title: "Album".into(),
+        display_artist: "Artist".into(),
+        sort_text: "album".into(),
+        favorite: Some(true),
+        rating: Some(8),
+        ..Default::default()
+    })
     .await
     .unwrap();
-    scan.write_artist(
-        "artist",
-        "Artist",
-        "artist",
-        Some("artist"),
-        None,
-        None,
-        Some(true),
-        Some(8),
-    )
+    scan.write_artist(&library::ArtistInput {
+        object_id: "artist".into(),
+        name: "Artist".into(),
+        sort_text: Some("artist".into()),
+        favorite: Some(true),
+        rating: Some(8),
+        ..Default::default()
+    })
     .await
     .unwrap();
     track(&mut scan, Some(true), None).await;
@@ -266,23 +246,15 @@ async fn incomplete_catalog_keeps_home_sections_when_their_refresh_fails() {
         .await
         .unwrap();
     scan.incomplete();
-    scan.write_album(
-        "album",
-        "Album",
-        "album",
-        "Artist",
-        "album",
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        true,
-        Some(8),
-        None,
-    )
+    scan.write_album(&library::AlbumInput {
+        object_id: "album".into(),
+        title: "Album".into(),
+        display_artist: "Artist".into(),
+        sort_text: "album".into(),
+        favorite: Some(true),
+        rating: Some(8),
+        ..Default::default()
+    })
     .await
     .unwrap();
     scan.retain_home_section("most-played").await.unwrap();

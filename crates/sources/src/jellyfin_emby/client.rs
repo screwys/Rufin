@@ -80,10 +80,10 @@ impl JellyfinEmbySource {
                 .append_pair("Fields", ALBUM_FIELDS);
             match self.get_json::<Value>(url).await {
                 Ok(item) => {
-                    let album = album_from_item(self.kind, &item);
+                    let album = album_from_item(self.kind, scan.source_id(), &item)?;
                     drop(item);
                     if let Some(album) = album {
-                        stage_album(scan, album).await?;
+                        scan.write_album(&album).await?;
                     }
                 }
                 Err(error) => crate::source::optional_collection_error(error)?,
@@ -146,23 +146,24 @@ impl JellyfinEmbySource {
                                 .append_pair("Fields", ALBUM_FIELDS);
                             match self.get_json::<Value>(url).await {
                                 Ok(item) => {
-                                    let album = album_from_item(self.kind, &item);
+                                    let album =
+                                        album_from_item(self.kind, scan.source_id(), &item)?;
                                     drop(item);
                                     if let Some(album) = album {
-                                        stage_album(scan, album).await?;
+                                        scan.write_album(&album).await?;
                                     }
                                 }
                                 Err(error) => crate::source::optional_collection_error(error)?,
                             }
                         }
                     }
-                    if let Some(mut track) = track_from_item(self.kind, item) {
-                        if track.album_id.is_none() {
+                    if let Some(mut track) = track_from_item(self.kind, scan.source_id(), item)? {
+                        if track.album_object_id.is_none() {
                             if let crate::SourceCollection::Album(id) = collection {
-                                track.album_id = Some(id.clone());
+                                track.album_object_id = Some(id.clone());
                             }
                         }
-                        let owner = track.album_id.as_deref().unwrap_or(&track.id);
+                        let owner = track.album_object_id.as_deref().unwrap_or(&track.object_id);
                         if !album_folders.contains_key(owner) {
                             album_folders.insert(
                                 owner.to_string(),
@@ -175,26 +176,28 @@ impl JellyfinEmbySource {
                     .as_str()
                     .is_some_and(|kind| kind.eq_ignore_ascii_case("MusicAlbum"))
                 {
-                    if let Some(album) = album_from_item(self.kind, item) {
-                        stage_album(scan, album).await?;
+                    if let Some(album) = album_from_item(self.kind, scan.source_id(), item)? {
+                        scan.write_album(&album).await?;
                     }
                 }
             }
             drop(page);
             scan.begin_batch().await?;
             for track in tracks {
-                let owner = track.album_id.as_deref().unwrap_or(&track.id);
+                let owner = track.album_object_id.as_deref().unwrap_or(&track.object_id);
                 if let Some(folders) = &album_folders[owner] {
                     scan.replace_track_folders(
-                        &track.id,
+                        &track.object_id,
                         &folders
                             .iter()
-                            .map(|(id, position)| library::ScanLink::new(&track.id, id, *position))
+                            .map(|(id, position)| {
+                                library::ScanLink::new(&track.object_id, id, *position)
+                            })
                             .collect::<Vec<_>>(),
                     )
                     .await?;
                 }
-                stage_track(scan, track).await?;
+                scan.write_track(&track).await?;
             }
             scan.finish_batch().await?;
             if finished {
@@ -324,26 +327,23 @@ impl JellyfinEmbySource {
             let mut artist_ids = Vec::new();
             let mut album_ids = Vec::new();
             let mut track_ids = Vec::new();
-            for artist in artists
-                .into_iter()
-                .filter_map(|item| artist_from_item(self.kind, &item))
-            {
-                artist_ids.push(artist.id.clone());
-                stage_artist(&mut scan, artist).await?;
+            for item in artists {
+                if let Some(artist) = artist_from_item(self.kind, scan.source_id(), &item)? {
+                    artist_ids.push(artist.object_id.clone());
+                    scan.write_artist(&artist).await?;
+                }
             }
-            for album in albums
-                .into_iter()
-                .filter_map(|item| album_from_item(self.kind, &item))
-            {
-                album_ids.push(album.id.clone());
-                stage_album(&mut scan, album).await?;
+            for item in albums {
+                if let Some(album) = album_from_item(self.kind, scan.source_id(), &item)? {
+                    album_ids.push(album.object_id.clone());
+                    scan.write_album(&album).await?;
+                }
             }
-            for track in tracks
-                .into_iter()
-                .filter_map(|item| track_from_item(self.kind, &item))
-            {
-                track_ids.push(track.id.clone());
-                stage_track(&mut scan, track).await?;
+            for item in tracks {
+                if let Some(track) = track_from_item(self.kind, scan.source_id(), &item)? {
+                    track_ids.push(track.object_id.clone());
+                    scan.write_track(&track).await?;
+                }
             }
             scan.finish_batch().await?;
             Ok((track_ids, album_ids, artist_ids))
@@ -1118,7 +1118,7 @@ impl PlaybackReportDto {
 #[cfg(test)]
 mod tests {
     use super::{playlist_entry, stream_descriptor};
-    use crate::jellyfin_emby::item::{album_from_item, stage_album, stage_track, track_from_item};
+    use crate::jellyfin_emby::item::{album_from_item, track_from_item};
     use crate::jellyfin_emby::{JellyfinEmbySource, JellyfinEmbySourceConfig};
     use serde_json::Value;
     use wiremock::matchers::{body_string, method, path, query_param};
@@ -1222,12 +1222,13 @@ mod tests {
         let mut scan = library::Scan::begin(&database, "source", "Jellyfin", "jellyfin", None)
             .await
             .unwrap();
-        stage_track(
-            &mut scan,
-            track_from_item(
+        scan.write_track(
+            &track_from_item(
                 crate::ServerKind::Jellyfin,
+                scan.source_id(),
                 &serde_json::json!({"Id":"track","Name":"Track"}),
             )
+            .unwrap()
             .unwrap(),
         )
         .await
@@ -1347,7 +1348,7 @@ mod tests {
                     .await
                     .unwrap();
             if cached {
-                stage_album(&mut scan, album_from_item(crate::ServerKind::Jellyfin, &serde_json::from_value(serde_json::json!({"Id":"album","Name":"Nonmatching album","Type":"MusicAlbum","ImageTags":{"Primary":"album-cover"}})).unwrap()).unwrap()).await.unwrap();
+                scan.write_album(&album_from_item(crate::ServerKind::Jellyfin, scan.source_id(), &serde_json::from_value(serde_json::json!({"Id":"album","Name":"Nonmatching album","Type":"MusicAlbum","ImageTags":{"Primary":"album-cover"}})).unwrap()).unwrap().unwrap()).await.unwrap();
             }
             scan.finish().await.unwrap();
             let (results, outcome) = source
@@ -1597,25 +1598,34 @@ mod tests {
             let mut scan = library::Scan::begin(&database, "source", "Server", "server", None)
                 .await
                 .unwrap();
-            stage_album(&mut scan, album_from_item(kind, &album).unwrap())
-                .await
-                .unwrap();
-            stage_track(&mut scan, track_from_item(kind, &track).unwrap())
-                .await
-                .unwrap();
-            super::stage_artist(&mut scan, super::artist_from_item(kind, &serde_json::json!({
+            scan.write_album(
+                &album_from_item(kind, scan.source_id(), &album)
+                    .unwrap()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+            scan.write_track(
+                &track_from_item(kind, scan.source_id(), &track)
+                    .unwrap()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+            scan.write_artist(&super::artist_from_item(kind, scan.source_id(), &serde_json::json!({
                 "Id":"artist","Name":"Artist","Type":"MusicArtist",
                 "ProviderIds":{"MusicBrainzArtist":"artist-mbid"},
                 "ImageTags":{"Primary":"artist-cover"},"UserData":{"IsFavorite":true,"Rating":8}
-            })).unwrap()).await.unwrap();
-            super::stage_genre(
-                &mut scan,
-                super::genre_from_item(
+            })).unwrap().unwrap()).await.unwrap();
+            scan.write_genre(
+                &super::genre_from_item(
                     kind,
+                    scan.source_id(),
                     &serde_json::json!({
                         "Id":"genre","Name":"Rock","ImageTags":{"Primary":"genre-cover"}
                     }),
                 )
+                .unwrap()
                 .unwrap(),
             )
             .await
@@ -1675,7 +1685,7 @@ mod tests {
                     .await
                     .unwrap();
                 let outcome = scan.finish().await.unwrap();
-                if prior.favorite == favorite {
+                if prior.favorite == favorite && prior.play_count == 3 {
                     assert!(
                         matches!(outcome, library::ScanOutcome::Identical(_)),
                         "{kind:?}: {outcome:?}"
@@ -1683,7 +1693,7 @@ mod tests {
                 } else {
                     assert!(
                         matches!(outcome, library::ScanOutcome::Changed(_)),
-                        "favorite must publish"
+                        "changed user data must publish"
                     );
                 }
                 let after = database
@@ -1692,6 +1702,7 @@ mod tests {
                     .unwrap()
                     .unwrap();
                 assert_eq!(after.favorite, favorite);
+                assert_eq!(after.play_count, 3);
                 assert_eq!(after.artwork_binding, before.artwork_binding);
                 let artist_key = after.artists[0].artist_key;
                 let artist = database
@@ -1761,29 +1772,31 @@ mod tests {
                 .await
                 .expect("initial Scan");
         scan.begin_batch().await.expect("initial batch");
-        stage_album(
-            &mut scan,
-            album_from_item(
+        scan.write_album(
+            &album_from_item(
                 crate::ServerKind::Jellyfin,
+                scan.source_id(),
                 &serde_json::from_value(serde_json::json!({
                     "Id": "album-one", "Name": "Old Album", "Type": "MusicAlbum"
                 }))
                 .expect("old Album"),
             )
+            .unwrap()
             .unwrap(),
         )
         .await
         .expect("stage old Album");
-        stage_track(
-            &mut scan,
-            track_from_item(
+        scan.write_track(
+            &track_from_item(
                 crate::ServerKind::Jellyfin,
+                scan.source_id(),
                 &serde_json::from_value(serde_json::json!({
                     "Id": "track-one", "Name": "Old Track", "Type": "Audio",
                     "AlbumId": "album-one", "Album": "Old Album"
                 }))
                 .expect("old Track"),
             )
+            .unwrap()
             .unwrap(),
         )
         .await
