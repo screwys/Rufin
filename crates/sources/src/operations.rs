@@ -271,10 +271,7 @@ pub enum SourceMetadataError {
     #[error("metadata was saved but its source refresh failed: {0}")]
     SavedRefreshFailed(String),
     #[error("some changes were saved: {message}")]
-    PartiallySaved {
-        message: String,
-        outcome: Option<library::ScanOutcome>,
-    },
+    PartiallySaved { message: String },
     #[error("metadata failed: {0}")]
     Write(String),
 }
@@ -340,22 +337,14 @@ impl ArtworkEditing {
 }
 
 pub(crate) fn metadata_refresh_error(error: crate::SourceError) -> SourceMetadataError {
-    match error {
-        crate::SourceError::IncompleteScan { outcome, error } => {
-            SourceMetadataError::PartiallySaved {
-                message: error.to_string(),
-                outcome: Some(outcome),
-            }
-        }
-        error => SourceMetadataError::SavedRefreshFailed(error.to_string()),
-    }
+    SourceMetadataError::SavedRefreshFailed(error.to_string())
 }
 
 pub(crate) fn finish_metadata_save(
     result: Result<(), SourceMetadataError>,
-    refresh: Result<library::ScanOutcome, SourceMetadataError>,
+    refresh: Result<(), SourceMetadataError>,
     saved: bool,
-) -> Result<library::ScanOutcome, SourceMetadataError> {
+) -> Result<(), SourceMetadataError> {
     let message = match result {
         Ok(()) => {
             return refresh.map_err(|error| match error {
@@ -364,25 +353,15 @@ pub(crate) fn finish_metadata_save(
                 error => SourceMetadataError::SavedRefreshFailed(error.to_string()),
             });
         }
-        Err(SourceMetadataError::PartiallySaved { message, .. }) => message,
+        Err(SourceMetadataError::PartiallySaved { message }) => message,
         Err(error) if saved => error.to_string(),
         Err(error) => return Err(error),
     };
-    let (message, outcome) = match refresh {
-        Ok(outcome) => (message, Some(outcome)),
-        Err(SourceMetadataError::PartiallySaved {
-            message: refresh_error,
-            outcome,
-        }) => (
-            format!("{message}. Source refresh also failed: {refresh_error}"),
-            outcome,
-        ),
-        Err(error) => (
-            format!("{message}. Source refresh also failed: {error}"),
-            None,
-        ),
+    let message = match refresh {
+        Ok(()) => message,
+        Err(error) => format!("{message}. Source refresh also failed: {error}"),
     };
-    Err(SourceMetadataError::PartiallySaved { message, outcome })
+    Err(SourceMetadataError::PartiallySaved { message })
 }
 
 pub(crate) fn artwork_file(binding: Option<&[u8]>) -> Option<String> {

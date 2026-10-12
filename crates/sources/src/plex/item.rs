@@ -291,6 +291,11 @@ mod tests {
         let database = library::Database::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
+        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = sender.send(update);
+            std::future::ready(())
+        });
         let artists = [
             json!({"ratingKey":"608","type":"artist","title":"The Cure","titleSort":"Cure, The"}),
             json!({"ratingKey":"609","type":"artist","title":"Duran Duran"}),
@@ -311,9 +316,9 @@ mod tests {
                 scan.write_record(&record).await.unwrap();
             }
         }
-        let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
-            panic!("initial import")
-        };
+        scan.finish().await.unwrap();
+        let publication = updates.try_recv().expect("catalog update");
+        assert!(publication.metadata);
         for refresh in [false, true] {
             if refresh {
                 let mut scan = Scan::begin_items(&database, "plex").await.unwrap();

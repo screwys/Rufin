@@ -2885,7 +2885,6 @@ fn download_source_failure(error: SourceError) -> DownloadFailure {
         | SourceError::Server { .. }
         | SourceError::Cancelled => DownloadFailure::Retry(error.to_string()),
         SourceError::Auth(_)
-        | SourceError::IncompleteScan { .. }
         | SourceError::Library(_)
         | SourceError::Json(_)
         | SourceError::InvalidRequest(_)
@@ -2958,20 +2957,14 @@ mod tests {
         })
         .await
         .expect("stage Track");
-        let publication = match scan.finish().await.expect("publish source") {
-            library::ScanOutcome::Changed(publication) => publication,
-            outcome => panic!("unexpected Scan outcome: {outcome:?}"),
-        };
+        let source = scan.source();
+        scan.finish().await.expect("finish source");
         let track = database
-            .track_key_by_object(
-                publication.source,
-                track_object_id,
-                &library::ReadCancellation::new(),
-            )
+            .track_key_by_object(source, track_object_id, &library::ReadCancellation::new())
             .await
             .expect("read Track key")
             .expect("Track exists");
-        (directory, database, publication.source, track)
+        (directory, database, source, track)
     }
 
     #[test]

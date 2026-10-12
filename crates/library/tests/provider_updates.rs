@@ -1,4 +1,4 @@
-use library::{Database, Freshness, ReadCancellation, Scan, ScanLink, ScanOutcome};
+use library::{Database, Freshness, ReadCancellation, Scan, ScanLink};
 
 async fn track(scan: &mut Scan, favorite: Option<bool>, play_count: Option<i64>) {
     scan.write_track(&library::TrackInput {
@@ -85,9 +85,14 @@ async fn favorite_and_play_count_changes_do_not_report_new_tracks() {
     for (favorite, plays) in [(true, 1), (false, 2)] {
         let mut scan = Scan::begin_items(&database, "source").await.unwrap();
         track(&mut scan, Some(favorite), Some(plays)).await;
-        let ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
-            panic!("user state changed");
-        };
+        let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = updates_tx.send(update);
+            std::future::ready(())
+        });
+        scan.finish().await.unwrap();
+        let publication = updates.try_recv().unwrap();
+        assert!(publication.metadata);
         assert!(!publication.tracks_added);
     }
 }
@@ -103,8 +108,14 @@ async fn point_metadata_preserves_folders_and_complete_memberships_can_clear_the
             scan.replace_track_folders("track", &[]).await.unwrap();
             track(&mut scan, None, None).await;
         }
-        let outcome = scan.finish().await.unwrap();
-        assert_eq!(matches!(outcome, ScanOutcome::Identical(_)), !replace);
+        let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = updates_tx.send(update);
+            std::future::ready(())
+        });
+        scan.finish().await.unwrap();
+        let outcome = updates.try_recv().unwrap();
+        assert_eq!(!outcome.changed(), !replace);
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT count(*) FROM track_folders")
                 .fetch_one(&mut raw)
@@ -135,8 +146,14 @@ async fn favorite_snapshots_replace_only_source_favorites_and_keep_catalog_fresh
             }
         };
         scan.replace_favorites(&ids("track"), &ids("album"), &ids("artist"));
-        let outcome = scan.finish().await.unwrap();
-        assert_eq!(matches!(outcome, ScanOutcome::Changed(_)), changed);
+        let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = updates_tx.send(update);
+            std::future::ready(())
+        });
+        scan.finish().await.unwrap();
+        let outcome = updates.try_recv().unwrap();
+        assert_eq!(outcome.metadata, changed);
         for table in ["tracks", "albums", "artists"] {
             let sql = format!("SELECT source_favorite,source_rating FROM {table}");
             assert_eq!(
@@ -162,7 +179,6 @@ async fn favorite_snapshots_replace_only_source_favorites_and_keep_catalog_fresh
             )
             .await
             .unwrap()
-            .is_some()
         );
         assert_eq!(
             sqlx::query_as::<_, (String, String, i64)>(
@@ -197,10 +213,15 @@ async fn home_sections_refresh_and_clear_without_replacing_their_entities() {
         scan.replace_home_section("most-played", &entries)
             .await
             .unwrap();
-        assert_eq!(
-            matches!(scan.finish().await.unwrap(), ScanOutcome::Changed(_)),
-            changed
-        );
+        let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = updates_tx.send(update);
+            std::future::ready(())
+        });
+        scan.finish().await.unwrap();
+        let update = updates.try_recv().unwrap();
+        assert_eq!(update.home, changed);
+        assert!(!update.metadata && !update.playlists && !update.artwork && !update.inventory);
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT count(*) FROM home_entries")
                 .fetch_one(&mut raw)
@@ -224,7 +245,6 @@ async fn home_sections_refresh_and_clear_without_replacing_their_entities() {
             )
             .await
             .unwrap()
-            .is_some()
         );
     }
 }
@@ -298,10 +318,14 @@ async fn growing_and_reordering_a_playlist_preserves_occurrence_keys() {
                 .await
                 .unwrap();
         }
-        assert!(matches!(
-            scan.finish().await.unwrap(),
-            ScanOutcome::PlaylistsChanged(_)
-        ));
+        let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = updates_tx.send(update);
+            std::future::ready(())
+        });
+        scan.finish().await.unwrap();
+        let update = updates.try_recv().unwrap();
+        assert!(update.playlists && !update.metadata && !update.home);
         let rows = sqlx::query_as::<_, (String, i64)>(
             "SELECT object_id,playlist_entry_key FROM playlist_entries ORDER BY position",
         )
@@ -327,10 +351,14 @@ async fn unchanged_point_reads_do_not_rewrite_tracks_or_albums() {
         .execute(&mut raw).await.unwrap();
     let mut scan = Scan::begin_items(&database, "source").await.unwrap();
     track(&mut scan, None, None).await;
-    assert!(matches!(
-        scan.finish().await.unwrap(),
-        ScanOutcome::Identical(_)
-    ));
+    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |update| {
+        let _ = updates_tx.send(update);
+        std::future::ready(())
+    });
+    scan.finish().await.unwrap();
+    let update = updates.try_recv().unwrap();
+    assert!(!update.changed());
 }
 
 #[tokio::test]
@@ -339,10 +367,14 @@ async fn first_activity_observation_publishes_without_invalidating_catalog_fresh
     for changed in [true, false] {
         let mut scan = Scan::begin_items(&database, "source").await.unwrap();
         track(&mut scan, None, Some(5)).await;
-        assert_eq!(
-            matches!(scan.finish().await.unwrap(), ScanOutcome::Changed(_)),
-            changed
-        );
+        let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = updates_tx.send(update);
+            std::future::ready(())
+        });
+        scan.finish().await.unwrap();
+        let update = updates.try_recv().unwrap();
+        assert_eq!(update.metadata, changed);
         let cancellation = ReadCancellation::new();
         let uri = library::source_entity_uri(&library::SourceId::new("source"), "track", "track");
         assert_eq!(
@@ -363,7 +395,6 @@ async fn first_activity_observation_publishes_without_invalidating_catalog_fresh
             )
             .await
             .unwrap()
-            .is_some()
         );
     }
 }

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use library::{
     AlbumKey, ArtistKey, Database, FolderKey, GenreKey, HomeEntryInput, HomeEntryKind, MoodKey,
-    QueueRepeatMode, QueueRow, Scan, ScanOutcome, SourceKey, TrackKey,
+    QueueRepeatMode, QueueRow, Scan, SourceKey, TrackKey,
 };
 use sqlx::Connection;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
@@ -204,9 +204,14 @@ pub async fn fixture() -> Fixture {
     })
     .await
     .expect("stage provider Home entry");
-    let ScanOutcome::Changed(publication) = scan.finish().await.expect("publish fixture") else {
-        panic!("fixture must publish");
-    };
+    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |update| {
+        let _ = updates_tx.send(update);
+        std::future::ready(())
+    });
+    scan.finish().await.expect("publish fixture");
+    let publication = updates.try_recv().unwrap();
+    assert!(publication.metadata);
     let mut connection = connection(&path).await;
     let tracks =
         sqlx::query_scalar::<_, TrackKey>("SELECT track_key FROM tracks ORDER BY object_id")

@@ -167,12 +167,17 @@ mod tests {
         let database = library::Database::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
+        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = sender.send(update);
+            std::future::ready(())
+        });
         let scan = Scan::begin(&database, "source", "Source", "source", None)
             .await
             .unwrap();
-        let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
-            panic!("initial publication");
-        };
+        scan.finish().await.unwrap();
+        let publication = updates.try_recv().expect("catalog update");
+        assert!(publication.metadata);
         let cancellation = library::ReadCancellation::new();
         for (id, status, empty, identical, expected) in [
             ("old", 200, false, false, vec!["old"]),
@@ -209,18 +214,12 @@ mod tests {
                 .and(wiremock::matchers::query_param("type", "newest")).and(wiremock::matchers::query_param("size", "24"))
                 .respond_with(ResponseTemplate::new(status).set_body_json(serde_json::json!({"subsonic-response":{"status":"ok","albumList2":{"album":entries}}})))
                 .expect(1).mount(&server).await;
-            let outcome = source
+            source
                 .apply_items(&database, vec![format!("album:{id}")], vec![])
                 .await
                 .unwrap();
-            assert_eq!(
-                matches!(outcome, library::ScanOutcome::Identical(_)),
-                identical
-            );
-            assert!(matches!(
-                outcome,
-                library::ScanOutcome::Changed(_) | library::ScanOutcome::Identical(_)
-            ));
+            let outcome = updates.try_recv().expect("catalog update");
+            assert_eq!(!outcome.changed(), identical);
             let home = database
                 .home_page(
                     publication.source,
@@ -272,6 +271,11 @@ mod tests {
         let database = library::Database::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
+        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = sender.send(update);
+            std::future::ready(())
+        });
         let marker = library::Freshness::new(b"catalog".to_vec()).unwrap();
         let mut scan = Scan::begin(
             &database,
@@ -292,9 +296,8 @@ mod tests {
         ))
         .await
         .unwrap();
-        let library::ScanOutcome::Changed(_) = scan.finish().await.unwrap() else {
-            panic!("initial publication")
-        };
+        scan.finish().await.unwrap();
+        assert!(updates.try_recv().expect("catalog update").metadata);
         item["starred"] = true.into();
         item["rating"] = 4.into();
         Mock::given(method("GET"))
@@ -334,13 +337,12 @@ mod tests {
             configuration.source_id,
             crate::source::Implementation::OpenSubsonic(provider),
         );
-        assert!(matches!(
-            source
-                .apply_items(&database, upserts, vec![])
-                .await
-                .unwrap(),
-            library::ScanOutcome::Changed(_)
-        ));
+        source
+            .apply_items(&database, upserts, vec![])
+            .await
+            .unwrap();
+        let update = updates.try_recv().expect("catalog update");
+        assert!(update.metadata);
         let cancellation = library::ReadCancellation::new();
         let uri = library::source_entity_uri(
             &crate::SourceId::new("source"),
@@ -359,7 +361,6 @@ mod tests {
             Scan::accept_freshness(&database, "source", &marker, &cancellation)
                 .await
                 .unwrap()
-                .is_some()
         );
     }
 

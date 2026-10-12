@@ -510,12 +510,17 @@ pub(super) mod tests {
         let database = library::Database::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
+        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = sender.send(update);
+            std::future::ready(())
+        });
         let scan = Scan::begin(&database, "source", "Source", "source", None)
             .await
             .unwrap();
-        let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
-            panic!("initial publication");
-        };
+        scan.finish().await.unwrap();
+        let publication = updates.try_recv().expect("catalog update");
+        assert!(publication.metadata);
         let cancellation = library::ReadCancellation::new();
         for (id, status, empty, identical, expected) in [
             ("old", 200, false, false, vec!["old"]),
@@ -552,18 +557,12 @@ pub(super) mod tests {
                 .expect(1)
                 .mount(&server)
                 .await;
-            let outcome = source
+            source
                 .apply_items(&database, vec![id.into()], vec![])
                 .await
                 .unwrap();
-            assert_eq!(
-                matches!(outcome, library::ScanOutcome::Identical(_)),
-                identical
-            );
-            assert!(matches!(
-                outcome,
-                library::ScanOutcome::Changed(_) | library::ScanOutcome::Identical(_)
-            ));
+            let outcome = updates.try_recv().expect("catalog update");
+            assert_eq!(!outcome.changed(), identical);
             let home = database
                 .home_page(
                     publication.source,
@@ -670,6 +669,11 @@ pub(super) mod tests {
         let database = library::Database::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
+        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = sender.send(update);
+            std::future::ready(())
+        });
         let mut scan = Scan::begin(&database, "plex-test", "Plex", "plex", None)
             .await
             .unwrap();
@@ -677,9 +681,9 @@ pub(super) mod tests {
             .stage_catalog(&mut scan, &|_| {}, &|| false)
             .await
             .unwrap();
-        let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
-            panic!("initial publication")
-        };
+        scan.finish().await.unwrap();
+        let publication = updates.try_recv().expect("catalog update");
+        assert!(publication.metadata);
         let cancellation = library::ReadCancellation::new();
         let uri = library::source_entity_uri(
             &crate::SourceId::new("plex-test"),
@@ -797,10 +801,9 @@ pub(super) mod tests {
             .stage_catalog(&mut scan, &|_| {}, &|| false)
             .await
             .unwrap();
-        assert!(matches!(
-            scan.finish().await.unwrap(),
-            library::ScanOutcome::Identical(_)
-        ));
+        scan.finish().await.unwrap();
+        let update = updates.try_recv().expect("catalog update");
+        assert!(!update.changed());
         database
             .set_favorite(&library::FavoriteTarget::Track(uri.clone()), true)
             .await

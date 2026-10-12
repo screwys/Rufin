@@ -90,11 +90,7 @@ pub fn write_reviewed_metadata(
             .await;
         let mut refresh = Ok(false);
         match &result {
-            Ok(outcome)
-            | Err(SourceMetadataError::PartiallySaved {
-                outcome: Some(outcome),
-                ..
-            }) => {
+            Ok(()) | Err(SourceMetadataError::PartiallySaved { .. }) => {
                 if let Some(binding) = previous_artwork {
                     let artwork = owner.shared.artwork.clone();
                     refresh = tokio::task::spawn_blocking(move || {
@@ -104,15 +100,11 @@ pub fn write_reviewed_metadata(
                     .map_err(string_error)
                     .and_then(|result| result.map_err(string_error));
                 }
-                let outcome = match (outcome.clone(), &refresh) {
-                    (library::ScanOutcome::Identical(publication), Ok(true)) => {
-                        library::ScanOutcome::ArtworkChanged(publication)
-                    }
-                    (outcome, _) => outcome,
-                };
-                owner
-                    .accept_scan(source.source_id(), outcome, CatalogChange::Broad)
-                    .await;
+                if matches!(refresh, Ok(true)) {
+                    owner
+                        .artwork_invalidated(source.source_id(), CatalogChange::Broad)
+                        .await;
+                }
             }
             Err(_) => {}
         }

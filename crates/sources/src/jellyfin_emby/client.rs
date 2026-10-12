@@ -304,9 +304,9 @@ impl JellyfinEmbySource {
         database: &library::Database,
         query: &str,
         limit: usize,
-    ) -> SourceResult<(library::SearchResults, Option<library::ScanOutcome>)> {
+    ) -> SourceResult<library::SearchResults> {
         if query.trim().is_empty() {
-            return Ok((library::SearchResults::default(), None));
+            return Ok(library::SearchResults::default());
         }
         let limit = limit.clamp(1, 100);
         let (artists, albums, tracks) = tokio::join!(
@@ -349,8 +349,7 @@ impl JellyfinEmbySource {
             Ok((track_ids, album_ids, artist_ids))
         }
         .await;
-        let ((track_ids, album_ids, artist_ids), outcome) =
-            crate::finish_scan(scan, result).await?;
+        let (track_ids, album_ids, artist_ids) = crate::finish_scan(scan, result).await?;
         let rows = database
             .search_rows_by_objects(
                 source,
@@ -361,12 +360,8 @@ impl JellyfinEmbySource {
                 &artist_ids,
                 &library::ReadCancellation::new(),
             )
-            .await
-            .map_err(|error| SourceError::IncompleteScan {
-                outcome: outcome.clone(),
-                error: Box::new(error.into()),
-            })?;
-        Ok((rows, Some(outcome)))
+            .await?;
+        Ok(rows)
     }
 
     async fn search_items(
@@ -1219,6 +1214,11 @@ mod tests {
         let database = library::Database::open(root.path().join("library.sqlite"))
             .await
             .unwrap();
+        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = sender.send(update);
+            std::future::ready(())
+        });
         let mut scan = library::Scan::begin(&database, "source", "Jellyfin", "jellyfin", None)
             .await
             .unwrap();
@@ -1245,9 +1245,9 @@ mod tests {
             .stage_playlist_entries(&mut scan, "jellyfin:playlist:list")
             .await
             .unwrap();
-        let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
-            panic!("published playlist")
-        };
+        scan.finish().await.unwrap();
+        let publication = updates.try_recv().expect("catalog update");
+        assert!(publication.metadata);
         let cancellation = library::ReadCancellation::new();
         let key = database
             .playlist_key_by_object(publication.source, "jellyfin:playlist:list", &cancellation)
@@ -1356,11 +1356,16 @@ mod tests {
                 scan.write_album(&album_from_item(crate::ServerKind::Jellyfin, scan.source_id(), &serde_json::from_value(serde_json::json!({"Id":"album","Name":"Nonmatching album","Type":"MusicAlbum","ImageTags":{"Primary":"album-cover"}})).unwrap()).unwrap().unwrap()).await.unwrap();
             }
             scan.finish().await.unwrap();
-            let (results, outcome) = source
+            let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+            database.observe_catalog(move |update| {
+                let _ = sender.send(update);
+                std::future::ready(())
+            });
+            let results = source
                 .live_search(&source_id, &database, "Match", 10)
                 .await
                 .unwrap();
-            assert!(matches!(outcome, Some(library::ScanOutcome::Changed(_))));
+            assert!(updates.try_recv().expect("catalog update").metadata);
             assert!(results.albums.is_empty());
             assert_eq!(results.tracks.len(), 1);
             let track = &results.tracks[0];
@@ -1600,6 +1605,11 @@ mod tests {
             let database = library::Database::open(root.path().join("library.sqlite"))
                 .await
                 .unwrap();
+            let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+            database.observe_catalog(move |update| {
+                let _ = sender.send(update);
+                std::future::ready(())
+            });
             let mut scan = library::Scan::begin(&database, "source", "Server", "server", None)
                 .await
                 .unwrap();
@@ -1635,10 +1645,9 @@ mod tests {
             )
             .await
             .unwrap();
-            let initial = scan.finish().await.unwrap();
-            let library::ScanOutcome::Changed(publication) = initial else {
-                panic!("initial catalog");
-            };
+            scan.finish().await.unwrap();
+            let publication = updates.try_recv().expect("catalog update");
+            assert!(publication.metadata);
             let uri = library::source_entity_uri(
                 &crate::SourceId::new("source"),
                 "track",
@@ -1689,17 +1698,12 @@ mod tests {
                     .stage_items(&mut scan, vec!["track".into()], vec![])
                     .await
                     .unwrap();
-                let outcome = scan.finish().await.unwrap();
+                scan.finish().await.unwrap();
+                let outcome = updates.try_recv().expect("catalog update");
                 if prior.favorite == favorite && prior.play_count == 3 {
-                    assert!(
-                        matches!(outcome, library::ScanOutcome::Identical(_)),
-                        "{kind:?}: {outcome:?}"
-                    );
+                    assert!(!outcome.changed(), "{kind:?}: {outcome:?}");
                 } else {
-                    assert!(
-                        matches!(outcome, library::ScanOutcome::Changed(_)),
-                        "changed user data must publish"
-                    );
+                    assert!(outcome.metadata, "changed user data must publish");
                 }
                 let after = database
                     .track_row_by_uri(&uri, &cancel)

@@ -99,6 +99,11 @@ mod tests {
         let database = library::Database::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
+        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = sender.send(update);
+            std::future::ready(())
+        });
         let mut scan = library::Scan::begin(&database, source.as_str(), "Source", "source", None)
             .await
             .unwrap();
@@ -111,9 +116,9 @@ mod tests {
         })
         .await
         .unwrap();
-        let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
-            panic!("artist artwork must be published");
-        };
+        scan.finish().await.unwrap();
+        let publication = updates.recv().await.unwrap();
+        assert!(publication.artwork);
         let artwork = Artwork::new(directory.path().join("covers"), Handle::current()).unwrap();
         for expected in [1, 0] {
             let progress = AtomicUsize::new(0);
@@ -150,9 +155,9 @@ mod tests {
         })
         .await
         .unwrap();
-        let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
-            panic!("second artist must be published");
-        };
+        scan.finish().await.unwrap();
+        let publication = updates.recv().await.unwrap();
+        assert!(publication.artwork);
         let progress = AtomicUsize::new(0);
         prepare_database_source(
             &artwork,
@@ -180,15 +185,16 @@ mod tests {
         let database = library::Database::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
+        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = sender.send(update);
+            std::future::ready(())
+        });
         let scan = library::Scan::begin(&database, "source", "Source", "source", None)
             .await
             .unwrap();
-        let publication = match scan.finish().await.unwrap() {
-            library::ScanOutcome::Changed(publication)
-            | library::ScanOutcome::ArtworkChanged(publication)
-            | library::ScanOutcome::Identical(publication) => publication,
-            outcome => panic!("unexpected Scan outcome: {outcome:?}"),
-        };
+        scan.finish().await.unwrap();
+        let publication = updates.recv().await.unwrap();
         let artwork = Artwork::new(directory.path().join("covers"), Handle::current()).unwrap();
         let source = SourceId::new("source");
         artwork
@@ -220,15 +226,16 @@ mod tests {
         let database = library::Database::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
+        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = sender.send(update);
+            std::future::ready(())
+        });
         let scan = library::Scan::begin(&database, "source", "Source", "source", None)
             .await
             .unwrap();
-        let publication = match scan.finish().await.unwrap() {
-            library::ScanOutcome::Changed(publication)
-            | library::ScanOutcome::ArtworkChanged(publication)
-            | library::ScanOutcome::Identical(publication) => publication,
-            outcome => panic!("unexpected Scan outcome: {outcome:?}"),
-        };
+        scan.finish().await.unwrap();
+        let publication = updates.recv().await.unwrap();
         let artwork = Artwork::new(directory.path().join("covers"), Handle::current()).unwrap();
         let progress = AtomicUsize::new(0);
         let result = prepare_database_source(

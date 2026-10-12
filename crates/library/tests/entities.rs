@@ -1153,10 +1153,14 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     )
     .await
     .unwrap();
-    assert!(matches!(
-        scan.finish().await.unwrap(),
-        library::ScanOutcome::Changed(_)
-    ));
+    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    fixture.database.observe_catalog(move |update| {
+        let _ = updates_tx.send(update);
+        std::future::ready(())
+    });
+    scan.finish().await.unwrap();
+    let update = updates.try_recv().unwrap();
+    assert!(update.metadata);
     let changed = fixture
         .database
         .album_release_candidates(fixture.source, 100, &cancel)
@@ -1573,7 +1577,6 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let track = fixture.tracks[0];
-    let mut publication = None;
     for refresh in 0..2 {
         let mut scan = library::Scan::begin_items(&fixture.database, "source")
             .await
@@ -1635,14 +1638,16 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
         })
         .await
         .expect("refresh Artist metadata");
-        match scan.finish().await.unwrap() {
-            library::ScanOutcome::Changed(changed) if refresh == 0 => {
-                publication = Some(changed.catalog_revision);
-            }
-            library::ScanOutcome::Identical(unchanged) if refresh == 1 => {
-                assert_eq!(publication, Some(unchanged.catalog_revision));
-            }
-            outcome => panic!("unexpected refresh {refresh} result: {outcome:?}"),
+        let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        fixture.database.observe_catalog(move |update| {
+            let _ = updates_tx.send(update);
+            std::future::ready(())
+        });
+        scan.finish().await.unwrap();
+        let update = updates.try_recv().unwrap();
+        assert_eq!(update.metadata, refresh == 0);
+        if refresh == 1 {
+            assert!(!update.playlists && !update.artwork && !update.home);
         }
     }
     let row = fixture

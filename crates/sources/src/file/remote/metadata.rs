@@ -18,7 +18,7 @@ impl FileSource {
         write: impl FnOnce(&std::path::Path, Option<&str>) -> Result<(), SourceMetadataError>
         + Send
         + 'static,
-    ) -> Result<library::ScanOutcome, SourceMetadataError> {
+    ) -> Result<(), SourceMetadataError> {
         let copy = self.working_file(database, track).await?;
         let format = track.source_format.clone();
         let copy = tokio::task::spawn_blocking(move || {
@@ -93,7 +93,7 @@ impl FileSource {
         mut edit: crate::MetadataEdit,
         previous_artist: &str,
         folder_image: Option<String>,
-    ) -> Result<library::ScanOutcome, SourceMetadataError> {
+    ) -> Result<(), SourceMetadataError> {
         let uri = &track.media_uri;
         let folder_image = folder_image
             .as_deref()
@@ -203,7 +203,6 @@ impl FileSource {
             .await;
         let refresh = crate::finish_scan(scan, refresh)
             .await
-            .map(|(_, outcome)| outcome)
             .map_err(crate::operations::metadata_refresh_error);
         crate::operations::finish_metadata_save(result, refresh, saved)
     }
@@ -325,7 +324,6 @@ impl FileSource {
         }
         .map_err(|error| SourceMetadataError::PartiallySaved {
             message: format!("The previous artwork image could not be removed: {error}"),
-            outcome: None,
         })?;
         scan.remove_local_file_paths(&[self.location(current).map_err(metadata_error)?])
             .await
@@ -823,7 +821,7 @@ impl FileSource {
         &self,
         database: &library::Database,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<library::ScanOutcome> {
+    ) -> SourceResult<()> {
         let mut scan = library::Scan::begin(
             database,
             self.source_id.as_str(),
@@ -835,9 +833,7 @@ impl FileSource {
         let result = self
             .stage_catalog(database, &mut scan, &|_| {}, cancelled)
             .await;
-        crate::finish_scan(scan, result)
-            .await
-            .map(|(_, outcome)| outcome)
+        crate::finish_scan(scan, result).await
     }
 
     pub(crate) async fn read_album_metadata(

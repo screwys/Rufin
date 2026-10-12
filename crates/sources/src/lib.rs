@@ -83,11 +83,6 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum SourceError {
-    #[error("{error}")]
-    IncompleteScan {
-        outcome: library::ScanOutcome,
-        error: Box<SourceError>,
-    },
     #[error(transparent)]
     Library(#[from] library::LibraryError),
     #[error(transparent)]
@@ -117,16 +112,10 @@ pub type SourceResult<T> = Result<T, SourceError>;
 pub(crate) async fn finish_scan<T>(
     mut scan: library::Scan,
     result: SourceResult<T>,
-) -> SourceResult<(T, library::ScanOutcome)> {
+) -> SourceResult<T> {
     if result.is_err() {
         scan.interrupted();
     }
-    let outcome = scan.finish().await?;
-    match result {
-        Ok(value) => Ok((value, outcome)),
-        Err(error) => Err(SourceError::IncompleteScan {
-            outcome,
-            error: Box::new(error),
-        }),
-    }
+    scan.finish().await?;
+    result
 }

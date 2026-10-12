@@ -3,7 +3,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use library::{Database, ReadCancellation, Scan, ScanOutcome, SourceId};
+use library::{Database, ReadCancellation, Scan, SourceId};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers::any};
 
 use super::{FileAuthentication, FileCredentials, FileSource, FileSourceSettings};
@@ -95,8 +95,13 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
         let database = Database::open(directory.path().join("library.sqlite3"))
             .await
             .unwrap();
+        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = sender.send(update);
+            std::future::ready(())
+        });
         let progress = std::sync::Mutex::new(Vec::new());
-        let result = source
+        source
             .manual_refresh(
                 &database,
                 "DAV",
@@ -105,9 +110,8 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
             )
             .await
             .unwrap();
-        let ScanOutcome::Changed(publication) = result else {
-            panic!("Accepted tracks must still be published: {result:?}");
-        };
+        let publication = updates.try_recv().expect("catalog update");
+        assert!(publication.metadata);
         let rows = database
             .mapping_track_page(publication.source, None, None, 10, &ReadCancellation::new())
             .await
@@ -202,13 +206,18 @@ async fn nextcloud_refresh_skips_unchanged_branches_and_keeps_selected_folder_id
     let database = Database::open(directory.path().join("library.sqlite3"))
         .await
         .unwrap();
+    let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |update| {
+        let _ = sender.send(update);
+        std::future::ready(())
+    });
     let mut identities = Vec::new();
     for round in 0..3 {
         let before = server.received_requests().await.unwrap().len();
         if round == 2 {
             generation.store(1, Ordering::Relaxed);
         }
-        let outcome = source
+        source
             .refresh_if_needed(
                 &database,
                 "Nextcloud",
@@ -216,12 +225,19 @@ async fn nextcloud_refresh_skips_unchanged_branches_and_keeps_selected_folder_id
                 Arc::new(false.into()),
             )
             .await
-            .unwrap()
             .unwrap();
-        let publication = match outcome {
-            ScanOutcome::Changed(p) if round != 1 => p,
-            ScanOutcome::Identical(p) if round == 1 => p,
-            other => panic!("Unexpected refresh: {other:?}"),
+        let publication = if round == 1 {
+            assert!(updates.try_recv().is_err());
+            database
+                .cached_source(source.source_id().as_str(), &ReadCancellation::new())
+                .await
+                .unwrap()
+                .unwrap()
+                .source
+        } else {
+            let update = updates.try_recv().expect("catalog update");
+            assert!(update.metadata);
+            update.source
         };
         let requests = server.received_requests().await.unwrap();
         assert!(
@@ -245,7 +261,7 @@ async fn nextcloud_refresh_skips_unchanged_branches_and_keeps_selected_folder_id
             );
         }
         let tracks = database
-            .mapping_track_page(publication.source, None, None, 10, &ReadCancellation::new())
+            .mapping_track_page(publication, None, None, 10, &ReadCancellation::new())
             .await
             .unwrap();
         assert_eq!(tracks.len(), 2);
@@ -335,6 +351,11 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
     let database = Database::open(directory.path().join("library.sqlite3"))
         .await
         .unwrap();
+    let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |update| {
+        let _ = sender.send(update);
+        std::future::ready(())
+    });
     let mut first_uri = String::new();
     let mut reads_after_first = 0;
     for round in 0..4 {
@@ -358,7 +379,8 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
             .stage_catalog(&database, &mut scan, &|_| {}, &|| false)
             .await
             .unwrap();
-        let outcome = scan.finish().await.unwrap();
+        scan.finish().await.unwrap();
+        let publication = updates.try_recv().expect("catalog update");
         if sync_supported && matches!(round, 1 | 3) {
             let requests = server.received_requests().await.unwrap();
             let current = &requests[before..];
@@ -374,8 +396,8 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
         }
         if round == 1 {
             assert!(
-                matches!(outcome, ScanOutcome::Identical(_)),
-                "unchanged inventory: {outcome:?}"
+                !publication.changed(),
+                "unchanged inventory: {publication:?}"
             );
             assert_eq!(
                 gets.load(Ordering::Relaxed),
@@ -383,10 +405,6 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
                 "unchanged files must not be downloaded or parsed again"
             );
         }
-        let publication = match outcome {
-            ScanOutcome::Changed(p) | ScanOutcome::Identical(p) => p,
-            other => panic!("{other:?}"),
-        };
         let tracks = database
             .mapping_track_page(publication.source, None, None, 10, &ReadCancellation::new())
             .await
@@ -499,6 +517,11 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
     let database = Database::open(folder.path().join("library.sqlite3"))
         .await
         .unwrap();
+    let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |update| {
+        let _ = sender.send(update);
+        std::future::ready(())
+    });
     let mut original_uris = Vec::new();
     let mut previous_reads = 0;
     for pass in 0..5 {
@@ -516,9 +539,10 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
             .stage_catalog(&database, &mut scan, &|_| {}, &|| false)
             .await
             .unwrap();
-        let outcome = scan.finish().await.unwrap();
+        scan.finish().await.unwrap();
+        let publication = updates.try_recv().expect("catalog update");
         if pass == 1 {
-            assert!(matches!(outcome, ScanOutcome::Identical(_)), "{outcome:?}");
+            assert!(!publication.changed(), "{publication:?}");
             assert_eq!(
                 reads.load(Ordering::Relaxed),
                 previous_reads,
@@ -532,10 +556,6 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
             );
         }
         previous_reads = reads.load(Ordering::Relaxed);
-        let publication = match outcome {
-            ScanOutcome::Changed(p) | ScanOutcome::Identical(p) => p,
-            other => panic!("{other:?}"),
-        };
         let rows = database
             .mapping_track_page(publication.source, None, None, 10, &ReadCancellation::new())
             .await

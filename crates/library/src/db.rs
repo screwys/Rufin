@@ -1,7 +1,9 @@
 //! Owns the fixed SQLite writer, bounded read pool, and read cancellation.
 //! It creates no runtime and contains no product query policy.
 
+use std::future::Future;
 use std::path::Path;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -60,6 +62,9 @@ impl ReadCancellation {
     }
 }
 
+type CatalogObserver =
+    dyn Fn(crate::CatalogUpdate) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync;
+
 struct DatabaseInner {
     writer: Arc<Mutex<Option<SqliteConnection>>>,
     readers: SqlitePool,
@@ -68,6 +73,7 @@ struct DatabaseInner {
     general_read: Arc<Semaphore>,
     acquisition: Arc<Mutex<()>>,
     distinct_track_covers: AtomicBool,
+    catalog_observer: std::sync::Mutex<Option<Arc<CatalogObserver>>>,
 }
 
 /// Final ownership of one fixed writer and the bounded read-only pool.
@@ -77,6 +83,22 @@ pub struct Database {
 }
 
 impl Database {
+    pub fn observe_catalog<F, Work>(&self, observer: F)
+    where
+        F: Fn(crate::CatalogUpdate) -> Work + Send + Sync + 'static,
+        Work: Future<Output = ()> + Send + 'static,
+    {
+        *self.inner.catalog_observer.lock().unwrap() =
+            Some(Arc::new(move |update| Box::pin(observer(update))));
+    }
+
+    pub(crate) async fn catalog_updated(&self, update: crate::CatalogUpdate) {
+        let observer = self.inner.catalog_observer.lock().unwrap().clone();
+        if let Some(observer) = observer {
+            observer(update).await;
+        }
+    }
+
     pub fn set_distinct_track_covers(&self, enabled: bool) {
         self.inner
             .distinct_track_covers
@@ -235,6 +257,7 @@ impl Database {
                 general_read: Arc::new(Semaphore::new(1)),
                 acquisition: Arc::new(Mutex::new(())),
                 distinct_track_covers: AtomicBool::new(false),
+                catalog_observer: std::sync::Mutex::new(None),
             }),
         })
     }

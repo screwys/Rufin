@@ -78,15 +78,13 @@ impl SubsonicSource {
         database: &library::Database,
         source_id: &str,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<library::ScanOutcome> {
+    ) -> SourceResult<()> {
         check_cancelled(cancelled)?;
         let mut scan = Scan::begin_items(database, source_id).await?;
         let result = self
             .stage_user_collections(&mut scan, &|_| {}, cancelled)
             .await;
-        crate::finish_scan(scan, result)
-            .await
-            .map(|(_, outcome)| outcome)
+        crate::finish_scan(scan, result).await
     }
 
     async fn stage_user_collections(
@@ -685,12 +683,17 @@ mod tests {
         let database = library::Database::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
+        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = sender.send(update);
+            std::future::ready(())
+        });
         let scan = library::Scan::begin(&database, "source", "Source", "source", None)
             .await
             .unwrap();
-        let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
-            panic!("initial source")
-        };
+        scan.finish().await.unwrap();
+        let publication = updates.try_recv().expect("catalog update");
+        assert!(publication.metadata);
         let cancellation = library::ReadCancellation::new();
         for (next, expected_reads) in [(0, 1), (1, 1), (2, 2), (3, 3), (6, 4), (4, 5), (5, 5)] {
             state.store(next, Ordering::Relaxed);
@@ -791,6 +794,11 @@ mod tests {
         let database = library::Database::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
+        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = sender.send(update);
+            std::future::ready(())
+        });
         let marker = library::Freshness::new(b"unchanged catalog".to_vec()).unwrap();
         let mut scan = library::Scan::begin(
             &database,
@@ -829,9 +837,9 @@ mod tests {
             .stage_playlist_snapshot(&mut scan, "subsonic:playlist:playlist")
             .await
             .unwrap();
-        let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
-            panic!("initial publication")
-        };
+        scan.finish().await.unwrap();
+        let publication = updates.try_recv().expect("catalog update");
+        assert!(publication.metadata);
         for (next, expected) in [(2, true), (1, false), (0, true)] {
             state.store(next, Ordering::Relaxed);
             source
@@ -867,7 +875,6 @@ mod tests {
                 library::Scan::accept_freshness(&database, "source", &marker, &cancellation)
                     .await
                     .unwrap()
-                    .is_some()
             );
             assert_eq!(
                 database
@@ -877,13 +884,17 @@ mod tests {
                 i64::from(next != 1)
             );
         }
-        assert!(matches!(
-            source
-                .refresh_user_collections(&database, "source", &|| false)
-                .await
-                .unwrap(),
-            library::ScanOutcome::Identical(_)
-        ));
+        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = sender.send(update);
+            std::future::ready(())
+        });
+        source
+            .refresh_user_collections(&database, "source", &|| false)
+            .await
+            .unwrap();
+        let update = updates.try_recv().expect("catalog update");
+        assert!(!update.changed());
     }
 
     #[tokio::test]
@@ -950,6 +961,11 @@ mod tests {
             let database = library::Database::open(directory.path().join("library.sqlite"))
                 .await
                 .unwrap();
+            let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+            database.observe_catalog(move |update| {
+                let _ = sender.send(update);
+                std::future::ready(())
+            });
             let marker = library::Freshness::new(b"server-observation".to_vec()).unwrap();
             if folders_available {
                 let mut previous = library::Scan::begin(
@@ -1017,6 +1033,7 @@ mod tests {
                     .await
                     .unwrap();
                 previous.finish().await.unwrap();
+                updates.try_recv().expect("initial catalog update");
             }
             let progress = std::sync::Mutex::new(Vec::new());
             let mut scan = library::Scan::begin(
@@ -1038,9 +1055,9 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
-                panic!("first catalog must publish");
-            };
+            scan.finish().await.unwrap();
+            let publication = updates.try_recv().expect("catalog update");
+            assert!(publication.metadata);
             let cancellation = library::ReadCancellation::new();
             let home = database
                 .home_page(
@@ -1081,8 +1098,7 @@ mod tests {
             assert_eq!(
                 library::Scan::accept_freshness(&database, "source", &marker, &cancellation)
                     .await
-                    .unwrap()
-                    .is_some(),
+                    .unwrap(),
                 folders_available
             );
             if folders_available {
@@ -1163,7 +1179,7 @@ mod tests {
                 crate::SourceId::new("source"),
                 crate::source::Implementation::OpenSubsonic(source),
             );
-            let outcome = source
+            source
                 .refresh_if_needed(
                     &database,
                     "Nextcloud Music",
@@ -1172,7 +1188,8 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            assert!(matches!(outcome, Some(library::ScanOutcome::Identical(_))));
+            let outcome = updates.try_recv().expect("catalog update");
+            assert!(!outcome.changed());
             assert!(
                 progress
                     .lock()

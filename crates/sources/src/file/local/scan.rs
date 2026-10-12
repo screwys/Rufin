@@ -27,7 +27,7 @@ pub(crate) async fn publish_metadata_paths(
     paths: &[PathBuf],
     removed_album: Option<&str>,
     removed_artist: Option<&str>,
-) -> SourceResult<library::ScanOutcome> {
+) -> SourceResult<()> {
     let mut scan = Scan::begin_local_items(database, source_id).await?;
     let result = async {
         scan.begin_batch().await?;
@@ -45,9 +45,7 @@ pub(crate) async fn publish_metadata_paths(
         Ok(())
     }
     .await;
-    crate::finish_scan(scan, result)
-        .await
-        .map(|(_, outcome)| outcome)
+    crate::finish_scan(scan, result).await
 }
 
 pub(crate) async fn stage_metadata_paths(scan: &mut Scan, paths: &[PathBuf]) -> SourceResult<()> {
@@ -95,7 +93,7 @@ pub(crate) async fn catch_up(
     local: &LocalSource,
     progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
     cancelled: &(dyn Fn() -> bool + Send + Sync),
-) -> SourceResult<library::ScanOutcome> {
+) -> SourceResult<()> {
     let roots = &local
         .roots()
         .iter()
@@ -165,9 +163,7 @@ pub(crate) async fn catch_up(
         Ok(())
     }
     .await;
-    crate::finish_scan(scan, result)
-        .await
-        .map(|(_, outcome)| outcome)
+    crate::finish_scan(scan, result).await
 }
 
 fn cached_observation_changed(file: &library::LocalFileRow) -> bool {
@@ -196,7 +192,7 @@ pub(crate) async fn publish_paths(
     local: &LocalSource,
     paths: &[PathBuf],
     rename: Option<&(PathBuf, PathBuf)>,
-) -> SourceResult<library::ScanOutcome> {
+) -> SourceResult<()> {
     let roots = &local
         .roots()
         .iter()
@@ -256,9 +252,7 @@ pub(crate) async fn publish_paths(
         Ok(())
     }
     .await;
-    crate::finish_scan(scan, result)
-        .await
-        .map(|(_, outcome)| outcome)
+    crate::finish_scan(scan, result).await
 }
 
 pub(super) fn normalize_observed_path(path: &Path) -> PathBuf {
@@ -603,7 +597,7 @@ pub(crate) async fn import_paths(
     paths: Vec<PathBuf>,
     name: &str,
     progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
-) -> SourceResult<(library::PlaylistKey, library::ScanOutcome)> {
+) -> SourceResult<library::PlaylistKey> {
     let local = LocalSource::from_roots(paths)?;
     let mut scan = Scan::begin_local_items(database, source_id).await?;
     let result = async {

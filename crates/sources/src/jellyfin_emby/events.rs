@@ -359,6 +359,11 @@ mod tests {
             let database = library::Database::open(root.path().join("library.sqlite"))
                 .await
                 .unwrap();
+            let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+            database.observe_catalog(move |update| {
+                let _ = sender.send(update);
+                std::future::ready(())
+            });
             let mut scan =
                 library::Scan::begin(&database, "source", kind.name(), kind.source_kind(), None)
                     .await
@@ -391,6 +396,7 @@ mod tests {
             .await
             .unwrap();
             scan.finish().await.unwrap();
+            updates.try_recv().expect("initial catalog update");
             let event = r#"{"MessageType":"UserDataChanged","Data":{"UserId":"user","UserDataList":[{"ItemId":"3272","IsFavorite":true},{"ItemId":"track","PlayCount":8}]}}"#;
             for repeated in [false, true] {
                 let JellyfinSocketMessage::Change(RemoteItemChange::Items(items)) =
@@ -398,11 +404,9 @@ mod tests {
                 else {
                     panic!("user data must retain the item boundary");
                 };
-                let outcome = source.apply_changes(&database, items).await.unwrap();
-                assert_eq!(
-                    matches!(outcome, library::ScanOutcome::Identical(_)),
-                    repeated
-                );
+                source.apply_changes(&database, items).await.unwrap();
+                let outcome = updates.try_recv().expect("catalog update");
+                assert_eq!(!outcome.changed(), repeated);
             }
             let cancellation = library::ReadCancellation::new();
             let track = database
@@ -548,6 +552,11 @@ mod tests {
                     .iter()
                     .all(|album| album.media_uri != uri)
             );
+            let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+            database.observe_catalog(move |update| {
+                let _ = sender.send(update);
+                std::future::ready(())
+            });
             let mut full =
                 library::Scan::begin(&database, "source", kind.name(), kind.source_kind(), None)
                     .await
@@ -555,10 +564,9 @@ mod tests {
             full.write_album(&album_from_item(kind, full.source_id(), &serde_json::json!({
                 "Id":"other","Name":"Album","Type":"MusicAlbum","UserData":{"IsFavorite":true}
             })).unwrap().unwrap()).await.unwrap();
-            assert!(matches!(
-                full.finish().await.unwrap(),
-                library::ScanOutcome::Identical(_)
-            ));
+            full.finish().await.unwrap();
+            let update = updates.try_recv().expect("catalog update");
+            assert!(!update.changed());
         }
     }
 

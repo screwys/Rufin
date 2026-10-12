@@ -57,7 +57,7 @@ impl FileSource {
         database: &Database,
         media_uri: &str,
         copy: &super::metadata::WorkingFile,
-    ) -> SourceResult<library::ScanOutcome> {
+    ) -> SourceResult<()> {
         let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
         let result = async {
             self.stage_saved_file(&mut scan, media_uri, copy).await?;
@@ -67,9 +67,7 @@ impl FileSource {
             Ok(())
         }
         .await;
-        crate::finish_scan(scan, result)
-            .await
-            .map(|(_, outcome)| outcome)
+        crate::finish_scan(scan, result).await
     }
 
     pub(crate) async fn stage_saved_file(

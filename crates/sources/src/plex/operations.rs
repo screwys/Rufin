@@ -309,7 +309,7 @@ impl PlexSource {
         database: &library::Database,
         query: &str,
         limit: usize,
-    ) -> SourceResult<(library::SearchResults, Option<library::ScanOutcome>)> {
+    ) -> SourceResult<library::SearchResults> {
         let response = self
             .get(
                 "/hubs/search",
@@ -345,7 +345,7 @@ impl PlexSource {
             Ok((tracks, albums, artists))
         }
         .await;
-        let ((tracks, albums, artists), outcome) = crate::finish_scan(scan, result).await?;
+        let (tracks, albums, artists) = crate::finish_scan(scan, result).await?;
         let rows = database
             .search_rows_by_objects(
                 source,
@@ -356,12 +356,8 @@ impl PlexSource {
                 &artists,
                 &library::ReadCancellation::new(),
             )
-            .await
-            .map_err(|error| SourceError::IncompleteScan {
-                outcome: outcome.clone(),
-                error: Box::new(error.into()),
-            })?;
-        Ok((rows, Some(outcome)))
+            .await?;
+        Ok(rows)
     }
     pub(crate) async fn browse_folder(
         &self,

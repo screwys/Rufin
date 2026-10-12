@@ -254,10 +254,14 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     )
     .await
     .unwrap();
-    assert!(matches!(
-        scan.finish().await.unwrap(),
-        library::ScanOutcome::Changed(_)
-    ));
+    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    fixture.database.observe_catalog(move |update| {
+        let _ = updates_tx.send(update);
+        std::future::ready(())
+    });
+    scan.finish().await.unwrap();
+    let update = updates.try_recv().unwrap();
+    assert!(update.metadata);
     let changed = fixture
         .database
         .next_missing_track_loudness(fixture.source, None, &cancel)
@@ -443,10 +447,14 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     scan.write_album_source_loudness("album-b", Some(-13.0), None, None, None)
         .await
         .expect("stage Album R128 fact");
-    assert!(matches!(
-        scan.finish().await.expect("publish membership change"),
-        library::ScanOutcome::Changed(_)
-    ));
+    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    fixture.database.observe_catalog(move |update| {
+        let _ = updates_tx.send(update);
+        std::future::ready(())
+    });
+    scan.finish().await.expect("publish membership change");
+    let update = updates.try_recv().unwrap();
+    assert!(update.metadata);
     assert!(
         fixture
             .database

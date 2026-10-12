@@ -2,7 +2,6 @@ use std::path::Path;
 
 use library::{
     Database, Freshness, LocalFileKind, LocalFileState, LocalFileWrite, ReadCancellation, Scan,
-    ScanOutcome,
 };
 use sqlx::FromRow;
 use sqlx::sqlite::SqliteConnection;
@@ -31,10 +30,14 @@ async fn publication_keeps_tracks_and_known_credits_beside_missing_related_objec
     scan.write_album_source_loudness("album-one", None, None, Some(-6.0), None)
         .await
         .unwrap();
-    assert!(matches!(
-        scan.finish().await.unwrap(),
-        ScanOutcome::Changed(_)
-    ));
+    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |update| {
+        let _ = updates_tx.send(update);
+        std::future::ready(())
+    });
+    scan.finish().await.unwrap();
+    let update = updates.try_recv().unwrap();
+    assert!(update.metadata);
     let mut raw = connection(&path).await;
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM tracks")
@@ -106,10 +109,14 @@ async fn remote_relocation_keeps_media_identity_and_updates_observed_access() {
         scan.write_local_files(&[(observation.clone(), Vec::new())])
             .await
             .unwrap();
-        let publication = match scan.finish().await.unwrap() {
-            ScanOutcome::Changed(publication) => publication,
-            other => panic!("expected changed catalog, got {other:?}"),
-        };
+        let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = updates_tx.send(update);
+            std::future::ready(())
+        });
+        scan.finish().await.unwrap();
+        let publication = updates.try_recv().unwrap();
+        assert!(publication.metadata);
         let observed = database.observed_media_file(&uri).await.unwrap().unwrap();
         assert_eq!(observed.path, observation.path);
         assert_eq!(observed.revision, observation.revision);
@@ -152,11 +159,8 @@ async fn reopening_preserves_accepted_source_rows_and_noop_refresh() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("library.sqlite3");
     let database = Database::open(&path).await.unwrap();
-    let publication = match write_small_catalog(&database, "same", "Track One", false, b"art").await
-    {
-        ScanOutcome::Changed(publication) => publication,
-        other => panic!("expected changed catalog, got {other:?}"),
-    };
+    let publication = write_small_catalog(&database, "same", "Track One", false, b"art").await;
+    assert!(publication.metadata);
     database.close().await.unwrap();
     let reopened = Database::open(&path).await.unwrap();
     assert_eq!(
@@ -166,10 +170,8 @@ async fn reopening_preserves_accepted_source_rows_and_noop_refresh() {
             .unwrap(),
         (1, 2)
     );
-    assert!(matches!(
-        write_small_catalog(&reopened, "same", "Track One", false, b"art").await,
-        ScanOutcome::Identical(_)
-    ));
+    let update = write_small_catalog(&reopened, "same", "Track One", false, b"art").await;
+    assert!(!update.changed());
     reopened.close().await.unwrap();
 }
 
@@ -230,11 +232,9 @@ async fn local_component_paths_page_beyond_one_batch() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
     let database = Database::open(&path).await.expect("open Library Store");
-    let ScanOutcome::Changed(publication) =
-        write_small_catalog(&database, "fresh-one", "Track One", false, b"genre-art").await
-    else {
-        panic!("catalog must publish");
-    };
+    let publication =
+        write_small_catalog(&database, "fresh-one", "Track One", false, b"genre-art").await;
+    assert!(publication.metadata);
     let mut observations = Vec::with_capacity(131);
     observations.push((
         LocalFileWrite {
@@ -463,9 +463,15 @@ async fn sparse_artist_credits_preserve_metadata_and_complete_records_can_clear_
             .await
             .unwrap();
         }
-        let outcome = scan.finish().await.unwrap();
+        let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = updates_tx.send(update);
+            std::future::ready(())
+        });
+        scan.finish().await.unwrap();
+        let outcome = updates.try_recv().unwrap();
         if point {
-            assert!(matches!(outcome, ScanOutcome::Identical(_)));
+            assert!(!outcome.changed());
         }
         let mut reader = connection(&path).await;
         let metadata = sqlx::query_as::<_, (Option<String>, Option<i64>)>(
@@ -491,7 +497,12 @@ async fn write_small_catalog(
     title: &str,
     reverse: bool,
     genre_artwork: &[u8],
-) -> ScanOutcome {
+) -> library::CatalogUpdate {
+    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |update| {
+        let _ = updates_tx.send(update);
+        std::future::ready(())
+    });
     let mut scan = Scan::begin(
         database,
         "source-one",
@@ -579,7 +590,8 @@ async fn write_small_catalog(
     )
     .await
     .expect("stage album relations");
-    scan.finish().await.expect("finish scan")
+    scan.finish().await.expect("finish scan");
+    updates.try_recv().expect("catalog update")
 }
 
 async fn write_track(scan: &mut Scan, object_id: &str, title: &str, position: i64) {
@@ -646,20 +658,26 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
     let database = Database::open(&path).await.expect("open Library Store");
-    let ScanOutcome::Changed(first) =
-        write_small_catalog(&database, "fresh-one", "Track One", false, b"genre-art").await
-    else {
-        panic!("first scan must publish");
-    };
-    assert_eq!(first.catalog_revision, 1);
-    assert!(first.tracks_added);
+    let first = write_small_catalog(&database, "fresh-one", "Track One", false, b"genre-art").await;
+    assert!(first.metadata);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT catalog_revision FROM sources WHERE object_id='source-one'"
+        )
+        .fetch_one(&mut connection(&path).await)
+        .await
+        .unwrap(),
+        1
+    );
+    assert!(first.tracks_added && first.inventory);
+    assert_eq!(first.source_id, library::SourceId::new("source-one"));
     assert_eq!(
         database
             .cached_source("source-one", &ReadCancellation::new())
             .await
             .expect("read saved source without provider contact")
-            .map(|source| (source.source, source.catalog_revision)),
-        Some((first.source, 1))
+            .map(|source| source.source),
+        Some(first.source)
     );
     let mut outside = connection(&path).await;
     let original_keys = sqlx::query_as::<_, (i64, i64, i64)>(
@@ -691,14 +709,12 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
     .await
     .expect("write user overrides");
 
-    assert_eq!(
-        write_small_catalog(&database, "fresh-two", "Track One", true, b"genre-art").await,
-        ScanOutcome::Identical(library::Publication {
-            tracks_added: false,
-            ..first.clone()
-        })
-    );
-    assert_eq!(
+    let unchanged =
+        write_small_catalog(&database, "fresh-two", "Track One", true, b"genre-art").await;
+    assert!(!unchanged.changed());
+    assert!(!unchanged.tracks_added && unchanged.inventory);
+    assert_eq!(unchanged.artwork_digest, first.artwork_digest);
+    assert!(
         Scan::accept_freshness(
             &database,
             "source-one",
@@ -706,25 +722,27 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
             &ReadCancellation::new(),
         )
         .await
-        .expect("accept freshness"),
-        Some(library::Publication {
-            tracks_added: false,
-            ..first.clone()
-        })
+        .expect("accept freshness")
     );
 
-    let ScanOutcome::Changed(changed) = write_small_catalog(
+    let changed = write_small_catalog(
         &database,
         "fresh-three",
         "Changed Track",
         false,
         b"genre-art",
     )
-    .await
-    else {
-        panic!("changed scan must publish");
-    };
-    assert_eq!(changed.catalog_revision, 2);
+    .await;
+    assert!(changed.metadata);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT catalog_revision FROM sources WHERE object_id='source-one'"
+        )
+        .fetch_one(&mut outside)
+        .await
+        .unwrap(),
+        2
+    );
     assert_eq!(changed.source, first.source);
     let changed_facts = sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
         "SELECT
@@ -815,18 +833,25 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
     .fetch_one(&mut outside)
     .await
     .expect("read artwork digest before Genre change");
-    let ScanOutcome::ArtworkChanged(artwork_change) = write_small_catalog(
+    let artwork_change = write_small_catalog(
         &database,
         "fresh-four",
         "Changed Track",
         false,
         b"genre-art-two",
     )
-    .await
-    else {
-        panic!("Genre artwork change must publish");
-    };
-    assert_eq!(artwork_change.catalog_revision, 2);
+    .await;
+    assert!(artwork_change.artwork);
+    assert!(!artwork_change.metadata && !artwork_change.playlists);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT catalog_revision FROM sources WHERE object_id='source-one'"
+        )
+        .fetch_one(&mut outside)
+        .await
+        .unwrap(),
+        2
+    );
     let artwork_after = sqlx::query_scalar::<_, Vec<u8>>(
         "SELECT artwork_digest FROM sources
          WHERE source_key=(SELECT source_key FROM sources WHERE object_id='source-one')",
@@ -883,7 +908,7 @@ async fn artwork_publication_keeps_one_effective_binding_per_entity() {
         )
         .await
         .expect("check policy freshness"),
-        None
+        false
     );
     write_small_catalog(&database, "distinct", "Track One", false, b"genre-art").await;
     let distinct = sqlx::query_as::<_, (Vec<u8>, Vec<u8>, Vec<u8>)>(
@@ -975,12 +1000,19 @@ async fn point_album_artwork_updates_cached_members_without_replacing_distinct_c
             .fetch_one(&mut reader)
             .await
             .unwrap();
-            let outcome = point.finish().await.unwrap();
-            assert!(match outcome {
-                ScanOutcome::ArtworkChanged(_) => title == "Album One",
-                ScanOutcome::Changed(_) => title == "Renamed Album" && previous != artwork,
-                ScanOutcome::Identical(_) => previous == artwork,
-                _ => false,
+            let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+            database.observe_catalog(move |update| {
+                let _ = updates_tx.send(update);
+                std::future::ready(())
+            });
+            point.finish().await.unwrap();
+            let outcome = updates.try_recv().unwrap();
+            assert!(if outcome.metadata {
+                title == "Renamed Album" && previous != artwork
+            } else if outcome.artwork {
+                title == "Album One"
+            } else {
+                !outcome.playlists && !outcome.home && previous == artwork
             });
             assert_eq!(
                 sqlx::query_scalar::<_, Vec<u8>>(
@@ -1017,7 +1049,13 @@ async fn incomplete_collection_publishes_valid_pages_without_removal_authority()
     .expect("begin incomplete Scan");
     scan.incomplete();
     write_track(&mut scan, "track-one", "Changed From Valid Page", 0).await;
-    assert!(matches!(scan.finish().await, Ok(ScanOutcome::Changed(_))));
+    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |update| {
+        let _ = updates_tx.send(update);
+        std::future::ready(())
+    });
+    scan.finish().await.unwrap();
+    assert!(updates.try_recv().unwrap().metadata);
 
     let mut outside = connection(&path).await;
     assert_eq!(
@@ -1069,11 +1107,17 @@ async fn complete_scans_remove_unseen_items_after_partial_updates() {
             .await
             .unwrap();
         }
-        let outcome = scan.finish().await.unwrap();
+        let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = updates_tx.send(update);
+            std::future::ready(())
+        });
+        scan.finish().await.unwrap();
+        let outcome = updates.try_recv().unwrap();
         assert!(if authoritative {
-            matches!(outcome, ScanOutcome::Changed(_))
+            outcome.metadata
         } else {
-            matches!(outcome, ScanOutcome::Identical(_))
+            !outcome.changed()
         });
         let mut reader = connection(&path).await;
         assert_eq!(
@@ -1108,10 +1152,14 @@ async fn complete_scans_remove_unseen_items_after_partial_updates() {
         })
         .await
         .unwrap();
-    assert!(matches!(
-        complete.finish().await.unwrap(),
-        ScanOutcome::Changed(_)
-    ));
+    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |update| {
+        let _ = updates_tx.send(update);
+        std::future::ready(())
+    });
+    complete.finish().await.unwrap();
+    let update = updates.try_recv().unwrap();
+    assert!(update.metadata);
     let mut reader = connection(&path).await;
     assert_eq!(
         sqlx::query_scalar::<_, String>("SELECT name FROM genres WHERE object_id='a'")
@@ -1170,11 +1218,17 @@ async fn identical_and_artwork_only_incomplete_scans_retain_unseen_local_files()
         scan.write_local_files(&files[..if index == 0 { 2 } else { 1 }])
             .await
             .unwrap();
-        let outcome = scan.finish().await.unwrap();
+        let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = updates_tx.send(update);
+            std::future::ready(())
+        });
+        scan.finish().await.unwrap();
+        let outcome = updates.try_recv().unwrap();
         assert!(match index {
-            0 => matches!(outcome, ScanOutcome::Changed(_)),
-            1 => matches!(outcome, ScanOutcome::Identical(_)),
-            _ => matches!(outcome, ScanOutcome::ArtworkChanged(_)),
+            0 => outcome.metadata,
+            1 => !outcome.changed(),
+            _ => outcome.artwork,
         });
         let mut reader = connection(&path).await;
         assert_eq!(
@@ -1192,11 +1246,8 @@ async fn saved_source_opens_from_cache_without_starting_a_scan() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
     let database = Database::open(&path).await.expect("open Library Store");
-    let ScanOutcome::Changed(publication) =
-        write_small_catalog(&database, "fresh", "Cached Track", false, b"art").await
-    else {
-        panic!("initial scan must publish");
-    };
+    let publication = write_small_catalog(&database, "fresh", "Cached Track", false, b"art").await;
+    assert!(publication.metadata);
     drop(database);
 
     let reopened = Database::open(&path).await.expect("reopen cached Store");
@@ -1208,7 +1259,7 @@ async fn saved_source_opens_from_cache_without_starting_a_scan() {
 
     assert_eq!(cached.source, publication.source);
     assert_eq!(cached.display_name, "Source One");
-    assert_eq!(cached.catalog_revision, 1);
+    assert_eq!(cached.artwork_digest, publication.artwork_digest);
     assert_eq!(
         reopened.all_source_counts().await.unwrap()[&library::SourceId::new("source-one")],
         (1, 2)
@@ -1220,11 +1271,8 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
     let database = Database::open(&path).await.expect("open Library Store");
-    let ScanOutcome::Changed(first) =
-        write_small_catalog(&database, "fresh-one", "Track One", false, b"genre-art").await
-    else {
-        panic!("first scan must publish");
-    };
+    let first = write_small_catalog(&database, "fresh-one", "Track One", false, b"genre-art").await;
+    assert!(first.metadata);
 
     let mut failed = Scan::begin(&database, "source-two", "Two", "two", None)
         .await
@@ -1266,10 +1314,14 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         })
         .await
         .expect_err("empty identity fails the current batch");
-    assert!(matches!(
-        failed.finish().await.expect("finish failed scan"),
-        ScanOutcome::Changed(_)
-    ));
+    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |update| {
+        let _ = updates_tx.send(update);
+        std::future::ready(())
+    });
+    failed.finish().await.expect("finish failed scan");
+    let update = updates.try_recv().unwrap();
+    assert!(update.metadata);
     let mut outside = connection(&path).await;
     assert_eq!(
         sqlx::query_scalar::<_, String>(
@@ -1338,10 +1390,13 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         })
         .await
         .expect_err("oversized row fails staging");
-    assert_eq!(
-        oversized.finish().await.expect("finish oversized scan"),
-        ScanOutcome::Failed
-    );
+    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |update| {
+        let _ = updates_tx.send(update);
+        std::future::ready(())
+    });
+    oversized.finish().await.expect("finish oversized scan");
+    assert!(updates.try_recv().is_err());
 
     let mut invalid = Scan::begin(&database, "source-four", "Four", "four", None)
         .await
@@ -1363,10 +1418,14 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         })
         .await
         .expect("stage song with unavailable album relationship");
-    assert!(matches!(
-        invalid.finish().await.expect("publish useful song"),
-        ScanOutcome::Changed(_)
-    ));
+    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |update| {
+        let _ = updates_tx.send(update);
+        std::future::ready(())
+    });
+    invalid.finish().await.expect("publish useful song");
+    let update = updates.try_recv().unwrap();
+    assert!(update.metadata);
     let song = database
         .track_row_by_uri(
             &library::source_entity_uri(
@@ -1427,10 +1486,14 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
     .execute(&mut outside)
     .await
     .expect("advance accepted revision");
-    assert!(matches!(
-        interleaved.finish().await.expect("finish valid update"),
-        ScanOutcome::Changed(_)
-    ));
+    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |update| {
+        let _ = updates_tx.send(update);
+        std::future::ready(())
+    });
+    interleaved.finish().await.expect("finish valid update");
+    let update = updates.try_recv().unwrap();
+    assert!(update.metadata);
     assert!(
         database
             .favorite(&favorite)
@@ -1470,7 +1533,7 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         .fetch_one(&mut outside)
         .await
         .expect("read revision"),
-        (first.catalog_revision + 2) as i64
+        3
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
@@ -1488,10 +1551,13 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         .remove_source(&library::SourceId::new("source-one"))
         .await
         .expect("remove source during acquisition");
-    assert_eq!(
-        removed.finish().await.expect("finish removed source"),
-        ScanOutcome::Stale
-    );
+    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |update| {
+        let _ = updates_tx.send(update);
+        std::future::ready(())
+    });
+    removed.finish().await.expect("finish removed source");
+    assert!(updates.try_recv().is_err());
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sources WHERE object_id='source-one'")
             .fetch_one(&mut outside)
@@ -1511,11 +1577,9 @@ async fn ordinary_orders_and_point_rows_use_named_indexes() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
     let database = Database::open(&path).await.expect("open Library Store");
-    let ScanOutcome::Changed(publication) =
-        write_small_catalog(&database, "fresh-one", "Track One", false, b"genre-art").await
-    else {
-        panic!("catalog must publish");
-    };
+    let publication =
+        write_small_catalog(&database, "fresh-one", "Track One", false, b"genre-art").await;
+    assert!(publication.metadata);
     let mut outside = connection(&path).await;
     let order = sqlx::query_as::<_, QueryPlan>(
         "EXPLAIN QUERY PLAN
@@ -1612,11 +1676,9 @@ async fn identical_playlist_point_update_is_not_a_catalog_change() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
     let database = Database::open(&path).await.expect("open Library Store");
-    let ScanOutcome::Changed(initial) =
-        write_small_catalog(&database, "fresh-one", "Track One", false, b"genre-art").await
-    else {
-        panic!("initial catalog must publish");
-    };
+    let initial =
+        write_small_catalog(&database, "fresh-one", "Track One", false, b"genre-art").await;
+    assert!(initial.metadata);
 
     let mut point = Scan::begin_items(&database, "source-one")
         .await
@@ -1641,10 +1703,17 @@ async fn identical_playlist_point_update_is_not_a_catalog_change() {
         .unwrap();
     point.finish_batch().await.unwrap();
 
-    let ScanOutcome::Identical(replayed) = point.finish().await.unwrap() else {
-        panic!("an identical Playlist readback must be ignored");
-    };
-    assert_eq!(replayed.catalog_revision, initial.catalog_revision);
+    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |update| {
+        let _ = updates_tx.send(update);
+        std::future::ready(())
+    });
+    point.finish().await.unwrap();
+    let replayed = updates.try_recv().unwrap();
+    assert!(!replayed.changed());
+    assert_eq!(replayed.artwork_digest, initial.artwork_digest);
+    assert!(!replayed.inventory);
+    assert!(updates.try_recv().is_err());
 }
 
 #[tokio::test]
@@ -1681,10 +1750,14 @@ async fn repeated_source_playlist_and_folder_observations_coalesce() {
         scan.finish_batch().await.expect("finish repeated batch");
     }
 
-    assert!(matches!(
-        scan.finish().await.expect("publish repeated observations"),
-        ScanOutcome::Changed(_)
-    ));
+    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |update| {
+        let _ = updates_tx.send(update);
+        std::future::ready(())
+    });
+    scan.finish().await.expect("publish repeated observations");
+    let update = updates.try_recv().unwrap();
+    assert!(update.metadata);
 }
 
 #[tokio::test]
@@ -1754,10 +1827,14 @@ async fn playlist_point_update_preserves_playlist_scope() {
         .unwrap();
     point.finish_batch().await.unwrap();
 
-    assert!(matches!(
-        point.finish().await.unwrap(),
-        ScanOutcome::PlaylistsChanged(_)
-    ));
+    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |update| {
+        let _ = updates_tx.send(update);
+        std::future::ready(())
+    });
+    point.finish().await.unwrap();
+    let update = updates.try_recv().unwrap();
+    assert!(update.playlists && !update.metadata && !update.home);
 }
 
 #[tokio::test]

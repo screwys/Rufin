@@ -128,7 +128,7 @@ impl FileSource {
         source: library::SourceKey,
         paths: &[String],
         rename: Option<&(String, String)>,
-    ) -> SourceResult<library::ScanOutcome> {
+    ) -> SourceResult<()> {
         let mut affected = Vec::new();
         for path in paths {
             if self.includes(path) {
@@ -226,8 +226,6 @@ impl FileSource {
             Ok(())
         }
         .await;
-        crate::finish_scan(scan, result)
-            .await
-            .map(|(_, outcome)| outcome)
+        crate::finish_scan(scan, result).await
     }
 }

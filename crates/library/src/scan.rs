@@ -45,15 +45,25 @@ impl Freshness {
     }
 }
 
-/// The only facts emitted by catalog publication.
+/// Stored catalog changes accepted by one source acquisition.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Publication {
+pub struct CatalogUpdate {
+    pub source_id: SourceId,
     pub source: SourceKey,
-    pub catalog_revision: u64,
     pub artwork_digest: [u8; 32],
-    /// This publication inserted tracks that were not in the source catalog.
+    pub metadata: bool,
+    pub playlists: bool,
+    pub artwork: bool,
+    pub home: bool,
+    pub inventory: bool,
     pub tracks_added: bool,
     pub song_rekeys: std::sync::Arc<[(crate::TrackKey, crate::TrackKey)]>,
+}
+
+impl CatalogUpdate {
+    pub fn changed(&self) -> bool {
+        self.metadata || self.playlists || self.artwork || self.home
+    }
 }
 
 #[derive(Clone, Debug, FromRow, Eq, PartialEq)]
@@ -61,19 +71,7 @@ pub struct CachedSource {
     pub source: SourceKey,
     pub object_id: String,
     pub display_name: String,
-    pub catalog_revision: i64,
     pub artwork_digest: Vec<u8>,
-}
-
-/// Changes accepted by a source acquisition.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ScanOutcome {
-    Changed(Publication),
-    PlaylistsChanged(Publication),
-    ArtworkChanged(Publication),
-    Identical(Publication),
-    Stale,
-    Failed,
 }
 
 /// One relation fact in a bounded Scan page.
@@ -262,28 +260,25 @@ impl Scan {
         Ok(first)
     }
 
-    /// Returns the current publication when the cheap freshness fact is accepted.
+    /// Checks whether the saved catalog matches the cheap freshness fact.
     pub async fn accept_freshness(
         database: &Database,
         source_id: &str,
         freshness: &Freshness,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<Publication>> {
+    ) -> LibraryResult<bool> {
         validate_id("source", source_id)?;
         let (_permit, mut connection) = database.acquire_general(cancellation).await?;
-        let result = sqlx::query_as::<_, (i64, i64, Vec<u8>)>(
-            "SELECT source_key,catalog_revision,artwork_digest FROM sources
+        Ok(sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM sources
              WHERE object_id=?1 AND freshness=?2 AND distinct_track_covers=?3
-               AND catalog_revision>0",
+               AND catalog_revision>0)",
         )
         .bind(source_id)
         .bind(freshness.as_bytes())
         .bind(database.distinct_track_covers())
-        .fetch_optional(&mut *connection)
-        .await;
-        result?
-            .map(|(source_key, revision, artwork)| publication(source_key, revision, &artwork))
-            .transpose()
+        .fetch_one(&mut *connection)
+        .await?)
     }
 
     pub async fn begin(
@@ -1392,7 +1387,7 @@ impl Scan {
         Ok(true)
     }
 
-    pub async fn finish(mut self) -> LibraryResult<ScanOutcome> {
+    pub async fn finish(mut self) -> LibraryResult<()> {
         if self.batch_writer.is_some() {
             self.finish_batch().await?;
         }
@@ -1401,17 +1396,27 @@ impl Scan {
         }
         let mut writer = self.database.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        self.publish(connection).await
+        let update = self.finalize(connection).await?;
+        drop(writer);
+        let database = self.database.clone();
+        drop(self);
+        if let Some(update) = update {
+            database.catalog_updated(update).await;
+        }
+        Ok(())
     }
 
-    async fn publish(&self, connection: &mut SqliteConnection) -> LibraryResult<ScanOutcome> {
+    async fn finalize(
+        &self,
+        connection: &mut SqliteConnection,
+    ) -> LibraryResult<Option<CatalogUpdate>> {
         let full = self.authoritative && !self.point_update;
         let source = self.source;
         let mut transaction = connection.begin().await?;
         let current = sqlx::query_as::<_, AcceptedSource>("SELECT artwork_digest,catalog_revision,display_name,normalized_name,freshness,distinct_track_covers FROM sources WHERE source_key=?1 AND object_id=?2")
             .bind(source).bind(&self.source_id).fetch_optional(&mut *transaction).await?;
         let Some(current) = current else {
-            return Ok(ScanOutcome::Stale);
+            return Ok(None);
         };
         if self.failed {
             sqlx::query("DELETE FROM temp.scan_artwork")
@@ -1451,10 +1456,9 @@ impl Scan {
         let catalog_changed = changed.metadata;
         changed.metadata |= changed.user_data;
         changed.metadata |= self.publish_user_data(&mut transaction, source).await?;
-        changed.metadata |= home_changed;
-        let any = changed.metadata || changed.playlists || changed.artwork;
+        let any = changed.metadata || changed.playlists || changed.artwork || home_changed;
         if current.catalog_revision == 0 && !any && !full {
-            return Ok(ScanOutcome::Failed);
+            return Ok(None);
         }
         changed.metadata |= current.catalog_revision == 0
             || current.display_name != self.display_name
@@ -1466,11 +1470,13 @@ impl Scan {
         } else {
             current.freshness.as_deref()
         };
-        let revision = current.catalog_revision + i64::from(changed.metadata || changed.playlists);
+        let revision = current.catalog_revision
+            + i64::from(changed.metadata || changed.playlists || home_changed);
         let artwork = if full
             || changed.metadata
             || changed.playlists
             || changed.artwork
+            || home_changed
             || freshness != current.freshness.as_deref()
             || self.distinct_track_covers != current.distinct_track_covers
         {
@@ -1487,20 +1493,20 @@ impl Scan {
                 .await?;
         }
         transaction.commit().await?;
-        let publication = Publication {
+        Ok(Some(CatalogUpdate {
+            source_id: SourceId::new(self.source_id.clone()),
+            source: SourceKey::from_raw(source),
+            artwork_digest: artwork.as_slice().try_into().map_err(|_| {
+                LibraryError::InvalidStore("source artwork digest is not 32 bytes".to_string())
+            })?,
+            metadata: changed.metadata,
+            playlists: changed.playlists,
+            artwork: changed.artwork,
+            home: home_changed,
+            inventory: !self.point_update || self.local_point_update,
             tracks_added: changed.tracks_added,
             song_rekeys: self.song_rekeys.clone().into(),
-            ..publication(source, revision, &artwork)?
-        };
-        Ok(if changed.metadata {
-            ScanOutcome::Changed(publication)
-        } else if changed.playlists {
-            ScanOutcome::PlaylistsChanged(publication)
-        } else if changed.artwork {
-            ScanOutcome::ArtworkChanged(publication)
-        } else {
-            ScanOutcome::Identical(publication)
-        })
+        }))
     }
 
     async fn publish_user_data(
@@ -1691,7 +1697,7 @@ impl Database {
         source_id: &SourceId,
         kind: &str,
         name: &str,
-    ) -> LibraryResult<Publication> {
+    ) -> LibraryResult<CachedSource> {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         let mut transaction = connection.begin().await?;
@@ -1700,24 +1706,15 @@ impl Database {
         );
         sqlx::query("UPDATE sources SET kind=?2,display_name=?3,normalized_name=?4 WHERE source_key=?1 AND (kind,display_name,normalized_name) IS NOT (?2,?3,?4)")
             .bind(source).bind(kind).bind(name).bind(name.to_lowercase()).execute(&mut *transaction).await?;
-        let observation = sqlx::query_as::<_, (i64, Vec<u8>)>(
-            "SELECT catalog_revision,artwork_digest FROM sources
-             WHERE source_key=?1 AND catalog_revision>0",
+        let cached = sqlx::query_as::<_, CachedSource>(
+            "SELECT source_key source,object_id,display_name,artwork_digest FROM sources
+             WHERE source_key=?1",
         )
         .bind(source)
-        .fetch_optional(&mut *transaction)
+        .fetch_one(&mut *transaction)
         .await?;
         transaction.commit().await?;
-        match observation {
-            Some((revision, artwork)) => publication(source.raw(), revision, &artwork),
-            None => Ok(Publication {
-                source,
-                catalog_revision: 0,
-                artwork_digest: [0; 32],
-                tracks_added: false,
-                song_rekeys: std::sync::Arc::from([]),
-            }),
-        }
+        Ok(cached)
     }
 
     pub async fn cached_source(
@@ -1728,7 +1725,7 @@ impl Database {
         validate_id("source", object_id)?;
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         Ok(sqlx::query_as::<_, CachedSource>(
-            "SELECT source_key source,object_id,display_name,catalog_revision,artwork_digest
+            "SELECT source_key source,object_id,display_name,artwork_digest
              FROM sources WHERE object_id=?1 AND catalog_revision>0",
         )
         .bind(object_id)
@@ -1773,24 +1770,6 @@ fn validate_id(kind: &'static str, value: &str) -> LibraryResult<()> {
         )));
     }
     Ok(())
-}
-
-fn publication(
-    source_key: i64,
-    revision: i64,
-    artwork_digest: &[u8],
-) -> LibraryResult<Publication> {
-    let revision = u64::try_from(revision)
-        .map_err(|_| LibraryError::InvalidStore("negative catalog revision".to_string()))?;
-    Ok(Publication {
-        source: SourceKey::from_raw(source_key),
-        catalog_revision: revision,
-        tracks_added: false,
-        song_rekeys: std::sync::Arc::from([]),
-        artwork_digest: artwork_digest.try_into().map_err(|_| {
-            LibraryError::InvalidStore("source artwork digest is not 32 bytes".to_string())
-        })?,
-    })
 }
 
 async fn create_working_set(connection: &mut SqliteConnection) -> LibraryResult<()> {
@@ -2407,10 +2386,14 @@ mod tests {
                     .expect("read the interleaved point write");
             assert_eq!(point_sources, 1);
         }
-        assert!(matches!(
-            scan.finish().await.expect("finish acquisition"),
-            ScanOutcome::Changed(_)
-        ));
+        let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = updates_tx.send(update);
+            std::future::ready(())
+        });
+        scan.finish().await.expect("finish acquisition");
+        let update = updates.try_recv().unwrap();
+        assert!(update.metadata);
     }
 }
 

@@ -230,7 +230,7 @@ impl LocalSource {
         database: &library::Database,
         source_id: &str,
         playlist: library::PlaylistKey,
-    ) -> SourceResult<library::ScanOutcome> {
+    ) -> SourceResult<()> {
         let mut scan = library::Scan::begin_local_items(database, source_id).await?;
         let result = async {
             scan::stage_imported_paths(database, self, &mut scan, Some(playlist)).await?;
@@ -240,9 +240,7 @@ impl LocalSource {
             Ok(())
         }
         .await;
-        crate::finish_scan(scan, result)
-            .await
-            .map(|(_, outcome)| outcome)
+        crate::finish_scan(scan, result).await
     }
 
     pub(crate) async fn publish_metadata_paths(
@@ -252,7 +250,7 @@ impl LocalSource {
         paths: &[PathBuf],
         removed_album: Option<&str>,
         removed_artist: Option<&str>,
-    ) -> SourceResult<library::ScanOutcome> {
+    ) -> SourceResult<()> {
         scan::publish_metadata_paths(database, source_id, paths, removed_album, removed_artist)
             .await
     }
@@ -272,7 +270,7 @@ impl LocalSource {
         source_id: &str,
         paths: &[PathBuf],
         rename: Option<&(PathBuf, PathBuf)>,
-    ) -> SourceResult<library::ScanOutcome> {
+    ) -> SourceResult<()> {
         scan::publish_paths(database, source, source_id, self, paths, rename).await
     }
 
@@ -283,16 +281,14 @@ impl LocalSource {
         source_id: &str,
         progress: &(dyn Fn(crate::SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<library::ScanOutcome> {
+    ) -> SourceResult<()> {
         if !self.documents.is_empty() {
             let mut scan =
                 library::Scan::begin(database, source_id, "Local", "local", None).await?;
             let result = self
                 .stage_catalog(database, &mut scan, progress, cancelled, true)
                 .await;
-            return crate::finish_scan(scan, result)
-                .await
-                .map(|(_, outcome)| outcome);
+            return crate::finish_scan(scan, result).await;
         }
         scan::catch_up(database, source, source_id, self, progress, cancelled).await
     }

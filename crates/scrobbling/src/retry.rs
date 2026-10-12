@@ -809,7 +809,7 @@ fn unix_seconds() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use library::{Database, ReadCancellation, Scan, ScanOutcome, SourceId, TrackSort};
+    use library::{Database, ReadCancellation, Scan, SourceId, TrackSort};
 
     use super::*;
 
@@ -893,15 +893,14 @@ mod tests {
         })
         .await
         .expect("stage Track");
-        let ScanOutcome::Changed(publication) = scan.finish().await.expect("publish Scan") else {
-            panic!("initial Scan must publish")
-        };
+        let source = scan.source();
+        scan.finish().await.expect("finish Scan");
         let cancellation = ReadCancellation::new();
         let track_uri = database
             .selected_track_uris(
                 &library::SongQuery {
                     sort: Some(TrackSort::Title),
-                    ..library::SongQuery::new(library::SongScope::Tracks(publication.source))
+                    ..library::SongQuery::new(library::SongScope::Tracks(source))
                 }
                 .selection(),
                 &cancellation,

@@ -249,9 +249,9 @@ impl SubsonicSource {
         database: &library::Database,
         query: &str,
         limit: usize,
-    ) -> SourceResult<(library::SearchResults, Option<library::ScanOutcome>)> {
+    ) -> SourceResult<library::SearchResults> {
         if query.trim().is_empty() {
-            return Ok((library::SearchResults::default(), None));
+            return Ok(library::SearchResults::default());
         }
         let count = limit.clamp(1, 100).to_string();
         let body: serde_json::Value = self
@@ -297,8 +297,7 @@ impl SubsonicSource {
             Ok((track_ids, album_ids, artist_ids))
         }
         .await;
-        let ((track_ids, album_ids, artist_ids), outcome) =
-            crate::finish_scan(scan, result).await?;
+        let (track_ids, album_ids, artist_ids) = crate::finish_scan(scan, result).await?;
         let rows = database
             .search_rows_by_objects(
                 source,
@@ -309,12 +308,8 @@ impl SubsonicSource {
                 &artist_ids,
                 &library::ReadCancellation::new(),
             )
-            .await
-            .map_err(|error| SourceError::IncompleteScan {
-                outcome: outcome.clone(),
-                error: Box::new(error.into()),
-            })?;
-        Ok((rows, Some(outcome)))
+            .await?;
+        Ok(rows)
     }
 }
 
@@ -1775,11 +1770,16 @@ mod tests {
             .finish()
             .await
             .unwrap();
-        let (results, outcome) = source
+        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = sender.send(update);
+            std::future::ready(())
+        });
+        let results = source
             .live_search(&source_id, &database, "Track", 60)
             .await
             .unwrap();
-        assert!(matches!(outcome, Some(library::ScanOutcome::Changed(_))));
+        assert!(updates.try_recv().expect("catalog update").metadata);
         assert_eq!(
             (
                 results.tracks.len(),
@@ -1880,11 +1880,16 @@ mod tests {
                 scan.write_album(&super::album_from_json(&source, source_id.as_str(), &serde_json::json!({"id":"album","name":"Nonmatching album","coverArt":"album-cover"})).unwrap().unwrap()).await.unwrap();
             }
             scan.finish().await.unwrap();
-            let (results, outcome) = source
+            let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+            database.observe_catalog(move |update| {
+                let _ = sender.send(update);
+                std::future::ready(())
+            });
+            let results = source
                 .live_search(&source_id, &database, "Match", 10)
                 .await
                 .unwrap();
-            assert!(matches!(outcome, Some(library::ScanOutcome::Changed(_))));
+            assert!(updates.try_recv().expect("catalog update").metadata);
             assert!(results.albums.is_empty());
             assert_eq!(results.tracks.len(), 1);
             let track = &results.tracks[0];
