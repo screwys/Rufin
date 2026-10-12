@@ -282,17 +282,14 @@ mod tests {
         )
         .await
         .unwrap();
-        stage_track(&mut scan, track_from_navidrome(&baseline, "track", &item))
+        scan.write_track(&track_from_navidrome(&baseline, "track", &item))
             .await
             .unwrap();
-        stage_track(
-            &mut scan,
-            track_from_navidrome(
-                &baseline,
-                "second",
-                &serde_json::json!({"id":"second","title":"Second"}),
-            ),
-        )
+        scan.write_track(&track_from_navidrome(
+            &baseline,
+            "second",
+            &serde_json::json!({"id":"second","title":"Second"}),
+        ))
         .await
         .unwrap();
         let library::ScanOutcome::Changed(_) = scan.finish().await.unwrap() else {

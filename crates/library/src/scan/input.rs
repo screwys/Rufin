@@ -36,6 +36,7 @@ pub struct TrackInput {
     pub relations: Option<TrackRelationsInput>,
     pub source_loudness: Option<LoudnessInput>,
     pub album_loudness: Option<LoudnessInput>,
+    pub folders: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -81,6 +82,42 @@ pub struct TrackRelationsInput {
     pub artists: Vec<ArtistInput>,
     pub album_artists: Vec<ArtistInput>,
     pub genres: Vec<GenreInput>,
+    pub moods: Vec<MoodInput>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct MoodInput {
+    pub object_id: String,
+    pub name: String,
+    pub sort_text: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct FolderInput {
+    pub object_id: String,
+    pub name: Option<String>,
+    pub sort_text: Option<String>,
+    pub artwork_binding: Option<Vec<u8>>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PlaylistInput {
+    pub object_id: String,
+    pub name: String,
+    pub sort_text: String,
+    pub artwork_binding: Option<Vec<u8>>,
+    pub writable: Option<bool>,
+    pub metadata_writable: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum RecordInput {
+    Track(Box<TrackInput>),
+    Album(AlbumInput),
+    Artist(ArtistInput),
+    Genre(GenreInput),
+    Folder(FolderInput),
+    Playlist(PlaylistInput),
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

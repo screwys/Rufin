@@ -64,9 +64,14 @@ async fn fixture() -> (tempfile::TempDir, Database) {
     .await
     .unwrap();
     track(&mut scan, Some(true), None).await;
-    scan.write_folder("folder", "Folder", "folder", "folder", None)
-        .await
-        .unwrap();
+    scan.write_folder(&library::FolderInput {
+        object_id: "folder".into(),
+        name: Some("Folder".into()),
+        sort_text: Some("folder".into()),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
     scan.write_track_folders(&[ScanLink::new("track", "folder", 0)])
         .await
         .unwrap();
@@ -280,9 +285,14 @@ async fn growing_and_reordering_a_playlist_preserves_occurrence_keys() {
         &["b", "a"][..],
     ] {
         let mut scan = Scan::begin_items(&database, "source").await.unwrap();
-        scan.write_playlist("playlist", "Playlist", "playlist", "playlist", None)
-            .await
-            .unwrap();
+        scan.write_playlist(&library::PlaylistInput {
+            object_id: "playlist".into(),
+            name: "Playlist".into(),
+            sort_text: "playlist".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
         for (position, id) in ids.iter().enumerate() {
             scan.write_playlist_entry("playlist", id, "track", position as i64)
                 .await

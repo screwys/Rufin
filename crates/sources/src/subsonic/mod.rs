@@ -1,5 +1,5 @@
 use crate::config::{decode_provider_payload, require_payload_version};
-use crate::policy::{raw_item_id, stable_hash, u16_from_option};
+use crate::policy::{raw_item_id, u16_from_option};
 use crate::{
     ConnectedSource, CredentialHostInput, CredentialSettingsInput, ImageBytes, SourceConfiguration,
     SourceEditResult, SourceError, SourceResult,
@@ -26,138 +26,14 @@ use item::*;
 
 use crate::{NativeImageRef as ImageRef, SourceId};
 
-type AlbumId = String;
-type ArtistId = String;
-type GenreId = String;
-type MusicFolderId = String;
 type PlaylistId = String;
 type TrackId = String;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct ArtistCredit {
-    id: String,
-    name: String,
-    sort_name: Option<String>,
-    musicbrainz_artist_id: Option<String>,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct GenreCredit {
-    id: String,
-    name: String,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct MoodCredit {
-    id: String,
-    name: String,
-}
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-struct AlbumRelations {
-    album_artists: Vec<ArtistCredit>,
-    artists: Vec<ArtistCredit>,
-    genres: Vec<GenreCredit>,
-}
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-struct TrackRelations {
-    artists: Vec<ArtistCredit>,
-    album_artists: Vec<ArtistCredit>,
-    genres: Vec<GenreCredit>,
-    moods: Vec<MoodCredit>,
-    music_folders: Option<Vec<MusicFolderId>>,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct Album {
-    id: AlbumId,
-    title: String,
-    sort_name: Option<String>,
-    artist: String,
-    year: u16,
-    release_date: Option<String>,
-    date_added: Option<String>,
-    last_played: Option<String>,
-    play_count: Option<u32>,
-    user_rating: Option<u8>,
-    favorite: Option<bool>,
-    color_seed: u32,
-    image_ref: Option<ImageRef>,
-    local_artwork: Option<()>,
-    release_types: Vec<String>,
-    is_compilation: Option<bool>,
-    musicbrainz_album_id: Option<String>,
-    musicbrainz_release_group_id: Option<String>,
-    relations: AlbumRelations,
-}
-#[derive(Clone, Debug, PartialEq)]
-struct Track {
-    audio_properties: library::AudioProperties,
-    id: TrackId,
-    album_id: Option<AlbumId>,
-    title: String,
-    sort_name: Option<String>,
-    artist: String,
-    album: String,
-    year: u16,
-    release_date: Option<String>,
-    date_added: Option<String>,
-    last_played: Option<i64>,
-    play_count: Option<u32>,
-    user_rating: Option<u8>,
-    duration_seconds: u32,
-    favorite: Option<bool>,
-    disc_number: u16,
-    track_number: u16,
-    image_ref: Option<ImageRef>,
-    local_artwork: Option<()>,
-    musicbrainz_recording_id: Option<String>,
-    musicbrainz_release_track_id: Option<String>,
-    source_path: Option<String>,
-    cue: Option<()>,
-    source_format: Option<String>,
-    comment: Option<String>,
-    skip_count: Option<u32>,
-    bpm: Option<u16>,
-    replay_gain_track_db: Option<f64>,
-    replay_gain_track_peak: Option<f64>,
-    replay_gain_album_db: Option<f64>,
-    replay_gain_album_peak: Option<f64>,
-    relations: TrackRelations,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct Artist {
-    id: ArtistId,
-    name: String,
-    sort_name: Option<String>,
-    favorite: Option<bool>,
-    last_played: Option<String>,
-    play_count: Option<u32>,
-    user_rating: Option<u8>,
-    musicbrainz_artist_id: Option<String>,
-    image_ref: Option<ImageRef>,
-    local_artwork: Option<()>,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct Genre {
-    id: GenreId,
-    name: String,
-    image_ref: Option<ImageRef>,
-    local_artwork: Option<()>,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct MusicFolder {
-    id: MusicFolderId,
-    name: String,
-    image_ref: Option<ImageRef>,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
 struct Playlist {
-    id: PlaylistId,
-    name: String,
-    duration_seconds: u32,
-    track_count: usize,
-    image_ref: Option<ImageRef>,
+    header: library::PlaylistInput,
     revision: Option<String>,
     valid_until: Option<i64>,
-    writable: bool,
-    metadata_writable: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PlaylistEntry {

@@ -1,10 +1,10 @@
-use super::item::stage_item;
+use super::item::records;
 use super::{PlexSource, plex_id};
 use crate::policy::raw_item_id;
 use crate::remote_json::{field, id, items};
 use crate::source::{SourceReadProgress, SourceReadStage};
 use crate::{SourceError, SourceHomeSection, SourceResult};
-use library::{HomeEntryInput, HomeEntryKind, Scan};
+use library::{FolderInput, HomeEntryInput, HomeEntryKind, RecordInput, Scan};
 use serde_json::Value;
 
 const PAGE: usize = 512;
@@ -26,14 +26,12 @@ impl PlexSource {
             };
             let folder = plex_id("music-folder", &section_id);
             let title = section["title"].as_str().unwrap_or(&section_id);
-            scan.write_folder(
-                &folder,
-                title,
-                &title.to_lowercase(),
-                &title.to_lowercase(),
-                None,
-            )
-            .await?;
+            let section_record = RecordInput::Folder(FolderInput {
+                object_id: folder.clone(),
+                name: Some(title.to_owned()),
+                ..Default::default()
+            });
+            scan.write_record(&section_record).await?;
             for (kind, stage) in [
                 ("8", SourceReadStage::Artists),
                 ("9", SourceReadStage::Albums),
@@ -79,10 +77,14 @@ impl PlexSource {
                     };
                     scan.begin_batch().await?;
                     for item in items(&details["MediaContainer"]["Metadata"]) {
-                        stage_item(scan, item).await?;
+                        for record in records(scan.source_id(), item)? {
+                            scan.write_record(&record).await?;
+                        }
                     }
                     for item in rows {
-                        stage_item(scan, item).await?;
+                        for record in records(scan.source_id(), item)? {
+                            scan.write_record(&record).await?;
+                        }
                         if kind == "10"
                             && let Some(raw) = id(&item["ratingKey"])
                         {
@@ -95,14 +97,7 @@ impl PlexSource {
                         }
                     }
                     // The section response owns its display name, not a track's optional copy.
-                    scan.write_folder(
-                        &folder,
-                        title,
-                        &title.to_lowercase(),
-                        &title.to_lowercase(),
-                        None,
-                    )
-                    .await?;
+                    scan.write_record(&section_record).await?;
                     scan.finish_batch().await?;
                     offset += rows.len();
                     progress(SourceReadProgress {
@@ -181,7 +176,9 @@ impl PlexSource {
                 let Some(raw) = id(&item["ratingKey"]) else {
                     continue;
                 };
-                stage_item(scan, item).await?;
+                for record in records(scan.source_id(), item)? {
+                    scan.write_record(&record).await?;
+                }
                 self.stage_playlist_entries(scan, &plex_id("playlist", &raw))
                     .await?;
             }
@@ -220,7 +217,9 @@ impl PlexSource {
                 else {
                     continue;
                 };
-                stage_item(scan, item).await?;
+                for record in records(scan.source_id(), item)? {
+                    scan.write_record(&record).await?;
+                }
                 scan.write_playlist_entry(
                     playlist_id,
                     &entry,
@@ -253,7 +252,9 @@ impl PlexSource {
                 Err(error) => return Err(error),
             };
             if item["type"] == "album" {
-                stage_item(scan, &item).await?;
+                for record in records(scan.source_id(), &item)? {
+                    scan.write_record(&record).await?;
+                }
                 self.stage_collection_contents(
                     scan,
                     &crate::SourceCollection::Album(plex_id("album", raw_item_id(&raw))),
@@ -265,11 +266,17 @@ impl PlexSource {
                 && let Some(album) = id(&item["parentRatingKey"])
             {
                 match self.metadata(&album).await {
-                    Ok(album) => stage_item(scan, &album).await?,
+                    Ok(album) => {
+                        for record in records(scan.source_id(), &album)? {
+                            scan.write_record(&record).await?;
+                        }
+                    }
                     Err(error) => crate::source::optional_collection_error(error)?,
                 }
             }
-            stage_item(scan, &item).await?;
+            for record in records(scan.source_id(), &item)? {
+                scan.write_record(&record).await?;
+            }
             if item["type"].as_str() == Some("playlist")
                 && let Some(raw) = id(&item["ratingKey"])
             {
@@ -344,7 +351,9 @@ impl PlexSource {
             let section_id = format!("plex:{section}:{identifier}");
             for (position, item) in items(&hub["Metadata"]).iter().take(24).enumerate() {
                 if let Some(entry) = home_entry(&section_id, position, item) {
-                    stage_item(scan, item).await?;
+                    for record in records(scan.source_id(), item)? {
+                        scan.write_record(&record).await?;
+                    }
                     scan.write_home_entry(&entry).await?;
                 }
             }
@@ -370,7 +379,9 @@ impl PlexSource {
                 let mix_section = format!("{section_id}:{}", crate::policy::stable_hash(key));
                 for (position, item) in candidates.iter().enumerate() {
                     if let Some(entry) = home_entry(&mix_section, position, item) {
-                        stage_item(scan, item).await?;
+                        for record in records(scan.source_id(), item)? {
+                            scan.write_record(&record).await?;
+                        }
                         scan.write_home_entry(&entry).await?;
                     }
                 }
@@ -686,6 +697,36 @@ pub(super) mod tests {
         assert_eq!(row.rating, Some(7));
         assert_eq!(row.musicbrainz_recording_id.as_deref(), Some("recording"));
         assert!(row.artwork_binding.is_some());
+        assert_eq!(
+            row.genres
+                .iter()
+                .map(|genre| genre.name.as_str())
+                .collect::<Vec<_>>(),
+            ["Rock"]
+        );
+        let folders = database
+            .folder_page(publication.source, None, 0, 10, &cancellation)
+            .await
+            .unwrap();
+        assert_eq!(folders.len(), 1);
+        assert_eq!(folders[0].name, "Music");
+        assert_eq!(folders[0].track_count, 2);
+        let moods = database
+            .mood_page(
+                publication.source,
+                Some(folders[0].folder_key),
+                "",
+                library::MoodSort::Title,
+                false,
+                0,
+                10,
+                &cancellation,
+            )
+            .await
+            .unwrap();
+        assert_eq!(moods.len(), 1);
+        assert_eq!(moods[0].name, "Calm");
+        assert_eq!(moods[0].track_count, 1);
         assert_eq!(
             database
                 .track_loudness(publication.source, row.track_key, &cancellation)

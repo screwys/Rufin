@@ -11,8 +11,8 @@ mod artwork;
 mod entities;
 mod input;
 pub use input::{
-    AlbumInput, AlbumRelationsInput, ArtistInput, GenreInput, LoudnessInput, TrackInput,
-    TrackRelationsInput,
+    AlbumInput, AlbumRelationsInput, ArtistInput, FolderInput, GenreInput, LoudnessInput,
+    MoodInput, PlaylistInput, RecordInput, TrackInput, TrackRelationsInput,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1231,14 +1231,9 @@ impl Scan {
         self.execute(sqlx::query("UPDATE playlists SET provider_revision=?3,valid_until=?4 WHERE owner='source' AND source_key=?1 AND object_id=?2 AND (provider_revision,valid_until) IS NOT (?3,?4)").bind(self.source).bind(object_id).bind(revision).bind(valid_until)).await
     }
 
-    pub async fn write_playlist(
-        &mut self,
-        object_id: &str,
-        name: &str,
-        normalized_name: &str,
-        sort_text: &str,
-        artwork_binding: Option<&[u8]>,
-    ) -> LibraryResult<()> {
+    pub async fn write_playlist(&mut self, input: &PlaylistInput) -> LibraryResult<()> {
+        let object_id = input.object_id.as_str();
+        let normalized_name = input.name.to_lowercase();
         self.require_id("playlist", object_id)?;
         let first = self.observe("playlist", object_id).await?;
         self.execute(
@@ -1250,18 +1245,17 @@ impl Scan {
             VALUES(?1,'source',?2,?3,?4,?5,(SELECT COALESCE(max(position)+1,0) FROM playlists))
             ON CONFLICT(source_key,object_id) DO UPDATE SET owner='source',indexed=1,name=excluded.name,normalized_name=excluded.normalized_name,sort_text=excluded.sort_text
             WHERE (owner,indexed,name,normalized_name,sort_text) IS NOT ('source',1,excluded.name,excluded.normalized_name,excluded.sort_text)")
-            .bind(self.source).bind(object_id).bind(name).bind(normalized_name).bind(sort_text)).await?.rows_affected()>0;
-        self.remember_artwork("playlist", object_id, artwork_binding, first)
-            .await
-    }
-
-    pub async fn write_playlist_permissions(
-        &mut self,
-        object_id: &str,
-        writable: bool,
-        metadata_writable: bool,
-    ) -> LibraryResult<()> {
-        self.changes.playlists |= self.execute_result(sqlx::query("UPDATE playlists SET writable=?3,metadata_writable=?4 WHERE owner='source' AND source_key=?1 AND object_id=?2 AND (writable,metadata_writable) IS NOT (?3,?4)").bind(self.source).bind(object_id).bind(writable).bind(metadata_writable)).await?.rows_affected()>0;
+            .bind(self.source).bind(object_id).bind(&input.name).bind(normalized_name).bind(&input.sort_text)).await?.rows_affected()>0;
+        self.remember_artwork(
+            "playlist",
+            object_id,
+            input.artwork_binding.as_deref(),
+            first,
+        )
+        .await?;
+        if input.writable.is_some() || input.metadata_writable.is_some() {
+            self.changes.playlists |= self.execute_result(sqlx::query("UPDATE playlists SET writable=COALESCE(?3,writable),metadata_writable=COALESCE(?4,metadata_writable) WHERE owner='source' AND source_key=?1 AND object_id=?2 AND ((?3 IS NOT NULL AND writable IS NOT ?3) OR (?4 IS NOT NULL AND metadata_writable IS NOT ?4))").bind(self.source).bind(object_id).bind(input.writable).bind(input.metadata_writable)).await?.rows_affected()>0;
+        }
         Ok(())
     }
 
@@ -2327,7 +2321,12 @@ mod tests {
         .expect("write before writer failure");
         database.fail_writer().await.expect("fail fixed writer");
         assert!(matches!(
-            scan.write_mood("mood", "Mood", "mood", "mood").await,
+            scan.write_mood(&crate::MoodInput {
+                object_id: "mood".into(),
+                name: "Mood".into(),
+                sort_text: "mood".into(),
+            })
+            .await,
             Err(LibraryError::WriterUnavailable)
         ));
         assert!(matches!(
@@ -2352,12 +2351,11 @@ mod tests {
             .expect("begin acquisition");
         scan.begin_batch().await.expect("begin bounded Scan batch");
         for number in 0..128 {
-            scan.write_mood(
-                &format!("mood-{number}"),
-                "Mood",
-                "mood",
-                &format!("mood-{number}"),
-            )
+            scan.write_mood(&crate::MoodInput {
+                object_id: format!("mood-{number}"),
+                name: "Mood".into(),
+                sort_text: format!("mood-{number}"),
+            })
             .await
             .expect("write one row in the bounded transaction");
         }

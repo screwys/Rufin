@@ -251,7 +251,11 @@ impl PlexSource {
             crate::SourceCollection::Album(id) | crate::SourceCollection::Artist(id) => id,
         };
         match self.metadata(object).await {
-            Ok(metadata) => item::stage_item(scan, &metadata).await?,
+            Ok(metadata) => {
+                for record in item::records(scan.source_id(), &metadata)? {
+                    scan.write_record(&record).await?;
+                }
+            }
             Err(error) => crate::source::optional_collection_error(error)?,
         }
         self.stage_collection_contents(scan, collection).await
@@ -280,7 +284,9 @@ impl PlexSource {
             let entries = items(&response["MediaContainer"]["Metadata"]);
             scan.begin_batch().await?;
             for entry in entries {
-                item::stage_item(scan, entry).await?;
+                for record in item::records(scan.source_id(), entry)? {
+                    scan.write_record(&record).await?;
+                }
             }
             scan.finish_batch().await?;
             offset += entries.len();
@@ -330,7 +336,9 @@ impl PlexSource {
                         Some("artist") => artists.push(plex_id("artist", &raw)),
                         _ => continue,
                     }
-                    item::stage_item(&mut scan, entry).await?;
+                    for record in item::records(scan.source_id(), entry)? {
+                        scan.write_record(&record).await?;
+                    }
                 }
             }
             scan.finish_batch().await?;

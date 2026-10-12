@@ -2470,12 +2470,16 @@ mod tests {
                     .await
                     .unwrap();
                 if revision < 2 {
-                    scan.write_playlist("mix", "Server mix", "server mix", "server mix", Some(art))
-                        .await
-                        .unwrap();
-                    scan.write_playlist_permissions("mix", false, false)
-                        .await
-                        .unwrap();
+                    scan.write_playlist(&library::PlaylistInput {
+                        object_id: "mix".into(),
+                        name: "Server mix".into(),
+                        sort_text: "server mix".into(),
+                        artwork_binding: Some(art.to_vec()),
+                        writable: Some(false),
+                        metadata_writable: Some(false),
+                    })
+                    .await
+                    .unwrap();
                     for position in 0..140 {
                         let entry = if revision == 0 {
                             position

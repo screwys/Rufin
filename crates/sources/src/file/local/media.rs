@@ -46,9 +46,16 @@ pub(crate) fn read_media(
     };
     let mut read = read_media_input(worker, path, &mut file, access_uri.as_str(), sidecar);
     if let MediaRead::Accepted(track) = &mut read {
-        track.id = crate::file::media::track_id(&identity);
-        track.local_uri = Some(uri.into());
-        track.audio_revision = audio_revision(&track.source_path, &identity);
+        track.track.object_id = crate::file::media::track_id(&identity);
+        track.track.media_uri = Some(uri.into());
+        track.audio_revision = audio_revision(
+            track
+                .track
+                .source_path
+                .as_deref()
+                .expect("file source path"),
+            &identity,
+        );
     }
     read
 }

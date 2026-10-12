@@ -4773,9 +4773,14 @@ mod artwork_preparation_tests {
             let mut scan = library::Scan::begin_items(&database, source_id.as_str())
                 .await
                 .unwrap();
-            scan.write_folder("new-folder", "New Folder", "new folder", "new folder", None)
-                .await
-                .unwrap();
+            scan.write_folder(&library::FolderInput {
+                object_id: "new-folder".into(),
+                name: Some("New Folder".into()),
+                sort_text: Some("new folder".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
             scan.write_track(&library::TrackInput {
                 object_id: "new-track".into(),
                 album_object_id: Some("album".into()),

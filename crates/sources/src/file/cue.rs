@@ -277,52 +277,57 @@ pub(crate) fn cue_track(
     end_millis: u64,
     backing: &ScannedTrack,
 ) -> ScannedTrack {
-    let mut track = backing.clone();
+    let mut scanned = backing.clone();
+    let track = &mut scanned.track;
+    let album = &mut scanned.album;
     let album_artist = album_performer
         .map(ToString::to_string)
-        .unwrap_or_else(|| backing.album_artist.clone());
-    track.id = media::cue_track_id(cue_path, cue.number);
-    track.album = album_title
-        .map(ToString::to_string)
-        .unwrap_or_else(|| backing.album.clone());
-    track.artist = cue
+        .unwrap_or_else(|| album.display_artist.clone());
+    track.object_id = media::cue_track_id(cue_path, cue.number);
+    if let Some(title) = album_title {
+        album.title = title.to_owned();
+        album.sort_text = title.to_lowercase();
+    }
+    track.display_album = album.title.clone();
+    track.display_artist = cue
         .performer
         .clone()
         .unwrap_or_else(|| album_artist.clone());
-    track.album_artists = media::split_names(&album_artist)
-        .iter()
+    let album_artists = media::split_names(&album_artist)
+        .into_iter()
+        .map(|name| media::artist_credit(name, None))
+        .collect::<Vec<_>>();
+    track.relations.get_or_insert_default().artists = media::split_names(&track.display_artist)
+        .into_iter()
         .map(|name| media::artist_credit(name, None))
         .collect();
-    track.artists = media::split_names(&track.artist)
-        .iter()
-        .map(|name| media::artist_credit(name, None))
-        .collect();
-    track.album_id = media::album_id(
-        &track.album_artists,
-        &track.album,
-        track.musicbrainz_album_id.as_deref(),
+    album.object_id = media::album_id(
+        &album_artists,
+        &album.title,
+        album.musicbrainz_release_id.as_deref(),
         Some(cue_path),
     );
+    album.relations.get_or_insert_default().album_artists = album_artists;
+    track.album_object_id = Some(album.object_id.clone());
     track.title = cue
         .title
         .clone()
         .unwrap_or_else(|| format!("Track {}", cue.number));
-    track.sort_title = None;
-    if album_title.is_some() {
-        track.sort_album = None;
-    }
-    track.duration_seconds = end_millis
-        .saturating_sub(cue.index_start_ms)
-        .div_euclid(1_000)
-        .max(1)
-        .min(u64::from(u32::MAX)) as u32;
+    track.sort_text = track.title.to_lowercase();
+    track.duration_millis = i64::from(
+        end_millis
+            .saturating_sub(cue.index_start_ms)
+            .div_euclid(1_000)
+            .max(1)
+            .min(u64::from(u32::MAX)) as u32,
+    ) * 1_000;
     track.disc_number = track.disc_number.max(1);
-    track.track_number = cue.number;
+    track.track_number = i64::from(cue.number);
     track.musicbrainz_recording_id = None;
     track.musicbrainz_release_track_id = None;
     track.comment = None;
     track.cue_path = Some(cue_path.to_string_lossy().into_owned());
     track.cue_start_millis = i64::try_from(cue.index_start_ms).ok();
     track.cue_end_millis = i64::try_from(end_millis).ok();
-    track
+    scanned
 }

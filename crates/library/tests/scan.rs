@@ -539,19 +539,27 @@ async fn write_small_catalog(
     })
     .await
     .expect("stage genre");
-    scan.write_mood("mood-one", "Mood One", "mood one", "mood one")
-        .await
-        .expect("stage mood");
-    scan.write_folder("folder-one", "Folder One", "folder one", "folder one", None)
-        .await
-        .expect("stage folder");
-    scan.write_playlist(
-        "playlist-one",
-        "Playlist One",
-        "playlist one",
-        "playlist one",
-        None,
-    )
+    scan.write_mood(&library::MoodInput {
+        object_id: "mood-one".into(),
+        name: "Mood One".into(),
+        sort_text: "mood one".into(),
+    })
+    .await
+    .expect("stage mood");
+    scan.write_folder(&library::FolderInput {
+        object_id: "folder-one".into(),
+        name: Some("Folder One".into()),
+        sort_text: Some("folder one".into()),
+        ..Default::default()
+    })
+    .await
+    .expect("stage folder");
+    scan.write_playlist(&library::PlaylistInput {
+        object_id: "playlist-one".into(),
+        name: "Playlist One".into(),
+        sort_text: "playlist one".into(),
+        ..Default::default()
+    })
     .await
     .expect("stage playlist");
 
@@ -1553,17 +1561,21 @@ async fn deleting_one_source_playlist_preserves_other_playlist_entries() {
         .expect("begin Playlist point scan");
     point.begin_batch().await.unwrap();
     point
-        .write_playlist(
-            "playlist-one",
-            "Playlist One",
-            "playlist one",
-            "playlist one",
-            None,
-        )
+        .write_playlist(&library::PlaylistInput {
+            object_id: "playlist-one".into(),
+            name: "Playlist One".into(),
+            sort_text: "playlist one".into(),
+            ..Default::default()
+        })
         .await
         .unwrap();
     point
-        .write_playlist("playlist-two", "Other", "other", "other", None)
+        .write_playlist(&library::PlaylistInput {
+            object_id: "playlist-two".into(),
+            name: "Other".into(),
+            sort_text: "other".into(),
+            ..Default::default()
+        })
         .await
         .unwrap();
     point
@@ -1611,13 +1623,12 @@ async fn identical_playlist_point_update_is_not_a_catalog_change() {
         .expect("begin Playlist point scan");
     point.begin_batch().await.unwrap();
     point
-        .write_playlist(
-            "playlist-one",
-            "Playlist One",
-            "playlist one",
-            "playlist one",
-            None,
-        )
+        .write_playlist(&library::PlaylistInput {
+            object_id: "playlist-one".into(),
+            name: "Playlist One".into(),
+            sort_text: "playlist one".into(),
+            ..Default::default()
+        })
         .await
         .unwrap();
     point
@@ -1648,16 +1659,20 @@ async fn repeated_source_playlist_and_folder_observations_coalesce() {
 
     for _ in 0..2 {
         scan.begin_batch().await.expect("begin repeated batch");
-        scan.write_folder("folder-one", "Music", "music", "music", None)
-            .await
-            .expect("stage repeated folder");
-        scan.write_playlist(
-            "playlist-one",
-            "Playlist One",
-            "playlist one",
-            "playlist one",
-            None,
-        )
+        scan.write_folder(&library::FolderInput {
+            object_id: "folder-one".into(),
+            name: Some("Music".into()),
+            sort_text: Some("music".into()),
+            ..Default::default()
+        })
+        .await
+        .expect("stage repeated folder");
+        scan.write_playlist(&library::PlaylistInput {
+            object_id: "playlist-one".into(),
+            name: "Playlist One".into(),
+            sort_text: "playlist one".into(),
+            ..Default::default()
+        })
         .await
         .expect("stage repeated playlist");
         scan.write_playlist_entry("playlist-one", "entry-one", "track-one", 0)
@@ -1682,9 +1697,14 @@ async fn duplicate_provider_positions_are_normalized_without_rejecting_occurrenc
         .await
         .expect("begin Playlist point Scan");
     scan.begin_batch().await.expect("begin batch");
-    scan.write_playlist("playlist-one", "Playlist", "playlist", "playlist", None)
-        .await
-        .expect("stage Playlist");
+    scan.write_playlist(&library::PlaylistInput {
+        object_id: "playlist-one".into(),
+        name: "Playlist".into(),
+        sort_text: "playlist".into(),
+        ..Default::default()
+    })
+    .await
+    .expect("stage Playlist");
     scan.write_playlist_entry("playlist-one", "duplicate-a", "track-one", 7)
         .await
         .expect("stage first occurrence");
@@ -1720,13 +1740,12 @@ async fn playlist_point_update_preserves_playlist_scope() {
         .expect("begin Playlist point scan");
     point.begin_batch().await.unwrap();
     point
-        .write_playlist(
-            "playlist-one",
-            "Playlist One",
-            "playlist one",
-            "playlist one",
-            None,
-        )
+        .write_playlist(&library::PlaylistInput {
+            object_id: "playlist-one".into(),
+            name: "Playlist One".into(),
+            sort_text: "playlist one".into(),
+            ..Default::default()
+        })
         .await
         .unwrap();
     point

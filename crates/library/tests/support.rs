@@ -126,12 +126,21 @@ pub async fn fixture() -> Fixture {
     })
     .await
     .expect("stage Genre");
-    scan.write_mood("mood", "Energetic", "energetic", "energetic")
-        .await
-        .expect("stage Mood");
-    scan.write_folder("folder", "Music", "music", "music", None)
-        .await
-        .expect("stage Folder");
+    scan.write_mood(&library::MoodInput {
+        object_id: "mood".into(),
+        name: "Energetic".into(),
+        sort_text: "energetic".into(),
+    })
+    .await
+    .expect("stage Mood");
+    scan.write_folder(&library::FolderInput {
+        object_id: "folder".into(),
+        name: Some("Music".into()),
+        sort_text: Some("music".into()),
+        ..Default::default()
+    })
+    .await
+    .expect("stage Folder");
     for (index, album, artist, title, favorite) in [
         (0, "album-a", "artist-a", "Alpha", false),
         (1, "album-a", "artist-a", "Beta", true),

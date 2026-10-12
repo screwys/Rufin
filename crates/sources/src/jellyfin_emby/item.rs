@@ -157,6 +157,7 @@ pub(super) fn track_from_item(
             artists,
             album_artists: artist_credits_from_pairs(server, &item["AlbumArtists"]),
             genres: genre_credits_from_pairs(server, &item["GenreItems"]),
+            ..Default::default()
         }),
         ..Default::default()
     }))

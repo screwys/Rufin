@@ -1233,9 +1233,14 @@ mod tests {
         )
         .await
         .unwrap();
-        scan.write_playlist("jellyfin:playlist:list", "List", "list", "list", None)
-            .await
-            .unwrap();
+        scan.write_playlist(&library::PlaylistInput {
+            object_id: ("jellyfin:playlist:list").to_string(),
+            name: ("List").to_string(),
+            sort_text: ("list").to_string(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
         source
             .stage_playlist_entries(&mut scan, "jellyfin:playlist:list")
             .await

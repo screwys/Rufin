@@ -117,12 +117,12 @@ impl SubsonicSource {
         scan: &mut Scan,
         playlist_id: &str,
     ) -> SourceResult<()> {
-        let snapshot = self.read_playlist(playlist_id).await?;
+        let snapshot = self.read_playlist(scan.source_id(), playlist_id).await?;
         scan.begin_batch().await?;
-        stage_playlist_header(scan, &snapshot.playlist).await?;
+        scan.write_playlist(&snapshot.playlist.header).await?;
         for (position, entry) in snapshot.entries.iter().enumerate() {
             scan.write_playlist_entry(
-                &snapshot.playlist.id,
+                &snapshot.playlist.header.object_id,
                 &entry.occurrence_id,
                 &entry.track_id,
                 position as i64,
@@ -130,7 +130,7 @@ impl SubsonicSource {
             .await?;
         }
         scan.write_playlist_freshness(
-            &snapshot.playlist.id,
+            &snapshot.playlist.header.object_id,
             snapshot.playlist.revision.as_deref(),
             snapshot.playlist.valid_until,
         )
@@ -161,16 +161,16 @@ impl SubsonicSource {
         let body: Value = self.get_json("getAlbumList2", &query).await?;
         json::items(&body["albumList2"]["album"])
             .iter()
-            .filter_map(|value| album_from_json(self, value))
+            .filter_map(|album| Some((self.id("album", &json::id(&album["id"])?), album)))
             .enumerate()
-            .map(|(position, album)| {
+            .map(|(position, (object_id, album))| {
                 Ok(library::HomeEntryInput {
                     section_id: section_id.to_string(),
                     position: position as i64,
                     kind: library::HomeEntryKind::Album,
-                    entity_object_id: album.id,
-                    title: album.title,
-                    subtitle: album.artist,
+                    entity_object_id: object_id,
+                    title: album_title(album),
+                    subtitle: display_artist(album),
                 })
             })
             .collect()
@@ -200,14 +200,7 @@ impl SubsonicSource {
         };
         scan.begin_batch().await?;
         for folder in &music_folders {
-            scan.write_folder(
-                &folder.id,
-                &folder.name,
-                &folder.name.to_lowercase(),
-                &folder.name.to_lowercase(),
-                None,
-            )
-            .await?;
+            scan.write_folder(folder).await?;
         }
         scan.finish_batch().await?;
         check_cancelled(cancelled)?;
@@ -245,7 +238,7 @@ impl SubsonicSource {
         };
         scan.begin_batch().await?;
         for genre in genres {
-            stage_genre(scan, genre).await?;
+            scan.write_genre(&genre).await?;
         }
         scan.finish_batch().await?;
 
@@ -286,8 +279,10 @@ impl SubsonicSource {
                 SourceError::Other("OpenSubsonic album offset overflowed".to_string())
             })?;
             scan.begin_batch().await?;
-            for album in page.iter().filter_map(|album| album_from_json(self, album)) {
-                stage_album(scan, album).await?;
+            for value in page {
+                if let Some(album) = album_from_json(self, scan.source_id(), value)? {
+                    scan.write_album(&album).await?;
+                }
             }
             scan.finish_batch().await?;
             progress(stage(SourceReadStage::Albums, offset));
@@ -299,7 +294,7 @@ impl SubsonicSource {
 
     pub(super) async fn emit_tracks(
         &self,
-        music_folders: &[MusicFolder],
+        music_folders: &[library::FolderInput],
         scan: &mut Scan,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
@@ -324,7 +319,10 @@ impl SubsonicSource {
                     ("songOffset", offset.to_string()),
                 ];
                 if let Some(folder) = folder {
-                    extra.push(("musicFolderId", raw_item_id(folder.id.as_str()).to_string()));
+                    extra.push((
+                        "musicFolderId",
+                        raw_item_id(folder.object_id.as_str()).to_string(),
+                    ));
                 }
                 let body: Value = self.get_json("search3", &extra).await?;
                 let page = json::items(&body["searchResult3"]["song"]);
@@ -336,11 +334,14 @@ impl SubsonicSource {
                 })?;
                 scan.begin_batch().await?;
                 let mut folder_links = Vec::new();
-                for track in page.iter().filter_map(|song| track_from_json(self, song)) {
+                for song in page {
+                    let Some(track) = track_from_json(self, scan.source_id(), song)? else {
+                        continue;
+                    };
                     if let Some(folder) = folder {
-                        folder_links.push((track.id.clone(), folder.id.clone()));
+                        folder_links.push((track.object_id.clone(), folder.object_id.clone()));
                     }
-                    if stage_track(scan, track).await? {
+                    if scan.write_track(&track).await? {
                         emitted += 1;
                     }
                 }
@@ -358,22 +359,24 @@ impl SubsonicSource {
         Ok(())
     }
 
-    async fn read_music_folders(&self) -> SourceResult<Vec<MusicFolder>> {
+    async fn read_music_folders(&self) -> SourceResult<Vec<library::FolderInput>> {
         let body: Value = self.get_json("getMusicFolders", &[]).await?;
         Ok(json::items(&body["musicFolders"]["musicFolder"])
             .iter()
             .filter_map(|folder| {
-                Some(MusicFolder {
-                    id: self.id("music-folder", &json::id(&folder["id"])?),
-                    name: json::field(folder, "name")
-                        .unwrap_or_else(|| "Untitled Folder".to_string()),
-                    image_ref: None,
+                let name = json::field::<String>(folder, "name")
+                    .unwrap_or_else(|| "Untitled Folder".to_string());
+                Some(library::FolderInput {
+                    object_id: self.id("music-folder", &json::id(&folder["id"])?),
+                    sort_text: Some(name.to_lowercase()),
+                    name: Some(name),
+                    ..Default::default()
                 })
             })
             .collect())
     }
 
-    async fn read_genres(&self) -> SourceResult<Vec<Genre>> {
+    async fn read_genres(&self) -> SourceResult<Vec<library::GenreInput>> {
         let body: Value = self.get_json("getGenres", &[]).await?;
         Ok(json::items(&body["genres"]["genre"])
             .iter()
@@ -381,11 +384,11 @@ impl SubsonicSource {
                 let name = json::field::<String>(genre, "value")
                     .or_else(|| json::field(genre, "name"))
                     .filter(|name| !name.trim().is_empty())?;
-                Some(Genre {
-                    id: self.id("genre", &name),
+                Some(library::GenreInput {
+                    object_id: self.id("genre", &name),
+                    sort_text: Some(name.to_lowercase()),
                     name,
-                    image_ref: None,
-                    local_artwork: None,
+                    ..Default::default()
                 })
             })
             .collect())
@@ -402,10 +405,10 @@ impl SubsonicSource {
         let total = playlists.len();
         for (position, playlist) in playlists.iter().enumerate() {
             check_cancelled(cancelled)?;
-            let Some(playlist) = playlist_from_json(self, playlist) else {
+            let Some(playlist) = playlist_from_json(self, scan.source_id(), playlist)? else {
                 continue;
             };
-            stage_playlist_header(scan, &playlist).await?;
+            scan.write_playlist(&playlist.header).await?;
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -413,13 +416,14 @@ impl SubsonicSource {
             let retained = if let Some(revision) = playlist.revision.as_deref()
                 && playlist.valid_until.is_some_and(|deadline| deadline > now)
             {
-                scan.retain_playlist_entries_if_fresh(&playlist.id, revision, now)
+                scan.retain_playlist_entries_if_fresh(&playlist.header.object_id, revision, now)
                     .await?
             } else {
                 false
             };
             if !retained {
-                self.stage_playlist_snapshot(scan, &playlist.id).await?;
+                self.stage_playlist_snapshot(scan, &playlist.header.object_id)
+                    .await?;
             }
             progress(SourceReadProgress {
                 stage: SourceReadStage::Playlists,
@@ -460,11 +464,10 @@ impl SubsonicSource {
             offset += page.len();
             let finished = page.len() < ALBUM_REQUEST_SIZE;
             scan.begin_batch().await?;
-            for artist in page
-                .iter()
-                .filter_map(|artist| artist_from_json(self, artist))
-            {
-                stage_artist(scan, artist).await?;
+            for value in page {
+                if let Some(artist) = artist_from_json(self, scan.source_id(), value)? {
+                    scan.write_artist(&artist).await?;
+                }
             }
             scan.finish_batch().await?;
             progress(stage(SourceReadStage::Artists, offset));
@@ -798,24 +801,29 @@ mod tests {
         )
         .await
         .unwrap();
-        super::stage_album(
-            &mut scan,
-            super::album_from_json(
+        scan.write_album(
+            &super::album_from_json(
                 &source,
+                "source",
                 &serde_json::json!({"id":"album","name":"Album","userRating":4}),
             )
+            .unwrap()
             .unwrap(),
         )
         .await
         .unwrap();
-        super::stage_artist(
-            &mut scan,
-            super::artist_from_json(&source, &serde_json::json!({"id":"artist","name":"Artist"}))
-                .unwrap(),
+        scan.write_artist(
+            &super::artist_from_json(
+                &source,
+                "source",
+                &serde_json::json!({"id":"artist","name":"Artist"}),
+            )
+            .unwrap()
+            .unwrap(),
         )
         .await
         .unwrap();
-        super::stage_track(&mut scan, super::track_from_json(&source, &serde_json::json!({"id":"track","title":"Track","albumId":"album","comment":"Keep","duration":42,"userRating":4})).unwrap()).await.unwrap();
+        scan.write_track(&super::track_from_json(&source, "source", &serde_json::json!({"id":"track","title":"Track","albumId":"album","comment":"Keep","duration":42,"userRating":4})).unwrap().unwrap()).await.unwrap();
         source.stage_favorites(&mut scan).await.unwrap();
         source
             .stage_playlist_snapshot(&mut scan, "subsonic:playlist:playlist")
@@ -953,24 +961,20 @@ mod tests {
                 )
                 .await
                 .unwrap();
-                super::stage_album(
-                    &mut previous,
-                    super::album_from_json(
-                        &source,
-                        &serde_json::json!({"id":"album","name":"Album","artist":"Artist"}),
+                previous
+                    .write_album(
+                        &super::album_from_json(
+                            &source,
+                            "source",
+                            &serde_json::json!({"id":"album","name":"Album","artist":"Artist"}),
+                        )
+                        .unwrap()
+                        .unwrap(),
                     )
-                    .unwrap(),
-                )
-                .await
-                .unwrap();
-                super::stage_track(
-                    &mut previous,
-                    super::track_from_json(
-                        &source,
-                        &serde_json::json!({"id":"removed","title":"Vanished","albumId":"album"}),
-                    )
-                    .unwrap(),
-                )
+                    .await
+                    .unwrap();
+                previous.write_track(&super::track_from_json(&source, "source", &serde_json::json!({"id":"removed","title":"Vanished","albumId":"album"})).unwrap()
+                    .unwrap())
                 .await
                 .unwrap();
                 previous
@@ -983,7 +987,13 @@ mod tests {
                     .await
                     .unwrap();
                 previous
-                    .write_playlist("cached-playlist", "Cached", "cached", "cached", None)
+                    .write_playlist(&library::PlaylistInput {
+                        object_id: "cached-playlist".to_string(),
+                        name: "Cached".to_string(),
+                        sort_text: "cached".to_string(),
+                        artwork_binding: None,
+                        ..Default::default()
+                    })
                     .await
                     .unwrap();
                 previous

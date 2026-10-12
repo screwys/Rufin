@@ -14,7 +14,6 @@ use super::LocalSource;
 use super::media::read_media;
 use crate::file::cue::{CueSheet, cue_track, parse_cue_sheet};
 use crate::file::media::{self as media, MediaRead, ScannedTrack};
-use crate::file::scan::stage_audio_tracks_batch;
 use crate::source::{SourceReadProgress, SourceReadStage};
 use crate::{SourceError, SourceResult};
 
@@ -66,7 +65,7 @@ pub(crate) async fn stage_metadata_paths(scan: &mut Scan, paths: &[PathBuf]) -> 
             match read_media(&mut worker, read_path.to_path_buf(), None) {
                 MediaRead::Accepted(mut track) => {
                     if let Some((id, _)) = existing {
-                        track.id = id;
+                        track.track.object_id = id;
                     }
                     tracks.push(*track);
                 }
@@ -79,7 +78,11 @@ pub(crate) async fn stage_metadata_paths(scan: &mut Scan, paths: &[PathBuf]) -> 
             }
         }
         scan.begin_batch().await?;
-        stage_audio_tracks_batch(scan, &tracks).await?;
+        let inputs = tracks
+            .into_iter()
+            .map(|track| track.into_inputs(scan.accepted_at()))
+            .collect::<SourceResult<Vec<_>>>()?;
+        scan.write_album_tracks(&inputs).await?;
         scan.finish_batch().await?;
     }
     Ok(())
@@ -538,7 +541,11 @@ async fn stage_exact_cue(
     for page in dependencies.chunks(LOCAL_BATCH_SIZE) {
         scan.write_local_dependency_paths(page).await?;
     }
-    stage_audio_tracks_batch(scan, &tracks).await?;
+    let inputs = tracks
+        .into_iter()
+        .map(|track| track.into_inputs(scan.accepted_at()))
+        .collect::<SourceResult<Vec<_>>>()?;
+    scan.write_album_tracks(&inputs).await?;
     if retain {
         scan.retain_local_cue_path(path.to_string_lossy().as_ref())
             .await?;
@@ -901,24 +908,28 @@ async fn stage_audio_batch(
                 let previous = if let Some((object_id, previous)) =
                     renamed_ids.get(path.to_string_lossy().as_ref())
                 {
-                    track.id = object_id.clone();
+                    track.track.object_id = object_id.clone();
                     Path::new(previous)
                 } else {
                     path.as_path()
                 };
-                if let Some(canonical) = track.local_uri.as_ref()
+                if let Some(canonical) = track.track.media_uri.as_ref()
                     && let Ok(previous) = url::Url::from_file_path(previous)
                     && previous.as_str() != canonical
                 {
                     if let Some(existing) = accepted
                         .iter()
-                        .find(|existing| existing.local_uri.as_ref() == Some(canonical))
+                        .find(|existing| existing.track.media_uri.as_ref() == Some(canonical))
                     {
-                        track.id = existing.id.clone();
+                        track.track.object_id = existing.track.object_id.clone();
                     } else if let Some((object_id, _)) = scan.local_track_file(canonical).await? {
-                        track.id = object_id;
+                        track.track.object_id = object_id;
                     }
-                    aliases.push((previous.into(), canonical.clone(), track.id.clone()));
+                    aliases.push((
+                        previous.into(),
+                        canonical.clone(),
+                        track.track.object_id.clone(),
+                    ));
                 }
                 accepted.push(*track)
             }
@@ -953,7 +964,11 @@ async fn stage_audio_batch(
         scan.rekey_songs(database.merge_local_file_uris(&aliases).await?);
     }
     scan.begin_batch().await?;
-    stage_audio_tracks_batch(scan, &accepted).await?;
+    let inputs = accepted
+        .into_iter()
+        .map(|track| track.into_inputs(scan.accepted_at()))
+        .collect::<SourceResult<Vec<_>>>()?;
+    scan.write_album_tracks(&inputs).await?;
     scan.retain_local_media_paths(&retained).await?;
     scan.finish_batch().await?;
     Ok(accepted_count)
@@ -1173,8 +1188,12 @@ fn read_cue_tracks(
             return None;
         };
         // Existing CUE URIs include the backing path as written in the sheet.
-        backing.local_uri = Some(url::Url::from_file_path(&backing.source_path).ok()?.into());
-        let duration_millis = u64::from(backing.duration_seconds) * 1_000;
+        backing.track.media_uri = Some(
+            url::Url::from_file_path(backing.track.source_path.as_ref()?)
+                .ok()?
+                .into(),
+        );
+        let duration_millis = backing.track.duration_millis as u64;
         for (position, cue) in file.tracks.iter().enumerate() {
             let end = file
                 .tracks
@@ -1383,7 +1402,10 @@ pub(crate) async fn stage_imported_paths(
                     if let CueRead::Accepted(sheet) = read_cue(&path)
                         && let Some(cues) = read_cue_tracks(&mut worker, &path, sheet)
                     {
-                        cue_tracks.extend(cues.into_iter().map(|track| (track.id.clone(), track)));
+                        cue_tracks.extend(
+                            cues.into_iter()
+                                .map(|track| (track.track.object_id.clone(), track)),
+                        );
                     }
                     cue_path = Some(path);
                 }
@@ -1396,13 +1418,17 @@ pub(crate) async fn stage_imported_paths(
                 && let MediaRead::Accepted(mut track) = read_media(&mut worker, path, None)
             {
                 if let Some((id, _)) = scan.local_track_file(&uri).await? {
-                    track.id = id;
+                    track.track.object_id = id;
                 }
                 tracks.push(*track);
             }
         }
         scan.begin_batch().await?;
-        stage_audio_tracks_batch(scan, &tracks).await?;
+        let inputs = tracks
+            .into_iter()
+            .map(|track| track.into_inputs(scan.accepted_at()))
+            .collect::<SourceResult<Vec<_>>>()?;
+        scan.write_album_tracks(&inputs).await?;
         scan.finish_batch().await?;
     }
     Ok(())

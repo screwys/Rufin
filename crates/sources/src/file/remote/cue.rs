@@ -6,7 +6,6 @@ use super::{FileSource, scan::PARSER_VERSION};
 use crate::file::{
     cue::{cue_track, parse_cue_sheet},
     media,
-    scan::stage_audio_tracks_batch,
 };
 use crate::{SourceError, SourceResult};
 
@@ -171,7 +170,7 @@ impl FileSource {
                             _ => None,
                         };
                         self.locate_track(&mut backing, &backing_file);
-                        let duration = u64::from(backing.duration_seconds) * 1000;
+                        let duration = backing.track.duration_millis as u64;
                         for (position, cue) in entry.tracks.iter().enumerate() {
                             let end = entry
                                 .tracks
@@ -189,10 +188,11 @@ impl FileSource {
                                 end,
                                 &backing,
                             );
-                            track.id = format!("{prefix}:{}", cue.number);
-                            track.cue_path = Some(file.path.clone());
+                            track.track.object_id = format!("{prefix}:{}", cue.number);
+                            track.track.cue_path = Some(file.path.clone());
                             scan.begin_batch().await?;
-                            stage_audio_tracks_batch(scan, &[track]).await?;
+                            scan.write_album_tracks(&[track.into_inputs(scan.accepted_at())?])
+                                .await?;
                             scan.finish_batch().await?;
                             completed += 1;
                             progress(completed);

@@ -147,13 +147,13 @@ impl JellyfinEmbySource {
                     .map(|image| crate::native_artwork_binding(scan.source_id(), image))
                     .transpose()?;
                 scan.begin_batch().await?;
-                scan.write_playlist(
-                    &playlist.id,
-                    &playlist.name,
-                    &playlist.name.to_lowercase(),
-                    &playlist.name.to_lowercase(),
-                    artwork.as_deref(),
-                )
+                scan.write_playlist(&library::PlaylistInput {
+                    object_id: (&playlist.id).to_string(),
+                    name: (&playlist.name).to_string(),
+                    sort_text: (&playlist.name.to_lowercase()).to_string(),
+                    artwork_binding: (artwork.as_deref()).map(|value| value.to_vec()),
+                    ..Default::default()
+                })
                 .await?;
                 scan.finish_batch().await?;
                 self.stage_playlist_entries(scan, &playlist.id).await?;
@@ -217,13 +217,13 @@ impl JellyfinEmbySource {
             .as_ref()
             .map(|image| crate::native_artwork_binding(scan.source_id(), image))
             .transpose()?;
-            scan.write_folder(
-                &folder_id,
-                &name,
-                &name.to_lowercase(),
-                &name.to_lowercase(),
-                artwork.as_deref(),
-            )
+            scan.write_folder(&library::FolderInput {
+                object_id: (&folder_id).to_string(),
+                name: Some((&name).to_string()),
+                sort_text: Some((&name.to_lowercase()).to_string()),
+                artwork_binding: (artwork.as_deref()).map(|value| value.to_vec()),
+                ..Default::default()
+            })
             .await?;
             folders.push((folder_id, position as i64));
         }
@@ -423,13 +423,13 @@ impl JellyfinEmbySource {
                 .as_ref()
                 .map(|image| crate::native_artwork_binding(scan.source_id(), image))
                 .transpose()?;
-            scan.write_folder(
-                &folder_id,
-                &name,
-                &name.to_lowercase(),
-                &name.to_lowercase(),
-                artwork.as_deref(),
-            )
+            scan.write_folder(&library::FolderInput {
+                object_id: (&folder_id).to_string(),
+                name: Some((&name).to_string()),
+                sort_text: Some((&name.to_lowercase()).to_string()),
+                artwork_binding: (artwork.as_deref()).map(|value| value.to_vec()),
+                ..Default::default()
+            })
             .await?;
             folders.push(folder_id);
         }
@@ -508,13 +508,13 @@ impl JellyfinEmbySource {
                     .map(|image| crate::native_artwork_binding(scan.source_id(), image))
                     .transpose()?;
                 scan.begin_batch().await?;
-                scan.write_playlist(
-                    &playlist.id,
-                    &playlist.name,
-                    &playlist.name.to_lowercase(),
-                    &playlist.name.to_lowercase(),
-                    artwork.as_deref(),
-                )
+                scan.write_playlist(&library::PlaylistInput {
+                    object_id: (&playlist.id).to_string(),
+                    name: (&playlist.name).to_string(),
+                    sort_text: (&playlist.name.to_lowercase()).to_string(),
+                    artwork_binding: (artwork.as_deref()).map(|value| value.to_vec()),
+                    ..Default::default()
+                })
                 .await?;
                 scan.finish_batch().await?;
                 self.stage_playlist_entries(scan, &playlist.id).await?;
@@ -839,7 +839,12 @@ mod tests {
             .await
             .unwrap();
         previous
-            .write_playlist("cached-playlist", "Cached", "cached", "cached", None)
+            .write_playlist(&library::PlaylistInput {
+                object_id: ("cached-playlist").to_string(),
+                name: ("Cached").to_string(),
+                sort_text: ("cached").to_string(),
+                ..Default::default()
+            })
             .await
             .unwrap();
         previous

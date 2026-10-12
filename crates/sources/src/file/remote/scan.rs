@@ -5,8 +5,8 @@ use library::{Database, LocalFileKind, LocalFileState, LocalFileWrite, ReadCance
 
 use super::FileSource;
 use super::reader::FileReader;
+use crate::file::media;
 use crate::file::remote::input::{FileInput, FileInputServer};
-use crate::file::{media, scan::stage_audio_tracks_batch};
 use crate::{LocalImageRef, SourceError, SourceReadProgress, SourceReadStage, SourceResult};
 
 pub(crate) const PARSER_VERSION: i64 = 7;
@@ -119,19 +119,20 @@ impl FileSource {
             revision: observation.revision.clone().unwrap_or_default(),
             picture_index,
         });
-        track.id = object_id;
+        track.track.object_id = object_id;
         self.locate_track(&mut track, &observation);
         observation.state = LocalFileState::Accepted;
         scan.begin_batch().await?;
-        stage_audio_tracks_batch(scan, &[*track]).await?;
+        scan.write_album_tracks(&[track.into_inputs(scan.accepted_at())?])
+            .await?;
         scan.write_local_files(&[(observation, vec![])]).await?;
         scan.finish_batch().await?;
         Ok(())
     }
 
     pub(crate) fn locate_track(&self, track: &mut media::ScannedTrack, file: &LocalFileWrite) {
-        track.source_path = file.path.clone();
-        track.local_uri = None;
+        track.track.source_path = Some(file.path.clone());
+        track.track.media_uri = None;
         let mut revision = blake3::Hasher::new();
         revision.update(file.path.as_bytes());
         revision.update(file.revision.as_deref().unwrap_or_default().as_bytes());
@@ -433,9 +434,9 @@ impl FileSource {
                     match parsed {
                         media::MediaRead::Accepted(mut track) => {
                             if let Some(id) = prior.and_then(|old| old.track_object_id.as_ref()) {
-                                track.id = id.clone();
+                                track.track.object_id = id.clone();
                             } else {
-                                track.id = format!(
+                                track.track.object_id = format!(
                                     "file:{:016x}",
                                     crate::policy::stable_hash(&super::file_identity(&file.path))
                                 );
@@ -451,7 +452,8 @@ impl FileSource {
                             self.locate_track(&mut track, &file);
                             file.state = LocalFileState::Accepted;
                             scan.begin_batch().await?;
-                            stage_audio_tracks_batch(scan, &[*track]).await?;
+                            scan.write_album_tracks(&[track.into_inputs(scan.accepted_at())?])
+                                .await?;
                             scan.write_local_files(&[(file, vec![])]).await?;
                             scan.finish_batch().await?;
                             completed += 1;

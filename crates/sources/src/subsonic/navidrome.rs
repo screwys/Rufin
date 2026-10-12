@@ -24,11 +24,7 @@ use crate::remote_json::{boolean, field, id, items, strings};
 use crate::source::{SourceReadProgress, SourceReadStage};
 use crate::{SourceError, SourceResult};
 
-use super::item::{stage_album, stage_artist, stage_track};
-use super::{
-    Album, AlbumRelations, Artist, ArtistCredit, GenreCredit, ImageRef, SubsonicSource, Track,
-    TrackRelations, normalize_release_types,
-};
+use super::{ImageRef, SubsonicSource, normalize_release_types};
 
 const NAVIDROME_PAGE_SIZE: usize = 1_000;
 const NAVIDROME_JSON_MAX_BYTES: usize = 16 * 1024 * 1024;
@@ -83,7 +79,7 @@ impl SubsonicSource {
         &self,
         seed: &crate::SourceRadioSeed,
         limit: usize,
-    ) -> SourceResult<Option<Vec<Track>>> {
+    ) -> SourceResult<Option<Vec<String>>> {
         if self.flavor != super::SubsonicFlavor::Navidrome {
             return Ok(None);
         }
@@ -152,23 +148,39 @@ impl SubsonicSource {
         Ok(result)
     }
 
-    pub(super) async fn read_albums(&self, values: &[Value]) -> SourceResult<Vec<Album>> {
+    pub(super) async fn read_albums(
+        &self,
+        source_id: &str,
+        values: &[Value],
+    ) -> SourceResult<Vec<library::AlbumInput>> {
         if self.has_navidrome_library() {
-            Ok(self
-                .navidrome_items("album", values)
+            self.navidrome_items("album", values)
                 .await?
                 .iter()
-                .filter_map(|value| Some(album_from_navidrome(self, &id(&value["id"])?, value)))
-                .collect())
+                .filter_map(|value| {
+                    Some(album_from_navidrome(
+                        self,
+                        source_id,
+                        &id(&value["id"])?,
+                        value,
+                    ))
+                })
+                .collect::<library::LibraryResult<Vec<_>>>()
+                .map_err(Into::into)
         } else {
-            Ok(values
+            values
                 .iter()
-                .filter_map(|value| super::album_from_json(self, value))
-                .collect())
+                .filter_map(|value| super::album_from_json(self, source_id, value).transpose())
+                .collect::<library::LibraryResult<Vec<_>>>()
+                .map_err(Into::into)
         }
     }
 
-    pub(super) async fn read_tracks(&self, values: &[Value]) -> SourceResult<Vec<Track>> {
+    pub(super) async fn read_tracks(
+        &self,
+        source_id: &str,
+        values: &[Value],
+    ) -> SourceResult<Vec<library::TrackInput>> {
         if self.has_navidrome_library() {
             Ok(self
                 .navidrome_items("song", values)
@@ -177,26 +189,39 @@ impl SubsonicSource {
                 .filter_map(|value| Some(track_from_navidrome(self, &id(&value["id"])?, value)))
                 .collect())
         } else {
-            Ok(values
+            values
                 .iter()
-                .filter_map(|value| super::track_from_json(self, value))
-                .collect())
+                .filter_map(|value| super::track_from_json(self, source_id, value).transpose())
+                .collect::<library::LibraryResult<Vec<_>>>()
+                .map_err(Into::into)
         }
     }
 
-    pub(super) async fn read_artists(&self, values: &[Value]) -> SourceResult<Vec<super::Artist>> {
+    pub(super) async fn read_artists(
+        &self,
+        source_id: &str,
+        values: &[Value],
+    ) -> SourceResult<Vec<library::ArtistInput>> {
         if self.has_navidrome_library() {
-            Ok(self
-                .navidrome_items("artist", values)
+            self.navidrome_items("artist", values)
                 .await?
                 .iter()
-                .filter_map(|value| Some(artist_from_navidrome(self, &id(&value["id"])?, value)))
-                .collect())
+                .filter_map(|value| {
+                    Some(artist_from_navidrome(
+                        self,
+                        source_id,
+                        &id(&value["id"])?,
+                        value,
+                    ))
+                })
+                .collect::<library::LibraryResult<Vec<_>>>()
+                .map_err(Into::into)
         } else {
-            Ok(values
+            values
                 .iter()
-                .filter_map(|value| super::artist_from_json(self, value))
-                .collect())
+                .filter_map(|value| super::artist_from_json(self, source_id, value).transpose())
+                .collect::<library::LibraryResult<Vec<_>>>()
+                .map_err(Into::into)
         }
     }
 
@@ -217,10 +242,8 @@ impl SubsonicSource {
             progress,
             cancelled,
             |scan, raw_id, album| {
-                Box::pin(stage_album(
-                    scan,
-                    album_from_navidrome(self, &raw_id, &album),
-                ))
+                let album = album_from_navidrome(self, scan.source_id(), &raw_id, &album);
+                Box::pin(async move { scan.write_album(&album?).await })
             },
         )
         .await?;
@@ -233,7 +256,7 @@ impl SubsonicSource {
             |scan, raw_id, track| {
                 let track = track_from_navidrome(self, &raw_id, &track);
                 Box::pin(async move {
-                    stage_track(scan, track).await?;
+                    scan.write_track(&track).await?;
                     Ok(())
                 })
             },
@@ -246,10 +269,8 @@ impl SubsonicSource {
             progress,
             cancelled,
             |scan, raw_id, artist| {
-                Box::pin(stage_artist(
-                    scan,
-                    artist_from_navidrome(self, &raw_id, &artist),
-                ))
+                let artist = artist_from_navidrome(self, scan.source_id(), &raw_id, &artist);
+                Box::pin(async move { scan.write_artist(&artist?).await })
             },
         )
         .await?;
@@ -505,7 +526,12 @@ fn item_release_date(item: &Value) -> Option<String> {
         .find_map(|key| normalized_date(field(item, key)))
 }
 
-fn album_from_navidrome(source: &SubsonicSource, raw_id: &str, album: &Value) -> Album {
+fn album_from_navidrome(
+    source: &SubsonicSource,
+    source_id: &str,
+    raw_id: &str,
+    album: &Value,
+) -> library::LibraryResult<library::AlbumInput> {
     let mut album_artists = participant_credits(
         source,
         &album["participants"],
@@ -537,39 +563,47 @@ fn album_from_navidrome(source: &SubsonicSource, raw_id: &str, album: &Value) ->
                 .and_then(|year| year.parse().ok())
         })
         .unwrap_or_default();
-    Album {
-        sort_name: clean_optional(field(album, "sortAlbumName")),
-        id: String::from(source.id("album", raw_id)),
-        title: clean_optional(field(album, "name")).unwrap_or_else(|| "Untitled Album".to_string()),
-        artist,
-        year,
+    let title =
+        clean_optional(field(album, "name")).unwrap_or_else(|| "Untitled Album".to_string());
+    Ok(library::AlbumInput {
+        sort_text: clean_optional(field(album, "sortAlbumName"))
+            .unwrap_or_else(|| title.clone())
+            .to_lowercase(),
+        object_id: source.id("album", raw_id),
+        title,
+        display_artist: artist,
+        year: Some(i64::from(year)).filter(|year| *year > 0),
         release_date,
         date_added: normalized_date(field(album, "createdAt")),
-        last_played: clean_optional(field(album, "playDate")),
-        play_count: capped_u32(field(album, "playCount")),
-        user_rating: rating(field(album, "rating")),
+        rating: rating(field(album, "rating")).map(i64::from),
         favorite: boolean(&album["starred"]),
-        color_seed: super::color_seed(raw_id),
-        image_ref: Some(navidrome_image_ref(
-            source,
-            "al",
-            raw_id,
-            clean_optional(field(album, "updatedAt")),
-        )),
-        local_artwork: None,
-        release_types: normalize_release_types(tag_values(&album["tags"], "releasetype")),
+        artwork_binding: Some(crate::native_artwork_binding(
+            source_id,
+            &navidrome_image_ref(
+                source,
+                "al",
+                raw_id,
+                clean_optional(field(album, "updatedAt")),
+            ),
+        )?),
         is_compilation: Some(boolean(&album["compilation"]).unwrap_or_default()),
-        musicbrainz_album_id: clean_optional(field(album, "mbzAlbumId")),
+        musicbrainz_release_id: clean_optional(field(album, "mbzAlbumId")),
         musicbrainz_release_group_id: clean_optional(field(album, "mbzReleaseGroupId")),
-        relations: AlbumRelations {
+        relations: Some(library::AlbumRelationsInput {
             album_artists,
-            artists: Vec::new(),
             genres: genre_credits(source, &album["genres"]),
-        },
-    }
+            release_types: normalize_release_types(tag_values(&album["tags"], "releasetype")),
+            ..Default::default()
+        }),
+        ..Default::default()
+    })
 }
 
-fn track_from_navidrome(source: &SubsonicSource, raw_id: &str, track: &Value) -> Track {
+fn track_from_navidrome(
+    source: &SubsonicSource,
+    raw_id: &str,
+    track: &Value,
+) -> library::TrackInput {
     let mut artists = participant_credits(
         source,
         &track["participants"],
@@ -613,82 +647,113 @@ fn track_from_navidrome(source: &SubsonicSource, raw_id: &str, track: &Value) ->
         .collect();
     }
     let album_id = id(&track["albumId"]).map(|id| String::from(source.id("album", &id)));
-    Track {
+    let object_id = source.id("track", raw_id);
+    let title =
+        clean_optional(field(track, "title")).unwrap_or_else(|| "Untitled Track".to_string());
+    let source_path = server_path(
+        field::<String>(track, "libraryPath").as_deref(),
+        &field::<String>(track, "path").unwrap_or_default(),
+    );
+    let source_format = clean_optional(field(track, "suffix"));
+    let duration_seconds = duration_seconds(field(track, "duration").unwrap_or_default());
+    let loudness_analysis_key = super::audio_key(
+        &object_id,
+        source_path.as_deref(),
+        source_format.as_deref(),
+        duration_seconds,
+    );
+    library::TrackInput {
         audio_properties: library::AudioProperties {
             bitrate_kbps: field(track, "bitRate"),
             sample_rate_hz: field(track, "sampleRate"),
             bit_depth: field(track, "bitDepth"),
             channels: field(track, "channels"),
         },
-        sort_name: clean_optional(field(track, "sortTitle")),
-        id: String::from(source.id("track", raw_id)),
-        album_id,
-        title: clean_optional(field(track, "title"))
-            .unwrap_or_else(|| "Untitled Track".to_string()),
-        artist,
-        album: clean_optional(field(track, "album")).unwrap_or_else(|| "Unknown Album".to_string()),
-        year: positive_u16(field(track, "year")).unwrap_or_default(),
+        sort_text: clean_optional(field(track, "sortTitle"))
+            .unwrap_or_else(|| title.clone())
+            .to_lowercase(),
+        object_id,
+        album_object_id: album_id,
+        title,
+        display_artist: artist,
+        display_album: clean_optional(field(track, "album"))
+            .unwrap_or_else(|| "Unknown Album".to_string()),
+        year: positive_u16(field(track, "year")).map(i64::from),
         release_date: item_release_date(track),
         date_added: normalized_date(field(track, "createdAt")),
-        last_played: crate::policy::unix_seconds(field(track, "playDate")),
-        play_count: capped_u32(field(track, "playCount")),
-        user_rating: rating(field(track, "rating")),
-        duration_seconds: duration_seconds(field(track, "duration").unwrap_or_default()),
+        source_last_played: crate::policy::unix_seconds(field(track, "playDate")),
+        source_play_count: capped_u32(field(track, "playCount")).map(i64::from),
+        rating: rating(field(track, "rating")).map(i64::from),
+        duration_millis: i64::from(duration_seconds) * 1000,
+        loudness_analysis_key,
         favorite: boolean(&track["starred"]),
-        disc_number: positive_u16(field(track, "discNumber")).unwrap_or_default(),
-        track_number: positive_u16(field(track, "trackNumber")).unwrap_or_default(),
-        image_ref: None,
-        local_artwork: None,
+        disc_number: i64::from(positive_u16(field(track, "discNumber")).unwrap_or_default()),
+        track_number: i64::from(positive_u16(field(track, "trackNumber")).unwrap_or_default()),
         musicbrainz_recording_id: clean_optional(
             field(track, "mbzRecordingID").or_else(|| field(track, "mbzRecordingId")),
         ),
         musicbrainz_release_track_id: clean_optional(field(track, "mbzReleaseTrackId")),
-        source_path: server_path(
-            field::<String>(track, "libraryPath").as_deref(),
-            &field::<String>(track, "path").unwrap_or_default(),
-        ),
-        cue: None,
-        source_format: clean_optional(field(track, "suffix")),
+        source_path,
+        source_format,
         comment: clean_optional(field(track, "comment")),
-        skip_count: None,
-        bpm: positive_u16(field(track, "bpm")),
-        replay_gain_track_db: field::<f64>(track, "rgTrackGain").filter(|value| value.is_finite()),
-        replay_gain_track_peak: field::<f64>(track, "rgTrackPeak")
-            .filter(|value| value.is_finite() && *value >= 0.0),
-        replay_gain_album_db: field::<f64>(track, "rgAlbumGain").filter(|value| value.is_finite()),
-        replay_gain_album_peak: field::<f64>(track, "rgAlbumPeak")
-            .filter(|value| value.is_finite() && *value >= 0.0),
-        relations: TrackRelations {
+        bpm: positive_u16(field(track, "bpm")).map(i64::from),
+        source_loudness: field::<f64>(track, "rgTrackGain")
+            .filter(|value| value.is_finite())
+            .map(|gain| library::LoudnessInput {
+                replay_gain_db: Some(gain),
+                replay_gain_peak: field::<f64>(track, "rgTrackPeak")
+                    .filter(|value| value.is_finite() && *value >= 0.0),
+                ..Default::default()
+            }),
+        album_loudness: field::<f64>(track, "rgAlbumGain")
+            .filter(|value| value.is_finite())
+            .map(|gain| library::LoudnessInput {
+                replay_gain_db: Some(gain),
+                replay_gain_peak: field::<f64>(track, "rgAlbumPeak")
+                    .filter(|value| value.is_finite() && *value >= 0.0),
+                ..Default::default()
+            }),
+        folders: Some(
+            field::<i64>(track, "libraryId")
+                .filter(|library_id| *library_id > 0)
+                .map(|library_id| source.id("music-folder", &library_id.to_string()))
+                .into_iter()
+                .collect(),
+        ),
+        relations: Some(library::TrackRelationsInput {
             artists,
             album_artists,
             genres: genre_credits(source, &track["genres"]),
             moods: super::moods_from_item(source, tag_values(&track["tags"], "mood")),
-            music_folders: Some(
-                field::<i64>(track, "libraryId")
-                    .filter(|library_id| *library_id > 0)
-                    .map(|library_id| {
-                        String::from(source.id("music-folder", &library_id.to_string()))
-                    })
-                    .into_iter()
-                    .collect(),
-            ),
-        },
+        }),
+        ..Default::default()
     }
 }
 
-fn artist_from_navidrome(source: &SubsonicSource, raw_id: &str, artist: &Value) -> Artist {
-    Artist {
-        sort_name: clean_optional(field(artist, "sortArtistName")),
-        id: String::from(source.id("artist", raw_id)),
-        name: clean_optional(field(artist, "name")).unwrap_or_else(|| "Unknown Artist".to_string()),
+fn artist_from_navidrome(
+    source: &SubsonicSource,
+    source_id: &str,
+    raw_id: &str,
+    artist: &Value,
+) -> library::LibraryResult<library::ArtistInput> {
+    let name =
+        clean_optional(field(artist, "name")).unwrap_or_else(|| "Unknown Artist".to_string());
+    Ok(library::ArtistInput {
+        sort_text: Some(
+            clean_optional(field(artist, "sortArtistName"))
+                .unwrap_or_else(|| name.clone())
+                .to_lowercase(),
+        ),
+        object_id: source.id("artist", raw_id),
+        name,
         favorite: boolean(&artist["starred"]),
-        last_played: clean_optional(field(artist, "playDate")),
-        play_count: capped_u32(field(artist, "playCount")),
-        user_rating: rating(field(artist, "rating")),
+        rating: rating(field(artist, "rating")).map(i64::from),
         musicbrainz_artist_id: clean_optional(field(artist, "mbzArtistId")),
-        image_ref: Some(navidrome_image_ref(source, "ar", raw_id, None)),
-        local_artwork: None,
-    }
+        artwork_binding: Some(crate::native_artwork_binding(
+            source_id,
+            &navidrome_image_ref(source, "ar", raw_id, None),
+        )?),
+    })
 }
 
 fn artist_credit(
@@ -697,12 +762,13 @@ fn artist_credit(
     name: String,
     musicbrainz_artist_id: Option<String>,
     sort_name: Option<String>,
-) -> Option<ArtistCredit> {
-    clean(raw_id).map(|raw_id| ArtistCredit {
-        sort_name: clean_optional(sort_name),
-        id: String::from(source.id("artist", &raw_id)),
+) -> Option<library::ArtistInput> {
+    clean(raw_id).map(|raw_id| library::ArtistInput {
+        sort_text: clean_optional(sort_name).map(|name| name.to_lowercase()),
+        object_id: String::from(source.id("artist", &raw_id)),
         name,
         musicbrainz_artist_id: clean_optional(musicbrainz_artist_id),
+        ..Default::default()
     })
 }
 
@@ -712,17 +778,19 @@ fn participant_credits(
     role: &str,
     fallback_id: &str,
     fallback_musicbrainz_id: Option<&str>,
-) -> Vec<ArtistCredit> {
+) -> Vec<library::ArtistInput> {
     let mut credits = items(&participants[role])
         .iter()
         .filter_map(|participant| {
             let raw_id = id(&participant["id"])?;
-            Some(ArtistCredit {
-                sort_name: clean_optional(field(participant, "sortArtistName")),
-                id: String::from(source.id("artist", &raw_id)),
+            Some(library::ArtistInput {
+                sort_text: clean_optional(field::<String>(participant, "sortArtistName"))
+                    .map(|name| name.to_lowercase()),
+                object_id: String::from(source.id("artist", &raw_id)),
                 name: clean_optional(field(participant, "name"))
                     .unwrap_or_else(|| "Unknown Artist".to_string()),
                 musicbrainz_artist_id: clean_optional(field(participant, "mbzArtistId")),
+                ..Default::default()
             })
         })
         .collect::<Vec<_>>();
@@ -731,7 +799,7 @@ fn participant_credits(
         fallback_musicbrainz_id.and_then(|value| clean(value.to_string())),
     ) && let Some(credit) = credits
         .iter_mut()
-        .find(|credit| credit.id.as_str() == source.id("artist", &fallback_id))
+        .find(|credit| credit.object_id.as_str() == source.id("artist", &fallback_id))
         && credit.musicbrainz_artist_id.is_none()
     {
         credit.musicbrainz_artist_id = Some(musicbrainz_id);
@@ -739,13 +807,14 @@ fn participant_credits(
     credits
 }
 
-fn genre_credits(source: &SubsonicSource, genres: &Value) -> Vec<GenreCredit> {
+fn genre_credits(source: &SubsonicSource, genres: &Value) -> Vec<library::GenreInput> {
     items(genres)
         .iter()
         .filter_map(|genre| clean_optional(field(genre, "name")))
-        .map(|name| GenreCredit {
-            id: String::from(source.id("genre", &name)),
+        .map(|name| library::GenreInput {
+            object_id: String::from(source.id("genre", &name)),
             name,
+            ..Default::default()
         })
         .collect()
 }
@@ -815,16 +884,14 @@ mod tests {
     #[test]
     fn native_and_opensubsonic_sort_names_keep_display_names_and_optional_credits() {
         let source = navidrome_source("http://localhost/");
-        let album = album_from_navidrome(
-            &source,
-            "album",
-            &serde_json::json!({"name":"The Album", "sortAlbumName":"Album, The", "albumArtistId":"artist", "albumArtist":"The Artist", "sortAlbumArtistName":"Artist, The"}),
-        );
+        let album = album_from_navidrome(&source, "source", "album", &serde_json::json!({"name":"The Album", "sortAlbumName":"Album, The", "albumArtistId":"artist", "albumArtist":"The Artist", "sortAlbumArtistName":"Artist, The"})).unwrap();
         assert_eq!(album.title, "The Album");
-        assert_eq!(album.sort_name.as_deref(), Some("Album, The"));
+        assert_eq!(album.sort_text, "album, the");
         assert_eq!(
-            album.relations.album_artists[0].sort_name.as_deref(),
-            Some("Artist, The")
+            album.relations.as_ref().unwrap().album_artists[0]
+                .sort_text
+                .as_deref(),
+            Some("artist, the")
         );
         let track = track_from_navidrome(
             &source,
@@ -832,51 +899,67 @@ mod tests {
             &serde_json::json!({"title":"The Song", "sortTitle":"Song, The", "participants":{"artist":[{"id":"artist", "name":"The Artist", "sortArtistName":"Artist, The"}]}}),
         );
         assert_eq!(track.title, "The Song");
-        assert_eq!(track.sort_name.as_deref(), Some("Song, The"));
+        assert_eq!(track.sort_text, "song, the");
         assert_eq!(
-            track.relations.artists[0].sort_name.as_deref(),
-            Some("Artist, The")
+            track.relations.as_ref().unwrap().artists[0]
+                .sort_text
+                .as_deref(),
+            Some("artist, the")
         );
         let artist = artist_from_navidrome(
             &source,
+            "source",
             "artist",
             &serde_json::json!({"name":"The Artist", "sortArtistName":"Artist, The"}),
-        );
+        )
+        .unwrap();
         assert_eq!(artist.name, "The Artist");
-        assert_eq!(artist.sort_name.as_deref(), Some("Artist, The"));
+        assert_eq!(artist.sort_text.as_deref(), Some("artist, the"));
 
         let value = serde_json::json!({"id":"1", "title":"The Name", "name":"The Name", "sortName":"Name, The", "artists":[{"id":"artist", "name":"The Artist", "sortName":"Artist, The"}]});
-        let album = super::super::item::album_from_json(&source, &value).unwrap();
+        let album = super::super::item::album_from_json(&source, "source", &value)
+            .unwrap()
+            .unwrap();
         assert_eq!(album.title, "The Name");
-        assert_eq!(album.sort_name.as_deref(), Some("Name, The"));
+        assert_eq!(album.sort_text, "name, the");
         assert_eq!(
-            album.relations.album_artists[0].sort_name.as_deref(),
-            Some("Artist, The")
+            album.relations.as_ref().unwrap().album_artists[0]
+                .sort_text
+                .as_deref(),
+            Some("artist, the")
         );
-        let track = super::super::item::track_from_json(&source, &value).unwrap();
+        let track = super::super::item::track_from_json(&source, "source", &value)
+            .unwrap()
+            .unwrap();
         assert_eq!(track.title, "The Name");
-        assert_eq!(track.sort_name.as_deref(), Some("Name, The"));
-        let artist = super::super::item::artist_from_json(&source, &value).unwrap();
+        assert_eq!(track.sort_text, "name, the");
+        let artist = super::super::item::artist_from_json(&source, "source", &value)
+            .unwrap()
+            .unwrap();
         assert_eq!(artist.name, "The Name");
-        assert_eq!(artist.sort_name.as_deref(), Some("Name, The"));
+        assert_eq!(artist.sort_text.as_deref(), Some("name, the"));
         let plain = serde_json::json!({"id":"1", "name":"Plain", "sortName":""});
-        assert!(
-            super::super::item::album_from_json(&source, &plain)
+        assert_eq!(
+            super::super::item::album_from_json(&source, "source", &plain)
                 .unwrap()
-                .sort_name
-                .is_none()
+                .unwrap()
+                .sort_text,
+            "plain"
         );
-        assert!(
-            super::super::item::track_from_json(&source, &plain)
+        assert_eq!(
+            super::super::item::track_from_json(&source, "source", &plain)
                 .unwrap()
-                .sort_name
-                .is_none()
+                .unwrap()
+                .sort_text,
+            "untitled track"
         );
-        assert!(
-            super::super::item::artist_from_json(&source, &plain)
+        assert_eq!(
+            super::super::item::artist_from_json(&source, "source", &plain)
                 .unwrap()
-                .sort_name
-                .is_none()
+                .unwrap()
+                .sort_text
+                .as_deref(),
+            Some("plain")
         );
     }
 
@@ -909,10 +992,26 @@ mod tests {
 
         let source = navidrome_source("http://localhost/");
         let track = track_from_navidrome(&source, "track-one", &track);
-        assert_eq!(track.replay_gain_track_db, Some(-4.25));
-        assert_eq!(track.replay_gain_track_peak, Some(0.91));
-        assert_eq!(track.replay_gain_album_db, Some(-3.5));
-        assert_eq!(track.replay_gain_album_peak, Some(0.95));
+        assert_eq!(
+            track.source_loudness.and_then(|value| value.replay_gain_db),
+            Some(-4.25)
+        );
+        assert_eq!(
+            track
+                .source_loudness
+                .and_then(|value| value.replay_gain_peak),
+            Some(0.91)
+        );
+        assert_eq!(
+            track.album_loudness.and_then(|value| value.replay_gain_db),
+            Some(-3.5)
+        );
+        assert_eq!(
+            track
+                .album_loudness
+                .and_then(|value| value.replay_gain_peak),
+            Some(0.95)
+        );
     }
 
     #[test]
@@ -944,9 +1043,9 @@ mod tests {
                 "releasetype": ["Album", "Live", "album"]
             }
         });
-        let album = album_from_navidrome(&source, "album-one", &album);
+        let album = album_from_navidrome(&source, "source", "album-one", &album).unwrap();
         assert_eq!(
-            album.musicbrainz_album_id.as_deref(),
+            album.musicbrainz_release_id.as_deref(),
             Some("11111111-1111-1111-1111-111111111111")
         );
         assert_eq!(
@@ -954,24 +1053,22 @@ mod tests {
             Some("22222222-2222-2222-2222-222222222222")
         );
         assert_eq!(
-            album.relations.album_artists[0]
+            album.relations.as_ref().unwrap().album_artists[0]
                 .musicbrainz_artist_id
                 .as_deref(),
             Some("33333333-3333-3333-3333-333333333333")
         );
         assert_eq!(album.release_date.as_deref(), Some("2025-04-03"));
-        assert_eq!(album.release_types, ["album", "live"]);
-        assert!(album.relations.artists.is_empty());
         assert_eq!(
-            album
-                .image_ref
-                .as_ref()
-                .map(|image| (image.item_id.as_str(), image.tag.as_deref())),
-            Some((
-                "navidrome:cover:al-album-one_0",
-                Some("2025-04-04T12:00:00Z")
-            ))
+            album.relations.as_ref().unwrap().release_types,
+            ["album", "live"]
         );
+        assert!(album.relations.as_ref().unwrap().artists.is_empty());
+        let binding: crate::NativeArtworkBinding =
+            serde_json::from_slice(album.artwork_binding.as_deref().unwrap()).unwrap();
+        assert_eq!(binding.source_id, crate::SourceId::new("source"));
+        assert_eq!(binding.image.item_id, "navidrome:cover:al-album-one_0");
+        assert_eq!(binding.image.tag.as_deref(), Some("2025-04-04T12:00:00Z"));
 
         for (data, expected) in [
             (
@@ -992,7 +1089,8 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                album_from_navidrome(&source, "dates", &data)
+                album_from_navidrome(&source, "source", "dates", &data)
+                    .unwrap()
                     .release_date
                     .as_deref(),
                 expected
@@ -1010,18 +1108,15 @@ mod tests {
             "name": "Album Artist",
             "mbzArtistId": "33333333-3333-3333-3333-333333333333"
         });
-        let artist = artist_from_navidrome(&source, "artist-one", &artist);
+        let artist = artist_from_navidrome(&source, "source", "artist-one", &artist).unwrap();
         assert_eq!(
             artist.musicbrainz_artist_id.as_deref(),
             Some("33333333-3333-3333-3333-333333333333")
         );
-        assert_eq!(
-            artist
-                .image_ref
-                .as_ref()
-                .map(|image| image.item_id.as_str()),
-            Some("navidrome:cover:ar-artist-one_0")
-        );
+        let binding: crate::NativeArtworkBinding =
+            serde_json::from_slice(artist.artwork_binding.as_deref().unwrap()).unwrap();
+        assert_eq!(binding.source_id, crate::SourceId::new("source"));
+        assert_eq!(binding.image.item_id, "navidrome:cover:ar-artist-one_0");
     }
 
     fn navidrome_source(base_url: &str) -> SubsonicSource {
@@ -1118,13 +1213,13 @@ mod tests {
         let mut scan = library::Scan::begin(&database, "source", "Source", "source", None)
             .await
             .unwrap();
-        scan.write_folder(
-            "navidrome:music-folder:1",
-            "Folder",
-            "folder",
-            "folder",
-            None,
-        )
+        scan.write_folder(&library::FolderInput {
+            object_id: "navidrome:music-folder:1".to_string(),
+            name: Some("Folder".to_string()),
+            sort_text: Some("folder".to_string()),
+            artwork_binding: None,
+            ..Default::default()
+        })
         .await
         .unwrap();
         source
@@ -1366,9 +1461,15 @@ mod tests {
                 .await
                 .expect("Navidrome Scan");
         scan.begin_batch().await.expect("Folder batch");
-        scan.write_folder("navidrome:music-folder:1", "Music", "music", "music", None)
-            .await
-            .expect("Music Folder");
+        scan.write_folder(&library::FolderInput {
+            object_id: "navidrome:music-folder:1".to_string(),
+            name: Some("Music".to_string()),
+            sort_text: Some("music".to_string()),
+            artwork_binding: None,
+            ..Default::default()
+        })
+        .await
+        .expect("Music Folder");
         scan.finish_batch().await.expect("finish Folder batch");
         source
             .stage_navidrome_library(&mut scan, &|_| {}, &|| false)
