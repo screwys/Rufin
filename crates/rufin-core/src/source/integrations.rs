@@ -54,7 +54,7 @@ impl SourceOwner {
                 if !matches!(input, SourceSetup::WebDav { .. } | SourceSetup::Smb { .. }) {
                     return Err("Choose WebDAV or SMB / Samba".into());
                 }
-                let connected = Source::connect(fresh_source_id()?, source_setup_input(input, ""))
+                let connected = Source::connect(fresh_source_id()?, input, "")
                     .await
                     .map_err(string_error)?;
                 let (configuration, _, credential) = connected.into_parts();
@@ -74,7 +74,7 @@ impl SourceOwner {
         &self,
         input: SourceSettingsChange,
     ) -> Receiver<Result<(), String>> {
-        let id = source_settings_id(&input).clone();
+        let id = input.source_id().clone();
         if self
             .shared
             .settings
@@ -103,14 +103,9 @@ impl SourceOwner {
                     .map(|r| load_provider_secret(&owner.shared.secrets, r))
                     .transpose()?
                     .flatten();
-                match Source::edit(
-                    saved.configuration.clone(),
-                    credential,
-                    source_settings_input(input),
-                    None,
-                )
-                .await
-                .map_err(string_error)?
+                match Source::edit(saved.configuration.clone(), credential, input, None)
+                    .await
+                    .map_err(string_error)?
                 {
                     sources::SourceEditResult::Unchanged => Ok(()),
                     sources::SourceEditResult::ConfigurationOnly(configuration) => {

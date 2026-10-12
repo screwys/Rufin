@@ -15,14 +15,14 @@ use gtk_widgets::media_drag::{MediaDragSource, install_compact_media_drag_source
 use gtk_widgets::mounted_route::{MountedRouteItemNavigation, item_navigation_entry_position};
 use gtk_widgets::sparse_model::{item_at, item_at_from_item};
 use localization::msgid;
-use playback::QueuePlacement;
+use rufin_core::playback::QueuePlacement;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use super::cards;
 use super::collections::collection_grid_field_label;
 use gtk_widgets::selection::track_play_request;
-use playback::PlayRequest;
+use rufin_core::playback::PlayRequest;
 
 use crate::track_selection::TrackSelection;
 use gtk_widgets::detail_links::{DetailLinkBinding, DetailLinks, album_artist_links};
@@ -725,7 +725,7 @@ impl<T: gtk_widgets::library_fields::TrackPresentation> TrackGridCell<T> {
                     let mut request =
                         track_play_request(row.track_key().expect("catalog song key"));
                     request.placement = placement;
-                    shell.queue.play(request);
+                    shell.playback.play_selection(request);
                 }
             });
         }

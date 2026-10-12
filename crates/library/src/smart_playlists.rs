@@ -7,8 +7,7 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{AssertSqlSafe, Connection, FromRow, Row, Sqlite, SqliteConnection};
 
 use crate::{
-    Database, FolderKey, LibraryError, LibraryResult, ReadCancellation, RouteSeedWindow,
-    SmartPlaylistKey, SourceKey,
+    Database, FolderKey, LibraryError, LibraryResult, ReadCancellation, SmartPlaylistKey, SourceKey,
 };
 
 const SMART_PLAYLIST_ROW_LIMIT: usize = 64;
@@ -430,7 +429,7 @@ fn smart_list_order(sort: SmartPlaylistListSort, descending: bool) -> Option<&'s
     }
 }
 
-async fn load_smart_playlist_rows(
+pub(crate) async fn load_smart_playlist_rows(
     connection: &mut SqliteConnection,
     source: Option<SourceKey>,
     keys: &[SmartPlaylistKey],
@@ -502,93 +501,6 @@ async fn load_smart_playlist_rows(
 }
 
 impl Database {
-    pub async fn smart_playlist_section_positions(
-        &self,
-        source: Option<SourceKey>,
-        folder: Option<FolderKey>,
-        sort: SmartPlaylistListSort,
-        descending: bool,
-        filter: &str,
-        now: i64,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<crate::ScrollSection>> {
-        if sort != SmartPlaylistListSort::Title {
-            return Ok(Vec::new());
-        }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        crate::scroll_sections::decode_sections(
-            load_smart_playlist_order::<String>(
-                &mut connection,
-                source,
-                folder,
-                sort,
-                descending,
-                filter,
-                now,
-                0,
-                usize::MAX,
-                true,
-            )
-            .await?,
-        )
-    }
-
-    pub async fn smart_playlist_count(
-        &self,
-        source: Option<SourceKey>,
-        folder: Option<FolderKey>,
-        filter: &str,
-        now: i64,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<i64> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(if folder.is_none() {
-            sqlx::query_scalar(
-                "SELECT count(*) FROM smart_playlists WHERE instr(normalized_name,lower(?1))>0",
-            )
-            .bind(filter.trim())
-            .fetch_one(&mut *connection)
-            .await?
-        } else {
-            let policy = smart_membership_sql(&mut connection, source, folder, now, None).await?;
-            sqlx::query_scalar(AssertSqlSafe(format!("{policy} SELECT count(*) FROM definitions WHERE instr(normalized_name,lower(?1))>0 AND (current_scope=0 OR EXISTS(SELECT 1 FROM selected WHERE selected.definition_key=definitions.definition_key))")))
-                .bind(filter.trim()).fetch_one(&mut *connection).await?
-        })
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub async fn smart_playlist_page(
-        &self,
-        source: Option<SourceKey>,
-        folder: Option<FolderKey>,
-        sort: SmartPlaylistListSort,
-        descending: bool,
-        filter: &str,
-        now: i64,
-        offset: usize,
-        limit: usize,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<SmartPlaylistRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let keys = load_smart_playlist_order::<SmartPlaylistKey>(
-            &mut transaction,
-            source,
-            folder,
-            sort,
-            descending,
-            filter,
-            now,
-            offset,
-            limit,
-            false,
-        )
-        .await?;
-        let rows = load_smart_playlist_rows(&mut transaction, source, &keys, folder, now).await?;
-        transaction.commit().await?;
-        Ok(rows)
-    }
-
     pub async fn ensure_default_smart_playlists(&self) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
@@ -661,37 +573,6 @@ impl Database {
                 .fetch_optional(&mut *connection)
                 .await?,
         )
-    }
-
-    pub async fn smart_playlist_route_page(
-        &self,
-        source: Option<SourceKey>,
-        folder: Option<FolderKey>,
-        sort: SmartPlaylistListSort,
-        descending: bool,
-        now: i64,
-        window: RouteSeedWindow,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<(usize, usize, Vec<SmartPlaylistRow>)> {
-        let count = self
-            .smart_playlist_count(source, folder, "", now, cancellation)
-            .await?
-            .max(0) as usize;
-        let range = window.range(count);
-        let rows = self
-            .smart_playlist_page(
-                source,
-                folder,
-                sort,
-                descending,
-                "",
-                now,
-                range.start,
-                range.len(),
-                cancellation,
-            )
-            .await?;
-        Ok((count, range.start, rows))
     }
 
     pub async fn smart_playlist_rows(
@@ -1312,7 +1193,7 @@ fn validate_definition(definition: &SmartPlaylistDefinition) -> LibraryResult<()
     Ok(())
 }
 
-async fn smart_membership_sql(
+pub(crate) async fn smart_membership_sql(
     connection: &mut SqliteConnection,
     source: Option<SourceKey>,
     folder: Option<FolderKey>,
@@ -1611,7 +1492,7 @@ pub(crate) async fn smart_query(
     Ok(query)
 }
 
-async fn load_smart_playlist_order<T>(
+pub(crate) async fn load_smart_playlist_order<T>(
     connection: &mut SqliteConnection,
     source: Option<SourceKey>,
     folder: Option<FolderKey>,

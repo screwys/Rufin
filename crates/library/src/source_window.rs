@@ -47,7 +47,7 @@ where
     T: for<'r> sqlx::Decode<'r, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite> + Send + Unpin,
 {
     Ok(
-        selected_rows_on::<(T,)>(connection, query, column, Some(ranges))
+        selected_rows_on::<(T,)>(connection, query, column, Some(ranges), None)
             .await?
             .into_iter()
             .map(|(value,)| value)
@@ -60,15 +60,24 @@ pub(crate) async fn selected_rows_on<T>(
     query: &SourceQuery,
     columns: &str,
     ranges: Option<&[std::ops::Range<usize>]>,
+    limit: Option<usize>,
 ) -> LibraryResult<Vec<T>>
 where
     T: for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> + Send + Unpin,
 {
+    if limit == Some(0) {
+        return Ok(Vec::new());
+    }
+    let first_parameter = query.arguments.len() + 1;
     let Some(ranges) = ranges else {
         return Ok(sqlx::query_as_with(
-            sqlx::AssertSqlSafe(query.select(columns)),
+            sqlx::AssertSqlSafe(format!(
+                "{} LIMIT ?{first_parameter}",
+                query.select(columns)
+            )),
             query.arguments.clone(),
         )
+        .bind(limit.map_or(-1, |limit| limit.min(i64::MAX as usize) as i64))
         .persistent(false)
         .fetch_all(connection)
         .await?);
@@ -76,7 +85,6 @@ where
     let Some(first) = ranges.first() else {
         return Ok(Vec::new());
     };
-    let first_parameter = query.arguments.len() + 1;
     let second_parameter = first_parameter + 1;
     if ranges.len() == 1 {
         return Ok(sqlx::query_as_with(
@@ -86,7 +94,12 @@ where
             )),
             query.arguments.clone(),
         )
-        .bind(first.len().min(i64::MAX as usize) as i64)
+        .bind(
+            first
+                .len()
+                .min(limit.unwrap_or(usize::MAX))
+                .min(i64::MAX as usize) as i64,
+        )
         .bind(first.start.min(i64::MAX as usize) as i64)
         .persistent(false)
         .fetch_all(connection)
@@ -96,11 +109,12 @@ where
         "{columns}, row_number() OVER (ORDER BY {})-1 selected_position",
         query.order.join(",")
     );
+    let third_parameter = first_parameter + 2;
     let sql = format!("WITH ordered AS ({} LIMIT ?{first_parameter})
          SELECT * FROM ordered WHERE EXISTS (
            SELECT 1 FROM json_each(?{second_parameter}) selected
            WHERE selected_position>=json_extract(selected.value,'$.start')
-             AND selected_position<json_extract(selected.value,'$.end')) ORDER BY selected_position", query.select(&columns));
+             AND selected_position<json_extract(selected.value,'$.end')) ORDER BY selected_position LIMIT ?{third_parameter}", query.select(&columns));
     Ok(
         sqlx::query_as_with(sqlx::AssertSqlSafe(sql), query.arguments.clone())
             .bind(
@@ -112,6 +126,7 @@ where
                     .min(i64::MAX as usize) as i64,
             )
             .bind(serde_json::to_string(ranges)?)
+            .bind(limit.map_or(-1, |limit| limit.min(i64::MAX as usize) as i64))
             .persistent(false)
             .fetch_all(connection)
             .await?,

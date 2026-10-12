@@ -547,18 +547,17 @@ pub fn local_sources_page(shell: &Rc<Preferences>, dialog: &adw::Dialog) -> adw:
             let Ok(sources::EditableSource::Local { roots, .. }) = configuration.editable() else {
                 return;
             };
-            let pending =
-                source.update_source(rufin_core::runtime::source::SourceSettingsChange::Local {
-                    source_id: source_id.clone(),
-                    roots,
-                    excluded_folders: Some(
-                        paths
-                            .borrow()
-                            .iter()
-                            .map(std::path::PathBuf::from)
-                            .collect(),
-                    ),
-                });
+            let pending = source.update_source(sources::SourceSettingsChange::Local {
+                source_id: source_id.clone(),
+                roots,
+                excluded_folders: Some(
+                    paths
+                        .borrow()
+                        .iter()
+                        .map(std::path::PathBuf::from)
+                        .collect(),
+                ),
+            });
             button.set_sensitive(false);
             status.set_visible(false);
             let button = button.downgrade();

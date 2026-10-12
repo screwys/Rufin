@@ -494,7 +494,7 @@ impl JellyfinEmbySource {
         }
     }
 
-    pub(crate) async fn create_playlist(
+    pub async fn create_playlist(
         &self,
         name: &str,
         tracks: &[String],
@@ -506,7 +506,7 @@ impl JellyfinEmbySource {
         }
     }
 
-    pub(crate) async fn update_playlist(
+    pub async fn update_playlist(
         &self,
         playlist: &str,
         name: Option<&str>,
@@ -532,7 +532,7 @@ impl JellyfinEmbySource {
         }
     }
 
-    pub(crate) async fn playlist_public(&self, playlist: &str) -> SourceResult<Option<bool>> {
+    pub async fn playlist_public(&self, playlist: &str) -> SourceResult<Option<bool>> {
         let raw = raw_item_id(playlist);
         match self.kind {
             ServerKind::Jellyfin => {
@@ -665,14 +665,14 @@ impl JellyfinEmbySource {
 }
 
 impl JellyfinEmbySource {
-    pub(crate) async fn delete_playlist(&self, playlist_id: &str) -> SourceResult<()> {
+    pub async fn delete_playlist(&self, playlist_id: &str) -> SourceResult<()> {
         let url = endpoint(
             &self.base_url,
             &format!("Items/{}", raw_item_id(playlist_id)),
         )?;
         self.send_unit(self.client.delete(url)).await
     }
-    pub(crate) async fn add_playlist_tracks(
+    pub async fn add_playlist_tracks(
         &self,
         playlist_id: &str,
         track_ids: &[String],
@@ -689,7 +689,7 @@ impl JellyfinEmbySource {
         }
         Ok(())
     }
-    pub(crate) async fn remove_playlist_entries(
+    pub async fn remove_playlist_entries(
         &self,
         playlist_id: &str,
         entry_ids: &[String],
@@ -705,7 +705,7 @@ impl JellyfinEmbySource {
         }
         Ok(())
     }
-    pub(crate) async fn move_playlist_entry(
+    pub async fn move_playlist_entry(
         &self,
         playlist_id: &str,
         entry_id: &str,
@@ -1132,18 +1132,16 @@ mod tests {
                 .await;
             let result = JellyfinEmbySource::authenticate(
                 crate::SourceId::new("source"),
-                crate::JellyfinEmbySetupInput {
-                    kind: crate::ServerKind::Jellyfin,
-                    credentials: crate::CredentialHostInput {
-                        server_name: None,
-                        server_url: server.uri(),
-                        username: "listener".into(),
-                        password: "password".into(),
-                        trust_invalid_cert: false,
-                    },
-                    device_id: "device".into(),
-                    use_instant_mix: false,
+                crate::ServerKind::Jellyfin,
+                crate::CredentialInput {
+                    source_name: None,
+                    server_url: server.uri(),
+                    username: "listener".into(),
+                    secret: "password".into(),
+                    trust_invalid_cert: false,
                 },
+                false,
+                "device".into(),
             )
             .await;
             assert_eq!(result.is_ok(), succeeds);
@@ -1262,18 +1260,22 @@ mod tests {
         );
         assert_eq!(
             database
-                .source_playlist_entry_object_ids(
-                    publication.source,
+                .playlist_edit_entries(
                     key,
-                    &page
-                        .first_rows
-                        .iter()
-                        .map(|row| row.playlist_entry_key)
-                        .collect::<Vec<_>>(),
+                    &library::SongSelection::PlaylistEntries(
+                        page.first_rows
+                            .iter()
+                            .map(|row| row.playlist_entry_key)
+                            .collect::<Vec<_>>()
+                            .into()
+                    ),
                     &cancellation
                 )
                 .await
-                .unwrap(),
+                .unwrap()
+                .into_iter()
+                .map(|entry| entry.object_id)
+                .collect::<Vec<_>>(),
             ["one", "two"]
         );
         assert_eq!(page.first_rows[0].media_uri, page.first_rows[1].media_uri);
@@ -1815,19 +1817,21 @@ mod tests {
             .expect("cached source")
             .expect("published source")
             .source;
-        let (_, _, albums) = database
-            .album_route_page(
-                source_key,
-                None,
-                false,
-                "Updated Album",
-                library::AlbumSort::Title,
-                false,
-                library::RouteSeedWindow::top(),
-                &cancellation,
-            )
-            .await
-            .expect("updated Album page");
+        let (_, _, albums) = library::CollectionQuery {
+            kind: library::CollectionKind::Albums {
+                source: source_key,
+                sort: library::AlbumSort::Title,
+                inline_tracks: None,
+            },
+            folder: None,
+            filter: ("Updated Album").to_string(),
+            descending: false,
+            favorites_only: false,
+        }
+        .page(&database, library::RouteSeedWindow::top(), &cancellation)
+        .await
+        .map(|(count, start, rows)| (count, start, rows.albums()))
+        .expect("updated Album page");
         assert_eq!(albums[0].title, "Updated Album");
 
         source

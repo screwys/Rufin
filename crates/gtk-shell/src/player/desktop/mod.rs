@@ -13,7 +13,7 @@ use adw::prelude::*;
 #[cfg(target_os = "linux")]
 use ashpd::desktop::background::Background;
 use gtk::glib;
-use playback::{CurrentMedia, PlaybackView, PositionDiscontinuity, TransportHandle};
+use playback::{CurrentMedia, PlaybackView, PositionDiscontinuity};
 use tracing::{info, warn};
 
 use crate::Settings as UiSettings;
@@ -44,7 +44,10 @@ pub(crate) struct DesktopState {
 }
 
 impl DesktopState {
-    pub(crate) fn new(application: &adw::Application, transport: TransportHandle) -> Self {
+    pub(crate) fn new(
+        application: &adw::Application,
+        transport: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
+    ) -> Self {
         let weak = application.downgrade();
         Self {
             media_controls: desktop_integration::MediaControls::start(transport, move |uri| {
@@ -89,7 +92,7 @@ impl Shell {
         self.chrome.window.set_visible(false);
         self.shutdown_tray();
 
-        let transport = self.products.playback.transport.clone();
+        let transport = self.products.playback.clone();
         let scrobbling = self.products.scrobbling.clone();
         let (completed, completion) = channel();
         if let Err(error) = std::thread::Builder::new()
@@ -394,13 +397,13 @@ impl Shell {
                 match intent {
                     desktop_integration::TrayIntent::Present => shell.present_from_tray(),
                     desktop_integration::TrayIntent::PlayPause => {
-                        shell.products.playback.transport.play_pause();
+                        shell.products.playback.play_pause();
                     }
                     desktop_integration::TrayIntent::PreviousTrack => {
-                        shell.products.playback.transport.previous();
+                        shell.products.playback.previous();
                     }
                     desktop_integration::TrayIntent::NextTrack => {
-                        shell.products.playback.transport.next();
+                        shell.products.playback.next();
                     }
                     desktop_integration::TrayIntent::TogglePrivateMode => {
                         let enabled = !shell.settings.current.borrow().private_mode;

@@ -7,7 +7,7 @@ use library::{
     AlbumRow, ArtistRow, FavoriteTarget, GenreRow, MoodRow, PlaylistRow, RadioSeed,
     SmartPlaylistRow, TrackRow,
 };
-use playback::{QueuePlacement, RadioPlayRequest};
+use rufin_core::playback::{QueuePlacement, RadioPlayRequest};
 
 use gtk_widgets::controls::{ADD_ICON, DELETE_ICON, EDIT_ICON, REMOVE_ICON, TRASH_ICON};
 use gtk_widgets::downloads::{OperationArtwork, OperationFeedback, OperationFeedbackKind};
@@ -24,7 +24,7 @@ use rufin_core::settings::ContextMenuItem;
 use rufin_core::settings::SidebarPin;
 
 use gtk_widgets::selection::{collection_play_request, track_play_request};
-use playback::PlayRequest;
+use rufin_core::playback::PlayRequest;
 const PLAY_ACTIONS: [(&str, QueuePlacement, bool); 6] = [
     ("play", QueuePlacement::Now, false),
     ("play-next", QueuePlacement::Next, false),
@@ -46,18 +46,17 @@ pub fn add_drag_to_playlist(
     let database = Arc::clone(&menus.library);
     let task = menus
         .runtime
-        .spawn(async move { source.resolve(&database).await });
+        .spawn(async move { source.playlist_input(&database).await });
     let menus = Rc::downgrade(menus);
     glib::spawn_future_local(async move {
-        let Some((media, subject)) = task.await.ok().and_then(Result::ok) else {
+        let Some((selection, title, preview_uris)) = task.await.ok().and_then(Result::ok) else {
             return;
         };
         let Some(owner) = menus.upgrade() else { return };
-        let preview_uris = media.iter().take(4).cloned().collect::<Vec<_>>();
         gtk_widgets::playlists::add_media_to_playlist(
             &owner.source,
             playlist.playlist_key,
-            media,
+            selection,
             false,
             Rc::new(move |accepted| {
                 if accepted > 0
@@ -65,7 +64,7 @@ pub fn add_drag_to_playlist(
                 {
                     (menus.operation_feedback)(
                         &OperationFeedback {
-                            subject: subject.clone(),
+                            title: title.clone(),
                             artwork: OperationArtwork::MediaUris(preview_uris.clone()),
                             item_count: accepted,
                             kind: OperationFeedbackKind::PlaylistAdded {
@@ -85,8 +84,7 @@ pub struct MediaMenus {
     pub library: Arc<library::Database>,
     pub runtime: tokio::runtime::Handle,
     pub source: rufin_core::runtime::SourceHandle,
-    pub queue: playback::QueueHandle,
-    pub radio: playback::RadioHandle,
+    pub playback: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
     pub downloads: downloads::Downloads,
     pub settings: Rc<gtk_widgets::settings::SettingsState>,
     pub navigate: Rc<dyn Fn(Route)>,
@@ -359,30 +357,30 @@ fn install_queue_entry_actions(
     occurrence_id: Option<u64>,
 ) {
     let selection = match occurrence_id {
-        Some(id) => playback::QueueSelection::Occurrences(vec![id]),
-        None => playback::QueueSelection::Positions(vec![position]),
+        Some(id) => rufin_core::playback::QueueSelection::Occurrences(vec![id]),
+        None => rufin_core::playback::QueueSelection::Positions(vec![position]),
     };
     let remove = selection.clone();
-    let queue = menus.queue.clone();
+    let queue = menus.playback.clone();
     surface.add_action("remove-from-queue", move || {
         queue.remove_many(remove.clone())
     });
-    let queue = menus.queue.clone();
+    let queue = menus.playback.clone();
     surface.add_action("play", move || match occurrence_id {
         Some(id) => queue.activate_occurrence(id),
         None => queue.activate(position),
     });
-    let queue = menus.queue.clone();
+    let queue = menus.playback.clone();
     surface.add_action("play-next", move || match occurrence_id {
         Some(id) => queue.move_occurrence_after_current(id),
         None => queue.move_after_current(position),
     });
-    let queue = menus.queue.clone();
+    let queue = menus.playback.clone();
     surface.add_action("play-last", move || {
-        queue.reorder(playback::QueueReorderRequest {
-            selection: selection.clone(),
-            target: playback::QueueReorderTarget::End,
-        });
+        queue.reorder(
+            selection.clone(),
+            rufin_core::playback::QueueReorderTarget::End,
+        );
     });
 }
 
@@ -562,45 +560,58 @@ pub fn remove_playlist_entry_selection(
     if !selection.writable || selection.count == 0 {
         return false;
     }
-    let item_count = selection.count;
-    let task_selection = selection.clone();
-    let database = menus.library.clone();
-    let task = menus
-        .runtime
-        .spawn(async move { task_selection.resolve(&database).await });
+    let result = rufin_core::playlists::remove_playlist_entries(
+        &menus.source,
+        selection.playlist,
+        selection.input,
+    );
     let menus = Rc::downgrade(menus);
     gtk::glib::spawn_future_local(async move {
-        let Ok(Ok((entries, media_uris))) = task.await else {
+        let Ok(Ok(tracks)) = result.recv().await else {
             return;
         };
-        let Some(menus) = menus.upgrade() else { return };
-        if media_uris.len() != item_count {
+        if tracks.is_empty() {
             return;
         }
-        rufin_core::playlists::remove_playlist_entries(&menus.source, selection.playlist, entries);
+        let Some(menus) = menus.upgrade() else {
+            return;
+        };
+        let item_count = tracks.len();
+        let songs = library::SongSelection::Tracks(tracks.into());
+        let database = menus.library.clone();
+        let preview = songs.clone();
+        let artwork = menus
+            .runtime
+            .spawn(async move {
+                database
+                    .selected_track_uris(&preview, Some(4), &library::ReadCancellation::new())
+                    .await
+            })
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or_default();
         let feedback = OperationFeedback {
-            subject: DownloadSubject::for_media_uris("playlist", Some("Playlist"), &media_uris),
-            artwork: OperationArtwork::MediaUris(media_uris.iter().take(4).cloned().collect()),
+            title: localization::tr("Playlist"),
+            artwork: OperationArtwork::MediaUris(artwork),
             item_count,
             kind: OperationFeedbackKind::PlaylistRemoved {
                 destination: selection.playlist_name.to_string(),
             },
         };
         let menus_for_undo = Rc::downgrade(&menus);
-        let playlist = selection.playlist;
         (menus.operation_feedback)(
             &feedback,
             Some(Box::new(move || {
-                let Some(menus) = menus_for_undo.upgrade() else {
-                    return;
-                };
-                gtk_widgets::playlists::add_media_to_playlist(
-                    &menus.source,
-                    playlist,
-                    media_uris.clone(),
-                    false,
-                    Rc::new(|_| {}),
-                );
+                if let Some(menus) = menus_for_undo.upgrade() {
+                    gtk_widgets::playlists::add_media_to_playlist(
+                        &menus.source,
+                        selection.playlist,
+                        songs.clone(),
+                        false,
+                        Rc::new(|_| {}),
+                    );
+                }
             })),
         );
     });
@@ -632,7 +643,7 @@ fn append_playlist_entry_selection_actions(
         let menus = Rc::clone(menus);
         let selection = selection.clone();
         surface.add_action(action, move || {
-            selection.play(&menus.queue, placement, shuffled)
+            selection.play(&menus.playback, placement, shuffled)
         });
     }
 }
@@ -668,7 +679,7 @@ fn append_track_selection_actions(
         let menus = Rc::clone(menus);
         let selection = selection.clone();
         surface.add_action(action, move || {
-            selection.play(&menus.queue, placement, shuffled)
+            selection.play(&menus.playback, placement, shuffled)
         });
     }
 }
@@ -1101,7 +1112,7 @@ pub fn present_playlist_context_menu(
                 };
                 (menus.operation_feedback)(
                     &OperationFeedback {
-                        subject: DownloadSubject::for_media_uris("playlist", Some(&name), &[]),
+                        title: name.clone(),
                         artwork: OperationArtwork::Bindings(artwork),
                         item_count: removed,
                         kind: OperationFeedbackKind::PlaylistRemoved { destination: name },
@@ -1137,7 +1148,7 @@ pub fn present_playlist_context_menu(
             gtk_widgets::playlists::add_media_to_playlist(
                 &add_menus.source,
                 playlist_key,
-                vec![media_uri.clone()],
+                library::SongSelection::Uris(vec![media_uri.clone()].into()),
                 false,
                 Rc::new(|_| {}),
             );
@@ -1317,9 +1328,9 @@ fn install_live_track_playback_actions(
         let menus = Rc::clone(menus);
         let track = track.clone();
         surface.add_action(action, move || {
-            menus
-                .queue
-                .play(playback::PlayRequest::one(track.clone(), placement).shuffled(shuffled));
+            menus.playback.play_selection(
+                rufin_core::playback::PlayRequest::one(track.clone(), placement).shuffled(shuffled),
+            );
         });
     }
 }
@@ -1330,10 +1341,12 @@ fn install_media_uri_playback_actions(
     media_uri: String,
 ) {
     for (action, placement, shuffled) in PLAY_ACTIONS {
-        let queue = menus.queue.clone();
+        let queue = menus.playback.clone();
         let media_uri = media_uri.clone();
         surface.add_action(action, move || {
-            queue.play(PlayRequest::uris(vec![media_uri.clone()], placement).shuffled(shuffled))
+            queue.play_selection(
+                PlayRequest::uris(vec![media_uri.clone()], placement).shuffled(shuffled),
+            )
         });
     }
 }
@@ -1392,7 +1405,7 @@ fn install_radio_actions(surface: &ContextMenuSurface, menus: &MediaMenus, seed:
         ("play-radio-next", RadioPlayRequest::next(seed.clone())),
         ("play-radio-last", RadioPlayRequest::last(seed)),
     ] {
-        let radio = menus.radio.clone();
+        let radio = menus.playback.clone();
         surface.add_action(action, move || radio.play_radio(request.clone()));
     }
 }

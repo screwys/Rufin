@@ -15,6 +15,7 @@ async fn reopening_without_statistics_preserves_library_order() {
                 ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
             }
             .selection(),
+            None,
             &ReadCancellation::new(),
         )
         .await
@@ -38,6 +39,7 @@ async fn reopening_without_statistics_preserves_library_order() {
                 ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
             }
             .selection(),
+            None,
             &ReadCancellation::new(),
         )
         .await
@@ -117,7 +119,11 @@ async fn index_setup_failure_returns_error_without_replacing_the_library() {
     let fixture = super::support::fixture().await;
     fixture
         .database
-        .create_playlist(None, "Keep me", &[])
+        .create_playlist(
+            None,
+            "Keep me",
+            &library::SongSelection::Uris((&[]).to_vec().into()),
+        )
         .await
         .unwrap();
     fixture.database.close().await.unwrap();
@@ -1750,7 +1756,11 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
     let uri = &fixture.track_uris[0];
     fixture
         .database
-        .create_playlist(None, "Durable duplicate list", &[uri.clone(), uri.clone()])
+        .create_playlist(
+            None,
+            "Durable duplicate list",
+            &library::SongSelection::Uris((&[uri.clone(), uri.clone()]).to_vec().into()),
+        )
         .await
         .unwrap();
     fixture
@@ -1898,7 +1908,11 @@ async fn forgetting_source_retains_canonical_metadata_for_global_playlists() {
     let fixture = super::support::fixture().await;
     let database = &fixture.database;
     database
-        .create_playlist(None, "Snapshot", &[fixture.track_uris[0].clone()])
+        .create_playlist(
+            None,
+            "Snapshot",
+            &library::SongSelection::Uris((&[fixture.track_uris[0].clone()]).to_vec().into()),
+        )
         .await
         .unwrap();
     let mut raw = connection(&fixture.path, false).await;
@@ -1979,7 +1993,11 @@ async fn unsupported_version_preserves_library_data() {
     let fixture = super::support::fixture().await;
     fixture
         .database
-        .create_playlist(None, "Keep me", &[])
+        .create_playlist(
+            None,
+            "Keep me",
+            &library::SongSelection::Uris((&[]).to_vec().into()),
+        )
         .await
         .unwrap();
     fixture.database.close().await.unwrap();
@@ -1996,7 +2014,11 @@ async fn missing_listen_identity_returns_error_without_replacing_user_data() {
     let fixture = super::support::fixture().await;
     fixture
         .database
-        .create_playlist(None, "Keep me", &[])
+        .create_playlist(
+            None,
+            "Keep me",
+            &library::SongSelection::Uris((&[]).to_vec().into()),
+        )
         .await
         .unwrap();
     fixture.database.close().await.unwrap();

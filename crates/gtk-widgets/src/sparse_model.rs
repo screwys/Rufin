@@ -495,7 +495,7 @@ impl SparseObjectModel {
 
     pub(crate) fn collection_selection(
         &self,
-        target: &playback::PlayRequest,
+        target: &rufin_core::playback::PlayRequest,
         positions: &gtk::Bitset,
     ) -> Option<crate::media_drag::CollectionTargets> {
         use glib::subclass::prelude::ObjectSubclassIsExt;

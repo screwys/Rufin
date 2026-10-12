@@ -210,7 +210,7 @@ pub async fn build(
     };
     let downloads = gtk_widgets::downloads::DownloadsState::new(Rc::clone(&settings_state));
 
-    let desktop = DesktopState::new(app, products.playback.transport.clone());
+    let desktop = DesktopState::new(app, products.playback.clone());
 
     let navigation_resource = crate::ui_resource::NAVIGATION_RESOURCE;
     let navigation_builder = gtk_widgets::ui_resource::builder(navigation_resource);
@@ -510,7 +510,7 @@ pub async fn build(
             };
             let local = shell.products.settings.local_configuration();
             if let Err(error) = rufin_core::open::files(
-                &shell.products.playback.queue,
+                &shell.products.playback,
                 &shell.products.library,
                 local.as_ref(),
                 files,

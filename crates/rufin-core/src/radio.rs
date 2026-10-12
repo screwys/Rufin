@@ -2,8 +2,9 @@
 
 use std::sync::{Arc, Weak};
 
+use crate::playback::{Placement, RadioPlayRequest, RandomPlayRequest};
 use library::{Database, RadioSeed, ReadCancellation, SourceKey};
-use playback::{Placement, Provenance, RadioPlayRequest, RandomPlayRequest};
+use playback::Provenance;
 use sources::{Source, SourceRadioSeed};
 use tracing::warn;
 
@@ -19,7 +20,7 @@ const MANUAL_RADIO_COUNT: usize = 20;
 pub fn random_play_request(
     settings: &crate::settings::RandomPlaySettings,
     genre: Option<library::GenreKey>,
-    placement: playback::QueuePlacement,
+    placement: crate::playback::QueuePlacement,
 ) -> RandomPlayRequest {
     RandomPlayRequest {
         placement,
@@ -42,7 +43,7 @@ pub async fn queue_random(
     source: SourceKey,
     folder: Option<library::FolderKey>,
     request: RandomPlayRequest,
-    queue: &playback::QueueHandle,
+    queue: &crate::playback::PlaybackOwner,
 ) -> Result<bool, String> {
     let cancellation = ReadCancellation::new();
     let order = database
@@ -59,7 +60,7 @@ pub async fn queue_random(
     if order.is_empty() {
         return Ok(true);
     }
-    queue.play(playback::PlayRequest::from_load(
+    queue.play_selection(crate::playback::PlayRequest::from_load(
         library::QueueReadRequest::media_uris(order, Provenance::Random),
         request.placement,
     ));

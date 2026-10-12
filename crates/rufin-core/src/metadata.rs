@@ -4,9 +4,12 @@ use crate::runtime::CatalogChange;
 use crate::source::{SourceOwner, string_error};
 use async_channel::Receiver;
 pub use editor::{MetadataEditor, identification_available};
+use library::Database;
 pub use metadata_lookup::{ArtworkQuery, ArtworkResult};
 pub use sources::MetadataDraft;
-use sources::{MetadataChanges, Source, SourceEntityKind, SourceMetadataError};
+use sources::{
+    Implementation, MetadataChanges, MetadataOwner, Source, SourceEntityKind, SourceMetadataError,
+};
 use std::sync::Arc;
 pub const MAX_ARTWORK_BYTES: usize = 32 * 1024 * 1024;
 
@@ -15,25 +18,51 @@ pub fn read_metadata(
     item: MetadataItemId,
 ) -> Receiver<Result<MetadataDraft, SourceMetadataError>> {
     owner.reply(move |owner, database| async move {
-        let target = owner.media_client(item.media_uri()).await;
-        match item {
-            MetadataItemId::Track(uri) => match target {
-                Ok(source) => source.read_track_metadata(&database, &uri).await,
-                Err(_) => Source::read_direct_file_metadata(&uri),
-            },
-            MetadataItemId::Album(uri) => {
-                target
-                    .map_err(|_| SourceMetadataError::Unavailable)?
-                    .read_album_metadata(&database, &uri)
-                    .await
+        let row = match metadata_row(&database, item.media_uri(), item.kind()).await {
+            Ok(row) => row,
+            Err(SourceMetadataError::Unavailable) if matches!(item, MetadataItemId::Track(_)) => {
+                return Source::read_direct_file_metadata(item.media_uri());
             }
-            MetadataItemId::Artist(uri) => {
-                target
-                    .map_err(|_| SourceMetadataError::Unavailable)?
-                    .read_artist_metadata(&database, &uri)
-                    .await
+            Err(error) => return Err(error),
+        };
+        let source = match metadata_source(&owner, &row) {
+            Ok(source) => source,
+            Err(_) if matches!(item, MetadataItemId::Track(_)) => {
+                return Source::read_direct_file_metadata(item.media_uri());
             }
-        }
+            Err(error) => return Err(error),
+        };
+        let binding = metadata_binding(&database, &row).await?;
+        let server = matches!(
+            source.implementation,
+            Implementation::JellyfinEmby(_) | Implementation::Plex(_)
+        );
+        let mut metadata = match (&source.implementation, row) {
+            (Implementation::JellyfinEmby(provider), MetadataOwner::Track(row)) => {
+                provider.read_track_metadata(*row).await?
+            }
+            (Implementation::JellyfinEmby(provider), MetadataOwner::Album(row)) => {
+                provider.read_album_metadata(row).await?
+            }
+            (Implementation::JellyfinEmby(provider), MetadataOwner::Artist(row)) => {
+                provider.read_artist_metadata(row).await?
+            }
+            (Implementation::Plex(provider), MetadataOwner::Track(row)) => {
+                provider.read_track_metadata(*row).await?
+            }
+            (Implementation::Plex(provider), MetadataOwner::Album(row)) => {
+                provider.read_album_metadata(row).await?
+            }
+            (Implementation::Plex(provider), MetadataOwner::Artist(row)) => {
+                provider.read_artist_metadata(row).await?
+            }
+            (_, MetadataOwner::Track(row)) => {
+                source.read_file_track_metadata(&database, *row).await?
+            }
+            (_, row) => source.read_file_collection_metadata(&database, row).await?,
+        };
+        metadata.artwork = metadata.artwork.with_binding(binding, server);
+        Ok(metadata)
     })
 }
 
@@ -46,8 +75,12 @@ pub fn write_reviewed_metadata(
     previous_artwork: Option<Vec<u8>>,
 ) -> Receiver<Result<(), SourceMetadataError>> {
     owner.reply(move |owner, database| async move {
-        let target = owner.media_client(&media_uri).await;
         let _lane = owner.shared.lane.lock().await;
+        let row = metadata_row(&database, &media_uri, edit.kind).await;
+        let target = row
+            .as_ref()
+            .map_err(Clone::clone)
+            .and_then(|row| metadata_source(&owner, row));
         let source = match target {
             Ok(source) => source,
             Err(_) => {
@@ -62,15 +95,59 @@ pub fn write_reviewed_metadata(
             }
         };
         let previous_artwork = edit.artwork.as_ref().and(previous_artwork);
-        let result = source
-            .write_metadata(
-                &database,
-                &media_uri,
-                revision.as_deref().unwrap_or_default(),
-                token.as_deref(),
-                edit,
-            )
-            .await;
+        let row = row?;
+        let expected = revision.as_deref().unwrap_or_default();
+        let result = async {
+            let object = row.object_id();
+            let tags_saved = !edit.changes.is_empty();
+            let (result, object, saved) = match &source.implementation {
+                Implementation::Plex(provider) => {
+                    let object = object.ok_or(SourceMetadataError::Unavailable)?;
+                    provider.write_metadata(object, expected, &edit).await?;
+                    (
+                        provider.write_artwork(object, edit.artwork.as_ref()).await,
+                        object.to_owned(),
+                        tags_saved,
+                    )
+                }
+                Implementation::JellyfinEmby(provider) => {
+                    let object = provider
+                        .write_metadata(
+                            object.ok_or(SourceMetadataError::Unavailable)?,
+                            expected,
+                            token.as_deref(),
+                            &edit,
+                        )
+                        .await?;
+                    let result = if let Some(artwork) = edit.artwork.as_ref() {
+                        provider.write_artwork(&object, artwork).await
+                    } else {
+                        Ok(())
+                    };
+                    (result, object, tags_saved || token.is_some())
+                }
+                _ => {
+                    let binding = metadata_binding(&database, &row).await?;
+                    let folder = sources::artwork_file(binding.as_deref());
+                    return source
+                        .write_file_metadata(
+                            &database,
+                            &media_uri,
+                            &row,
+                            expected,
+                            &edit,
+                            folder.as_deref(),
+                        )
+                        .await;
+                }
+            };
+            let refresh = source
+                .apply_items(&database, vec![object], Vec::new())
+                .await
+                .map_err(|error| SourceMetadataError::SavedRefreshFailed(error.to_string()));
+            sources::finish_metadata_save(result, refresh, saved)
+        }
+        .await;
         let mut refresh = Ok(false);
         match &result {
             Ok(()) | Err(SourceMetadataError::PartiallySaved { .. }) => {
@@ -115,7 +192,7 @@ pub fn identify_metadata(
         .load()
         .ui
         .allows_external_metadata_lookup();
-    owner.reply(move |owner, database| async move {
+    owner.reply(move |owner, _database| async move {
         let exact = editor::exact_identity(kind, &values);
         if external && (exact || kind == SourceEntityKind::Track) {
             let input = values.clone();
@@ -134,31 +211,28 @@ pub fn identify_metadata(
         if kind == SourceEntityKind::Track {
             return Ok(None);
         }
-        let native_source = library::source_entity_parts(&media_uri)
-            .map(|(id, _, _)| id)
-            .filter(|id| {
-                owner.configuration(id).is_some_and(|configuration| {
-                    matches!(configuration.kind.as_str(), "jellyfin" | "emby")
-                })
-            });
-        let source = match native_source {
-            Some(id) => tokio::task::spawn_blocking(move || owner.client(&id).ok())
-                .await
-                .map_err(string_error)?,
+        let native = library::source_entity_parts(&media_uri).filter(|(id, _, _)| {
+            owner.configuration(id).is_some_and(|configuration| {
+                matches!(configuration.kind.as_str(), "jellyfin" | "emby")
+            })
+        });
+        let source = match &native {
+            Some((id, _, _)) => {
+                let id = id.clone();
+                tokio::task::spawn_blocking(move || owner.client(&id).ok())
+                    .await
+                    .map_err(string_error)?
+            }
             None => None,
         };
-        if let Some(source) = source {
+        if let Some((_, _, object)) = native
+            && let Some(source) = source
+            && let Implementation::JellyfinEmby(provider) = &source.implementation
+        {
+            let id = object.as_str();
             let found = match kind {
-                SourceEntityKind::Album => {
-                    source
-                        .identify_album_metadata(&database, &media_uri, &values)
-                        .await?
-                }
-                SourceEntityKind::Artist => {
-                    source
-                        .identify_artist_metadata(&database, &media_uri, &values)
-                        .await?
-                }
+                SourceEntityKind::Album => provider.identify_album_metadata(id, &values).await?,
+                SourceEntityKind::Artist => provider.identify_artist_metadata(id, &values).await?,
                 SourceEntityKind::Track => unreachable!(),
             };
             if let Some((changes, token)) = found {
@@ -191,6 +265,14 @@ pub enum MetadataItemId {
 }
 
 impl MetadataItemId {
+    fn kind(&self) -> SourceEntityKind {
+        match self {
+            Self::Track(_) => SourceEntityKind::Track,
+            Self::Album(_) => SourceEntityKind::Album,
+            Self::Artist(_) => SourceEntityKind::Artist,
+        }
+    }
+
     pub fn media_uri(&self) -> &str {
         match self {
             Self::Track(uri) | Self::Album(uri) | Self::Artist(uri) => uri,
@@ -282,4 +364,83 @@ fn checked_artwork(bytes: Vec<u8>) -> Result<Arc<sources::ImageBytes>, String> {
         bytes,
         content_type,
     }))
+}
+
+async fn metadata_row(
+    database: &Database,
+    uri: &str,
+    kind: SourceEntityKind,
+) -> Result<MetadataOwner, SourceMetadataError> {
+    let cancel = library::ReadCancellation::new();
+    let missing = SourceMetadataError::Unavailable;
+    let error = |error: library::LibraryError| SourceMetadataError::Write(error.to_string());
+    Ok(match kind {
+        SourceEntityKind::Track => MetadataOwner::Track(Box::new(
+            database
+                .track_row_by_uri(uri, &cancel)
+                .await
+                .map_err(error)?
+                .ok_or(missing)?,
+        )),
+        SourceEntityKind::Album => MetadataOwner::Album(
+            database
+                .album_row_by_media_uri(uri, &cancel)
+                .await
+                .map_err(error)?
+                .ok_or(missing)?,
+        ),
+        SourceEntityKind::Artist => MetadataOwner::Artist(
+            database
+                .artist_row_by_media_uri(uri, &cancel)
+                .await
+                .map_err(error)?
+                .ok_or(missing)?,
+        ),
+    })
+}
+
+fn metadata_source(
+    owner: &SourceOwner,
+    row: &MetadataOwner,
+) -> Result<Arc<Source>, SourceMetadataError> {
+    let source = match row {
+        MetadataOwner::Track(row) => row.source_id.as_deref().map(sources::SourceId::new),
+        MetadataOwner::Album(row) => {
+            library::source_entity_parts(&row.media_uri).map(|(id, _, _)| id)
+        }
+        MetadataOwner::Artist(row) => {
+            library::source_entity_parts(&row.media_uri).map(|(id, _, _)| id)
+        }
+    }
+    .ok_or(SourceMetadataError::Unavailable)?;
+    owner
+        .client(&source)
+        .map_err(|_| SourceMetadataError::Unavailable)
+}
+
+async fn metadata_binding(
+    database: &Database,
+    row: &MetadataOwner,
+) -> Result<Option<Vec<u8>>, SourceMetadataError> {
+    match row {
+        MetadataOwner::Track(row) => track_artwork_binding(database, row).await,
+        MetadataOwner::Album(row) => Ok(row.artwork_binding.clone()),
+        MetadataOwner::Artist(row) => Ok(row.artwork_binding.clone()),
+    }
+}
+async fn track_artwork_binding(
+    database: &Database,
+    track: &library::TrackRow,
+) -> Result<Option<Vec<u8>>, SourceMetadataError> {
+    if track.artwork_binding.is_some() {
+        return Ok(track.artwork_binding.clone());
+    }
+    let Some(uri) = &track.album_media_uri else {
+        return Ok(None);
+    };
+    Ok(database
+        .album_row_by_media_uri(uri, &library::ReadCancellation::new())
+        .await
+        .map_err(|error| SourceMetadataError::Write(error.to_string()))?
+        .and_then(|album| album.artwork_binding))
 }

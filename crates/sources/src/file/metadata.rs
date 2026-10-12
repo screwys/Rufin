@@ -1404,9 +1404,10 @@ mod tests {
             .unwrap();
         let connected = crate::Source::connect(
             crate::SourceId::new("metadata-paths"),
-            crate::SourceSetupInput::Local(crate::LocalFolderHostInput {
+            crate::SourceSetup::Local {
                 roots: vec![root.clone()],
-            }),
+            },
+            "",
         )
         .await
         .unwrap();
@@ -1459,9 +1460,10 @@ mod tests {
             .unwrap();
         let connected = crate::Source::connect(
             crate::SourceId::new("remove-local-root"),
-            crate::SourceSetupInput::Local(crate::LocalFolderHostInput {
+            crate::SourceSetup::Local {
                 roots: vec![directory.path().to_path_buf()],
-            }),
+            },
+            "",
         )
         .await
         .unwrap();
@@ -1483,10 +1485,12 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+        let source_id = configuration.source_id.clone();
         let edit = crate::Source::edit(
             configuration,
             None,
-            crate::SourceSettingsInput::Local {
+            crate::SourceSettingsChange::Local {
+                source_id,
                 roots: Vec::new(),
                 excluded_folders: None,
             },
@@ -1543,7 +1547,8 @@ mod tests {
         let source_id = crate::SourceId::new("import-local");
         let connected = crate::Source::connect(
             source_id.clone(),
-            crate::SourceSetupInput::Local(crate::LocalFolderHostInput { roots: Vec::new() }),
+            crate::SourceSetup::Local { roots: Vec::new() },
+            "",
         )
         .await
         .unwrap();

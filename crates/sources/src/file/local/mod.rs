@@ -11,8 +11,7 @@ use serde::Deserialize;
 
 use crate::source::SourceReadProgress;
 use crate::{
-    ConnectedSource, ImageBytes, LocalFolderHostInput, SourceConfiguration, SourceEditResult,
-    SourceError, SourceResult,
+    ConnectedSource, ImageBytes, SourceConfiguration, SourceEditResult, SourceError, SourceResult,
 };
 
 pub(crate) mod artwork;
@@ -347,9 +346,9 @@ impl LocalSource {
 
 pub(crate) fn connect(
     source_id: crate::SourceId,
-    input: LocalFolderHostInput,
+    roots: Vec<PathBuf>,
 ) -> SourceResult<ConnectedSource> {
-    let source = LocalSource::from_roots(input.roots)?;
+    let source = LocalSource::from_roots(roots)?;
     let configuration = crate::config::encode_provider_payload(
         source_id,
         LOCAL_SOURCE_ID,

@@ -32,7 +32,7 @@ pub enum OperationArtwork {
 }
 
 pub struct OperationFeedback {
-    pub subject: DownloadSubject,
+    pub title: String,
     pub artwork: OperationArtwork,
     pub item_count: usize,
     pub kind: OperationFeedbackKind,

@@ -3,9 +3,7 @@ use std::sync::Arc;
 pub use library::{QueuePlacement as Placement, QueueReorderTarget};
 use library::{RadioSeed, RandomCriteria};
 
-use crate::{
-    AudioOutput, CastNetwork, PlaybackOutput, Provenance, QueueItem, RemoteOutput, RepeatMode,
-};
+use playback::{Provenance, QueueItem};
 
 pub type QueuePlacement = Placement;
 
@@ -219,12 +217,6 @@ pub enum QueueSelection {
     Occurrences(Vec<u64>),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct QueueReorderRequest {
-    pub selection: QueueSelection,
-    pub target: QueueReorderTarget,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct RandomPlayRequest {
     pub placement: QueuePlacement,
@@ -261,73 +253,17 @@ impl RadioPlayRequest {
     }
 }
 
-pub trait QueueCommandPort: Send + Sync {
-    fn page(&self, offset: u64, limit: u32, filter: String) -> Result<QueuePage, String>;
-    fn snapshot(&self) -> Result<library::QueueRestore, String>;
-    fn media_uris(&self) -> Result<Vec<String>, String>;
-    fn play(&self, request: PlayRequest);
-    fn insert(&self, selection: library::SongSelection, target: QueueReorderTarget);
-    fn remove(&self, position: usize);
-    fn remove_many(&self, selection: QueueSelection);
-    fn activate(&self, position: usize);
-    fn activate_occurrence(&self, occurrence_id: u64);
-    fn move_after_current(&self, position: usize);
-    fn move_occurrence_after_current(&self, occurrence_id: u64);
-    fn reorder(&self, request: QueueReorderRequest);
-    fn clear(&self, include_current: bool);
-}
-
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct QueuePage {
-    pub rows: Vec<Arc<crate::QueueRow>>,
+    pub rows: Vec<Arc<playback::QueueRow>>,
     pub total: u64,
     pub window_offset: u64,
-}
-
-pub trait RadioCommandPort: Send + Sync {
-    fn candidates(
-        &self,
-        seed: RadioSeed,
-        requested: usize,
-        cancellation: library::ReadCancellation,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<String>, String>> + Send>>;
-    fn play_random(&self, request: RandomPlayRequest);
-    fn play_radio(&self, request: RadioPlayRequest);
-}
-
-pub trait TransportCommandPort: Send + Sync {
-    fn play_pause(&self);
-    fn play(&self);
-    fn pause(&self);
-    fn stop(&self);
-    fn next(&self);
-    fn previous(&self);
-    fn seek_seconds(&self, seconds: u32);
-    fn seek_millis(&self, millis: u64);
-    fn set_volume(&self, volume: f64);
-    fn persist_volume(&self, volume: f64);
-    fn set_muted(&self, muted: bool);
-    fn set_shuffle(&self, enabled: bool);
-    fn cycle_repeat(&self);
-    fn set_repeat(&self, repeat: RepeatMode);
-    fn toggle_auto_dj(&self);
-    fn set_visualizer_enabled(&self, enabled: bool);
-    fn available_audio_outputs(&self) -> Vec<AudioOutput>;
-    fn available_cast_networks(&self) -> Vec<CastNetwork>;
-    fn playback_output(&self) -> PlaybackOutput;
-    fn discover_remote_outputs(&self) -> Result<Vec<RemoteOutput>, String>;
-    fn select_playback_output(
-        &self,
-        output: PlaybackOutput,
-        cancelled: Arc<std::sync::atomic::AtomicBool>,
-    ) -> Result<(), String>;
-    fn shutdown(&self);
 }
 
 #[cfg(test)]
 mod tests {
     use super::{PlayRequest, QueuePlacement};
-    use crate::Provenance;
+    use playback::Provenance;
     use std::sync::Arc;
 
     #[test]
@@ -416,16 +352,4 @@ mod tests {
 
         assert!(Arc::ptr_eq(&first, &second));
     }
-}
-
-pub type TransportHandle = Arc<dyn TransportCommandPort>;
-pub type QueueHandle = Arc<dyn QueueCommandPort>;
-pub type RadioHandle = Arc<dyn RadioCommandPort>;
-
-#[derive(Clone)]
-pub struct PlaybackHandles {
-    pub updates: crate::PlaybackUpdates,
-    pub transport: TransportHandle,
-    pub queue: QueueHandle,
-    pub radio: RadioHandle,
 }

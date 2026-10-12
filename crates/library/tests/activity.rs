@@ -322,6 +322,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
                 now: 1800000000,
             })
             .selection(),
+            None,
             &cancel,
         )
         .await
@@ -371,14 +372,17 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         .create_playlist(
             None,
             "History track",
-            std::slice::from_ref(&listen.media_uri),
+            &library::SongSelection::Uris(
+                (std::slice::from_ref(&listen.media_uri)).to_vec().into(),
+            ),
         )
         .await
         .unwrap()
         .unwrap();
     let entries = fixture
         .database
-        .selected_playlist_entries(
+        .playlist_edit_entries(
+            playlist,
             &library::SongQuery {
                 sort: Some(library::TrackSort::Position),
                 ..library::SongQuery::new(library::SongScope::Playlist(playlist))
@@ -387,6 +391,12 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
             &cancel,
         )
         .await
+        .map(|entries| {
+            entries
+                .into_iter()
+                .map(|entry| entry.playlist_entry_key)
+                .collect::<Vec<_>>()
+        })
         .unwrap();
     let entries = fixture
         .database

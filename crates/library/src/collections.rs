@@ -8,11 +8,10 @@ use sqlx::{Connection, FromRow, QueryBuilder, Row, Sqlite, SqliteConnection};
 
 use crate::{
     AlbumKey, ArtistKey, Database, FolderKey, GenreKey, LibraryError, LibraryResult, MoodKey,
-    ReadCancellation, RouteSeedWindow, SourceKey, TrackKey, TrackRow, TrackSort,
-    tracks::load_track_rows,
+    ReadCancellation, SourceKey, TrackRow, TrackSort,
 };
 
-const COLLECTION_ROW_LIMIT: usize = 128;
+pub(crate) const COLLECTION_ROW_LIMIT: usize = 128;
 
 #[derive(Clone, Debug, PartialEq)]
 #[expect(
@@ -113,7 +112,7 @@ fn collection_stat(entity: &str, field: &str, role: &str) -> String {
     )
 }
 
-fn album_track_scope(folder: Option<FolderKey>) -> String {
+pub(crate) fn album_track_scope(folder: Option<FolderKey>) -> String {
     let mut scope = "item.indexed=1 AND item.album_key=album.album_key".to_string();
     if let Some(folder) = folder {
         scope.push_str(&format!(" AND EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=item.track_key AND scope.folder_key={})", folder.raw()));
@@ -121,7 +120,7 @@ fn album_track_scope(folder: Option<FolderKey>) -> String {
     scope
 }
 
-fn album_scope(
+pub(crate) fn album_scope(
     source: SourceKey,
     folder: Option<FolderKey>,
     favorites_only: bool,
@@ -145,7 +144,12 @@ fn album_scope(
     scope
 }
 
-fn named_scope(kind: &str, source: SourceKey, folder: Option<FolderKey>, filter: &str) -> String {
+pub(crate) fn named_scope(
+    kind: &str,
+    source: SourceKey,
+    folder: Option<FolderKey>,
+    filter: &str,
+) -> String {
     let mut scope = format!("{kind}.indexed=1 AND {kind}.source_key={}", source.raw());
     if let Some(folder) = folder {
         scope.push_str(&format!(
@@ -393,7 +397,7 @@ pub enum AlbumReleaseResult {
     Missing,
 }
 
-fn artist_scope(
+pub(crate) fn artist_scope(
     source: SourceKey,
     folder: Option<FolderKey>,
     album_artist: bool,
@@ -513,124 +517,7 @@ impl Database {
                 .await?,
         )
     }
-    pub async fn mood_section_positions(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        filter: &str,
-        sort: MoodSort,
-        descending: bool,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<crate::ScrollSection>> {
-        if sort != MoodSort::Title {
-            return Ok(Vec::new());
-        }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        crate::scroll_sections::decode_sections(
-            load_mood_order::<String>(
-                &mut connection,
-                source,
-                folder,
-                filter,
-                sort,
-                descending,
-                0,
-                usize::MAX,
-                true,
-            )
-            .await?,
-        )
-    }
 
-    pub async fn album_section_positions(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        favorites_only: bool,
-        filter: &str,
-        sort: AlbumSort,
-        descending: bool,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<crate::ScrollSection>> {
-        if !matches!(sort, AlbumSort::Title | AlbumSort::AlbumArtist) {
-            return Ok(Vec::new());
-        }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        crate::scroll_sections::decode_sections(
-            load_album_order::<String>(
-                &mut connection,
-                source,
-                folder,
-                favorites_only,
-                filter,
-                sort,
-                descending,
-                None,
-                true,
-            )
-            .await?,
-        )
-    }
-
-    pub async fn artist_section_positions(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        album_artists_only: bool,
-        favorites_only: bool,
-        filter: &str,
-        sort: ArtistSort,
-        descending: bool,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<crate::ScrollSection>> {
-        if sort != ArtistSort::Title {
-            return Ok(Vec::new());
-        }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        crate::scroll_sections::decode_sections(
-            load_artist_order::<String>(
-                &mut connection,
-                source,
-                folder,
-                album_artists_only,
-                favorites_only,
-                filter,
-                sort,
-                descending,
-                None,
-                true,
-            )
-            .await?,
-        )
-    }
-
-    pub async fn genre_section_positions(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        filter: &str,
-        sort: GenreSort,
-        descending: bool,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<crate::ScrollSection>> {
-        if sort != GenreSort::Title {
-            return Ok(Vec::new());
-        }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        crate::scroll_sections::decode_sections(
-            load_genre_order::<String>(
-                &mut connection,
-                source,
-                folder,
-                filter,
-                sort,
-                descending,
-                None,
-                true,
-            )
-            .await?,
-        )
-    }
     pub async fn genre_choices(
         &self,
         source: SourceKey,
@@ -642,59 +529,6 @@ impl Database {
             "SELECT genre.genre_key,genre.object_id,genre.name FROM genres genre WHERE {} ORDER BY genre.sort_text,genre.genre_key",
             named_scope("genre",source,folder,"")
         ))).fetch_all(&mut *connection).await?)
-    }
-
-    pub async fn album_count(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        favorites_only: bool,
-        filter: &str,
-        sort: AlbumSort,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<i64> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let _ = sort;
-        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT count(*) FROM albums album WHERE {}",
-            album_scope(source, folder, favorites_only, filter)
-        )))
-        .fetch_one(&mut *connection)
-        .await?)
-    }
-
-    pub async fn artist_count(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        album_artists_only: bool,
-        favorites_only: bool,
-        filter: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<i64> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT count(*) FROM artists artist WHERE {}",
-            artist_scope(source, folder, album_artists_only, favorites_only, filter)
-        )))
-        .fetch_one(&mut *connection)
-        .await?)
-    }
-
-    pub async fn genre_count(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        filter: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<i64> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT count(*) FROM genres genre WHERE {}",
-            named_scope("genre", source, folder, filter)
-        )))
-        .fetch_one(&mut *connection)
-        .await?)
     }
 
     pub async fn collection_source(
@@ -861,405 +695,6 @@ impl Database {
         Ok(Some(album))
     }
 
-    pub async fn album_route_page(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        favorites_only: bool,
-        filter: &str,
-        sort: AlbumSort,
-        descending: bool,
-        window: RouteSeedWindow,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<(usize, usize, Vec<AlbumRow>)> {
-        let count = self
-            .album_count(source, folder, favorites_only, filter, sort, cancellation)
-            .await?
-            .max(0) as usize;
-        let range = window.range(count);
-        let rows = self
-            .album_page(
-                source,
-                folder,
-                favorites_only,
-                filter,
-                sort,
-                descending,
-                range.start,
-                range.len(),
-                cancellation,
-            )
-            .await?;
-        Ok((count, range.start, rows))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub async fn album_page(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        favorites_only: bool,
-        filter: &str,
-        sort: AlbumSort,
-        descending: bool,
-        offset: usize,
-        limit: usize,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<AlbumRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let order = load_album_order::<AlbumKey>(
-            &mut transaction,
-            source,
-            folder,
-            favorites_only,
-            filter,
-            sort,
-            descending,
-            Some((offset, limit)),
-            false,
-        )
-        .await?;
-        let rows = load_album_rows(&mut transaction, source, &order, folder).await?;
-        transaction.commit().await?;
-        Ok(rows)
-    }
-
-    pub async fn album_detail_count(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        favorites_only: bool,
-        filter: &str,
-        inline_tracks: usize,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<i64> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT COALESCE(sum(1+max({}-{},0)),0) FROM albums album WHERE {}",
-            album_detail_track_count(folder),
-            inline_tracks,
-            album_scope(source, folder, favorites_only, filter)
-        )))
-        .fetch_one(&mut *connection)
-        .await?)
-    }
-
-    pub async fn album_detail_page(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        favorites_only: bool,
-        filter: &str,
-        sort: AlbumSort,
-        descending: bool,
-        inline_tracks: usize,
-        offset: usize,
-        limit: usize,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<AlbumDetailRow>> {
-        let offset = offset.min(i64::MAX as usize);
-        let end = offset
-            .saturating_add(limit.min(COLLECTION_ROW_LIMIT))
-            .min(i64::MAX as usize);
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let spans = sqlx::query_as::<_, (AlbumKey, i64, i64)>(sqlx::AssertSqlSafe(format!(
-            "{} SELECT album_key,track_count,first_position FROM spans
-             WHERE first_position<?1 AND first_position+max(track_count-{inline_tracks},0)>=?2
-             ORDER BY first_position",
-            album_detail_spans_sql(
-                source,
-                folder,
-                favorites_only,
-                filter,
-                sort,
-                descending,
-                inline_tracks,
-                end,
-            )
-        )))
-        .bind(end.min(i64::MAX as usize) as i64)
-        .bind(offset.min(i64::MAX as usize) as i64)
-        .fetch_all(&mut *transaction)
-        .await?;
-        let mut items = Vec::new();
-        let mut albums = Vec::new();
-        let mut tracks = Vec::new();
-        for (album, track_count, first_position) in spans {
-            let first_position = first_position as usize;
-            let track_count = track_count as usize;
-            let header = first_position >= offset;
-            if header {
-                albums.push(album);
-            }
-            let first_track = first_position.saturating_add(1);
-            let start = if header {
-                0
-            } else {
-                inline_tracks.saturating_add(offset.saturating_sub(first_track))
-            };
-            let count = inline_tracks
-                .saturating_add(end.saturating_sub(first_track))
-                .min(track_count)
-                .saturating_sub(start);
-            let scope = album_track_scope(folder).replace("album.album_key", "?1");
-            let keys = sqlx::query_scalar::<_, TrackKey>(sqlx::AssertSqlSafe(format!(
-                "SELECT item.track_key FROM tracks item WHERE {scope}
-                 ORDER BY item.disc_number,item.track_number,item.sort_text,item.track_key LIMIT ?2 OFFSET ?3"
-            )))
-            .bind(album)
-            .bind(count as i64)
-            .bind(start as i64)
-            .fetch_all(&mut *transaction)
-            .await?;
-            tracks.extend(&keys);
-            items.push((album, header, start, track_count, keys));
-        }
-        let mut albums = load_album_rows(&mut transaction, source, &albums, folder)
-            .await?
-            .into_iter()
-            .map(|row| (row.album_key, row))
-            .collect::<BTreeMap<_, _>>();
-        let mut tracks = load_track_rows(&mut transaction, &tracks)
-            .await?
-            .into_iter()
-            .map(|row| (row.track_key, row))
-            .collect::<BTreeMap<_, _>>();
-        let mut rows = Vec::new();
-        for (key, header, start, track_count, keys) in items {
-            let mut loaded = keys.into_iter().filter_map(|key| tracks.remove(&key));
-            if header && let Some(album) = albums.remove(&key) {
-                rows.push(AlbumDetailRow::Album {
-                    album,
-                    tracks: loaded.by_ref().take(inline_tracks).collect(),
-                    last: track_count <= inline_tracks,
-                });
-            }
-            for (position, track) in loaded.enumerate() {
-                let index = position + start.max(inline_tracks);
-                rows.push(AlbumDetailRow::Track {
-                    track,
-                    index,
-                    last: index + 1 == track_count,
-                });
-            }
-        }
-        transaction.commit().await?;
-        Ok(rows)
-    }
-
-    pub async fn artist_route_page(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        album_artists_only: bool,
-        favorites_only: bool,
-        filter: &str,
-        sort: ArtistSort,
-        descending: bool,
-        window: RouteSeedWindow,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<(usize, usize, Vec<ArtistRow>)> {
-        let count = self
-            .artist_count(
-                source,
-                folder,
-                album_artists_only,
-                favorites_only,
-                filter,
-                cancellation,
-            )
-            .await?
-            .max(0) as usize;
-        let range = window.range(count);
-        let rows = self
-            .artist_page(
-                source,
-                folder,
-                album_artists_only,
-                favorites_only,
-                filter,
-                sort,
-                descending,
-                range.start,
-                range.len(),
-                cancellation,
-            )
-            .await?;
-        Ok((count, range.start, rows))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub async fn artist_page(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        album_artists_only: bool,
-        favorites_only: bool,
-        filter: &str,
-        sort: ArtistSort,
-        descending: bool,
-        offset: usize,
-        limit: usize,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<ArtistRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let order = load_artist_order::<ArtistKey>(
-            &mut transaction,
-            source,
-            folder,
-            album_artists_only,
-            favorites_only,
-            filter,
-            sort,
-            descending,
-            Some((offset, limit)),
-            false,
-        )
-        .await?;
-        let rows =
-            load_artist_rows(&mut transaction, source, &order, album_artists_only, folder).await?;
-        transaction.commit().await?;
-        Ok(rows)
-    }
-
-    pub async fn genre_route_page(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        filter: &str,
-        sort: GenreSort,
-        descending: bool,
-        window: RouteSeedWindow,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<(usize, usize, Vec<GenreRow>)> {
-        let count = self
-            .genre_count(source, folder, filter, cancellation)
-            .await?
-            .max(0) as usize;
-        let range = window.range(count);
-        let rows = self
-            .genre_page(
-                source,
-                folder,
-                filter,
-                sort,
-                descending,
-                range.start,
-                range.len(),
-                cancellation,
-            )
-            .await?;
-        Ok((count, range.start, rows))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub async fn genre_page(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        filter: &str,
-        sort: GenreSort,
-        descending: bool,
-        offset: usize,
-        limit: usize,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<GenreRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let keys = load_genre_order::<GenreKey>(
-            &mut transaction,
-            source,
-            folder,
-            filter,
-            sort,
-            descending,
-            Some((offset, limit)),
-            false,
-        )
-        .await?;
-        let rows = load_genre_rows(&mut transaction, source, &keys, folder).await?;
-        transaction.commit().await?;
-        Ok(rows)
-    }
-
-    pub async fn mood_route_page(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        filter: &str,
-        sort: MoodSort,
-        descending: bool,
-        window: RouteSeedWindow,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<(usize, usize, Vec<MoodRow>)> {
-        let count = self
-            .mood_count(source, folder, filter, cancellation)
-            .await?
-            .max(0) as usize;
-        let range = window.range(count);
-        let rows = self
-            .mood_page(
-                source,
-                folder,
-                filter,
-                sort,
-                descending,
-                range.start,
-                range.len(),
-                cancellation,
-            )
-            .await?;
-        Ok((count, range.start, rows))
-    }
-
-    pub async fn mood_count(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        filter: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<i64> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT count(*) FROM moods mood WHERE {}",
-            named_scope("mood", source, folder, filter)
-        )))
-        .fetch_one(&mut *connection)
-        .await?)
-    }
-
-    pub async fn mood_page(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        filter: &str,
-        sort: MoodSort,
-        descending: bool,
-        offset: usize,
-        limit: usize,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<MoodRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let result = load_mood_order::<MoodKey>(
-            &mut transaction,
-            source,
-            folder,
-            filter,
-            sort,
-            descending,
-            offset,
-            limit,
-            false,
-        )
-        .await?;
-        let first_rows = load_mood_rows(&mut transaction, source, &result, folder).await?;
-        transaction.commit().await?;
-        Ok(first_rows)
-    }
     pub async fn folder_key_by_object(
         &self,
         source: SourceKey,
@@ -1830,7 +1265,7 @@ async fn named_collection_artwork(
     Ok(artwork)
 }
 
-async fn load_genre_rows(
+pub(crate) async fn load_genre_rows(
     connection: &mut SqliteConnection,
     source: SourceKey,
     keys: &[GenreKey],
@@ -1871,7 +1306,7 @@ async fn load_genre_facts(
     Ok(rows)
 }
 
-async fn load_mood_rows(
+pub(crate) async fn load_mood_rows(
     connection: &mut SqliteConnection,
     source: SourceKey,
     keys: &[MoodKey],
@@ -1931,7 +1366,7 @@ async fn collection_key_by_object(
         .await?)
 }
 
-fn album_detail_track_count(folder: Option<FolderKey>) -> String {
+pub(crate) fn album_detail_track_count(folder: Option<FolderKey>) -> String {
     if folder.is_none() {
         "album.track_count".to_string()
     } else {
@@ -1942,7 +1377,7 @@ fn album_detail_track_count(folder: Option<FolderKey>) -> String {
     }
 }
 
-fn album_detail_spans_sql(
+pub(crate) fn album_detail_spans_sql(
     source: SourceKey,
     folder: Option<FolderKey>,
     favorites_only: bool,
@@ -1967,7 +1402,7 @@ fn album_detail_spans_sql(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn load_album_order<T>(
+pub(crate) async fn load_album_order<T>(
     connection: &mut SqliteConnection,
     source: SourceKey,
     folder: Option<FolderKey>,
@@ -2058,7 +1493,7 @@ async fn load_folder_children(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn load_artist_order<T>(
+pub(crate) async fn load_artist_order<T>(
     connection: &mut SqliteConnection,
     source: SourceKey,
     folder: Option<FolderKey>,
@@ -2127,7 +1562,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn load_genre_order<T>(
+pub(crate) async fn load_genre_order<T>(
     connection: &mut SqliteConnection,
     source: SourceKey,
     folder: Option<FolderKey>,
@@ -2182,7 +1617,7 @@ const ARTIST_ALBUM_SCOPE: &str = "SELECT album.album_key FROM albums album
              AND (?4 IS NULL OR EXISTS(SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.indexed=1 AND track.album_key=album.album_key AND scope.folder_key=?4))
              AND (?5 OR instr(lower(album.title),?6)>0 OR instr(lower(album.display_artist),?6)>0 OR CAST(album.year AS TEXT)=?6)";
 
-async fn load_mood_order<T>(
+pub(crate) async fn load_mood_order<T>(
     connection: &mut SqliteConnection,
     source: SourceKey,
     folder: Option<FolderKey>,

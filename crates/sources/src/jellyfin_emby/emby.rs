@@ -229,18 +229,16 @@ mod tests {
             .await;
         let authenticated = JellyfinEmbySource::authenticate(
             SourceId::new("source"),
-            JellyfinEmbySetupInput {
-                kind: ServerKind::Emby,
-                device_id: "device".into(),
-                use_instant_mix: false,
-                credentials: CredentialHostInput {
-                    server_name: None,
-                    server_url: format!("{}/music", server.uri()),
-                    username: "Listener".into(),
-                    password: "password".into(),
-                    trust_invalid_cert: false,
-                },
+            ServerKind::Emby,
+            CredentialInput {
+                source_name: None,
+                server_url: format!("{}/music", server.uri()),
+                username: "Listener".into(),
+                secret: "password".into(),
+                trust_invalid_cert: false,
             },
+            false,
+            "device".into(),
         )
         .await
         .unwrap();

@@ -1,8 +1,8 @@
 use crate::config::{decode_provider_payload, require_payload_version};
 use crate::policy::{raw_item_id, u16_from_option};
 use crate::{
-    ConnectedSource, CredentialHostInput, CredentialSettingsInput, ImageBytes, SourceConfiguration,
-    SourceEditResult, SourceError, SourceResult,
+    ConnectedSource, CredentialInput, ImageBytes, SourceConfiguration, SourceEditResult,
+    SourceError, SourceResult,
 };
 use lyrics::{
     LyricsAgent, LyricsAgentRole, LyricsBundle, LyricsCue, LyricsCueLine, LyricsDocument,
@@ -144,7 +144,7 @@ pub(crate) async fn connect(
     source_id: SourceId,
     flavor: SubsonicFlavor,
     authentication: SubsonicAuthentication,
-    credentials: CredentialHostInput,
+    credentials: CredentialInput,
 ) -> SourceResult<ConnectedSource> {
     SubsonicSource::authenticate(source_id, flavor, authentication, credentials)
         .await
@@ -170,16 +170,19 @@ pub(crate) async fn edit(
     current: SourceConfiguration,
     current_credential: Option<String>,
     authentication: SubsonicAuthentication,
-    credentials: CredentialSettingsInput,
+    mut credentials: CredentialInput,
 ) -> SourceResult<SourceEditResult> {
     let flavor = SubsonicFlavor::from_source_id(&current.kind)?;
     crate::source::require_source_edit(&current, flavor.source_id())?;
     let saved = SubsonicSourceConfig::from_configuration(&current)?;
-    let name = crate::source::edited_source_name(&credentials.name, &current.name);
-    let address_changed = crate::source::comparable_address(&credentials.base_url)
+    let name = crate::source::edited_source_name(
+        credentials.source_name.as_deref().unwrap_or_default(),
+        &current.name,
+    );
+    let address_changed = crate::source::comparable_address(&credentials.server_url)
         != crate::source::comparable_address(&saved.base_url);
     let username_changed = credentials.username.trim() != saved.username;
-    let has_password = !credentials.password.is_empty();
+    let has_password = !credentials.secret.is_empty();
     let authentication_changed = authentication != saved.authentication;
 
     if (username_changed || authentication_changed) && !has_password {
@@ -189,19 +192,10 @@ pub(crate) async fn edit(
     }
 
     if has_password {
-        let authenticated = SubsonicSource::authenticate(
-            current.source_id,
-            flavor,
-            authentication,
-            CredentialHostInput {
-                server_name: Some(name),
-                server_url: credentials.base_url,
-                username: credentials.username,
-                password: credentials.password,
-                trust_invalid_cert: credentials.trust_invalid_cert,
-            },
-        )
-        .await?;
+        credentials.source_name = Some(name);
+        let authenticated =
+            SubsonicSource::authenticate(current.source_id, flavor, authentication, credentials)
+                .await?;
         return Ok(SourceEditResult::Connected(Box::new(
             authenticated.connected(),
         )));
@@ -213,7 +207,7 @@ pub(crate) async fn edit(
         flavor.source_id(),
         name,
         SubsonicSourceConfig {
-            base_url: normalize_base_url(&credentials.base_url)?
+            base_url: normalize_base_url(&credentials.server_url)?
                 .as_str()
                 .trim_end_matches('/')
                 .to_owned(),
@@ -236,9 +230,11 @@ pub(crate) async fn edit(
     )))
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SubsonicFlavor {
     Navidrome,
+    #[serde(rename = "open_subsonic")]
     Subsonic,
 }
 impl SubsonicFlavor {
@@ -327,13 +323,13 @@ impl SubsonicSource {
         source_id: SourceId,
         flavor: SubsonicFlavor,
         authentication: SubsonicAuthentication,
-        credentials: CredentialHostInput,
+        credentials: CredentialInput,
     ) -> SourceResult<AuthenticatedSubsonic> {
-        let CredentialHostInput {
-            server_name: submitted_name,
+        let CredentialInput {
+            source_name: submitted_name,
             server_url,
             username,
-            password,
+            secret: password,
             trust_invalid_cert,
         } = credentials;
         let base_url = normalize_base_url(&server_url)?;

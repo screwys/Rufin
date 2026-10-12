@@ -497,7 +497,7 @@ impl SubsonicSource {
 }
 
 impl SubsonicSource {
-    pub(crate) async fn create_playlist(
+    pub async fn create_playlist(
         &self,
         name: &str,
         track_ids: &[String],
@@ -520,7 +520,7 @@ impl SubsonicSource {
         }
         Ok(playlist)
     }
-    pub(crate) async fn update_playlist(
+    pub async fn update_playlist(
         &self,
         playlist_id: &str,
         name: Option<&str>,
@@ -535,7 +535,7 @@ impl SubsonicSource {
         }
         self.get_unit("updatePlaylist", &fields).await
     }
-    pub(crate) async fn playlist_public(&self, playlist_id: &str) -> SourceResult<Option<bool>> {
+    pub async fn playlist_public(&self, playlist_id: &str) -> SourceResult<Option<bool>> {
         // getPlaylist includes every track; getPlaylists returns only playlist metadata.
         let body: Value = self.get_json("getPlaylists", &[]).await?;
         let playlist = json::items(&body["playlists"]["playlist"])
@@ -545,14 +545,14 @@ impl SubsonicSource {
         Ok(json::boolean(&playlist["public"]))
     }
 
-    pub(crate) async fn delete_playlist(&self, playlist_id: &str) -> SourceResult<()> {
+    pub async fn delete_playlist(&self, playlist_id: &str) -> SourceResult<()> {
         self.get_unit(
             "deletePlaylist",
             &[("id", raw_item_id(playlist_id).to_string())],
         )
         .await
     }
-    pub(crate) async fn add_playlist_tracks(
+    pub async fn add_playlist_tracks(
         &self,
         playlist_id: &str,
         track_ids: &[String],
@@ -565,7 +565,7 @@ impl SubsonicSource {
         );
         self.get_unit("updatePlaylist", &extra).await
     }
-    pub(crate) async fn remove_playlist_entries(
+    pub async fn remove_playlist_entries(
         &self,
         playlist_id: &str,
         entry_ids: &[String],
@@ -584,7 +584,7 @@ impl SubsonicSource {
         }
         self.get_unit("updatePlaylist", &extra).await
     }
-    pub(crate) async fn move_playlist_entry(
+    pub async fn move_playlist_entry(
         &self,
         playlist_id: &str,
         entry_id: &str,
@@ -1397,11 +1397,11 @@ mod tests {
                 crate::SourceId::new("source"),
                 SubsonicFlavor::Subsonic,
                 SubsonicAuthentication::Password,
-                crate::CredentialHostInput {
-                    server_name: None,
+                crate::CredentialInput {
+                    source_name: None,
                     server_url: server.uri(),
                     username: "listener".into(),
-                    password: "password".into(),
+                    secret: "password".into(),
                     trust_invalid_cert: false,
                 },
             )
@@ -1529,11 +1529,11 @@ mod tests {
                 crate::SourceId::new("source"),
                 SubsonicFlavor::Subsonic,
                 SubsonicAuthentication::Password,
-                crate::CredentialHostInput {
-                    server_name: None,
+                crate::CredentialInput {
+                    source_name: None,
                     server_url: server.uri(),
                     username: "listener".into(),
-                    password: "password".into(),
+                    secret: "password".into(),
                     trust_invalid_cert: false,
                 },
             )
@@ -1651,11 +1651,11 @@ mod tests {
                 source_id.clone(),
                 SubsonicFlavor::Subsonic,
                 authentication,
-                crate::CredentialHostInput {
-                    server_name: None,
+                crate::CredentialInput {
+                    source_name: None,
                     server_url: server.uri(),
                     username: "api-user".into(),
-                    password: "generated & password".into(),
+                    secret: "generated & password".into(),
                     trust_invalid_cert: false,
                 },
             )
@@ -1802,6 +1802,7 @@ mod tests {
             .selected_track_uris(
                 &library::SongQuery::new(library::SongScope::Album(results.albums[0].album_key))
                     .selection(),
+                None,
                 &library::ReadCancellation::new(),
             )
             .await
@@ -1831,6 +1832,7 @@ mod tests {
             .selected_track_uris(
                 &library::SongQuery::new(library::SongScope::Album(results.albums[0].album_key))
                     .selection(),
+                None,
                 &library::ReadCancellation::new(),
             )
             .await

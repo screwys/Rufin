@@ -5,9 +5,10 @@ use async_channel::Receiver;
 use rufin_core::runtime::source::{
     DiscoveryStatus, DiscoveryUpdate, EmbyConnectLoginEvent, EmbyConnectLoginMethod,
     JellyfinQuickConnectEvent, NextcloudLoginEvent, PlexLoginEvent, PlexLoginMethod,
-    SourceSettingsChange, SourceSetup,
 };
 use rufin_core::runtime::{ProductHandles, SourceHandle};
+
+use sources::{SourceSettingsChange, SourceSetup};
 
 #[derive(Clone, Copy, uniffi::Enum)]
 pub enum AndroidSourceDiscoveryProvider {

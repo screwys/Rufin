@@ -16,7 +16,7 @@ use gtk_media_menus::media_menus::{
 };
 use gtk_widgets::cover_controls::cover_play_only_hover_controls;
 use gtk_widgets::selection::collection_play_request;
-use playback::PlayRequest;
+use rufin_core::playback::PlayRequest;
 
 use crate::{SidebarPin, SidebarRouteItem};
 use adw::prelude::*;
@@ -29,7 +29,7 @@ use gtk_widgets::interactions::{
 use gtk_widgets::library_fields::{playlist_artwork, smart_playlist_display_name};
 use gtk_widgets::route::{CollectionCategory, Route};
 use library::{AlbumRow, ArtistRow, GenreRow, PlaylistRow, SmartPlaylistRow};
-use playback::QueuePlacement;
+use rufin_core::playback::QueuePlacement;
 use tracing::warn;
 
 use super::{Shell, layout::ResolvedLeftSidebarMode, route::RouteStack};

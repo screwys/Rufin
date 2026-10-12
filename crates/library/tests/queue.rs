@@ -394,7 +394,11 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
         .collect::<Vec<_>>();
     let playlist_key = fixture
         .database
-        .create_playlist(Some(fixture.source), "Collection", &fixture.track_uris[..3])
+        .create_playlist(
+            Some(fixture.source),
+            "Collection",
+            &library::SongSelection::Uris((&fixture.track_uris[..3]).to_vec().into()),
+        )
         .await
         .expect("create Playlist")
         .expect("Playlist key")
@@ -403,6 +407,7 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
         .database
         .selected_track_uris(
             &library::SongQuery::new(library::SongScope::Playlist(playlist_key)).selection(),
+            None,
             &cancel,
         )
         .await
@@ -421,6 +426,7 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
                 now: 0,
             })
             .selection(),
+            None,
             &cancel,
         )
         .await

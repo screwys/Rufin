@@ -3,7 +3,6 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use downloads::DownloadSubject;
 use localization::msgid;
 
 use crate::shell::Shell;
@@ -12,7 +11,7 @@ use gtk_widgets::interactions::{ADD_TO_PLAYLIST_ICON, ContextMenuSurface};
 use rufin_core::settings::ContextMenuItem;
 
 use gtk_widgets::selection::{PlaylistEntrySelectionSnapshot, TrackSelectionSnapshot};
-use playback::PlayRequest;
+use rufin_core::playback::PlayRequest;
 
 pub(crate) fn refresh_context_playlist_picker(shell: &Rc<Shell>) {
     shell.refresh_playlist_picker();
@@ -84,20 +83,29 @@ fn open_full_playlist_picker(shell: &Rc<Shell>, source: MediaDragSource) {
         .map(|selected| selected.source_key);
     let database = shell.products.library.clone();
     let task = shell.products.runtime.spawn(async move {
-        let (tracks, subject) = source.resolve(&database).await?;
+        let (selection, title, preview_uris) = source.playlist_input(&database).await?;
         let playlists = database
             .playlist_destinations(source_key, &library::ReadCancellation::new())
             .await
             .map_err(|error| error.to_string())?;
-        Ok::<_, String>((playlists, tracks, subject))
+        Ok::<_, String>((playlists, selection, title, preview_uris))
     });
     let shell = Rc::downgrade(shell);
     gtk::glib::spawn_future_local(async move {
-        let Some((playlists, tracks, subject)) = task.await.ok().and_then(Result::ok) else {
+        let Some((playlists, selection, title, preview_uris)) =
+            task.await.ok().and_then(Result::ok)
+        else {
             return;
         };
         if let Some(shell) = shell.upgrade() {
-            present_playlist_picker(&shell, source_key, playlists, tracks, subject);
+            present_playlist_picker(
+                &shell,
+                source_key,
+                playlists,
+                selection,
+                title,
+                preview_uris,
+            );
         }
     });
 }
@@ -145,16 +153,18 @@ fn populate_context_playlist_picker(
         .map(|selected| selected.source_key);
     let database = shell.products.library.clone();
     let task = shell.products.runtime.spawn(async move {
-        let (tracks, subject) = source.resolve(&database).await?;
+        let (selection, title, preview_uris) = source.playlist_input(&database).await?;
         let playlists = database
             .playlist_destinations(source_key, &library::ReadCancellation::new())
             .await
             .map_err(|error| error.to_string())?;
-        Ok::<_, String>((playlists, tracks, subject))
+        Ok::<_, String>((playlists, selection, title, preview_uris))
     });
     gtk::glib::spawn_future_local(async move {
-        if let Some((playlists, tracks, subject)) = task.await.ok().and_then(Result::ok) {
-            update(playlists, tracks, subject);
+        if let Some((playlists, selection, title, preview_uris)) =
+            task.await.ok().and_then(Result::ok)
+        {
+            update(playlists, selection, title, preview_uris);
         }
     });
 }
@@ -172,8 +182,9 @@ fn present_playlist_picker(
     shell: &Rc<Shell>,
     source_key: Option<library::SourceKey>,
     playlists: Vec<library::PlaylistRow>,
-    media_uris: Vec<String>,
-    subject: DownloadSubject,
+    selection: library::SongSelection,
+    title: String,
+    preview_uris: Vec<String>,
 ) {
     let create_shell = Rc::downgrade(shell);
     let (dialog, update) = gtk_media_menus::playlist_picker::playlist_picker_dialog(
@@ -186,8 +197,9 @@ fn present_playlist_picker(
         }),
         picker_feedback(shell),
         playlists,
-        media_uris,
-        subject,
+        selection,
+        title,
+        preview_uris,
     );
     let close_shell = Rc::downgrade(shell);
     dialog.connect_closed(move |_| {

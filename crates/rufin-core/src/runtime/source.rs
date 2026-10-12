@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use sources::SourceId;
+use sources::{CredentialPreset, SourceId};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize)]
 pub struct LocalAccessStatus {
@@ -71,72 +71,6 @@ impl ConfiguredSources {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OpenSubsonicKind {
-    Navidrome,
-    OpenSubsonic,
-}
-
-pub use sources::SubsonicAuthentication as OpenSubsonicAuthentication;
-
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
-pub struct CredentialInput {
-    pub source_name: Option<String>,
-    pub server_url: String,
-    pub username: String,
-    pub secret: String,
-    pub trust_invalid_cert: bool,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
-#[serde(tag = "type", content = "data", rename_all = "snake_case")]
-pub enum SourceSetup {
-    EmbyConnect {
-        server: sources::EmbyConnectServer,
-        source_name: Option<String>,
-        use_instant_mix: bool,
-    },
-    JellyfinQuickConnect {
-        login: sources::JellyfinQuickConnectLogin,
-        source_name: Option<String>,
-        use_instant_mix: bool,
-    },
-    Plex(sources::PlexSetupInput),
-    WebDav {
-        name: String,
-        settings: sources::FileSourceSettings,
-        credentials: sources::FileCredentials,
-    },
-    Smb {
-        name: String,
-        settings: sources::FileSourceSettings,
-        credentials: sources::FileCredentials,
-    },
-    JellyfinEmby {
-        kind: sources::ServerKind,
-        credentials: CredentialInput,
-        use_instant_mix: bool,
-    },
-    OpenSubsonic {
-        kind: OpenSubsonicKind,
-        authentication: OpenSubsonicAuthentication,
-        credentials: CredentialInput,
-    },
-    Local {
-        roots: Vec<PathBuf>,
-    },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-pub struct CredentialPreset {
-    pub source_name: String,
-    pub server_url: String,
-    pub username: String,
-    pub trust_invalid_cert: bool,
-    pub open_subsonic_authentication: Option<OpenSubsonicAuthentication>,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct EditableSource {
     pub plex_settings: Option<sources::PlexSettingsInput>,
@@ -145,51 +79,6 @@ pub struct EditableSource {
     pub credentials: CredentialPreset,
     pub use_instant_mix: Option<bool>,
     pub emby_connect: bool,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
-#[serde(tag = "type", content = "data", rename_all = "snake_case")]
-pub enum SourceSettingsChange {
-    Local {
-        source_id: SourceId,
-        roots: Vec<PathBuf>,
-        #[serde(default)]
-        excluded_folders: Option<Vec<PathBuf>>,
-    },
-    EmbyConnect {
-        source_id: SourceId,
-        server: sources::EmbyConnectServer,
-        source_name: Option<String>,
-        use_instant_mix: bool,
-    },
-    JellyfinQuickConnect {
-        source_id: SourceId,
-        login: sources::JellyfinQuickConnectLogin,
-        source_name: Option<String>,
-        use_instant_mix: bool,
-    },
-    Plex {
-        source_id: SourceId,
-        settings: sources::PlexSettingsInput,
-    },
-    Files {
-        source_id: SourceId,
-        name: String,
-        settings: sources::FileSourceSettings,
-        credentials: sources::FileCredentialsEdit,
-    },
-    JellyfinEmby {
-        connect_manually: bool,
-        source_id: SourceId,
-        credentials: CredentialInput,
-        use_instant_mix: bool,
-    },
-    OpenSubsonic {
-        source_id: SourceId,
-        kind: OpenSubsonicKind,
-        authentication: OpenSubsonicAuthentication,
-        credentials: CredentialInput,
-    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]

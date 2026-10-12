@@ -851,11 +851,9 @@ impl ConnectOwner {
                 Some(queue) => queue,
                 None => {
                     let playback = Arc::clone(&self.playback);
-                    tokio::task::spawn_blocking(move || {
-                        playback::QueueCommandPort::snapshot(playback.as_ref())
-                    })
-                    .await
-                    .map_err(error)??
+                    tokio::task::spawn_blocking(move || playback.snapshot())
+                        .await
+                        .map_err(error)??
                 }
             };
             let key = self

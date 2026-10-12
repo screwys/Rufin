@@ -7,11 +7,22 @@ async fn playlist_pin_import_reads_only_the_owning_sources_identities() {
     let fixture = fixture().await;
     let database = &fixture.database;
     let (_, authored) = database
-        .create_playlist(Some(fixture.source), "Z saved", &[])
+        .create_playlist(
+            Some(fixture.source),
+            "Z saved",
+            &library::SongSelection::Uris((&[]).to_vec().into()),
+        )
         .await
         .unwrap()
         .unwrap();
-    database.create_playlist(None, "Global", &[]).await.unwrap();
+    database
+        .create_playlist(
+            None,
+            "Global",
+            &library::SongSelection::Uris((&[]).to_vec().into()),
+        )
+        .await
+        .unwrap();
     let mut raw = connection(&fixture.path).await;
     sqlx::query("INSERT INTO playlists(source_key,owner,position,object_id,name,normalized_name,sort_text) VALUES(?1,'source',(SELECT COALESCE(max(position)+1,0) FROM playlists),'native','A native','a native','a native')")
         .bind(fixture.source).execute(&mut raw).await.unwrap();
@@ -55,7 +66,11 @@ async fn playlist_destinations_keep_global_rank_without_a_current_source() {
         keys.push(
             fixture
                 .database
-                .create_playlist(owner, name, &[])
+                .create_playlist(
+                    owner,
+                    name,
+                    &library::SongSelection::Uris((&[]).to_vec().into()),
+                )
                 .await
                 .expect("create destination")
                 .expect("playlist")
@@ -102,10 +117,14 @@ async fn playlist_destinations_keep_global_rank_without_a_current_source() {
     drop(raw);
     fixture
         .database
-        .add_playlist_media(
+        .add_playlist_songs(
             None,
             keys[0],
-            &["https://example.test/unavailable.flac".into()],
+            &library::SongSelection::Uris(
+                (&["https://example.test/unavailable.flac".into()])
+                    .to_vec()
+                    .into(),
+            ),
             false,
         )
         .await
@@ -132,7 +151,7 @@ async fn playlist_order_is_title_ordered_and_folder_scoped() {
         .create_playlist(
             Some(fixture.source),
             "Zulu",
-            &[fixture.track_uris[0].clone()],
+            &library::SongSelection::Uris((&[fixture.track_uris[0].clone()]).to_vec().into()),
         )
         .await
         .expect("create Zulu Playlist")
@@ -143,7 +162,7 @@ async fn playlist_order_is_title_ordered_and_folder_scoped() {
         .create_playlist(
             Some(fixture.source),
             "Alpha",
-            &[fixture.track_uris[1].clone()],
+            &library::SongSelection::Uris((&[fixture.track_uris[1].clone()]).to_vec().into()),
         )
         .await
         .expect("create Alpha Playlist")
@@ -233,7 +252,11 @@ async fn playlist_reordering_keeps_one_rank_sequence() {
         playlists.push(
             fixture
                 .database
-                .create_playlist(Some(fixture.source), name, &[])
+                .create_playlist(
+                    Some(fixture.source),
+                    name,
+                    &library::SongSelection::Uris((&[]).to_vec().into()),
+                )
                 .await
                 .expect("create Playlist")
                 .expect("Playlist key")
@@ -279,11 +302,15 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
         .create_playlist(
             Some(fixture.source),
             "Duplicates",
-            &[
-                fixture.track_uris[0].clone(),
-                fixture.track_uris[0].clone(),
-                fixture.track_uris[1].clone(),
-            ],
+            &library::SongSelection::Uris(
+                (&[
+                    fixture.track_uris[0].clone(),
+                    fixture.track_uris[0].clone(),
+                    fixture.track_uris[1].clone(),
+                ])
+                    .to_vec()
+                    .into(),
+            ),
         )
         .await
         .expect("create Playlist")
@@ -292,7 +319,8 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     let cancel = ReadCancellation::new();
     let initial = fixture
         .database
-        .selected_playlist_entries(
+        .playlist_edit_entries(
+            playlist,
             &library::SongQuery {
                 sort: Some(TrackSort::Position),
                 ..library::SongQuery::new(library::SongScope::Playlist(playlist))
@@ -301,6 +329,12 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
             &cancel,
         )
         .await
+        .map(|entries| {
+            entries
+                .into_iter()
+                .map(|entry| entry.playlist_entry_key)
+                .collect::<Vec<_>>()
+        })
         .expect("initial Playlist order");
     let rows = fixture
         .database
@@ -310,6 +344,65 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     assert_eq!(rows.len(), 3);
     assert_eq!(rows[0].media_uri, rows[1].media_uri);
     assert_ne!(rows[0].playlist_entry_key, rows[1].playlist_entry_key);
+    let edit_entries = fixture
+        .database
+        .playlist_edit_entries(
+            playlist,
+            &library::SongSelection::PlaylistEntries(
+                initial.iter().rev().copied().collect::<Vec<_>>().into(),
+            ),
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        edit_entries
+            .iter()
+            .map(|entry| entry.playlist_entry_key)
+            .collect::<Vec<_>>(),
+        initial
+    );
+    assert_eq!(
+        edit_entries
+            .iter()
+            .map(|entry| entry.position)
+            .collect::<Vec<_>>(),
+        [0, 1, 2]
+    );
+    assert_eq!(edit_entries[0].track_key, edit_entries[1].track_key);
+    assert!(
+        fixture
+            .database
+            .playlist_edit_entries(
+                playlist,
+                &library::SongSelection::Tracks(vec![edit_entries[0].track_key].into()),
+                &cancel,
+            )
+            .await
+            .is_err()
+    );
+    let selected = fixture
+        .database
+        .playlist_edit_entries(
+            playlist,
+            &library::SongSelection::Query {
+                query: library::SongQuery {
+                    descending: true,
+                    ..library::SongQuery::new(library::SongScope::Playlist(playlist))
+                },
+                ranges: Some(vec![0..1, 2..3]),
+            },
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        selected
+            .iter()
+            .map(|entry| entry.playlist_entry_key)
+            .collect::<Vec<_>>(),
+        [initial[0], initial[2]]
+    );
     assert_eq!(
         rows.iter()
             .map(|row| row.media_uri.as_str())
@@ -324,15 +417,19 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     assert_eq!(
         fixture
             .database
-            .add_playlist_media(
+            .add_playlist_songs(
                 Some(fixture.source),
                 playlist,
-                &[
-                    fixture.track_uris[0].clone(),
-                    fixture.track_uris[2].clone(),
-                    fixture.track_uris[2].clone(),
-                ],
-                true,
+                &library::SongSelection::Uris(
+                    (&[
+                        fixture.track_uris[0].clone(),
+                        fixture.track_uris[2].clone(),
+                        fixture.track_uris[2].clone(),
+                    ])
+                        .to_vec()
+                        .into()
+                ),
+                true
             )
             .await
             .expect("add with duplicate policy"),
@@ -340,7 +437,8 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     );
     let added = fixture
         .database
-        .selected_playlist_entries(
+        .playlist_edit_entries(
+            playlist,
             &library::SongQuery {
                 sort: Some(TrackSort::Position),
                 ..library::SongQuery::new(library::SongScope::Playlist(playlist))
@@ -349,6 +447,12 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
             &cancel,
         )
         .await
+        .map(|entries| {
+            entries
+                .into_iter()
+                .map(|entry| entry.playlist_entry_key)
+                .collect::<Vec<_>>()
+        })
         .expect("added Playlist order");
     assert!(
         fixture
@@ -359,7 +463,8 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     );
     let moved = fixture
         .database
-        .selected_playlist_entries(
+        .playlist_edit_entries(
+            playlist,
             &library::SongQuery {
                 sort: Some(TrackSort::Position),
                 ..library::SongQuery::new(library::SongScope::Playlist(playlist))
@@ -368,6 +473,12 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
             &cancel,
         )
         .await
+        .map(|entries| {
+            entries
+                .into_iter()
+                .map(|entry| entry.playlist_entry_key)
+                .collect::<Vec<_>>()
+        })
         .expect("moved Playlist order");
     assert_eq!(moved[0], added[4]);
     assert_eq!(
@@ -383,7 +494,12 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     assert_eq!(
         fixture
             .database
-            .add_playlist_media(Some(fixture.source), playlist, &selection, false)
+            .add_playlist_songs(
+                Some(fixture.source),
+                playlist,
+                &library::SongSelection::Uris((&selection).to_vec().into()),
+                false
+            )
             .await
             .expect("add selected media"),
         520
@@ -391,7 +507,8 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     assert_eq!(
         fixture
             .database
-            .selected_playlist_entries(
+            .playlist_edit_entries(
+                playlist,
                 &library::SongQuery {
                     sort: Some(TrackSort::Position),
                     ..library::SongQuery::new(library::SongScope::Playlist(playlist))
@@ -400,13 +517,18 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
                 &cancel
             )
             .await
+            .map(|entries| entries
+                .into_iter()
+                .map(|entry| entry.playlist_entry_key)
+                .collect::<Vec<_>>())
             .expect("complete Playlist order")
             .len(),
         523
     );
     let entries = fixture
         .database
-        .selected_playlist_entries(
+        .playlist_edit_entries(
+            playlist,
             &library::SongQuery {
                 sort: Some(TrackSort::Position),
                 ..library::SongQuery::new(library::SongScope::Playlist(playlist))
@@ -415,6 +537,12 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
             &cancel,
         )
         .await
+        .map(|entries| {
+            entries
+                .into_iter()
+                .map(|entry| entry.playlist_entry_key)
+                .collect::<Vec<_>>()
+        })
         .unwrap();
     let state = super::support::resolve_queue(
         &fixture.database,
@@ -441,22 +569,30 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
     let fixture = fixture().await;
     let (playlist, _) = fixture
         .database
-        .create_playlist(None, "Global", &[fixture.track_uris[0].clone()])
+        .create_playlist(
+            None,
+            "Global",
+            &library::SongSelection::Uris((&[fixture.track_uris[0].clone()]).to_vec().into()),
+        )
         .await
         .expect("create global Playlist")
         .expect("Playlist key");
     assert_eq!(
         fixture
             .database
-            .add_playlist_media(
+            .add_playlist_songs(
                 None,
                 playlist,
-                &[
-                    fixture.track_uris[1].clone(),
-                    fixture.track_uris[1].clone(),
-                    fixture.track_uris[2].clone(),
-                ],
-                false,
+                &library::SongSelection::Uris(
+                    (&[
+                        fixture.track_uris[1].clone(),
+                        fixture.track_uris[1].clone(),
+                        fixture.track_uris[2].clone(),
+                    ])
+                        .to_vec()
+                        .into()
+                ),
+                false
             )
             .await
             .expect("add global Playlist media"),
@@ -466,6 +602,7 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
         .database
         .selected_track_uris(
             &library::SongQuery::new(library::SongScope::Playlist(playlist)).selection(),
+            None,
             &ReadCancellation::new(),
         )
         .await
@@ -489,7 +626,8 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
     drop(raw);
     let entries = fixture
         .database
-        .selected_playlist_entries(
+        .playlist_edit_entries(
+            playlist,
             &library::SongQuery {
                 sort: Some(TrackSort::Position),
                 ..library::SongQuery::new(library::SongScope::Playlist(playlist))
@@ -498,6 +636,12 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
             &ReadCancellation::new(),
         )
         .await
+        .map(|entries| {
+            entries
+                .into_iter()
+                .map(|entry| entry.playlist_entry_key)
+                .collect::<Vec<_>>()
+        })
         .expect("unavailable entries");
     let rows = fixture
         .database
@@ -525,9 +669,10 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
     assert_eq!(
         fixture
             .database
-            .playlist_owner(playlist, &ReadCancellation::new())
+            .playlist_access(playlist, &ReadCancellation::new())
             .await
-            .expect("read global Playlist owner"),
+            .expect("read global Playlist owner")
+            .map(|access| (access.source_key, access.source_id, access.source_owned)),
         Some((None, None, false))
     );
     assert!(
@@ -547,7 +692,7 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
     assert_eq!(
         fixture
             .database
-            .playlist_owner(playlist, &ReadCancellation::new())
+            .playlist_access(playlist, &ReadCancellation::new())
             .await
             .expect("deleted Playlist owner"),
         None
@@ -574,13 +719,17 @@ async fn playlist_automatic_covers_do_not_create_saved_artwork() {
         .create_playlist(
             Some(fixture.source),
             "Positional covers",
-            &[
-                fixture.track_uris[0].clone(),
-                fixture.track_uris[0].clone(),
-                fixture.track_uris[2].clone(),
-                fixture.track_uris[1].clone(),
-                fixture.track_uris[3].clone(),
-            ],
+            &library::SongSelection::Uris(
+                (&[
+                    fixture.track_uris[0].clone(),
+                    fixture.track_uris[0].clone(),
+                    fixture.track_uris[2].clone(),
+                    fixture.track_uris[1].clone(),
+                    fixture.track_uris[3].clone(),
+                ])
+                    .to_vec()
+                    .into(),
+            ),
         )
         .await
         .expect("create Playlist")
@@ -604,7 +753,7 @@ async fn provider_playlist_payload_resolves_uri_only_at_the_protocol_boundary() 
         .create_playlist(
             Some(fixture.source),
             "Provider list",
-            &[fixture.track_uris[0].clone()],
+            &library::SongSelection::Uris((&[fixture.track_uris[0].clone()]).to_vec().into()),
         )
         .await
         .expect("seed Playlist")
@@ -620,16 +769,19 @@ async fn provider_playlist_payload_resolves_uri_only_at_the_protocol_boundary() 
     assert_eq!(
         fixture
             .database
-            .source_playlist_media_object_ids(
+            .source_playlist_song_ids(
                 fixture.source,
                 Some(playlist),
-                &[
-                    fixture.track_uris[0].clone(),
-                    fixture.track_uris[1].clone(),
-                    fixture.track_uris[1].clone(),
-                ],
-                true,
-                &ReadCancellation::new(),
+                &library::SongSelection::Uris(
+                    (&[
+                        fixture.track_uris[0].clone(),
+                        fixture.track_uris[1].clone(),
+                        fixture.track_uris[1].clone(),
+                    ])
+                        .to_vec()
+                        .into()
+                ),
+                true
             )
             .await
             .expect("provider payload"),
@@ -652,19 +804,22 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
     let database = &fixture.database;
     let cancel = ReadCancellation::new();
     let playlist = database
-        .create_playlist(Some(destination), "Destination", &[])
+        .create_playlist(
+            Some(destination),
+            "Destination",
+            &library::SongSelection::Uris((&[]).to_vec().into()),
+        )
         .await
         .unwrap()
         .unwrap()
         .0;
     assert_eq!(
         database
-            .source_playlist_media_object_ids(
+            .source_playlist_song_ids(
                 destination,
                 Some(playlist),
-                std::slice::from_ref(&own_uri),
-                false,
-                &cancel,
+                &library::SongSelection::Uris((std::slice::from_ref(&own_uri)).to_vec().into()),
+                false
             )
             .await
             .unwrap(),
@@ -672,10 +827,10 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
     );
     assert_eq!(
         database
-            .add_playlist_media(
+            .add_playlist_songs(
                 Some(destination),
                 playlist,
-                std::slice::from_ref(&own_uri),
+                &library::SongSelection::Uris((std::slice::from_ref(&own_uri)).to_vec().into()),
                 false
             )
             .await
@@ -687,17 +842,21 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
         vec![own_uri.clone(), fixture.track_uris[0].clone()],
     ] {
         let provider_error = database
-            .source_playlist_media_object_ids(
+            .source_playlist_song_ids(
                 destination,
                 Some(playlist),
-                &selection,
+                &library::SongSelection::Uris((&selection).to_vec().into()),
                 true,
-                &cancel,
             )
             .await
             .unwrap_err();
         let authored_error = database
-            .add_playlist_media(Some(destination), playlist, &selection, false)
+            .add_playlist_songs(
+                Some(destination),
+                playlist,
+                &library::SongSelection::Uris((&selection).to_vec().into()),
+                false,
+            )
             .await
             .unwrap_err();
         for error in [provider_error, authored_error] {
@@ -710,14 +869,19 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
     let missing = vec![own_uri.clone(), "test:missing-track".to_string()];
     assert!(matches!(
         database
-            .source_playlist_media_object_ids(destination, Some(playlist), &missing, false, &cancel)
+            .source_playlist_song_ids(destination,Some(playlist),&library::SongSelection::Uris((&missing).to_vec().into()),false)
             .await
             .unwrap_err(),
         library::LibraryError::InvalidRequest(message) if message == "Playlist Track is no longer current"
     ));
     assert_eq!(
         database
-            .add_playlist_media(Some(destination), playlist, &missing, false)
+            .add_playlist_songs(
+                Some(destination),
+                playlist,
+                &library::SongSelection::Uris((&missing).to_vec().into()),
+                false
+            )
             .await
             .unwrap(),
         0
@@ -726,6 +890,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
         database
             .selected_track_uris(
                 &library::SongQuery::new(library::SongScope::Playlist(playlist)).selection(),
+                None,
                 &cancel
             )
             .await
@@ -733,7 +898,11 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
         std::slice::from_ref(&own_uri)
     );
     let global = database
-        .create_playlist(None, "Global", &[])
+        .create_playlist(
+            None,
+            "Global",
+            &library::SongSelection::Uris((&[]).to_vec().into()),
+        )
         .await
         .unwrap()
         .unwrap()
@@ -741,7 +910,12 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
     let mixed = vec![own_uri, fixture.track_uris[0].clone()];
     assert_eq!(
         database
-            .add_playlist_media(None, global, &mixed, false)
+            .add_playlist_songs(
+                None,
+                global,
+                &library::SongSelection::Uris((&mixed).to_vec().into()),
+                false
+            )
             .await
             .unwrap(),
         2
@@ -750,6 +924,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
         database
             .selected_track_uris(
                 &library::SongQuery::new(library::SongScope::Playlist(global)).selection(),
+                None,
                 &cancel
             )
             .await

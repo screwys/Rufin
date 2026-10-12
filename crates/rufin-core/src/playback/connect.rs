@@ -235,7 +235,7 @@ impl PlaybackOwner {
         offset: u64,
         limit: u32,
         filter: String,
-    ) -> Result<playback::QueuePage, String> {
+    ) -> Result<crate::playback::QueuePage, String> {
         let limit = limit.min(library::QUEUE_CONTEXT_LIMIT as u32);
         let receiver = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone();
         if let Some(receiver) = receiver {
@@ -263,7 +263,7 @@ impl PlaybackOwner {
             return Ok(page);
         }
         let Some(active) = self.active() else {
-            return Ok(playback::QueuePage {
+            return Ok(crate::playback::QueuePage {
                 rows: Vec::new(),
                 total: 0,
                 window_offset: 0,
@@ -306,7 +306,7 @@ impl PlaybackOwner {
         for (row, (_, id, _)) in rows.iter_mut().zip(requested) {
             Arc::make_mut(row).occurrence_id = id;
         }
-        Ok(playback::QueuePage {
+        Ok(crate::playback::QueuePage {
             rows,
             total,
             window_offset: offset.min(total),
@@ -678,11 +678,11 @@ impl PlaybackOwner {
             Command::Remove(position) => Control::Remove {
                 positions: vec![position],
             },
-            Command::RemoveMany(playback::QueueSelection::Positions(positions)) => {
+            Command::RemoveMany(crate::playback::QueueSelection::Positions(positions)) => {
                 Control::Remove { positions }
             }
             Command::Reorder {
-                selection: playback::QueueSelection::Positions(positions),
+                selection: crate::playback::QueueSelection::Positions(positions),
                 target,
             } => Control::Reorder { positions, target },
             Command::MoveAfterCurrent(position) => Control::MoveNext { position },

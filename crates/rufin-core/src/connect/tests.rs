@@ -102,7 +102,7 @@ fn cue_backing_file_reuse_and_removal() {
                 assert_eq!(file.is_file(), original_exists);
             }
             inputs.receivers.visualizer.close();
-            let playback = inputs.products.playback.transport.clone();
+            let playback = inputs.products.playback.clone();
             tokio::task::spawn_blocking(move || playback.shutdown()).await.unwrap();
         }))
     }).unwrap();
@@ -169,7 +169,7 @@ fn cue_concurrent_completion_and_revision_changes() {
                 assert_eq!(original.is_file(), original_exists);
             }
             inputs.receivers.visualizer.close();
-            let playback = inputs.products.playback.transport.clone();
+            let playback = inputs.products.playback.clone();
             tokio::task::spawn_blocking(move || playback.shutdown()).await.unwrap();
         }))
     }).unwrap();
@@ -214,14 +214,13 @@ fn cue_direct_continuation_transfers_one_file_without_enrollment() {
                 item.source_format = Some("flac".into());
                 host.products
                     .playback
-                    .queue
-                    .play(playback::PlayRequest::one(
+                    .play_selection(crate::playback::PlayRequest::one(
                         item.clone(),
                         library::QueuePlacement::Now,
                     ));
                 tokio::time::timeout(Duration::from_secs(5), async {
                     loop {
-                        let queue = host.products.playback.queue.clone();
+                        let queue = host.products.playback.clone();
                         let saved = tokio::task::spawn_blocking(move || queue.snapshot())
                             .await
                             .unwrap()
@@ -292,7 +291,7 @@ fn cue_direct_continuation_transfers_one_file_without_enrollment() {
             for inputs in [guest, host] {
                 inputs.products.connect.leave_profile().await.unwrap();
                 inputs.receivers.visualizer.close();
-                let playback = inputs.products.playback.transport.clone();
+                let playback = inputs.products.playback.clone();
                 tokio::task::spawn_blocking(move || playback.shutdown())
                     .await
                     .unwrap();
@@ -351,7 +350,7 @@ fn relay_changes_preserve_the_open_profile_and_device_identity() {
             }
             owner.leave_profile().await.unwrap();
             inputs.receivers.visualizer.close();
-            let playback = inputs.products.playback.transport.clone();
+            let playback = inputs.products.playback.clone();
             tokio::task::spawn_blocking(move || playback.shutdown())
                 .await
                 .unwrap();
@@ -421,7 +420,7 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
             for inputs in [guest, host] {
                 inputs.products.connect.leave_profile().await.unwrap();
                 inputs.receivers.visualizer.close();
-                let playback = inputs.products.playback.transport.clone();
+                let playback = inputs.products.playback.clone();
                 tokio::task::spawn_blocking(move || playback.shutdown())
                     .await
                     .unwrap();
@@ -569,7 +568,7 @@ fn folder_exchange_preserves_disconnected_edits_without_rewriting_peer_files() {
             assert!(std::fs::read(folders[0].join(&names[0])).unwrap() == compact);
             for inputs in [host, guest] {
                 inputs.receivers.visualizer.close();
-                let playback = inputs.products.playback.transport.clone();
+                let playback = inputs.products.playback.clone();
                 tokio::task::spawn_blocking(move || playback.shutdown())
                     .await
                     .unwrap();
@@ -642,7 +641,7 @@ fn webdav_exchange_leaves_an_unchanged_profile_file_untouched() {
                 trust_invalid_certificate: false, certificate_pem: None, require_smb_encryption: false,
             };
             let source_id = inputs.products.source.configure_file_integration(
-                crate::runtime::source::SourceSetup::WebDav {
+                sources::SourceSetup::WebDav {
                     name: "Profile storage".into(), settings,
                     credentials: sources::FileCredentials { secret: String::new(), headers: vec![] },
                 },
@@ -653,7 +652,7 @@ fn webdav_exchange_leaves_an_unchanged_profile_file_untouched() {
                 id: source_id.clone(), name: "Profile storage".into(), kind: "webdav".into(), music_source: false,
             }]);
             let preset = inputs.products.source.file_integration_settings(&source_id).unwrap().unwrap();
-            inputs.products.source.update_file_integration(crate::runtime::source::SourceSettingsChange::Files {
+            inputs.products.source.update_file_integration(sources::SourceSettingsChange::Files {
                 source_id: source_id.clone(), name: "Files".into(), settings: preset.file_settings.unwrap(),
                 credentials: sources::FileCredentialsEdit { secret: None, headers: None },
             }).recv().await.unwrap().unwrap();
@@ -712,7 +711,7 @@ fn webdav_exchange_leaves_an_unchanged_profile_file_untouched() {
             assert_eq!(file.lock().unwrap().1, uploads + 1);
             owner.leave_profile().await.unwrap();
             inputs.receivers.visualizer.close();
-            let playback = inputs.products.playback.transport.clone();
+            let playback = inputs.products.playback.clone();
             tokio::task::spawn_blocking(move || playback.shutdown())
                 .await
                 .unwrap();

@@ -3,20 +3,21 @@ use super::{
     actor::{PlaybackError, WeakPlayback},
     queue::{OccurrenceId, Sequence, SequenceError},
 };
+use crate::playback::{QueueReorderTarget, QueueSelection};
 use playback::{
     BackendFailure, ControlsView, CurrentMedia, CurrentMediaId, PlaybackBackend, PlaybackNotice,
     PlaybackProjection, PlaybackView, PositionDiscontinuity, SourceReportFact, SourceReportPhase,
     TransportStatus, TransportView,
 };
-use playback::{QueueReorderTarget, QueueSelection};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Weak};
 use tokio::task::JoinHandle;
 
+use crate::playback::Placement;
 use playback::{
-    BackendCommand, BackendEvent, BackendState, NextTransition, Placement, PlaybackOutput,
-    PlaybackSettings, PlaybackTransitionMode, PreparedNext, PreparedStream, Provenance, QueueItem,
-    QueueRow, RepeatMode, RunEndReason, RunId, StreamRequest, manual_end_is_skip,
+    BackendCommand, BackendEvent, BackendState, NextTransition, PlaybackOutput, PlaybackSettings,
+    PlaybackTransitionMode, PreparedNext, PreparedStream, Provenance, QueueItem, QueueRow,
+    RepeatMode, RunEndReason, RunId, StreamRequest, manual_end_is_skip,
     qualified_play_threshold_millis,
 };
 
@@ -77,11 +78,11 @@ pub enum Command {
     Forget(Vec<library::TrackKey>),
     Reorder {
         selection: QueueSelection,
-        target: playback::QueueReorderTarget,
+        target: crate::playback::QueueReorderTarget,
     },
     Insert {
         input: library::QueueReadRequest,
-        target: playback::QueueReorderTarget,
+        target: crate::playback::QueueReorderTarget,
     },
     MoveAfterCurrent(usize),
     MoveOccurrenceAfterCurrent(u64),
@@ -886,7 +887,7 @@ impl Player {
 
     pub(super) fn play(
         &mut self,
-        mut request: playback::PlayRequest,
+        mut request: crate::playback::PlayRequest,
         sample: &ClockSample,
     ) -> Result<(), SequenceError> {
         request.shuffled_start &=

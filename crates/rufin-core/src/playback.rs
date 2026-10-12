@@ -1,10 +1,12 @@
 //! Playback controls, source jobs, and persistent playback facts.
 pub(crate) mod actor;
+mod commands;
 mod connect;
 mod continuation;
 mod plex;
 mod queue;
 pub(crate) mod state;
+pub use commands::*;
 pub(crate) use continuation::PreparedContinuation;
 #[cfg(test)]
 mod queue_tests;
@@ -25,9 +27,7 @@ use async_channel::{Receiver, Sender as EventSender, TrySendError};
 use library::QueueUpdate;
 use library::{Database, ListenWrite, ReadCancellation};
 use playback::{
-    PlayRequest, PlaybackBackend, PlaybackProjection, PreparedStream, QueueCommandPort,
-    QueueReorderRequest, RadioCommandPort, RadioPlayRequest, RandomPlayRequest, RepeatMode, RunId,
-    StreamRequest, TransportCommandPort,
+    PlaybackBackend, PlaybackProjection, PreparedStream, RepeatMode, RunId, StreamRequest,
 };
 use queue::Sequence;
 use scrobbling::Scrobbler;
@@ -45,11 +45,11 @@ struct OutputSelection {
     prepared: Option<Box<dyn PlaybackBackend>>,
 }
 
-pub(crate) struct PlaybackOwner {
+pub struct PlaybackOwner {
     database: Arc<Database>,
     settings: SettingsFile,
     runtime: tokio::runtime::Handle,
-    pub(crate) updates: playback::PlaybackUpdates,
+    pub updates: playback::PlaybackUpdates,
     visualizer_events: EventSender<crate::runtime::VisualizerPublication>,
     visualizer_drain: Receiver<VisualizerPublication>,
     waveform: Arc<WaveformOwner>,
@@ -123,11 +123,7 @@ async fn save_pending_queue(
 }
 
 impl PlaybackOwner {
-    pub(crate) fn insert_load(
-        &self,
-        input: library::QueueReadRequest,
-        target: playback::QueueReorderTarget,
-    ) {
+    pub(crate) fn insert_load(&self, input: library::QueueReadRequest, target: QueueReorderTarget) {
         self.send(Command::Insert { input, target });
     }
 
@@ -732,13 +728,13 @@ impl PlaybackOwner {
     }
 }
 
-impl QueueCommandPort for PlaybackOwner {
-    fn page(&self, offset: u64, limit: u32, filter: String) -> Result<playback::QueuePage, String> {
+impl PlaybackOwner {
+    pub fn page(&self, offset: u64, limit: u32, filter: String) -> Result<QueuePage, String> {
         self.runtime
             .block_on(self.receiver_queue_page(offset, limit, filter))
     }
 
-    fn snapshot(&self) -> Result<library::QueueRestore, String> {
+    pub fn snapshot(&self) -> Result<library::QueueRestore, String> {
         let receiver = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone();
         if let Some(receiver) = receiver {
             return self
@@ -755,19 +751,18 @@ impl QueueCommandPort for PlaybackOwner {
             .map_err(string_error)
     }
 
-    fn media_uris(&self) -> Result<Vec<String>, String> {
+    pub fn selection(&self) -> Result<library::SongSelection, String> {
         let queue = self.snapshot()?;
-        let keys = queue
-            .order
-            .iter()
-            .map(|index| queue.entries[*index as usize].track_key)
-            .collect::<Vec<_>>();
-        self.runtime
-            .block_on(self.database.track_uris(&keys, &ReadCancellation::new()))
-            .map_err(string_error)
+        Ok(library::SongSelection::Tracks(
+            queue
+                .order
+                .iter()
+                .map(|index| queue.entries[*index as usize].track_key)
+                .collect(),
+        ))
     }
 
-    fn play(&self, request: PlayRequest) {
+    pub fn play_selection(&self, request: PlayRequest) {
         if self.play_rufin(&request) {
             return;
         }
@@ -781,45 +776,42 @@ impl QueueCommandPort for PlaybackOwner {
             warn!(%error, "could not play Queue");
         }
     }
-    fn insert(&self, input: library::SongSelection, target: playback::QueueReorderTarget) {
+    pub fn insert(&self, input: library::SongSelection, target: QueueReorderTarget) {
         self.insert_load(library::QueueReadRequest::songs(input), target);
     }
-    fn remove(&self, position: usize) {
+    pub fn remove(&self, position: usize) {
         self.send(Command::Remove(position));
     }
-    fn remove_many(&self, selection: playback::QueueSelection) {
+    pub fn remove_many(&self, selection: QueueSelection) {
         self.send(Command::RemoveMany(selection));
     }
-    fn activate(&self, position: usize) {
+    pub fn activate(&self, position: usize) {
         self.send(Command::Activate(position));
     }
-    fn activate_occurrence(&self, id: u64) {
+    pub fn activate_occurrence(&self, id: u64) {
         self.send(Command::ActivateOccurrence(id));
     }
-    fn move_occurrence_after_current(&self, id: u64) {
+    pub fn move_occurrence_after_current(&self, id: u64) {
         self.send(Command::MoveOccurrenceAfterCurrent(id));
     }
-    fn move_after_current(&self, position: usize) {
+    pub fn move_after_current(&self, position: usize) {
         self.send(Command::MoveAfterCurrent(position));
     }
-    fn reorder(&self, request: QueueReorderRequest) {
-        self.send(Command::Reorder {
-            selection: request.selection,
-            target: request.target,
-        });
+    pub fn reorder(&self, selection: QueueSelection, target: QueueReorderTarget) {
+        self.send(Command::Reorder { selection, target });
     }
-    fn clear(&self, include_current: bool) {
+    pub fn clear(&self, include_current: bool) {
         self.send(Command::Clear { include_current });
     }
 }
 
-impl RadioCommandPort for PlaybackOwner {
-    fn candidates(
+impl PlaybackOwner {
+    pub fn candidates(
         &self,
         seed: library::RadioSeed,
         requested: usize,
         cancellation: library::ReadCancellation,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<String>, String>> + Send>>
+    ) -> impl std::future::Future<Output = Result<Vec<String>, String>> + Send + 'static + use<>
     {
         let database = self.database.clone();
         let source = self
@@ -827,12 +819,12 @@ impl RadioCommandPort for PlaybackOwner {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .clone();
-        Box::pin(async move {
+        async move {
             crate::radio::radio_candidates(&database, source, seed, requested, &cancellation).await
-        })
+        }
     }
 
-    fn play_random(&self, request: RandomPlayRequest) {
+    pub fn play_random(&self, request: RandomPlayRequest) {
         if self.random_rufin(&request) {
             return;
         }
@@ -852,7 +844,7 @@ impl RadioCommandPort for PlaybackOwner {
             );
         }
     }
-    fn play_radio(&self, request: RadioPlayRequest) {
+    pub fn play_radio(&self, request: RadioPlayRequest) {
         if self.radio_rufin(&request) {
             return;
         }
@@ -874,41 +866,41 @@ impl RadioCommandPort for PlaybackOwner {
     }
 }
 
-impl TransportCommandPort for PlaybackOwner {
-    fn play_pause(&self) {
+impl PlaybackOwner {
+    pub fn play_pause(&self) {
         self.send(Command::PlayPause)
     }
-    fn play(&self) {
+    pub fn play(&self) {
         self.send(Command::Play)
     }
-    fn pause(&self) {
+    pub fn pause(&self) {
         self.send(Command::Pause)
     }
-    fn stop(&self) {
+    pub fn stop(&self) {
         self.send(Command::Stop)
     }
-    fn next(&self) {
+    pub fn next(&self) {
         self.send(Command::Next)
     }
-    fn previous(&self) {
+    pub fn previous(&self) {
         self.send(Command::Previous)
     }
-    fn seek_seconds(&self, seconds: u32) {
+    pub fn seek_seconds(&self, seconds: u32) {
         self.seek_millis(u64::from(seconds) * 1000)
     }
-    fn seek_millis(&self, millis: u64) {
+    pub fn seek_millis(&self, millis: u64) {
         self.send(Command::Seek(millis))
     }
-    fn set_volume(&self, volume: f64) {
+    pub fn set_volume(&self, volume: f64) {
         self.send(Command::SetVolume(volume))
     }
-    fn persist_volume(&self, volume: f64) {
+    pub fn persist_volume(&self, volume: f64) {
         self.send(Command::PersistVolume(volume))
     }
-    fn set_muted(&self, muted: bool) {
+    pub fn set_muted(&self, muted: bool) {
         self.send(Command::SetMuted(muted))
     }
-    fn set_shuffle(&self, enabled: bool) {
+    pub fn set_shuffle(&self, enabled: bool) {
         let _ = self.settings.update(|stored| {
             stored.ui.shuffle_enabled = enabled;
             Ok(())
@@ -918,7 +910,7 @@ impl TransportCommandPort for PlaybackOwner {
             seed: random_u64(),
         })
     }
-    fn cycle_repeat(&self) {
+    pub fn cycle_repeat(&self) {
         if self
             .rufin
             .lock()
@@ -937,14 +929,14 @@ impl TransportCommandPort for PlaybackOwner {
             Err(_) => self.set_repeat(RepeatMode::Off),
         }
     }
-    fn set_repeat(&self, repeat: RepeatMode) {
+    pub fn set_repeat(&self, repeat: RepeatMode) {
         let _ = self.settings.update(|stored| {
             stored.ui.repeat_mode = repeat;
             Ok(())
         });
         self.send(Command::SetRepeat(repeat))
     }
-    fn toggle_auto_dj(&self) {
+    pub fn toggle_auto_dj(&self) {
         if self
             .rufin
             .lock()
@@ -970,23 +962,23 @@ impl TransportCommandPort for PlaybackOwner {
             refill_threshold: usize::from(threshold),
         })
     }
-    fn set_visualizer_enabled(&self, enabled: bool) {
+    pub fn set_visualizer_enabled(&self, enabled: bool) {
         self.send(Command::SetVisualizerEnabled(enabled))
     }
-    fn available_audio_outputs(&self) -> Vec<playback::AudioOutput> {
+    pub fn available_audio_outputs(&self) -> Vec<playback::AudioOutput> {
         (self.audio_outputs)()
     }
-    fn available_cast_networks(&self) -> Vec<playback::CastNetwork> {
+    pub fn available_cast_networks(&self) -> Vec<playback::CastNetwork> {
         self.cast.available_networks().unwrap_or_default()
     }
-    fn playback_output(&self) -> playback::PlaybackOutput {
+    pub fn playback_output(&self) -> playback::PlaybackOutput {
         self.output
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .selected
             .clone()
     }
-    fn discover_remote_outputs(&self) -> Result<Vec<playback::RemoteOutput>, String> {
+    pub fn discover_remote_outputs(&self) -> Result<Vec<playback::RemoteOutput>, String> {
         let mut outputs = self.cast.discover().unwrap_or_else(|error| {
             debug!(%error, "generic receiver discovery unavailable");
             Vec::new()
@@ -1001,14 +993,14 @@ impl TransportCommandPort for PlaybackOwner {
         }
         Ok(outputs)
     }
-    fn select_playback_output(
+    pub fn select_playback_output(
         &self,
         output: playback::PlaybackOutput,
         cancelled: Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<(), String> {
         self.select_output(output, cancelled)
     }
-    fn shutdown(&self) {
+    pub fn shutdown(&self) {
         if let Some(receiver) = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).take() {
             receiver.cancel();
         }

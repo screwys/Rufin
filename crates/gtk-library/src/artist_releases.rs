@@ -12,7 +12,6 @@ use crate::{LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings};
 use gtk_widgets::layout::width_allocation_owner;
 use gtk_widgets::mounted_route::MountedRouteSearchTarget;
 
-use super::artist::{ArtistReleasePage, ArtistReleaseQuery};
 use super::cards;
 use super::collections::library_route_inset;
 use super::columns::AlbumTableCell;
@@ -25,6 +24,7 @@ use gtk_widgets::library_fields::COLLECTION_GRID_MIN_CARD_WIDTH;
 use gtk_widgets::sparse_model::{
     SparseObjectItem, SparseRouteModel, SparseSource, connect_sparse_bind,
 };
+use rufin_core::browse::{ArtistReleasePage, ArtistReleaseQuery};
 
 const ARTIST_RELEASE_SECTION_GAP: i32 = 18;
 const ARTIST_RELEASE_HEADER_GAP: i32 = 10;

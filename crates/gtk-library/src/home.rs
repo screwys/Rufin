@@ -6,7 +6,7 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 use library::{HomeAlbumRow, HomeGenreRow, HomePage, HomeSectionRows, HomeTrackRow, RadioSeed};
 use localization::{album_count_text, msgid, tr, track_count_text};
-use playback::RadioPlayRequest;
+use rufin_core::playback::RadioPlayRequest;
 
 use crate::CatalogUi;
 use crate::LibraryField;
@@ -644,7 +644,7 @@ impl CatalogUi {
         let showcase_view =
             DetailShowcaseView::new("home-showcase", seed, "Showcase", true, &title_text);
         let radio = detail_radio_button();
-        let radio_controller = self.radio.clone();
+        let radio_controller = self.playback.clone();
         let radio_seed = RadioSeed::Album(album.album_key);
         radio.connect_clicked(move |_| {
             radio_controller.play_radio(RadioPlayRequest::now(radio_seed.clone()));
@@ -832,7 +832,7 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
             let play = Rc::new(move |_| {
                 (play_shell.media_menus.play_target)(
                     &track_play_request(play_key),
-                    playback::QueuePlacement::Now,
+                    rufin_core::playback::QueuePlacement::Now,
                     false,
                 );
             });
@@ -881,7 +881,7 @@ fn activate_home_item(shell: &Rc<CatalogUi>, item: HomeItem) {
     match item {
         HomeItem::Track(item) => (shell.media_menus.play_target)(
             &track_play_request(item.track.track_key),
-            playback::QueuePlacement::Now,
+            rufin_core::playback::QueuePlacement::Now,
             false,
         ),
         HomeItem::Album(item) => shell.navigate(Route::AlbumDetail(item.album.media_uri.clone())),

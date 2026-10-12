@@ -7,7 +7,7 @@ use adw::prelude::*;
 use artwork::ArtworkBinding;
 use library::{Database, GenreKey, GenreRow, MoodKey, MoodRow, RadioSeed, ReadCancellation};
 use localization::{msgid, track_count_text};
-use playback::RadioPlayRequest;
+use rufin_core::playback::RadioPlayRequest;
 
 use crate::CatalogUi;
 use crate::{LibraryListKey, LibraryListSettings};
@@ -255,69 +255,44 @@ pub async fn load_named_detail(
     window: library::RouteSeedWindow,
     cancellation: &ReadCancellation,
 ) -> Result<Option<(NamedDetailSummary, library::TrackRoutePage)>, String> {
-    let collection = match id {
-        NamedDetailId::Genre(key) => library::SongScope::Genre(key),
-        NamedDetailId::Mood(key) => library::SongScope::Mood(key),
+    let route = match id {
+        NamedDetailId::Genre(key) => rufin_core::route::Route::GenreDetail(key),
+        NamedDetailId::Mood(key) => rufin_core::route::Route::MoodDetail(key),
     };
+    let query = rufin_core::browse::BrowseRequest::new(
+        &route,
+        rufin_core::route::CollectionCategory::Tracks,
+        None,
+        None,
+        settings,
+        8,
+    )
+    .songs()
+    .expect("named song route");
     let Some(source) = database
-        .collection_source(&collection, cancellation)
+        .collection_source(&query.scope, cancellation)
         .await
         .map_err(|error| error.to_string())?
     else {
         return Ok(None);
     };
-    let sort = settings.sort_key.track_sort();
-    let descending = settings.descending;
-    match id {
-        NamedDetailId::Genre(key) => {
-            let detail = database
-                .genre_detail(source, key, None, cancellation)
-                .await
-                .map_err(|error| error.to_string())?;
-            let detail = detail.map(NamedDetailSummary::Genre);
-            let page = database
-                .song_route_page(
-                    &library::SongQuery {
-                        scope: library::SongScope::Genre(key),
-                        folder: None,
-                        filter: "".to_string(),
-                        sort: Some(sort),
-                        descending: descending,
-                        favorites_only: false,
-                        downloaded_only: false,
-                    },
-                    window,
-                    cancellation,
-                )
-                .await
-                .map_err(|error| error.to_string())?;
-            Ok(detail.map(|detail| (detail, page)))
-        }
-        NamedDetailId::Mood(key) => {
-            let detail = database
-                .mood_detail(source, key, None, cancellation)
-                .await
-                .map_err(|error| error.to_string())?;
-            let detail = detail.map(NamedDetailSummary::Mood);
-            let page = database
-                .song_route_page(
-                    &library::SongQuery {
-                        scope: library::SongScope::Mood(key),
-                        folder: None,
-                        filter: "".to_string(),
-                        sort: Some(sort),
-                        descending: descending,
-                        favorites_only: false,
-                        downloaded_only: false,
-                    },
-                    window,
-                    cancellation,
-                )
-                .await
-                .map_err(|error| error.to_string())?;
-            Ok(detail.map(|detail| (detail, page)))
-        }
-    }
+    let detail = match id {
+        NamedDetailId::Genre(key) => database
+            .genre_detail(source, key, None, cancellation)
+            .await
+            .map_err(|error| error.to_string())?
+            .map(NamedDetailSummary::Genre),
+        NamedDetailId::Mood(key) => database
+            .mood_detail(source, key, None, cancellation)
+            .await
+            .map_err(|error| error.to_string())?
+            .map(NamedDetailSummary::Mood),
+    };
+    let page = database
+        .song_route_page(&query, window, cancellation)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(detail.map(|detail| (detail, page)))
 }
 
 fn named_context_menu(
@@ -352,7 +327,7 @@ fn named_kind_controls(shell: &Rc<CatalogUi>, id: NamedDetailId) -> Vec<gtk::Wid
     let mut controls = Vec::new();
     if let NamedDetailId::Genre(key) = id {
         let radio = detail_radio_button();
-        let controller = shell.radio.clone();
+        let controller = shell.playback.clone();
         radio.connect_clicked(move |_| {
             controller.play_radio(RadioPlayRequest::now(RadioSeed::Genre(key)));
         });

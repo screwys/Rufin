@@ -570,7 +570,7 @@ async fn rule_media_uris(
             query.folder = folder;
             query.favorites_only = matches!(rule, DownloadRule::Favorites);
             database
-                .selected_track_uris(&query.selection(), &cancellation)
+                .selected_track_uris(&query.selection(), None, &cancellation)
                 .await
         }
         DownloadRule::AllPlaylists => {

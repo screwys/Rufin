@@ -277,9 +277,9 @@ async fn queue_play(
             .get("anchor_entry")
             .is_none_or(Value::is_null);
     let placement = match input.mode.as_str() {
-        "replace" => playback::QueuePlacement::Replace { anchor_index: 0 },
-        "append" | "insert" => playback::QueuePlacement::End,
-        "next" => playback::QueuePlacement::AfterCurrent,
+        "replace" => rufin_core::playback::QueuePlacement::Replace { anchor_index: 0 },
+        "append" | "insert" => rufin_core::playback::QueuePlacement::End,
+        "next" => rufin_core::playback::QueuePlacement::AfterCurrent,
         _ => {
             return Err(bad_request(
                 "Queue mode must be replace, append, next or insert",
@@ -348,37 +348,41 @@ async fn queue_play(
             .await?
             .selection()
     };
-    let queue = products.playback.queue.clone();
+    let queue = products.playback.clone();
     tokio::task::spawn_blocking(move || {
         if input.mode == "insert" {
             queue.insert(selection, queue_drop_target(input.before, input.after));
             return;
         }
-        let mut request = playback::PlayRequest::ordered(selection, 0, placement, shuffled_start);
+        let mut request =
+            rufin_core::playback::PlayRequest::ordered(selection, 0, placement, shuffled_start);
         if kind != "track" {
             request = request.with_context("api".into());
         }
         if let Some(key) = anchor_key {
             request = request.with_anchor(key, anchor_entry);
         }
-        queue.play(request)
+        queue.play_selection(request)
     })
     .await
     .map_err(internal)?;
     Ok(accepted())
 }
 
-fn queue_drop_target(before: Option<usize>, after: Option<usize>) -> playback::QueueReorderTarget {
+fn queue_drop_target(
+    before: Option<usize>,
+    after: Option<usize>,
+) -> rufin_core::playback::QueueReorderTarget {
     match (before, after) {
-        (Some(id), _) => playback::QueueReorderTarget::Before(id),
-        (_, Some(id)) => playback::QueueReorderTarget::After(id),
-        _ => playback::QueueReorderTarget::End,
+        (Some(id), _) => rufin_core::playback::QueueReorderTarget::Before(id),
+        (_, Some(id)) => rufin_core::playback::QueueReorderTarget::After(id),
+        _ => rufin_core::playback::QueueReorderTarget::End,
     }
 }
 
 async fn queue_clear(State(products): State<ProductHandles>) -> Result<Response<Body>, Error> {
     let products = &products;
-    let queue = products.playback.queue.clone();
+    let queue = products.playback.clone();
     let include_current = products.settings.load().clear_queue_includes_current;
     tokio::task::spawn_blocking(move || queue.clear(include_current))
         .await
@@ -392,7 +396,7 @@ async fn queue_activate(
 ) -> Result<Response<Body>, Error> {
     let products = &products;
     let input: QueuePosition = body(request).await?;
-    let queue = products.playback.queue.clone();
+    let queue = products.playback.clone();
     tokio::task::spawn_blocking(move || queue.activate(input.position))
         .await
         .map_err(internal)?;
@@ -413,7 +417,7 @@ async fn queue_remove(
             .parse::<usize>()
             .map_err(bad_request)?
     };
-    let queue = products.playback.queue.clone();
+    let queue = products.playback.clone();
     tokio::task::spawn_blocking(move || queue.remove(position))
         .await
         .map_err(internal)?;
@@ -426,7 +430,7 @@ async fn playback_command(
 ) -> Result<Response<Body>, Error> {
     let products = &products;
     let path = request.uri().path().to_owned();
-    let transport = products.playback.transport.clone();
+    let transport = products.playback.clone();
     let action = path.trim_start_matches("/api/playback/").to_owned();
     let value: Value = if matches!(
         action.as_str(),

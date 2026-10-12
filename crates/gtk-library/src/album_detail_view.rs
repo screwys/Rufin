@@ -17,7 +17,7 @@ use gtk_widgets::favorites::{
 use gtk_widgets::format_duration_units;
 use gtk_widgets::mounted_route::MountedRoute;
 use localization::{msgid, track_count_text};
-use playback::RadioPlayRequest;
+use rufin_core::playback::RadioPlayRequest;
 
 use super::collections::library_route_inset;
 use super::detail_showcase::{
@@ -91,7 +91,7 @@ impl CatalogUi {
         });
 
         let radio = detail_radio_button();
-        let radio_controller = self.radio.clone();
+        let radio_controller = self.playback.clone();
         let radio_album = Rc::clone(&current_album);
         radio.connect_clicked(move |_| {
             radio_controller.play_radio(RadioPlayRequest::now(RadioSeed::Album(
@@ -115,7 +115,7 @@ impl CatalogUi {
         let actions = showcase_view.actions();
         actions.add_css_class("album-detail-actions");
         actions.set_halign(gtk::Align::Start);
-        let play_controller = self.queue.clone();
+        let play_controller = self.playback.clone();
         let play_tracks = track_projection.clone();
         let play_context_id = context_id.clone();
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {
@@ -293,26 +293,20 @@ pub async fn load_album_detail(
     window: library::RouteSeedWindow,
     cancellation: &library::ReadCancellation,
 ) -> library::LibraryResult<Option<(AlbumRow, library::TrackRoutePage)>> {
-    let Some(album) = database
-        .album_row_by_media_uri(album_uri, cancellation)
-        .await?
-    else {
+    let route = rufin_core::route::Route::AlbumDetail(album_uri.to_string());
+    let request = rufin_core::browse::BrowseRequest::new(
+        &route,
+        rufin_core::route::CollectionCategory::Tracks,
+        None,
+        None,
+        settings,
+        8,
+    );
+    let Some((album, query)) = request.album(database, cancellation).await? else {
         return Ok(None);
     };
     let page = database
-        .song_route_page(
-            &library::SongQuery {
-                scope: library::SongScope::Album(album.album_key),
-                folder: None,
-                filter: "".to_string(),
-                sort: Some(settings.sort_key.track_sort()),
-                descending: settings.descending,
-                favorites_only: false,
-                downloaded_only: false,
-            },
-            window,
-            cancellation,
-        )
+        .song_route_page(&query, window, cancellation)
         .await?;
     Ok(Some((album, page)))
 }

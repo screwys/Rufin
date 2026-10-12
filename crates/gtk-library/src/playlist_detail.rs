@@ -184,7 +184,7 @@ impl CatalogUi {
             detail.projection,
         );
         let play_model = model.clone();
-        let play_queue = self.queue.clone();
+        let play_queue = self.playback.clone();
         let play_context = owner.context_id();
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {
             play_model.play_source(
@@ -325,7 +325,7 @@ impl CatalogUi {
             let entries = Rc::clone(&entries);
             Rc::new(move || entries.resume_initial_demand()) as Rc<dyn Fn()>
         };
-        let play_queue = self.queue.clone();
+        let play_queue = self.playback.clone();
         let download_entries = Rc::clone(&entries);
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {
             entries.play(play_queue.clone(), placement, shuffled);
@@ -615,10 +615,10 @@ impl CatalogUi {
         showcase.clear_kind_controls();
         if let PlaylistDetailOwner::Saved { key, .. } = owner {
             let radio = detail_radio_button();
-            let controller = self.radio.clone();
+            let controller = self.playback.clone();
             let key = *key;
             radio.connect_clicked(move |_| {
-                controller.play_radio(playback::RadioPlayRequest::now(
+                controller.play_radio(rufin_core::playback::RadioPlayRequest::now(
                     library::RadioSeed::Playlist(key),
                 ));
             });
@@ -656,12 +656,19 @@ pub async fn load_smart_playlist_detail(
     else {
         return Ok(None);
     };
-    let query = library::SongQuery {
-        folder,
-        sort: Some(settings.sort_key.track_sort()),
-        descending: settings.descending,
-        ..library::SongQuery::new(library::SongScope::Smart { key, source, now })
-    };
+    let query = rufin_core::browse::BrowseRequest {
+        now,
+        ..rufin_core::browse::BrowseRequest::new(
+            &Route::SmartPlaylistDetail(key),
+            rufin_core::route::CollectionCategory::Tracks,
+            source,
+            folder,
+            &settings,
+            8,
+        )
+    }
+    .songs()
+    .expect("smart playlist route");
     let count = summary.track_count.max(0) as usize;
     let range = window.range(count);
     let first_rows = database

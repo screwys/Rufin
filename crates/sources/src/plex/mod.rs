@@ -62,7 +62,7 @@ impl PlexSourceConfig {
     }
 }
 
-pub(crate) struct PlexSource {
+pub struct PlexSource {
     pub(crate) login: Arc<tokio::sync::Mutex<PlexLogin>>,
     config: PlexSourceConfig,
     client: Client,

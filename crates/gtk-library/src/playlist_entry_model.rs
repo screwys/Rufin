@@ -39,15 +39,21 @@ impl PlaylistEntryModel {
         first_rows: Vec<PlaylistEntryRow>,
         settings: LibraryListSettings,
     ) -> Self {
-        let applied = Rc::new(RefCell::new(PlaylistEntryProjectionRequest {
-            query: library::SongQuery {
-                sort: Some(settings.sort_key.track_sort()),
-                descending: settings.descending,
-                ..library::SongQuery::new(library::SongScope::Playlist(playlist_key))
-            },
+        let request = PlaylistEntryProjectionRequest {
+            query: rufin_core::browse::BrowseRequest::new(
+                &rufin_core::route::Route::PlaylistDetail(playlist_key),
+                rufin_core::route::CollectionCategory::Tracks,
+                None,
+                None,
+                &settings,
+                8,
+            )
+            .songs()
+            .expect("playlist route"),
             settings: settings.clone(),
             first_row_position,
-        }));
+        };
+        let applied = Rc::new(RefCell::new(request.clone()));
         let load_request = Rc::clone(&applied);
         let loader_database = Arc::clone(&database);
         let load = Rc::new(
@@ -76,15 +82,7 @@ impl PlaylistEntryModel {
                 playlist_key,
                 sparse,
                 applied,
-                request: RefCell::new(PlaylistEntryProjectionRequest {
-                    query: library::SongQuery {
-                        sort: Some(settings.sort_key.track_sort()),
-                        descending: settings.descending,
-                        ..library::SongQuery::new(library::SongScope::Playlist(playlist_key))
-                    },
-                    settings,
-                    first_row_position,
-                }),
+                request: RefCell::new(request),
             }),
         }
     }
@@ -214,14 +212,18 @@ impl PlaylistEntryModel {
         })
     }
 
-    pub fn activate(&self, position: u32, queue: playback::QueueHandle) {
+    pub fn activate(
+        &self,
+        position: u32,
+        queue: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
+    ) {
         let Some(_row) = self.ready(position) else {
             return;
         };
         self.play(
             position as usize,
             queue,
-            playback::QueuePlacement::Now,
+            rufin_core::playback::QueuePlacement::Now,
             false,
             false,
         );
@@ -230,8 +232,8 @@ impl PlaylistEntryModel {
     pub fn play(
         &self,
         position: usize,
-        queue: playback::QueueHandle,
-        placement: playback::QueuePlacement,
+        queue: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
+        placement: rufin_core::playback::QueuePlacement,
         collection_start: bool,
         shuffled: bool,
     ) {
@@ -239,9 +241,9 @@ impl PlaylistEntryModel {
             return;
         }
         let constructor = if collection_start {
-            playback::PlayRequest::ordered
+            rufin_core::playback::PlayRequest::ordered
         } else {
-            playback::PlayRequest::captured
+            rufin_core::playback::PlayRequest::captured
         };
         let mut request = constructor(
             self.inner.applied.borrow().query.clone().selection(),
@@ -254,6 +256,6 @@ impl PlaylistEntryModel {
         if !collection_start && let Some(row) = self.ready(position as u32) {
             request = request.with_anchor(row.track_key, Some(row.playlist_entry_key));
         }
-        queue.play(request);
+        queue.play_selection(request);
     }
 }

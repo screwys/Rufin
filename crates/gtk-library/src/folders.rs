@@ -4,7 +4,7 @@ use adw::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use library::ReadCancellation;
 use localization::{msgid, tr};
-use playback::QueuePlacement;
+use rufin_core::playback::QueuePlacement;
 use rufin_core::source::folders::FolderProjection;
 
 use crate::{CatalogUi, LibraryField, LibraryListKey};
@@ -129,11 +129,23 @@ pub async fn prepare_folder_route(
     )
     .await
     .map_err(|error| error.to_string())?;
-    let query = library::SongQuery {
-        sort: Some(settings.sort_key.track_sort()),
-        descending: settings.descending,
-        ..source.song_query(selected.source_key)
+    let route = Route::Folders {
+        path: path.to_vec(),
     };
+    let query = rufin_core::browse::BrowseRequest::new(
+        &route,
+        rufin_core::route::CollectionCategory::Tracks,
+        Some(selected.source_key),
+        selected.music_folder_key,
+        settings,
+        8,
+    )
+    .resolve(&selected.database, Some(&source), cancellation)
+    .await
+    .map_err(|error| error.to_string())?
+    .songs()
+    .expect("folder song route")
+    .clone();
     let page = load_folder_page(
         &selected.database,
         selected.source_key,
@@ -155,42 +167,18 @@ async fn load_child_folders(
     range: std::ops::Range<usize>,
     cancellation: &ReadCancellation,
 ) -> library::LibraryResult<(usize, Vec<FolderLink>)> {
-    Ok(match source {
-        FolderProjection::Live { .. } => (
-            source.live_folders(&query.filter, query.descending).count(),
-            source
-                .live_folders(&query.filter, query.descending)
-                .skip(range.start)
-                .take(range.len())
-                .map(|folder| FolderLink {
-                    object_id: folder.object_id.clone(),
-                    name: folder.name.clone(),
-                })
-                .collect(),
-        ),
-        FolderProjection::Cached(folder) => {
-            let (count, rows) = database
-                .filtered_folder_page(
-                    source_key,
-                    *folder,
-                    &query.filter,
-                    query.descending,
-                    range.start,
-                    range.len(),
-                    cancellation,
-                )
-                .await?;
-            (
-                count,
-                rows.into_iter()
-                    .map(|row| FolderLink {
-                        object_id: row.object_id,
-                        name: row.name,
-                    })
-                    .collect(),
-            )
-        }
-    })
+    let (count, rows) = source
+        .child_page(database, source_key, query, range, cancellation)
+        .await?;
+    Ok((
+        count,
+        rows.into_iter()
+            .map(|row| FolderLink {
+                object_id: row.object_id,
+                name: row.name,
+            })
+            .collect(),
+    ))
 }
 
 async fn load_folder_page(
@@ -606,17 +594,22 @@ fn folder_table(
             FolderTableRow::Track(track) => {
                 let anchor = position.saturating_sub(folder_count);
                 let input = applied_query.borrow().clone().selection();
-                activate_shell.queue.play(
-                    playback::PlayRequest::captured(input, anchor, QueuePlacement::Now, false)
-                        .with_context(
-                            format!(
-                                "{}|result={}",
-                                folder_context_id(&path),
-                                activate_tracks.order_id()
-                            )
-                            .into(),
+                activate_shell.playback.play_selection(
+                    rufin_core::playback::PlayRequest::captured(
+                        input,
+                        anchor,
+                        QueuePlacement::Now,
+                        false,
+                    )
+                    .with_context(
+                        format!(
+                            "{}|result={}",
+                            folder_context_id(&path),
+                            activate_tracks.order_id()
                         )
-                        .with_anchor(track.track_key, None),
+                        .into(),
+                    )
+                    .with_anchor(track.track_key, None),
                 );
             }
         }

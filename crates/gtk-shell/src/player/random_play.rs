@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use ::library::{GenreChoice, PlayedFilter, RandomCriteria, ReadCancellation};
 use adw::prelude::*;
 use gtk::glib;
-use playback::{QueuePlacement, RandomPlayRequest};
+use rufin_core::playback::{QueuePlacement, RandomPlayRequest};
 use tracing::warn;
 
 use localization::tr;
@@ -313,7 +313,7 @@ pub(crate) fn play_saved_random(shell: &Rc<Shell>, placement: QueuePlacement) {
         )
         .map(str::to_owned);
     let runtime = selected.runtime.clone();
-    let queue = shell.products.playback.queue.clone();
+    let queue = shell.products.playback.clone();
     let task = runtime.spawn(async move {
         let cancellation = ReadCancellation::new();
         let genre = match genre_object_id {
@@ -356,7 +356,7 @@ fn execute_random(
     request: RandomPlayRequest,
 ) {
     let runtime = selected.runtime.clone();
-    let queue = shell.products.playback.queue.clone();
+    let queue = shell.products.playback.clone();
     let task = runtime.spawn(execute_random_task(selected, request, queue));
     report_random_result(shell, task);
 }
@@ -377,7 +377,7 @@ fn report_random_result(shell: &Shell, task: tokio::task::JoinHandle<bool>) {
 async fn execute_random_task(
     selected: rufin_core::runtime::SelectedLibrary,
     request: RandomPlayRequest,
-    queue: playback::QueueHandle,
+    queue: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
 ) -> bool {
     match rufin_core::radio::queue_random(
         &selected.database,
@@ -405,7 +405,7 @@ fn random_variation() -> i64 {
 #[cfg(test)]
 mod tests {
     use library::PlayedFilter;
-    use playback::QueuePlacement;
+    use rufin_core::playback::QueuePlacement;
     use sources::SourceId;
 
     use super::{RandomPlaySettings, request_from_settings};

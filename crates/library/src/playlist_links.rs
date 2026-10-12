@@ -63,7 +63,11 @@ mod tests {
         // Deliberately create higher ordinals first to exercise unique-path compaction.
         for index in [2, 1, 0] {
             let playlist = database
-                .create_playlist(None, &format!("Root {index}"), &[])
+                .create_playlist(
+                    None,
+                    &format!("Root {index}"),
+                    &crate::SongSelection::Uris((&[]).to_vec().into()),
+                )
                 .await?
                 .unwrap()
                 .0;
@@ -187,7 +191,11 @@ mod tests {
             .create_playlist(
                 None,
                 "Music",
-                &["file:///song.flac".into(), "file:///two.flac".into()],
+                &crate::SongSelection::Uris(
+                    (&["file:///song.flac".into(), "file:///two.flac".into()])
+                        .to_vec()
+                        .into(),
+                ),
             )
             .await?
             .unwrap()
@@ -207,7 +215,11 @@ mod tests {
         check!(database.save_playlist_file_link(&link).await?);
         check!(!database.save_playlist_file_link(&link).await?);
         let second = database
-            .create_playlist(None, "Second", &[])
+            .create_playlist(
+                None,
+                "Second",
+                &crate::SongSelection::Uris((&[]).to_vec().into()),
+            )
             .await?
             .unwrap()
             .0;
@@ -235,7 +247,12 @@ mod tests {
         );
         check_eq!(
             database
-                .add_playlist_media(None, playlist, &["file:///song.flac".into()], true)
+                .add_playlist_songs(
+                    None,
+                    playlist,
+                    &crate::SongSelection::Uris((&["file:///song.flac".into()]).to_vec().into()),
+                    true
+                )
                 .await?,
             0
         );
@@ -260,7 +277,12 @@ mod tests {
             .mark_playlist_file_synced(playlist, "second")
             .await?;
         database
-            .add_playlist_media(None, playlist, &["file:///three.flac".into()], false)
+            .add_playlist_songs(
+                None,
+                playlist,
+                &crate::SongSelection::Uris((&["file:///three.flac".into()]).to_vec().into()),
+                false,
+            )
             .await?;
         check!(
             database
@@ -273,7 +295,8 @@ mod tests {
             .mark_playlist_file_synced(playlist, "third")
             .await?;
         let entries = database
-            .selected_playlist_entries(
+            .playlist_edit_entries(
+                playlist,
                 &crate::SongQuery {
                     sort: Some(crate::TrackSort::Position),
                     ..crate::SongQuery::new(crate::SongScope::Playlist(playlist))
@@ -281,7 +304,13 @@ mod tests {
                 .selection(),
                 &crate::ReadCancellation::default(),
             )
-            .await?;
+            .await
+            .map(|entries| {
+                entries
+                    .into_iter()
+                    .map(|entry| entry.playlist_entry_key)
+                    .collect::<Vec<_>>()
+            })?;
         database
             .move_playlist_entry(None, playlist, entries[0], 0)
             .await?;
@@ -355,7 +384,11 @@ mod tests {
         let directory = tempfile::tempdir()?;
         let database = Database::open(directory.path().join("store.sqlite")).await?;
         let playlist = database
-            .create_playlist(None, "Playlist", &[])
+            .create_playlist(
+                None,
+                "Playlist",
+                &crate::SongSelection::Uris((&[]).to_vec().into()),
+            )
             .await?
             .unwrap()
             .0;

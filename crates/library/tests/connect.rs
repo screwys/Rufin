@@ -27,7 +27,11 @@ async fn local_media_download_pages_include_files_and_cue_segments_without_copie
     );
     fixture
         .database
-        .create_playlist(None, "Saved", &[file.clone(), cue.clone()])
+        .create_playlist(
+            None,
+            "Saved",
+            &library::SongSelection::Uris((&[file.clone(), cue.clone()]).to_vec().into()),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -88,7 +92,11 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
     );
     fixture
         .database
-        .create_playlist(None, "Saved", std::slice::from_ref(uri))
+        .create_playlist(
+            None,
+            "Saved",
+            &library::SongSelection::Uris((std::slice::from_ref(uri)).to_vec().into()),
+        )
         .await
         .unwrap();
     sqlx::query("UPDATE main.connect_seed SET cursor=0,complete=(kind<>'track')")
@@ -176,7 +184,11 @@ async fn connect_saved_playlist_replay_keeps_duplicate_media_without_catalog_mem
     ];
     let (playlist, identity) = fixture
         .database
-        .create_playlist(None, "Saved", &uris)
+        .create_playlist(
+            None,
+            "Saved",
+            &library::SongSelection::Uris((&uris).to_vec().into()),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -213,6 +225,7 @@ async fn connect_saved_playlist_replay_keeps_duplicate_media_without_catalog_mem
             .selected_track_uris(
                 &library::SongQuery::new(library::SongScope::Playlist(imported_playlist))
                     .selection(),
+                None,
                 &library::ReadCancellation::new()
             )
             .await

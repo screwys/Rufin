@@ -326,130 +326,46 @@ impl AndroidBrowseQuery {
                 .map(|(index, row)| self.track_row(row, offset + index))
                 .collect());
         }
-        let db = &self.database;
-        let selected_source = self.selected.as_ref().map(|selected| selected.source_key);
-        let folder = self
-            .selected
-            .as_ref()
-            .and_then(|selected| selected.music_folder_key);
         let cancel = ReadCancellation::new();
-        let filter = &self.filter;
-        let sort = self.sort;
-        let descending = self.descending;
-        if self.album_detail_layout() {
-            return Ok(db
-                .album_detail_page(
-                    self.selected().source_key,
-                    folder,
-                    self.favorites(),
-                    filter,
-                    sort.album_sort(),
-                    descending,
-                    0,
-                    offset,
-                    limit,
-                    &cancel,
-                )
-                .await?
-                .into_iter()
-                .map(|item| match item {
-                    library::AlbumDetailRow::Album { album, .. } => {
-                        let mut row: AndroidBrowseRow = album.into();
-                        row.kind = "album_header".into();
-                        row
+        match self.query().await? {
+            BrowseQuery::Collection(query) => Ok(
+                match query.rows(&self.database, offset, limit, &cancel).await? {
+                    CollectionRows::Albums(rows) => rows.into_iter().map(Into::into).collect(),
+                    CollectionRows::AlbumDetails(rows) => rows
+                        .into_iter()
+                        .map(|item| match item {
+                            library::AlbumDetailRow::Album { album, .. } => {
+                                let mut row: AndroidBrowseRow = album.into();
+                                row.kind = "album_header".into();
+                                row
+                            }
+                            library::AlbumDetailRow::Track { track, index, .. } => {
+                                self.track_row(track, index)
+                            }
+                        })
+                        .collect(),
+                    CollectionRows::Artists(rows) => rows
+                        .into_iter()
+                        .map(|row| artist_row(row, matches!(self.route, Route::AlbumArtists)))
+                        .collect(),
+                    CollectionRows::Genres(rows) => rows.into_iter().map(Into::into).collect(),
+                    CollectionRows::Moods(rows) => rows.into_iter().map(Into::into).collect(),
+                    CollectionRows::Playlists(rows) => rows.into_iter().map(Into::into).collect(),
+                    CollectionRows::SmartPlaylists(rows) => {
+                        rows.into_iter().map(Into::into).collect()
                     }
-                    library::AlbumDetailRow::Track { track, index, .. } => {
-                        self.track_row(track, index)
-                    }
-                })
-                .collect());
-        }
-        match &self.route {
-            Route::Albums | Route::Favorites
-                if !matches!(self.route, Route::Favorites)
-                    || self.category == CollectionCategory::Albums =>
-            {
-                Ok(db
-                    .album_page(
-                        self.selected().source_key,
-                        folder,
-                        self.favorites(),
-                        filter,
-                        sort.album_sort(),
-                        descending,
-                        offset,
-                        limit,
-                        &cancel,
-                    )
-                    .await?
-                    .into_iter()
-                    .map(Into::into)
-                    .collect())
-            }
-            Route::Artists | Route::AlbumArtists | Route::Favorites
-                if !matches!(self.route, Route::Favorites)
-                    || self.category == CollectionCategory::Artists =>
-            {
-                Ok(db
-                    .artist_page(
-                        self.selected().source_key,
-                        folder,
-                        matches!(self.route, Route::AlbumArtists),
-                        self.favorites(),
-                        filter,
-                        sort.artist_sort(),
-                        descending,
-                        offset,
-                        limit,
-                        &cancel,
-                    )
-                    .await?
-                    .into_iter()
-                    .map(|row| artist_row(row, matches!(self.route, Route::AlbumArtists)))
-                    .collect())
-            }
-            Route::ArtistDetail(uri)
-            | Route::AlbumArtistDetail(uri)
-            | Route::ArtistDiscography(uri)
-            | Route::AlbumArtistDiscography(uri)
-                if self.category == CollectionCategory::Albums
-                    || matches!(
-                        self.route,
-                        Route::ArtistDiscography(_) | Route::AlbumArtistDiscography(_)
-                    ) =>
-            {
-                let (_, _, object) = library::source_entity_parts(uri).ok_or_else(|| {
-                    library::LibraryError::InvalidRequest("Artist identity is unavailable".into())
-                })?;
-                let Some(key) = db
-                    .artist_key_by_object(self.selected().source_key, &object, &cancel)
-                    .await?
-                else {
-                    return Ok(Vec::new());
-                };
+                },
+            ),
+            BrowseQuery::Releases(query) => {
                 if matches!(self.release_section, Some(ArtistReleaseSection::AppearsOn)) {
                     return Ok(Vec::new());
                 }
-                Ok(db
-                    .artist_release_page(
-                        self.selected().source_key,
-                        key,
-                        matches!(
-                            self.route,
-                            Route::AlbumArtistDetail(_) | Route::AlbumArtistDiscography(_)
-                        ),
-                        folder,
-                        filter,
-                        sort.album_sort(),
-                        descending,
-                        self.release_section.and_then(|section| match section {
-                            ArtistReleaseSection::Class(class) => Some(class),
-                            ArtistReleaseSection::AppearsOn => None,
-                        }),
-                        offset,
-                        limit,
-                        &cancel,
-                    )
+                let class = self.release_section.and_then(|section| match section {
+                    ArtistReleaseSection::Class(class) => Some(class),
+                    ArtistReleaseSection::AppearsOn => None,
+                });
+                Ok(query
+                    .section_rows(&self.database, class, offset, limit, &cancel)
                     .await?
                     .into_iter()
                     .map(|(class, album)| {
@@ -462,69 +378,7 @@ impl AndroidBrowseQuery {
                     })
                     .collect())
             }
-            Route::Genres => Ok(db
-                .genre_page(
-                    self.selected().source_key,
-                    folder,
-                    filter,
-                    sort.genre_sort(),
-                    descending,
-                    offset,
-                    limit,
-                    &cancel,
-                )
-                .await?
-                .into_iter()
-                .map(Into::into)
-                .collect()),
-            Route::Moods => Ok(db
-                .mood_page(
-                    self.selected().source_key,
-                    folder,
-                    filter,
-                    sort.mood_sort(),
-                    descending,
-                    offset,
-                    limit,
-                    &cancel,
-                )
-                .await?
-                .into_iter()
-                .map(Into::into)
-                .collect()),
-            Route::Playlists => Ok(db
-                .playlist_page(
-                    selected_source,
-                    folder,
-                    sort.playlist_sort(),
-                    descending,
-                    filter,
-                    offset,
-                    limit,
-                    &cancel,
-                )
-                .await?
-                .into_iter()
-                .map(Into::into)
-                .collect()),
-            Route::SmartPlaylists => Ok(db
-                .smart_playlist_page(
-                    selected_source,
-                    folder,
-                    sort.smart_playlist_sort(),
-                    descending,
-                    filter,
-                    self.now,
-                    offset,
-                    limit,
-                    &cancel,
-                )
-                .await?
-                .into_iter()
-                .map(Into::into)
-                .collect()),
-            Route::History => unreachable!("History is handled before source projection"),
-            Route::Home => Ok(self
+            _ if matches!(self.route, Route::Home) => Ok(self
                 .home_rows()
                 .await?
                 .iter()
@@ -532,23 +386,21 @@ impl AndroidBrowseQuery {
                 .take(limit)
                 .cloned()
                 .collect()),
-            Route::Search => Ok(search_rows(
-                db.search(
-                    self.selected().source_key,
-                    folder,
-                    false,
-                    &library::SearchRequest::with_limit(filter, 60),
-                    &cancel,
-                )
-                .await?,
+            _ if matches!(self.route, Route::Search) => Ok(search_rows(
+                self.database
+                    .search(
+                        self.selected().source_key,
+                        self.selected().music_folder_key,
+                        false,
+                        &library::SearchRequest::with_limit(&self.filter, 60),
+                        &cancel,
+                    )
+                    .await?,
             )
             .into_iter()
             .skip(offset)
             .take(limit)
             .collect()),
-            Route::Folders { .. } => {
-                unreachable!("Folder projection is handled before source rows")
-            }
             _ => Ok(Vec::new()),
         }
     }

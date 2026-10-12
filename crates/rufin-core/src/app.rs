@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::runtime::{DiagnosticsHandle, ProductHandles, ProductReceivers, RuntimeInputs};
 use ::scrobbling::Scrobbler;
 use async_channel::{bounded, unbounded};
-use playback::{PlaybackBackend, PlaybackHandles};
+use playback::PlaybackBackend;
 use secrets::SwitchableSecretStore;
 use tracing::warn;
 
@@ -289,10 +289,6 @@ where
 
     source.start()?;
     let source_handle: crate::runtime::SourceHandle = source.clone();
-    let transport: playback::TransportHandle = playback.clone();
-    let queue: playback::QueueHandle = playback.clone();
-    let playback_updates = playback.updates.clone();
-    let radio: playback::RadioHandle = playback;
 
     Ok(RuntimeInputs {
         temporary_store,
@@ -311,12 +307,7 @@ where
             runtime,
             source: source_handle,
             downloads,
-            playback: PlaybackHandles {
-                updates: playback_updates,
-                transport,
-                queue,
-                radio,
-            },
+            playback,
             artwork,
             lyrics: lyrics.handle(),
             release_updates,

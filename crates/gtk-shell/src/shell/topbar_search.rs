@@ -407,7 +407,7 @@ impl SearchPopup {
                         gtk_library::SearchSession::play_recent(
                             &result,
                             &catalog,
-                            playback::QueuePlacement::Now,
+                            rufin_core::playback::QueuePlacement::Now,
                         );
                         popup.render();
                     }

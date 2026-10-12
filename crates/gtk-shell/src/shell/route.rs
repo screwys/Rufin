@@ -5,6 +5,7 @@
 //! detail have narrow point-update hooks because those operations are
 //! intentionally visible without remounting the whole page.
 
+use rufin_core::browse::{BrowseRequest, library_list_key};
 use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::rc::Rc;
@@ -557,11 +558,7 @@ impl Shell {
                 return;
             }
             Route::Playlists | Route::SmartPlaylists => {
-                let key = if route == Route::Playlists {
-                    LibraryListKey::Playlists
-                } else {
-                    LibraryListKey::SmartPlaylists
-                };
+                let key = library_list_key(&route, CollectionCategory::Tracks);
                 let settings = self.settings.current.borrow().library_list(key);
                 if route == Route::Playlists {
                     self.queue_playlist_route(route, settings, render_started);
@@ -575,7 +572,7 @@ impl Shell {
                     .settings
                     .current
                     .borrow()
-                    .library_list(LibraryListKey::PlaylistTracks);
+                    .library_list(library_list_key(&route, CollectionCategory::Tracks));
                 self.queue_playlist_detail_route(route, key, settings, render_started);
                 return;
             }
@@ -585,13 +582,21 @@ impl Shell {
             }
             Route::GenreDetail(genre_id) => {
                 let id = NamedDetailId::Genre(genre_id);
-                let settings = self.settings.current.borrow().library_list(id.key());
+                let settings = self
+                    .settings
+                    .current
+                    .borrow()
+                    .library_list(library_list_key(&route, CollectionCategory::Tracks));
                 self.queue_named_detail_route(route, id, settings, render_started);
                 return;
             }
             Route::MoodDetail(mood_id) => {
                 let id = NamedDetailId::Mood(mood_id);
-                let settings = self.settings.current.borrow().library_list(id.key());
+                let settings = self
+                    .settings
+                    .current
+                    .borrow()
+                    .library_list(library_list_key(&route, CollectionCategory::Tracks));
                 self.queue_named_detail_route(route, id, settings, render_started);
                 return;
             }
@@ -600,25 +605,24 @@ impl Shell {
                     .settings
                     .current
                     .borrow()
-                    .library_list(LibraryListKey::AlbumDetailTracks);
+                    .library_list(library_list_key(&route, CollectionCategory::Tracks));
                 self.queue_album_detail_route(route, album_id, settings, render_started);
                 return;
             }
-            Route::ArtistDetail(artist_id) | Route::AlbumArtistDetail(artist_id) => {
+            Route::ArtistDetail(_) | Route::AlbumArtistDetail(_) => {
                 let album_artist = matches!(&route, Route::AlbumArtistDetail(_));
                 let track_settings = self
                     .settings
                     .current
                     .borrow()
-                    .library_list(LibraryListKey::ArtistTracks);
+                    .library_list(library_list_key(&route, CollectionCategory::Tracks));
                 let album_settings = self
                     .settings
                     .current
                     .borrow()
-                    .library_list(LibraryListKey::ArtistAlbums);
+                    .library_list(library_list_key(&route, CollectionCategory::Albums));
                 self.queue_artist_overview_route(
                     route,
-                    artist_id,
                     album_artist,
                     track_settings,
                     album_settings,
@@ -626,32 +630,24 @@ impl Shell {
                 );
                 return;
             }
-            Route::ArtistDiscography(artist_id) | Route::AlbumArtistDiscography(artist_id) => {
-                let album_artist = matches!(&route, Route::AlbumArtistDiscography(_));
+            Route::ArtistDiscography(_) | Route::AlbumArtistDiscography(_) => {
                 let settings = self
                     .settings
                     .current
                     .borrow()
-                    .library_list(LibraryListKey::ArtistAlbums);
-                self.queue_artist_discography_route(
-                    route,
-                    artist_id,
-                    album_artist,
-                    settings,
-                    render_started,
-                );
+                    .library_list(library_list_key(&route, CollectionCategory::Albums));
+                self.queue_artist_discography_route(route, settings, render_started);
                 return;
             }
-            Route::ArtistTracks(artist_id) | Route::AlbumArtistTracks(artist_id) => {
+            Route::ArtistTracks(_) | Route::AlbumArtistTracks(_) => {
                 let album_artist = matches!(&route, Route::AlbumArtistTracks(_));
                 let settings = self
                     .settings
                     .current
                     .borrow()
-                    .library_list(LibraryListKey::ArtistTracks);
+                    .library_list(library_list_key(&route, CollectionCategory::Tracks));
                 self.queue_artist_tracks_route(
                     route,
-                    artist_id,
                     album_artist,
                     settings,
                     false,
@@ -659,22 +655,14 @@ impl Shell {
                 );
                 return;
             }
-            Route::ArtistFavoriteTracks(artist_id)
-            | Route::AlbumArtistFavoriteTracks(artist_id) => {
+            Route::ArtistFavoriteTracks(_) | Route::AlbumArtistFavoriteTracks(_) => {
                 let album_artist = matches!(&route, Route::AlbumArtistFavoriteTracks(_));
                 let settings = self
                     .settings
                     .current
                     .borrow()
-                    .library_list(LibraryListKey::ArtistTracks);
-                self.queue_artist_tracks_route(
-                    route,
-                    artist_id,
-                    album_artist,
-                    settings,
-                    true,
-                    render_started,
-                );
+                    .library_list(library_list_key(&route, CollectionCategory::Tracks));
+                self.queue_artist_tracks_route(route, album_artist, settings, true, render_started);
                 return;
             }
             _ => {}
@@ -704,7 +692,7 @@ impl Shell {
                     .settings
                     .current
                     .borrow()
-                    .library_list(LibraryListKey::Folders);
+                    .library_list(library_list_key(&route, CollectionCategory::Tracks));
                 let load_selected = selected.clone();
                 let load_path = path.clone();
                 self.queue_prepared_route(
@@ -732,7 +720,7 @@ impl Shell {
                     .settings
                     .current
                     .borrow()
-                    .library_list(LibraryListKey::Albums);
+                    .library_list(library_list_key(&route, CollectionCategory::Albums));
                 self.queue_album_route(selected, route, settings, false, render_started);
             }
             Route::Tracks => {
@@ -740,8 +728,8 @@ impl Shell {
                     .settings
                     .current
                     .borrow()
-                    .library_list(LibraryListKey::Tracks);
-                self.queue_root_track_route(selected, route, settings, false, render_started);
+                    .library_list(library_list_key(&route, CollectionCategory::Tracks));
+                self.queue_root_track_route(selected, route, settings, render_started);
             }
             Route::Artists | Route::AlbumArtists => {
                 let album_artists = matches!(&route, Route::AlbumArtists);
@@ -766,15 +754,15 @@ impl Shell {
                         .settings
                         .current
                         .borrow()
-                        .library_list(LibraryListKey::FavoriteTracks);
-                    self.queue_root_track_route(selected, route, settings, true, render_started);
+                        .library_list(library_list_key(&route, CollectionCategory::Tracks));
+                    self.queue_root_track_route(selected, route, settings, render_started);
                 }
                 CollectionCategory::Albums => {
                     let settings = self
                         .settings
                         .current
                         .borrow()
-                        .library_list(LibraryListKey::Albums);
+                        .library_list(library_list_key(&route, CollectionCategory::Albums));
                     self.queue_album_route(selected, route, settings, true, render_started);
                 }
                 CollectionCategory::Artists => {
@@ -782,18 +770,14 @@ impl Shell {
                         .settings
                         .current
                         .borrow()
-                        .library_list(LibraryListKey::Artists);
+                        .library_list(library_list_key(&route, CollectionCategory::Artists));
                     self.queue_artist_route(selected, route, false, settings, true, render_started);
                 }
             },
             Route::History => unreachable!("History is application-owned"),
             Route::Genres | Route::Moods => {
                 let genres = matches!(&route, Route::Genres);
-                let key = if genres {
-                    LibraryListKey::Genres
-                } else {
-                    LibraryListKey::Moods
-                };
+                let key = library_list_key(&route, CollectionCategory::Tracks);
                 let settings = self.settings.current.borrow().library_list(key);
                 if genres {
                     self.queue_genre_route(selected, route, settings, render_started);
@@ -823,7 +807,6 @@ impl Shell {
         selected: rufin_core::runtime::SelectedLibrary,
         route: Route,
         settings: LibraryListSettings,
-        favorites_only: bool,
         render_started: RouteTiming,
     ) {
         let database = Arc::clone(&selected.database);
@@ -832,21 +815,22 @@ impl Shell {
         let build_route = route.clone();
         self.queue_prepared_route(
             selected,
-            route,
+            route.clone(),
             render_started,
             "Track route",
             move |window, cancellation| async move {
                 database
                     .song_route_page(
-                        &library::SongQuery {
-                            scope: library::SongScope::Tracks(source_key),
-                            folder: folder,
-                            filter: "".to_string(),
-                            sort: Some(settings.sort_key.track_sort()),
-                            descending: settings.descending,
-                            favorites_only: favorites_only,
-                            downloaded_only: false,
-                        },
+                        &BrowseRequest::new(
+                            &route,
+                            CollectionCategory::Tracks,
+                            Some(source_key),
+                            folder,
+                            &settings,
+                            8,
+                        )
+                        .songs()
+                        .expect("song route"),
                         window,
                         &cancellation,
                     )
@@ -899,21 +883,30 @@ impl Shell {
         let folder = selected.music_folder_key;
         self.queue_prepared_route(
             selected,
-            route,
+            route.clone(),
             render_started,
             "Album route",
             move |window, cancellation| async move {
-                gtk_library::load_album_collection(
-                    &database,
-                    source_key,
-                    folder,
-                    &settings,
-                    favorites_only,
-                    "",
-                    window,
-                    &cancellation,
-                )
+                BrowseRequest {
+                    favorites_only: favorites_only,
+                    ..BrowseRequest::new(
+                        &route,
+                        CollectionCategory::Albums,
+                        Some(source_key),
+                        folder,
+                        &settings,
+                        8,
+                    )
+                }
+                .collection()
+                .expect("collection route")
+                .page(&database, window, &cancellation)
                 .await
+                .map(|(count, start, rows)| match rows {
+                    library::CollectionRows::Albums(rows) => (count, start, rows, Vec::new()),
+                    library::CollectionRows::AlbumDetails(rows) => (count, start, Vec::new(), rows),
+                    _ => unreachable!("album query"),
+                })
             },
             move |shell, (order, first_row_position, first_rows, first_detail_rows), selected| {
                 shell.library_albums_route(
@@ -942,23 +935,26 @@ impl Shell {
         let folder = selected.music_folder_key;
         self.queue_prepared_route(
             selected,
-            route,
+            route.clone(),
             render_started,
             "Artist route",
             move |window, cancellation| async move {
-                database
-                    .artist_route_page(
-                        source_key,
+                BrowseRequest {
+                    favorites_only: favorites_only,
+                    ..BrowseRequest::new(
+                        &route,
+                        CollectionCategory::Artists,
+                        Some(source_key),
                         folder,
-                        album_artist,
-                        favorites_only,
-                        "",
-                        settings.sort_key.artist_sort(),
-                        settings.descending,
-                        window,
-                        &cancellation,
+                        &settings,
+                        8,
                     )
-                    .await
+                }
+                .collection()
+                .expect("collection route")
+                .page(&database, window, &cancellation)
+                .await
+                .map(|(count, start, rows)| (count, start, rows.artists()))
             },
             move |shell, (order, first_row_position, first_rows), selected| {
                 shell.library_artist_list_route(
@@ -1020,17 +1016,22 @@ impl Shell {
     ) {
         let database = Arc::clone(&self.products.library);
         self.queue_application_route(
-            route,
+            route.clone(),
             render_started,
             "Playlist detail route",
             move |window, cancellation| async move {
                 database
                     .playlist_detail_page(
-                        &library::SongQuery {
-                            sort: Some(settings.sort_key.track_sort()),
-                            descending: settings.descending,
-                            ..library::SongQuery::new(library::SongScope::Playlist(key))
-                        },
+                        &BrowseRequest::new(
+                            &route,
+                            CollectionCategory::Tracks,
+                            None,
+                            None,
+                            &settings,
+                            8,
+                        )
+                        .songs()
+                        .expect("song route"),
                         window,
                         &cancellation,
                     )
@@ -1043,7 +1044,6 @@ impl Shell {
     fn queue_artist_overview_route(
         self: &Rc<Self>,
         route: Route,
-        artist_uri: String,
         album_artist: bool,
         track_settings: LibraryListSettings,
         album_settings: LibraryListSettings,
@@ -1051,24 +1051,13 @@ impl Shell {
     ) {
         let database = Arc::clone(&self.products.library);
         self.queue_application_route(
-            route,
+            route.clone(),
             render_started,
             "Artist overview route",
             move |window, cancellation| async move {
-                let Some((source, artist)) = database
-                    .artist_identity_by_media_uri(&artist_uri, &cancellation)
-                    .await
-                    .map_err(|error| error.to_string())?
-                else {
-                    return Ok(None);
-                };
-                let folder = None;
                 load_artist_overview(
                     &database,
-                    source,
-                    folder,
-                    artist,
-                    album_artist,
+                    &route,
                     &track_settings,
                     &album_settings,
                     window,
@@ -1093,36 +1082,16 @@ impl Shell {
     fn queue_artist_discography_route(
         self: &Rc<Self>,
         route: Route,
-        artist_uri: String,
-        album_artist: bool,
         settings: LibraryListSettings,
         render_started: RouteTiming,
     ) {
         let database = Arc::clone(&self.products.library);
         self.queue_application_route(
-            route,
+            route.clone(),
             render_started,
             "Artist discography route",
             move |window, cancellation| async move {
-                let Some((source, artist)) = database
-                    .artist_identity_by_media_uri(&artist_uri, &cancellation)
-                    .await
-                    .map_err(|error| error.to_string())?
-                else {
-                    return Ok(None);
-                };
-                let folder = None;
-                load_artist_discography(
-                    &database,
-                    source,
-                    folder,
-                    artist,
-                    album_artist,
-                    &settings,
-                    window,
-                    &cancellation,
-                )
-                .await
+                load_artist_discography(&database, &route, &settings, window, &cancellation).await
             },
             move |shell, detail| {
                 let Some(detail) = detail else {
@@ -1140,7 +1109,6 @@ impl Shell {
     fn queue_artist_tracks_route(
         self: &Rc<Self>,
         route: Route,
-        artist_uri: String,
         album_artist: bool,
         settings: LibraryListSettings,
         favorites_only: bool,
@@ -1148,30 +1116,11 @@ impl Shell {
     ) {
         let database = Arc::clone(&self.products.library);
         self.queue_application_route(
-            route,
+            route.clone(),
             render_started,
             "Artist tracks route",
             move |window, cancellation| async move {
-                let Some((source, artist)) = database
-                    .artist_identity_by_media_uri(&artist_uri, &cancellation)
-                    .await
-                    .map_err(|error| error.to_string())?
-                else {
-                    return Ok(None);
-                };
-                let folder = None;
-                load_artist_tracks(
-                    &database,
-                    source,
-                    folder,
-                    artist,
-                    album_artist,
-                    &settings,
-                    favorites_only,
-                    window,
-                    &cancellation,
-                )
-                .await
+                load_artist_tracks(&database, &route, &settings, window, &cancellation).await
             },
             move |shell, detail| {
                 let Some(detail) = detail else {
@@ -1224,21 +1173,23 @@ impl Shell {
         drop(selected);
         let database = Arc::clone(&self.products.library);
         self.queue_application_route(
-            route,
+            route.clone(),
             render_started,
             "Playlist route",
             move |window, cancellation| async move {
-                database
-                    .playlist_route_page(
-                        source,
-                        folder,
-                        settings.sort_key.playlist_sort(),
-                        settings.descending,
-                        "",
-                        window,
-                        &cancellation,
-                    )
-                    .await
+                BrowseRequest::new(
+                    &route,
+                    CollectionCategory::Tracks,
+                    source,
+                    folder,
+                    &settings,
+                    8,
+                )
+                .collection()
+                .expect("collection route")
+                .page(&database, window, &cancellation)
+                .await
+                .map(|(count, start, rows)| (count, start, rows.playlists()))
             },
             move |shell, (order, first_row_position, first_rows)| {
                 shell.library_playlists_route(order, first_row_position, first_rows, source, folder)
@@ -1263,21 +1214,26 @@ impl Shell {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |duration| duration.as_secs().min(i64::MAX as u64) as i64);
         self.queue_application_route(
-            route,
+            route.clone(),
             render_started,
             "Smart Playlist route",
             move |window, cancellation| async move {
-                database
-                    .smart_playlist_route_page(
+                BrowseRequest {
+                    now: now,
+                    ..BrowseRequest::new(
+                        &route,
+                        CollectionCategory::Tracks,
                         source,
                         folder,
-                        settings.sort_key.smart_playlist_sort(),
-                        settings.descending,
-                        now,
-                        window,
-                        &cancellation,
+                        &settings,
+                        8,
                     )
-                    .await
+                }
+                .collection()
+                .expect("collection route")
+                .page(&database, window, &cancellation)
+                .await
+                .map(|(count, start, rows)| (count, start, rows.smart_playlists()))
             },
             move |shell, (order, first_row_position, first_rows)| {
                 shell.library_smart_playlists_route(
@@ -1299,14 +1255,20 @@ impl Shell {
             .borrow()
             .library_list(LibraryListKey::History);
         self.queue_application_route(
-            route,
+            route.clone(),
             render_started,
             "History route",
             move |_, cancellation| async move {
-                let query = library::SongQuery {
-                    descending: settings.descending,
-                    ..library::SongQuery::new(library::SongScope::History { source: None })
-                };
+                let query = BrowseRequest::new(
+                    &route,
+                    CollectionCategory::Tracks,
+                    None,
+                    None,
+                    &settings,
+                    8,
+                )
+                .songs()
+                .expect("song route");
                 let count = database.song_count(&query, &cancellation).await?.max(0) as usize;
                 let rows = database
                     .song_history_rows(&query, 0, 64, &cancellation)
@@ -1329,21 +1291,23 @@ impl Shell {
         let folder = selected.music_folder_key;
         self.queue_prepared_route(
             selected,
-            route,
+            route.clone(),
             render_started,
             "Genre route",
             move |window, cancellation| async move {
-                database
-                    .genre_route_page(
-                        source_key,
-                        folder,
-                        "",
-                        settings.sort_key.genre_sort(),
-                        settings.descending,
-                        window,
-                        &cancellation,
-                    )
-                    .await
+                BrowseRequest::new(
+                    &route,
+                    CollectionCategory::Tracks,
+                    Some(source_key),
+                    folder,
+                    &settings,
+                    8,
+                )
+                .collection()
+                .expect("collection route")
+                .page(&database, window, &cancellation)
+                .await
+                .map(|(count, start, rows)| (count, start, rows.genres()))
             },
             |shell, (order, first_row_position, first_rows), selected| {
                 shell.library_genres_route(order, first_row_position, first_rows, selected)
@@ -1363,21 +1327,23 @@ impl Shell {
         let folder = selected.music_folder_key;
         self.queue_prepared_route(
             selected,
-            route,
+            route.clone(),
             render_started,
             "Mood route",
             move |window, cancellation| async move {
-                database
-                    .mood_route_page(
-                        source_key,
-                        folder,
-                        "",
-                        settings.sort_key.mood_sort(),
-                        settings.descending,
-                        window,
-                        &cancellation,
-                    )
-                    .await
+                BrowseRequest::new(
+                    &route,
+                    CollectionCategory::Tracks,
+                    Some(source_key),
+                    folder,
+                    &settings,
+                    8,
+                )
+                .collection()
+                .expect("collection route")
+                .page(&database, window, &cancellation)
+                .await
+                .map(|(count, start, rows)| (count, start, rows.moods()))
             },
             |shell, (order, first_row_position, first_rows), selected| {
                 shell.library_moods_route(order, first_row_position, first_rows, selected)

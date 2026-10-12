@@ -667,7 +667,7 @@ impl crate::PlayerUi {
             return;
         };
         let cancellation = library::ReadCancellation::new();
-        let candidates = self.playback_handles.radio.candidates(
+        let candidates = self.playback_owner.candidates(
             library::RadioSeed::Track(seed.clone()),
             20,
             cancellation.clone(),

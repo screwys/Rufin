@@ -906,6 +906,7 @@ mod tests {
                     ..library::SongQuery::new(library::SongScope::Tracks(source))
                 }
                 .selection(),
+                None,
                 &cancellation,
             )
             .await

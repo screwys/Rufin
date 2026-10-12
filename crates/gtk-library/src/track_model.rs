@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use library::{Database, TrackKey, TrackRow};
-use playback::{PlayRequest, QueuePlacement};
+use rufin_core::playback::{PlayRequest, QueuePlacement};
 
 use rufin_core::settings::LibraryListSettings;
 
@@ -222,7 +222,7 @@ impl<T: CollectionTrack> TrackCollectionModel<T> {
 
     pub fn play(
         &self,
-        queue: playback::QueueHandle,
+        queue: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
         anchor_index: usize,
         placement: QueuePlacement,
         context_base: &str,
@@ -256,12 +256,12 @@ impl<T: CollectionTrack> TrackCollectionModel<T> {
         if !collection_start && let Some(row) = self.0.sparse.ready(anchor_index as u32) {
             request = request.with_anchor(row.key(), None);
         }
-        queue.play(request);
+        queue.play_selection(request);
     }
 
     pub fn play_source(
         &self,
-        queue: playback::QueueHandle,
+        queue: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
         placement: QueuePlacement,
         context_id: String,
         shuffled: bool,

@@ -355,10 +355,10 @@ pub fn delete_file(owner: &SourceOwner, playlist: PlaylistKey) -> Receiver<Resul
         let source = owner
             .shared
             .database
-            .playlist_owner(playlist, &ReadCancellation::new())
+            .playlist_access(playlist, &ReadCancellation::new())
             .await
             .map_err(string_error)?
-            .and_then(|(source, _, _)| source);
+            .and_then(|access| access.source_key);
         owner
             .shared
             .database

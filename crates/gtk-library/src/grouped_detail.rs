@@ -116,7 +116,7 @@ impl CatalogUi {
                 search: None,
             },
         );
-        let controller = self.queue.clone();
+        let controller = self.playback.clone();
         let play_context = playback_context;
         let play_tracks = track_projection.clone();
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {

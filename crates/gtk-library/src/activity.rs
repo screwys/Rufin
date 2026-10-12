@@ -60,7 +60,7 @@ impl ActivityCollections {
                 let row = item.borrow::<HistoryRow>();
                 (shell.media_menus.play_target)(
                     &track_play_request(row.track_key),
-                    playback::QueuePlacement::Now,
+                    rufin_core::playback::QueuePlacement::Now,
                     false,
                 );
             }

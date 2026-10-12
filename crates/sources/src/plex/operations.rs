@@ -69,7 +69,7 @@ impl PlexSource {
                 .join(",")
         )
     }
-    pub(crate) async fn create_playlist(&self, name: &str, ids: &[String]) -> SourceResult<String> {
+    pub async fn create_playlist(&self, name: &str, ids: &[String]) -> SourceResult<String> {
         let response: Value = remote_http::json(
             self.request(
                 Method::POST,
@@ -92,7 +92,7 @@ impl PlexSource {
             .map(|id| plex_id("playlist", &id))
             .ok_or(SourceError::NotFound)
     }
-    pub(crate) async fn rename_playlist(&self, playlist: &str, name: &str) -> SourceResult<()> {
+    pub async fn rename_playlist(&self, playlist: &str, name: &str) -> SourceResult<()> {
         self.unit(
             Method::PUT,
             &format!("/playlists/{}", raw_item_id(playlist)),
@@ -100,7 +100,7 @@ impl PlexSource {
         )
         .await
     }
-    pub(crate) async fn delete_playlist(&self, playlist: &str) -> SourceResult<()> {
+    pub async fn delete_playlist(&self, playlist: &str) -> SourceResult<()> {
         self.unit(
             Method::DELETE,
             &format!("/playlists/{}", raw_item_id(playlist)),
@@ -108,11 +108,7 @@ impl PlexSource {
         )
         .await
     }
-    pub(crate) async fn add_playlist_tracks(
-        &self,
-        playlist: &str,
-        ids: &[String],
-    ) -> SourceResult<()> {
+    pub async fn add_playlist_tracks(&self, playlist: &str, ids: &[String]) -> SourceResult<()> {
         self.unit(
             Method::PUT,
             &format!("/playlists/{}/items", raw_item_id(playlist)),
@@ -120,7 +116,7 @@ impl PlexSource {
         )
         .await
     }
-    pub(crate) async fn remove_playlist_entries(
+    pub async fn remove_playlist_entries(
         &self,
         playlist: &str,
         occurrences: &[String],
@@ -139,7 +135,7 @@ impl PlexSource {
         }
         Ok(())
     }
-    pub(crate) async fn move_playlist_entry(
+    pub async fn move_playlist_entry(
         &self,
         playlist: &str,
         occurrence: &str,

@@ -1767,6 +1767,7 @@ dependencies = [
  "mpris-server",
  "playback",
  "presence",
+ "rufin-core",
  "serde_json",
  "tempfile",
  "tracing",

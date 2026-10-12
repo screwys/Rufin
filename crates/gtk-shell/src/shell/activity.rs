@@ -645,7 +645,7 @@ impl ActivityView {
                     {
                         (shell.media_menus.play_target)(
                             &gtk_widgets::selection::track_play_request(uri),
-                            playback::QueuePlacement::Now,
+                            rufin_core::playback::QueuePlacement::Now,
                             false,
                         );
                     }

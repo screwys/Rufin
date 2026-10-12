@@ -59,8 +59,8 @@ pub struct PlaylistEntriesView {
 impl PlaylistEntriesView {
     pub fn play(
         &self,
-        queue: playback::QueueHandle,
-        placement: playback::QueuePlacement,
+        queue: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
+        placement: rufin_core::playback::QueuePlacement,
         shuffled: bool,
     ) {
         self.model.play(0, queue, placement, true, shuffled);
@@ -278,7 +278,7 @@ fn playlist_entry_table(
         .row_fields;
     let column_shell = Rc::clone(shell);
     let activate_model = model.clone();
-    let queue = shell.queue.clone();
+    let queue = shell.playback.clone();
     let table = dynamic_collection_table(
         shell,
         LibraryListKey::PlaylistTracks,
@@ -924,7 +924,7 @@ fn playlist_entry_grid(
         .grid_fields;
     let cell_shell = Rc::clone(shell);
     let activate_model = model.clone();
-    let queue = shell.queue.clone();
+    let queue = shell.playback.clone();
     collection_grid_with_selection_and_demand(
         model.list_model(),
         Some(selection.selection_model()),

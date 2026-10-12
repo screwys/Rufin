@@ -332,7 +332,7 @@ impl AndroidRuntime {
     }
 
     pub async fn open_uris(&self, uris: Vec<String>) -> Result<(), AndroidError> {
-        let queue = self.products.playback.queue.clone();
+        let queue = self.products.playback.clone();
         let database = self.products.library.clone();
         let local = self.products.settings.local_configuration();
         self.products
@@ -352,39 +352,39 @@ impl AndroidRuntime {
     }
 
     pub fn play(&self) {
-        self.products.playback.transport.play();
+        self.products.playback.play();
     }
     pub fn pause(&self) {
-        self.products.playback.transport.pause();
+        self.products.playback.pause();
     }
     pub fn stop(&self) {
-        self.products.playback.transport.stop();
+        self.products.playback.stop();
     }
     pub fn next(&self) {
-        self.products.playback.transport.next();
+        self.products.playback.next();
     }
     pub fn previous(&self) {
-        self.products.playback.transport.previous();
+        self.products.playback.previous();
     }
     pub fn seek_millis(&self, millis: u64) {
-        self.products.playback.transport.seek_millis(millis);
+        self.products.playback.seek_millis(millis);
     }
     pub fn set_volume(&self, volume: f64) {
-        self.products.playback.transport.set_volume(volume);
-        self.products.playback.transport.persist_volume(volume);
+        self.products.playback.set_volume(volume);
+        self.products.playback.persist_volume(volume);
     }
     pub fn set_shuffle(&self, enabled: bool) {
-        self.products.playback.transport.set_shuffle(enabled);
+        self.products.playback.set_shuffle(enabled);
     }
     pub fn set_repeat(&self, mode: AndroidRepeatMode) {
-        self.products.playback.transport.set_repeat(mode.into());
+        self.products.playback.set_repeat(mode.into());
     }
 }
 
 impl Drop for AndroidRuntime {
     fn drop(&mut self) {
         self.controller_owner.stop();
-        self.products.playback.transport.shutdown();
+        self.products.playback.shutdown();
         self.products.scrobbling.shutdown();
         if let Some(runtime) = self.runtime.take() {
             runtime.shutdown_timeout(std::time::Duration::from_secs(1));

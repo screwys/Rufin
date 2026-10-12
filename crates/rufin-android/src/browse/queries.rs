@@ -89,139 +89,20 @@ impl AndroidBrowseQuery {
                         })
                         .collect());
                 }
-                let db = &self.database;
-                let selected_source = self.selected.as_ref().map(|selected| selected.source_key);
-                let folder = self
-                    .selected
-                    .as_ref()
-                    .and_then(|selected| selected.music_folder_key);
-                let filter = &self.filter;
-
-                let sort = self.sort;
-                let descending = self.descending;
-                let cancel = ReadCancellation::new();
-                let sections = match &self.route {
-                    Route::Albums | Route::Favorites
-                        if !matches!(self.route, Route::Favorites)
-                            || self.category == CollectionCategory::Albums =>
-                    {
-                        db.album_section_positions(
-                            self.selected().source_key,
-                            folder,
-                            self.favorites(),
-                            filter,
-                            sort.album_sort(),
-                            descending,
-                            &cancel,
-                        )
-                        .await
-                    }
-                    Route::Artists | Route::AlbumArtists | Route::Favorites
-                        if !matches!(self.route, Route::Favorites)
-                            || self.category == CollectionCategory::Artists =>
-                    {
-                        db.artist_section_positions(
-                            self.selected().source_key,
-                            folder,
-                            matches!(self.route, Route::AlbumArtists),
-                            self.favorites(),
-                            filter,
-                            sort.artist_sort(),
-                            descending,
-                            &cancel,
-                        )
-                        .await
-                    }
-                    Route::ArtistDetail(uri)
-                    | Route::AlbumArtistDetail(uri)
-                    | Route::ArtistDiscography(uri)
-                    | Route::AlbumArtistDiscography(uri)
-                        if self.category == CollectionCategory::Albums
-                            || matches!(
-                                self.route,
-                                Route::ArtistDiscography(_) | Route::AlbumArtistDiscography(_)
-                            ) =>
-                    {
-                        let (_, _, object) = library::source_entity_parts(uri)
-                            .ok_or_else(|| error("Artist identity is unavailable"))?;
-                        let Some(key) = db
-                            .artist_key_by_object(self.selected().source_key, &object, &cancel)
+                let sections = match self.query().await.map_err(error)? {
+                    BrowseQuery::Collection(query) => {
+                        query
+                            .sections(&self.database, &ReadCancellation::new())
                             .await
-                            .map_err(error)?
-                        else {
-                            return Ok(Vec::new());
-                        };
-                        match self.release_section {
-                            Some(ArtistReleaseSection::Class(class)) => {
-                                db.artist_release_scroll_sections(
-                                    self.selected().source_key,
-                                    key,
-                                    matches!(
-                                        self.route,
-                                        Route::AlbumArtistDetail(_)
-                                            | Route::AlbumArtistDiscography(_)
-                                    ),
-                                    folder,
-                                    filter,
-                                    sort.album_sort(),
-                                    descending,
-                                    class,
-                                    &cancel,
-                                )
+                    }
+                    BrowseQuery::Releases(query) => match self.release_section {
+                        Some(ArtistReleaseSection::Class(class)) => {
+                            query
+                                .sections(&self.database, class, &ReadCancellation::new())
                                 .await
-                            }
-                            _ => Ok(Vec::new()),
                         }
-                    }
-                    Route::Genres => {
-                        db.genre_section_positions(
-                            self.selected().source_key,
-                            folder,
-                            filter,
-                            sort.genre_sort(),
-                            descending,
-                            &cancel,
-                        )
-                        .await
-                    }
-                    Route::Moods => {
-                        db.mood_section_positions(
-                            self.selected().source_key,
-                            folder,
-                            filter,
-                            sort.mood_sort(),
-                            descending,
-                            &cancel,
-                        )
-                        .await
-                    }
-                    Route::Playlists => {
-                        db.playlist_section_positions(
-                            selected_source,
-                            folder,
-                            sort.playlist_sort(),
-                            descending,
-                            filter,
-                            &cancel,
-                        )
-                        .await
-                    }
-                    Route::SmartPlaylists => {
-                        db.smart_playlist_section_positions(
-                            selected_source,
-                            folder,
-                            sort.smart_playlist_sort(),
-                            descending,
-                            filter,
-                            self.now,
-                            &cancel,
-                        )
-                        .await
-                    }
-                    Route::Home | Route::Search | Route::History => Ok(Vec::new()),
-                    Route::Folders { .. } => {
-                        unreachable!("Folder section projection is handled first")
-                    }
+                        _ => Ok(Vec::new()),
+                    },
                     _ => Ok(Vec::new()),
                 }
                 .map_err(error)?;
@@ -278,8 +159,8 @@ impl AndroidBrowseQuery {
                         }
                     }
                 }
-                self.queue.play(
-                    playback::PlayRequest::captured(
+                self.playback.play_selection(
+                    rufin_core::playback::PlayRequest::captured(
                         SongSelection::Concat(selections),
                         0,
                         placement,
@@ -311,104 +192,31 @@ impl AndroidBrowseQuery {
                         .map_err(error)?
                         .max(0) as u64);
                 }
-                let db = &self.database;
-                let selected_source = self.selected.as_ref().map(|selected| selected.source_key);
-                let folder = self
-                    .selected
-                    .as_ref()
-                    .and_then(|selected| selected.music_folder_key);
-
-                let cancel = ReadCancellation::new();
-                let filter = &self.filter;
-                if self.album_detail_layout() {
-                    return Ok(db
-                        .album_detail_count(
-                            self.selected().source_key,
-                            folder,
-                            self.favorites(),
-                            filter,
-                            0,
-                            &cancel,
-                        )
+                let count = match self.query().await.map_err(error)? {
+                    BrowseQuery::Collection(query) => query
+                        .count(&self.database, &ReadCancellation::new())
                         .await
-                        .map_err(error)?
-                        .max(0) as u64);
-                }
-                let count = match &self.route {
-                    Route::Albums | Route::Favorites
-                        if !matches!(self.route, Route::Favorites)
-                            || self.category == CollectionCategory::Albums =>
-                    {
-                        db.album_count(
-                            self.selected().source_key,
-                            folder,
-                            self.favorites(),
-                            filter,
-                            self.sort.album_sort(),
-                            &cancel,
-                        )
-                        .await
-                    }
-                    Route::Artists | Route::AlbumArtists | Route::Favorites
-                        if !matches!(self.route, Route::Favorites)
-                            || self.category == CollectionCategory::Artists =>
-                    {
-                        db.artist_count(
-                            self.selected().source_key,
-                            folder,
-                            matches!(self.route, Route::AlbumArtists),
-                            self.favorites(),
-                            filter,
-                            &cancel,
-                        )
-                        .await
-                    }
-                    Route::ArtistDetail(_)
-                    | Route::AlbumArtistDetail(_)
-                    | Route::ArtistDiscography(_)
-                    | Route::AlbumArtistDiscography(_)
-                        if self.category == CollectionCategory::Albums
-                            || matches!(
-                                self.route,
-                                Route::ArtistDiscography(_) | Route::AlbumArtistDiscography(_)
-                            ) =>
-                    {
+                        .map_err(error)?,
+                    BrowseQuery::Releases(_) => {
                         let counts = self.release_counts().await?;
-                        Ok(match self.release_section {
+                        match self.release_section {
                             Some(ArtistReleaseSection::Class(class)) => {
                                 counts[release_index(class)]
                             }
                             Some(ArtistReleaseSection::AppearsOn) => 0,
                             None => counts.iter().sum(),
-                        })
+                        }
+                        .max(0) as usize
                     }
-                    Route::Genres => {
-                        db.genre_count(self.selected().source_key, folder, filter, &cancel)
-                            .await
+                    _ if matches!(self.route, Route::Home) => {
+                        self.home_rows().await.map_err(error)?.len()
                     }
-                    Route::Moods => {
-                        db.mood_count(self.selected().source_key, folder, filter, &cancel)
-                            .await
+                    _ if matches!(self.route, Route::Search) => {
+                        self.rows(0, usize::MAX).await.map_err(error)?.len()
                     }
-                    Route::Playlists => {
-                        db.playlist_count(selected_source, folder, filter, &cancel)
-                            .await
-                    }
-                    Route::SmartPlaylists => {
-                        db.smart_playlist_count(selected_source, folder, filter, self.now, &cancel)
-                            .await
-                    }
-                    Route::Home => return Ok(self.home_rows().await.map_err(error)?.len() as u64),
-                    Route::Search | Route::History => {
-                        return Ok(self.rows(0, usize::MAX).await.map_err(error)?.len() as u64);
-                    }
-                    Route::Folders { .. } => {
-                        unreachable!("Folder count is handled before source count")
-                    }
-                    _ => Ok(0),
-                }
-                .map_err(error)?;
-                Ok(count.max(0) as u64)
+                    _ => 0,
+                };
+                Ok(count as u64)
             })
             .await
             .map_err(error)?
@@ -571,12 +379,14 @@ impl AndroidBrowseQuery {
                         self.context_id(),
                     )
                 };
-                self.queue.play(
-                    playback::PlayRequest::captured(selection, anchor, placement, false)
-                        .with_context(context)
-                        .with_anchor(track.track_key, entry)
-                        .with_context_title(title)
-                        .shuffled(shuffled),
+                self.playback.play_selection(
+                    rufin_core::playback::PlayRequest::captured(
+                        selection, anchor, placement, false,
+                    )
+                    .with_context(context)
+                    .with_anchor(track.track_key, entry)
+                    .with_context_title(title)
+                    .shuffled(shuffled),
                 );
                 Ok(())
             })

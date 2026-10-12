@@ -108,49 +108,78 @@ pub(super) async fn page_total(
     let database = &products.library;
     let required_source = || source.ok_or_else(|| bad_request("Source not found"));
     let count = match kind {
-        "albums" => {
-            database
-                .album_count(
-                    required_source()?,
-                    folder,
-                    favorites,
-                    filter,
-                    match parameters.get("sort").map(String::as_str) {
-                        Some("track_count") => AlbumSort::TrackCount,
-                        Some("duration") => AlbumSort::Duration,
-                        _ => AlbumSort::Title,
-                    },
-                    &cancel,
-                )
-                .await
+        "albums" => library::CollectionQuery {
+            kind: library::CollectionKind::Albums {
+                source: required_source()?,
+                sort: match parameters.get("sort").map(String::as_str) {
+                    Some("track_count") => AlbumSort::TrackCount,
+                    Some("duration") => AlbumSort::Duration,
+                    _ => AlbumSort::Title,
+                },
+                inline_tracks: None,
+            },
+            folder: folder,
+            filter: (filter).to_string(),
+            descending: false,
+            favorites_only: favorites,
         }
-        "artists" => {
-            database
-                .artist_count(
-                    required_source()?,
-                    folder,
-                    boolean(parameters, "album_artists")?,
-                    favorites,
-                    filter,
-                    &cancel,
-                )
-                .await
+        .count(&database, &cancel)
+        .await
+        .map(|count| count as i64),
+        "artists" => library::CollectionQuery {
+            kind: library::CollectionKind::Artists {
+                source: required_source()?,
+                sort: library::ArtistSort::Title,
+                album_artist: boolean(parameters, "album_artists")?,
+            },
+            folder: folder,
+            filter: (filter).to_string(),
+            descending: false,
+            favorites_only: favorites,
         }
-        "genres" => {
-            database
-                .genre_count(required_source()?, folder, filter, &cancel)
-                .await
+        .count(&database, &cancel)
+        .await
+        .map(|count| count as i64),
+        "genres" => library::CollectionQuery {
+            kind: library::CollectionKind::Genres {
+                source: required_source()?,
+                sort: library::GenreSort::Title,
+            },
+            folder: folder,
+            filter: (filter).to_string(),
+            descending: false,
+            favorites_only: false,
         }
-        "playlists" => {
-            database
-                .playlist_count(source, folder, filter, &cancel)
-                .await
+        .count(&database, &cancel)
+        .await
+        .map(|count| count as i64),
+        "playlists" => library::CollectionQuery {
+            kind: library::CollectionKind::Playlists {
+                source: (source).into(),
+                sort: library::PlaylistSort::Title,
+            },
+            folder: folder,
+            filter: (filter).to_string(),
+            descending: false,
+            favorites_only: false,
         }
-        "smart-playlists" => {
-            database
-                .smart_playlist_count(source, folder, filter, now(), &cancel)
-                .await
+        .count(&database, &cancel)
+        .await
+        .map(|count| count as i64),
+        "smart-playlists" => library::CollectionQuery {
+            kind: library::CollectionKind::SmartPlaylists {
+                source: (source).into(),
+                sort: library::SmartPlaylistListSort::Title,
+                now: now(),
+            },
+            folder: folder,
+            filter: (filter).to_string(),
+            descending: false,
+            favorites_only: false,
         }
+        .count(&database, &cancel)
+        .await
+        .map(|count| count as i64),
         _ => unreachable!("Unknown catalog count"),
     }
     .map_err(internal)?;
@@ -386,22 +415,21 @@ pub(super) async fn artists_data(
     };
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 48)?.min(128);
-    let rows = products
-        .library
-        .artist_page(
-            source,
-            folder,
-            boolean(parameters, "album_artists")?,
-            boolean(parameters, "favorites")?,
-            parameters.get("q").map(String::as_str).unwrap_or(""),
-            sort,
-            boolean(parameters, "descending")?,
-            offset,
-            limit,
-            &ReadCancellation::new(),
-        )
-        .await
-        .map_err(internal)?;
+    let rows = library::CollectionQuery {
+        kind: library::CollectionKind::Artists {
+            source: source,
+            sort: sort,
+            album_artist: boolean(parameters, "album_artists")?,
+        },
+        folder: folder,
+        filter: (parameters.get("q").map(String::as_str).unwrap_or("")).to_string(),
+        descending: boolean(parameters, "descending")?,
+        favorites_only: boolean(parameters, "favorites")?,
+    }
+    .rows(&products.library, offset, limit, &ReadCancellation::new())
+    .await
+    .map(|rows| rows.artists())
+    .map_err(internal)?;
     let total = page_total(products, parameters, "artists").await?;
     Ok(
         json!({"total":total,"offset":offset,"limit":limit,"artists":rows.iter().map(|row|json!({"id":row.artist_key,"object_id":row.object_id,"album_artists":boolean(parameters,"album_artists").unwrap_or(false),"uri":row.media_uri,"name":row.name,"favorite":row.favorite,"album_count":row.album_count,"track_count":row.track_count})).collect::<Vec<_>>()}),
@@ -479,21 +507,21 @@ pub(super) async fn smart_playlists_data(
     };
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 48)?.min(64);
-    let rows = products
-        .library
-        .smart_playlist_page(
-            source,
-            folder,
-            sort,
-            boolean(parameters, "descending")?,
-            parameters.get("q").map(String::as_str).unwrap_or(""),
-            now(),
-            offset,
-            limit,
-            &ReadCancellation::new(),
-        )
-        .await
-        .map_err(internal)?;
+    let rows = library::CollectionQuery {
+        kind: library::CollectionKind::SmartPlaylists {
+            source: (source).into(),
+            sort: sort,
+            now: now(),
+        },
+        folder: folder,
+        filter: (parameters.get("q").map(String::as_str).unwrap_or("")).to_string(),
+        descending: boolean(parameters, "descending")?,
+        favorites_only: false,
+    }
+    .rows(&products.library, offset, limit, &ReadCancellation::new())
+    .await
+    .map(|rows| rows.smart_playlists())
+    .map_err(internal)?;
     let total = page_total(products, parameters, "smart-playlists").await?;
     Ok(
         json!({"total":total,"offset":offset,"limit":limit,"smart_playlists":rows.iter().map(|row|json!({"id":row.smart_playlist_key,"object_id":row.object_id,"name":rufin_core::playlists::smart_playlist_display_name(row),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_bindings.len()})).collect::<Vec<_>>()}),
@@ -571,21 +599,21 @@ pub(super) async fn albums_data(
         "favorite" => AlbumSort::Favorite,
         _ => return Err(bad_request("Unknown album sort")),
     };
-    let rows = products
-        .library
-        .album_page(
-            source,
-            folder,
-            favorites,
-            filter,
-            sort,
-            descending,
-            offset,
-            limit,
-            &cancellation,
-        )
-        .await
-        .map_err(internal)?;
+    let rows = library::CollectionQuery {
+        kind: library::CollectionKind::Albums {
+            source: source,
+            sort: sort,
+            inline_tracks: None,
+        },
+        folder: folder,
+        filter: (filter).to_string(),
+        descending: descending,
+        favorites_only: favorites,
+    }
+    .rows(&products.library, offset, limit, &cancellation)
+    .await
+    .map(|rows| rows.albums())
+    .map_err(internal)?;
     let total = page_total(products, parameters, "albums").await?;
     Ok(
         json!({"total":total,"offset":offset,"limit":limit,"albums":rows.iter().map(|row| json!({

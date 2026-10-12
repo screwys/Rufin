@@ -18,52 +18,6 @@ pub struct SourceConfiguration {
     pub provider_payload: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CredentialHostInput {
-    pub server_name: Option<String>,
-    pub server_url: String,
-    pub username: String,
-    pub password: String,
-    pub trust_invalid_cert: bool,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CredentialHostPreset {
-    pub server_name: String,
-    pub server_url: String,
-    pub username: String,
-    pub trust_invalid_cert: bool,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct JellyfinEmbySetupInput {
-    pub kind: crate::ServerKind,
-    pub credentials: CredentialHostInput,
-    pub use_instant_mix: bool,
-    pub device_id: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LocalFolderHostInput {
-    pub roots: Vec<PathBuf>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CredentialSettingsInput {
-    pub name: String,
-    pub base_url: String,
-    pub username: String,
-    pub password: String,
-    pub trust_invalid_cert: bool,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct JellyfinEmbySettingsInput {
-    pub connect_manually: bool,
-    pub credentials: CredentialSettingsInput,
-    pub use_instant_mix: bool,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
 pub struct PlexSetupInput {
     pub name: String,
@@ -81,8 +35,29 @@ pub struct PlexSettingsInput {
     pub trust_invalid_cert: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SourceSetupInput {
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
+pub struct CredentialInput {
+    pub source_name: Option<String>,
+    pub server_url: String,
+    pub username: String,
+    pub secret: String,
+    pub trust_invalid_cert: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum SourceSetup {
+    EmbyConnect {
+        server: crate::EmbyConnectServer,
+        source_name: Option<String>,
+        use_instant_mix: bool,
+    },
+    JellyfinQuickConnect {
+        login: crate::JellyfinQuickConnectLogin,
+        source_name: Option<String>,
+        use_instant_mix: bool,
+    },
+    Plex(crate::PlexSetupInput),
     WebDav {
         name: String,
         settings: crate::FileSourceSettings,
@@ -93,57 +68,93 @@ pub enum SourceSetupInput {
         settings: crate::FileSourceSettings,
         credentials: crate::FileCredentials,
     },
+    JellyfinEmby {
+        kind: crate::ServerKind,
+        credentials: CredentialInput,
+        use_instant_mix: bool,
+    },
+    OpenSubsonic {
+        kind: SubsonicFlavor,
+        authentication: crate::SubsonicAuthentication,
+        credentials: CredentialInput,
+    },
+    Local {
+        roots: Vec<PathBuf>,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct CredentialPreset {
+    pub source_name: String,
+    pub server_url: String,
+    pub username: String,
+    pub trust_invalid_cert: bool,
+    pub open_subsonic_authentication: Option<crate::SubsonicAuthentication>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum SourceSettingsChange {
+    #[serde(skip)]
+    LocalDocuments {
+        source_id: SourceId,
+        roots: Vec<crate::DocumentRoot>,
+    },
+    Local {
+        source_id: SourceId,
+        roots: Vec<PathBuf>,
+        #[serde(default)]
+        excluded_folders: Option<Vec<PathBuf>>,
+    },
     EmbyConnect {
+        source_id: SourceId,
         server: crate::EmbyConnectServer,
         source_name: Option<String>,
         use_instant_mix: bool,
-        device_id: String,
     },
     JellyfinQuickConnect {
+        source_id: SourceId,
         login: crate::JellyfinQuickConnectLogin,
         source_name: Option<String>,
         use_instant_mix: bool,
     },
-    JellyfinEmby(JellyfinEmbySetupInput),
-    Plex(PlexSetupInput),
-    Subsonic {
-        flavor: SubsonicFlavor,
-        authentication: crate::subsonic::SubsonicAuthentication,
-        credentials: CredentialHostInput,
-    },
-    Local(LocalFolderHostInput),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SourceSettingsInput {
-    LocalDocuments {
-        roots: Vec<crate::DocumentRoot>,
+    Plex {
+        source_id: SourceId,
+        settings: crate::PlexSettingsInput,
     },
     Files {
+        source_id: SourceId,
         name: String,
         settings: crate::FileSourceSettings,
         credentials: crate::FileCredentialsEdit,
     },
-    EmbyConnect {
-        server: crate::EmbyConnectServer,
-        source_name: Option<String>,
+    JellyfinEmby {
+        connect_manually: bool,
+        source_id: SourceId,
+        credentials: CredentialInput,
         use_instant_mix: bool,
     },
-    JellyfinQuickConnect {
-        login: crate::JellyfinQuickConnectLogin,
-        source_name: Option<String>,
-        use_instant_mix: bool,
+    OpenSubsonic {
+        source_id: SourceId,
+        kind: SubsonicFlavor,
+        authentication: crate::SubsonicAuthentication,
+        credentials: CredentialInput,
     },
-    JellyfinEmby(JellyfinEmbySettingsInput),
-    Plex(PlexSettingsInput),
-    Subsonic {
-        authentication: crate::subsonic::SubsonicAuthentication,
-        credentials: CredentialSettingsInput,
-    },
-    Local {
-        roots: Vec<PathBuf>,
-        excluded_folders: Option<Vec<PathBuf>>,
-    },
+}
+
+impl SourceSettingsChange {
+    pub fn source_id(&self) -> &SourceId {
+        match self {
+            Self::LocalDocuments { source_id, .. }
+            | Self::Local { source_id, .. }
+            | Self::EmbyConnect { source_id, .. }
+            | Self::JellyfinQuickConnect { source_id, .. }
+            | Self::Plex { source_id, .. }
+            | Self::Files { source_id, .. }
+            | Self::JellyfinEmby { source_id, .. }
+            | Self::OpenSubsonic { source_id, .. } => source_id,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -162,10 +173,9 @@ pub enum EditableSource {
     Credentials {
         source_id: SourceId,
         kind: String,
-        credentials: CredentialHostPreset,
+        credentials: CredentialPreset,
         use_instant_mix: Option<bool>,
         emby_connect: bool,
-        subsonic_authentication: Option<crate::subsonic::SubsonicAuthentication>,
     },
     Local {
         source_id: SourceId,
@@ -339,15 +349,15 @@ impl SourceConfiguration {
                 Ok(EditableSource::Credentials {
                     source_id: self.source_id.clone(),
                     kind: self.kind.clone(),
-                    credentials: CredentialHostPreset {
-                        server_name: self.name.clone(),
+                    credentials: CredentialPreset {
+                        source_name: self.name.clone(),
                         server_url: config.base_url,
                         username: config.username,
                         trust_invalid_cert: config.trust_invalid_cert,
+                        open_subsonic_authentication: None,
                     },
                     use_instant_mix: Some(config.use_instant_mix),
                     emby_connect: config.emby_connect,
-                    subsonic_authentication: None,
                 })
             }
             "navidrome" | "subsonic" => {
@@ -355,15 +365,15 @@ impl SourceConfiguration {
                 Ok(EditableSource::Credentials {
                     source_id: self.source_id.clone(),
                     kind: self.kind.clone(),
-                    credentials: CredentialHostPreset {
-                        server_name: self.name.clone(),
+                    credentials: CredentialPreset {
+                        source_name: self.name.clone(),
                         server_url: config.base_url,
                         username: config.username,
                         trust_invalid_cert: config.trust_invalid_cert,
+                        open_subsonic_authentication: Some(config.authentication),
                     },
                     use_instant_mix: None,
                     emby_connect: false,
-                    subsonic_authentication: Some(config.authentication),
                 })
             }
             crate::file::local::LOCAL_SOURCE_ID => {

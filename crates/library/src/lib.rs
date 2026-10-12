@@ -6,7 +6,9 @@ mod activity_overview;
 pub use activity_overview::{ActivityOverview, ActivityTotals};
 mod artwork;
 mod backup;
+mod collection_query;
 mod collections;
+pub use collection_query::{CollectionKind, CollectionQuery, CollectionRows};
 mod connect;
 mod connect_media;
 mod db;
@@ -74,8 +76,8 @@ pub use playlist_format::{
 };
 pub use playlist_links::{ObservedPlaylistFile, PlaylistFileLink};
 pub use playlists::{
-    PlaylistDetailPage, PlaylistEntryRemovals, PlaylistEntryRow, PlaylistEntryWrite,
-    PlaylistGenreLink, PlaylistIdentity, PlaylistRow, PlaylistSort,
+    PlaylistAccess, PlaylistDetailPage, PlaylistEditEntry, PlaylistEntryRemovals, PlaylistEntryRow,
+    PlaylistEntryWrite, PlaylistGenreLink, PlaylistIdentity, PlaylistRow, PlaylistSort,
 };
 pub use queue::{
     QUEUE_CONTEXT_LIMIT, QueueContextTitle, QueueEntry, QueueItem, QueueLoad, QueueOrderUpdate,

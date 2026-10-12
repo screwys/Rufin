@@ -352,37 +352,39 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
     assert_eq!((mood.track_count, mood.duration_millis), (4, 726000));
     assert!(mood.representative_artwork.is_empty());
     for sort in [GenreSort::Title, GenreSort::TrackCount] {
-        let (count, _, rows) = fixture
-            .database
-            .genre_route_page(
-                fixture.source,
-                folder,
-                "",
-                sort,
-                false,
-                RouteSeedWindow::top(),
-                &cancel,
-            )
-            .await
-            .unwrap();
+        let (count, _, rows) = library::CollectionQuery {
+            kind: library::CollectionKind::Genres {
+                source: fixture.source,
+                sort: sort,
+            },
+            folder: folder,
+            filter: ("").to_string(),
+            descending: false,
+            favorites_only: false,
+        }
+        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .await
+        .map(|(count, start, rows)| (count, start, rows.genres()))
+        .unwrap();
         let order = rows.iter().map(|row| row.genre_key).collect::<Vec<_>>();
         assert_eq!(count, order.len());
         assert!(order.is_empty());
     }
     for sort in [MoodSort::Title, MoodSort::TrackCount] {
-        let (count, _, rows) = fixture
-            .database
-            .mood_route_page(
-                fixture.source,
-                folder,
-                "",
-                sort,
-                false,
-                RouteSeedWindow::top(),
-                &cancel,
-            )
-            .await
-            .unwrap();
+        let (count, _, rows) = library::CollectionQuery {
+            kind: library::CollectionKind::Moods {
+                source: fixture.source,
+                sort: sort,
+            },
+            folder: folder,
+            filter: ("").to_string(),
+            descending: false,
+            favorites_only: false,
+        }
+        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .await
+        .map(|(count, start, rows)| (count, start, rows.moods()))
+        .unwrap();
         let order = rows.iter().map(|row| row.mood_key).collect::<Vec<_>>();
         assert_eq!(count, order.len());
         assert!(order.is_empty());
@@ -612,6 +614,7 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
             .database
             .selected_track_uris(
                 &library::SongQuery::new(collection.clone()).selection(),
+                None,
                 &cancel,
             )
             .await
@@ -714,65 +717,65 @@ async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
         .expect("favorite Artist");
 
     assert_eq!(
-        fixture
-            .database
-            .album_route_page(
-                fixture.source,
-                None,
-                true,
-                "",
-                AlbumSort::Title,
-                false,
-                RouteSeedWindow::top(),
-                &cancellation,
-            )
-            .await
-            .expect("favorite Album order")
-            .2
-            .into_iter()
-            .map(|row| row.album_key)
-            .collect::<Vec<_>>(),
+        library::CollectionQuery {
+            kind: library::CollectionKind::Albums {
+                source: fixture.source,
+                sort: AlbumSort::Title,
+                inline_tracks: None,
+            },
+            folder: None,
+            filter: ("").to_string(),
+            descending: false,
+            favorites_only: true,
+        }
+        .page(&fixture.database, RouteSeedWindow::top(), &cancellation)
+        .await
+        .map(|(count, start, rows)| (count, start, rows.albums()))
+        .expect("favorite Album order")
+        .2
+        .into_iter()
+        .map(|row| row.album_key)
+        .collect::<Vec<_>>(),
         [fixture.albums[0]]
     );
     assert_eq!(
-        fixture
-            .database
-            .artist_route_page(
-                fixture.source,
-                None,
-                false,
-                true,
-                "",
-                ArtistSort::Title,
-                false,
-                RouteSeedWindow::top(),
-                &cancellation,
-            )
-            .await
-            .expect("favorite Artist order")
-            .2
-            .into_iter()
-            .map(|row| row.artist_key)
-            .collect::<Vec<_>>(),
+        library::CollectionQuery {
+            kind: library::CollectionKind::Artists {
+                source: fixture.source,
+                sort: ArtistSort::Title,
+                album_artist: false,
+            },
+            folder: None,
+            filter: ("").to_string(),
+            descending: false,
+            favorites_only: true,
+        }
+        .page(&fixture.database, RouteSeedWindow::top(), &cancellation)
+        .await
+        .map(|(count, start, rows)| (count, start, rows.artists()))
+        .expect("favorite Artist order")
+        .2
+        .into_iter()
+        .map(|row| row.artist_key)
+        .collect::<Vec<_>>(),
         [fixture.artists[1]]
     );
 
-    let rows = fixture
-        .database
-        .album_detail_page(
-            fixture.source,
-            None,
-            true,
-            "",
-            AlbumSort::Title,
-            false,
-            0,
-            0,
-            64,
-            &cancellation,
-        )
-        .await
-        .expect("favorite Album detail page");
+    let rows = library::CollectionQuery {
+        kind: library::CollectionKind::Albums {
+            source: fixture.source,
+            sort: AlbumSort::Title,
+            inline_tracks: Some(0),
+        },
+        folder: None,
+        filter: ("").to_string(),
+        descending: false,
+        favorites_only: true,
+    }
+    .rows(&fixture.database, 0, 64, &cancellation)
+    .await
+    .map(|rows| rows.album_details())
+    .expect("favorite Album detail page");
     assert_eq!(
         rows.iter()
             .filter_map(|row| match row {
@@ -808,11 +811,56 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
                 ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
             }
             .selection(),
+            None,
             &cancel,
         )
         .await
         .expect("title Track order");
     assert_eq!(title.len(), 4);
+    for (ranges, expected) in [
+        (None, vec![title[0].clone(), title[1].clone()]),
+        (Some(vec![1..4]), vec![title[1].clone(), title[2].clone()]),
+        (
+            Some(vec![0..1, 2..4]),
+            vec![title[0].clone(), title[2].clone()],
+        ),
+    ] {
+        let selection = library::SongSelection::Query {
+            query: library::SongQuery::new(library::SongScope::Tracks(fixture.source)),
+            ranges,
+        };
+        assert_eq!(
+            fixture
+                .database
+                .selected_track_uris(&selection, Some(2), &cancel)
+                .await
+                .unwrap(),
+            expected,
+        );
+    }
+    let combined = library::SongSelection::Concat(vec![
+        library::SongSelection::Uris(vec![title[3].clone(), title[3].clone()].into()),
+        library::SongSelection::Query {
+            query: library::SongQuery::new(library::SongScope::Tracks(fixture.source)),
+            ranges: Some(vec![1..2, 3..4]),
+        },
+    ]);
+    assert_eq!(
+        fixture
+            .database
+            .selected_track_uris(&combined, Some(3), &cancel)
+            .await
+            .unwrap(),
+        [title[3].clone(), title[3].clone(), title[1].clone()],
+    );
+    assert!(
+        fixture
+            .database
+            .selected_track_uris(&combined, Some(0), &cancel)
+            .await
+            .unwrap()
+            .is_empty()
+    );
     let numbered = fixture
         .database
         .selected_track_uris(
@@ -822,6 +870,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
                 ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
             }
             .selection(),
+            None,
             &cancel,
         )
         .await
@@ -839,6 +888,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
                 ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
             }
             .selection(),
+            None,
             &cancel,
         )
         .await
@@ -853,6 +903,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
                 ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
             }
             .selection(),
+            None,
             &cancel,
         )
         .await
@@ -887,149 +938,154 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         "Track row bound was not enforced"
     );
     assert_eq!(
-        fixture
-            .database
-            .album_route_page(
-                fixture.source,
-                None,
-                false,
-                "",
-                AlbumSort::Title,
-                false,
-                RouteSeedWindow::top(),
-                &cancel
-            )
-            .await
-            .expect("Album order")
-            .2
-            .into_iter()
-            .map(|row| row.album_key)
-            .collect::<Vec<_>>(),
+        library::CollectionQuery {
+            kind: library::CollectionKind::Albums {
+                source: fixture.source,
+                sort: AlbumSort::Title,
+                inline_tracks: None,
+            },
+            folder: None,
+            filter: ("").to_string(),
+            descending: false,
+            favorites_only: false,
+        }
+        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .await
+        .map(|(count, start, rows)| (count, start, rows.albums()))
+        .expect("Album order")
+        .2
+        .into_iter()
+        .map(|row| row.album_key)
+        .collect::<Vec<_>>(),
         fixture.albums
     );
     assert_eq!(
-        fixture
-            .database
-            .album_route_page(
-                fixture.source,
-                None,
-                false,
-                "",
-                AlbumSort::DateAdded,
-                true,
-                RouteSeedWindow::top(),
-                &cancel
-            )
-            .await
-            .expect("sorted Album order")
-            .2
-            .into_iter()
-            .map(|row| row.album_key)
-            .collect::<Vec<_>>(),
+        library::CollectionQuery {
+            kind: library::CollectionKind::Albums {
+                source: fixture.source,
+                sort: AlbumSort::DateAdded,
+                inline_tracks: None,
+            },
+            folder: None,
+            filter: ("").to_string(),
+            descending: true,
+            favorites_only: false,
+        }
+        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .await
+        .map(|(count, start, rows)| (count, start, rows.albums()))
+        .expect("sorted Album order")
+        .2
+        .into_iter()
+        .map(|row| row.album_key)
+        .collect::<Vec<_>>(),
         fixture.albums
     );
     assert_eq!(
-        fixture
-            .database
-            .artist_route_page(
-                fixture.source,
-                None,
-                true,
-                false,
-                "",
-                ArtistSort::Title,
-                false,
-                RouteSeedWindow::top(),
-                &cancel
-            )
-            .await
-            .expect("Album Artist order")
-            .2
-            .into_iter()
-            .map(|row| row.artist_key)
-            .collect::<Vec<_>>(),
+        library::CollectionQuery {
+            kind: library::CollectionKind::Artists {
+                source: fixture.source,
+                sort: ArtistSort::Title,
+                album_artist: true,
+            },
+            folder: None,
+            filter: ("").to_string(),
+            descending: false,
+            favorites_only: false,
+        }
+        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .await
+        .map(|(count, start, rows)| (count, start, rows.artists()))
+        .expect("Album Artist order")
+        .2
+        .into_iter()
+        .map(|row| row.artist_key)
+        .collect::<Vec<_>>(),
         fixture.artists
     );
     assert_eq!(
-        fixture
-            .database
-            .artist_route_page(
-                fixture.source,
-                None,
-                false,
-                false,
-                "",
-                ArtistSort::Title,
-                false,
-                RouteSeedWindow::top(),
-                &cancel
-            )
-            .await
-            .expect("sorted Artist order")
-            .2
-            .into_iter()
-            .map(|row| row.artist_key)
-            .collect::<Vec<_>>(),
+        library::CollectionQuery {
+            kind: library::CollectionKind::Artists {
+                source: fixture.source,
+                sort: ArtistSort::Title,
+                album_artist: false,
+            },
+            folder: None,
+            filter: ("").to_string(),
+            descending: false,
+            favorites_only: false,
+        }
+        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .await
+        .map(|(count, start, rows)| (count, start, rows.artists()))
+        .expect("sorted Artist order")
+        .2
+        .into_iter()
+        .map(|row| row.artist_key)
+        .collect::<Vec<_>>(),
         fixture.artists
     );
     assert_eq!(
-        fixture
-            .database
-            .genre_route_page(
-                fixture.source,
-                None,
-                "",
-                GenreSort::Title,
-                false,
-                RouteSeedWindow::top(),
-                &cancel,
-            )
-            .await
-            .expect("Genre order")
-            .2
-            .into_iter()
-            .map(|row| row.genre_key)
-            .collect::<Vec<_>>(),
+        library::CollectionQuery {
+            kind: library::CollectionKind::Genres {
+                source: fixture.source,
+                sort: GenreSort::Title,
+            },
+            folder: None,
+            filter: ("").to_string(),
+            descending: false,
+            favorites_only: false,
+        }
+        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .await
+        .map(|(count, start, rows)| (count, start, rows.genres()))
+        .expect("Genre order")
+        .2
+        .into_iter()
+        .map(|row| row.genre_key)
+        .collect::<Vec<_>>(),
         [fixture.genre]
     );
     assert_eq!(
-        fixture
-            .database
-            .genre_route_page(
-                fixture.source,
-                None,
-                "",
-                GenreSort::TrackCount,
-                true,
-                RouteSeedWindow::top(),
-                &cancel,
-            )
-            .await
-            .expect("sorted Genre order")
-            .2
-            .into_iter()
-            .map(|row| row.genre_key)
-            .collect::<Vec<_>>(),
+        library::CollectionQuery {
+            kind: library::CollectionKind::Genres {
+                source: fixture.source,
+                sort: GenreSort::TrackCount,
+            },
+            folder: None,
+            filter: ("").to_string(),
+            descending: true,
+            favorites_only: false,
+        }
+        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .await
+        .map(|(count, start, rows)| (count, start, rows.genres()))
+        .expect("sorted Genre order")
+        .2
+        .into_iter()
+        .map(|row| row.genre_key)
+        .collect::<Vec<_>>(),
         [fixture.genre]
     );
     assert_eq!(
-        fixture
-            .database
-            .mood_route_page(
-                fixture.source,
-                None,
-                "",
-                MoodSort::Duration,
-                true,
-                RouteSeedWindow::top(),
-                &cancel,
-            )
-            .await
-            .expect("sorted Mood order")
-            .2
-            .into_iter()
-            .map(|row| row.mood_key)
-            .collect::<Vec<_>>(),
+        library::CollectionQuery {
+            kind: library::CollectionKind::Moods {
+                source: fixture.source,
+                sort: MoodSort::Duration,
+            },
+            folder: None,
+            filter: ("").to_string(),
+            descending: true,
+            favorites_only: false,
+        }
+        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .await
+        .map(|(count, start, rows)| (count, start, rows.moods()))
+        .expect("sorted Mood order")
+        .2
+        .into_iter()
+        .map(|row| row.mood_key)
+        .collect::<Vec<_>>(),
         [fixture.mood]
     );
     let album_rows = fixture
@@ -1412,47 +1468,47 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         [fixture.track_uris[3].clone()]
     );
     assert!(
-        fixture
-            .database
-            .artist_route_page(
-                fixture.source,
-                None,
-                false,
-                false,
-                "artist a",
-                ArtistSort::Title,
-                false,
-                RouteSeedWindow::top(),
-                &cancel,
-            )
-            .await
-            .expect("direct Artist filter")
-            .2
-            .into_iter()
-            .map(|row| row.artist_key)
-            .collect::<Vec<_>>()
-            .is_empty()
+        library::CollectionQuery {
+            kind: library::CollectionKind::Artists {
+                source: fixture.source,
+                sort: ArtistSort::Title,
+                album_artist: false,
+            },
+            folder: None,
+            filter: ("artist a").to_string(),
+            descending: false,
+            favorites_only: false,
+        }
+        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .await
+        .map(|(count, start, rows)| (count, start, rows.artists()))
+        .expect("direct Artist filter")
+        .2
+        .into_iter()
+        .map(|row| row.artist_key)
+        .collect::<Vec<_>>()
+        .is_empty()
     );
     assert_eq!(
-        fixture
-            .database
-            .artist_route_page(
-                fixture.source,
-                None,
-                true,
-                false,
-                "artist a",
-                ArtistSort::Title,
-                false,
-                RouteSeedWindow::top(),
-                &cancel,
-            )
-            .await
-            .expect("Album Artist filter")
-            .2
-            .into_iter()
-            .map(|row| row.artist_key)
-            .collect::<Vec<_>>(),
+        library::CollectionQuery {
+            kind: library::CollectionKind::Artists {
+                source: fixture.source,
+                sort: ArtistSort::Title,
+                album_artist: true,
+            },
+            folder: None,
+            filter: ("artist a").to_string(),
+            descending: false,
+            favorites_only: false,
+        }
+        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .await
+        .map(|(count, start, rows)| (count, start, rows.artists()))
+        .expect("Album Artist filter")
+        .2
+        .into_iter()
+        .map(|row| row.artist_key)
+        .collect::<Vec<_>>(),
         [fixture.artists[0]]
     );
     assert_eq!(
@@ -1502,25 +1558,26 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     let empty_folder = sqlx::query_scalar("INSERT INTO folders(source_key,object_id,name,normalized_name,sort_text) VALUES (?1,'empty-folder','Empty','empty','empty') RETURNING folder_key")
         .bind(fixture.source).fetch_one(&mut raw).await.expect("insert empty Folder");
     assert!(
-        fixture
-            .database
-            .album_route_page(
-                fixture.source,
-                Some(empty_folder),
-                false,
-                "",
-                AlbumSort::Title,
-                false,
-                RouteSeedWindow::top(),
-                &cancel
-            )
-            .await
-            .expect("empty Folder scope")
-            .2
-            .into_iter()
-            .map(|row| row.album_key)
-            .collect::<Vec<_>>()
-            .is_empty()
+        library::CollectionQuery {
+            kind: library::CollectionKind::Albums {
+                source: fixture.source,
+                sort: AlbumSort::Title,
+                inline_tracks: None,
+            },
+            folder: Some(empty_folder),
+            filter: ("").to_string(),
+            descending: false,
+            favorites_only: false,
+        }
+        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .await
+        .map(|(count, start, rows)| (count, start, rows.albums()))
+        .expect("empty Folder scope")
+        .2
+        .into_iter()
+        .map(|row| row.album_key)
+        .collect::<Vec<_>>()
+        .is_empty()
     );
 }
 
@@ -1541,32 +1598,34 @@ async fn empty_named_collection_routes_return_empty_pages() {
     let source = fixture.source;
     let cancellation = ReadCancellation::new();
 
-    let genres = fixture
-        .database
-        .genre_route_page(
-            source,
-            None,
-            "",
-            GenreSort::TrackCount,
-            false,
-            RouteSeedWindow::top(),
-            &cancellation,
-        )
-        .await
-        .expect("empty Genre route");
-    let moods = fixture
-        .database
-        .mood_route_page(
-            source,
-            None,
-            "",
-            MoodSort::Duration,
-            false,
-            RouteSeedWindow::top(),
-            &cancellation,
-        )
-        .await
-        .expect("empty Mood route");
+    let genres = library::CollectionQuery {
+        kind: library::CollectionKind::Genres {
+            source: source,
+            sort: GenreSort::TrackCount,
+        },
+        folder: None,
+        filter: ("").to_string(),
+        descending: false,
+        favorites_only: false,
+    }
+    .page(&fixture.database, RouteSeedWindow::top(), &cancellation)
+    .await
+    .map(|(count, start, rows)| (count, start, rows.genres()))
+    .expect("empty Genre route");
+    let moods = library::CollectionQuery {
+        kind: library::CollectionKind::Moods {
+            source: source,
+            sort: MoodSort::Duration,
+        },
+        folder: None,
+        filter: ("").to_string(),
+        descending: false,
+        favorites_only: false,
+    }
+    .page(&fixture.database, RouteSeedWindow::top(), &cancellation)
+    .await
+    .map(|(count, start, rows)| (count, start, rows.moods()))
+    .expect("empty Mood route");
 
     assert_eq!(genres, (0, 0, Vec::new()));
     assert_eq!(moods, (0, 0, Vec::new()));
@@ -1701,66 +1760,69 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
         [fixture.track_uris[0].clone()]
     );
     assert_eq!(
-        fixture
-            .database
-            .album_route_page(
-                fixture.source,
-                None,
-                false,
-                "rock",
-                AlbumSort::Title,
-                false,
-                RouteSeedWindow::top(),
-                &cancel,
-            )
-            .await
-            .expect("Album Genre filter")
-            .2
-            .into_iter()
-            .map(|row| row.album_key)
-            .collect::<Vec<_>>(),
+        library::CollectionQuery {
+            kind: library::CollectionKind::Albums {
+                source: fixture.source,
+                sort: AlbumSort::Title,
+                inline_tracks: None,
+            },
+            folder: None,
+            filter: ("rock").to_string(),
+            descending: false,
+            favorites_only: false,
+        }
+        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .await
+        .map(|(count, start, rows)| (count, start, rows.albums()))
+        .expect("Album Genre filter")
+        .2
+        .into_iter()
+        .map(|row| row.album_key)
+        .collect::<Vec<_>>(),
         [fixture.albums[1], fixture.albums[0]]
     );
     assert_eq!(
-        fixture
-            .database
-            .album_route_page(
-                fixture.source,
-                None,
-                false,
-                "artist b",
-                AlbumSort::Title,
-                false,
-                RouteSeedWindow::top(),
-                &cancel,
-            )
-            .await
-            .expect("Album Artist filter")
-            .2
-            .into_iter()
-            .map(|row| row.album_key)
-            .collect::<Vec<_>>(),
+        library::CollectionQuery {
+            kind: library::CollectionKind::Albums {
+                source: fixture.source,
+                sort: AlbumSort::Title,
+                inline_tracks: None,
+            },
+            folder: None,
+            filter: ("artist b").to_string(),
+            descending: false,
+            favorites_only: false,
+        }
+        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .await
+        .map(|(count, start, rows)| (count, start, rows.albums()))
+        .expect("Album Artist filter")
+        .2
+        .into_iter()
+        .map(|row| row.album_key)
+        .collect::<Vec<_>>(),
         [fixture.albums[1]]
     );
     assert_eq!(
-        fixture
-            .database
-            .album_route_page(
-                fixture.source,
-                None,
-                false,
-                "2024",
-                AlbumSort::Title,
-                false,
-                RouteSeedWindow::top(),
-                &cancel,
-            )
-            .await
-            .expect("Album Year filter")
-            .2
-            .into_iter()
-            .map(|row| row.album_key)
-            .collect::<Vec<_>>(),
+        library::CollectionQuery {
+            kind: library::CollectionKind::Albums {
+                source: fixture.source,
+                sort: AlbumSort::Title,
+                inline_tracks: None,
+            },
+            folder: None,
+            filter: ("2024").to_string(),
+            descending: false,
+            favorites_only: false,
+        }
+        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .await
+        .map(|(count, start, rows)| (count, start, rows.albums()))
+        .expect("Album Year filter")
+        .2
+        .into_iter()
+        .map(|row| row.album_key)
+        .collect::<Vec<_>>(),
         [fixture.albums[1]]
     );
 

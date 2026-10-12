@@ -239,10 +239,8 @@ impl AndroidBrowseQuery {
                         .collect::<Vec<AndroidDetailLink>>()
                 };
                 if matches!(self.route, Route::AlbumDetail(_)) {
-                    let Some(album) = db
-                        .album_row_by_media_uri(&uri, &cancel)
-                        .await
-                        .map_err(error)?
+                    let Some((album, _)) =
+                        self.request().album(db, &cancel).await.map_err(error)?
                     else {
                         return Ok(None);
                     };
@@ -277,27 +275,34 @@ impl AndroidBrowseQuery {
                         show_track_header: self.display.display.show_header,
                     }));
                 }
-                let Some((source, key)) = db
-                    .artist_identity_by_media_uri(&uri, &cancel)
-                    .await
-                    .map_err(error)?
-                else {
+                let request = self.request();
+                let Some(releases) = request.artist(db, &cancel).await.map_err(error)? else {
                     return Ok(None);
                 };
                 let artist = db
-                    .artist_rows(source, &[key], album_artist, folder, &cancel)
+                    .artist_rows(
+                        releases.source,
+                        &[releases.artist],
+                        releases.album_artist,
+                        folder,
+                        &cancel,
+                    )
                     .await
                     .map_err(error)?
                     .pop()
                     .ok_or_else(|| error("Artist is no longer available"))?;
-                let mut query = SongQuery::new(SongScope::Artist {
-                    key: artist.artist_key,
-                    album_artist,
-                });
-                query.folder = folder;
-                query.favorites_only = true;
-                let favorite_total =
-                    db.song_count(&query, &cancel).await.map_err(error)?.max(0) as u64;
+                let favorites = BrowseRequest {
+                    filter: "",
+                    favorites_only: true,
+                    downloaded_only: false,
+                    ..request
+                }
+                .artist_songs(&releases);
+                let favorite_total = db
+                    .song_count(&favorites, &cancel)
+                    .await
+                    .map_err(error)?
+                    .max(0) as u64;
                 let links = present_links(rufin_core::detail_links::artist_external_links(
                     &link_settings,
                     configuration.as_ref(),

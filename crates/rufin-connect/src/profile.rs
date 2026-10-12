@@ -2108,7 +2108,11 @@ mod tests {
         scan.finish().await.unwrap();
         let uri = library::source_entity_uri(&library::SourceId::new("server"), "track", "track");
         source
-            .create_playlist(None, "Saved", std::slice::from_ref(&uri))
+            .create_playlist(
+                None,
+                "Saved",
+                &library::SongSelection::Uris(vec![uri.clone()].into()),
+            )
             .await
             .unwrap();
         source.connect_initialize_profile().await.unwrap();
@@ -2516,20 +2520,21 @@ mod tests {
                 .unwrap();
             if revision == 2 {
                 assert!(
-                    target
-                        .playlist_page(
-                            None,
-                            None,
-                            library::PlaylistSort::Position,
-                            false,
-                            "",
-                            0,
-                            140,
-                            &cancel
-                        )
-                        .await
-                        .unwrap()
-                        .is_empty()
+                    library::CollectionQuery {
+                        kind: library::CollectionKind::Playlists {
+                            source: (None).into(),
+                            sort: library::PlaylistSort::Position
+                        },
+                        folder: None,
+                        filter: ("").to_string(),
+                        descending: false,
+                        favorites_only: false
+                    }
+                    .rows(&target, 0, 140, &cancel)
+                    .await
+                    .map(|rows| rows.playlists())
+                    .unwrap()
+                    .is_empty()
                 );
                 continue;
             }

@@ -40,7 +40,7 @@ fn controller_http_api_and_browser_share_application_operations() {
             )))
             .unwrap()
             .unwrap();
-        inputs.products.playback.transport.set_muted(true);
+        inputs.products.playback.set_muted(true);
         let mut playback = inputs.products.playback.updates.subscribe();
         runtime.block_on(async {
             tokio::time::timeout(Duration::from_secs(5), async {
@@ -64,7 +64,7 @@ fn controller_http_api_and_browser_share_application_operations() {
         ));
         inputs.receivers.visualizer.close();
         drop(inputs.receivers);
-        inputs.products.playback.transport.shutdown();
+        inputs.products.playback.shutdown();
     })
     .unwrap();
 }
@@ -227,7 +227,7 @@ async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs
     );
     let mut playback = inputs.products.playback.updates.subscribe();
     for muted in [false, true] {
-        inputs.products.playback.transport.set_muted(muted);
+        inputs.products.playback.set_muted(muted);
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if playback
@@ -558,11 +558,11 @@ async fn exercise_http_api(
     let limited = api(reqwest::Method::GET, "queue?limit=1", Value::Null).await;
     assert_eq!(limited["total"], 2);
     assert_eq!(limited["window"].as_array().unwrap().len(), 1);
-    let moved = queue["window"][0]["id"].clone();
+    let moved = queue["window"][0]["position"].clone();
     api(
         reqwest::Method::POST,
         "queue/reorder",
-        json!({"ids":[moved],"before":null}),
+        json!({"positions":[moved],"before":null}),
     )
     .await;
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -940,7 +940,7 @@ async fn exercise_http_api(
     })
     .await
     .unwrap();
-    let anchor = inserted["window"][0]["id"].clone();
+    let anchor = inserted["window"][0]["position"].clone();
     let first_drop = api(reqwest::Method::GET, "playback", Value::Null).await;
     api(
         reqwest::Method::POST,
@@ -951,7 +951,7 @@ async fn exercise_http_api(
     api(
         reqwest::Method::POST,
         "queue",
-        json!({"mode":"insert","uris":[uri],"after":anchor}),
+        json!({"mode":"insert","uris":[uri],"after":anchor.as_u64().unwrap()+1}),
     )
     .await;
     let inserted = tokio::time::timeout(Duration::from_secs(5), async {
@@ -974,7 +974,9 @@ async fn exercise_http_api(
     assert_eq!(uris, vec![json!(items[1]), json!(items[0]), json!(uri)]);
     let after_drop = api(reqwest::Method::GET, "playback", Value::Null).await;
     assert_eq!(after_drop["state"], previous_playback["state"]);
-    assert_eq!(after_drop["current"], first_drop["current"]);
+    let mut expected_current = first_drop["current"].clone();
+    expected_current["position"] = json!(1);
+    assert_eq!(after_drop["current"], expected_current);
 
     exercise_browser(&format!("http://{address}"), token, &sources[1], uri).await;
     exercise_browser_restart(products.clone()).await;
@@ -999,7 +1001,7 @@ async fn exercise_http_api(
         .await
         .unwrap();
     assert!(!playback_event(&mut stopped_http).await.is_null());
-    let transport = products.playback.transport.clone();
+    let transport = products.playback.clone();
     tokio::task::spawn_blocking(move || transport.shutdown())
         .await
         .unwrap();
@@ -1278,12 +1280,12 @@ async fn exercise_browser(origin: &str, token: &str, source: &str, uri: &str) {
         .json()
         .await
         .unwrap();
-    let id = queue["window"][0]["id"].as_str().unwrap();
+    let position = queue["window"][0]["position"].as_u64().unwrap();
     for (route, payload) in [
-        ("activate", json!({"id":id})),
-        ("next", json!({"id":id})),
-        ("reorder", json!({"ids":[id]})),
-        ("item", json!({"id":id})),
+        ("activate", json!({"position":position})),
+        ("next", json!({"position":position})),
+        ("reorder", json!({"positions":[position]})),
+        ("item", json!({"position":position})),
         ("clear", json!({})),
     ] {
         let response = client

@@ -718,19 +718,20 @@ pub(super) mod tests {
         assert_eq!(folders.len(), 1);
         assert_eq!(folders[0].name, "Music");
         assert_eq!(folders[0].track_count, 2);
-        let moods = database
-            .mood_page(
-                publication.source,
-                Some(folders[0].folder_key),
-                "",
-                library::MoodSort::Title,
-                false,
-                0,
-                10,
-                &cancellation,
-            )
-            .await
-            .unwrap();
+        let moods = library::CollectionQuery {
+            kind: library::CollectionKind::Moods {
+                source: publication.source,
+                sort: library::MoodSort::Title,
+            },
+            folder: Some(folders[0].folder_key),
+            filter: ("").to_string(),
+            descending: false,
+            favorites_only: false,
+        }
+        .rows(&database, 0, 10, &cancellation)
+        .await
+        .map(|rows| rows.moods())
+        .unwrap();
         assert_eq!(moods.len(), 1);
         assert_eq!(moods[0].name, "Calm");
         assert_eq!(moods[0].track_count, 1);
@@ -749,23 +750,21 @@ pub(super) mod tests {
             .await
             .unwrap()
             .unwrap();
-        let order = database
-            .selected_playlist_entries(
+        let entries = database
+            .playlist_edit_entries(
+                playlist_key,
                 &library::SongQuery::new(library::SongScope::Playlist(playlist_key)).selection(),
                 &cancellation,
             )
             .await
             .unwrap();
-        let entries = database
-            .source_playlist_entry_object_ids(
-                publication.source,
-                playlist_key,
-                &order,
-                &cancellation,
-            )
-            .await
-            .unwrap();
-        assert_eq!(entries, vec!["entry-one", "entry-two"]);
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.object_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["entry-one", "entry-two"]
+        );
         assert!(
             !database
                 .playlist_rows(&[playlist_key], &cancellation)

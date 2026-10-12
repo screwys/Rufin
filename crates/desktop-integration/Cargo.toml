@@ -18,6 +18,7 @@ gio.workspace = true
 glib = { workspace = true, features = ["v2_66"] }
 localization.workspace = true
 playback.workspace = true
+rufin-core.workspace = true
 presence.workspace = true
 serde_json.workspace = true
 tracing.workspace = true

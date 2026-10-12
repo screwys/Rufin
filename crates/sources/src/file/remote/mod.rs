@@ -188,7 +188,7 @@ pub(crate) fn detail_folder_uri(
     Ok(url.into())
 }
 
-pub(crate) struct FileSource {
+pub struct FileSource {
     source_id: SourceId,
     kind: String,
     name: String,

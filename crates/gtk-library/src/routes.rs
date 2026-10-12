@@ -1,3 +1,4 @@
+use rufin_core::browse::BrowseRequest;
 use std::{cell::RefCell, rc::Rc, sync::Arc, time::Duration};
 
 use adw::prelude::*;
@@ -19,7 +20,7 @@ use super::named_collections::{NamedPageLoad, NamedReadRequest};
 use super::route_shell::{LibraryPageShellOptions, LibraryToolbarProjection};
 use crate::track_model::CollectionTrack;
 use crate::track_model::TrackCollectionModel;
-use gtk_widgets::route::CollectionCategory;
+use gtk_widgets::route::{CollectionCategory, Route};
 use gtk_widgets::sparse_model::SparseSource;
 
 const TRACK_FILTER_DEBOUNCE: Duration = Duration::from_millis(150);
@@ -92,8 +93,8 @@ impl<T: CollectionTrack> TrackListProjection<T> {
 
     pub fn play_source(
         &self,
-        queue: playback::QueueHandle,
-        placement: playback::QueuePlacement,
+        queue: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
+        placement: rufin_core::playback::QueuePlacement,
         context_id: String,
         shuffled: bool,
     ) {
@@ -364,17 +365,29 @@ impl CatalogUi {
             move |request: CollectionReadRequest, cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&database);
                 Box::pin(async move {
-                    super::album_detail::load_album_collection(
-                        &database,
-                        source,
-                        folder,
-                        &request.settings,
-                        favorites_only,
-                        &request.query,
-                        library::RouteSeedWindow::top(),
-                        &cancellation,
-                    )
+                    BrowseRequest {
+                        filter: &request.query,
+                        favorites_only: favorites_only,
+                        ..BrowseRequest::new(
+                            &Route::Albums,
+                            CollectionCategory::Albums,
+                            Some(source),
+                            folder,
+                            &request.settings,
+                            8,
+                        )
+                    }
+                    .collection()
+                    .expect("collection route")
+                    .page(&database, library::RouteSeedWindow::top(), &cancellation)
                     .await
+                    .map(|(count, start, rows)| match rows {
+                        library::CollectionRows::Albums(rows) => (count, start, rows, Vec::new()),
+                        library::CollectionRows::AlbumDetails(rows) => {
+                            (count, start, Vec::new(), rows)
+                        }
+                        _ => unreachable!("album query"),
+                    })
                     .map_err(|error| error.to_string())
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
             },
@@ -686,21 +699,28 @@ impl CatalogUi {
                   cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&row_database);
                 Box::pin(async move {
-                    database
-                        .artist_page(
-                            source,
+                    BrowseRequest {
+                        filter: &request.query,
+                        favorites_only: favorites_only,
+                        ..BrowseRequest::new(
+                            &if album_artist {
+                                Route::AlbumArtists
+                            } else {
+                                Route::Artists
+                            },
+                            CollectionCategory::Artists,
+                            Some(source),
                             folder,
-                            album_artist,
-                            favorites_only,
-                            &request.query,
-                            request.settings.sort_key.artist_sort(),
-                            request.settings.descending,
-                            range.start,
-                            range.len(),
-                            &cancellation,
+                            &request.settings,
+                            8,
                         )
-                        .await
-                        .map_err(|error| error.to_string())
+                    }
+                    .collection()
+                    .expect("collection route")
+                    .rows(&database, range.start, range.len(), &cancellation)
+                    .await
+                    .map(|rows| rows.artists())
+                    .map_err(|error| error.to_string())
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
             },
         );
@@ -793,20 +813,28 @@ impl CatalogUi {
             move |request: CollectionReadRequest, cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&order_database);
                 Box::pin(async move {
-                    database
-                        .artist_route_page(
-                            source,
+                    BrowseRequest {
+                        filter: &request.query,
+                        favorites_only: favorites_only,
+                        ..BrowseRequest::new(
+                            &if album_artist {
+                                Route::AlbumArtists
+                            } else {
+                                Route::Artists
+                            },
+                            CollectionCategory::Artists,
+                            Some(source),
                             folder,
-                            album_artist,
-                            favorites_only,
-                            &request.query,
-                            request.settings.sort_key.artist_sort(),
-                            request.settings.descending,
-                            library::RouteSeedWindow::top(),
-                            &cancellation,
+                            &request.settings,
+                            8,
                         )
-                        .await
-                        .map_err(|error| error.to_string())
+                    }
+                    .collection()
+                    .expect("collection route")
+                    .page(&database, library::RouteSeedWindow::top(), &cancellation)
+                    .await
+                    .map(|(count, start, rows)| (count, start, rows.artists()))
+                    .map_err(|error| error.to_string())
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
             },
         );
@@ -927,19 +955,23 @@ impl CatalogUi {
                   cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&row_database);
                 Box::pin(async move {
-                    database
-                        .playlist_page(
+                    BrowseRequest {
+                        filter: &request.query,
+                        ..BrowseRequest::new(
+                            &Route::Playlists,
+                            CollectionCategory::Tracks,
                             source,
                             folder,
-                            request.settings.sort_key.playlist_sort(),
-                            request.settings.descending,
-                            &request.query,
-                            range.start,
-                            range.len(),
-                            &cancellation,
+                            &request.settings,
+                            8,
                         )
-                        .await
-                        .map_err(|error| error.to_string())
+                    }
+                    .collection()
+                    .expect("collection route")
+                    .rows(&database, range.start, range.len(), &cancellation)
+                    .await
+                    .map(|rows| rows.playlists())
+                    .map_err(|error| error.to_string())
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
             },
         );
@@ -948,18 +980,23 @@ impl CatalogUi {
             Arc::new(move |request: NamedReadRequest, cancellation| {
                 let database = Arc::clone(&order_database);
                 Box::pin(async move {
-                    database
-                        .playlist_route_page(
+                    BrowseRequest {
+                        filter: &request.query,
+                        ..BrowseRequest::new(
+                            &Route::Playlists,
+                            CollectionCategory::Tracks,
                             source,
                             folder,
-                            request.settings.sort_key.playlist_sort(),
-                            request.settings.descending,
-                            &request.query,
-                            library::RouteSeedWindow::top(),
-                            &cancellation,
+                            &request.settings,
+                            8,
                         )
-                        .await
-                        .map_err(|error| error.to_string())
+                    }
+                    .collection()
+                    .expect("collection route")
+                    .page(&database, library::RouteSeedWindow::top(), &cancellation)
+                    .await
+                    .map(|(count, start, rows)| (count, start, rows.playlists()))
+                    .map_err(|error| error.to_string())
                 })
             });
         self.named_collection_route(
@@ -994,20 +1031,23 @@ impl CatalogUi {
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map_or(0, |duration| duration.as_secs().min(i64::MAX as u64) as i64);
-                    database
-                        .smart_playlist_page(
+                    BrowseRequest {
+                        now: now,
+                        ..BrowseRequest::new(
+                            &Route::SmartPlaylists,
+                            CollectionCategory::Tracks,
                             source,
                             folder,
-                            request.settings.sort_key.smart_playlist_sort(),
-                            request.settings.descending,
-                            "",
-                            now,
-                            range.start,
-                            range.len(),
-                            &cancellation,
+                            &request.settings,
+                            8,
                         )
-                        .await
-                        .map_err(|error| error.to_string())
+                    }
+                    .collection()
+                    .expect("collection route")
+                    .rows(&database, range.start, range.len(), &cancellation)
+                    .await
+                    .map(|rows| rows.smart_playlists())
+                    .map_err(|error| error.to_string())
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
             },
         );
@@ -1019,18 +1059,23 @@ impl CatalogUi {
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map_or(0, |duration| duration.as_secs().min(i64::MAX as u64) as i64);
-                    database
-                        .smart_playlist_route_page(
+                    BrowseRequest {
+                        now: now,
+                        ..BrowseRequest::new(
+                            &Route::SmartPlaylists,
+                            CollectionCategory::Tracks,
                             source,
                             folder,
-                            request.settings.sort_key.smart_playlist_sort(),
-                            request.settings.descending,
-                            now,
-                            library::RouteSeedWindow::top(),
-                            &cancellation,
+                            &request.settings,
+                            8,
                         )
-                        .await
-                        .map_err(|error| error.to_string())
+                    }
+                    .collection()
+                    .expect("collection route")
+                    .page(&database, library::RouteSeedWindow::top(), &cancellation)
+                    .await
+                    .map(|(count, start, rows)| (count, start, rows.smart_playlists()))
+                    .map_err(|error| error.to_string())
                 })
             });
         self.named_collection_route(

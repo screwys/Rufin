@@ -3,11 +3,12 @@ use super::super::{
     actor::{self, Message, Playback},
 };
 use super::*;
+use crate::playback::Placement;
 use crate::{
     lyrics::LyricsService, settings::SettingsFile, source::SourceOwner, waveform::WaveformOwner,
 };
+use playback::Provenance;
 use playback::{BackendError, PlaybackBackend};
-use playback::{Placement, Provenance};
 use std::sync::Mutex;
 
 pub(in crate::playback) struct IdleBackend(pub(in crate::playback) Arc<Mutex<Vec<BackendCommand>>>);
@@ -1331,7 +1332,7 @@ async fn shuffled_batches_keep_placement_and_global_shuffle() {
                         )
                     })
                     .collect::<Vec<_>>();
-                let request = playback::PlayRequest::from_load(
+                let request = crate::playback::PlayRequest::from_load(
                     library::QueueReadRequest::items(items),
                     placement,
                 )
@@ -1449,9 +1450,9 @@ async fn collection_starts_and_selected_rows_keep_distinct_shuffle_anchors() {
             assert_eq!(session.sequence().selected().unwrap().position, 0);
 
             let request = if collection_start {
-                playback::PlayRequest::ordered
+                crate::playback::PlayRequest::ordered
             } else {
-                playback::PlayRequest::captured
+                crate::playback::PlayRequest::captured
             };
             let request = request(input, anchor, Placement::Now, collection_start && shuffled)
                 .with_context("collection".into());
@@ -2236,13 +2237,17 @@ async fn repeat_wraps_when_source_exhaustion_is_discovered_after_a_full_page() {
         .map(|i| format!("https://example.test/{i}"))
         .collect::<Vec<_>>();
     let (key, _) = db
-        .create_playlist(None, "Source", &uris)
+        .create_playlist(
+            None,
+            "Source",
+            &library::SongSelection::Uris(uris.clone().into()),
+        )
         .await
         .unwrap()
         .unwrap();
     let page = db
         .read_queue(
-            playback::PlayRequest::ordered(
+            crate::playback::PlayRequest::ordered(
                 library::SongQuery::new(library::SongScope::Playlist(key)).selection(),
                 0,
                 Placement::Now,
@@ -2311,7 +2316,7 @@ async fn removing_the_visible_window_continues_with_the_unbuffered_source() {
         .iter()
         .map(|row| row.position.clone())
         .collect::<Vec<_>>();
-    session.remove_many(&playback::QueueSelection::Positions(ids), &sample);
+    session.remove_many(&crate::playback::QueueSelection::Positions(ids), &sample);
     finish_queue(&mut session, &inbox, &sample).await;
     assert_eq!(
         session.sequence.selected().unwrap().media_uri,

@@ -130,7 +130,7 @@ fn scope(kind: SourceEntityKind) -> u8 {
 }
 
 impl PlexSource {
-    pub(crate) async fn write_artwork(
+    pub async fn write_artwork(
         &self,
         object: &str,
         edit: Option<&crate::ArtworkEdit>,
@@ -144,7 +144,7 @@ impl PlexSource {
             .map_err(error)
     }
 
-    pub(crate) async fn change_artwork(
+    pub async fn change_artwork(
         &self,
         object: &str,
         change: &crate::ArtworkChange,
@@ -171,7 +171,7 @@ impl PlexSource {
         }
         crate::remote_http::unit(request, HTTP).await
     }
-    pub(crate) async fn read_track_metadata(
+    pub async fn read_track_metadata(
         &self,
         track: library::TrackRow,
     ) -> Result<MetadataDraft, Error> {
@@ -183,7 +183,7 @@ impl PlexSource {
         )
         .await
     }
-    pub(crate) async fn read_album_metadata(
+    pub async fn read_album_metadata(
         &self,
         album: library::AlbumRow,
     ) -> Result<MetadataDraft, Error> {
@@ -195,7 +195,7 @@ impl PlexSource {
         )
         .await
     }
-    pub(crate) async fn read_artist_metadata(
+    pub async fn read_artist_metadata(
         &self,
         artist: library::ArtistRow,
     ) -> Result<MetadataDraft, Error> {
@@ -317,7 +317,7 @@ impl PlexSource {
         .await
         .map_err(error)
     }
-    pub(crate) async fn write_metadata(
+    pub async fn write_metadata(
         &self,
         object: &str,
         expected: &str,

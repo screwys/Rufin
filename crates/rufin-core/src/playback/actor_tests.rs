@@ -186,7 +186,7 @@ fn replace_queue(playback: &Playback, prefix: &str, count: usize) {
                     })
                     .collect(),
             ),
-            playback::QueuePlacement::Now,
+            crate::playback::QueuePlacement::Now,
         ))
         .unwrap();
 }

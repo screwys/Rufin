@@ -6,7 +6,7 @@ use gio::prelude::*;
 use library::{PlaylistFile, PlaylistFormat, QueueItem, QueueProvenance};
 
 pub async fn arguments(
-    queue: &playback::QueueHandle,
+    queue: &crate::playback::PlaybackOwner,
     database: &library::Database,
     local: Option<&sources::SourceConfiguration>,
     arguments: Vec<std::ffi::OsString>,
@@ -24,7 +24,7 @@ pub async fn arguments(
 }
 
 pub async fn files(
-    queue: &playback::QueueHandle,
+    queue: &crate::playback::PlaybackOwner,
     database: &library::Database,
     local: Option<&sources::SourceConfiguration>,
     files: Vec<gio::File>,
@@ -145,9 +145,9 @@ pub async fn files(
     if items.is_empty() {
         return Err(localization::tr("No playable entries were found"));
     }
-    queue.play(playback::PlayRequest::from_load(
+    queue.play_selection(crate::playback::PlayRequest::from_load(
         library::QueueReadRequest::items(items),
-        playback::QueuePlacement::Now,
+        crate::playback::QueuePlacement::Now,
     ));
     Ok(())
 }

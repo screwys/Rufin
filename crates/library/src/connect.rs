@@ -1426,7 +1426,11 @@ mod tests {
         scan.finish().await.unwrap();
         let uri = crate::source_entity_uri(&crate::SourceId::new("server"), "track", "track");
         source
-            .create_playlist(None, "Saved", std::slice::from_ref(&uri))
+            .create_playlist(
+                None,
+                "Saved",
+                &crate::SongSelection::Uris((std::slice::from_ref(&uri)).to_vec().into()),
+            )
             .await
             .unwrap();
         source.connect_initialize_profile().await.unwrap();
@@ -1618,12 +1622,20 @@ mod tests {
         destination.connect_capture_enabled(true).await.unwrap();
         let media = "https://example.org/same.flac".to_owned();
         let (playlist, _) = source
-            .create_playlist(None, "Shared", &[media.clone(), media.clone()])
+            .create_playlist(
+                None,
+                "Shared",
+                &crate::SongSelection::Uris((&[media.clone(), media.clone()]).to_vec().into()),
+            )
             .await
             .unwrap()
             .unwrap();
         destination
-            .create_playlist(None, "Old local playlist", std::slice::from_ref(&media))
+            .create_playlist(
+                None,
+                "Old local playlist",
+                &crate::SongSelection::Uris((std::slice::from_ref(&media)).to_vec().into()),
+            )
             .await
             .unwrap()
             .unwrap();
@@ -1646,7 +1658,12 @@ mod tests {
         assert!(destination.connect_changes().await.unwrap().is_empty());
         source.connect_acknowledge(&changes).await.unwrap();
         source
-            .add_playlist_media(None, playlist, std::slice::from_ref(&media), false)
+            .add_playlist_songs(
+                None,
+                playlist,
+                &crate::SongSelection::Uris((std::slice::from_ref(&media)).to_vec().into()),
+                false,
+            )
             .await
             .unwrap();
         let last = sqlx::query_scalar::<_, crate::PlaylistEntryKey>(

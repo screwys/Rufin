@@ -31,7 +31,7 @@ impl Shell {
             }
             DownloadEvent::Feedback(feedback) => {
                 self.show_operation_feedback(&OperationFeedback {
-                    subject: feedback.subject,
+                    title: gtk_widgets::downloads::download_subject_title(&feedback.subject),
                     artwork: OperationArtwork::MediaUris(feedback.preview_uris),
                     item_count: feedback.item_count,
                     kind: match feedback.kind {
@@ -62,7 +62,7 @@ impl Shell {
         action: Option<Box<dyn FnOnce()>>,
     ) {
         crate::preferences::dialogs::release_notes::dismiss_release_notification(&self.preferences);
-        let title = gtk_widgets::downloads::download_subject_title(&feedback.subject);
+        let title = &feedback.title;
         let count = track_count_text(feedback.item_count as u64);
         let subtitle = operation_feedback_subtitle(&feedback.kind, &count);
         self.chrome
@@ -86,7 +86,7 @@ impl Shell {
                 .widget(),
         };
         self.chrome.operation_feedback_artwork.append(&artwork);
-        self.chrome.operation_feedback_title.set_text(&title);
+        self.chrome.operation_feedback_title.set_text(title);
         self.chrome.operation_feedback_subtitle.set_visible(true);
         self.chrome.operation_feedback_subtitle.set_text(&subtitle);
         let opens_queue = matches!(

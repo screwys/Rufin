@@ -7,7 +7,7 @@ use adw::prelude::*;
 use artwork::ArtworkBinding;
 use downloads::DownloadSubject;
 use gtk::glib;
-use playback::PlayRequest;
+use rufin_core::playback::PlayRequest;
 use std::{cell::RefCell, rc::Rc};
 use std::{future::Future, ops::Range, pin::Pin, sync::Arc};
 
@@ -322,7 +322,7 @@ pub enum MediaDragSource {
     PlaylistEntries(PlaylistEntrySelectionSnapshot),
     MediaUris(std::sync::Arc<[String]>),
     Queue {
-        selection: playback::QueueSelection,
+        selection: rufin_core::playback::QueueSelection,
         media_uris: std::sync::Arc<[String]>,
     },
 }
@@ -519,11 +519,7 @@ impl MediaDragSource {
             Self::MediaUris(uris)
             | Self::Queue {
                 media_uris: uris, ..
-            } => database
-                .remember_media_uris(uris)
-                .await
-                .map(|keys| library::SongSelection::Tracks(keys.into()))
-                .map_err(|error| error.to_string()),
+            } => Ok(library::SongSelection::Uris(uris.clone())),
             _ => Ok(self
                 .play_request(database)
                 .await?
@@ -532,8 +528,25 @@ impl MediaDragSource {
         }
     }
 
+    pub async fn playlist_input(
+        &self,
+        database: &library::Database,
+    ) -> Result<(library::SongSelection, String, Vec<String>), String> {
+        let selection = self.song_selection(database).await?;
+        let title = match self {
+            Self::Target { .. } | Self::LiveCollection { .. } => selection_title(Some(&selection)),
+            Self::PlaylistEntries(_) => localization::tr("Playlist"),
+            _ => localization::tr("Selection"),
+        };
+        let preview = database
+            .selected_track_uris(&selection, Some(4), &library::ReadCancellation::new())
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok((selection, title, preview))
+    }
+
     pub async fn play_request(&self, database: &library::Database) -> Result<PlayRequest, String> {
-        let placement = playback::QueuePlacement::Now;
+        let placement = rufin_core::playback::QueuePlacement::Now;
         Ok(match self {
             Self::LiveCollection {
                 media_uri,
@@ -569,7 +582,7 @@ impl MediaDragSource {
                 let selection = request.selection().expect("song-backed collection drag");
                 prepared = Some(request);
                 database
-                    .selected_track_uris(&selection, &library::ReadCancellation::new())
+                    .selected_track_uris(&selection, None, &library::ReadCancellation::new())
                     .await
                     .map_err(|error| error.to_string())?
             }
@@ -577,19 +590,7 @@ impl MediaDragSource {
         let subject = match self {
             Self::Target { .. } | Self::LiveCollection { .. } => {
                 let target = prepared.as_ref().expect("prepared collection");
-                let title = match target.selection() {
-                    Some(library::SongSelection::Tracks(_)) => localization::tr("Track"),
-                    Some(library::SongSelection::Query { query, .. }) => match query.scope {
-                        library::SongScope::Album(_) => localization::tr("Album"),
-                        library::SongScope::Artist { .. } => localization::tr("Artist"),
-                        library::SongScope::Genre(_) => localization::tr("Genre"),
-                        library::SongScope::Mood(_) => localization::tr("Mood"),
-                        library::SongScope::Playlist(_) => localization::tr("Playlist"),
-                        library::SongScope::Smart { .. } => localization::tr("Smart Playlist"),
-                        _ => localization::tr("Folder"),
-                    },
-                    _ => localization::tr("Selection"),
-                };
+                let title = selection_title(target.selection().as_ref());
                 DownloadSubject::Prepared {
                     context_id: target.context().map(str::to_string).unwrap_or_else(|| {
                         format!("track:{}", uris.first().map_or("", String::as_str))
@@ -607,6 +608,22 @@ impl MediaDragSource {
             Self::Selection(_) => DownloadSubject::for_media_uris("track-selection", None, &uris),
         };
         Ok((uris, subject))
+    }
+}
+
+fn selection_title(selection: Option<&library::SongSelection>) -> String {
+    match selection {
+        Some(library::SongSelection::Tracks(_)) => localization::tr("Track"),
+        Some(library::SongSelection::Query { query, .. }) => match query.scope {
+            library::SongScope::Album(_) => localization::tr("Album"),
+            library::SongScope::Artist { .. } => localization::tr("Artist"),
+            library::SongScope::Genre(_) => localization::tr("Genre"),
+            library::SongScope::Mood(_) => localization::tr("Mood"),
+            library::SongScope::Playlist(_) => localization::tr("Playlist"),
+            library::SongScope::Smart { .. } => localization::tr("Smart Playlist"),
+            _ => localization::tr("Folder"),
+        },
+        _ => localization::tr("Selection"),
     }
 }
 

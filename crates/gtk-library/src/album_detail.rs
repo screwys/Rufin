@@ -1,3 +1,5 @@
+use rufin_core::browse::BrowseRequest;
+use rufin_core::route::{CollectionCategory, Route};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
@@ -7,7 +9,7 @@ use adw::prelude::*;
 use gtk::glib;
 use library::{AlbumKey, AlbumRow, TrackRow};
 use localization::track_count_text;
-use playback::QueuePlacement;
+use rufin_core::playback::QueuePlacement;
 
 use crate::CatalogUi;
 use crate::{LibraryField, LibraryLayout, LibraryListKey};
@@ -40,7 +42,7 @@ fn detail_display(shell: &CatalogUi) -> rufin_core::settings::layout::DisplaySet
         .library_list(LibraryListKey::Albums)
         .display
 }
-const ALBUM_DETAIL_INLINE_TRACK_ROWS: usize = 8;
+pub(crate) const ALBUM_DETAIL_INLINE_TRACK_ROWS: usize = 8;
 const ALBUM_DETAIL_TRACK_COLUMN_GAP: i32 = 8;
 const ALBUM_DETAIL_TRACK_HEADER_HEIGHT: i32 = 26;
 const ALBUM_DETAIL_SEPARATOR_WIDTH: i32 = 1;
@@ -119,21 +121,24 @@ impl AlbumCollectionModels {
                     let database = Arc::clone(&database);
                     let request = request.borrow().clone();
                     Box::pin(async move {
-                        database
-                            .album_detail_page(
-                                source,
+                        BrowseRequest {
+                            filter: &request.query,
+                            favorites_only: favorites_only,
+                            ..BrowseRequest::new(
+                                &Route::Albums,
+                                CollectionCategory::Albums,
+                                Some(source),
                                 folder,
-                                favorites_only,
-                                &request.query,
-                                request.settings.sort_key.album_sort(),
-                                request.settings.descending,
-                                ALBUM_DETAIL_INLINE_TRACK_ROWS,
-                                range.start,
-                                range.len(),
-                                &cancellation,
+                                &request.settings,
+                                8,
                             )
-                            .await
-                            .map_err(|error| error.to_string())
+                        }
+                        .collection()
+                        .expect("collection route")
+                        .rows(&database, range.start, range.len(), &cancellation)
+                        .await
+                        .map(|rows| rows.album_details())
+                        .map_err(|error| error.to_string())
                     })
                         as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
                 },
@@ -162,20 +167,24 @@ impl AlbumCollectionModels {
                   cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&database);
                 Box::pin(async move {
-                    database
-                        .album_page(
-                            source,
+                    BrowseRequest {
+                        filter: &request.query,
+                        favorites_only: favorites_only,
+                        ..BrowseRequest::new(
+                            &Route::Albums,
+                            CollectionCategory::Albums,
+                            Some(source),
                             folder,
-                            favorites_only,
-                            &request.query,
-                            request.settings.sort_key.album_sort(),
-                            request.settings.descending,
-                            range.start,
-                            range.len(),
-                            &cancellation,
+                            &request.settings,
+                            8,
                         )
-                        .await
-                        .map_err(|error| error.to_string())
+                    }
+                    .collection()
+                    .expect("collection route")
+                    .rows(&database, range.start, range.len(), &cancellation)
+                    .await
+                    .map(|rows| rows.albums())
+                    .map_err(|error| error.to_string())
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
             },
         );
@@ -1121,14 +1130,14 @@ fn play_album_track(
     let Some(album) = album else {
         return;
     };
-    let queue = shell.queue.clone();
+    let queue = shell.playback.clone();
     let settings = shell
         .settings
         .current
         .borrow()
         .library_list(LibraryListKey::AlbumDetailTracks);
-    queue.play(
-        playback::PlayRequest::ordered(
+    queue.play_selection(
+        rufin_core::playback::PlayRequest::ordered(
             library::SongQuery {
                 folder: selected.music_folder_key,
                 sort: Some(settings.sort_key.track_sort()),
@@ -1217,60 +1226,5 @@ mod tests {
             album_detail_ready_height(width, true, 3, &Default::default()),
             expected_meta.max(expected_tracks),
         );
-    }
-}
-
-pub async fn load_album_collection(
-    database: &library::Database,
-    source_key: library::SourceKey,
-    folder: Option<library::FolderKey>,
-    settings: &rufin_core::settings::LibraryListSettings,
-    favorites_only: bool,
-    filter: &str,
-    window: library::RouteSeedWindow,
-    cancellation: &library::ReadCancellation,
-) -> library::LibraryResult<(usize, usize, Vec<AlbumRow>, Vec<AlbumDetailRow>)> {
-    if settings.layout == crate::LibraryLayout::Detail {
-        let count = database
-            .album_detail_count(
-                source_key,
-                folder,
-                favorites_only,
-                filter,
-                ALBUM_DETAIL_INLINE_TRACK_ROWS,
-                cancellation,
-            )
-            .await?
-            .max(0) as usize;
-        let seed = window.range(count);
-        let first_detail_rows = database
-            .album_detail_page(
-                source_key,
-                folder,
-                favorites_only,
-                filter,
-                settings.sort_key.album_sort(),
-                settings.descending,
-                ALBUM_DETAIL_INLINE_TRACK_ROWS,
-                seed.start,
-                seed.len(),
-                cancellation,
-            )
-            .await?;
-        Ok((count, seed.start, Vec::new(), first_detail_rows))
-    } else {
-        let (order, first_row_position, first_rows) = database
-            .album_route_page(
-                source_key,
-                folder,
-                favorites_only,
-                filter,
-                settings.sort_key.album_sort(),
-                settings.descending,
-                window,
-                cancellation,
-            )
-            .await?;
-        Ok((order, first_row_position, first_rows, Vec::new()))
     }
 }

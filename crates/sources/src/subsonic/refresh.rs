@@ -111,7 +111,7 @@ impl SubsonicSource {
         Ok(())
     }
 
-    pub(crate) async fn stage_playlist_snapshot(
+    pub async fn stage_playlist_snapshot(
         &self,
         scan: &mut Scan,
         playlist_id: &str,
@@ -681,19 +681,20 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(reads.load(Ordering::Relaxed), expected_reads);
-            let rows = database
-                .playlist_page(
-                    Some(publication.source),
-                    None,
-                    library::PlaylistSort::Position,
-                    false,
-                    "",
-                    0,
-                    2,
-                    &cancellation,
-                )
-                .await
-                .unwrap();
+            let rows = library::CollectionQuery {
+                kind: library::CollectionKind::Playlists {
+                    source: (Some(publication.source)).into(),
+                    sort: library::PlaylistSort::Position,
+                },
+                folder: None,
+                filter: ("").to_string(),
+                descending: false,
+                favorites_only: false,
+            }
+            .rows(&database, 0, 2, &cancellation)
+            .await
+            .map(|rows| rows.playlists())
+            .unwrap();
             if next == 5 {
                 assert!(rows.is_empty());
                 continue;
@@ -707,6 +708,7 @@ mod tests {
                     .selected_track_uris(
                         &library::SongQuery::new(library::SongScope::Playlist(playlist))
                             .selection(),
+                        None,
                         &cancellation
                     )
                     .await
@@ -856,10 +858,20 @@ mod tests {
                     .unwrap()
             );
             assert_eq!(
-                database
-                    .playlist_count(Some(publication.source), None, "", &cancellation)
-                    .await
-                    .unwrap(),
+                library::CollectionQuery {
+                    kind: library::CollectionKind::Playlists {
+                        source: (Some(publication.source)).into(),
+                        sort: library::PlaylistSort::Title
+                    },
+                    folder: None,
+                    filter: ("").to_string(),
+                    descending: false,
+                    favorites_only: false
+                }
+                .count(&database, &cancellation)
+                .await
+                .map(|count| count as i64)
+                .unwrap(),
                 i64::from(next != 1)
             );
         }
@@ -1099,6 +1111,7 @@ mod tests {
                                 publication.source
                             ))
                             .selection(),
+                            None,
                             &cancellation
                         )
                         .await
@@ -1122,6 +1135,7 @@ mod tests {
                         .selected_track_uris(
                             &library::SongQuery::new(library::SongScope::Playlist(playlist))
                                 .selection(),
+                            None,
                             &cancellation,
                         )
                         .await

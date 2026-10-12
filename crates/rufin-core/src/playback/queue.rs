@@ -1,5 +1,6 @@
 //! Compact live queue entries, two orders, and nearby resolved metadata.
-use ::playback::{Provenance, QueueReorderTarget, QueueRow, QueueSelection, RepeatMode};
+use crate::playback::{QueueReorderTarget, QueueSelection};
+use playback::{Provenance, QueueRow, RepeatMode};
 use std::{
     collections::{HashMap, HashSet},
     ops::Range,

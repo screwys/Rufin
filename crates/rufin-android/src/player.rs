@@ -351,7 +351,7 @@ impl AndroidPlayer {
         &self,
         selected: playback::PlaybackOutput,
     ) -> Result<(), AndroidError> {
-        let transport = self.products.playback.transport.clone();
+        let transport = self.products.playback.clone();
         self.products
             .runtime
             .spawn_blocking(move || {
@@ -747,9 +747,11 @@ impl AndroidPlayer {
         offset: i64,
     ) -> Result<(), AndroidError> {
         self.current_media(&token)?;
-        self.products.playback.transport.seek_millis(
-            lyrics::playback_position_for_lyrics_position(position, offset),
-        );
+        self.products
+            .playback
+            .seek_millis(lyrics::playback_position_for_lyrics_position(
+                position, offset,
+            ));
         Ok(())
     }
 
@@ -1211,7 +1213,7 @@ impl AndroidPlayer {
         self.settings()
     }
     pub async fn outputs(&self) -> Result<AndroidOutputChoices, AndroidError> {
-        let transport = self.products.playback.transport.clone();
+        let transport = self.products.playback.clone();
         let remotes = self
             .products
             .runtime
@@ -1222,7 +1224,7 @@ impl AndroidPlayer {
             Ok(remotes) => (remotes, None),
             Err(error) => (Vec::new(), Some(error)),
         };
-        let selected = self.products.playback.transport.playback_output();
+        let selected = self.products.playback.playback_output();
         let connect = self.products.connect.status();
         if let playback::PlaybackOutput::Remote(remote) = &selected
             && !remotes
@@ -1351,7 +1353,7 @@ impl AndroidPlayer {
             });
         };
         let database = self.products.library.clone();
-        let queue = self.products.playback.queue.clone();
+        let queue = self.products.playback.clone();
         let (rows, total, window_offset) = self
             .products
             .runtime
@@ -1395,31 +1397,28 @@ impl AndroidPlayer {
     }
 
     pub fn activate_queue(&self, position: u64) {
-        self.products.playback.queue.activate(position as usize);
+        self.products.playback.activate(position as usize);
     }
 
     pub fn remove_queue(&self, position: u64) {
-        self.products.playback.queue.remove(position as usize);
+        self.products.playback.remove(position as usize);
     }
 
     pub fn move_queue(&self, position: u64, target_position: Option<u64>, after: bool) {
-        self.products
-            .playback
-            .queue
-            .reorder(playback::QueueReorderRequest {
-                selection: playback::QueueSelection::Positions(vec![position as usize]),
-                target: target_position.map_or(library::QueueReorderTarget::End, |id| {
-                    if after {
-                        library::QueueReorderTarget::After(id as usize)
-                    } else {
-                        library::QueueReorderTarget::Before(id as usize)
-                    }
-                }),
-            });
+        self.products.playback.reorder(
+            rufin_core::playback::QueueSelection::Positions(vec![position as usize]),
+            target_position.map_or(library::QueueReorderTarget::End, |id| {
+                if after {
+                    library::QueueReorderTarget::After(id as usize)
+                } else {
+                    library::QueueReorderTarget::Before(id as usize)
+                }
+            }),
+        );
     }
 
     pub fn clear_queue(&self, include_current: bool) {
-        self.products.playback.queue.clear(include_current);
+        self.products.playback.clear(include_current);
     }
 
     pub async fn create_queue_playlist(
@@ -1428,11 +1427,11 @@ impl AndroidPlayer {
         use_current_source: bool,
         public: Option<bool>,
     ) -> Result<(), AndroidError> {
-        let queue = self.products.playback.queue.clone();
-        let uris = self
+        let queue = self.products.playback.clone();
+        let selection = self
             .products
             .runtime
-            .spawn_blocking(move || queue.media_uris())
+            .spawn_blocking(move || queue.selection())
             .await
             .map_err(error)?
             .map_err(error)?;
@@ -1446,7 +1445,7 @@ impl AndroidPlayer {
             &self.products.source,
             source.clone(),
             name,
-            uris,
+            selection,
             public,
         )
         .recv()
@@ -1478,14 +1477,11 @@ impl AndroidPlayer {
                 .unwrap_or_else(|poisoned| poisoned.into_inner()) =
                 VisualizerDrawingState::default();
         }
-        self.products
-            .playback
-            .transport
-            .set_visualizer_enabled(enabled);
+        self.products.playback.set_visualizer_enabled(enabled);
     }
 
     pub fn toggle_auto_dj(&self) {
-        self.products.playback.transport.toggle_auto_dj();
+        self.products.playback.toggle_auto_dj();
     }
 
     pub fn subscribe_visualizer(&self) -> Arc<AndroidVisualizerSubscription> {

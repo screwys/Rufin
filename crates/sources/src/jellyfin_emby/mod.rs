@@ -2,9 +2,8 @@ use crate::config::{decode_provider_payload, require_payload_version};
 use crate::policy::raw_item_id;
 use crate::remote_json::{field, id, items};
 use crate::{
-    ConnectedSource, CredentialHostInput, ImageBytes, JellyfinEmbySettingsInput,
-    JellyfinEmbySetupInput, SourceConfiguration, SourceEditResult, SourceError, SourceId,
-    SourceResult,
+    ConnectedSource, CredentialInput, ImageBytes, SourceConfiguration, SourceEditResult,
+    SourceError, SourceId, SourceResult,
 };
 use item::{
     ALBUM_FIELDS, ImageRef, MIXED_ITEM_FIELDS, PLAYLIST_FIELDS, TRACK_FIELDS, album_from_item,
@@ -176,9 +175,12 @@ impl AuthenticatedJellyfinEmby {
 
 pub(crate) async fn connect(
     source_id: SourceId,
-    input: JellyfinEmbySetupInput,
+    kind: ServerKind,
+    credentials: CredentialInput,
+    use_instant_mix: bool,
+    device_id: String,
 ) -> SourceResult<ConnectedSource> {
-    JellyfinEmbySource::authenticate(source_id, input)
+    JellyfinEmbySource::authenticate(source_id, kind, credentials, use_instant_mix, device_id)
         .await
         .map(AuthenticatedJellyfinEmby::connected)
 }
@@ -203,20 +205,20 @@ pub(crate) fn open(
 pub(crate) async fn edit(
     current: SourceConfiguration,
     current_credential: Option<String>,
-    input: JellyfinEmbySettingsInput,
+    connect_manually: bool,
+    mut credentials: CredentialInput,
+    use_instant_mix: bool,
     device_id: Option<String>,
 ) -> SourceResult<SourceEditResult> {
-    let JellyfinEmbySettingsInput {
-        connect_manually,
-        credentials,
-        use_instant_mix,
-    } = input;
     let saved = JellyfinEmbySourceConfig::from_configuration(&current)?;
-    let name = crate::source::edited_source_name(&credentials.name, &current.name);
-    let address_changed = crate::source::comparable_address(&credentials.base_url)
+    let name = crate::source::edited_source_name(
+        credentials.source_name.as_deref().unwrap_or_default(),
+        &current.name,
+    );
+    let address_changed = crate::source::comparable_address(&credentials.server_url)
         != crate::source::comparable_address(&saved.base_url);
     let username_changed = credentials.username.trim() != saved.username;
-    let has_password = !credentials.password.is_empty();
+    let has_password = !credentials.secret.is_empty();
     let switching_to_manual = saved.emby_connect && connect_manually;
 
     if username_changed && !has_password && !switching_to_manual {
@@ -229,20 +231,13 @@ pub(crate) async fn edit(
         let device_id = device_id.ok_or_else(|| {
             SourceError::InvalidConfig("the app-wide Jellyfin device ID is missing".to_string())
         })?;
+        credentials.source_name = Some(name);
         let authenticated = JellyfinEmbySource::authenticate(
             current.source_id,
-            JellyfinEmbySetupInput {
-                kind: saved.kind,
-                credentials: CredentialHostInput {
-                    server_name: Some(name),
-                    server_url: credentials.base_url,
-                    username: credentials.username,
-                    password: credentials.password,
-                    trust_invalid_cert: credentials.trust_invalid_cert,
-                },
-                use_instant_mix,
-                device_id,
-            },
+            saved.kind,
+            credentials,
+            use_instant_mix,
+            device_id,
         )
         .await?;
         return Ok(SourceEditResult::Connected(Box::new(
@@ -260,7 +255,7 @@ pub(crate) async fn edit(
         JellyfinEmbySourceConfig {
             emby_connect: saved.emby_connect,
             kind: saved.kind,
-            base_url: normalize_base_url(&credentials.base_url)?
+            base_url: normalize_base_url(&credentials.server_url)?
                 .as_str()
                 .trim_end_matches('/')
                 .to_owned(),
@@ -365,21 +360,23 @@ impl JellyfinEmbySource {
         })
     }
 
-    #[instrument(skip(input), fields(base_url = %input.credentials.server_url, username = %input.credentials.username, trust_invalid_cert = input.credentials.trust_invalid_cert))]
+    #[instrument(skip(credentials), fields(base_url = %credentials.server_url, username = %credentials.username, trust_invalid_cert = credentials.trust_invalid_cert))]
     async fn authenticate(
         source_id: SourceId,
-        input: JellyfinEmbySetupInput,
+        kind: ServerKind,
+        credentials: CredentialInput,
+        use_instant_mix: bool,
+        device_id: String,
     ) -> SourceResult<AuthenticatedJellyfinEmby> {
-        let CredentialHostInput {
-            server_name: submitted_name,
+        let CredentialInput {
+            source_name: submitted_name,
             server_url,
             username,
-            password,
+            secret: password,
             trust_invalid_cert,
-        } = input.credentials;
-        let mut config =
-            JellyfinEmbyClientConfig::new(&server_url, trust_invalid_cert, input.device_id)?;
-        config.kind = input.kind;
+        } = credentials;
+        let mut config = JellyfinEmbyClientConfig::new(&server_url, trust_invalid_cert, device_id)?;
+        config.kind = kind;
         let socket_base_url = normalize_base_url(&config.base_url)?;
         let base_url = config.kind.api_base(&socket_base_url)?;
         let client = build_client(config.trust_invalid_cert)?;
@@ -401,7 +398,7 @@ impl JellyfinEmbySource {
         Self::finish_authentication(
             source_id,
             submitted_name,
-            input.use_instant_mix,
+            use_instant_mix,
             config,
             body.username,
             response,

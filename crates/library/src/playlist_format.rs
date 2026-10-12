@@ -936,7 +936,8 @@ mod tests {
             .unwrap();
         assert!(first.changed);
         let keys = database
-            .selected_playlist_entries(
+            .playlist_edit_entries(
+                first.playlist,
                 &crate::SongQuery {
                     sort: Some(crate::TrackSort::Position),
                     ..crate::SongQuery::new(crate::SongScope::Playlist(first.playlist))
@@ -945,6 +946,12 @@ mod tests {
                 &crate::ReadCancellation::new(),
             )
             .await
+            .map(|entries| {
+                entries
+                    .into_iter()
+                    .map(|entry| entry.playlist_entry_key)
+                    .collect::<Vec<_>>()
+            })
             .unwrap();
         let same = database
             .import_playlist_file(
@@ -959,7 +966,8 @@ mod tests {
         assert_eq!(same.imported, 3);
         assert_eq!(
             database
-                .selected_playlist_entries(
+                .playlist_edit_entries(
+                    first.playlist,
                     &crate::SongQuery {
                         sort: Some(crate::TrackSort::Position),
                         ..crate::SongQuery::new(crate::SongScope::Playlist(first.playlist))
@@ -968,6 +976,10 @@ mod tests {
                     &crate::ReadCancellation::new()
                 )
                 .await
+                .map(|entries| entries
+                    .into_iter()
+                    .map(|entry| entry.playlist_entry_key)
+                    .collect::<Vec<_>>())
                 .unwrap(),
             keys
         );
@@ -984,7 +996,8 @@ mod tests {
         assert!(rename.changed);
         assert_eq!(
             database
-                .selected_playlist_entries(
+                .playlist_edit_entries(
+                    first.playlist,
                     &crate::SongQuery {
                         sort: Some(crate::TrackSort::Position),
                         ..crate::SongQuery::new(crate::SongScope::Playlist(first.playlist))
@@ -993,6 +1006,10 @@ mod tests {
                     &crate::ReadCancellation::new()
                 )
                 .await
+                .map(|entries| entries
+                    .into_iter()
+                    .map(|entry| entry.playlist_entry_key)
+                    .collect::<Vec<_>>())
                 .unwrap(),
             keys
         );
@@ -1479,9 +1496,10 @@ mod tests {
         assert_eq!(copy.imported, 2);
         assert_eq!(
             database
-                .playlist_owner(copy.playlist, &crate::ReadCancellation::new())
+                .playlist_access(copy.playlist, &crate::ReadCancellation::new())
                 .await
-                .unwrap(),
+                .unwrap()
+                .map(|access| (access.source_key, access.source_id, access.source_owned)),
             Some((None, None, false))
         );
         let mut copied = Vec::new();

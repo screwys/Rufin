@@ -7,24 +7,20 @@ use crate::host::{AndroidError, error};
 #[derive(uniffi::Object)]
 pub struct AndroidLibrary {
     pub(crate) source: SourceHandle,
-    pub(crate) queue: playback::QueueHandle,
-    pub(crate) radio: playback::RadioHandle,
+    pub(crate) playback: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
     pub(crate) settings: rufin_core::SettingsHandle,
     pub(crate) database: Arc<library::Database>,
     pub(crate) runtime: tokio::runtime::Handle,
-    playback_updates: playback::PlaybackUpdates,
 }
 
 impl AndroidLibrary {
     pub(crate) fn new(products: &ProductHandles) -> Self {
         Self {
             source: products.source.clone(),
-            queue: products.playback.queue.clone(),
-            radio: products.playback.radio.clone(),
+            playback: products.playback.clone(),
             settings: products.settings.clone(),
             database: products.library.clone(),
             runtime: products.runtime.clone(),
-            playback_updates: products.playback.updates.clone(),
         }
     }
 }
@@ -36,7 +32,7 @@ impl AndroidLibrary {
         media_uri: String,
     ) -> Result<Option<crate::browse::AndroidBrowseRow>, AndroidError> {
         let database = self.database.clone();
-        let current = self.playback_updates.current().and_then(|view| {
+        let current = self.playback.updates.current().and_then(|view| {
             view.transport
                 .current
                 .as_ref()

@@ -9,7 +9,7 @@ use crate::{MetadataChanges, MetadataDraft, MetadataField, SourceEntityKind, Sou
 const ITEM_FIELDS: &str = "Genres,ProviderIds,AlbumArtists,ArtistItems,Overview,ProductionYear,Settings,OriginalTitle,CustomRating,Tags,Studios,Etag";
 
 impl JellyfinEmbySource {
-    pub(crate) async fn write_artwork(
+    pub async fn write_artwork(
         &self,
         raw: &str,
         edit: &crate::ArtworkEdit,
@@ -22,7 +22,7 @@ impl JellyfinEmbySource {
             .map_err(metadata_write)
     }
 
-    pub(crate) async fn change_artwork(
+    pub async fn change_artwork(
         &self,
         object: &str,
         change: &crate::ArtworkChange,
@@ -46,7 +46,7 @@ impl JellyfinEmbySource {
         };
         self.send_unit(request).await
     }
-    pub(crate) async fn read_track_metadata(
+    pub async fn read_track_metadata(
         &self,
         track: library::TrackRow,
     ) -> Result<MetadataDraft, SourceMetadataError> {
@@ -77,7 +77,7 @@ impl JellyfinEmbySource {
         .await
     }
 
-    pub(crate) async fn read_album_metadata(
+    pub async fn read_album_metadata(
         &self,
         album: library::AlbumRow,
     ) -> Result<MetadataDraft, SourceMetadataError> {
@@ -99,7 +99,7 @@ impl JellyfinEmbySource {
         .await
     }
 
-    pub(crate) async fn read_artist_metadata(
+    pub async fn read_artist_metadata(
         &self,
         artist: library::ArtistRow,
     ) -> Result<MetadataDraft, SourceMetadataError> {
@@ -181,7 +181,25 @@ impl JellyfinEmbySource {
         self.get_json(url).await
     }
 
-    pub(crate) async fn write_metadata_value(
+    pub async fn write_metadata(
+        &self,
+        object_id: &str,
+        expected_revision: &str,
+        application: Option<&str>,
+        edit: &crate::MetadataEdit,
+    ) -> Result<String, crate::SourceMetadataError> {
+        self.write_metadata_value(
+            object_id,
+            edit.kind.as_str(),
+            expected_revision,
+            application,
+            !edit.changes.is_empty(),
+            |item| apply_edit(self.kind, item, edit),
+        )
+        .await
+    }
+
+    pub async fn write_metadata_value(
         &self,
         object_id: &str,
         kind: &str,
@@ -226,7 +244,7 @@ impl JellyfinEmbySource {
         Ok(raw.to_string())
     }
 
-    pub(crate) async fn identify_album_metadata(
+    pub async fn identify_album_metadata(
         &self,
         object_id: &str,
         values: &MetadataChanges,
@@ -264,7 +282,7 @@ impl JellyfinEmbySource {
         ))
     }
 
-    pub(crate) async fn identify_artist_metadata(
+    pub async fn identify_artist_metadata(
         &self,
         object_id: &str,
         values: &MetadataChanges,

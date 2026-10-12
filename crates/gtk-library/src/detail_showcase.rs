@@ -475,20 +475,24 @@ pub fn detail_playback_controls(
     );
 
     let primary = detail_primary_action_button(gtk_widgets::controls::PLAY_ICON, "Play");
-    connect_collection_play(&primary, Rc::clone(&play), playback::QueuePlacement::Now);
+    connect_collection_play(
+        &primary,
+        Rc::clone(&play),
+        rufin_core::playback::QueuePlacement::Now,
+    );
     actions.append(&primary);
 
     for (icon, label, placement, hover) in [
         (
             PLAY_NEXT_ICON,
             "Next",
-            playback::QueuePlacement::Next,
+            rufin_core::playback::QueuePlacement::Next,
             controls.play_next.clone(),
         ),
         (
             PLAY_LATER_ICON,
             "Play Later",
-            playback::QueuePlacement::Last,
+            rufin_core::playback::QueuePlacement::Last,
             controls.play_last.clone(),
         ),
     ] {
@@ -497,14 +501,18 @@ pub fn detail_playback_controls(
         actions.append(&button);
         connect_collection_play(&hover, Rc::clone(&play), placement);
     }
-    connect_collection_play(&controls.play, play, playback::QueuePlacement::Now);
+    connect_collection_play(
+        &controls.play,
+        play,
+        rufin_core::playback::QueuePlacement::Now,
+    );
     controls
 }
 
 fn connect_collection_play(
     button: &gtk::Button,
     play: CollectionPlay,
-    placement: playback::QueuePlacement,
+    placement: rufin_core::playback::QueuePlacement,
 ) {
     button.connect_clicked(move |_| play(placement, false));
 }

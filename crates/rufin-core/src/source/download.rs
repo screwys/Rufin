@@ -10,7 +10,7 @@ impl SourceOwner {
     ) -> Receiver<Result<(), String>> {
         self.reply(move |owner, database| async move {
             let uris = database
-                .selected_track_uris(&selection, &library::ReadCancellation::new())
+                .selected_track_uris(&selection, None, &library::ReadCancellation::new())
                 .await
                 .map_err(|error| error.to_string())?;
             owner.download_media(subject, uris);
@@ -24,7 +24,7 @@ impl SourceOwner {
     ) -> Receiver<Result<(), String>> {
         self.reply(move |owner, database| async move {
             let uris = database
-                .selected_track_uris(&selection, &library::ReadCancellation::new())
+                .selected_track_uris(&selection, None, &library::ReadCancellation::new())
                 .await
                 .map_err(|error| error.to_string())?;
             owner.remove_download_media(uris);

@@ -330,20 +330,25 @@ mod tests {
                 }
                 scan.finish().await.unwrap();
             }
-            let (_, _, rows) = database
-                .artist_route_page(
-                    publication.source,
-                    None,
-                    false,
-                    false,
-                    "",
-                    library::ArtistSort::Title,
-                    false,
-                    library::RouteSeedWindow::top(),
-                    &library::ReadCancellation::new(),
-                )
-                .await
-                .unwrap();
+            let (_, _, rows) = library::CollectionQuery {
+                kind: library::CollectionKind::Artists {
+                    source: publication.source,
+                    sort: library::ArtistSort::Title,
+                    album_artist: false,
+                },
+                folder: None,
+                filter: ("").to_string(),
+                descending: false,
+                favorites_only: false,
+            }
+            .page(
+                &database,
+                library::RouteSeedWindow::top(),
+                &library::ReadCancellation::new(),
+            )
+            .await
+            .map(|(count, start, rows)| (count, start, rows.artists()))
+            .unwrap();
             assert_eq!(
                 rows.iter().map(|row| row.name.as_str()).collect::<Vec<_>>(),
                 ["The Cure", "Duran Duran"]

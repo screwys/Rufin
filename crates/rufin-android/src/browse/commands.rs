@@ -40,7 +40,7 @@ impl AndroidLibrary {
                         )
                     } else {
                         let uris = database
-                            .selected_track_uris(&selection, &cancel)
+                            .selected_track_uris(&selection, None, &cancel)
                             .await
                             .map_err(error)?;
                         (
@@ -131,7 +131,7 @@ impl AndroidLibrary {
             selected,
             database: self.database.clone(),
             runtime: self.runtime.clone(),
-            queue: self.queue.clone(),
+            playback: self.playback.clone(),
             route,
             home_variations: self.source.home_variations(),
             home_snapshot: tokio::sync::OnceCell::new(),
@@ -147,7 +147,7 @@ impl AndroidLibrary {
             release_section,
             release_counts: tokio::sync::OnceCell::new(),
             folder_projection: tokio::sync::OnceCell::new(),
-            songs: tokio::sync::OnceCell::new(),
+            query: tokio::sync::OnceCell::new(),
             filter,
             sort,
             descending,
@@ -179,7 +179,7 @@ impl AndroidLibrary {
                 let selection = query.target_selection().await?;
                 query
                     .database
-                    .selected_track_uris(&selection, &ReadCancellation::new())
+                    .selected_track_uris(&selection, None, &ReadCancellation::new())
                     .await
                     .map_err(error)
             })
@@ -315,8 +315,14 @@ impl AndroidLibrary {
         target_route: String,
         public: Option<bool>,
     ) -> Result<Option<String>, AndroidError> {
-        let order = self.resolve_target_uris(&target_route).await?;
-        self.create_playlist(source_id, name, order, public).await
+        let query = self.target_query(&target_route)?;
+        let selection = self
+            .runtime
+            .spawn(async move { query.target_selection().await })
+            .await
+            .map_err(error)??;
+        self.create_playlist_selection(source_id, name, selection, public)
+            .await
     }
 
     pub async fn add_target_to_playlist(
@@ -330,13 +336,23 @@ impl AndroidLibrary {
         else {
             return Err(error("Choose a playlist"));
         };
-        let order = self.resolve_target_uris(&target_route).await?;
-        rufin_core::playlists::add_playlist_tracks(&self.source, playlist, order, skip_duplicates)
-            .recv()
+        let query = self.target_query(&target_route)?;
+        let selection = self
+            .runtime
+            .spawn(async move { query.target_selection().await })
             .await
-            .map_err(error)?
-            .map(|count| count as u64)
-            .map_err(error)
+            .map_err(error)??;
+        rufin_core::playlists::add_playlist_tracks(
+            &self.source,
+            playlist,
+            selection,
+            skip_duplicates,
+        )
+        .recv()
+        .await
+        .map_err(error)?
+        .map(|count| count as u64)
+        .map_err(error)
     }
 
     pub async fn play_target(
@@ -352,8 +368,8 @@ impl AndroidLibrary {
         self.runtime
             .spawn(async move {
                 let selection = query.target_selection().await?;
-                query.queue.play(
-                    playback::PlayRequest::ordered(selection, 0, placement, true)
+                query.playback.play_selection(
+                    rufin_core::playback::PlayRequest::ordered(selection, 0, placement, true)
                         .with_context(query.context_id())
                         .with_context_title(context_title)
                         .shuffled(shuffled),
@@ -406,10 +422,11 @@ impl AndroidLibrary {
                 .await
                 .map_err(error)??
         };
-        self.radio.play_radio(playback::RadioPlayRequest {
-            seed,
-            placement: queue_placement(&placement)?,
-        });
+        self.playback
+            .play_radio(rufin_core::playback::RadioPlayRequest {
+                seed,
+                placement: queue_placement(&placement)?,
+            });
         Ok(())
     }
 
@@ -509,8 +526,8 @@ impl AndroidLibrary {
         context_title: Option<String>,
     ) -> Result<(), AndroidError> {
         let placement = queue_placement(&placement)?;
-        self.queue.play(
-            playback::PlayRequest::uris(media_uris, placement)
+        self.playback.play_selection(
+            rufin_core::playback::PlayRequest::uris(media_uris, placement)
                 .with_context(context.into())
                 .with_anchor_index(usize::try_from(index).map_err(error)?)
                 .with_context_title(context_title.map(|title| {
@@ -640,7 +657,7 @@ impl AndroidLibrary {
         let mut current = self.settings.load();
         current.random_play = settings.clone();
         self.settings.save(&current).map_err(error)?;
-        let queue = self.queue.clone();
+        let queue = self.playback.clone();
         selected
             .runtime
             .clone()
@@ -683,7 +700,7 @@ impl AndroidLibrary {
         rufin_core::playlists::add_playlist_tracks(
             &self.source,
             key,
-            vec![media_uri],
+            SongSelection::Uris(vec![media_uri].into()),
             skip_duplicates,
         )
         .recv()
@@ -833,24 +850,13 @@ impl AndroidLibrary {
         media_uris: Vec<String>,
         public: Option<bool>,
     ) -> Result<Option<String>, AndroidError> {
-        let source = source_id.map(sources::SourceId::new);
-        let created = rufin_core::playlists::create_playlist(
-            &self.source,
-            source.clone(),
+        self.create_playlist_selection(
+            source_id,
             name,
-            media_uris,
+            SongSelection::Uris(media_uris.into()),
             public,
         )
-        .recv()
         .await
-        .map_err(error)?
-        .map_err(error)?;
-        if let Some(id) = &created {
-            self.settings
-                .remember_created_playlist(source, id.clone(), None)
-                .map_err(error)?;
-        }
-        Ok(created)
     }
 
     pub async fn import_playlist(
@@ -1091,5 +1097,34 @@ impl AndroidLibrary {
             })
             .await
             .map_err(error)?
+    }
+}
+
+impl AndroidLibrary {
+    async fn create_playlist_selection(
+        &self,
+        source_id: Option<String>,
+        name: String,
+        selection: SongSelection,
+        public: Option<bool>,
+    ) -> Result<Option<String>, AndroidError> {
+        let source = source_id.map(sources::SourceId::new);
+        let created = rufin_core::playlists::create_playlist(
+            &self.source,
+            source.clone(),
+            name,
+            selection,
+            public,
+        )
+        .recv()
+        .await
+        .map_err(error)?
+        .map_err(error)?;
+        if let Some(id) = &created {
+            self.settings
+                .remember_created_playlist(source, id.clone(), None)
+                .map_err(error)?;
+        }
+        Ok(created)
     }
 }

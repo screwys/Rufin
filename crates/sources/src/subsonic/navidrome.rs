@@ -380,7 +380,7 @@ impl SubsonicSource {
             && self.credential.navidrome_password().is_some()
     }
 
-    pub(crate) async fn change_playlist_artwork(
+    pub async fn change_playlist_artwork(
         &self,
         object: &str,
         change: &crate::ArtworkChange,
@@ -1456,19 +1456,21 @@ mod tests {
             .expect("cached source")
             .expect("published source")
             .source;
-        let (_, _, albums) = database
-            .album_route_page(
-                source_key,
-                None,
-                false,
-                "AAA Rich Album",
-                library::AlbumSort::Title,
-                false,
-                library::RouteSeedWindow::top(),
-                &cancellation,
-            )
-            .await
-            .expect("Album page");
+        let (_, _, albums) = library::CollectionQuery {
+            kind: library::CollectionKind::Albums {
+                source: source_key,
+                sort: library::AlbumSort::Title,
+                inline_tracks: None,
+            },
+            folder: None,
+            filter: ("AAA Rich Album").to_string(),
+            descending: false,
+            favorites_only: false,
+        }
+        .page(&database, library::RouteSeedWindow::top(), &cancellation)
+        .await
+        .map(|(count, start, rows)| (count, start, rows.albums()))
+        .expect("Album page");
         let album = albums.first().expect("rich Album");
         assert_eq!(
             album.musicbrainz_release_group_id.as_deref(),
@@ -1512,20 +1514,21 @@ mod tests {
             mapping[0].source_path,
             "/srv/navidrome/audio/Artist/Album/Track.flac"
         );
-        let (_, _, artists) = database
-            .artist_route_page(
-                source_key,
-                None,
-                false,
-                false,
-                "Track Artist",
-                library::ArtistSort::Title,
-                false,
-                library::RouteSeedWindow::top(),
-                &cancellation,
-            )
-            .await
-            .expect("Track Artist page");
+        let (_, _, artists) = library::CollectionQuery {
+            kind: library::CollectionKind::Artists {
+                source: source_key,
+                sort: library::ArtistSort::Title,
+                album_artist: false,
+            },
+            folder: None,
+            filter: ("Track Artist").to_string(),
+            descending: false,
+            favorites_only: false,
+        }
+        .page(&database, library::RouteSeedWindow::top(), &cancellation)
+        .await
+        .map(|(count, start, rows)| (count, start, rows.artists()))
+        .expect("Track Artist page");
         assert_eq!(
             artists[0].musicbrainz_artist_id.as_deref(),
             Some("track-artist-mbid")

@@ -112,7 +112,7 @@ fn run_inner(arguments: impl Iterator<Item = std::ffi::OsString>) -> Result<(), 
             if !files.is_empty() {
                 let local = inputs.products.settings.local_configuration();
                 rufin_core::open::arguments(
-                    &inputs.products.playback.queue,
+                    &inputs.products.playback,
                     &inputs.products.library,
                     local.as_ref(),
                     files,
@@ -132,7 +132,7 @@ fn run_inner(arguments: impl Iterator<Item = std::ffi::OsString>) -> Result<(), 
                 wait_for_shutdown().await
             }
         });
-        inputs.products.playback.transport.shutdown();
+        inputs.products.playback.shutdown();
         inputs.products.scrobbling.shutdown();
         result.map_err(|error| error.to_string())
     })

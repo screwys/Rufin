@@ -10,8 +10,7 @@ pub(super) fn build(
         library: products.library.clone(),
         runtime: products.runtime.clone(),
         source: products.source.clone(),
-        queue: products.playback.queue.clone(),
-        radio: products.playback.radio.clone(),
+        playback: products.playback.clone(),
         downloads: products.downloads.clone(),
         settings,
         navigate: {

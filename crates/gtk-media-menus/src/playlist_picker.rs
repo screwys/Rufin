@@ -1,5 +1,4 @@
 use adw::prelude::*;
-use downloads::DownloadSubject;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gio, glib};
 use gtk_widgets::downloads::{OperationArtwork, OperationFeedback, OperationFeedbackKind};
@@ -32,8 +31,9 @@ struct PlaylistChoice {
 
 #[derive(Clone)]
 struct ReadyPlaylistTracks {
-    media_uris: Rc<[String]>,
-    subject: DownloadSubject,
+    selection: library::SongSelection,
+    title: String,
+    preview_uris: Vec<String>,
 }
 
 pub fn populate_context_playlist_picker(
@@ -41,7 +41,7 @@ pub fn populate_context_playlist_picker(
     source: rufin_core::runtime::SourceHandle,
     feedback: Rc<dyn Fn(&OperationFeedback)>,
     popover: &gtk::PopoverMenu,
-) -> Rc<dyn Fn(Vec<library::PlaylistRow>, Vec<String>, DownloadSubject)> {
+) -> Rc<dyn Fn(Vec<library::PlaylistRow>, library::SongSelection, String, Vec<String>)> {
     let resource = crate::ui_resource::PLAYLIST_PICKER_CONTEXT_RESOURCE;
     let builder = crate::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
@@ -128,19 +128,19 @@ pub fn populate_context_playlist_picker(
         else {
             return;
         };
-        let subject = ready.subject.clone();
-        let preview_uris = ready.media_uris.iter().take(4).cloned().collect::<Vec<_>>();
+        let title = ready.title.clone();
+        let preview_uris = ready.preview_uris.clone();
         let destination = choice.name;
         let feedback = Rc::clone(&feedback);
         gtk_widgets::playlists::add_media_to_playlist(
             &source,
             choice.key,
-            ready.media_uris.to_vec(),
+            ready.selection,
             activate_skip.is_active(),
             Rc::new(move |accepted| {
                 if accepted > 0 {
                     feedback(&OperationFeedback {
-                        subject: subject.clone(),
+                        title: title.clone(),
                         artwork: OperationArtwork::MediaUris(preview_uris.clone()),
                         item_count: accepted,
                         kind: OperationFeedbackKind::PlaylistAdded {
@@ -157,7 +157,7 @@ pub fn populate_context_playlist_picker(
 
     let root = root.downgrade();
     let spinner = spinner.downgrade();
-    Rc::new(move |playlists, tracks, subject| {
+    Rc::new(move |playlists, selection, title, preview_uris| {
         if root.upgrade().is_none() {
             return;
         }
@@ -173,8 +173,9 @@ pub fn populate_context_playlist_picker(
             .collect::<Vec<_>>();
         store.splice(0, 0, &choices);
         ready.replace(Some(ReadyPlaylistTracks {
-            media_uris: tracks.into(),
-            subject,
+            selection,
+            title,
+            preview_uris,
         }));
         if let Some(spinner) = spinner.upgrade() {
             spinner.stop();
@@ -191,14 +192,16 @@ struct PickerRow {
     haystack: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn playlist_picker_dialog(
     source: rufin_core::runtime::SourceHandle,
     artwork: Rc<gtk_widgets::artwork::ArtworkState>,
-    create_playlist: Rc<dyn Fn(String, Vec<String>)>,
+    create_playlist: Rc<dyn Fn(String, library::SongSelection)>,
     feedback: Rc<dyn Fn(&OperationFeedback)>,
     playlists: Vec<library::PlaylistRow>,
-    media_uris: Vec<String>,
-    subject: DownloadSubject,
+    selection: library::SongSelection,
+    title: String,
+    preview_uris: Vec<String>,
 ) -> (adw::Dialog, Rc<dyn Fn(Vec<library::PlaylistRow>)>) {
     let resource = crate::ui_resource::PLAYLIST_PICKER_RESOURCE;
     let builder = crate::ui_resource::builder(resource);
@@ -236,7 +239,7 @@ pub fn playlist_picker_dialog(
         }
         filter_add.set_sensitive(filter_rows.borrow().iter().any(|row| row.check.is_active()));
     });
-    let create_tracks = media_uris.clone();
+    let create_tracks = selection.clone();
     let create_search = search.clone();
     create.connect_clicked(move |_| {
         let name = create_search.text().trim().to_string();
@@ -262,13 +265,13 @@ pub fn playlist_picker_dialog(
             let accepted = Rc::clone(&accepted);
             let accepted_names = Rc::clone(&accepted_names);
             let feedback = Rc::clone(&feedback);
-            let feedback_subject = subject.clone();
-            let preview_uris = media_uris.iter().take(4).cloned().collect::<Vec<_>>();
+            let feedback_title = title.clone();
+            let preview_uris = preview_uris.clone();
             let name = playlist.name.clone();
             gtk_widgets::playlists::add_media_to_playlist(
                 &source,
                 playlist.playlist_key,
-                media_uris.clone(),
+                selection.clone(),
                 skip.is_active(),
                 Rc::new(move |count| {
                     accepted.set(accepted.get() + count);
@@ -283,7 +286,7 @@ pub fn playlist_picker_dialog(
                             _ => format!("{} {}", names.len(), tr("Playlists")),
                         };
                         feedback(&OperationFeedback {
-                            subject: feedback_subject.clone(),
+                            title: feedback_title.clone(),
                             artwork: OperationArtwork::MediaUris(preview_uris.clone()),
                             item_count: accepted.get(),
                             kind: OperationFeedbackKind::PlaylistAdded { destination },

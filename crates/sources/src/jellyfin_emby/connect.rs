@@ -464,17 +464,15 @@ mod tests {
         let edited = edit(
             configuration.clone(),
             credential.clone(),
-            JellyfinEmbySettingsInput {
-                connect_manually: false,
-                use_instant_mix: false,
-                credentials: crate::CredentialSettingsInput {
-                    name: "Renamed".into(),
-                    base_url: server.uri(),
-                    username: "Listener".into(),
-                    password: String::new(),
-                    trust_invalid_cert: false,
-                },
+            false,
+            crate::CredentialInput {
+                source_name: Some("Renamed".into()),
+                server_url: server.uri(),
+                username: "Listener".into(),
+                secret: String::new(),
+                trust_invalid_cert: false,
             },
+            false,
             Some("device".into()),
         )
         .await
@@ -540,17 +538,15 @@ mod tests {
         let result = edit(
             current.clone(),
             Some("old-credential".into()),
-            JellyfinEmbySettingsInput {
-                connect_manually: true,
-                use_instant_mix: false,
-                credentials: crate::CredentialSettingsInput {
-                    name: "Home".into(),
-                    base_url: server.uri(),
-                    username: "Listener".into(),
-                    password: String::new(),
-                    trust_invalid_cert: false,
-                },
+            true,
+            crate::CredentialInput {
+                source_name: Some("Home".into()),
+                server_url: server.uri(),
+                username: "Listener".into(),
+                secret: String::new(),
+                trust_invalid_cert: false,
             },
+            false,
             Some("device".into()),
         )
         .await

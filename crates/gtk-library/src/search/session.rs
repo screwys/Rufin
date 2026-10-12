@@ -70,23 +70,25 @@ impl SearchSession {
                 settings.remember_search_result(result.clone())
             });
         if result.kind == RecentSearchKind::Track {
-            catalog.queue.play(playback::PlayRequest::uris(
-                vec![result.media_uri.clone()],
-                placement,
-            ));
+            catalog
+                .playback
+                .play_selection(rufin_core::playback::PlayRequest::uris(
+                    vec![result.media_uri.clone()],
+                    placement,
+                ));
             return;
         }
         let source = MediaDragSource::LiveCollection {
             media_uri: result.media_uri.clone(),
             operations: catalog.source.clone(),
         };
-        let queue = catalog.queue.clone();
+        let queue = catalog.playback.clone();
         let database = catalog.library.clone();
         catalog.runtime.spawn(async move {
             match source.play_request(&database).await {
                 Ok(mut request) => {
                     request.placement = placement;
-                    queue.play(request);
+                    queue.play_selection(request);
                 }
                 Err(error) => tracing::warn!(%error, "could not prepare recent search playback"),
             }

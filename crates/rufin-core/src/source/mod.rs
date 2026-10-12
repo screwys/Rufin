@@ -15,10 +15,9 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::runtime::source::{
-    ConfiguredSources, CredentialInput, CredentialPreset, DiscoveryStatus, DiscoveryUpdate,
-    EditableSource, LocalAccessStatus, LocalFolder, OpenSubsonicKind, SourceLocalAccess,
-    SourceLocalAccessSummary, SourceOperation, SourceProgress, SourceProgressStage,
-    SourceSettingsChange, SourceSetup, SourceSummary,
+    ConfiguredSources, DiscoveryStatus, DiscoveryUpdate, EditableSource, LocalAccessStatus,
+    LocalFolder, SourceLocalAccess, SourceLocalAccessSummary, SourceOperation, SourceProgress,
+    SourceProgressStage, SourceSummary,
 };
 use crate::runtime::{
     CatalogChange, CatalogPublication, FavoriteSettlement, SelectedLibrary, SourceEvent,
@@ -32,10 +31,8 @@ use library::{
 };
 use secrets::{SecretStorageMode, SwitchableSecretStore};
 use sources::{
-    CredentialHostInput, CredentialSettingsInput, JellyfinEmbySettingsInput,
-    JellyfinEmbySetupInput, LiveFolderPage, LocalFolderHostInput, SelectedFeed, Source,
-    SourceConfiguration, SourceEntityKind, SourceError, SourceId, SourceReadProgress,
-    SourceReadStage, SourceSettingsInput, SourceSetupInput, SubsonicFlavor,
+    CredentialPreset, LiveFolderPage, SelectedFeed, Source, SourceConfiguration, SourceEntityKind,
+    SourceError, SourceId, SourceReadProgress, SourceReadStage, SourceSettingsChange, SourceSetup,
 };
 use tracing::{info, warn};
 
@@ -1396,13 +1393,13 @@ impl SourceOwner {
 
     async fn edit_configured_source(
         &self,
-        source_id: SourceId,
-        input: SourceSettingsInput,
+        input: SourceSettingsChange,
         cancelled: Arc<AtomicBool>,
     ) -> Result<(), String> {
         if cancelled.load(Ordering::Acquire) {
             return Ok(());
         }
+        let source_id = input.source_id().clone();
         let configured = configured_source(&self.shared.settings.load().sources, &source_id)?;
         let credential = configured
             .credential_ref
@@ -1877,9 +1874,9 @@ impl SourceOwner {
 
     async fn reuse_plex_login(
         &self,
-        input: &mut SourceSetupInput,
+        input: &mut SourceSetup,
     ) -> Result<Option<crate::settings::CredentialRef>, String> {
-        let SourceSetupInput::Plex(input) = input else {
+        let SourceSetup::Plex(input) = input else {
             return Ok(None);
         };
         for configured in self.shared.settings.load().sources.configured {
@@ -2032,7 +2029,7 @@ impl SourceOwner {
 
     pub fn configure_source(
         &self,
-        input: SourceSetup,
+        mut input: SourceSetup,
     ) -> Receiver<Result<SelectedLibrary, String>> {
         let (sender, receiver) = async_channel::bounded(1);
         let cancelled = self.shared.begin_acquisition();
@@ -2047,12 +2044,11 @@ impl SourceOwner {
                     progress: initial_progress(),
                 })
                 .await;
-            let mut input =
-                source_setup_input(input, &owner.shared.settings.load().jellyfin_device_id);
             let mut persisted_source_id = None;
             let result = async {
                 let reused_credential = owner.reuse_plex_login(&mut input).await?;
-                let connected = Source::connect(fresh_source_id()?, input)
+                let device_id = owner.shared.settings.load().jellyfin_device_id;
+                let connected = Source::connect(fresh_source_id()?, input, &device_id)
                     .await
                     .map_err(string_error)?;
                 let (configuration, mut source, credential) = connected.into_parts();
@@ -2170,12 +2166,8 @@ impl SourceOwner {
     pub fn update_source(&self, input: SourceSettingsChange) -> Receiver<Result<(), String>> {
         let (sender, receiver) = async_channel::bounded(1);
         let cancelled = self.shared.begin_acquisition();
-        let source_id = source_settings_id(&input).clone();
-        let input = source_settings_input(input);
         self.spawn_serialized(move |owner| async move {
-            let result = owner
-                .edit_configured_source(source_id, input, cancelled)
-                .await;
+            let result = owner.edit_configured_source(input, cancelled).await;
             if let Err(error) = &result {
                 owner.shared.warn_nonfatal(&error);
             }
@@ -2360,7 +2352,8 @@ impl SourceOwner {
         } else {
             let connected = Source::connect(
                 fresh_source_id()?,
-                SourceSetupInput::Local(sources::LocalFolderHostInput { roots: Vec::new() }),
+                SourceSetup::Local { roots: Vec::new() },
+                "",
             )
             .await
             .map_err(string_error)?;
@@ -2411,8 +2404,8 @@ impl SourceOwner {
                 roots.extend(paths);
                 owner
                     .edit_configured_source(
-                        source.source_id().clone(),
-                        SourceSettingsInput::Local {
+                        SourceSettingsChange::Local {
+                            source_id: source.source_id().clone(),
                             roots,
                             excluded_folders: None,
                         },
@@ -2469,8 +2462,10 @@ impl SourceOwner {
                 }
                 owner
                     .edit_configured_source(
-                        source.source_id().clone(),
-                        SourceSettingsInput::LocalDocuments { roots },
+                        SourceSettingsChange::LocalDocuments {
+                            source_id: source.source_id().clone(),
+                            roots,
+                        },
                         Arc::clone(&cancelled),
                     )
                     .await?;
@@ -3578,17 +3573,14 @@ fn edit_local_roots(owner: &SourceOwner, edit: impl FnOnce(&mut Vec<PathBuf>) + 
     };
     let mut roots = local_roots(&local.configuration).unwrap_or_default();
     edit(&mut roots);
-    let input = SourceSettingsInput::Local {
+    let input = SourceSettingsChange::Local {
+        source_id: local.configuration.source_id,
         roots,
         excluded_folders: None,
     };
-    let source_id = local.configuration.source_id;
     let cancelled = owner.shared.begin_acquisition();
     owner.spawn_serialized(move |owner| async move {
-        if let Err(error) = owner
-            .edit_configured_source(source_id, input, cancelled)
-            .await
-        {
+        if let Err(error) = owner.edit_configured_source(input, cancelled).await {
             owner.shared.warn_nonfatal(&error);
         }
     });
@@ -3746,7 +3738,6 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
             credentials,
             use_instant_mix,
             emby_connect,
-            subsonic_authentication,
             ..
         } => Ok(EditableSource {
             plex_settings: None,
@@ -3760,13 +3751,7 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
                 half_stars_enabled: matches!(configuration.kind.as_str(), "jellyfin" | "emby"),
                 supports_playlist_public: configuration.supports_playlist_public(),
             },
-            credentials: CredentialPreset {
-                source_name: credentials.server_name,
-                server_url: credentials.server_url,
-                username: credentials.username,
-                trust_invalid_cert: credentials.trust_invalid_cert,
-                open_subsonic_authentication: subsonic_authentication,
-            },
+            credentials,
             use_instant_mix,
             emby_connect,
         }),
@@ -3794,171 +3779,6 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
         sources::EditableSource::Local { .. } => {
             Err("Local folders are edited from the Local source panel".to_string())
         }
-    }
-}
-
-fn source_setup_input(input: SourceSetup, jellyfin_device_id: &str) -> SourceSetupInput {
-    match input {
-        SourceSetup::EmbyConnect {
-            server,
-            source_name,
-            use_instant_mix,
-        } => SourceSetupInput::EmbyConnect {
-            server,
-            source_name,
-            use_instant_mix,
-            device_id: jellyfin_device_id.to_owned(),
-        },
-        SourceSetup::JellyfinQuickConnect {
-            login,
-            source_name,
-            use_instant_mix,
-        } => SourceSetupInput::JellyfinQuickConnect {
-            login,
-            source_name,
-            use_instant_mix,
-        },
-        SourceSetup::Plex(input) => SourceSetupInput::Plex(input),
-        SourceSetup::WebDav {
-            name,
-            settings,
-            credentials,
-        } => SourceSetupInput::WebDav {
-            name,
-            settings,
-            credentials,
-        },
-        SourceSetup::Smb {
-            name,
-            settings,
-            credentials,
-        } => SourceSetupInput::Smb {
-            name,
-            settings,
-            credentials,
-        },
-        SourceSetup::JellyfinEmby {
-            kind,
-            credentials,
-            use_instant_mix,
-        } => SourceSetupInput::JellyfinEmby(JellyfinEmbySetupInput {
-            kind,
-            credentials: credential_host_input(credentials),
-            use_instant_mix,
-            device_id: jellyfin_device_id.to_string(),
-        }),
-        SourceSetup::OpenSubsonic {
-            kind,
-            authentication,
-            credentials,
-        } => SourceSetupInput::Subsonic {
-            flavor: subsonic_flavor(kind),
-            authentication,
-            credentials: credential_host_input(credentials),
-        },
-        SourceSetup::Local { roots } => SourceSetupInput::Local(LocalFolderHostInput { roots }),
-    }
-}
-
-fn source_settings_input(input: SourceSettingsChange) -> SourceSettingsInput {
-    match input {
-        SourceSettingsChange::Local {
-            roots,
-            excluded_folders,
-            ..
-        } => SourceSettingsInput::Local {
-            roots,
-            excluded_folders,
-        },
-        SourceSettingsChange::EmbyConnect {
-            server,
-            source_name,
-            use_instant_mix,
-            ..
-        } => SourceSettingsInput::EmbyConnect {
-            server,
-            source_name,
-            use_instant_mix,
-        },
-        SourceSettingsChange::JellyfinQuickConnect {
-            login,
-            source_name,
-            use_instant_mix,
-            ..
-        } => SourceSettingsInput::JellyfinQuickConnect {
-            login,
-            source_name,
-            use_instant_mix,
-        },
-        SourceSettingsChange::Plex { settings, .. } => SourceSettingsInput::Plex(settings),
-        SourceSettingsChange::Files {
-            name,
-            settings,
-            credentials,
-            ..
-        } => SourceSettingsInput::Files {
-            name,
-            settings,
-            credentials,
-        },
-        SourceSettingsChange::JellyfinEmby {
-            connect_manually,
-            source_id: _,
-            credentials,
-            use_instant_mix,
-        } => SourceSettingsInput::JellyfinEmby(JellyfinEmbySettingsInput {
-            connect_manually,
-            credentials: credential_settings_input(credentials),
-            use_instant_mix,
-        }),
-        SourceSettingsChange::OpenSubsonic {
-            source_id: _,
-            kind: _,
-            authentication,
-            credentials,
-        } => SourceSettingsInput::Subsonic {
-            authentication,
-            credentials: credential_settings_input(credentials),
-        },
-    }
-}
-
-fn source_settings_id(input: &SourceSettingsChange) -> &SourceId {
-    match input {
-        SourceSettingsChange::Local { source_id, .. } => source_id,
-        SourceSettingsChange::EmbyConnect { source_id, .. }
-        | SourceSettingsChange::JellyfinQuickConnect { source_id, .. }
-        | SourceSettingsChange::Plex { source_id, .. }
-        | SourceSettingsChange::Files { source_id, .. }
-        | SourceSettingsChange::JellyfinEmby { source_id, .. }
-        | SourceSettingsChange::OpenSubsonic { source_id, .. } => source_id,
-    }
-}
-
-fn credential_host_input(input: CredentialInput) -> CredentialHostInput {
-    CredentialHostInput {
-        server_name: input.source_name,
-        server_url: input.server_url,
-        username: input.username,
-        password: input.secret,
-        trust_invalid_cert: input.trust_invalid_cert,
-    }
-}
-
-fn credential_settings_input(input: CredentialInput) -> CredentialSettingsInput {
-    CredentialSettingsInput {
-        name: input.source_name.unwrap_or_default(),
-        base_url: input.server_url,
-        username: input.username,
-        password: input.secret,
-        trust_invalid_cert: input.trust_invalid_cert,
-    }
-}
-
-fn subsonic_flavor(kind: OpenSubsonicKind) -> SubsonicFlavor {
-    match kind {
-        OpenSubsonicKind::Navidrome => SubsonicFlavor::Navidrome,
-        OpenSubsonicKind::OpenSubsonic => SubsonicFlavor::Subsonic,
     }
 }
 

@@ -11,7 +11,7 @@ use gtk_widgets::cover_controls::{
 use gtk_widgets::favorites::{favorite_button_is_active, favorite_icon_button};
 use gtk_widgets::interactions::ContextMenuOpen;
 use localization::msgid;
-use playback::QueuePlacement;
+use rufin_core::playback::QueuePlacement;
 use std::rc::Rc;
 
 use gtk_widgets::library_fields::{COLLECTION_GRID_CARD_MARGIN, COLLECTION_GRID_MIN_CARD_WIDTH};

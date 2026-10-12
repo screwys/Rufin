@@ -445,14 +445,12 @@ impl crate::PlayerUi {
             });
         let changed = self.views.visualizer.active.replace(active) != active;
         if active {
-            self.playback_handles.transport.set_visualizer_enabled(true);
+            self.playback_owner.set_visualizer_enabled(true);
             self.start_visualizer_tick();
             return;
         }
         if changed {
-            self.playback_handles
-                .transport
-                .set_visualizer_enabled(false);
+            self.playback_owner.set_visualizer_enabled(false);
             self.stop_visualizer_tick();
             self.clear_visualizer();
         }

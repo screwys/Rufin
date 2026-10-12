@@ -127,12 +127,12 @@ async fn radio(
         Input::Playlist { id } => library::RadioSeed::Playlist(id),
     };
     let request = match input.mode.as_deref().unwrap_or("replace") {
-        "replace" => playback::RadioPlayRequest::now(seed),
-        "next" => playback::RadioPlayRequest::next(seed),
-        "append" => playback::RadioPlayRequest::last(seed),
+        "replace" => rufin_core::playback::RadioPlayRequest::now(seed),
+        "next" => rufin_core::playback::RadioPlayRequest::next(seed),
+        "append" => rufin_core::playback::RadioPlayRequest::last(seed),
         _ => return Err(bad_request("Queue mode must be replace, append or next")),
     };
-    products.playback.radio.play_radio(request);
+    products.playback.play_radio(request);
     Ok(accepted())
 }
 
@@ -141,20 +141,25 @@ async fn random_settings(
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
     let (source, folder) = catalog::scope(&products, &parameters).await?;
-    let rows = products
-        .library
-        .genre_page(
-            source,
-            folder,
-            parameters.get("q").map(String::as_str).unwrap_or(""),
-            library::GenreSort::Title,
-            false,
-            number(&parameters, "offset", 0)?,
-            64,
-            &library::ReadCancellation::new(),
-        )
-        .await
-        .map_err(internal)?;
+    let rows = library::CollectionQuery {
+        kind: library::CollectionKind::Genres {
+            source: source,
+            sort: library::GenreSort::Title,
+        },
+        folder: folder,
+        filter: (parameters.get("q").map(String::as_str).unwrap_or("")).to_string(),
+        descending: false,
+        favorites_only: false,
+    }
+    .rows(
+        &products.library,
+        number(&parameters, "offset", 0)?,
+        64,
+        &library::ReadCancellation::new(),
+    )
+    .await
+    .map(|rows| rows.genres())
+    .map_err(internal)?;
     let settings = products.settings.load().random_play.clone();
     let mut selected_genre = None;
     if let Some(object_id) = settings.selected_genre_id(
@@ -207,12 +212,12 @@ async fn random(
     }
     let (source, folder) = catalog::scope(&products, &parameters).await?;
     let placement = match input.mode.as_str() {
-        "replace" => playback::QueuePlacement::Now,
-        "next" => playback::QueuePlacement::Next,
-        "append" => playback::QueuePlacement::Last,
+        "replace" => rufin_core::playback::QueuePlacement::Now,
+        "next" => rufin_core::playback::QueuePlacement::Next,
+        "append" => rufin_core::playback::QueuePlacement::Last,
         _ => return Err(bad_request("Queue mode must be replace, append or next")),
     };
-    let request = playback::RandomPlayRequest {
+    let request = rufin_core::playback::RandomPlayRequest {
         placement,
         requested: input.count.min(500),
         criteria: library::RandomCriteria {
@@ -231,7 +236,7 @@ async fn random(
         source,
         folder,
         request,
-        &products.playback.queue,
+        &products.playback,
     )
     .await
     .map_err(bad_request)?;
@@ -247,7 +252,7 @@ pub(super) async fn play_next(
         position: usize,
     }
     let input: Input = body(request).await?;
-    let queue = products.playback.queue.clone();
+    let queue = products.playback.clone();
     tokio::task::spawn_blocking(move || queue.move_after_current(input.position))
         .await
         .map_err(internal)?;
@@ -326,12 +331,12 @@ pub(super) async fn reorder(
         after: Option<usize>,
     }
     let input: Input = body(request).await?;
-    let queue = products.playback.queue.clone();
+    let queue = products.playback.clone();
     tokio::task::spawn_blocking(move || {
-        queue.reorder(playback::QueueReorderRequest {
-            selection: playback::QueueSelection::Positions(input.positions),
-            target: queue_drop_target(input.before, input.after),
-        })
+        queue.reorder(
+            rufin_core::playback::QueueSelection::Positions(input.positions),
+            queue_drop_target(input.before, input.after),
+        )
     })
     .await
     .map_err(internal)?;

@@ -13,9 +13,10 @@ use super::{
         Player,
     },
 };
+use crate::playback::{Placement, PlayRequest};
 use playback::{
-    Placement, PlayRequest, PlaybackBackend, PlaybackOutput, PlaybackProjection, PlaybackSettings,
-    PreparedStream, QueueItem, RunId,
+    PlaybackBackend, PlaybackOutput, PlaybackProjection, PlaybackSettings, PreparedStream,
+    QueueItem, RunId,
 };
 
 #[derive(Debug, thiserror::Error)]

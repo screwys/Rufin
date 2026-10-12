@@ -2,6 +2,8 @@ use gtk_widgets::media_drag::{
     MediaDragSource, install_compact_media_drag_source, install_media_drag_source,
 };
 use gtk_widgets::sparse_model::item_at_from_item;
+use rufin_core::browse::BrowseRequest;
+use rufin_core::route::CollectionCategory;
 use std::cell::RefCell;
 use std::future::Future;
 use std::pin::Pin;
@@ -80,19 +82,23 @@ impl CatalogUi {
                   cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&rows_database);
                 Box::pin(async move {
-                    database
-                        .genre_page(
-                            source,
+                    BrowseRequest {
+                        filter: &request.query,
+                        ..BrowseRequest::new(
+                            &Route::Genres,
+                            CollectionCategory::Tracks,
+                            Some(source),
                             folder,
-                            &request.query,
-                            request.settings.sort_key.genre_sort(),
-                            request.settings.descending,
-                            range.start,
-                            range.len(),
-                            &cancellation,
+                            &request.settings,
+                            8,
                         )
-                        .await
-                        .map_err(|error| error.to_string())
+                    }
+                    .collection()
+                    .expect("collection route")
+                    .rows(&database, range.start, range.len(), &cancellation)
+                    .await
+                    .map(|rows| rows.genres())
+                    .map_err(|error| error.to_string())
                 }) as Pin<Box<dyn Future<Output = _> + Send>>
             },
         );
@@ -100,18 +106,23 @@ impl CatalogUi {
         let order_load: NamedPageLoad<GenreRow> = Arc::new(move |request, cancellation| {
             let database = Arc::clone(&order_database);
             Box::pin(async move {
-                database
-                    .genre_route_page(
-                        source,
+                BrowseRequest {
+                    filter: &request.query,
+                    ..BrowseRequest::new(
+                        &Route::Genres,
+                        CollectionCategory::Tracks,
+                        Some(source),
                         folder,
-                        &request.query,
-                        request.settings.sort_key.genre_sort(),
-                        request.settings.descending,
-                        library::RouteSeedWindow::top(),
-                        &cancellation,
+                        &request.settings,
+                        8,
                     )
-                    .await
-                    .map_err(|error| error.to_string())
+                }
+                .collection()
+                .expect("collection route")
+                .page(&database, library::RouteSeedWindow::top(), &cancellation)
+                .await
+                .map(|(count, start, rows)| (count, start, rows.genres()))
+                .map_err(|error| error.to_string())
             })
         });
         self.named_collection_route(
@@ -142,19 +153,23 @@ impl CatalogUi {
                   cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&rows_database);
                 Box::pin(async move {
-                    database
-                        .mood_page(
-                            source,
+                    BrowseRequest {
+                        filter: &request.query,
+                        ..BrowseRequest::new(
+                            &Route::Moods,
+                            CollectionCategory::Tracks,
+                            Some(source),
                             folder,
-                            &request.query,
-                            request.settings.sort_key.mood_sort(),
-                            request.settings.descending,
-                            range.start,
-                            range.len(),
-                            &cancellation,
+                            &request.settings,
+                            8,
                         )
-                        .await
-                        .map_err(|error| error.to_string())
+                    }
+                    .collection()
+                    .expect("collection route")
+                    .rows(&database, range.start, range.len(), &cancellation)
+                    .await
+                    .map(|rows| rows.moods())
+                    .map_err(|error| error.to_string())
                 }) as Pin<Box<dyn Future<Output = _> + Send>>
             },
         );
@@ -162,18 +177,23 @@ impl CatalogUi {
         let order_load: NamedPageLoad<MoodRow> = Arc::new(move |request, cancellation| {
             let database = Arc::clone(&order_database);
             Box::pin(async move {
-                database
-                    .mood_route_page(
-                        source,
+                BrowseRequest {
+                    filter: &request.query,
+                    ..BrowseRequest::new(
+                        &Route::Moods,
+                        CollectionCategory::Tracks,
+                        Some(source),
                         folder,
-                        &request.query,
-                        request.settings.sort_key.mood_sort(),
-                        request.settings.descending,
-                        library::RouteSeedWindow::top(),
-                        &cancellation,
+                        &request.settings,
+                        8,
                     )
-                    .await
-                    .map_err(|error| error.to_string())
+                }
+                .collection()
+                .expect("collection route")
+                .page(&database, library::RouteSeedWindow::top(), &cancellation)
+                .await
+                .map(|(count, start, rows)| (count, start, rows.moods()))
+                .map_err(|error| error.to_string())
             })
         });
         self.named_collection_route(
@@ -352,7 +372,7 @@ pub trait NamedCollectionRow: Clone + PartialEq + 'static {
     fn playback(
         &self,
         _selected: Option<&rufin_core::runtime::SelectedLibrary>,
-    ) -> playback::PlayRequest;
+    ) -> rufin_core::playback::PlayRequest;
     fn field(&self, field: LibraryField) -> String;
     fn downloaded(&self) -> bool;
     fn set_downloaded(&mut self, downloaded: bool);
@@ -422,7 +442,7 @@ impl NamedCollectionRow for GenreRow {
     fn playback(
         &self,
         _selected: Option<&rufin_core::runtime::SelectedLibrary>,
-    ) -> playback::PlayRequest {
+    ) -> rufin_core::playback::PlayRequest {
         gtk_widgets::selection::collection_play_request(library::SongScope::Genre(self.genre_key))
     }
     fn downloaded(&self) -> bool {
@@ -476,7 +496,7 @@ impl NamedCollectionRow for MoodRow {
     fn playback(
         &self,
         _selected: Option<&rufin_core::runtime::SelectedLibrary>,
-    ) -> playback::PlayRequest {
+    ) -> rufin_core::playback::PlayRequest {
         gtk_widgets::selection::collection_play_request(library::SongScope::Mood(self.mood_key))
     }
     fn downloaded(&self) -> bool {
@@ -520,7 +540,7 @@ impl NamedCollectionRow for PlaylistRow {
     fn playback(
         &self,
         _selected: Option<&rufin_core::runtime::SelectedLibrary>,
-    ) -> playback::PlayRequest {
+    ) -> rufin_core::playback::PlayRequest {
         gtk_widgets::selection::collection_play_request(library::SongScope::Playlist(
             self.playlist_key,
         ))
@@ -580,7 +600,7 @@ impl NamedCollectionRow for SmartPlaylistRow {
     fn playback(
         &self,
         _selected: Option<&rufin_core::runtime::SelectedLibrary>,
-    ) -> playback::PlayRequest {
+    ) -> rufin_core::playback::PlayRequest {
         gtk_widgets::selection::smart_play_request(self.smart_playlist_key, _selected)
     }
     fn downloaded(&self) -> bool {

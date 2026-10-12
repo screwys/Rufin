@@ -8,7 +8,7 @@ use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::prelude::{Accessor, ItemKey};
 use lofty::probe::Probe;
 use lofty::tag::{Tag, TagType};
-use sources::{LocalFolderHostInput, LocalLiveChange, Source, SourceId, SourceSetupInput};
+use sources::{LocalLiveChange, Source, SourceId, SourceSetup};
 
 #[tokio::test]
 async fn unavailable_local_root_preserves_catalog_and_can_retry() {
@@ -28,9 +28,10 @@ async fn unavailable_local_root_preserves_catalog_and_can_retry() {
     });
     let (configuration, source, _) = Source::connect(
         SourceId::new("test-source"),
-        SourceSetupInput::Local(LocalFolderHostInput {
+        SourceSetup::Local {
             roots: vec![root.clone()],
-        }),
+        },
+        "",
     )
     .await
     .unwrap()
@@ -102,9 +103,10 @@ async fn one_local_path_republishes_only_its_component() {
     });
     let connected = Source::connect(
         SourceId::new("test-source"),
-        SourceSetupInput::Local(LocalFolderHostInput {
+        SourceSetup::Local {
             roots: vec![root.path().to_path_buf()],
-        }),
+        },
+        "",
     )
     .await
     .expect("Local");
@@ -122,6 +124,7 @@ async fn one_local_path_republishes_only_its_component() {
     let before = database
         .selected_track_uris(
             &SongQuery::new(SongScope::Tracks(first_publication.source)).selection(),
+            None,
             &ReadCancellation::new(),
         )
         .await
@@ -145,6 +148,7 @@ async fn one_local_path_republishes_only_its_component() {
     let after = database
         .selected_track_uris(
             &SongQuery::new(SongScope::Tracks(changed.source)).selection(),
+            None,
             &ReadCancellation::new(),
         )
         .await
@@ -170,9 +174,10 @@ async fn local_image_change_updates_artwork_without_changing_metadata() {
     });
     let connected = Source::connect(
         SourceId::new("test-source"),
-        SourceSetupInput::Local(LocalFolderHostInput {
+        SourceSetup::Local {
             roots: vec![root.path().to_path_buf()],
-        }),
+        },
+        "",
     )
     .await
     .expect("Local");
@@ -187,20 +192,26 @@ async fn local_image_change_updates_artwork_without_changing_metadata() {
         .await
         .expect("scan");
     let initial = updates.try_recv().expect("catalog update");
-    let album = database
-        .album_route_page(
-            initial.source,
-            None,
-            false,
-            "",
-            library::AlbumSort::Title,
-            false,
-            library::RouteSeedWindow::top(),
-            &ReadCancellation::new(),
-        )
-        .await
-        .expect("Album order")
-        .2[0]
+    let album = library::CollectionQuery {
+        kind: library::CollectionKind::Albums {
+            source: initial.source,
+            sort: library::AlbumSort::Title,
+            inline_tracks: None,
+        },
+        folder: None,
+        filter: ("").to_string(),
+        descending: false,
+        favorites_only: false,
+    }
+    .page(
+        &database,
+        library::RouteSeedWindow::top(),
+        &ReadCancellation::new(),
+    )
+    .await
+    .map(|(count, start, rows)| (count, start, rows.albums()))
+    .expect("Album order")
+    .2[0]
         .album_key;
     let before = database
         .album_rows(initial.source, &[album], None, &ReadCancellation::new())
@@ -286,9 +297,10 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
     });
     let connected = Source::connect(
         SourceId::new("test-source"),
-        SourceSetupInput::Local(LocalFolderHostInput {
+        SourceSetup::Local {
             roots: vec![root.path().to_path_buf()],
-        }),
+        },
+        "",
     )
     .await
     .expect("Local");
@@ -306,6 +318,7 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
     let order = database
         .selected_track_uris(
             &SongQuery::new(SongScope::Tracks(initial.source)).selection(),
+            None,
             &ReadCancellation::new(),
         )
         .await
@@ -393,9 +406,10 @@ async fn restart_catch_up_accepts_file_bookkeeping_without_catalog_change() {
     });
     let connected = Source::connect(
         SourceId::new("test-source"),
-        SourceSetupInput::Local(LocalFolderHostInput {
+        SourceSetup::Local {
             roots: vec![root.path().to_path_buf()],
-        }),
+        },
+        "",
     )
     .await
     .expect("Local");
@@ -535,9 +549,10 @@ async fn cue_catch_up_advances_a_shared_backing_media_observation() {
     });
     let connected = Source::connect(
         SourceId::new("test-source"),
-        SourceSetupInput::Local(LocalFolderHostInput {
+        SourceSetup::Local {
             roots: vec![root.path().to_path_buf()],
-        }),
+        },
+        "",
     )
     .await
     .expect("Local");
@@ -552,20 +567,26 @@ async fn cue_catch_up_advances_a_shared_backing_media_observation() {
         .await
         .expect("scan");
     let initial = updates.try_recv().expect("catalog update");
-    let albums = database
-        .album_route_page(
-            initial.source,
-            None,
-            false,
-            "",
-            library::AlbumSort::Title,
-            false,
-            library::RouteSeedWindow::top(),
-            &ReadCancellation::new(),
-        )
-        .await
-        .expect("Album order")
-        .2;
+    let albums = library::CollectionQuery {
+        kind: library::CollectionKind::Albums {
+            source: initial.source,
+            sort: library::AlbumSort::Title,
+            inline_tracks: None,
+        },
+        folder: None,
+        filter: ("").to_string(),
+        descending: false,
+        favorites_only: false,
+    }
+    .page(
+        &database,
+        library::RouteSeedWindow::top(),
+        &ReadCancellation::new(),
+    )
+    .await
+    .map(|(count, start, rows)| (count, start, rows.albums()))
+    .expect("Album order")
+    .2;
     assert_eq!(albums.len(), 2);
     write_silent_wav(&media, 3).expect("edit CUE backing media");
     source
@@ -613,7 +634,8 @@ async fn encoded_local_paths_publish_folder_art_and_watcher_replacements() {
     });
     let connected = Source::connect(
         SourceId::new("local-art"),
-        SourceSetupInput::Local(LocalFolderHostInput { roots: vec![root] }),
+        SourceSetup::Local { roots: vec![root] },
+        "",
     )
     .await
     .unwrap();
@@ -709,9 +731,10 @@ async fn local_default_cover_reaches_later_track_and_distinct_rescan_preserves_g
         .unwrap();
     let connected = Source::connect(
         SourceId::new("local-art"),
-        SourceSetupInput::Local(LocalFolderHostInput {
+        SourceSetup::Local {
             roots: vec![root.path().to_path_buf()],
-        }),
+        },
+        "",
     )
     .await
     .unwrap();
@@ -787,9 +810,10 @@ async fn local_artist_cover_keeps_album_order_across_point_updates() {
     });
     let connected = Source::connect(
         SourceId::new("local-art"),
-        SourceSetupInput::Local(LocalFolderHostInput {
+        SourceSetup::Local {
             roots: vec![root.path().to_path_buf()],
-        }),
+        },
+        "",
     )
     .await
     .unwrap();
@@ -804,22 +828,27 @@ async fn local_artist_cover_keeps_album_order_across_point_updates() {
         .await
         .unwrap();
     let initial = updates.try_recv().expect("catalog update");
-    let artist = database
-        .artist_route_page(
-            initial.source,
-            None,
-            false,
-            false,
-            "",
-            library::ArtistSort::Title,
-            false,
-            library::RouteSeedWindow::top(),
-            &ReadCancellation::new(),
-        )
-        .await
-        .unwrap()
-        .2
-        .remove(0);
+    let artist = library::CollectionQuery {
+        kind: library::CollectionKind::Artists {
+            source: initial.source,
+            sort: library::ArtistSort::Title,
+            album_artist: false,
+        },
+        folder: None,
+        filter: ("").to_string(),
+        descending: false,
+        favorites_only: false,
+    }
+    .page(
+        &database,
+        library::RouteSeedWindow::top(),
+        &ReadCancellation::new(),
+    )
+    .await
+    .map(|(count, start, rows)| (count, start, rows.artists()))
+    .unwrap()
+    .2
+    .remove(0);
     for changed in [&covers[1], &covers[0]] {
         fs::write(changed, b"replacement artwork").unwrap();
         source
@@ -880,9 +909,10 @@ async fn local_borrowed_album_cover_follows_replacement_and_removal() {
     });
     let connected = Source::connect(
         SourceId::new("local-art"),
-        SourceSetupInput::Local(LocalFolderHostInput {
+        SourceSetup::Local {
             roots: vec![root.path().to_path_buf()],
-        }),
+        },
+        "",
     )
     .await
     .unwrap();
@@ -974,9 +1004,10 @@ async fn local_metadata_save_publishes_album_identity_changes() {
     });
     let connected = Source::connect(
         SourceId::new("local-metadata"),
-        SourceSetupInput::Local(LocalFolderHostInput {
+        SourceSetup::Local {
             roots: vec![root.path().to_path_buf()],
-        }),
+        },
+        "",
     )
     .await
     .unwrap();
@@ -1008,20 +1039,21 @@ async fn local_metadata_save_publishes_album_identity_changes() {
         .unwrap()
         .remove(0);
     let metadata = source
-        .read_album_metadata(&database, &album.media_uri)
+        .read_file_collection_metadata(&database, sources::MetadataOwner::Album(album.clone()))
         .await
         .unwrap();
     source
-        .write_metadata(
+        .write_file_metadata(
             &database,
             &album.media_uri,
+            &sources::MetadataOwner::Album(album.clone()),
             metadata.revision.as_deref().unwrap(),
-            None,
-            sources::MetadataEdit {
+            &sources::MetadataEdit {
                 kind: sources::SourceEntityKind::Album,
                 changes: [("title".into(), "After".into())].into(),
                 artwork: None,
             },
+            None,
         )
         .await
         .unwrap();
@@ -1033,18 +1065,35 @@ async fn local_metadata_save_publishes_album_identity_changes() {
         .unwrap();
     assert_eq!(current.track_key, track.track_key);
     assert_eq!(current.album, "After");
-    let metadata = source.read_track_metadata(&database, &uri).await.unwrap();
+    let metadata = source
+        .read_file_track_metadata(
+            &database,
+            database
+                .track_row_by_uri(&uri, &ReadCancellation::new())
+                .await
+                .unwrap()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     source
-        .write_metadata(
+        .write_file_metadata(
             &database,
             &uri,
+            &sources::MetadataOwner::Track(Box::new(
+                database
+                    .track_row_by_uri(&uri, &ReadCancellation::new())
+                    .await
+                    .unwrap()
+                    .unwrap(),
+            )),
             metadata.revision.as_deref().unwrap(),
-            None,
-            sources::MetadataEdit {
+            &sources::MetadataEdit {
                 kind: sources::SourceEntityKind::Track,
                 changes: Default::default(),
                 artwork: None,
             },
+            None,
         )
         .await
         .unwrap();
@@ -1082,16 +1131,16 @@ async fn local_metadata_save_publishes_album_identity_changes() {
             .unwrap()
             .remove(0);
         let metadata = source
-            .read_album_metadata(&database, &album.media_uri)
+            .read_file_collection_metadata(&database, sources::MetadataOwner::Album(album.clone()))
             .await
             .unwrap();
         source
-            .write_metadata(
+            .write_file_metadata(
                 &database,
                 &album.media_uri,
+                &sources::MetadataOwner::Album(album.clone()),
                 metadata.revision.as_deref().unwrap(),
-                None,
-                sources::MetadataEdit {
+                &sources::MetadataEdit {
                     kind: sources::SourceEntityKind::Album,
                     changes: [
                         ("recording_date".to_string(), date.to_string()),
@@ -1101,6 +1150,7 @@ async fn local_metadata_save_publishes_album_identity_changes() {
                     .into(),
                     artwork: None,
                 },
+                None,
             )
             .await
             .unwrap();
@@ -1116,7 +1166,17 @@ async fn local_metadata_save_publishes_album_identity_changes() {
             .remove(0);
         for path in [&path, &second_path] {
             let uri = url::Url::from_file_path(path).unwrap().to_string();
-            let metadata = source.read_track_metadata(&database, &uri).await.unwrap();
+            let metadata = source
+                .read_file_track_metadata(
+                    &database,
+                    database
+                        .track_row_by_uri(&uri, &ReadCancellation::new())
+                        .await
+                        .unwrap()
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
             for (key, value) in [
                 ("recording_date", date),
                 ("release_date", release),
@@ -1143,20 +1203,21 @@ async fn local_metadata_save_publishes_album_identity_changes() {
         assert_eq!(album.release_date.as_deref(), expected);
         assert_eq!(album.year, year);
         for descending in [false, true] {
-            let albums = database
-                .album_page(
-                    initial.source,
-                    None,
-                    false,
-                    "",
-                    library::AlbumSort::ReleaseDate,
-                    descending,
-                    0,
-                    10,
-                    &ReadCancellation::new(),
-                )
-                .await
-                .unwrap();
+            let albums = library::CollectionQuery {
+                kind: library::CollectionKind::Albums {
+                    source: initial.source,
+                    sort: library::AlbumSort::ReleaseDate,
+                    inline_tracks: None,
+                },
+                folder: None,
+                filter: ("").to_string(),
+                descending: descending,
+                favorites_only: false,
+            }
+            .rows(&database, 0, 10, &ReadCancellation::new())
+            .await
+            .map(|rows| rows.albums())
+            .unwrap();
             let titles = albums
                 .iter()
                 .map(|row| row.title.as_str())
@@ -1195,9 +1256,10 @@ async fn transient_cue_read_failure_retains_tracks_but_rejected_content_removes_
     });
     let connected = Source::connect(
         SourceId::new("test-source"),
-        SourceSetupInput::Local(LocalFolderHostInput {
+        SourceSetup::Local {
             roots: vec![root.path().to_path_buf()],
-        }),
+        },
+        "",
     )
     .await
     .expect("Local");
@@ -1266,9 +1328,10 @@ async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
     });
     let connected = Source::connect(
         SourceId::new("test-source"),
-        SourceSetupInput::Local(LocalFolderHostInput {
+        SourceSetup::Local {
             roots: vec![root.path().to_path_buf()],
-        }),
+        },
+        "",
     )
     .await
     .expect("Local");
@@ -1283,23 +1346,29 @@ async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
         .await
         .expect("scan");
     let initial = updates.try_recv().expect("catalog update");
-    let albums = database
-        .album_route_page(
-            initial.source,
-            None,
-            false,
-            "",
-            library::AlbumSort::Title,
-            false,
-            library::RouteSeedWindow::top(),
-            &ReadCancellation::new(),
-        )
-        .await
-        .expect("Album order")
-        .2
-        .into_iter()
-        .map(|row| row.album_key)
-        .collect::<Vec<_>>();
+    let albums = library::CollectionQuery {
+        kind: library::CollectionKind::Albums {
+            source: initial.source,
+            sort: library::AlbumSort::Title,
+            inline_tracks: None,
+        },
+        folder: None,
+        filter: ("").to_string(),
+        descending: false,
+        favorites_only: false,
+    }
+    .page(
+        &database,
+        library::RouteSeedWindow::top(),
+        &ReadCancellation::new(),
+    )
+    .await
+    .map(|(count, start, rows)| (count, start, rows.albums()))
+    .expect("Album order")
+    .2
+    .into_iter()
+    .map(|row| row.album_key)
+    .collect::<Vec<_>>();
     assert_eq!(albums.len(), 1);
     assert_eq!(
         album_genres(&database, &initial, albums[0]).await,
@@ -1341,9 +1410,10 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
     });
     let connected = Source::connect(
         SourceId::new("test-source"),
-        SourceSetupInput::Local(LocalFolderHostInput {
+        SourceSetup::Local {
             roots: vec![root.path().to_path_buf()],
-        }),
+        },
+        "",
     )
     .await
     .expect("Local");
@@ -1361,6 +1431,7 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
     let order = database
         .selected_track_uris(
             &SongQuery::new(SongScope::Tracks(initial.source)).selection(),
+            None,
             &ReadCancellation::new(),
         )
         .await
@@ -1424,6 +1495,7 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
     let changed_order = database
         .selected_track_uris(
             &SongQuery::new(SongScope::Tracks(changed.source)).selection(),
+            None,
             &ReadCancellation::new(),
         )
         .await
@@ -1437,18 +1509,35 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
         object_id
     );
     let uri = &changed_order[0];
-    let metadata = source.read_track_metadata(&database, uri).await.unwrap();
+    let metadata = source
+        .read_file_track_metadata(
+            &database,
+            database
+                .track_row_by_uri(uri, &ReadCancellation::new())
+                .await
+                .unwrap()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     source
-        .write_metadata(
+        .write_file_metadata(
             &database,
             uri,
+            &sources::MetadataOwner::Track(Box::new(
+                database
+                    .track_row_by_uri(uri, &ReadCancellation::new())
+                    .await
+                    .unwrap()
+                    .unwrap(),
+            )),
             metadata.revision.as_deref().unwrap(),
-            None,
-            sources::MetadataEdit {
+            &sources::MetadataEdit {
                 kind: sources::SourceEntityKind::Track,
                 changes: [("title".into(), "After rename".into())].into(),
                 artwork: None,
             },
+            None,
         )
         .await
         .unwrap();
@@ -1474,9 +1563,10 @@ async fn initial_local_walk_reports_real_total_free_file_progress() {
         .expect("Database");
     let connected = Source::connect(
         SourceId::new("test-source"),
-        SourceSetupInput::Local(LocalFolderHostInput {
+        SourceSetup::Local {
             roots: vec![root.path().to_path_buf()],
-        }),
+        },
+        "",
     )
     .await
     .expect("Local");

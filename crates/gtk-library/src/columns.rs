@@ -21,7 +21,7 @@ use gtk_widgets::localization::localized_column;
 
 use super::collections::{install_playlist_reorder, install_smart_playlist_reorder};
 use gtk_widgets::selection::collection_play_request;
-use playback::PlayRequest;
+use rufin_core::playback::PlayRequest;
 
 use super::table_links::mapped_track_link_column;
 use gtk_widgets::detail_links::{DetailLinks, album_artist_links};

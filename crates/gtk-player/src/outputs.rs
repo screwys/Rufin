@@ -29,12 +29,7 @@ pub fn select_next_audio_output(shell: &Rc<PlayerUi>) {
 }
 
 fn cycle_audio_output(shell: &Rc<PlayerUi>, direction: isize) {
-    if !shell
-        .playback_handles
-        .transport
-        .playback_output()
-        .is_local()
-    {
+    if !shell.playback_owner.playback_output().is_local() {
         return;
     }
     let selected = shell
@@ -122,8 +117,7 @@ pub fn casting_network_dropdown(shell: &Rc<PlayerUi>, width: i32) -> gtk::DropDo
     let mut options = vec![(None, tr("Automatic"))];
     options.extend(
         shell
-            .playback_handles
-            .transport
+            .playback_owner
             .available_cast_networks()
             .into_iter()
             .map(|network| {
@@ -235,7 +229,7 @@ fn request_audio_output_refresh(shell: &Rc<PlayerUi>) {
     shell.controls.audio_output_refresh_running.set(true);
 
     let (sender, receiver) = std::sync::mpsc::channel();
-    let transport = shell.playback_handles.transport.clone();
+    let transport = shell.playback_owner.clone();
     thread::spawn(move || {
         let _sent = sender.send(transport.available_audio_outputs());
     });

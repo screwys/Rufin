@@ -37,11 +37,7 @@ fn playback_settings_popover(
 ) -> gtk::Popover {
     let settings = shell.settings.current.borrow().clone();
     let playback = settings.playback;
-    let local_output = shell
-        .playback_handles
-        .transport
-        .playback_output()
-        .is_local();
+    let local_output = shell.playback_owner.playback_output().is_local();
 
     let resource = crate::ui_resource::PLAYBACK_SETTINGS_POPOVER_RESOURCE;
     let builder = gtk_widgets::ui_resource::builder(resource);

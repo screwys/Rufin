@@ -1,4 +1,4 @@
-//! Concrete music sources behind one source-agnostic application boundary.
+//! Native music providers and file access.
 //!
 //! Providers own authentication, HTTP or filesystem work, paging, wire
 //! translation, and bounded Library updates. Rufin owns source lifecycle,
@@ -31,9 +31,8 @@ mod local_change_integration_tests {
 }
 
 pub use config::{
-    CredentialHostInput, CredentialHostPreset, CredentialSettingsInput, EditableSource,
-    JellyfinEmbySettingsInput, JellyfinEmbySetupInput, LocalFolderHostInput, PlexSettingsInput,
-    PlexSetupInput, SourceConfiguration, SourceSettingsInput, SourceSetupInput,
+    CredentialInput, CredentialPreset, EditableSource, PlexSettingsInput, PlexSetupInput,
+    SourceConfiguration, SourceSettingsChange, SourceSetup,
 };
 pub use file::discovery::DiscoveryWorker;
 pub use file::discovery::run_worker as run_discovery_worker;
@@ -63,6 +62,7 @@ pub use library::SourceId;
 pub use operations::{
     ArtworkChange, ArtworkEdit, ArtworkEditing, ArtworkStorage, ImageBytes, MetadataChanges,
     MetadataDraft, MetadataEdit, MetadataField, MetadataFieldKind, SourceMetadataError,
+    artwork_file, finish_metadata_save,
 };
 pub use source::*;
 

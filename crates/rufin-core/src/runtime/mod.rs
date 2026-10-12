@@ -12,8 +12,6 @@ mod release_update;
 mod scrobbling;
 pub mod source;
 mod waveform;
-
-pub use ::playback::PlaybackHandles;
 pub use backup::{BackupHandle, BackupPreview, BackupSettings};
 pub use diagnostics::DiagnosticsHandle;
 pub use downloads::{
@@ -43,7 +41,7 @@ pub struct ProductHandles {
     pub runtime: tokio::runtime::Handle,
     pub source: SourceHandle,
     pub downloads: downloads::Downloads,
-    pub playback: PlaybackHandles,
+    pub playback: std::sync::Arc<crate::playback::PlaybackOwner>,
     pub artwork: artwork::Artwork,
     pub lyrics: crate::lyrics::LyricsHandle,
     pub release_updates: ReleaseUpdateHandle,

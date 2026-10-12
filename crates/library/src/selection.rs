@@ -5,8 +5,8 @@ use std::{ops::Range, sync::Arc};
 use sqlx::{Arguments, Connection, SqliteConnection};
 
 use crate::{
-    AlbumKey, ArtistKey, Database, FolderKey, GenreKey, HistoryRow, LibraryError, LibraryResult,
-    MoodKey, PlaylistEntryKey, PlaylistEntryRow, PlaylistKey, ReadCancellation, RouteSeedWindow,
+    AlbumKey, ArtistKey, Database, FolderKey, GenreKey, HistoryRow, LibraryResult, MoodKey,
+    PlaylistEntryKey, PlaylistEntryRow, PlaylistKey, ReadCancellation, RouteSeedWindow,
     ScrollSection, SmartPlaylistKey, SourceId, SourceKey, TrackKey, TrackRoutePage, TrackRow,
     TrackSort,
     source_window::{SourceQuery, selected_values_on},
@@ -80,6 +80,7 @@ impl SongQuery {
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SongSelection {
+    Uris(Arc<[String]>),
     Tracks(Arc<[TrackKey]>),
     PlaylistEntries(Arc<[PlaylistEntryKey]>),
     Query {
@@ -220,13 +221,14 @@ pub(crate) async fn selected_songs_on(
     connection: &mut SqliteConnection,
     selection: &SongSelection,
 ) -> LibraryResult<Vec<(TrackKey, Option<PlaylistEntryKey>)>> {
-    selection_rows_on(connection, selection, "track.track_key,$entry").await
+    selection_rows_on(connection, selection, "track.track_key,$entry", None).await
 }
 
 async fn selection_rows_on<T>(
     connection: &mut SqliteConnection,
     selection: &SongSelection,
     columns: &str,
+    limit: Option<usize>,
 ) -> LibraryResult<Vec<T>>
 where
     T: for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> + Send + Unpin,
@@ -234,6 +236,10 @@ where
     let mut pending = vec![selection];
     let mut rows = Vec::new();
     while let Some(selection) = pending.pop() {
+        let remaining = limit.map(|limit| limit.saturating_sub(rows.len()));
+        if remaining == Some(0) {
+            break;
+        }
         let (keys, from, entry) = match selection {
             SongSelection::Concat(selections) => {
                 pending.extend(selections.iter().rev());
@@ -247,11 +253,17 @@ where
                         &query,
                         &columns.replace("$entry", &query.entry_key),
                         ranges.as_deref(),
+                        remaining,
                     )
                     .await?,
                 );
                 continue;
             }
+            SongSelection::Uris(uris) => (
+                serde_json::to_string(uris)?,
+                "json_each(?1) requested JOIN tracks track ON track.media_uri=requested.value",
+                "NULL",
+            ),
             SongSelection::Tracks(keys) => (
                 serde_json::to_string(keys)?,
                 "json_each(?1) requested JOIN tracks track ON track.track_key=requested.value",
@@ -265,10 +277,11 @@ where
         };
         rows.extend(
             sqlx::query_as(sqlx::AssertSqlSafe(format!(
-                "SELECT {} FROM {from} ORDER BY requested.key",
+                "SELECT {} FROM {from} ORDER BY requested.key LIMIT ?2",
                 columns.replace("$entry", entry)
             )))
             .bind(keys)
+            .bind(remaining.map_or(-1, |limit| limit.min(i64::MAX as usize) as i64))
             .persistent(false)
             .fetch_all(&mut *connection)
             .await?,
@@ -446,33 +459,18 @@ impl Database {
     pub async fn selected_track_uris(
         &self,
         selection: &SongSelection,
+        limit: Option<usize>,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<String>> {
+        if limit == Some(0) {
+            return Ok(Vec::new());
+        }
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let rows =
-            selection_rows_on::<(String,)>(&mut transaction, selection, "track.media_uri").await?;
+            selection_rows_on::<(String,)>(&mut transaction, selection, "track.media_uri", limit)
+                .await?;
         transaction.commit().await?;
         Ok(rows.into_iter().map(|(uri,)| uri).collect())
-    }
-
-    pub async fn selected_playlist_entries(
-        &self,
-        selection: &SongSelection,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<PlaylistEntryKey>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let rows = selected_songs_on(&mut transaction, selection).await?;
-        transaction.commit().await?;
-        rows.into_iter()
-            .map(|(_, key)| {
-                key.ok_or_else(|| {
-                    LibraryError::InvalidRequest(
-                        "Selection does not contain playlist entries".into(),
-                    )
-                })
-            })
-            .collect()
     }
 }

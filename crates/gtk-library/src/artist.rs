@@ -4,7 +4,7 @@ use adw::prelude::*;
 use artwork::ArtworkBinding;
 use library::{ArtistKey, ArtistRow, Database, RadioSeed, ReadCancellation};
 use localization::{album_count_text, msgid, track_count_text};
-use playback::RadioPlayRequest;
+use rufin_core::playback::RadioPlayRequest;
 
 use crate::CatalogUi;
 use crate::{LibraryListKey, LibraryListSettings};
@@ -47,142 +47,8 @@ pub struct ArtistDiscographyData {
     pub releases: ArtistReleasePage,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct ArtistReleasePage {
-    pub query: ArtistReleaseQuery,
-    pub counts: [usize; 6],
-    pub source_counts: [usize; 6],
-    pub first_row_position: usize,
-    pub first_rows: Vec<library::AlbumRow>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ArtistReleaseQuery {
-    pub source: library::SourceKey,
-    pub folder: Option<library::FolderKey>,
-    pub artist: ArtistKey,
-    pub album_artist: bool,
-    pub filters: [String; 6],
-    pub sort: library::AlbumSort,
-    pub descending: bool,
-}
-
-const ARTIST_RELEASE_CLASSES: [library::AlbumReleaseClass; 5] = [
-    library::AlbumReleaseClass::Album,
-    library::AlbumReleaseClass::Ep,
-    library::AlbumReleaseClass::Single,
-    library::AlbumReleaseClass::Collection,
-    library::AlbumReleaseClass::Other,
-];
-
-impl ArtistReleaseQuery {
-    pub async fn rows(
-        &self,
-        database: &Database,
-        counts: [usize; 6],
-        range: std::ops::Range<usize>,
-        cancellation: &ReadCancellation,
-    ) -> library::LibraryResult<Vec<library::AlbumRow>> {
-        if self.filters[..ARTIST_RELEASE_CLASSES.len()]
-            .iter()
-            .all(|filter| filter == &self.filters[0])
-        {
-            return Ok(database
-                .artist_release_page(
-                    self.source,
-                    self.artist,
-                    self.album_artist,
-                    self.folder,
-                    &self.filters[0],
-                    self.sort,
-                    self.descending,
-                    None,
-                    range.start,
-                    range.len(),
-                    cancellation,
-                )
-                .await?
-                .into_iter()
-                .map(|(_, row)| row)
-                .collect());
-        }
-        let mut rows = Vec::new();
-        let mut start = 0;
-        for (index, class) in ARTIST_RELEASE_CLASSES.into_iter().enumerate() {
-            let end = start + counts[index];
-            let first = range.start.max(start);
-            let last = range.end.min(end);
-            if first < last {
-                rows.extend(
-                    database
-                        .artist_release_page(
-                            self.source,
-                            self.artist,
-                            self.album_artist,
-                            self.folder,
-                            &self.filters[index],
-                            self.sort,
-                            self.descending,
-                            Some(class),
-                            first - start,
-                            last - first,
-                            cancellation,
-                        )
-                        .await?
-                        .into_iter()
-                        .map(|(_, row)| row),
-                );
-            }
-            start = end;
-        }
-        Ok(rows)
-    }
-
-    async fn page(
-        self,
-        database: &Database,
-        window: library::RouteSeedWindow,
-        cancellation: &ReadCancellation,
-    ) -> library::LibraryResult<ArtistReleasePage> {
-        let source_counts = database
-            .artist_release_counts(
-                self.source,
-                self.artist,
-                self.album_artist,
-                self.folder,
-                "",
-                cancellation,
-            )
-            .await?
-            .map(|count| count as usize);
-        let mut counts = source_counts;
-        for index in 0..ARTIST_RELEASE_CLASSES.len() {
-            if !self.filters[index].is_empty() {
-                counts[index] = database
-                    .artist_release_counts(
-                        self.source,
-                        self.artist,
-                        self.album_artist,
-                        self.folder,
-                        &self.filters[index],
-                        cancellation,
-                    )
-                    .await?[index] as usize;
-            }
-        }
-        let range = window.range(counts.iter().sum());
-        let first_rows = self
-            .rows(database, counts, range.clone(), cancellation)
-            .await?;
-        Ok(ArtistReleasePage {
-            query: self,
-            counts,
-            source_counts,
-            first_row_position: range.start,
-            first_rows,
-        })
-    }
-}
+use rufin_core::browse::{ArtistReleasePage, BrowseRequest};
+use rufin_core::route::CollectionCategory;
 
 const ARTIST_RELEASE_TITLES: [&str; 6] = [
     msgid("Albums"),
@@ -719,56 +585,63 @@ fn request_artist_releases(
 
 pub async fn load_artist_overview(
     database: &Database,
-    source: library::SourceKey,
-    folder: Option<library::FolderKey>,
-    artist: ArtistKey,
-    album_artist: bool,
+    route: &Route,
     track_settings: &LibraryListSettings,
     album_settings: &LibraryListSettings,
     window: library::RouteSeedWindow,
     cancellation: &ReadCancellation,
 ) -> Result<Option<ArtistOverviewData>, String> {
-    let Some(detail) = database
-        .artist_rows(source, &[artist], album_artist, folder, cancellation)
+    let request = BrowseRequest::new(
+        route,
+        CollectionCategory::Albums,
+        None,
+        None,
+        album_settings,
+        8,
+    );
+    let Some(releases) = request
+        .artist(database, cancellation)
+        .await
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(None);
+    };
+    let Some(summary) = database
+        .artist_rows(
+            releases.source,
+            &[releases.artist],
+            releases.album_artist,
+            releases.folder,
+            cancellation,
+        )
         .await
         .map_err(|error| error.to_string())?
         .pop()
     else {
         return Ok(None);
     };
-    let favorite_tracks = database
-        .song_route_page(
-            &library::SongQuery {
-                scope: library::SongScope::Artist {
-                    key: artist,
-                    album_artist: album_artist,
-                },
-                folder: folder,
-                filter: "".to_string(),
-                sort: Some(track_settings.sort_key.track_sort()),
-                descending: track_settings.descending,
-                favorites_only: true,
-                downloaded_only: false,
-            },
-            library::RouteSeedWindow::top(),
-            cancellation,
+    let favorites = BrowseRequest {
+        favorites_only: true,
+        ..BrowseRequest::new(
+            route,
+            CollectionCategory::Tracks,
+            Some(releases.source),
+            releases.folder,
+            track_settings,
+            8,
         )
+    }
+    .artist_songs(&releases);
+    let favorite_tracks = database
+        .song_route_page(&favorites, library::RouteSeedWindow::top(), cancellation)
         .await
         .map_err(|error| error.to_string())?;
-    let releases = ArtistReleaseQuery {
-        source,
-        folder,
-        artist,
-        album_artist,
-        filters: Default::default(),
-        sort: album_settings.sort_key.album_sort(),
-        descending: album_settings.descending,
-    }
-    .page(database, window, cancellation)
-    .await
-    .map_err(|error| error.to_string())?;
+    let releases = releases
+        .page(database, window, cancellation)
+        .await
+        .map_err(|error| error.to_string())?;
     Ok(Some(ArtistOverviewData {
-        summary: detail,
+        summary,
         favorite_tracks,
         releases,
     }))
@@ -776,53 +649,63 @@ pub async fn load_artist_overview(
 
 pub async fn load_artist_discography(
     database: &Database,
-    source: library::SourceKey,
-    folder: Option<library::FolderKey>,
-    artist: ArtistKey,
-    album_artist: bool,
+    route: &Route,
     settings: &LibraryListSettings,
     window: library::RouteSeedWindow,
     cancellation: &ReadCancellation,
 ) -> Result<Option<ArtistDiscographyData>, String> {
-    let Some(detail) = database
-        .artist_rows(source, &[artist], album_artist, folder, cancellation)
+    let request = BrowseRequest::new(route, CollectionCategory::Albums, None, None, settings, 8);
+    let Some(releases) = request
+        .artist(database, cancellation)
+        .await
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(None);
+    };
+    let Some(summary) = database
+        .artist_rows(
+            releases.source,
+            &[releases.artist],
+            releases.album_artist,
+            releases.folder,
+            cancellation,
+        )
         .await
         .map_err(|error| error.to_string())?
         .pop()
     else {
         return Ok(None);
     };
-    let releases = ArtistReleaseQuery {
-        source,
-        folder,
-        artist,
-        album_artist,
-        filters: Default::default(),
-        sort: settings.sort_key.album_sort(),
-        descending: settings.descending,
-    }
-    .page(database, window, cancellation)
-    .await
-    .map_err(|error| error.to_string())?;
-    Ok(Some(ArtistDiscographyData {
-        summary: detail,
-        releases,
-    }))
+    let releases = releases
+        .page(database, window, cancellation)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(Some(ArtistDiscographyData { summary, releases }))
 }
 
 pub async fn load_artist_tracks(
     database: &Database,
-    source: library::SourceKey,
-    folder: Option<library::FolderKey>,
-    artist: ArtistKey,
-    album_artist: bool,
+    route: &Route,
     settings: &LibraryListSettings,
-    favorites_only: bool,
     window: library::RouteSeedWindow,
     cancellation: &ReadCancellation,
 ) -> Result<Option<ArtistTracksData>, String> {
-    let Some(detail) = database
-        .artist_rows(source, &[artist], album_artist, folder, cancellation)
+    let request = BrowseRequest::new(route, CollectionCategory::Tracks, None, None, settings, 8);
+    let Some(artist) = request
+        .artist(database, cancellation)
+        .await
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(None);
+    };
+    let Some(summary) = database
+        .artist_rows(
+            artist.source,
+            &[artist.artist],
+            artist.album_artist,
+            artist.folder,
+            cancellation,
+        )
         .await
         .map_err(|error| error.to_string())?
         .pop()
@@ -830,28 +713,10 @@ pub async fn load_artist_tracks(
         return Ok(None);
     };
     let tracks = database
-        .song_route_page(
-            &library::SongQuery {
-                scope: library::SongScope::Artist {
-                    key: artist,
-                    album_artist: album_artist,
-                },
-                folder: folder,
-                filter: "".to_string(),
-                sort: Some(settings.sort_key.track_sort()),
-                descending: settings.descending,
-                favorites_only: favorites_only,
-                downloaded_only: false,
-            },
-            window,
-            cancellation,
-        )
+        .song_route_page(&request.artist_songs(&artist), window, cancellation)
         .await
         .map_err(|error| error.to_string())?;
-    Ok(Some(ArtistTracksData {
-        summary: detail,
-        tracks,
-    }))
+    Ok(Some(ArtistTracksData { summary, tracks }))
 }
 
 #[derive(Clone)]
@@ -927,7 +792,7 @@ fn artist_detail_header_restored(
         &artist.name,
     );
     let radio = detail_radio_button();
-    let radio_controller = shell.radio.clone();
+    let radio_controller = shell.playback.clone();
     radio.connect_clicked(move |_| {
         radio_controller.play_radio(RadioPlayRequest::now(if album_artist {
             RadioSeed::AlbumArtist(artist_key)

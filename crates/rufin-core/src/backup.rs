@@ -9,7 +9,6 @@ use crate::{
 };
 use async_channel::Receiver;
 use gio::prelude::*;
-use playback::TransportCommandPort;
 use secrets::{SecretStore, SwitchableSecretStore};
 use serde::{Deserialize, Serialize};
 use std::{

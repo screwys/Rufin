@@ -13,7 +13,7 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gio, glib};
 use library::{ReadCancellation, SearchResults};
 use localization::{msgid, tr};
-use playback::QueuePlacement;
+use rufin_core::playback::QueuePlacement;
 
 use crate::CatalogUi;
 use crate::{LibraryField, LibraryLayout};
@@ -91,7 +91,7 @@ impl SearchItem {
     fn drag_source(&self, _: &CatalogUi) -> Option<MediaDragSource> {
         Some(MediaDragSource::capture_target(self.play_request()))
     }
-    fn play_request(&self) -> playback::PlayRequest {
+    fn play_request(&self) -> rufin_core::playback::PlayRequest {
         match self {
             Self::Track(row) => gtk_widgets::selection::track_play_request(row.track_key),
             Self::Album(row) => gtk_widgets::selection::album_play_request(row),
@@ -239,7 +239,7 @@ impl SearchItem {
             });
         let mut request = self.play_request();
         request.placement = placement;
-        shell.queue.play(request);
+        shell.playback.play_selection(request);
     }
     fn activate(&self, shell: &Rc<CatalogUi>) {
         if matches!(self, Self::Track(_)) {

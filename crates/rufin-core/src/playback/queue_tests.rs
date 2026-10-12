@@ -1,7 +1,8 @@
 use super::queue::Sequence;
 use super::{PlaybackStoreWork, enqueue_queue_save, save_pending_queue};
+use crate::playback::QueueSelection;
 use library::{Database, QueueRestore};
-use playback::{QueueSelection, RepeatMode};
+use playback::RepeatMode;
 use std::sync::Mutex;
 
 async fn replace_queue(

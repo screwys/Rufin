@@ -200,8 +200,8 @@ impl PlexPlayback {
     async fn insert(
         &self,
         input: library::QueueReadRequest,
-        target: Option<playback::QueueReorderTarget>,
-        placement: playback::QueuePlacement,
+        target: Option<crate::playback::QueueReorderTarget>,
+        placement: crate::playback::QueuePlacement,
     ) -> Result<(), String> {
         self.current().await?;
         let page = self
@@ -221,7 +221,7 @@ impl PlexPlayback {
         }
         let replacing = matches!(
             placement,
-            playback::QueuePlacement::Now | playback::QueuePlacement::Replace { .. }
+            crate::playback::QueuePlacement::Now | crate::playback::QueuePlacement::Replace { .. }
         ) && target.is_none();
         if replacing {
             let queue = create_queue(&self.connection().0, &keys, &self.cancelled).await?;
@@ -320,10 +320,12 @@ impl PlexPlayback {
                 .ok_or("The Plex player has no queue")?;
             let mut first = None;
             let placement = match target {
-                Some(playback::QueueReorderTarget::After(position)) => PlexQueuePlacement::After(
-                    self.items_at(&timeline, &[position]).await?[0].occurrence_id,
-                ),
-                Some(playback::QueueReorderTarget::Before(position)) => {
+                Some(crate::playback::QueueReorderTarget::After(position)) => {
+                    PlexQueuePlacement::After(
+                        self.items_at(&timeline, &[position]).await?[0].occurrence_id,
+                    )
+                }
+                Some(crate::playback::QueueReorderTarget::Before(position)) => {
                     let id = self.items_at(&timeline, &[position]).await?[0].occurrence_id;
                     let before = self
                         .connection()
@@ -339,11 +341,13 @@ impl PlexPlayback {
                     }
                 }
                 Some(
-                    playback::QueueReorderTarget::BeforeOccurrence(_)
-                    | playback::QueueReorderTarget::AfterOccurrence(_),
+                    crate::playback::QueueReorderTarget::BeforeOccurrence(_)
+                    | crate::playback::QueueReorderTarget::AfterOccurrence(_),
                 ) => return Ok(()),
-                Some(playback::QueueReorderTarget::End) => PlexQueuePlacement::End,
-                None if placement == playback::QueuePlacement::Next => PlexQueuePlacement::Next,
+                Some(crate::playback::QueueReorderTarget::End) => PlexQueuePlacement::End,
+                None if placement == crate::playback::QueuePlacement::Next => {
+                    PlexQueuePlacement::Next
+                }
                 None => PlexQueuePlacement::End,
             };
             let chunks = keys.chunks(sources::PLEX_QUEUE_WINDOW).collect::<Vec<_>>();
@@ -628,11 +632,11 @@ impl PlexPlayback {
                 self.control(move |client| client.skip_to(&key, id)).await?;
             }
             Command::Remove(position) => self.remove(&[position]).await?,
-            Command::RemoveMany(playback::QueueSelection::Positions(positions)) => {
+            Command::RemoveMany(crate::playback::QueueSelection::Positions(positions)) => {
                 self.remove(&positions).await?
             }
             Command::Reorder {
-                selection: playback::QueueSelection::Positions(positions),
+                selection: crate::playback::QueueSelection::Positions(positions),
                 target,
             } => self.reorder(&positions, &target).await?,
             Command::MoveAfterCurrent(position) => {
@@ -659,7 +663,7 @@ impl PlexPlayback {
                 }
             }
             Command::Insert { input, target } => {
-                self.insert(input, Some(target), playback::QueuePlacement::Last)
+                self.insert(input, Some(target), crate::playback::QueuePlacement::Last)
                     .await?
             }
             Command::Clear { include_current } => {
@@ -799,9 +803,9 @@ impl PlexPlayback {
     async fn reorder(
         &self,
         positions: &[usize],
-        target: &playback::QueueReorderTarget,
+        target: &crate::playback::QueueReorderTarget,
     ) -> Result<(), String> {
-        if matches!(target, playback::QueueReorderTarget::Before(position) | playback::QueueReorderTarget::After(position) if positions.contains(position))
+        if matches!(target, crate::playback::QueueReorderTarget::Before(position) | crate::playback::QueueReorderTarget::After(position) if positions.contains(position))
         {
             return Ok(());
         }
@@ -811,12 +815,12 @@ impl PlexPlayback {
             .ok_or("The Plex player has no queue")?;
         let moving = self.items_at(&timeline, positions).await?;
         let mut after = match target {
-            playback::QueueReorderTarget::BeforeOccurrence(_)
-            | playback::QueueReorderTarget::AfterOccurrence(_) => return Ok(()),
-            playback::QueueReorderTarget::After(position) => {
+            crate::playback::QueueReorderTarget::BeforeOccurrence(_)
+            | crate::playback::QueueReorderTarget::AfterOccurrence(_) => return Ok(()),
+            crate::playback::QueueReorderTarget::After(position) => {
                 Some(self.items_at(&timeline, &[*position]).await?[0].occurrence_id)
             }
-            playback::QueueReorderTarget::Before(position) => {
+            crate::playback::QueueReorderTarget::Before(position) => {
                 let items = self.all_items(&timeline, &self.cancelled).await?;
                 items
                     .get(*position)
@@ -828,7 +832,7 @@ impl PlexPlayback {
                     .find(|(position, _)| !positions.contains(position))
                     .map(|(_, item)| item.occurrence_id)
             }
-            playback::QueueReorderTarget::End => self
+            crate::playback::QueueReorderTarget::End => self
                 .all_items(&timeline, &self.cancelled)
                 .await?
                 .iter()
@@ -1058,7 +1062,7 @@ impl PlaybackOwner {
                 plex.insert(
                     library::QueueReadRequest::media_uris(candidates, playback::Provenance::AutoDj),
                     None,
-                    playback::QueuePlacement::Last,
+                    crate::playback::QueuePlacement::Last,
                 )
                 .await
             }
@@ -1635,7 +1639,7 @@ impl PlaybackOwner {
             return false;
         };
         let mut request = request.clone();
-        request.shuffled_start &= request.placement == playback::QueuePlacement::Now
+        request.shuffled_start &= request.placement == crate::playback::QueuePlacement::Now
             && plex
                 .playback
                 .projection()

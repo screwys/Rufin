@@ -46,7 +46,7 @@ impl ConnectOwner {
         offset: u64,
         limit: u32,
         filter: String,
-    ) -> Result<playback::QueuePage, String> {
+    ) -> Result<crate::playback::QueuePage, String> {
         serde_json::from_value(
             self.request(
                 peer,
@@ -187,10 +187,8 @@ impl ConnectOwner {
             let playback = Arc::clone(&self.playback);
             tokio::task::spawn_blocking(move || match target {
                 Some(target) => playback.insert_load(input, target),
-                None => playback::QueueCommandPort::play(
-                    playback.as_ref(),
-                    playback::PlayRequest::from_load(input, placement),
-                ),
+                None => playback
+                    .play_selection(crate::playback::PlayRequest::from_load(input, placement)),
             })
             .await
             .map_err(error)?;

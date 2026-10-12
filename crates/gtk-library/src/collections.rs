@@ -1,7 +1,7 @@
 #[cfg(test)]
 use gtk_widgets::selection::collection_play_request;
 use gtk_widgets::sparse_model::{item_at, item_at_from_item};
-use playback::PlayRequest;
+use rufin_core::playback::PlayRequest;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -544,13 +544,13 @@ pub fn track_collection_projection<T: CollectionTrack>(
     let selection = TrackSelection::new(model.clone());
     shell.register_current_route_track_selection_owner(selection.clone());
     let play_model = model.clone();
-    let play_queue = shell.queue.clone();
+    let play_queue = shell.playback.clone();
     let play_context_id = context_id.clone();
     let play_from_collection = Rc::new(move |position: u32| {
         play_model.play(
             play_queue.clone(),
             position as usize,
-            playback::QueuePlacement::Now,
+            rufin_core::playback::QueuePlacement::Now,
             &play_context_id,
             false,
             false,
@@ -1076,14 +1076,14 @@ pub fn track_table<T: CollectionTrack>(
     } else {
         shell.settings.current.borrow().library_list(key).row_fields
     };
-    let queue = shell.queue.clone();
+    let queue = shell.playback.clone();
     let play_model = model.clone();
     let context_id = options.context_id;
     let activate = Box::new(move |position, _: T| {
         play_model.play(
             queue.clone(),
             position as usize,
-            playback::QueuePlacement::Now,
+            rufin_core::playback::QueuePlacement::Now,
             &context_id,
             false,
             false,

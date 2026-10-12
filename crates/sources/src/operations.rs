@@ -158,7 +158,7 @@ pub struct ArtworkEditing {
 }
 
 impl ArtworkEditing {
-    pub(crate) fn with_binding(mut self, binding: Option<Vec<u8>>, server: bool) -> Self {
+    pub fn with_binding(mut self, binding: Option<Vec<u8>>, server: bool) -> Self {
         let source = binding
             .as_deref()
             .and_then(|bytes| serde_json::from_slice::<library::ArtistArtworkBinding>(bytes).ok());
@@ -188,7 +188,7 @@ pub(crate) fn metadata_refresh_error(error: crate::SourceError) -> SourceMetadat
     SourceMetadataError::SavedRefreshFailed(error.to_string())
 }
 
-pub(crate) fn finish_metadata_save(
+pub fn finish_metadata_save(
     result: Result<(), SourceMetadataError>,
     refresh: Result<(), SourceMetadataError>,
     saved: bool,
@@ -212,7 +212,7 @@ pub(crate) fn finish_metadata_save(
     Err(SourceMetadataError::PartiallySaved { message })
 }
 
-pub(crate) fn artwork_file(binding: Option<&[u8]>) -> Option<String> {
+pub fn artwork_file(binding: Option<&[u8]>) -> Option<String> {
     let binding = binding?;
     if let Ok(artist) = serde_json::from_slice::<library::ArtistArtworkBinding>(binding) {
         return artwork_file(artist.source.as_deref());

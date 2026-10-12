@@ -51,7 +51,7 @@ fn application_starts_on_a_worker_and_reopens_saved_settings_without_a_ui() {
                     settings.save(&saved).unwrap();
                 }))
                 .unwrap();
-            inputs.products.playback.transport.set_muted(true);
+            inputs.products.playback.set_muted(true);
             let mut playback = inputs.products.playback.updates.subscribe();
             runtime.block_on(async {
                 tokio::time::timeout(Duration::from_secs(5), async {
@@ -69,7 +69,7 @@ fn application_starts_on_a_worker_and_reopens_saved_settings_without_a_ui() {
             });
             inputs.receivers.visualizer.close();
             drop(inputs.receivers);
-            inputs.products.playback.transport.shutdown();
+            inputs.products.playback.shutdown();
         })
         .unwrap();
     }

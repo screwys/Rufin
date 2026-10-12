@@ -8,7 +8,6 @@ mod tests;
 
 use crate::{playback::PlaybackOwner, settings::SettingsOwner, source::SourceOwner};
 use library::ConnectRecord;
-use playback::TransportCommandPort;
 use rufin_connect::{
     ConnectNetwork, Credentials, NetworkConfig, NetworkEvent, profile::ProfileStore,
 };
@@ -2553,8 +2552,7 @@ impl ConnectOwner {
                 } else {
                     let playback = Arc::clone(&self.playback);
                     tokio::task::spawn_blocking(move || {
-                        playback::TransportCommandPort::select_playback_output(
-                            playback.as_ref(),
+                        playback.select_playback_output(
                             playback::PlaybackOutput::Local,
                             Arc::new(std::sync::atomic::AtomicBool::new(false)),
                         )
@@ -2719,26 +2717,16 @@ impl ConnectOwner {
                     Control::Repeat { mode } => playback.set_repeat(mode),
                     Control::Shuffle { enabled } => playback.set_shuffle(enabled),
                     Control::AutoDj { enabled } => playback.send_cast_auto_dj(enabled),
-                    Control::Activate { position } => {
-                        playback::QueueCommandPort::activate(playback.as_ref(), position)
+                    Control::Activate { position } => playback.activate(position),
+                    Control::Remove { positions } => {
+                        playback.remove_many(crate::playback::QueueSelection::Positions(positions))
                     }
-                    Control::Remove { positions } => playback::QueueCommandPort::remove_many(
-                        playback.as_ref(),
-                        playback::QueueSelection::Positions(positions),
+                    Control::Reorder { positions, target } => playback.reorder(
+                        crate::playback::QueueSelection::Positions(positions),
+                        target,
                     ),
-                    Control::Reorder { positions, target } => playback::QueueCommandPort::reorder(
-                        playback.as_ref(),
-                        playback::QueueReorderRequest {
-                            selection: playback::QueueSelection::Positions(positions),
-                            target,
-                        },
-                    ),
-                    Control::MoveNext { position } => {
-                        playback::QueueCommandPort::move_after_current(playback.as_ref(), position)
-                    }
-                    Control::Clear { include_current } => {
-                        playback::QueueCommandPort::clear(playback.as_ref(), include_current)
-                    }
+                    Control::MoveNext { position } => playback.move_after_current(position),
+                    Control::Clear { include_current } => playback.clear(include_current),
                 })
                 .await
                 .map_err(error)?;

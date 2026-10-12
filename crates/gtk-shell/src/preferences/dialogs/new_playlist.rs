@@ -7,7 +7,7 @@ impl Shell {
     pub(crate) fn create_playlist_and_pin(
         self: &Rc<Self>,
         name: String,
-        media_uris: Vec<String>,
+        selection: library::SongSelection,
         source_id: Option<library::SourceId>,
         public: Option<bool>,
     ) {
@@ -15,7 +15,7 @@ impl Shell {
             &self.products.source,
             source_id.clone(),
             name,
-            media_uris,
+            selection,
             public,
         );
         let shell = Rc::downgrade(self);
@@ -42,10 +42,17 @@ impl Shell {
     }
 
     pub(crate) fn new_playlist_dialog(self: &Rc<Self>) {
-        self.new_playlist_dialog_with(String::new(), Vec::new());
+        self.new_playlist_dialog_with(
+            String::new(),
+            library::SongSelection::Tracks(Default::default()),
+        );
     }
 
-    pub(crate) fn new_playlist_dialog_with(self: &Rc<Self>, name: String, media_uris: Vec<String>) {
+    pub(crate) fn new_playlist_dialog_with(
+        self: &Rc<Self>,
+        name: String,
+        selection: library::SongSelection,
+    ) {
         let configured = self.source.configured.borrow();
         let selected = configured
             .selected_source_id
@@ -59,7 +66,7 @@ impl Shell {
             selected,
             move |name, source_id, public| {
                 if let Some(shell) = shell.upgrade() {
-                    shell.create_playlist_and_pin(name, media_uris.clone(), source_id, public);
+                    shell.create_playlist_and_pin(name, selection.clone(), source_id, public);
                 }
             },
         );

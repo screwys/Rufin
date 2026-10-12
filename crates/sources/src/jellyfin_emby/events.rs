@@ -573,22 +573,24 @@ mod tests {
                     .is_some()
             );
             assert!(
-                database
-                    .album_route_page(
-                        source_key,
-                        None,
-                        false,
-                        "",
-                        library::AlbumSort::Title,
-                        false,
-                        library::RouteSeedWindow::top(),
-                        &cancellation,
-                    )
-                    .await
-                    .unwrap()
-                    .2
-                    .iter()
-                    .all(|album| album.media_uri != uri)
+                library::CollectionQuery {
+                    kind: library::CollectionKind::Albums {
+                        source: source_key,
+                        sort: library::AlbumSort::Title,
+                        inline_tracks: None,
+                    },
+                    folder: None,
+                    filter: ("").to_string(),
+                    descending: false,
+                    favorites_only: false,
+                }
+                .page(&database, library::RouteSeedWindow::top(), &cancellation)
+                .await
+                .map(|(count, start, rows)| (count, start, rows.albums()))
+                .unwrap()
+                .2
+                .iter()
+                .all(|album| album.media_uri != uri)
             );
             let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
             database.observe_catalog(move |update| {

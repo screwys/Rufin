@@ -14,7 +14,7 @@ use gtk_widgets::{
 };
 use library::QueuePageRow;
 use localization::tr;
-use playback::{QueueReorderRequest, QueueReorderTarget, QueueSelection};
+use rufin_core::playback::{QueueReorderTarget, QueueSelection};
 use rufin_core::settings::layout::{LibraryField, LibraryListKey, LibraryListSettings};
 use std::{
     cell::{Cell, RefCell},
@@ -420,7 +420,7 @@ fn enqueue_media_drop(
     let Some(shell) = shell.upgrade() else {
         return false;
     };
-    let queue = shell.playback_handles.queue.clone();
+    let queue = shell.playback_owner.clone();
     if let MediaDragSource::Queue { selection, .. } = source {
         let within_selection = match (&selection, &target) {
             (
@@ -442,7 +442,7 @@ fn enqueue_media_drop(
         {
             selection.unselect_all();
         }
-        queue.reorder(QueueReorderRequest { selection, target });
+        queue.reorder(selection, target);
         return true;
     }
     let database = shell.database.clone();
@@ -790,7 +790,7 @@ fn build_queue_table(
         1,
     );
 
-    let activate = shell.playback_handles.queue.clone();
+    let activate = shell.playback_owner.clone();
     let activate_model = model.clone();
     table.connect_activate(move |table, position| {
         let Some(object) = activate_model
@@ -1061,7 +1061,7 @@ fn queue_overlay_empty_label(
 impl crate::PlayerUi {
     pub fn clear_queue(&self) {
         let include_current = self.settings.current.borrow().clear_queue_includes_current;
-        self.playback_handles.queue.clear(include_current);
+        self.playback_owner.clear(include_current);
     }
 
     pub fn schedule_queue_panel_render(self: &Rc<Self>) {

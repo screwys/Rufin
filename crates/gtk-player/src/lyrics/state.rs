@@ -342,7 +342,7 @@ impl PlayerUi {
         let offset_millis = lyrics.offset_millis.get();
         drop(lyrics);
         let position_millis = playback_position_for_lyrics_position(position_millis, offset_millis);
-        self.playback_handles.transport.seek_millis(position_millis);
+        self.playback_owner.seek_millis(position_millis);
         self.update_lyrics_highlight_at(position_millis, std::time::Instant::now());
     }
 }
