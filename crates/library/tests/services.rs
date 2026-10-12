@@ -706,14 +706,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
         .expect("Local file page");
     assert_eq!(page[0].local_file_key, key);
     assert_eq!(page[0].dependencies, dependencies);
-    let identity = fixture
-        .database
-        .local_file_reuse_candidates(fixture.source, std::slice::from_ref(&cue), &cancel)
-        .await
-        .expect("Local identity")
-        .remove(0);
-    assert_eq!(identity.path, "/music/album.cue");
-    assert_eq!(identity.dependencies, dependencies);
+    assert_eq!(page[0].path, "/music/album.cue");
     let metadata = LocalAccessWrite {
         media_uri: "rufin://source/track/not-catalogued".to_string(),
         origin: library::LocalAccessOrigin::Mapping,

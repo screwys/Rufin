@@ -165,12 +165,10 @@ impl Scan {
         Ok(sqlx::query_as("SELECT track.object_id,track.source_path path,track.disc_number,track.track_number,track.sort_text,
                 COALESCE((SELECT artist.object_id FROM album_artists relation JOIN artists artist USING(artist_key)
                     WHERE relation.album_key=track.album_key ORDER BY relation.position LIMIT 1)=?1,0) primary_artist,
-                COALESCE(staged.root,current.root) root,
-                CASE WHEN staged.path IS NOT NULL THEN staged.picture_index ELSE current.picture_index END picture_index,
-                CASE WHEN staged.path IS NULL OR (staged.size_bytes IS current.size_bytes AND staged.mtime_ns=current.mtime_ns AND staged.revision IS current.revision) THEN COALESCE(staged.artist_pictures,current.artist_pictures) ELSE staged.artist_pictures END artist_pictures,
-                CASE WHEN staged.path IS NOT NULL THEN COALESCE(staged.revision,CAST(staged.size_bytes AS TEXT)||'-'||CAST(staged.mtime_ns AS TEXT)) ELSE COALESCE(current.revision,CAST(current.size_bytes AS TEXT)||'-'||CAST(current.mtime_ns AS TEXT)) END revision
+                COALESCE(seen.root,current.root) root,current.picture_index,current.artist_pictures,
+                COALESCE(current.revision,CAST(current.size_bytes AS TEXT)||'-'||CAST(current.mtime_ns AS TEXT)) revision
              FROM tracks track
-             LEFT JOIN temp.scan_local_files staged ON staged.path=track.source_path
+             LEFT JOIN temp.scan_local_seen seen ON seen.path=track.source_path
              LEFT JOIN local_files current ON current.source_key=?3 AND current.path=track.source_path
              WHERE track.source_key=?3 AND track.object_id>?2 AND track.source_path IS NOT NULL
                AND track.track_key IN (
@@ -197,12 +195,6 @@ impl Scan {
         path: &str,
         pictures: &str,
     ) -> LibraryResult<()> {
-        self.execute(
-            sqlx::query("UPDATE temp.scan_local_files SET artist_pictures=?2 WHERE path=?1")
-                .bind(path)
-                .bind(pictures),
-        )
-        .await?;
         self.execute(sqlx::query("UPDATE local_files SET artist_pictures=?3 WHERE source_key=?1 AND path=?2 AND artist_pictures IS NOT ?3")
             .bind(self.source).bind(path).bind(pictures)).await
     }
@@ -214,14 +206,11 @@ impl Scan {
     ) -> LibraryResult<Vec<(String, Option<String>)>> {
         let mut writer = self.database.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        Ok(sqlx::query_as("SELECT path,revision FROM (
-                SELECT path,revision FROM temp.scan_local_files WHERE kind='image' AND path>=?1 AND path<?1||char(1114111) AND path>?2
-                UNION ALL
-                SELECT path,revision FROM local_files current WHERE ?4 AND source_key=?3 AND kind='image'
-                  AND path>=?1 AND path<?1||char(1114111) AND path>?2
-                  AND NOT EXISTS(SELECT 1 FROM temp.scan_local_files staged WHERE staged.path=current.path)
-                  AND NOT EXISTS(SELECT 1 FROM temp.scan_local_file_removals removed WHERE removed.path=current.path)
-             ) WHERE instr(substr(path,length(?1)+1),'/')=0 ORDER BY path LIMIT 128")
+        Ok(sqlx::query_as("SELECT path,revision FROM local_files file
+            WHERE source_key=?3 AND kind='image' AND path>=?1 AND path<?1||char(1114111) AND path>?2
+              AND (EXISTS(SELECT 1 FROM temp.scan_local_seen seen WHERE seen.path=file.path)
+                OR (?4 AND NOT EXISTS(SELECT 1 FROM temp.scan_local_file_removals removed WHERE removed.path=file.path)))
+              AND instr(substr(path,length(?1)+1),'/')=0 ORDER BY path LIMIT 128")
             .bind(prefix).bind(after).bind(self.source).bind(self.point_update).fetch_all(connection).await?)
     }
 
@@ -234,12 +223,10 @@ impl Scan {
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         Ok(sqlx::query_as("SELECT track.object_id,track.source_path path,track.disc_number,track.track_number,track.sort_text,
                0 primary_artist,
-               CASE WHEN staged.path IS NOT NULL THEN staged.root ELSE current.root END root,
-               CASE WHEN staged.path IS NOT NULL THEN staged.picture_index ELSE current.picture_index END picture_index,
-               CASE WHEN staged.path IS NULL OR (staged.size_bytes IS current.size_bytes AND staged.mtime_ns=current.mtime_ns AND staged.revision IS current.revision) THEN COALESCE(staged.artist_pictures,current.artist_pictures) ELSE staged.artist_pictures END artist_pictures,
-               CASE WHEN staged.path IS NOT NULL THEN COALESCE(staged.revision,CAST(staged.size_bytes AS TEXT)||'-'||CAST(staged.mtime_ns AS TEXT)) ELSE COALESCE(current.revision,CAST(current.size_bytes AS TEXT)||'-'||CAST(current.mtime_ns AS TEXT)) END revision
+               COALESCE(seen.root,current.root) root,current.picture_index,current.artist_pictures,
+               COALESCE(current.revision,CAST(current.size_bytes AS TEXT)||'-'||CAST(current.mtime_ns AS TEXT)) revision
              FROM albums album JOIN tracks track USING(album_key)
-             LEFT JOIN temp.scan_local_files staged ON staged.path=track.source_path
+             LEFT JOIN temp.scan_local_seen seen ON seen.path=track.source_path
              LEFT JOIN local_files current ON current.source_key=?6 AND current.path=track.source_path
              WHERE album.source_key=?6 AND album.object_id=?1 AND track.source_path IS NOT NULL
                AND (EXISTS(SELECT 1 FROM temp.scan_seen WHERE kind='track' AND object_id=track.object_id)

@@ -217,7 +217,7 @@ impl FileSource {
                     .await?;
                 after = Some(directory);
             }
-            self.stage_files(database, &mut scan, &|_| {}, &|| false, rename.as_ref())
+            self.stage_files(&mut scan, &|_| {}, &|| false, rename.as_ref())
                 .await?;
             scan.remove_local_component_tracks(source).await?;
             crate::file::artwork::ArtworkFiles::Remote(self)

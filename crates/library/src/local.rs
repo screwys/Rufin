@@ -38,7 +38,8 @@ pub struct DownloadMetadata {
     pub loudness_analysis_key: Vec<u8>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, sqlx::Type)]
+#[sqlx(type_name = "TEXT", rename_all = "lowercase")]
 pub enum LocalFileKind {
     Media,
     Cue,
@@ -46,7 +47,8 @@ pub enum LocalFileKind {
     Directory,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, sqlx::Type)]
+#[sqlx(type_name = "TEXT", rename_all = "lowercase")]
 pub enum LocalFileState {
     Accepted,
     Rejected,
@@ -54,7 +56,7 @@ pub enum LocalFileState {
     Observed,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, FromRow, PartialEq)]
 pub struct LocalFileWrite {
     pub path: String,
     pub root: String,
@@ -99,7 +101,7 @@ struct LocalFileScalar {
     path: String,
     root: String,
     relative_path: String,
-    kind: String,
+    kind: LocalFileKind,
     size_bytes: Option<i64>,
     mtime_ns: i64,
     device_id: Option<i64>,
@@ -109,7 +111,7 @@ struct LocalFileScalar {
     picture_index: Option<i64>,
     artist_pictures: Option<String>,
     parse_version: Option<i64>,
-    state: String,
+    state: LocalFileState,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, FromRow)]
@@ -197,50 +199,6 @@ impl LocalAccessOrigin {
             Self::Mapping => "mapping",
             Self::Download => "download",
             Self::Import => "import",
-        }
-    }
-}
-
-impl LocalFileKind {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Media => "media",
-            Self::Cue => "cue",
-            Self::Image => "image",
-            Self::Directory => "directory",
-        }
-    }
-    pub(crate) fn parse(value: &str) -> LibraryResult<Self> {
-        match value {
-            "media" => Ok(Self::Media),
-            "cue" => Ok(Self::Cue),
-            "image" => Ok(Self::Image),
-            "directory" => Ok(Self::Directory),
-            _ => Err(LibraryError::InvalidStore(
-                "invalid Local file kind".to_string(),
-            )),
-        }
-    }
-}
-
-impl LocalFileState {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::Unreadable => "unreadable",
-            Self::Observed => "observed",
-        }
-    }
-    pub(crate) fn parse(value: &str) -> LibraryResult<Self> {
-        match value {
-            "accepted" => Ok(Self::Accepted),
-            "rejected" => Ok(Self::Rejected),
-            "unreadable" => Ok(Self::Unreadable),
-            "observed" => Ok(Self::Observed),
-            _ => Err(LibraryError::InvalidStore(
-                "invalid Local file state".to_string(),
-            )),
         }
     }
 }
@@ -717,48 +675,6 @@ impl Database {
         Ok(rows)
     }
 
-    pub async fn local_file_reuse_candidates(
-        &self,
-        source: SourceKey,
-        observations: &[LocalFileWrite],
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<LocalFileRow>> {
-        if observations.len() > LOCAL_FILE_PAGE_LIMIT {
-            return Err(LibraryError::InvalidRequest(
-                "Local reuse batch exceeds 128 files".to_string(),
-            ));
-        }
-        if observations.is_empty() {
-            return Ok(Vec::new());
-        }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let mut query = QueryBuilder::<Sqlite>::new(
-            "WITH requested(path,device_id,inode,native_id,position) AS (",
-        );
-        query.push_values(
-            observations.iter().enumerate(),
-            |mut row, (position, observation)| {
-                row.push_bind(&observation.path)
-                    .push_bind(observation.device_id)
-                    .push_bind(observation.inode)
-                    .push_bind(&observation.native_id)
-                    .push_bind(position as i64);
-            },
-        );
-        query.push(") SELECT file.local_file_key,file.path,file.root,file.relative_path,file.kind,file.size_bytes,file.mtime_ns,file.device_id,file.inode,file.native_id,file.revision,file.picture_index,file.artist_pictures,file.parse_version,file.state FROM requested JOIN local_files file ON file.source_key=")
-            .push_bind(source)
-            .push(" AND (file.path=requested.path OR (requested.native_id IS NOT NULL AND file.native_id=requested.native_id) OR (requested.device_id IS NOT NULL AND requested.inode IS NOT NULL AND file.device_id=requested.device_id AND file.inode=requested.inode)) ORDER BY requested.position,CASE WHEN file.path=requested.path THEN 0 ELSE 1 END,file.local_file_key");
-        let scalars = query
-            .build_query_as::<LocalFileScalar>()
-            .persistent(false)
-            .fetch_all(&mut *transaction)
-            .await?;
-        let rows = load_local_file_rows(&mut transaction, source, scalars).await?;
-        transaction.commit().await?;
-        Ok(rows)
-    }
-
     pub async fn upsert_local_access(
         &self,
         source: Option<SourceKey>,
@@ -977,8 +893,43 @@ fn folder_path_name(path: &str) -> String {
     }
 }
 
+pub(crate) async fn local_file_reuse_candidates_on(
+    connection: &mut sqlx::SqliteConnection,
+    source: SourceKey,
+    observations: &[LocalFileWrite],
+) -> LibraryResult<Vec<LocalFileRow>> {
+    let mut query =
+        QueryBuilder::<Sqlite>::new("WITH requested(path,device_id,inode,native_id,position) AS (");
+    query.push_values(
+        observations.iter().enumerate(),
+        |mut row, (position, observation)| {
+            row.push_bind(&observation.path)
+                .push_bind(observation.device_id)
+                .push_bind(observation.inode)
+                .push_bind(&observation.native_id)
+                .push_bind(position as i64);
+        },
+    );
+    query.push(") SELECT file.local_file_key,file.path,file.root,file.relative_path,file.kind,file.size_bytes,file.mtime_ns,file.device_id,file.inode,file.native_id,
+            CASE WHEN file.kind='directory' AND seen.path IS NOT NULL THEN seen.previous_revision ELSE file.revision END revision,
+            file.picture_index,file.artist_pictures,
+            CASE WHEN file.kind='directory' AND seen.path IS NOT NULL THEN seen.previous_parse_version
+                 WHEN seen.changed THEN NULL ELSE file.parse_version END parse_version,
+            CASE WHEN file.kind='directory' AND seen.path IS NOT NULL THEN
+                CASE WHEN seen.previous_accepted THEN 'accepted' ELSE 'observed' END
+                ELSE file.state END state FROM requested JOIN local_files file ON file.source_key=")
+            .push_bind(source)
+            .push(" AND (file.path=requested.path OR (requested.native_id IS NOT NULL AND file.native_id=requested.native_id) OR (requested.device_id IS NOT NULL AND requested.inode IS NOT NULL AND file.device_id=requested.device_id AND file.inode=requested.inode)) LEFT JOIN temp.scan_local_seen seen ON seen.path=file.path ORDER BY requested.position,CASE WHEN file.path=requested.path THEN 0 ELSE 1 END,file.local_file_key");
+    let scalars = query
+        .build_query_as::<LocalFileScalar>()
+        .persistent(false)
+        .fetch_all(&mut *connection)
+        .await?;
+    load_local_file_rows(connection, source, scalars).await
+}
+
 async fn load_local_file_rows(
-    transaction: &mut sqlx::Transaction<'_, Sqlite>,
+    connection: &mut sqlx::SqliteConnection,
     source: SourceKey,
     scalars: Vec<LocalFileScalar>,
 ) -> LibraryResult<Vec<LocalFileRow>> {
@@ -994,7 +945,7 @@ async fn load_local_file_rows(
         for (file, dependency) in query
             .build_query_as::<(LocalFileKey, String)>()
             .persistent(false)
-            .fetch_all(&mut **transaction)
+            .fetch_all(&mut *connection)
             .await?
         {
             dependencies.entry(file).or_default().push(dependency);
@@ -1024,38 +975,36 @@ async fn load_local_file_rows(
         for (file, object_id) in query
             .build_query_as::<(LocalFileKey, String)>()
             .persistent(false)
-            .fetch_all(&mut **transaction)
+            .fetch_all(&mut *connection)
             .await?
         {
             track_objects.insert(file, object_id);
         }
     }
-    scalars
+    Ok(scalars
         .into_iter()
-        .map(|scalar| {
-            Ok(LocalFileRow {
-                local_file_key: scalar.local_file_key,
-                path: scalar.path,
-                root: scalar.root,
-                relative_path: scalar.relative_path,
-                kind: LocalFileKind::parse(&scalar.kind)?,
-                size_bytes: scalar.size_bytes,
-                mtime_ns: scalar.mtime_ns,
-                device_id: scalar.device_id,
-                inode: scalar.inode,
-                native_id: scalar.native_id,
-                revision: scalar.revision,
-                picture_index: scalar.picture_index,
-                artist_pictures: scalar.artist_pictures,
-                parse_version: scalar.parse_version,
-                state: LocalFileState::parse(&scalar.state)?,
-                dependencies: dependencies
-                    .remove(&scalar.local_file_key)
-                    .unwrap_or_default(),
-                track_object_id: track_objects.remove(&scalar.local_file_key),
-            })
+        .map(|scalar| LocalFileRow {
+            local_file_key: scalar.local_file_key,
+            path: scalar.path,
+            root: scalar.root,
+            relative_path: scalar.relative_path,
+            kind: scalar.kind,
+            size_bytes: scalar.size_bytes,
+            mtime_ns: scalar.mtime_ns,
+            device_id: scalar.device_id,
+            inode: scalar.inode,
+            native_id: scalar.native_id,
+            revision: scalar.revision,
+            picture_index: scalar.picture_index,
+            artist_pictures: scalar.artist_pictures,
+            parse_version: scalar.parse_version,
+            state: scalar.state,
+            dependencies: dependencies
+                .remove(&scalar.local_file_key)
+                .unwrap_or_default(),
+            track_object_id: track_objects.remove(&scalar.local_file_key),
         })
-        .collect()
+        .collect())
 }
 
 fn validate_local_access(access: &LocalAccessWrite) -> LibraryResult<()> {

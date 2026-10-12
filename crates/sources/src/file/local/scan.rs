@@ -414,7 +414,7 @@ async fn stage_component(
             scan.finish_batch().await?;
         }
         for path in cues {
-            stage_exact_cue(database, roots, scan, &path, true).await?;
+            stage_exact_cue(roots, scan, &path, true).await?;
         }
         if !audio.is_empty() {
             stage_audio_batch(
@@ -453,7 +453,7 @@ async fn stage_component(
             for path in page.into_iter().map(PathBuf::from) {
                 if is_cue(&path) {
                     if path.is_file() {
-                        stage_exact_cue(database, roots, scan, &path, true).await?;
+                        stage_exact_cue(roots, scan, &path, true).await?;
                     }
                 } else if path.is_file() {
                     media.push(path);
@@ -478,13 +478,12 @@ async fn stage_component(
 }
 
 async fn stage_exact_cue(
-    database: &library::Database,
     roots: &BTreeSet<&Path>,
     scan: &mut Scan,
     path: &Path,
     retain_unreadable: bool,
 ) -> SourceResult<usize> {
-    let (state, dependencies, tracks, retain, dependencies_observed) = match read_cue(path) {
+    let (state, mut dependencies, tracks, retain, dependencies_observed) = match read_cue(path) {
         CueRead::Accepted(sheet) => {
             let dependencies = sheet
                 .files
@@ -520,16 +519,19 @@ async fn stage_exact_cue(
         ),
         CueRead::Unreadable => (
             library::LocalFileState::Unreadable,
-            if retain_unreadable {
-                retained_cue_dependencies(database, scan, roots, path).await?
-            } else {
-                Vec::new()
-            },
+            Vec::new(),
             Vec::new(),
             retain_unreadable,
             false,
         ),
     };
+    if retain {
+        for path in retained_cue_dependencies(scan, roots, path).await? {
+            if !dependencies.contains(&path) {
+                dependencies.push(path);
+            }
+        }
+    }
     let accepted = tracks.len();
     scan.begin_batch().await?;
     for page in dependencies.chunks(LOCAL_BATCH_SIZE) {
@@ -566,7 +568,7 @@ async fn stage_exact_cue(
                         roots,
                         &path,
                         library::LocalFileKind::Media,
-                        library::LocalFileState::Observed,
+                        library::LocalFileState::Accepted,
                         &[],
                     )
                 })
@@ -599,7 +601,7 @@ pub(crate) async fn import_paths(
     progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
 ) -> SourceResult<library::PlaylistKey> {
     let local = LocalSource::from_roots(paths)?;
-    let mut scan = Scan::begin_local_items(database, source_id).await?;
+    let mut scan = Scan::begin_file_import(database, source_id).await?;
     let result = async {
         stage_roots(database, &local, &mut scan, progress, &|| false, true).await?;
         crate::file::artwork::ArtworkFiles::Local
@@ -709,8 +711,7 @@ async fn stage_roots(
         for path_text in paths {
             check_cancelled(cancelled)?;
             let path = PathBuf::from(&path_text);
-            if reuse_unchanged
-                && let Some(dependencies) = unchanged_cue(database, scan, roots, &path).await?
+            if reuse_unchanged && let Some(dependencies) = unchanged_cue(scan, roots, &path).await?
             {
                 scan.begin_batch().await?;
                 for page in dependencies.chunks(LOCAL_BATCH_SIZE) {
@@ -720,7 +721,7 @@ async fn stage_roots(
                 scan.finish_batch().await?;
                 continue;
             }
-            parsed += stage_exact_cue(database, roots, scan, &path, reuse_unchanged).await?;
+            parsed += stage_exact_cue(roots, scan, &path, reuse_unchanged).await?;
             progress(SourceReadProgress {
                 stage: SourceReadStage::Tracks,
                 completed: parsed,
@@ -770,8 +771,7 @@ async fn stage_roots(
 }
 
 async fn unchanged_cue(
-    database: &library::Database,
-    scan: &Scan,
+    scan: &mut Scan,
     roots: &BTreeSet<&Path>,
     path: &Path,
 ) -> SourceResult<Option<Vec<String>>> {
@@ -783,21 +783,35 @@ async fn unchanged_cue(
         &[],
     )?
     .0;
-    Ok(cached_cue(database, scan, &observation)
-        .await?
-        .and_then(|stored| {
-            (stored.path == observation.path
-                && stored.size_bytes == observation.size_bytes
-                && stored.mtime_ns == observation.mtime_ns
-                && stored.parse_version == Some(i64::from(LOCAL_PARSER_VERSION))
-                && stored.state == library::LocalFileState::Accepted)
-                .then_some(stored.dependencies)
-        }))
+    let Some(stored) = cached_cue(scan, &observation).await? else {
+        return Ok(None);
+    };
+    if stored.size_bytes != observation.size_bytes
+        || stored.mtime_ns != observation.mtime_ns
+        || stored.parse_version != Some(i64::from(LOCAL_PARSER_VERSION))
+        || stored.state != library::LocalFileState::Accepted
+    {
+        return Ok(None);
+    }
+    for page in stored.dependencies.chunks(LOCAL_BATCH_SIZE) {
+        let files = scan.local_inventory_files(page).await?;
+        if files.len() != page.len() {
+            return Ok(None);
+        }
+        let previous = scan.local_file_reuse_candidates(&files).await?;
+        if files.iter().any(|file| {
+            !previous.iter().any(|old| {
+                old.path == file.path && old.parse_version == Some(i64::from(LOCAL_PARSER_VERSION))
+            })
+        }) {
+            return Ok(None);
+        }
+    }
+    Ok(Some(stored.dependencies))
 }
 
 async fn retained_cue_dependencies(
-    database: &library::Database,
-    scan: &Scan,
+    scan: &mut Scan,
     roots: &BTreeSet<&Path>,
     path: &Path,
 ) -> SourceResult<Vec<String>> {
@@ -809,24 +823,18 @@ async fn retained_cue_dependencies(
         &[],
     )?
     .0;
-    Ok(cached_cue(database, scan, &observation)
+    Ok(cached_cue(scan, &observation)
         .await?
         .map(|file| file.dependencies)
         .unwrap_or_default())
 }
 
 async fn cached_cue(
-    database: &library::Database,
-    scan: &Scan,
+    scan: &mut Scan,
     observation: &library::LocalFileWrite,
 ) -> SourceResult<Option<library::LocalFileRow>> {
-    let source = scan.source();
-    Ok(database
-        .local_file_reuse_candidates(
-            source,
-            std::slice::from_ref(&observation),
-            &library::ReadCancellation::new(),
-        )
+    Ok(scan
+        .local_file_reuse_candidates(std::slice::from_ref(observation))
         .await?
         .into_iter()
         .find(|stored| stored.path == observation.path))
@@ -852,7 +860,7 @@ async fn stage_audio_batch(
         .into_iter()
         .collect::<BTreeSet<_>>();
     let reuse = if reuse_unchanged {
-        path_reuse(database, scan, roots, paths, explicit_rename).await?
+        path_reuse(scan, roots, paths, explicit_rename).await?
     } else {
         PathReuse::default()
     };
@@ -1075,13 +1083,11 @@ struct PathReuse {
 }
 
 async fn path_reuse(
-    database: &library::Database,
-    scan: &Scan,
+    scan: &mut Scan,
     roots: &BTreeSet<&Path>,
     paths: &[PathBuf],
     explicit_rename: Option<&(PathBuf, PathBuf)>,
 ) -> SourceResult<PathReuse> {
-    let source = scan.source();
     let mut facts = Vec::new();
     for path in paths {
         let observation = file_observation(
@@ -1111,9 +1117,7 @@ async fn path_reuse(
         old.inode = None;
         facts.push(old);
     }
-    let current = database
-        .local_file_reuse_candidates(source, &facts, &library::ReadCancellation::new())
-        .await?;
+    let current = scan.local_file_reuse_candidates(&facts).await?;
     let mut reuse = PathReuse::default();
     for observation in facts.into_iter().take(original_count) {
         if current.iter().any(|stored| {

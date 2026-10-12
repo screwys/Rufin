@@ -232,9 +232,10 @@ pub(super) fn records(
                     .chain(Vec::new().into_iter().map(RecordInput::Genre)));
             }
         };
-    Ok(Some(record)
+    Ok(folder
+        .map(RecordInput::Folder)
         .into_iter()
-        .chain(folder.map(RecordInput::Folder))
+        .chain(Some(record))
         .chain(genres.into_iter().map(RecordInput::Genre)))
 }
 

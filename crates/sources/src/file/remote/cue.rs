@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use library::{Database, LocalFileKind, LocalFileState, ReadCancellation, Scan};
+use library::{LocalFileKind, LocalFileState, Scan};
 
 use super::{FileSource, scan::PARSER_VERSION};
 use crate::file::{
@@ -12,7 +12,6 @@ use crate::{SourceError, SourceResult};
 impl FileSource {
     pub(crate) async fn stage_cues(
         &self,
-        database: &Database,
         scan: &mut Scan,
         progress: &(dyn Fn(usize) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
@@ -34,9 +33,7 @@ impl FileSource {
                 break;
             }
             after = files.last().map(|file| file.path.clone());
-            let previous = database
-                .local_file_reuse_candidates(scan.source(), &files, &ReadCancellation::new())
-                .await?;
+            let previous = scan.local_file_reuse_candidates(&files).await?;
             for mut file in files {
                 if cancelled() {
                     return Err(SourceError::Cancelled);
@@ -47,13 +44,7 @@ impl FileSource {
                 {
                     let mut from = file.clone();
                     from.path = format!("{old}{suffix}");
-                    database
-                        .local_file_reuse_candidates(
-                            scan.source(),
-                            &[from],
-                            &ReadCancellation::new(),
-                        )
-                        .await?
+                    scan.local_file_reuse_candidates(&[from]).await?
                 } else {
                     vec![]
                 };
@@ -64,22 +55,18 @@ impl FileSource {
                     && old.parse_version == Some(PARSER_VERSION)
                     && old.state == LocalFileState::Accepted
                     && self
-                        .cue_dependencies_unchanged(database, scan, &old.dependencies)
+                        .cue_dependencies_unchanged(scan, &old.dependencies)
                         .await?
                 {
-                    file.state = LocalFileState::Accepted;
-                    file.picture_index = old.picture_index;
-                    file.artist_pictures = old.artist_pictures.clone();
                     scan.begin_batch().await?;
                     scan.retain_local_cue_path(&file.path).await?;
                     for page in old.dependencies.chunks(128) {
                         scan.write_local_dependency_paths(page).await?;
                     }
-                    scan.write_local_files(&[(file, old.dependencies.clone())])
-                        .await?;
                     scan.finish_batch().await?;
                     continue;
                 }
+                file.parse_version = Some(PARSER_VERSION);
                 let relative = self.relative(&file.path)?;
                 let mut dependencies = Vec::new();
                 let parsed: SourceResult<bool> = async {
@@ -145,6 +132,7 @@ impl FileSource {
                                 }
                             },
                         };
+                        backing_file.parse_version = Some(PARSER_VERSION);
                         let mut backing = match self
                             .read_audio(&backing_file, Arc::clone(&worker))
                             .await
@@ -230,25 +218,22 @@ impl FileSource {
 
     async fn cue_dependencies_unchanged(
         &self,
-        database: &Database,
         scan: &mut Scan,
         paths: &[String],
     ) -> SourceResult<bool> {
-        let source = scan.source();
         for page in paths.chunks(128) {
             let files = scan.local_inventory_files(page).await?;
             if files.len() != page.len() {
                 return Ok(false);
             }
-            let previous = database
-                .local_file_reuse_candidates(source, &files, &ReadCancellation::new())
-                .await?;
+            let previous = scan.local_file_reuse_candidates(&files).await?;
             if files.iter().any(|file| {
                 file.revision.is_none()
                     || !previous.iter().any(|old| {
                         old.path == file.path
                             && old.revision == file.revision
                             && old.state == LocalFileState::Accepted
+                            && old.parse_version == Some(PARSER_VERSION)
                     })
             }) {
                 return Ok(false);

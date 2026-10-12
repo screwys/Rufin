@@ -192,14 +192,11 @@ impl LocalSource {
     ) -> SourceResult<()> {
         scan::stage_catalog(database, self, scan, progress, cancelled, reuse_unchanged).await?;
         for source in &self.documents {
-            source
-                .stage_inventory(database, scan, progress, cancelled)
-                .await?;
+            source.stage_inventory(scan, progress, cancelled).await?;
         }
         for source in &self.documents {
             source
                 .stage_cues(
-                    database,
                     scan,
                     &|completed| {
                         progress(SourceReadProgress {
@@ -215,7 +212,7 @@ impl LocalSource {
         }
         for source in &self.documents {
             source
-                .stage_media_files(database, scan, progress, cancelled, None, 0)
+                .stage_media_files(scan, progress, cancelled, None, 0)
                 .await?;
         }
         crate::file::artwork::ArtworkFiles::Local

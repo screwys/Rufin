@@ -365,6 +365,20 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
         }
         if round == 2 {
             *path.write().unwrap() = "renamed.wav".into();
+            let mut interrupted = Scan::begin(
+                &database,
+                configuration.source_id.as_str(),
+                "DAV",
+                "dav",
+                None,
+            )
+            .await
+            .unwrap();
+            source
+                .stage_inventory(&mut interrupted, &|_| {}, &|| false)
+                .await
+                .unwrap();
+            drop(interrupted);
         }
         let mut scan = Scan::begin(
             &database,
@@ -427,6 +441,15 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
                 .unwrap()
                 .unwrap();
             assert!(observation.path.ends_with("/renamed.wav"));
+            assert!(
+                database
+                    .local_file_page(publication.source, None, 128, &ReadCancellation::new())
+                    .await
+                    .unwrap()
+                    .iter()
+                    .all(|file| !file.path.ends_with("/first.wav")),
+                "a listing interrupted before completion must not retain the absent old path"
+            );
             let stream = source.stream(&database, &first_uri).await.unwrap();
             let response = reqwest::get(stream.uri()).await.unwrap();
             assert_eq!(response.bytes().await.unwrap().as_ref(), wave());
@@ -473,14 +496,14 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
             "PROPFIND" => {
                 let mut files = String::new();
                 if request.headers.get("depth").unwrap() == "1" {
-                    for (name, id, revision, size) in [("audio.wav", "audio-id", revision, audio.len()), (cue_name, "cue-id", "cue-1", cue.len())] {
-                        if round == 4 && name == cue_name { continue; }
+                    for (name, id, revision, size) in [("audio.wav", "audio-id", revision, audio.len()), (cue_name, "cue-id", "cue-1", cue.len()), ("second.cue", "second-cue-id", "cue-1", cue.len())] {
+                        if round == 4 && name.ends_with(".cue") { continue; }
                         files.push_str(&format!("<d:response><d:href>/music/{name}</d:href><d:propstat><d:prop><d:getcontentlength>{size}</d:getcontentlength><d:getetag>&quot;{revision}&quot;</d:getetag><o:fileid>{id}</o:fileid><d:resourcetype/></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"));
                     }
                 }
                 ResponseTemplate::new(207).set_body_string(format!("<d:multistatus xmlns:d=\"DAV:\" xmlns:o=\"http://owncloud.org/ns\"><d:response><d:href>/music/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>{files}</d:multistatus>"))
             }
-            "GET" if request.url.path() == format!("/music/{cue_name}") => {
+            "GET" if request.url.path() == format!("/music/{cue_name}") || request.url.path() == "/music/second.cue" => {
                 gets.fetch_add(1, Ordering::Relaxed);
                 ResponseTemplate::new(200).set_body_bytes(cue.to_vec())
             }
@@ -526,6 +549,7 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
     let mut previous_reads = 0;
     for pass in 0..5 {
         round.store(pass, Ordering::Relaxed);
+        let before = server.received_requests().await.unwrap().len();
         let mut scan = Scan::begin(
             &database,
             configuration.source_id.as_str(),
@@ -550,10 +574,15 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
             );
         }
         if pass == 3 {
-            assert!(
-                reads.load(Ordering::Relaxed) > previous_reads,
-                "changed backing audio must be re-read"
-            );
+            let requests = server.received_requests().await.unwrap();
+            for cue in ["/music/renamed.cue", "/music/second.cue"] {
+                assert!(
+                    requests[before..].iter().any(
+                        |request| request.method.as_str() == "GET" && request.url.path() == cue
+                    ),
+                    "both CUE sheets must reparse changed shared backing audio"
+                );
+            }
         }
         previous_reads = reads.load(Ordering::Relaxed);
         let rows = database
@@ -562,7 +591,7 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
             .unwrap();
         assert_eq!(
             rows.len(),
-            if pass == 4 { 1 } else { 2 },
+            if pass == 4 { 1 } else { 4 },
             "backing audio appears only after its CUE is removed"
         );
         let mut uris = rows
@@ -593,8 +622,12 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
             windows.sort_by_key(|window| window.start_millis);
             assert_eq!(windows[0].start_millis, 0);
             assert_eq!(windows[0].end_millis, 493);
-            assert_eq!(windows[1].start_millis, 493);
-            assert_eq!(windows[1].end_millis, 1000);
+            assert_eq!(windows[1].start_millis, 0);
+            assert_eq!(windows[1].end_millis, 493);
+            assert_eq!(windows[2].start_millis, 493);
+            assert_eq!(windows[2].end_millis, 1000);
+            assert_eq!(windows[3].start_millis, 493);
+            assert_eq!(windows[3].end_millis, 1000);
         }
     }
 }

@@ -1737,12 +1737,22 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
-        let second = database
-            .create_playlist(None, "Second", std::slice::from_ref(&uri))
+        let second = source
+            .import_local_paths(&database, vec![audio.clone()], "Second", &|_| {})
+            .await
+            .unwrap();
+        let source_key = database
+            .source_identity_key(source.source_id())
             .await
             .unwrap()
-            .unwrap()
-            .0;
+            .unwrap();
+        assert!(
+            database
+                .local_file_page(source_key, None, 128, &library::ReadCancellation::new())
+                .await
+                .unwrap()
+                .is_empty()
+        );
         database
             .delete_playlist(None, playlist.playlist)
             .await

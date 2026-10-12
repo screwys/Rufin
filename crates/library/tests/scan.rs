@@ -128,12 +128,11 @@ async fn remote_relocation_keeps_media_identity_and_updates_observed_access() {
                 .unwrap();
             observation.path = "https://music.example/dav/renamed.flac".into();
             observation.relative_path = "renamed.flac".into();
-            let candidates = database
-                .local_file_reuse_candidates(
-                    publication.source,
-                    &[observation.clone()],
-                    &ReadCancellation::default(),
-                )
+            let mut next_scan = Scan::begin_items(&database, source_id.as_str())
+                .await
+                .unwrap();
+            let candidates = next_scan
+                .local_file_reuse_candidates(&[observation.clone()])
                 .await
                 .unwrap();
             assert_eq!(candidates.len(), 1);
@@ -1517,13 +1516,13 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>("SELECT genre.object_id FROM album_genres relation JOIN albums album USING(album_key) JOIN genres genre USING(genre_key) WHERE album.source_key=?1 ORDER BY relation.position")
-            .bind(first.source.raw()).fetch_all(&mut outside).await.expect("keep known genres and append observed ones"),
-        ["genre-one", "new-genre"]
+            .bind(first.source.raw()).fetch_all(&mut outside).await.expect("keep known genres and apply observed ones"),
+        ["new-genre", "genre-one"]
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>("SELECT release_type FROM album_release_types relation JOIN albums album USING(album_key) WHERE album.source_key=?1 ORDER BY position")
             .bind(first.source.raw()).fetch_all(&mut outside).await.expect("keep known release types"),
-        ["Album", "Live"]
+        ["Live", "Album"]
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(

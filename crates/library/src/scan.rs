@@ -4,12 +4,14 @@
 use blake3::Hasher;
 use sqlx::query::Query;
 use sqlx::sqlite::{SqliteArguments, SqliteConnection, SqliteQueryResult};
-use sqlx::{Connection, FromRow, QueryBuilder, Row, Sqlite, Transaction};
+use sqlx::{Connection, FromRow, QueryBuilder, Sqlite, Transaction};
 use sqlx_core::transaction::TransactionManager;
 
 mod artwork;
 mod entities;
+mod files;
 mod input;
+mod relations;
 pub use input::{
     AlbumInput, AlbumRelationsInput, ArtistInput, FolderInput, GenreInput, LoudnessInput,
     MoodInput, PlaylistInput, RecordInput, TrackInput, TrackRelationsInput,
@@ -108,6 +110,7 @@ pub struct Scan {
     batch_writer: Option<tokio::sync::OwnedMutexGuard<Option<sqlx::SqliteConnection>>>,
     point_update: bool,
     local_point_update: bool,
+    import_files: bool,
     authoritative: bool,
     distinct_track_covers: bool,
     failed: bool,
@@ -160,25 +163,6 @@ pub struct LocalArtworkCandidate {
 }
 
 impl Scan {
-    /// Save the selected files as playlist entries without retaining a folder inventory.
-    pub async fn create_local_playlist(&mut self, name: &str) -> LibraryResult<crate::PlaylistKey> {
-        let mut writer = self.database.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
-        let (playlist, _) =
-            crate::playlists::create_playlist_identity(&mut transaction, None, name).await?;
-        sqlx::query("INSERT INTO playlist_entries(playlist_key,object_id,track_key,position)
-            SELECT ?1,'rufin:entry:'||lower(hex(randomblob(16))),track.track_key,
-                row_number() OVER (ORDER BY coalesce(track.cue_path,track.source_path),track.disc_number,track.track_number,track.object_id)-1
-            FROM tracks track
-            WHERE track.source_key=?2 AND track.indexed AND EXISTS(SELECT 1 FROM temp.scan_local_files file WHERE file.path=coalesce(track.cue_path,track.source_path))")
-            .bind(playlist).bind(self.source).execute(&mut *transaction).await?;
-        sqlx::raw_sql("DELETE FROM temp.scan_local_files; DELETE FROM temp.scan_local_file_dependencies; DELETE FROM temp.scan_local_dependency_paths;")
-            .execute(&mut *transaction).await?;
-        transaction.commit().await?;
-        Ok(playlist)
-    }
-
     pub fn rekey_songs(&mut self, pairs: Vec<(crate::TrackKey, crate::TrackKey)>) {
         self.song_rekeys.extend(pairs);
     }
@@ -312,6 +296,7 @@ impl Scan {
             batch_writer: None,
             point_update: false,
             local_point_update: false,
+            import_files: false,
             authoritative: true,
             distinct_track_covers: database.distinct_track_covers(),
             failed: false,
@@ -488,383 +473,6 @@ impl Scan {
             self.batch_changes = None;
         }
         Ok(())
-    }
-
-    pub async fn write_local_dependency_paths(&mut self, paths: &[String]) -> LibraryResult<()> {
-        if paths.len() > 128 {
-            self.failed = true;
-            return Err(LibraryError::InvalidScan(
-                "Local dependency batch exceeds 128 paths".to_string(),
-            ));
-        }
-        if paths.is_empty() {
-            return Ok(());
-        }
-        for path in paths {
-            self.require_id("Local dependency path", path)?;
-            self.require_row_bytes(&[path.as_bytes()])?;
-        }
-        let mut query = QueryBuilder::<Sqlite>::new(
-            "INSERT OR IGNORE INTO temp.scan_local_dependency_paths(path) ",
-        );
-        query.push_values(paths, |mut row, path| {
-            row.push_bind(path);
-        });
-        self.execute(query.build()).await?;
-        let documents = paths
-            .iter()
-            .filter(|path| path.starts_with("rufin-document://"))
-            .collect::<Vec<_>>();
-        if !documents.is_empty() {
-            let mut query = QueryBuilder::<Sqlite>::new(
-                "INSERT OR IGNORE INTO temp.scan_local_dependency_paths(path)
-                 SELECT alias.path FROM temp.scan_local_files original
-                 JOIN temp.scan_local_files alias ON alias.native_id=original.native_id
-                 WHERE original.native_id IS NOT NULL AND original.path IN (",
-            );
-            let mut values = query.separated(",");
-            for path in documents {
-                values.push_bind(path);
-            }
-            values.push_unseparated(")");
-            self.execute(query.build()).await?;
-        }
-        Ok(())
-    }
-
-    pub async fn write_local_files(
-        &mut self,
-        files: &[(crate::LocalFileWrite, Vec<String>)],
-    ) -> LibraryResult<()> {
-        if files.len() > 128 {
-            self.failed = true;
-            return Err(LibraryError::InvalidScan(
-                "Local observation batch exceeds 128 files".to_string(),
-            ));
-        }
-        if files.is_empty() {
-            return Ok(());
-        }
-        self.local_point_update = self.point_update;
-        for (file, dependencies) in files {
-            if file.path.is_empty()
-                || file.root.is_empty()
-                || !file.path.starts_with(&file.root)
-                || file.mtime_ns < 0
-                || dependencies.iter().any(String::is_empty)
-            {
-                self.failed = true;
-                return Err(LibraryError::InvalidScan(
-                    "invalid Local observation".to_string(),
-                ));
-            }
-            self.require_row_bytes(&[
-                file.path.as_bytes(),
-                file.root.as_bytes(),
-                file.relative_path.as_bytes(),
-                file.native_id.as_deref().unwrap_or_default().as_bytes(),
-                file.revision.as_deref().unwrap_or_default().as_bytes(),
-            ])?;
-        }
-        let mut observations = QueryBuilder::<Sqlite>::new(
-            "INSERT INTO temp.scan_local_files(path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,artist_pictures,parse_version,state) ",
-        );
-        observations.push_values(files, |mut row, (file, _)| {
-            row.push_bind(&file.path)
-                .push_bind(&file.root)
-                .push_bind(&file.relative_path)
-                .push_bind(file.kind.as_str())
-                .push_bind(file.size_bytes)
-                .push_bind(file.mtime_ns)
-                .push_bind(file.device_id)
-                .push_bind(file.inode)
-                .push_bind(&file.native_id)
-                .push_bind(&file.revision)
-                .push_bind(file.picture_index)
-                .push_bind(&file.artist_pictures)
-                .push_bind(file.parse_version)
-                .push_bind(file.state.as_str());
-        });
-        observations.push(" ON CONFLICT(path) DO UPDATE SET root=excluded.root,relative_path=excluded.relative_path,kind=excluded.kind,size_bytes=excluded.size_bytes,mtime_ns=excluded.mtime_ns,device_id=excluded.device_id,inode=excluded.inode,native_id=excluded.native_id,revision=excluded.revision,picture_index=excluded.picture_index,artist_pictures=excluded.artist_pictures,parse_version=excluded.parse_version,state=excluded.state");
-        self.execute(observations.build()).await?;
-
-        let mut clear = QueryBuilder::<Sqlite>::new(
-            "DELETE FROM temp.scan_local_file_dependencies WHERE path IN (",
-        );
-        let mut separated = clear.separated(",");
-        for (file, _) in files {
-            separated.push_bind(&file.path);
-        }
-        separated.push_unseparated(")");
-        self.execute(clear.build()).await?;
-
-        let dependency_count = files
-            .iter()
-            .map(|(_, dependencies)| dependencies.len())
-            .sum::<usize>();
-        if dependency_count > 0 {
-            let mut dependencies = QueryBuilder::<Sqlite>::new(
-                "INSERT INTO temp.scan_local_file_dependencies(path,dependency_path,position) ",
-            );
-            dependencies.push_values(
-                files.iter().flat_map(|(file, values)| {
-                    values
-                        .iter()
-                        .enumerate()
-                        .map(move |(position, dependency)| (&file.path, dependency, position))
-                }),
-                |mut row, (path, dependency, position)| {
-                    row.push_bind(path)
-                        .push_bind(dependency)
-                        .push_bind(position as i64);
-                },
-            );
-            self.execute(dependencies.build()).await?;
-        }
-        Ok(())
-    }
-
-    pub async fn remove_local_file_paths(&mut self, paths: &[String]) -> LibraryResult<()> {
-        if paths.len() > 128 {
-            self.failed = true;
-            return Err(LibraryError::InvalidScan(
-                "Local removal batch exceeds 128 paths".to_string(),
-            ));
-        }
-        if paths.is_empty() {
-            return Ok(());
-        }
-        if paths.iter().any(String::is_empty) {
-            self.failed = true;
-            return Err(LibraryError::InvalidScan(
-                "invalid Local removal path".to_string(),
-            ));
-        }
-        let mut query = QueryBuilder::<Sqlite>::new(
-            "INSERT OR IGNORE INTO temp.scan_local_file_removals(path) ",
-        );
-        query.push_values(paths, |mut row, path| {
-            row.push_bind(path);
-        });
-        self.execute(query.build()).await
-    }
-
-    pub async fn local_dependency_paths(&mut self, paths: &[String]) -> LibraryResult<Vec<String>> {
-        if paths.is_empty() {
-            return Ok(Vec::new());
-        }
-        if paths.len() > 128 {
-            return Err(LibraryError::InvalidScan(
-                "Local dependency lookup exceeds 128 paths".to_string(),
-            ));
-        }
-        if let Some(writer) = self.batch_writer.as_mut() {
-            let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-            return fetch_local_dependency_paths(connection, paths).await;
-        }
-        let mut writer = self.database.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        fetch_local_dependency_paths(connection, paths).await
-    }
-
-    /// Reuse an unchanged remote directory's observations after the source has
-    /// established that its revision covers descendants (for example Nextcloud).
-    pub async fn retain_file_tree(
-        &mut self,
-        directory: &crate::LocalFileWrite,
-    ) -> LibraryResult<bool> {
-        let source = self.source;
-        let prefix = format!("{}/", directory.path.trim_end_matches('/'));
-        let mut writer = self.database.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let unchanged: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM local_files file JOIN sources USING(source_key)
-             WHERE source_key=?1 AND file.path=?2 AND file.kind='directory'
-               AND file.revision=?3 AND file.parse_version=?4 AND sources.freshness IS NOT NULL)",
-        )
-        .bind(source)
-        .bind(&directory.path)
-        .bind(&directory.revision)
-        .bind(directory.parse_version)
-        .fetch_one(&mut *connection)
-        .await?;
-        if !unchanged {
-            return Ok(false);
-        }
-        sqlx::query(
-            "INSERT OR IGNORE INTO temp.scan_local_files
-             SELECT path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,
-                    native_id,revision,picture_index,artist_pictures,parse_version,
-                    CASE WHEN kind='directory' THEN 'accepted' ELSE state END
-             FROM local_files WHERE source_key=?1 AND path>=?2 AND path<?2||char(1114111)",
-        )
-        .bind(source)
-        .bind(prefix)
-        .execute(&mut *connection)
-        .await?;
-        sqlx::query("UPDATE temp.scan_local_files SET state='accepted' WHERE path=?1")
-            .bind(&directory.path)
-            .execute(&mut *connection)
-            .await?;
-        Ok(true)
-    }
-
-    /// Retain a collection listing proven unchanged by a depth-one DAV sync.
-    /// Child directories remain pending: their own tokens cover their children.
-    pub async fn retain_file_directory_children(&mut self, path: &str) -> LibraryResult<()> {
-        let prefix = format!("{}/", path.trim_end_matches('/'));
-        self.execute(
-            sqlx::query(
-                "INSERT OR IGNORE INTO temp.scan_local_files
-             SELECT path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,
-                    native_id,revision,picture_index,artist_pictures,parse_version,
-                    CASE WHEN kind='directory' THEN 'observed' ELSE state END
-             FROM local_files WHERE source_key=?1 AND path>=?2 AND path<?2||char(1114111)
-               AND instr(substr(rtrim(path,'/'),length(?2)+1),'/')=0",
-            )
-            .bind(self.source)
-            .bind(prefix),
-        )
-        .await?;
-        self.execute(
-            sqlx::query("UPDATE temp.scan_local_files SET state='accepted' WHERE path=?1")
-                .bind(path),
-        )
-        .await
-    }
-
-    pub async fn local_inventory_path_page(
-        &mut self,
-        kind: crate::LocalFileKind,
-        after: Option<&str>,
-        exclude_cue_dependencies: bool,
-        limit: usize,
-    ) -> LibraryResult<Vec<String>> {
-        self.local_inventory_path_page_in_root(kind, after, exclude_cue_dependencies, limit, None)
-            .await
-    }
-
-    pub async fn local_inventory_path_page_in_root(
-        &mut self,
-        kind: crate::LocalFileKind,
-        after: Option<&str>,
-        exclude_cue_dependencies: bool,
-        limit: usize,
-        root: Option<&str>,
-    ) -> LibraryResult<Vec<String>> {
-        let query = || {
-            sqlx::query_scalar::<_, String>(
-                "SELECT file.path FROM temp.scan_local_files file
-             WHERE file.kind=?1 AND file.path>?2 AND (?5 IS NULL OR file.root=?5)
-               AND (file.kind<>'directory' OR file.state='observed')
-               AND (?3=0 OR NOT EXISTS (
-                 SELECT 1 FROM temp.scan_local_dependency_paths dependency
-                 WHERE dependency.path=file.path
-               ))
-             ORDER BY file.path LIMIT ?4",
-            )
-            .bind(kind.as_str())
-            .bind(after.unwrap_or(""))
-            .bind(exclude_cue_dependencies)
-            .bind(limit.clamp(1, 128) as i64)
-            .bind(root)
-        };
-        if let Some(writer) = self.batch_writer.as_mut() {
-            let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-            return Ok(query().fetch_all(&mut *connection).await?);
-        }
-        let mut writer = self.database.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        Ok(query().fetch_all(&mut *connection).await?)
-    }
-
-    pub async fn local_inventory_file_page(
-        &mut self,
-        kind: crate::LocalFileKind,
-        after: Option<&str>,
-    ) -> LibraryResult<Vec<crate::LocalFileWrite>> {
-        self.local_inventory_file_page_in_root(kind, after, None)
-            .await
-    }
-
-    pub async fn local_inventory_file_page_in_root(
-        &mut self,
-        kind: crate::LocalFileKind,
-        after: Option<&str>,
-        root: Option<&str>,
-    ) -> LibraryResult<Vec<crate::LocalFileWrite>> {
-        let query = || {
-            sqlx::query("SELECT path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,artist_pictures,parse_version,state FROM temp.scan_local_files WHERE kind=?1 AND path>?2 AND (?3 IS NULL OR root=?3) ORDER BY path LIMIT 128")
-            .bind(kind.as_str()).bind(after.unwrap_or("")).bind(root)
-        };
-        let rows = if let Some(writer) = self.batch_writer.as_mut() {
-            query()
-                .fetch_all(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-                .await?
-        } else {
-            let mut writer = self.database.writer().await?;
-            query()
-                .fetch_all(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-                .await?
-        };
-        rows.into_iter().map(local_inventory_row).collect()
-    }
-
-    pub async fn local_inventory_files(
-        &mut self,
-        paths: &[String],
-    ) -> LibraryResult<Vec<crate::LocalFileWrite>> {
-        if paths.is_empty() {
-            return Ok(Vec::new());
-        }
-        if paths.len() > 128 {
-            return Err(LibraryError::InvalidScan(
-                "File inventory lookup exceeds 128 paths".into(),
-            ));
-        }
-        let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,artist_pictures,parse_version,state FROM temp.scan_local_files WHERE path IN (",
-        );
-        let mut values = query.separated(",");
-        for path in paths {
-            values.push_bind(path);
-        }
-        values.push_unseparated(")");
-        let rows = if let Some(writer) = self.batch_writer.as_mut() {
-            query
-                .build()
-                .fetch_all(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-                .await?
-        } else {
-            let mut writer = self.database.writer().await?;
-            query
-                .build()
-                .fetch_all(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-                .await?
-        };
-        rows.into_iter().map(local_inventory_row).collect()
-    }
-
-    /// At most two paths are needed to distinguish a unique native ID from aliases.
-    pub async fn local_inventory_native_paths(
-        &mut self,
-        native_id: &str,
-    ) -> LibraryResult<Vec<String>> {
-        let query = || {
-            sqlx::query_scalar(
-                "SELECT path FROM temp.scan_local_files WHERE native_id=?1 ORDER BY path LIMIT 2",
-            )
-            .bind(native_id)
-        };
-        if let Some(writer) = self.batch_writer.as_mut() {
-            return Ok(query()
-                .fetch_all(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-                .await?);
-        }
-        let mut writer = self.database.writer().await?;
-        Ok(query()
-            .fetch_all(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-            .await?)
     }
 
     pub async fn write_local_component_paths(&mut self, paths: &[String]) -> LibraryResult<()> {
@@ -1126,63 +734,14 @@ impl Scan {
         ] {
             self.execute(sqlx::query(sqlx::AssertSqlSafe(format!("INSERT OR IGNORE INTO temp.scan_seen(kind,object_id,written) SELECT '{kind}',object_id,0 FROM ({query})"))).bind(self.source).bind(parameter)).await?;
         }
-        for (relation, target, key) in [
-            ("album_artists", "artists", "artist_key"),
-            ("album_genres", "genres", "genre_key"),
+        for (relation, target_key) in [
+            ("album_artists", "artist_key"),
+            ("album_genres", "genre_key"),
+            ("album_release_types", "release_type"),
         ] {
-            self.execute(sqlx::query(sqlx::AssertSqlSafe(format!("INSERT OR IGNORE INTO temp.scan_{relation} SELECT album.object_id,target.object_id,relation.position FROM {relation} relation JOIN albums album USING(album_key) JOIN {target} target USING({key}) WHERE album.album_key IN (SELECT album_key FROM tracks WHERE track_key IN ({tracks}))"))).bind(self.source).bind(parameter)).await?;
+            self.execute(sqlx::query(sqlx::AssertSqlSafe(format!("INSERT OR IGNORE INTO temp.scan_relation_seen(kind,owner_key,target_key) SELECT '{relation}',album_key,CAST({target_key} AS TEXT) FROM {relation} WHERE album_key IN (SELECT album_key FROM tracks WHERE track_key IN ({tracks}))"))).bind(self.source).bind(parameter)).await?;
         }
-        self.execute(sqlx::query(sqlx::AssertSqlSafe(format!("INSERT OR IGNORE INTO temp.scan_album_release_types SELECT album.object_id,relation.release_type,relation.position FROM album_release_types relation JOIN albums album USING(album_key) WHERE album.album_key IN (SELECT album_key FROM tracks WHERE track_key IN ({tracks}))"))).bind(self.source).bind(parameter)).await?;
         self.execute(sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO temp.scan_seen(kind,object_id,written,supplied) SELECT 'album',album.object_id,0,{} FROM albums album WHERE album.album_key IN (SELECT album_key FROM tracks WHERE track_key IN ({tracks})) ON CONFLICT(kind,object_id) DO UPDATE SET supplied=supplied|excluded.supplied",entities::ALBUM_SUPPLIED))).bind(self.source).bind(parameter)).await
-    }
-
-    pub async fn write_track_relations(
-        &mut self,
-        artists: &[(&str, &str)],
-        genres: &[(&str, &str)],
-        moods: &[(&str, &str)],
-    ) -> LibraryResult<()> {
-        self.write_ordered_relation_batch("temp.scan_track_artists", "Track", artists)
-            .await?;
-        self.write_ordered_relation_batch("temp.scan_track_genres", "Track", genres)
-            .await?;
-        self.write_ordered_relation_batch("temp.scan_track_moods", "Track", moods)
-            .await
-    }
-
-    pub async fn write_album_relations(
-        &mut self,
-        artists: &[(&str, &str)],
-        genres: &[(&str, &str)],
-        release_types: &[(&str, &str)],
-    ) -> LibraryResult<()> {
-        self.write_ordered_relation_batch("temp.scan_album_artists", "Album", artists)
-            .await?;
-        self.write_ordered_relation_batch("temp.scan_album_genres", "Album", genres)
-            .await?;
-        self.write_ordered_relation_batch("temp.scan_album_release_types", "Album", release_types)
-            .await
-    }
-
-    pub async fn write_track_folders(&mut self, links: &[ScanLink<'_>]) -> LibraryResult<()> {
-        self.write_links_batch(
-            "INSERT OR IGNORE INTO temp.scan_track_folders(owner_id,related_id,position) ",
-            links,
-        )
-        .await
-    }
-
-    pub async fn replace_track_folders(
-        &mut self,
-        object_id: &str,
-        links: &[ScanLink<'_>],
-    ) -> LibraryResult<()> {
-        self.write_removal("track-folders", object_id).await?;
-        self.execute(
-            sqlx::query("DELETE FROM temp.scan_track_folders WHERE owner_id=?1").bind(object_id),
-        )
-        .await?;
-        self.write_track_folders(links).await
     }
 
     pub fn replace_favorites(&mut self, tracks: &[String], albums: &[String], artists: &[String]) {
@@ -1435,7 +994,8 @@ impl Scan {
         let (removed, removed_playlists) = publish_removals(&mut transaction, source, full).await?;
         changed.metadata |= removed;
         changed.playlists |= removed_playlists;
-        changed.metadata |= publish_links(&mut transaction, source, self.authoritative).await?;
+        changed.metadata |=
+            relations::prune_relations(&mut transaction, source, self.authoritative).await?;
         changed.playlists |= publish_playlist_entries(&mut transaction, source).await?;
         let home_changed = publish_home(&mut transaction, source, full).await?;
         if self.local_point_update {
@@ -1452,7 +1012,9 @@ impl Scan {
             self.local_point_update,
         )
         .await?;
-        publish_local_files(&mut transaction, source, full).await?;
+        if !self.import_files {
+            files::prune_local_files(&mut transaction, source, full).await?;
+        }
         let catalog_changed = changed.metadata;
         changed.metadata |= changed.user_data;
         changed.metadata |= self.publish_user_data(&mut transaction, source).await?;
@@ -1550,88 +1112,6 @@ impl Scan {
             }
         }
         Ok(changed)
-    }
-
-    async fn write_links_batch(
-        &mut self,
-        prefix: &'static str,
-        links: &[ScanLink<'_>],
-    ) -> LibraryResult<()> {
-        if links.is_empty() {
-            return Ok(());
-        }
-        for link in links {
-            self.require_id("link owner", link.owner_id)?;
-            self.require_id("link target", link.related_id)?;
-            if link.position < 0 {
-                self.failed = true;
-                return Err(LibraryError::InvalidScan(
-                    "link position cannot be negative".to_string(),
-                ));
-            }
-            self.require_row_bytes(&[link.owner_id.as_bytes(), link.related_id.as_bytes()])?;
-        }
-        for page in links.chunks(128) {
-            let mut query = QueryBuilder::<Sqlite>::new(prefix);
-            query.push_values(page, |mut row, link| {
-                row.push_bind(link.owner_id)
-                    .push_bind(link.related_id)
-                    .push_bind(link.position);
-            });
-            self.execute(query.build()).await?;
-        }
-        Ok(())
-    }
-
-    async fn write_ordered_relation_batch(
-        &mut self,
-        table: &'static str,
-        owner_kind: &'static str,
-        links: &[(&str, &str)],
-    ) -> LibraryResult<()> {
-        if links.is_empty() {
-            return Ok(());
-        }
-        for (owner, related) in links {
-            self.require_id(owner_kind, owner)?;
-            self.require_id("relation", related)?;
-            self.require_row_bytes(&[owner.as_bytes(), related.as_bytes()])?;
-        }
-        for page in links.chunks(128) {
-            let mut query =
-                QueryBuilder::<Sqlite>::new("WITH input(owner_id,related_id,ordinal) AS (");
-            query.push_values(
-                page.iter().enumerate(),
-                |mut row, (ordinal, (owner, related))| {
-                    row.push_bind(*owner)
-                        .push_bind(*related)
-                        .push_bind(ordinal as i64);
-                },
-            );
-            query.push(
-                "), deduplicated AS (
-                 SELECT owner_id,related_id,min(ordinal) AS ordinal
-                 FROM input GROUP BY owner_id,related_id
-             ), ranked AS (
-                 SELECT owner_id,related_id,
-                        row_number() OVER (PARTITION BY owner_id ORDER BY ordinal)-1 AS offset
-                 FROM deduplicated
-             ) INSERT OR IGNORE INTO ",
-            );
-            query.push(table);
-            query.push(
-                "(owner_id,related_id,position)
-             SELECT owner_id,related_id,
-                    COALESCE((SELECT max(position)+1 FROM ",
-            );
-            query.push(table);
-            query.push(
-                " existing WHERE existing.owner_id=ranked.owner_id),0)+offset
-             FROM ranked",
-            );
-            self.execute(query.build()).await?;
-        }
-        Ok(())
     }
 
     fn require_id(&mut self, kind: &'static str, value: &str) -> LibraryResult<()> {
@@ -1744,25 +1224,6 @@ impl Drop for Scan {
     }
 }
 
-async fn fetch_local_dependency_paths(
-    connection: &mut sqlx::SqliteConnection,
-    paths: &[String],
-) -> LibraryResult<Vec<String>> {
-    let mut query = QueryBuilder::<Sqlite>::new(
-        "SELECT path FROM temp.scan_local_dependency_paths WHERE path IN (",
-    );
-    let mut separated = query.separated(",");
-    for path in paths {
-        separated.push_bind(path);
-    }
-    separated.push_unseparated(")");
-    Ok(query
-        .build_query_scalar()
-        .persistent(false)
-        .fetch_all(connection)
-        .await?)
-}
-
 fn validate_id(kind: &'static str, value: &str) -> LibraryResult<()> {
     if value.is_empty() {
         return Err(LibraryError::InvalidScan(format!(
@@ -1781,10 +1242,9 @@ async fn create_working_set(connection: &mut SqliteConnection) -> LibraryResult<
     CREATE TEMP TABLE IF NOT EXISTS scan_loudness(kind TEXT NOT NULL,object_id TEXT NOT NULL,integrated_lufs REAL,true_peak REAL,replay_gain_db REAL,replay_gain_peak REAL,PRIMARY KEY(kind,object_id)) STRICT, WITHOUT ROWID;
     CREATE TEMP TABLE IF NOT EXISTS scan_artwork(kind TEXT NOT NULL,object_id TEXT NOT NULL,source BLOB,binding BLOB,PRIMARY KEY(kind,object_id)) STRICT, WITHOUT ROWID;
     CREATE TEMP TABLE IF NOT EXISTS scan_local_dependency_paths(path TEXT PRIMARY KEY) STRICT;
-    CREATE TEMP TABLE IF NOT EXISTS scan_local_files(path TEXT PRIMARY KEY,root TEXT NOT NULL,relative_path TEXT NOT NULL,kind TEXT NOT NULL,size_bytes INTEGER,mtime_ns INTEGER NOT NULL,device_id INTEGER,inode INTEGER,native_id TEXT,revision TEXT,picture_index INTEGER,artist_pictures TEXT,parse_version INTEGER,state TEXT NOT NULL) STRICT;
-    CREATE INDEX IF NOT EXISTS scan_local_files_kind_path ON scan_local_files(kind,path);
-    CREATE INDEX IF NOT EXISTS scan_local_files_native_id ON scan_local_files(native_id,path) WHERE native_id IS NOT NULL;
-    CREATE TEMP TABLE IF NOT EXISTS scan_local_file_dependencies(path TEXT NOT NULL,dependency_path TEXT NOT NULL,position INTEGER NOT NULL,PRIMARY KEY(path,dependency_path)) STRICT;
+    CREATE TEMP TABLE IF NOT EXISTS scan_local_seen(path TEXT PRIMARY KEY,root TEXT NOT NULL,kind TEXT NOT NULL,changed INTEGER NOT NULL,pending_directory INTEGER NOT NULL DEFAULT 0,previous_revision TEXT,previous_parse_version INTEGER,previous_accepted INTEGER NOT NULL DEFAULT 0) STRICT, WITHOUT ROWID;
+    CREATE INDEX IF NOT EXISTS scan_local_seen_kind_path ON scan_local_seen(kind,path);
+    CREATE TEMP TABLE IF NOT EXISTS scan_relation_seen(kind TEXT NOT NULL,owner_key INTEGER NOT NULL,target_key TEXT NOT NULL,PRIMARY KEY(kind,owner_key,target_key)) STRICT, WITHOUT ROWID;
     CREATE TEMP TABLE IF NOT EXISTS scan_local_file_removals(path TEXT PRIMARY KEY) STRICT;
     CREATE TEMP TABLE IF NOT EXISTS scan_retained_paths(path TEXT PRIMARY KEY) STRICT;
     CREATE TEMP TABLE IF NOT EXISTS scan_local_component_paths(path TEXT PRIMARY KEY) STRICT;
@@ -1794,25 +1254,14 @@ async fn create_working_set(connection: &mut SqliteConnection) -> LibraryResult<
     CREATE TEMP TABLE IF NOT EXISTS scan_retained_home(owner_id TEXT PRIMARY KEY) STRICT;
     CREATE TEMP TABLE IF NOT EXISTS scan_home_entries(owner_id TEXT NOT NULL,position INTEGER NOT NULL,entity_kind TEXT NOT NULL,entity_object_id TEXT NOT NULL,title TEXT NOT NULL,subtitle TEXT NOT NULL,section_title TEXT,PRIMARY KEY(owner_id,position)) STRICT;
     "#).execute(&mut *connection).await?;
-    for relation in [
-        "album_artists",
-        "track_artists",
-        "album_genres",
-        "track_genres",
-        "track_moods",
-        "track_folders",
-        "album_release_types",
-    ] {
-        sqlx::raw_sql(sqlx::AssertSqlSafe(format!("CREATE TEMP TABLE IF NOT EXISTS scan_{relation}(owner_id TEXT NOT NULL,related_id TEXT NOT NULL,position INTEGER NOT NULL,PRIMARY KEY(owner_id,related_id)) STRICT, WITHOUT ROWID; CREATE INDEX IF NOT EXISTS scan_{relation}_related ON scan_{relation}(related_id,owner_id);"))).execute(&mut *connection).await?;
-    }
     clear_working_set(connection).await
 }
 
 async fn clear_working_set(connection: &mut SqliteConnection) -> LibraryResult<()> {
     sqlx::raw_sql("DELETE FROM temp.scan_seen; DELETE FROM temp.scan_unresolved_artists; DELETE FROM temp.scan_track_albums; DELETE FROM temp.scan_affected_albums; DELETE FROM temp.scan_loudness; DELETE FROM temp.scan_artwork;
-        DELETE FROM temp.scan_local_dependency_paths; DELETE FROM temp.scan_local_file_dependencies; DELETE FROM temp.scan_local_file_removals; DELETE FROM temp.scan_local_files; DELETE FROM temp.scan_retained_paths; DELETE FROM temp.scan_local_component_paths; DELETE FROM temp.scan_removals;
+        DELETE FROM temp.scan_local_dependency_paths; DELETE FROM temp.scan_local_seen; DELETE FROM temp.scan_local_file_removals; DELETE FROM temp.scan_retained_paths; DELETE FROM temp.scan_local_component_paths; DELETE FROM temp.scan_removals;
         DELETE FROM temp.scan_home_entries; DELETE FROM temp.scan_retained_home; DELETE FROM temp.scan_playlist_entries; DELETE FROM temp.scan_playlist_scopes;
-        DELETE FROM temp.scan_album_release_types; DELETE FROM temp.scan_track_folders; DELETE FROM temp.scan_track_moods; DELETE FROM temp.scan_track_genres; DELETE FROM temp.scan_album_genres; DELETE FROM temp.scan_track_artists; DELETE FROM temp.scan_album_artists;")
+        DELETE FROM temp.scan_relation_seen;")
         .execute(connection).await?;
     Ok(())
 }
@@ -1941,70 +1390,6 @@ async fn publish_source_loudness(
     Ok(changed)
 }
 
-async fn publish_local_files(
-    transaction: &mut Transaction<'_, Sqlite>,
-    source_key: i64,
-    full: bool,
-) -> LibraryResult<()> {
-    if full {
-        sqlx::query(
-            "DELETE FROM local_files WHERE source_key=?1
-             AND path NOT IN (SELECT path FROM temp.scan_local_files)",
-        )
-        .bind(source_key)
-        .execute(&mut **transaction)
-        .await?;
-    } else {
-        sqlx::query(
-            "DELETE FROM local_files WHERE source_key=?1
-             AND path IN (SELECT path FROM temp.scan_local_file_removals)",
-        )
-        .bind(source_key)
-        .execute(&mut **transaction)
-        .await?;
-    }
-    sqlx::query(
-        "INSERT INTO local_files(
-             source_key,path,root,relative_path,kind,size_bytes,mtime_ns,
-             device_id,inode,native_id,revision,picture_index,artist_pictures,parse_version,state
-         )
-         SELECT ?1,path,root,relative_path,kind,size_bytes,mtime_ns,
-                device_id,inode,native_id,CASE WHEN kind='directory' AND ?2=0 THEN NULL ELSE revision END,picture_index,artist_pictures,parse_version,state
-         FROM temp.scan_local_files WHERE true
-         ON CONFLICT(source_key,path) DO UPDATE SET
-             root=excluded.root,relative_path=excluded.relative_path,
-             kind=excluded.kind,size_bytes=excluded.size_bytes,
-             mtime_ns=excluded.mtime_ns,device_id=excluded.device_id,
-             inode=excluded.inode,parse_version=excluded.parse_version,
-             native_id=excluded.native_id,revision=excluded.revision,picture_index=excluded.picture_index,artist_pictures=CASE WHEN local_files.size_bytes IS excluded.size_bytes AND local_files.mtime_ns=excluded.mtime_ns AND local_files.revision IS excluded.revision THEN COALESCE(excluded.artist_pictures,local_files.artist_pictures) ELSE excluded.artist_pictures END,
-             state=excluded.state",
-    )
-    .bind(source_key)
-    .bind(full)
-    .execute(&mut **transaction)
-    .await?;
-    sqlx::query(
-        "DELETE FROM local_file_dependencies WHERE local_file_key IN (
-             SELECT file.local_file_key FROM local_files file
-             JOIN temp.scan_local_files staged USING(path)
-             WHERE file.source_key=?1
-         )",
-    )
-    .bind(source_key)
-    .execute(&mut **transaction)
-    .await?;
-    sqlx::query(
-        "INSERT INTO local_file_dependencies(local_file_key,dependency_path,position)
-         SELECT file.local_file_key,dependency.dependency_path,dependency.position
-         FROM temp.scan_local_file_dependencies dependency
-         JOIN local_files file ON file.source_key=?1 AND file.path=dependency.path",
-    )
-    .bind(source_key)
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
-}
-
 async fn prune_local_orphans(
     transaction: &mut Transaction<'_, Sqlite>,
     source_key: i64,
@@ -2069,113 +1454,6 @@ async fn publish_removals(
         }
     }
     Ok((metadata, playlists))
-}
-
-async fn publish_links(
-    transaction: &mut Transaction<'_, Sqlite>,
-    source: i64,
-    authoritative: bool,
-) -> LibraryResult<bool> {
-    let mut changed = false;
-    for (relation, owners, owner_key, targets, target_key) in [
-        (
-            "album_artists",
-            "albums",
-            "album_key",
-            "artists",
-            "artist_key",
-        ),
-        (
-            "track_artists",
-            "tracks",
-            "track_key",
-            "artists",
-            "artist_key",
-        ),
-        ("album_genres", "albums", "album_key", "genres", "genre_key"),
-        ("track_genres", "tracks", "track_key", "genres", "genre_key"),
-        ("track_moods", "tracks", "track_key", "moods", "mood_key"),
-        (
-            "track_folders",
-            "tracks",
-            "track_key",
-            "folders",
-            "folder_key",
-        ),
-        (
-            "album_release_types",
-            "albums",
-            "album_key",
-            "",
-            "release_type",
-        ),
-    ] {
-        let (target, join) = if targets.is_empty() {
-            ("link.related_id".to_string(), String::new())
-        } else {
-            (
-                format!("target.{target_key}"),
-                format!(
-                    "CROSS JOIN {targets} target ON target.source_key=?1 AND target.object_id=link.related_id"
-                ),
-            )
-        };
-        let rows = format!(
-            "SELECT owner.{owner_key} AS owner,{target} AS target,
-             row_number() OVER(PARTITION BY link.owner_id ORDER BY link.position,link.related_id)-1 AS position
-             FROM temp.scan_{relation} link CROSS JOIN {owners} owner ON owner.source_key=?1 AND owner.object_id=link.owner_id {join}"
-        );
-        if !authoritative && owners == "albums" {
-            let append = format!(
-                "WITH incoming AS ({rows}), additions AS MATERIALIZED (
-                    SELECT incoming.*,COALESCE((SELECT max(position) FROM {relation}
-                        WHERE {owner_key}=incoming.owner),-1) AS previous
-                    FROM incoming WHERE NOT EXISTS(SELECT 1 FROM {relation}
-                        WHERE {owner_key}=incoming.owner AND {target_key}=incoming.target))
-                 INSERT INTO {relation}({owner_key},{target_key},position)
-                 SELECT owner,target,previous+row_number() OVER(PARTITION BY owner ORDER BY position)
-                 FROM additions"
-            );
-            changed |= sqlx::query(sqlx::AssertSqlSafe(append))
-                .bind(source)
-                .execute(&mut **transaction)
-                .await?
-                .rows_affected()
-                > 0;
-            continue;
-        }
-        let delete = format!(
-            "WITH expected AS MATERIALIZED ({rows}) DELETE FROM {relation} AS current
-             WHERE {owner_key} IN (SELECT {owner_key} FROM {owners} WHERE source_key=?1 {})
-             AND NOT EXISTS(SELECT 1 FROM expected WHERE expected.owner=current.{owner_key}
-                 AND expected.target=current.{target_key} AND expected.position=current.position)",
-            if relation == "track_folders" {
-                "AND object_id IN (SELECT owner_id FROM temp.scan_track_folders
-                 UNION SELECT object_id FROM temp.scan_removals WHERE entity_kind='track-folders')"
-                    .to_string()
-            } else {
-                format!(
-                    "AND object_id IN (SELECT object_id FROM temp.scan_seen WHERE kind='{}' AND written=1)",
-                    owners.trim_end_matches('s')
-                )
-            }
-        );
-        changed |= sqlx::query(sqlx::AssertSqlSafe(delete))
-            .bind(source)
-            .execute(&mut **transaction)
-            .await?
-            .rows_affected()
-            > 0;
-        let insert =
-            format!("INSERT OR IGNORE INTO {relation}({owner_key},{target_key},position) {rows}");
-        changed |= sqlx::query(sqlx::AssertSqlSafe(insert))
-            .bind(source)
-            .execute(&mut **transaction)
-            .await?
-            .rows_affected()
-            > 0;
-    }
-    Ok(changed)
 }
 
 async fn publish_home(
@@ -2409,23 +1687,4 @@ async fn source_exists(
     .bind(source_id)
     .fetch_one(connection)
     .await?)
-}
-
-fn local_inventory_row(row: sqlx::sqlite::SqliteRow) -> LibraryResult<crate::LocalFileWrite> {
-    Ok(crate::LocalFileWrite {
-        path: row.try_get("path")?,
-        root: row.try_get("root")?,
-        relative_path: row.try_get("relative_path")?,
-        kind: crate::LocalFileKind::parse(row.try_get("kind")?)?,
-        size_bytes: row.try_get("size_bytes")?,
-        mtime_ns: row.try_get("mtime_ns")?,
-        device_id: row.try_get("device_id")?,
-        inode: row.try_get("inode")?,
-        native_id: row.try_get("native_id")?,
-        revision: row.try_get("revision")?,
-        picture_index: row.try_get("picture_index")?,
-        artist_pictures: row.try_get("artist_pictures")?,
-        parse_version: row.try_get("parse_version")?,
-        state: crate::LocalFileState::parse(row.try_get("state")?)?,
-    })
 }
