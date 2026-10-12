@@ -274,8 +274,9 @@ pub(super) async fn update_artwork(
     distinct: bool,
     point: bool,
     local: bool,
+    authoritative: bool,
 ) -> LibraryResult<bool> {
-    if point && !local {
+    if !authoritative || (point && !local) {
         for (kind, table) in [("artist", "artists"), ("genre", "genres")] {
             sqlx::query(sqlx::AssertSqlSafe(format!(
                 "UPDATE temp.scan_artwork AS image SET source=(SELECT artwork_binding FROM {table} WHERE source_key=?1 AND object_id=image.object_id),
@@ -297,21 +298,21 @@ pub(super) async fn update_artwork(
     loop {
         let rows: Vec<(String, String, Option<String>, Option<Vec<u8>>, Option<Vec<u8>>)> = sqlx::query_as(
             "SELECT artist.object_id,artist.name,artist.musicbrainz_artist_id,image.source,COALESCE(
-                (SELECT CASE WHEN incoming.object_id IS NOT NULL THEN incoming.binding ELSE album.artwork_binding END
+                (SELECT CASE WHEN incoming.binding IS NOT NULL OR (?3 AND incoming.object_id IS NOT NULL) THEN incoming.binding ELSE album.artwork_binding END
                  FROM albums album LEFT JOIN temp.scan_artwork incoming ON incoming.kind='album' AND incoming.object_id=album.object_id
                  WHERE album.album_key IN (SELECT album_key FROM album_artists WHERE artist_key=artist.artist_key
                     UNION SELECT track.album_key FROM track_artists relation JOIN tracks track USING(track_key) WHERE relation.artist_key=artist.artist_key)
-                   AND CASE WHEN incoming.object_id IS NOT NULL THEN incoming.binding ELSE album.artwork_binding END IS NOT NULL
+                   AND CASE WHEN incoming.binding IS NOT NULL OR (?3 AND incoming.object_id IS NOT NULL) THEN incoming.binding ELSE album.artwork_binding END IS NOT NULL
                  ORDER BY album.sort_text,album.object_id LIMIT 1),
-                (SELECT CASE WHEN incoming.object_id IS NOT NULL THEN incoming.binding ELSE track.artwork_binding END
+                (SELECT CASE WHEN incoming.binding IS NOT NULL OR (?3 AND incoming.object_id IS NOT NULL) THEN incoming.binding ELSE track.artwork_binding END
                  FROM track_artists relation JOIN tracks track USING(track_key)
                  LEFT JOIN temp.scan_artwork incoming ON incoming.kind='track' AND incoming.object_id=track.object_id
                  WHERE relation.artist_key=artist.artist_key
-                   AND CASE WHEN incoming.object_id IS NOT NULL THEN incoming.binding ELSE track.artwork_binding END IS NOT NULL
+                   AND CASE WHEN incoming.binding IS NOT NULL OR (?3 AND incoming.object_id IS NOT NULL) THEN incoming.binding ELSE track.artwork_binding END IS NOT NULL
                  ORDER BY track.sort_text,track.object_id LIMIT 1))
              FROM temp.scan_artwork image JOIN artists artist ON artist.source_key=?1 AND artist.object_id=image.object_id
              WHERE image.kind='artist' AND artist.object_id>?2 ORDER BY artist.object_id LIMIT 128"
-        ).bind(source).bind(&after).fetch_all(&mut *connection).await?;
+        ).bind(source).bind(&after).bind(authoritative).fetch_all(&mut *connection).await?;
         if rows.is_empty() {
             break;
         }
@@ -364,8 +365,9 @@ pub(super) async fn update_artwork(
     ] {
         changed |= sqlx::query(sqlx::AssertSqlSafe(format!(
             "UPDATE {table} AS entity SET artwork_binding=image.binding FROM temp.scan_artwork image
-             WHERE entity.indexed AND entity.source_key=?1 AND image.kind=?2 AND image.object_id=entity.object_id AND entity.artwork_binding IS NOT image.binding"
-        ))).bind(source).bind(kind).execute(&mut *connection).await?.rows_affected() > 0;
+             WHERE entity.indexed AND entity.source_key=?1 AND image.kind=?2 AND image.object_id=entity.object_id
+               AND (?3 OR image.binding IS NOT NULL) AND entity.artwork_binding IS NOT image.binding"
+        ))).bind(source).bind(kind).bind(authoritative).execute(&mut *connection).await?.rows_affected() > 0;
     }
     if !distinct {
         changed |= sqlx::query("UPDATE tracks SET artwork_binding=album.artwork_binding FROM albums album

@@ -74,13 +74,6 @@ impl SelectedUiState {
         }
         session
     }
-
-    pub(crate) fn replace_library(&self, library: SelectedLibrary) {
-        let mut session = self
-            .session_mut()
-            .expect("a Library replacement requires its selected UI session");
-        session.library = library;
-    }
 }
 
 impl Shell {

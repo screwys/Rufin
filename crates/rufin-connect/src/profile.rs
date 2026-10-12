@@ -2127,11 +2127,12 @@ mod tests {
         guest.acknowledge_projection(&records).await.unwrap();
         let cancellation = library::ReadCancellation::new();
         assert!(
-            destination
+            !destination
                 .cached_source("server", &cancellation)
                 .await
                 .unwrap()
-                .is_none()
+                .unwrap()
+                .catalog_complete
         );
         // Bounded library backfill adds the newly captured field to the existing document.
         assert_eq!(host.capture(&source).await.unwrap(), 1);

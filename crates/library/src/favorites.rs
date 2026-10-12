@@ -24,13 +24,11 @@ impl SourceUserData {
     }
 }
 
-/// Publishes source facts without changing local overrides or pending actions.
-/// The input stays a SQL relation so catalog scans never materialize it in Rust.
-pub(crate) async fn publish_source_user_data(
-    connection: &mut SqliteConnection,
+/// Updates source facts without changing local overrides or pending actions.
+pub(crate) fn source_user_data_query(
     kind: &str,
-    input: impl Fn(&mut QueryBuilder<Sqlite>),
-) -> LibraryResult<bool> {
+    input: impl FnOnce(&mut QueryBuilder<Sqlite>),
+) -> QueryBuilder<Sqlite> {
     let mut query = QueryBuilder::new(
         "WITH incoming(source_key,object_id,favorite,rating_set,rating,play_count,skip_count,last_played) AS (",
     );
@@ -49,7 +47,7 @@ pub(crate) async fn publish_source_user_data(
            OR (incoming.skip_count IS NOT NULL AND current.source_skip_count IS NOT incoming.skip_count)
            OR (incoming.last_played IS NOT NULL AND current.source_last_played IS NOT incoming.last_played))"
     ));
-    Ok(query.build().execute(connection).await?.rows_affected() > 0)
+    query
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -202,7 +200,7 @@ impl Database {
             .fetch_one(&mut *transaction)
             .await?;
         if known {
-            let changed = publish_source_user_data(&mut transaction, target.kind(), |query| {
+            let changed = source_user_data_query(target.kind(), |query| {
                 query
                     .push("SELECT source_key,object_id,")
                     .push_bind(favorite)
@@ -212,7 +210,11 @@ impl Database {
                     ))
                     .push_bind(target.media_uri());
             })
-            .await?;
+            .build()
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected()
+                > 0;
             if changed {
                 sqlx::query(sqlx::AssertSqlSafe(format!(
                     "UPDATE sources SET catalog_revision=catalog_revision+1 WHERE source_key=(SELECT source_key FROM {}s WHERE media_uri=?1)",

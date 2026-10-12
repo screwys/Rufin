@@ -23,10 +23,6 @@ pub enum SourceEvent {
         configured: ConfiguredSources,
         selected: SelectedLibrary,
     },
-    CatalogReplaced {
-        configured: ConfiguredSources,
-        selected: SelectedLibrary,
-    },
     Operation(SourceOperation),
     ArtworkPreparation {
         source_key: SourceKey,
@@ -55,6 +51,7 @@ pub struct CatalogPublication {
 pub enum CatalogChange {
     /// Completed source acquisition; refresh selected folder/count summaries too.
     Acquired,
+    Scope,
     Broad,
     Home,
     Playlists(Option<PlaylistKey>),

@@ -130,12 +130,6 @@ fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
         } => {
             apply_selected_source(shell, configured, selected);
         }
-        SourceEvent::CatalogReplaced {
-            configured,
-            selected,
-        } => {
-            apply_selected_library_replacement(shell, configured, selected);
-        }
         SourceEvent::Operation(operation) => apply_source_operation(shell, operation),
         SourceEvent::ArtworkPreparation {
             source_key,
@@ -299,41 +293,31 @@ fn apply_selected_source(
     finish_source_assignment(shell, previous_source, next_source);
 }
 
-fn apply_selected_library_replacement(
-    shell: &Rc<Shell>,
-    configured: rufin_core::runtime::source::ConfiguredSources,
-    selected: rufin_core::runtime::SelectedLibrary,
-) {
-    let scope_changed = shell.selected_library().is_none_or(|previous| {
-        previous.music_folder_key != selected.music_folder_key
-            || previous.music_folder_object_id != selected.music_folder_object_id
-    });
-    let source_key = selected.source_key;
-    *shell.source.configured.borrow_mut() = configured;
-    shell.selected_ui.replace_library(selected.clone());
-    shell
-        .chrome
-        .topbar
-        .search_session
-        .set_selected(Some(selected));
-    if scope_changed {
-        shell.player_ui.refresh_queue_window();
-        refresh_context_playlist_picker(shell);
-        shell.rebuild_sidebar_navigation();
-        shell.replace_current_route_when_ready();
-    } else {
-        apply_catalog_publication(
-            shell,
-            CatalogPublication {
-                source_key: Some(source_key),
-                favorite: None,
-                change: CatalogChange::Broad,
-            },
-        );
-    }
-}
-
 fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication) {
+    let mut scope_changed = false;
+    if matches!(
+        publication.change,
+        CatalogChange::Acquired | CatalogChange::Scope
+    ) && let Some(selected) = shell.products.source.selected_library()
+        && publication.source_key == Some(selected.source_key)
+        && shell
+            .selected_library()
+            .is_some_and(|current| current.source_key == selected.source_key)
+    {
+        {
+            let mut session = shell.selected_ui.session_mut().unwrap();
+            scope_changed = session.library.music_folder_key != selected.music_folder_key
+                || session.library.music_folder_object_id != selected.music_folder_object_id;
+            session.library.music_folder_key = selected.music_folder_key;
+            session.library.music_folder_object_id = selected.music_folder_object_id.clone();
+            session.library.music_folders = Arc::clone(&selected.music_folders);
+        }
+        shell
+            .chrome
+            .topbar
+            .search_session
+            .set_selected(Some(selected));
+    }
     if matches!(
         publication.change,
         CatalogChange::Acquired | CatalogChange::Broad | CatalogChange::Playlists(_)
@@ -342,7 +326,10 @@ fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication)
     }
     if matches!(
         publication.change,
-        CatalogChange::Acquired | CatalogChange::Broad | CatalogChange::Album(_)
+        CatalogChange::Acquired
+            | CatalogChange::Scope
+            | CatalogChange::Broad
+            | CatalogChange::Album(_)
     ) {
         shell.player_ui.refresh_queue_window();
     }
@@ -387,10 +374,20 @@ fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication)
             {
                 return;
             }
-            if current == Route::Home {
+            if scope_changed {
+                shell.rebuild_sidebar_navigation();
+                shell.replace_current_route_when_ready();
+            } else if current == Route::Home {
                 shell.refresh_mounted_home();
             } else {
                 shell.refresh_mounted_catalog();
+            }
+        }
+        CatalogChange::Scope => {
+            if affects_current {
+                refresh_context_playlist_picker(shell);
+                shell.rebuild_sidebar_navigation();
+                shell.replace_current_route_when_ready();
             }
         }
         CatalogChange::Home => {

@@ -75,6 +75,7 @@ pub struct CachedSource {
     pub object_id: String,
     pub display_name: String,
     pub artwork_digest: Vec<u8>,
+    pub catalog_complete: bool,
 }
 
 /// One relation fact in a bounded Scan page.
@@ -115,8 +116,6 @@ pub struct Scan {
     authoritative: bool,
     distinct_track_covers: bool,
     failed: bool,
-    favorites: Option<[String; 3]>,
-    user_data: Vec<(&'static str, String, crate::SourceUserData)>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -247,7 +246,7 @@ impl Scan {
         Ok(sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM sources
              WHERE object_id=?1 AND freshness=?2 AND distinct_track_covers=?3
-               AND catalog_revision>0)",
+               AND catalog_complete)",
         )
         .bind(source_id)
         .bind(freshness.as_bytes())
@@ -291,8 +290,6 @@ impl Scan {
             authoritative: true,
             distinct_track_covers: database.distinct_track_covers(),
             failed: false,
-            favorites: None,
-            user_data: Vec::new(),
         })
     }
 
@@ -435,19 +432,20 @@ impl Scan {
     }
 
     pub async fn finish_batch(&mut self) -> LibraryResult<()> {
-        let Some(mut writer) = self.batch_writer.take() else {
-            return Err(LibraryError::InvalidScan(
-                "no acquisition batch is active".into(),
-            ));
-        };
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         if self.failed {
-            sqlx::sqlite::SqliteTransactionManager::rollback(connection).await?;
-            self.changes = self.batch_changes.take().unwrap();
-        } else {
-            sqlx::sqlite::SqliteTransactionManager::commit(connection).await?;
-            self.batch_changes = None;
+            self.incomplete();
         }
+        if let Some(mut writer) = self.batch_writer.take() {
+            let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+            if self.failed {
+                sqlx::sqlite::SqliteTransactionManager::rollback(connection).await?;
+                self.changes = self.batch_changes.take().unwrap();
+            } else {
+                sqlx::sqlite::SqliteTransactionManager::commit(connection).await?;
+                self.batch_changes = None;
+            }
+        }
+        self.failed = false;
         Ok(())
     }
 
@@ -720,11 +718,27 @@ impl Scan {
         self.execute(sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO temp.scan_seen(kind,object_id,written,supplied) SELECT 'album',album.object_id,0,{} FROM albums album WHERE album.album_key IN (SELECT album_key FROM tracks WHERE track_key IN ({tracks})) ON CONFLICT(kind,object_id) DO UPDATE SET supplied=supplied|excluded.supplied",entities::ALBUM_SUPPLIED))).bind(self.source).bind(parameter)).await
     }
 
-    pub fn replace_favorites(&mut self, tracks: &[String], albums: &[String], artists: &[String]) {
-        self.favorites = Some(
-            [tracks, albums, artists]
-                .map(|ids| serde_json::to_string(ids).expect("favorite IDs serialize")),
-        );
+    pub async fn replace_favorites(
+        &mut self,
+        tracks: &[String],
+        albums: &[String],
+        artists: &[String],
+    ) -> LibraryResult<()> {
+        for (kind, ids) in [("track", tracks), ("album", albums), ("artist", artists)] {
+            let ids = serde_json::to_string(ids)?;
+            let mut query = crate::favorites::source_user_data_query(kind, |query| {
+                query
+                    .push("SELECT ")
+                    .push_bind(self.source)
+                    .push(",object_id,object_id IN (SELECT value FROM json_each(")
+                    .push_bind(ids)
+                    .push(")),0,NULL,NULL,NULL,NULL FROM ")
+                    .push(format!("{kind}s WHERE source_key="))
+                    .push_bind(self.source);
+            });
+            self.changes.user_data |= self.execute_result(query.build()).await?.rows_affected() > 0;
+        }
+        Ok(())
     }
 
     pub async fn remove_unstaged_playlists(&mut self) -> LibraryResult<()> {
@@ -739,27 +753,49 @@ impl Scan {
         .await
     }
 
-    /// Stages sparse facts only for an admitted entity. Unknown IDs need metadata first.
+    /// Updates admitted source entities in bounded batches. Unknown IDs need metadata first.
     pub async fn write_source_user_data(
         &mut self,
-        kind: &'static str,
-        object_id: String,
-        facts: crate::SourceUserData,
-    ) -> LibraryResult<bool> {
-        if !self.contains_entity(kind, &object_id, true).await? {
-            return Ok(false);
+        facts: &[(&'static str, String, crate::SourceUserData)],
+    ) -> LibraryResult<()> {
+        for kind in ["track", "album", "artist"] {
+            let mut facts = facts
+                .iter()
+                .filter(|(entry_kind, _, _)| *entry_kind == kind);
+            loop {
+                let rows = facts
+                    .by_ref()
+                    .take(128)
+                    .map(|(_, id, fact)| {
+                        (
+                            id,
+                            fact.favorite,
+                            fact.rating.is_some(),
+                            fact.rating.flatten(),
+                            fact.play_count,
+                            fact.last_played,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                if rows.is_empty() {
+                    break;
+                }
+                let rows = serde_json::to_string(&rows)?;
+                let mut query = crate::favorites::source_user_data_query(kind, |query| {
+                    query.push("SELECT ").push_bind(self.source)
+                        .push(",owner.object_id,json_extract(fact.value,'$[1]'),json_extract(fact.value,'$[2]'),json_extract(fact.value,'$[3]'),json_extract(fact.value,'$[4]'),NULL,json_extract(fact.value,'$[5]') FROM json_each(")
+                        .push_bind(rows).push(format!(") fact CROSS JOIN {kind}s owner ON owner.source_key="))
+                        .push_bind(self.source).push(" AND owner.indexed AND owner.object_id=json_extract(fact.value,'$[0]')");
+                });
+                self.changes.user_data |=
+                    self.execute_result(query.build()).await?.rows_affected() > 0;
+            }
         }
-        self.user_data.push((kind, object_id, facts));
-        Ok(true)
+        Ok(())
     }
 
     pub async fn finish(mut self) -> LibraryResult<()> {
-        if self.batch_writer.is_some() {
-            self.finish_batch().await?;
-        }
-        if self.failed {
-            self.incomplete();
-        }
+        self.finish_batch().await?;
         let mut writer = self.database.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         let update = self.finalize(connection).await?;
@@ -784,11 +820,6 @@ impl Scan {
         let Some(current) = current else {
             return Ok(None);
         };
-        if self.failed {
-            sqlx::query("DELETE FROM temp.scan_artwork")
-                .execute(&mut *transaction)
-                .await?;
-        }
         let mut changed = self.changes;
         if self.authoritative {
             let (album_metadata, album_user_data) =
@@ -816,14 +847,20 @@ impl Scan {
             self.distinct_track_covers,
             self.point_update,
             self.local_point_update,
+            self.authoritative,
         )
         .await?;
         if !self.import_files {
-            files::prune_local_files(&mut transaction, source, full).await?;
+            files::prune_local_files(
+                &mut transaction,
+                source,
+                full,
+                self.local_point_update && self.authoritative,
+            )
+            .await?;
         }
         let catalog_changed = changed.metadata;
         changed.metadata |= changed.user_data;
-        changed.metadata |= self.publish_user_data(&mut transaction, source).await?;
         let any = changed.metadata || changed.playlists || changed.artwork || home_changed;
         if current.catalog_revision == 0 && !any && !full {
             return Ok(None);
@@ -875,49 +912,6 @@ impl Scan {
             tracks_added: changed.tracks_added,
             song_rekeys: self.song_rekeys.clone().into(),
         }))
-    }
-
-    async fn publish_user_data(
-        &self,
-        connection: &mut SqliteConnection,
-        source: i64,
-    ) -> LibraryResult<bool> {
-        let mut changed = false;
-        for (index, kind) in ["track", "album", "artist"].into_iter().enumerate() {
-            if let Some(favorites) = &self.favorites {
-                changed |= crate::favorites::publish_source_user_data(connection, kind, |query| {
-                    query
-                        .push("SELECT ")
-                        .push_bind(source)
-                        .push(",object_id,object_id IN (SELECT value FROM json_each(")
-                        .push_bind(&favorites[index])
-                        .push(")),0,NULL,NULL,NULL,NULL FROM ")
-                        .push(format!("{kind}s WHERE source_key="))
-                        .push_bind(source);
-                })
-                .await?;
-            }
-            let facts = self
-                .user_data
-                .iter()
-                .filter(|(item_kind, _, _)| *item_kind == kind);
-            if facts.clone().next().is_some() {
-                changed |= crate::favorites::publish_source_user_data(connection, kind, |query| {
-                    query.push_values(facts.clone(), |mut row, (_, id, fact)| {
-                        row.push_bind(source)
-                            .push_bind(id)
-                            .push_bind(fact.favorite)
-                            .push_bind(fact.rating.is_some())
-                            .push_bind(fact.rating.flatten())
-                            .push_bind(fact.play_count)
-                            .push("NULL")
-                            .push_bind(fact.last_played);
-                    });
-                })
-                .await?;
-            }
-        }
-        Ok(changed)
     }
 
     fn require_id(&mut self, kind: &'static str, value: &str) -> LibraryResult<()> {
@@ -993,7 +987,7 @@ impl Database {
         sqlx::query("UPDATE sources SET kind=?2,display_name=?3,normalized_name=?4 WHERE source_key=?1 AND (kind,display_name,normalized_name) IS NOT (?2,?3,?4)")
             .bind(source).bind(kind).bind(name).bind(name.to_lowercase()).execute(&mut *transaction).await?;
         let cached = sqlx::query_as::<_, CachedSource>(
-            "SELECT source_key source,object_id,display_name,artwork_digest FROM sources
+            "SELECT source_key source,object_id,display_name,artwork_digest,catalog_complete FROM sources
              WHERE source_key=?1",
         )
         .bind(source)
@@ -1011,8 +1005,8 @@ impl Database {
         validate_id("source", object_id)?;
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         Ok(sqlx::query_as::<_, CachedSource>(
-            "SELECT source_key source,object_id,display_name,artwork_digest
-             FROM sources WHERE object_id=?1 AND catalog_revision>0",
+            "SELECT source_key source,object_id,display_name,artwork_digest,catalog_complete
+             FROM sources WHERE object_id=?1",
         )
         .bind(object_id)
         .fetch_optional(&mut *connection)

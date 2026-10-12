@@ -439,6 +439,43 @@ mod tests {
             }
             assert!(server.received_requests().await.unwrap().is_empty());
             server.verify().await;
+            server.reset().await;
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(503))
+                .mount(&server)
+                .await;
+            assert!(
+                source
+                    .apply_changes(
+                        &database,
+                        [
+                            ("missing".into(), RemoteItemUpdate::Metadata),
+                            (
+                                "track".into(),
+                                RemoteItemUpdate::UserData(library::SourceUserData {
+                                    play_count: Some(9),
+                                    ..Default::default()
+                                })
+                            ),
+                        ]
+                    )
+                    .await
+                    .is_err()
+            );
+            assert!(updates.try_recv().unwrap().metadata);
+            assert!(
+                updates.try_recv().is_err(),
+                "one catalog notification after partial failure"
+            );
+            assert_eq!(
+                database
+                    .track_row_by_uri(&track.media_uri, &cancellation)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .play_count,
+                9
+            );
             for (album_id, removed) in [("3272", false), ("other", true)] {
                 server.reset().await;
                 let item_path = match kind {

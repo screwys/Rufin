@@ -3431,6 +3431,7 @@ impl Source {
         let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
         let result = async {
             let (mut upserts, mut removals) = (Vec::new(), Vec::new());
+            let mut user_data = Vec::new();
             for (id, change) in items {
                 match change {
                     RemoteItemUpdate::Remove => removals.push(id),
@@ -3439,13 +3440,9 @@ impl Source {
                         let mut known = false;
                         if let Implementation::JellyfinEmby(provider) = &self.implementation {
                             for kind in ["track", "album", "artist"] {
-                                known |= scan
-                                    .write_source_user_data(
-                                        kind,
-                                        provider.kind.object_id(kind, &id),
-                                        facts.clone(),
-                                    )
-                                    .await?;
+                                let object = provider.kind.object_id(kind, &id);
+                                known |= scan.contains_entity(kind, &object, true).await?;
+                                user_data.push((kind, object, facts.clone()));
                             }
                         }
                         if !known {
@@ -3454,11 +3451,24 @@ impl Source {
                     }
                 }
             }
-            if !upserts.is_empty() || !removals.is_empty() {
-                self.stage_items(&mut scan, upserts, removals).await?;
-                self.stage_item_relations(&mut scan).await?;
+            let metadata = async {
+                if !upserts.is_empty() || !removals.is_empty() {
+                    self.stage_items(&mut scan, upserts, removals).await?;
+                    self.stage_item_relations(&mut scan).await?;
+                }
+                Ok(())
             }
-            Ok(())
+            .await;
+            if !user_data.is_empty() {
+                if metadata.is_err() {
+                    scan.interrupted();
+                }
+                scan.finish_batch().await?;
+                scan.begin_batch().await?;
+                scan.write_source_user_data(&user_data).await?;
+                scan.finish_batch().await?;
+            }
+            metadata
         }
         .await;
         crate::finish_scan(scan, result).await

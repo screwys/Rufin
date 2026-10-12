@@ -1436,11 +1436,12 @@ mod tests {
         assert!(destination.connect_apply(&records).await.unwrap());
         let cancellation = ReadCancellation::new();
         assert!(
-            destination
+            !destination
                 .cached_source("server", &cancellation)
                 .await
                 .unwrap()
-                .is_none()
+                .unwrap()
+                .catalog_complete
         );
         let track: (String, bool) =
             sqlx::query_as("SELECT title,indexed FROM tracks WHERE media_uri=?1")

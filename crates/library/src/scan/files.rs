@@ -572,6 +572,7 @@ pub(super) async fn prune_local_files(
     transaction: &mut Transaction<'_, Sqlite>,
     source_key: i64,
     full: bool,
+    completed_local_component: bool,
 ) -> LibraryResult<()> {
     sqlx::query(
         "DELETE FROM local_files WHERE source_key=?1 AND
@@ -582,7 +583,7 @@ pub(super) async fn prune_local_files(
     .bind(full)
     .execute(&mut **transaction)
     .await?;
-    if full {
+    if full || completed_local_component {
         sqlx::query("UPDATE local_files SET state='accepted' WHERE source_key=?1 AND kind='directory' AND state='observed'
             AND path IN (SELECT path FROM temp.scan_local_seen WHERE kind='directory' AND pending_directory=0)")
             .bind(source_key).execute(&mut **transaction).await?;

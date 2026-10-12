@@ -125,6 +125,20 @@ pub(crate) async fn catch_up(
                 break;
             }
             after = page.last().map(|file| file.local_file_key);
+            let unfinished_directories = page
+                .iter()
+                .filter(|file| {
+                    file.kind == library::LocalFileKind::Directory
+                        && file.state != library::LocalFileState::Accepted
+                })
+                .map(|file| file.path.clone())
+                .collect::<Vec<_>>();
+            let traversed = scan
+                .local_inventory_files(&unfinished_directories)
+                .await?
+                .into_iter()
+                .map(|file| file.path)
+                .collect::<BTreeSet<_>>();
             let changed_paths = page
                 .iter()
                 .filter(|file| {
@@ -135,6 +149,7 @@ pub(crate) async fn catch_up(
                             | library::LocalFileKind::Directory
                     )
                 })
+                .filter(|file| !traversed.contains(&file.path))
                 .filter(|file| cached_observation_changed(file))
                 .map(|file| PathBuf::from(&file.path))
                 .collect::<Vec<_>>();
@@ -179,6 +194,8 @@ fn cached_observation_changed(file: &library::LocalFileRow) -> bool {
         .unwrap_or_default();
     file.size_bytes != size
         || file.mtime_ns != mtime_ns
+        || file.kind == library::LocalFileKind::Directory
+            && file.state != library::LocalFileState::Accepted
         || matches!(
             file.kind,
             library::LocalFileKind::Media | library::LocalFileKind::Cue
@@ -285,13 +302,27 @@ async fn stage_component_paths(
     seeds: &[String],
     cancelled: &(dyn Fn() -> bool + Send + Sync),
 ) -> SourceResult<()> {
+    let roots = &local
+        .roots()
+        .iter()
+        .map(PathBuf::as_path)
+        .collect::<BTreeSet<_>>();
     for page in seeds.chunks(LOCAL_BATCH_SIZE) {
         check_cancelled(cancelled)?;
-        stage_component_path_page(scan, source, page).await?;
+        stage_component_path_page(scan, source, roots, page).await?;
     }
 
     let mut walked = Vec::with_capacity(LOCAL_BATCH_SIZE);
-    for directory in paths.iter().filter(|path| path.is_dir()) {
+    let directories = paths
+        .iter()
+        .filter(|path| path.is_dir())
+        .collect::<BTreeSet<_>>();
+    let mut traversed: Option<&Path> = None;
+    for directory in directories {
+        if traversed.is_some_and(|parent| directory.starts_with(parent)) {
+            continue;
+        }
+        traversed = Some(directory);
         for entry in WalkDir::new(directory)
             .follow_links(false)
             .sort_by_file_name()
@@ -304,13 +335,13 @@ async fn stage_component_paths(
             })?;
             walked.push(entry.path().to_string_lossy().into_owned());
             if walked.len() == LOCAL_BATCH_SIZE {
-                stage_component_path_page(scan, source, &walked).await?;
+                stage_component_path_page(scan, source, roots, &walked).await?;
                 walked.clear();
             }
         }
     }
     if !walked.is_empty() {
-        stage_component_path_page(scan, source, &walked).await?;
+        stage_component_path_page(scan, source, roots, &walked).await?;
     }
     Ok(())
 }
@@ -318,12 +349,21 @@ async fn stage_component_paths(
 async fn stage_component_path_page(
     scan: &mut Scan,
     source: library::SourceKey,
+    roots: &BTreeSet<&Path>,
     paths: &[String],
 ) -> SourceResult<()> {
     let mut directories = BTreeSet::new();
     let mut image_directories = BTreeSet::new();
+    let mut observations = Vec::new();
     for path in paths.iter().map(PathBuf::from) {
         let target = if path.is_dir() {
+            observations.push(file_observation(
+                roots,
+                &path,
+                library::LocalFileKind::Directory,
+                library::LocalFileState::Accepted,
+                &[],
+            )?);
             &mut directories
         } else if crate::file::artwork::supported_image(&path) {
             &mut image_directories
@@ -345,6 +385,7 @@ async fn stage_component_path_page(
     }
     scan.begin_batch().await?;
     scan.write_local_component_paths(paths).await?;
+    persist_observations(scan, observations).await?;
     scan.expand_local_artwork_prefixes(
         source,
         &directories.into_iter().collect::<Vec<_>>(),
@@ -387,13 +428,7 @@ async fn stage_component(
             if !path.exists() {
                 missing.push(path.to_string_lossy().into_owned());
             } else if path.is_dir() {
-                observations.push(file_observation(
-                    roots,
-                    &path,
-                    library::LocalFileKind::Directory,
-                    library::LocalFileState::Observed,
-                    &[],
-                )?);
+                continue;
             } else if crate::file::artwork::supported_image(&path) {
                 observations.push(file_observation(
                     roots,
@@ -642,7 +677,7 @@ async fn stage_roots(
             let (kind, state, dependencies) = if entry.file_type().is_dir() {
                 (
                     library::LocalFileKind::Directory,
-                    library::LocalFileState::Observed,
+                    library::LocalFileState::Accepted,
                     Vec::new(),
                 )
             } else if is_cue(path) {
@@ -960,12 +995,12 @@ async fn stage_audio_batch(
             }
         }
     }
-    persist_observations(scan, observations).await?;
     let accepted_count = accepted.len();
     if !aliases.is_empty() {
         scan.rekey_songs(database.merge_local_file_uris(&aliases).await?);
     }
     scan.begin_batch().await?;
+    persist_observations(scan, observations).await?;
     let inputs = accepted
         .into_iter()
         .map(|track| track.into_inputs(scan.accepted_at()))

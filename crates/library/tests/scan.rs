@@ -1258,9 +1258,14 @@ async fn identical_and_artwork_only_incomplete_scans_retain_unseen_local_files()
             Vec::new(),
         )
     });
-    for (index, artwork) in [b"first".as_slice(), b"first", b"second"]
-        .into_iter()
-        .enumerate()
+    for (index, artwork) in [
+        Some(b"first".as_slice()),
+        Some(b"first"),
+        None,
+        Some(b"second"),
+    ]
+    .into_iter()
+    .enumerate()
     {
         let mut scan = Scan::begin(&database, "local", "Local", "local", None)
             .await
@@ -1269,7 +1274,7 @@ async fn identical_and_artwork_only_incomplete_scans_retain_unseen_local_files()
             object_id: "genre".into(),
             name: "Genre".into(),
             sort_text: Some("genre".into()),
-            artwork_binding: Some(artwork.to_vec()),
+            artwork_binding: artwork.map(<[u8]>::to_vec),
         })
         .await
         .unwrap();
@@ -1288,10 +1293,23 @@ async fn identical_and_artwork_only_incomplete_scans_retain_unseen_local_files()
         let outcome = updates.try_recv().unwrap();
         assert!(match index {
             0 => outcome.metadata,
-            1 => !outcome.changed(),
+            1 | 2 => !outcome.changed(),
             _ => outcome.artwork,
         });
         let mut reader = connection(&path).await;
+        assert_eq!(
+            sqlx::query_scalar::<_, Vec<u8>>(
+                "SELECT artwork_binding FROM genres WHERE object_id='genre'"
+            )
+            .fetch_one(&mut reader)
+            .await
+            .unwrap(),
+            if index < 3 {
+                b"first".as_slice()
+            } else {
+                b"second".as_slice()
+            }
+        );
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT count(*) FROM local_files")
                 .fetch_one(&mut reader)
@@ -1319,6 +1337,7 @@ async fn saved_source_opens_from_cache_without_starting_a_scan() {
         .expect("cached source");
 
     assert_eq!(cached.source, publication.source);
+    assert!(cached.catalog_complete);
     assert_eq!(cached.display_name, "Source One");
     assert_eq!(cached.artwork_digest, publication.artwork_digest);
     assert_eq!(
@@ -1344,11 +1363,30 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
             object_id: "kept".into(),
             name: "Kept".into(),
             sort_text: Some("kept".into()),
+            artwork_binding: Some(b"kept-art".to_vec()),
             ..Default::default()
         })
         .await
         .expect("write a useful record");
+    failed
+        .write_track(&library::TrackInput {
+            object_id: "known".into(),
+            title: "Known".into(),
+            sort_text: "known".into(),
+            favorite: Some(false),
+            source_play_count: Some(1),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
     failed.finish_batch().await.expect("commit first batch");
+    let partial = database
+        .cached_source("source-two", &ReadCancellation::new())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(partial.source, failed.source());
+    assert!(!partial.catalog_complete);
     failed.begin_batch().await.expect("begin later batch");
     failed
         .write_genre(&library::GenreInput {
@@ -1359,6 +1397,18 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         })
         .await
         .expect("write before the invalid record");
+    failed
+        .write_source_user_data(&[(
+            "track",
+            "known".into(),
+            library::SourceUserData {
+                favorite: Some(true),
+                play_count: Some(9),
+                ..Default::default()
+            },
+        )])
+        .await
+        .unwrap();
     failed
         .write_track(&library::TrackInput {
             object_id: "".into(),
@@ -1375,6 +1425,37 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         })
         .await
         .expect_err("empty identity fails the current batch");
+    failed
+        .finish_batch()
+        .await
+        .expect("settle the failed batch");
+    let mut outside = connection(&path).await;
+    assert_eq!(sqlx::query_as::<_, (bool, i64)>(
+        "SELECT source_favorite,source_play_count FROM tracks WHERE source_key=?1 AND object_id='known'"
+    ).bind(failed.source()).fetch_one(&mut outside).await.unwrap(), (false, 1));
+    failed
+        .begin_batch()
+        .await
+        .expect("begin independent accepted facts");
+    failed
+        .write_source_user_data(&[(
+            "track",
+            "known".into(),
+            library::SourceUserData {
+                favorite: Some(true),
+                play_count: Some(2),
+                ..Default::default()
+            },
+        )])
+        .await
+        .unwrap();
+    failed
+        .finish_batch()
+        .await
+        .expect("commit independent accepted facts");
+    assert_eq!(sqlx::query_as::<_, (bool, i64)>(
+        "SELECT source_favorite,source_play_count FROM tracks WHERE source_key=?1 AND object_id='known'"
+    ).bind(failed.source()).fetch_one(&mut outside).await.unwrap(), (true, 2));
     let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
     database.observe_catalog(move |update| {
         let _ = updates_tx.send(update);
@@ -1382,8 +1463,25 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
     });
     failed.finish().await.expect("finish failed scan");
     let update = updates.try_recv().unwrap();
-    assert!(update.metadata);
-    let mut outside = connection(&path).await;
+    assert!(update.metadata && update.artwork);
+    assert!(
+        !database
+            .cached_source("source-two", &ReadCancellation::new())
+            .await
+            .unwrap()
+            .unwrap()
+            .catalog_complete
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, Vec<u8>>(
+            "SELECT artwork_binding FROM genres WHERE source_key=?1 AND object_id='kept'"
+        )
+        .bind(update.source)
+        .fetch_one(&mut outside)
+        .await
+        .unwrap(),
+        b"kept-art"
+    );
     assert_eq!(
         sqlx::query_scalar::<_, String>(
             "SELECT object_id FROM genres WHERE source_key=(SELECT source_key FROM sources WHERE object_id='source-two') ORDER BY object_id",

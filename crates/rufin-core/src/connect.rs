@@ -588,12 +588,16 @@ impl ConnectOwner {
         let weak = Arc::downgrade(self);
         let stop = session.stop.clone();
         let mut configuration = self.source.configuration_changes();
+        let mut catalog = self.source.catalog_changes();
         self.runtime.spawn(async move {
             stop.run_until_cancelled(async move {
+                let mut configure = true;
                 loop {
                     let Some(owner) = weak.upgrade() else { return };
-                    if let Err(error) = owner.configure_network().await {
-                        owner.failed(error);
+                    if configure {
+                        if let Err(error) = owner.configure_network().await {
+                            owner.failed(error);
+                        }
                     }
                     loop {
                         let mut busy = false;
@@ -629,10 +633,13 @@ impl ConnectOwner {
                         owner.failed(error);
                     }
                     drop(owner);
-                    tokio::select! {
-                        _ = tokio::time::sleep(Duration::from_secs(300)) => {},
-                        _ = configuration.changed() => {},
-                    }
+                    configure = tokio::select! {
+                        biased;
+                        _ = tokio::time::sleep(Duration::from_secs(300)) => true,
+                        _ = configuration.changed() => true,
+                        _ = catalog.changed() => false,
+                    };
+                    catalog.borrow_and_update();
                 }
             })
             .await;

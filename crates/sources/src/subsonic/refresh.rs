@@ -69,7 +69,8 @@ impl SubsonicSource {
             &ids("song", "track"),
             &ids("album", "album"),
             &ids("artist", "artist"),
-        );
+        )
+        .await?;
         Ok(())
     }
 

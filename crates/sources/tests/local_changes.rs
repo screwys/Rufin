@@ -277,9 +277,8 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
     let track = root.path().join("track.wav");
     write_silent_wav(&track, 1).expect("WAV");
     let store = tempfile::tempdir().expect("Store");
-    let database = Database::open(store.path().join("library.sqlite"))
-        .await
-        .expect("Database");
+    let database_path = store.path().join("library.sqlite");
+    let database = Database::open(&database_path).await.expect("Database");
     let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
     database.observe_catalog(move |update| {
         let _ = sender.send(update);
@@ -320,7 +319,16 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
         1_000
     );
 
+    database.close().await.expect("close before file edit");
     write_silent_wav(&track, 2).expect("edit WAV in place");
+    let database = Database::open(&database_path)
+        .await
+        .expect("reopen after edit");
+    let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |update| {
+        let _ = sender.send(update);
+        std::future::ready(())
+    });
     source
         .catch_up_local(
             &database,
@@ -340,7 +348,16 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
             .duration_millis,
         2_000
     );
+    database.close().await.expect("close before file removal");
     fs::remove_file(&track).expect("remove cached file while stopped");
+    let database = Database::open(&database_path)
+        .await
+        .expect("reopen after removal");
+    let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |update| {
+        let _ = sender.send(update);
+        std::future::ready(())
+    });
     source
         .catch_up_local(
             &database,
@@ -367,9 +384,8 @@ async fn restart_catch_up_accepts_file_bookkeeping_without_catalog_change() {
     let track = root.path().join("track.wav");
     write_silent_wav(&track, 1).expect("WAV");
     let store = tempfile::tempdir().expect("Store");
-    let database = Database::open(store.path().join("library.sqlite"))
-        .await
-        .expect("Database");
+    let database_path = store.path().join("library.sqlite");
+    let database = Database::open(&database_path).await.expect("Database");
     let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
     database.observe_catalog(move |update| {
         let _ = sender.send(update);
@@ -408,6 +424,87 @@ async fn restart_catch_up_accepts_file_bookkeeping_without_catalog_change() {
 
     let update = updates.try_recv().expect("catalog update");
     assert!(!update.changed());
+
+    for index in 0..130 {
+        fs::create_dir_all(root.path().join(format!("pending-{index:03}/nested"))).unwrap();
+    }
+    let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stop = Arc::clone(&cancelled);
+    assert!(matches!(
+        source
+            .manual_refresh(
+                &database,
+                &configuration.name,
+                &move |progress| {
+                    if progress.stage == sources::SourceReadStage::Files {
+                        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                },
+                cancelled,
+            )
+            .await,
+        Err(sources::SourceError::Cancelled)
+    ));
+    assert!(
+        database
+            .cached_source(configuration.source_id.as_str(), &ReadCancellation::new())
+            .await
+            .unwrap()
+            .unwrap()
+            .catalog_complete
+    );
+    database.close().await.unwrap();
+    let database = Database::open(&database_path).await.unwrap();
+    let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |update| {
+        let _ = sender.send(update);
+        std::future::ready(())
+    });
+    source
+        .catch_up_local(
+            &database,
+            initial.source,
+            &|_| {},
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
+        .await
+        .unwrap();
+    assert!(!updates.try_recv().unwrap().changed());
+    let mut files = Vec::new();
+    loop {
+        let page = database
+            .local_file_page(
+                initial.source,
+                files
+                    .last()
+                    .map(|file: &library::LocalFileRow| file.local_file_key),
+                128,
+                &ReadCancellation::new(),
+            )
+            .await
+            .unwrap();
+        if page.is_empty() {
+            break;
+        }
+        files.extend(page);
+    }
+    assert_eq!(files.len(), 263);
+    assert!(
+        files
+            .iter()
+            .filter(|file| file.kind == library::LocalFileKind::Directory)
+            .all(|file| file.state == library::LocalFileState::Accepted)
+    );
+    source
+        .catch_up_local(
+            &database,
+            initial.source,
+            &|_| {},
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
+        .await
+        .unwrap();
+    assert!(!updates.try_recv().unwrap().changed());
 }
 
 #[tokio::test]

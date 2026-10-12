@@ -81,10 +81,54 @@ async fn fixture() -> (tempfile::TempDir, Database) {
 
 #[tokio::test]
 async fn favorite_and_play_count_changes_do_not_report_new_tracks() {
-    let (_directory, database) = fixture().await;
-    for (favorite, plays) in [(true, 1), (false, 2)] {
+    let (directory, database) = fixture().await;
+    let mut raw = super::support::connection(&directory.path().join("library.sqlite3")).await;
+    sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,indexed,source_favorite,source_play_count)
+        SELECT source_key,'unknown',?1,0,0,0 FROM sources WHERE object_id='source'")
+        .bind(library::source_entity_uri(&library::SourceId::new("source"), "track", "unknown"))
+        .execute(&mut raw).await.unwrap();
+    for (favorite, plays, changed) in [(true, 1, true), (true, 1, false), (false, 2, true)] {
         let mut scan = Scan::begin_items(&database, "source").await.unwrap();
-        track(&mut scan, Some(favorite), Some(plays)).await;
+        scan.write_source_user_data(&[
+            (
+                "track",
+                "track".into(),
+                library::SourceUserData {
+                    favorite: Some(favorite),
+                    play_count: Some(plays),
+                    ..Default::default()
+                },
+            ),
+            (
+                "track",
+                "unknown".into(),
+                library::SourceUserData {
+                    favorite: Some(true),
+                    play_count: Some(42),
+                    ..Default::default()
+                },
+            ),
+        ])
+        .await
+        .unwrap();
+        assert_eq!(
+            sqlx::query_as::<_, (bool, i64)>(
+                "SELECT source_favorite,source_play_count FROM tracks WHERE object_id='unknown'"
+            )
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+            (false, 0)
+        );
+        assert_eq!(
+            sqlx::query_as::<_, (bool, Option<i64>, Option<i64>)>(
+                "SELECT source_favorite,source_play_count,source_rating FROM tracks WHERE object_id='track'"
+            )
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+            (favorite, Some(plays), Some(80))
+        );
         let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
         database.observe_catalog(move |update| {
             let _ = updates_tx.send(update);
@@ -92,7 +136,7 @@ async fn favorite_and_play_count_changes_do_not_report_new_tracks() {
         });
         scan.finish().await.unwrap();
         let publication = updates.try_recv().unwrap();
-        assert!(publication.metadata);
+        assert_eq!(publication.metadata, changed);
         assert!(!publication.tracks_added);
     }
 }
@@ -145,15 +189,9 @@ async fn favorite_snapshots_replace_only_source_favorites_and_keep_catalog_fresh
                 Vec::new()
             }
         };
-        scan.replace_favorites(&ids("track"), &ids("album"), &ids("artist"));
-        let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |update| {
-            let _ = updates_tx.send(update);
-            std::future::ready(())
-        });
-        scan.finish().await.unwrap();
-        let outcome = updates.try_recv().unwrap();
-        assert_eq!(outcome.metadata, changed);
+        scan.replace_favorites(&ids("track"), &ids("album"), &ids("artist"))
+            .await
+            .unwrap();
         for table in ["tracks", "albums", "artists"] {
             let sql = format!("SELECT source_favorite,source_rating FROM {table}");
             assert_eq!(
@@ -164,6 +202,14 @@ async fn favorite_snapshots_replace_only_source_favorites_and_keep_catalog_fresh
                 (favorite, Some(80))
             );
         }
+        let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = updates_tx.send(update);
+            std::future::ready(())
+        });
+        scan.finish().await.unwrap();
+        let outcome = updates.try_recv().unwrap();
+        assert_eq!(outcome.metadata, changed);
         assert!(
             database
                 .favorite(&library::FavoriteTarget::Track(uri.clone()))

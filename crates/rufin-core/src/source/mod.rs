@@ -59,9 +59,7 @@ pub(crate) struct SelectedSourceState {
     pub(crate) music_folder_key: Option<FolderKey>,
     pub(crate) music_folder_object_id: Option<String>,
     pub(crate) music_folders: Arc<[FolderRow]>,
-    pub(crate) track_count: usize,
-    pub(crate) formula_match_count: usize,
-    pub(crate) sample_source_path: Option<String>,
+    pub(crate) local_access_status: LocalAccessStatus,
 }
 
 impl SelectedSourceState {
@@ -110,16 +108,6 @@ impl ActiveSource {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone()
-    }
-
-    fn replace(&self, current: Arc<SelectedSourceState>) {
-        let mut slot = self
-            .current
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if slot.is_some() {
-            *slot = Some(current);
-        }
     }
 
     fn update(
@@ -431,7 +419,6 @@ impl Shared {
             &event,
             SourceEvent::Configured(_)
                 | SourceEvent::Selected { .. }
-                | SourceEvent::CatalogReplaced { .. }
                 | SourceEvent::ReleaseSelected
         ) {
             self.configuration_changed.send_replace(());
@@ -820,7 +807,7 @@ impl SourceOwner {
             .cached_source(source_id.as_str(), &ReadCancellation::new())
             .await
             .map_err(string_error)?;
-        let cached_start = cached.is_some();
+        let cached_start = cached.is_some_and(|source| source.catalog_complete);
         let publication = self
             .shared
             .database
@@ -903,13 +890,11 @@ impl SourceOwner {
         Ok(())
     }
 
-    async fn selected_state(
+    async fn source_catalog(
         &self,
-        configured: ConfiguredSource,
-        source: Option<Arc<Source>>,
+        configured: &ConfiguredSource,
         source_key: SourceKey,
-        artwork_digest: [u8; 32],
-    ) -> Result<Arc<SelectedSourceState>, String> {
+    ) -> Result<(Arc<[FolderRow]>, Option<FolderKey>, LocalAccessStatus), String> {
         let cancellation = ReadCancellation::new();
         let folder_order = self
             .shared
@@ -960,20 +945,15 @@ impl SourceOwner {
             .map_err(string_error)?
             .pop()
             .map(|track| track.source_path);
-        Ok(Arc::new(SelectedSourceState {
-            configuration: configured.configuration.clone(),
-            source,
-            source_key,
-            artwork_digest,
-            database: Arc::clone(&self.shared.database),
-            runtime: self.shared.runtime.clone(),
-            music_folder_key: folder_key,
-            music_folder_object_id: requested_folder,
-            music_folders: folders,
-            track_count,
-            formula_match_count,
-            sample_source_path,
-        }))
+        Ok((
+            folders,
+            folder_key,
+            LocalAccessStatus {
+                total_track_count: track_count,
+                matched_track_count: formula_match_count,
+                sample_source_path,
+            },
+        ))
     }
 
     async fn install_selected(
@@ -983,18 +963,25 @@ impl SourceOwner {
         source_state: library::CachedSource,
         acquisition: Arc<AtomicBool>,
     ) -> Result<(), String> {
-        let selected = self
-            .selected_state(
-                configured,
-                source,
-                source_state.source,
-                source_state
-                    .artwork_digest
-                    .as_slice()
-                    .try_into()
-                    .map_err(string_error)?,
-            )
+        let (music_folders, music_folder_key, local_access_status) = self
+            .source_catalog(&configured, source_state.source)
             .await?;
+        let selected = Arc::new(SelectedSourceState {
+            configuration: configured.configuration,
+            source,
+            source_key: source_state.source,
+            artwork_digest: source_state
+                .artwork_digest
+                .as_slice()
+                .try_into()
+                .map_err(string_error)?,
+            database: Arc::clone(&self.shared.database),
+            runtime: self.shared.runtime.clone(),
+            music_folder_key,
+            music_folder_object_id: configured.music_folder_id,
+            music_folders,
+            local_access_status,
+        });
         let session = ActiveSource::new(&self.shared, Arc::clone(&selected));
         if !self.shared.acquisition_is_current(&acquisition) {
             return Ok(());
@@ -1504,11 +1491,7 @@ impl SourceOwner {
             })
             .await;
         }
-        let mut event = SourceEvent::CatalogPublished(CatalogPublication {
-            source_key: Some(update.source),
-            favorite: None,
-            change,
-        });
+        let mut counts_updated = false;
         if let Some(session) = self.shared.selected_session() {
             session.update(update.source, |current| {
                 current.artwork_digest = update.artwork_digest;
@@ -1520,23 +1503,15 @@ impl SourceOwner {
                 && let Ok(configured) =
                     configured_source(&self.shared.settings.load().sources, source_id)
             {
-                match self
-                    .selected_state(
-                        configured,
-                        selected.source.clone(),
-                        update.source,
-                        update.artwork_digest,
-                    )
-                    .await
-                {
-                    Ok(selected) => {
-                        session.replace(selected);
-                        if let Some(selected) = session.resolve() {
-                            event = SourceEvent::CatalogReplaced {
-                                configured: self.shared.configured_sources(Some(&selected)),
-                                selected: ui_selected(selected, session.clone()),
-                            };
-                        }
+                match self.source_catalog(&configured, update.source).await {
+                    Ok((folders, folder_key, local_access_status)) => {
+                        counts_updated = true;
+                        session.update(update.source, |current| {
+                            current.music_folders = folders;
+                            current.music_folder_key = folder_key;
+                            current.music_folder_object_id = configured.music_folder_id;
+                            current.local_access_status = local_access_status;
+                        });
                     }
                     Err(error) => self.shared.warn_nonfatal(&error),
                 }
@@ -1548,22 +1523,32 @@ impl SourceOwner {
         if let Ok(playback) = self.shared.playback() {
             playback.catalog_changed();
         }
-        if update.metadata && matches!(event, SourceEvent::CatalogPublished(_)) {
-            if let Err(error) = self
-                .shared
-                .refresh_source_counts(source_id, update.source)
-                .await
+        if update.metadata {
+            if !counts_updated
+                && let Err(error) = self
+                    .shared
+                    .refresh_source_counts(source_id, update.source)
+                    .await
             {
                 self.shared.warn_nonfatal(&error);
             }
-            self.shared
+            let _ = self
+                .shared
+                .outputs
+                .events
                 .send(SourceEvent::Configured(
                     self.shared
                         .configured_sources(self.shared.selected().as_deref()),
                 ))
                 .await;
         }
-        self.shared.send(event).await;
+        self.shared
+            .send(SourceEvent::CatalogPublished(CatalogPublication {
+                source_key: Some(update.source),
+                favorite: None,
+                change,
+            }))
+            .await;
         if let Some(session) = self.shared.selected_session()
             && session
                 .resolve()
@@ -1657,7 +1642,7 @@ impl SourceOwner {
                 return Ok(());
             };
             let Some(current) = session.update(selected.source_key, |current| {
-                current.formula_match_count = formula_match_count;
+                current.local_access_status.matched_track_count = formula_match_count;
             }) else {
                 return Ok(());
             };
@@ -2692,7 +2677,7 @@ impl SourceOwner {
                     .await;
                 if let Some(session) = owner.shared.selected_session() {
                     session.update(selected.source_key, |current| {
-                        current.formula_match_count = 0;
+                        current.local_access_status.matched_track_count = 0;
                     });
                 }
                 let _ = owner
@@ -3017,10 +3002,7 @@ impl ActiveSource {
             if folder_object_id.is_some() && key.is_none() {
                 return Ok(());
             }
-            let mut replacement = (*selected).clone();
-            replacement.music_folder_key = key;
-            replacement.music_folder_object_id = folder_object_id.clone();
-            let configured = replacement.configuration.clone();
+            let configured = selected.configuration.clone();
             let _ = owner.shared.settings.update(|stored| {
                 if let Some(item) = stored
                     .sources
@@ -3032,27 +3014,32 @@ impl ActiveSource {
                 }
                 Ok(())
             });
-            let replacement = Arc::new(replacement);
             if let Some(session) = owner.shared.selected_session() {
-                session.replace(Arc::clone(&replacement));
+                session.update(selected.source_key, |current| {
+                    current.music_folder_key = key;
+                    current.music_folder_object_id = folder_object_id;
+                });
             }
             let _ = owner
                 .shared
                 .downloads
                 .attach(
-                    replacement.source_id().clone(),
-                    replacement.source_key,
-                    replacement.source.clone(),
-                    replacement.music_folder_key,
+                    selected.source_id().clone(),
+                    selected.source_key,
+                    selected.source.clone(),
+                    key,
                 )
                 .await;
-            let session = owner.shared.selected_session().expect("selected session");
             owner
                 .shared
-                .send(SourceEvent::CatalogReplaced {
-                    configured: owner.shared.configured_sources(Some(&replacement)),
-                    selected: ui_selected(replacement, session),
-                })
+                .send(SourceEvent::Configured(
+                    owner
+                        .shared
+                        .configured_sources(owner.shared.selected().as_deref()),
+                ))
+                .await;
+            owner
+                .publish_catalog(&selected, None, CatalogChange::Scope)
                 .await;
             Ok(())
         })
@@ -3686,11 +3673,7 @@ fn configured_sources(
                 access,
                 status: selected
                     .filter(|selected| selected.source_id() == &configured.configuration.source_id)
-                    .map(|selected| LocalAccessStatus {
-                        total_track_count: selected.track_count,
-                        matched_track_count: selected.formula_match_count,
-                        sample_source_path: selected.sample_source_path.clone(),
-                    })
+                    .map(|selected| selected.local_access_status.clone())
                     .unwrap_or_default(),
                 selected_music_folder_name: selected
                     .and_then(|selected| {
@@ -4316,9 +4299,7 @@ mod artwork_preparation_tests {
                 music_folder_key: None,
                 music_folder_object_id: None,
                 music_folders: Arc::from([]),
-                track_count: 0,
-                formula_match_count: 0,
-                sample_source_path: None,
+                local_access_status: LocalAccessStatus::default(),
             }),
         );
         for (revision, visible) in [(1, true), (2, false), (3, true), (4, false)] {
@@ -4426,6 +4407,8 @@ mod artwork_preparation_tests {
             owner.publish_operation(SourceOperation::Idle).await;
             *owner.shared.selected.lock().unwrap() = selected.then(|| session.clone());
             while receiver.try_recv().is_ok() {}
+            let configuration = owner.configuration_changes();
+            let catalog = owner.catalog_changes();
             owner
                 .catalog_updated(CatalogUpdate {
                     source_id: source_id.clone(),
@@ -4440,6 +4423,11 @@ mod artwork_preparation_tests {
                     song_rekeys: Arc::from([]),
                 })
                 .await;
+            assert!(
+                !configuration.has_changed().unwrap(),
+                "catalog data does not change source configuration"
+            );
+            assert_eq!(catalog.has_changed().unwrap(), metadata || artwork);
             let mut refreshing = false;
             let mut published = false;
             while let Ok(event) = receiver.try_recv() {
@@ -4779,10 +4767,15 @@ mod artwork_preparation_tests {
             scan.finish().await.unwrap();
             tokio::time::timeout(Duration::from_secs(2), async {
                 loop {
-                    if let SourceEvent::CatalogReplaced { selected, .. } =
-                        receiver.recv().await.unwrap()
+                    if let SourceEvent::CatalogPublished(CatalogPublication {
+                        change: CatalogChange::Acquired,
+                        ..
+                    }) = receiver.recv().await.unwrap()
                     {
-                        assert_eq!(selected.music_folders[0].object_id, "new-folder");
+                        assert_eq!(
+                            owner.selected_library().unwrap().music_folders[0].object_id,
+                            "new-folder"
+                        );
                         break;
                     }
                 }
@@ -5125,9 +5118,7 @@ mod artwork_preparation_tests {
                 music_folder_key: None,
                 music_folder_object_id: None,
                 music_folders: Arc::from([]),
-                track_count: 0,
-                formula_match_count: 0,
-                sample_source_path: None,
+                local_access_status: LocalAccessStatus::default(),
             });
             let weak_selected = Arc::downgrade(&selected);
             let (retirement, _) = tokio::sync::watch::channel(false);
