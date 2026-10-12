@@ -121,9 +121,8 @@ impl PlexSource {
         ] {
             match self.home_section(section).await {
                 Ok(entries) => {
-                    for entry in entries {
-                        scan.write_home_entry(&entry).await?;
-                    }
+                    scan.replace_home_section(section.id(), None, &entries)
+                        .await?;
                 }
                 Err(error) => {
                     crate::source::optional_collection_error(error)?;
@@ -208,7 +207,8 @@ impl PlexSource {
             let rows = items(&page["MediaContainer"]["Metadata"]);
             let finished = page_finished(&page, offset, rows.len())?;
             scan.begin_batch().await?;
-            for (position, item) in rows.iter().enumerate() {
+            let mut entries = Vec::with_capacity(rows.len());
+            for item in rows {
                 if item["type"].as_str() != Some("track") {
                     continue;
                 }
@@ -220,14 +220,13 @@ impl PlexSource {
                 for record in records(scan.source_id(), item)? {
                     scan.write_record(&record).await?;
                 }
-                scan.write_playlist_entry(
-                    playlist_id,
-                    &entry,
-                    &plex_id("track", &raw),
-                    (offset + position) as i64,
-                )
-                .await?;
+                entries.push(library::PlaylistEntryInput {
+                    object_id: entry,
+                    track_id: plex_id("track", &raw),
+                });
             }
+            scan.write_playlist_page(playlist_id, offset, &entries, finished)
+                .await?;
             scan.finish_batch().await?;
             offset += rows.len();
             if finished {
@@ -322,7 +321,7 @@ impl PlexSource {
             .iter()
             .take(24)
             .enumerate()
-            .filter_map(|(position, item)| home_entry(section.id(), position, item))
+            .filter_map(|(position, item)| home_entry(position, item))
             .collect())
     }
 
@@ -341,6 +340,8 @@ impl PlexSource {
             Ok(page) => page,
             Err(error) => {
                 crate::source::optional_collection_error(error)?;
+                scan.retain_home_sections_with_prefix(&format!("plex:{section}:"))
+                    .await?;
                 return Ok(());
             }
         };
@@ -349,17 +350,19 @@ impl PlexSource {
                 continue;
             };
             let section_id = format!("plex:{section}:{identifier}");
+            let mut entries = Vec::new();
+            scan.begin_batch().await?;
             for (position, item) in items(&hub["Metadata"]).iter().take(24).enumerate() {
-                if let Some(entry) = home_entry(&section_id, position, item) {
+                if let Some(entry) = home_entry(position, item) {
                     for record in records(scan.source_id(), item)? {
                         scan.write_record(&record).await?;
                     }
-                    scan.write_home_entry(&entry).await?;
+                    entries.push(entry);
                 }
             }
-            if let Some(title) = hub["title"].as_str() {
-                scan.write_home_section_title(&section_id, title).await?;
-            }
+            scan.replace_home_section(&section_id, hub["title"].as_str(), &entries)
+                .await?;
+            scan.finish_batch().await?;
             for station in items(&hub["Directory"])
                 .iter()
                 .chain(items(&hub["Metadata"]))
@@ -369,25 +372,28 @@ impl PlexSource {
                 let Some(key) = station["key"].as_str() else {
                     continue;
                 };
+                let mix_section = format!("{section_id}:{}", crate::policy::stable_hash(key));
                 let candidates = match self.station_candidates(key, 24).await {
                     Ok(rows) => rows,
                     Err(error) => {
                         crate::source::optional_collection_error(error)?;
+                        scan.retain_home_section(&mix_section).await?;
                         continue;
                     }
                 };
-                let mix_section = format!("{section_id}:{}", crate::policy::stable_hash(key));
+                let mut entries = Vec::new();
+                scan.begin_batch().await?;
                 for (position, item) in candidates.iter().enumerate() {
-                    if let Some(entry) = home_entry(&mix_section, position, item) {
+                    if let Some(entry) = home_entry(position, item) {
                         for record in records(scan.source_id(), item)? {
                             scan.write_record(&record).await?;
                         }
-                        scan.write_home_entry(&entry).await?;
+                        entries.push(entry);
                     }
                 }
-                if let Some(title) = station["title"].as_str() {
-                    scan.write_home_section_title(&mix_section, title).await?;
-                }
+                scan.replace_home_section(&mix_section, station["title"].as_str(), &entries)
+                    .await?;
+                scan.finish_batch().await?;
             }
         }
         Ok(())
@@ -427,7 +433,7 @@ impl PlexSource {
     }
 }
 
-fn home_entry(section: &str, position: usize, item: &Value) -> Option<HomeEntryInput> {
+fn home_entry(position: usize, item: &Value) -> Option<HomeEntryInput> {
     let raw = id(&item["ratingKey"])?;
     let kind = match item["type"].as_str()? {
         "track" => HomeEntryKind::Track,
@@ -435,7 +441,6 @@ fn home_entry(section: &str, position: usize, item: &Value) -> Option<HomeEntryI
         _ => return None,
     };
     Some(HomeEntryInput {
-        section_id: section.into(),
         position: position as i64,
         kind,
         entity_object_id: plex_id(item["type"].as_str()?, &raw),
@@ -630,11 +635,11 @@ pub(super) mod tests {
         }
         let playlist =
             json!({"ratingKey":"list","type":"playlist","title":"Repeated","smart":true});
-        Mock::given(method("GET")).and(path("/hubs/sections/1")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"MediaContainer":{"Hub":[
+        let mut hubs = Some(Mock::given(method("GET")).and(path("/hubs/sections/1")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"MediaContainer":{"Hub":[
             {"hubIdentifier":"related","title":"Picked for You","Metadata":[track()]},
             {"hubIdentifier":"mixes","title":"Mixes","Metadata":[{"type":"playlist","radio":true,"title":"Your Evening Mix","key":"/library/metadata/artist/station/abc?type=10"}]}
-        ]}}))).mount(&server).await;
-        Mock::given(method("POST"))
+        ]}}))).mount_as_scoped(&server).await);
+        let stations = Mock::given(method("POST"))
             .and(path("/playQueues"))
             .and(query_param("type", "audio"))
             .and(query_param("window", "24"))
@@ -642,7 +647,7 @@ pub(super) mod tests {
                 ResponseTemplate::new(200)
                     .set_body_json(json!({"MediaContainer":{"Metadata":[track()]}})),
             )
-            .mount(&server)
+            .mount_as_scoped(&server)
             .await;
         Mock::given(method("GET"))
             .and(path("/playlists"))
@@ -733,9 +738,10 @@ pub(super) mod tests {
         assert_eq!(moods[0].track_count, 1);
         assert_eq!(
             database
-                .track_loudness(publication.source, row.track_key, &cancellation)
+                .playback_loudness(&uri, &cancellation)
                 .await
                 .unwrap()
+                .0
                 .unwrap()
                 .replay_gain_db,
             Some(-4.25)
@@ -804,6 +810,49 @@ pub(super) mod tests {
         scan.finish().await.unwrap();
         let update = updates.try_recv().expect("catalog update");
         assert!(!update.changed());
+        drop(stations);
+        let unavailable_stations = Mock::given(method("POST"))
+            .and(path("/playQueues"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount_as_scoped(&server)
+            .await;
+        for failed_hubs in [false, true] {
+            let unavailable_hubs = if failed_hubs {
+                drop(hubs.take());
+                Some(
+                    Mock::given(method("GET"))
+                        .and(path("/hubs/sections/1"))
+                        .respond_with(ResponseTemplate::new(503))
+                        .mount_as_scoped(&server)
+                        .await,
+                )
+            } else {
+                None
+            };
+            let mut scan = Scan::begin(&database, "plex-test", "Plex", "plex", None)
+                .await
+                .unwrap();
+            source
+                .stage_catalog(&mut scan, &|_| {}, &|| false)
+                .await
+                .unwrap();
+            scan.finish().await.unwrap();
+            assert!(!updates.try_recv().expect("retained Home update").changed());
+            let retained = database
+                .home_page(
+                    publication.source,
+                    None,
+                    0,
+                    0,
+                    &library::HomeBlockKind::all(),
+                    &cancellation,
+                )
+                .await
+                .unwrap();
+            assert_eq!(retained.provider_sections, home.provider_sections);
+            drop(unavailable_hubs);
+        }
+        drop(unavailable_stations);
         database
             .set_favorite(&library::FavoriteTarget::Track(uri.clone()), true)
             .await

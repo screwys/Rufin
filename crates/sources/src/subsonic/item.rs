@@ -400,14 +400,14 @@ pub(super) fn playlist_entries_from_json(
     source: &SubsonicSource,
     playlist_id: &str,
     entries: &Value,
-) -> Vec<PlaylistEntry> {
+) -> Vec<library::PlaylistEntryInput> {
     json::items(entries)
         .iter()
         .enumerate()
         .filter_map(|(index, song)| {
             let raw_track_id = json::id(&song["id"])?;
-            Some(PlaylistEntry {
-                occurrence_id: playlist_entry_id(playlist_id, index, &raw_track_id),
+            Some(library::PlaylistEntryInput {
+                object_id: playlist_entry_id(playlist_id, index, &raw_track_id),
                 track_id: source.id("track", &raw_track_id),
             })
         })

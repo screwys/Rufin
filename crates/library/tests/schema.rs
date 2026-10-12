@@ -52,14 +52,46 @@ async fn extra_source_fields_preserve_library_data() {
     let fixture = super::support::fixture().await;
     fixture.database.close().await.unwrap();
     let mut raw = super::support::connection(&fixture.path).await;
-    sqlx::raw_sql("ALTER TABLE sources ADD COLUMN extra_value TEXT")
-        .execute(&mut raw)
-        .await
-        .unwrap();
+    sqlx::raw_sql(
+        "ALTER TABLE sources ADD COLUMN extra_value TEXT;
+        ALTER TABLE loudness_measurements RENAME TO current_loudness;
+        CREATE TABLE loudness_measurements (
+            source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
+            entity_kind TEXT NOT NULL CHECK(entity_kind IN ('track','album')),
+            entity_key INTEGER NOT NULL,analysis_key BLOB NOT NULL CHECK(length(analysis_key)=32),
+            integrated_lufs REAL,true_peak REAL,origin TEXT NOT NULL DEFAULT 'source',
+            PRIMARY KEY(source_key,entity_kind,entity_key)
+        ) STRICT;
+        INSERT INTO loudness_measurements SELECT * FROM current_loudness;
+        DROP TABLE current_loudness;
+        PRAGMA user_version=57;",
+    )
+    .execute(&mut raw)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO loudness_measurements SELECT source_key,'track',track_key,loudness_analysis_key,-19.0,0.75,'analysis' FROM tracks WHERE track_key=?1")
+        .bind(fixture.tracks[0]).execute(&mut raw).await.unwrap();
     raw.close().await.unwrap();
     let before = durable_rows(&fixture.path).await;
     let reopened = Database::open(&fixture.path).await.unwrap();
     assert_eq!(durable_rows(&fixture.path).await, before);
+    let mut raw = super::support::connection(&fixture.path).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("PRAGMA user_version")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        58
+    );
+    sqlx::query("INSERT INTO loudness_measurements SELECT source_key,entity_kind,entity_key,analysis_key,-15.0,0.85,'source' FROM loudness_measurements WHERE origin='analysis'")
+        .execute(&mut raw).await.unwrap();
+    let values = sqlx::query_as::<_, (String,f64)>("SELECT origin,integrated_lufs FROM loudness_measurements WHERE entity_key=?1 ORDER BY origin")
+        .bind(fixture.tracks[0]).fetch_all(&mut raw).await.unwrap();
+    assert_eq!(
+        values,
+        vec![("analysis".into(), -19.0), ("source".into(), -15.0)]
+    );
+    raw.close().await.unwrap();
     reopened.close().await.unwrap();
 }
 
@@ -792,7 +824,7 @@ async fn schema_43_fixture_relocates_and_migrates_every_core_durable_family_and_
             .fetch_one(&mut reader)
             .await
             .expect("read migrated version"),
-        57
+        58
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>(
@@ -1051,7 +1083,7 @@ async fn schema_43_malformed_listen_keeps_valid_siblings_and_preserves_input() {
             .fetch_one(&mut reader)
             .await
             .expect("read rebuilt schema version"),
-        57
+        58
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>("SELECT external_id FROM listens ORDER BY listen_key")
@@ -1101,7 +1133,7 @@ async fn fresh_schema_has_one_durable_entity_family() {
             .fetch_one(&mut raw)
             .await
             .unwrap(),
-        57
+        58
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
@@ -1316,7 +1348,7 @@ async fn schema_39_store_runs_the_committed_chain_into_current_schema() {
             .fetch_one(&mut reader)
             .await
             .expect("read current schema version"),
-        57
+        58
     );
     let definition = sqlx::query_scalar::<_, String>(
         "SELECT definition_json FROM smart_playlists WHERE object_id='smart-list'",
@@ -1357,7 +1389,7 @@ async fn released_migration_ignores_unused_catalog_damage() {
             .fetch_one(&mut restored)
             .await
             .expect("read repaired schema version"),
-        57
+        58
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sources WHERE catalog_complete=1")

@@ -1528,7 +1528,7 @@ mod tests {
                 crate::schema::pragma(&mut reader, "user_version")
                     .await
                     .unwrap(),
-                57
+                58
             );
             assert_eq!(
                 sqlx::query_scalar::<_, i64>(

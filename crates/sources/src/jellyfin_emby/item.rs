@@ -166,7 +166,6 @@ pub(super) fn track_from_item(
 pub(super) fn home_entry_from_item(
     server: ServerKind,
     item: &Value,
-    section_id: &str,
     position: usize,
     kind: library::HomeEntryKind,
 ) -> Option<library::HomeEntryInput> {
@@ -191,7 +190,6 @@ pub(super) fn home_entry_from_item(
         _ => unreachable!(),
     };
     Some(library::HomeEntryInput {
-        section_id: section_id.to_string(),
         position: position as i64,
         kind,
         entity_object_id: server.object_id(entity, &item_id),

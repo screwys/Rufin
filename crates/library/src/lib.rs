@@ -86,8 +86,8 @@ pub use queue::{
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
 pub use scan::{
     AlbumInput, AlbumRelationsInput, ArtistInput, CachedSource, CatalogUpdate, FolderInput,
-    Freshness, GenreInput, LocalArtworkCandidate, LoudnessInput, MoodInput, PlaylistInput,
-    RecordInput, Scan, ScanLink, TrackInput, TrackRelationsInput,
+    Freshness, GenreInput, LocalArtworkCandidate, LoudnessInput, MoodInput, PlaylistEntryInput,
+    PlaylistInput, RecordInput, Scan, ScanLink, TrackInput, TrackRelationsInput,
 };
 pub use search::{SearchRequest, SearchResults};
 pub use smart_playlists::{

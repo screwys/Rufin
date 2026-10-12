@@ -118,15 +118,13 @@ impl SubsonicSource {
         let snapshot = self.read_playlist(scan.source_id(), playlist_id).await?;
         scan.begin_batch().await?;
         scan.write_playlist(&snapshot.playlist.header).await?;
-        for (position, entry) in snapshot.entries.iter().enumerate() {
-            scan.write_playlist_entry(
-                &snapshot.playlist.header.object_id,
-                &entry.occurrence_id,
-                &entry.track_id,
-                position as i64,
-            )
-            .await?;
-        }
+        scan.write_playlist_page(
+            &snapshot.playlist.header.object_id,
+            0,
+            &snapshot.entries,
+            true,
+        )
+        .await?;
         scan.write_playlist_freshness(
             &snapshot.playlist.header.object_id,
             snapshot.playlist.revision.as_deref(),
@@ -141,12 +139,11 @@ impl SubsonicSource {
         &self,
         section: crate::SourceHomeSection,
     ) -> SourceResult<Vec<library::HomeEntryInput>> {
-        let (section_id, list_type, extra) = match section {
-            crate::SourceHomeSection::MostPlayed => ("most-played", "frequent", Vec::new()),
-            crate::SourceHomeSection::NewlyAdded => ("newly-added", "newest", Vec::new()),
-            crate::SourceHomeSection::RecentlyPlayed => ("recently-played", "recent", Vec::new()),
+        let (list_type, extra) = match section {
+            crate::SourceHomeSection::MostPlayed => ("frequent", Vec::new()),
+            crate::SourceHomeSection::NewlyAdded => ("newest", Vec::new()),
+            crate::SourceHomeSection::RecentlyPlayed => ("recent", Vec::new()),
             crate::SourceHomeSection::RecentlyReleased => (
-                "recently-released",
                 "byYear",
                 vec![
                     ("fromYear", current_year().to_string()),
@@ -159,11 +156,11 @@ impl SubsonicSource {
         let body: Value = self.get_json("getAlbumList2", &query).await?;
         json::items(&body["albumList2"]["album"])
             .iter()
+            .take(24)
             .filter_map(|album| Some((self.id("album", &json::id(&album["id"])?), album)))
             .enumerate()
             .map(|(position, (object_id, album))| {
                 Ok(library::HomeEntryInput {
-                    section_id: section_id.to_string(),
                     position: position as i64,
                     kind: library::HomeEntryKind::Album,
                     entity_object_id: object_id,
@@ -490,9 +487,8 @@ impl SubsonicSource {
                     continue;
                 }
             };
-            scan.begin_batch().await?;
-            scan.replace_home_section(section.id(), &entries).await?;
-            scan.finish_batch().await?;
+            scan.replace_home_section(section.id(), None, &entries)
+                .await?;
         }
         Ok(())
     }
@@ -1013,23 +1009,29 @@ mod tests {
                     .await
                     .unwrap();
                 previous
-                    .write_playlist_entry(
+                    .write_playlist_page(
                         "cached-playlist",
-                        "occurrence",
-                        "subsonic:track:removed",
                         0,
+                        &[library::PlaylistEntryInput {
+                            object_id: "occurrence".into(),
+                            track_id: "subsonic:track:removed".into(),
+                        }],
+                        true,
                     )
                     .await
                     .unwrap();
                 previous
-                    .write_home_entry(&library::HomeEntryInput {
-                        section_id: "recently-played".into(),
-                        position: 0,
-                        kind: library::HomeEntryKind::Album,
-                        entity_object_id: "subsonic:album:album".into(),
-                        title: "Album".into(),
-                        subtitle: "Artist".into(),
-                    })
+                    .replace_home_section(
+                        "recently-played",
+                        None,
+                        &[library::HomeEntryInput {
+                            position: 0,
+                            kind: library::HomeEntryKind::Album,
+                            entity_object_id: "subsonic:album:album".into(),
+                            title: "Album".into(),
+                            subtitle: "Artist".into(),
+                        }],
+                    )
                     .await
                     .unwrap();
                 previous.finish().await.unwrap();
@@ -1237,7 +1239,6 @@ mod tests {
             .expect("OpenSubsonic Newly Added");
 
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].section_id, "newly-added");
         assert_eq!(entries[0].title, "New Album");
     }
 }

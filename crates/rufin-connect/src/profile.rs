@@ -2480,17 +2480,25 @@ mod tests {
                     })
                     .await
                     .unwrap();
-                    for position in 0..140 {
-                        let entry = if revision == 0 {
-                            position
-                        } else {
-                            139 - position
-                        };
-                        scan.write_playlist_entry(
+                    for offset in (0..140).step_by(64) {
+                        let entries = (offset..(offset + 64).min(140))
+                            .map(|position| {
+                                let entry = if revision == 0 {
+                                    position
+                                } else {
+                                    139 - position
+                                };
+                                library::PlaylistEntryInput {
+                                    object_id: format!("entry-{entry}"),
+                                    track_id: format!("track-{entry}"),
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        scan.write_playlist_page(
                             "mix",
-                            &format!("entry-{entry}"),
-                            &format!("track-{entry}"),
-                            position,
+                            offset,
+                            &entries,
+                            offset + entries.len() == 140,
                         )
                         .await
                         .unwrap();

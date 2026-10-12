@@ -2970,24 +2970,14 @@ impl ActiveSource {
                     };
                     match source.home_section(section).await {
                         Ok(entries) => {
-                            let section_id = entries
-                                .first()
-                                .map(|entry| entry.section_id.as_str())
-                                .unwrap_or(match section {
-                                    sources::SourceHomeSection::MostPlayed => "most-played",
-                                    sources::SourceHomeSection::NewlyAdded => "newly-added",
-                                    sources::SourceHomeSection::RecentlyPlayed => "recently-played",
-                                    sources::SourceHomeSection::RecentlyReleased => {
-                                        "recently-released"
-                                    }
-                                });
                             let result = async {
                                 let mut scan = library::Scan::begin_items(
                                     &selected.database,
                                     selected.source_id().as_str(),
                                 )
                                 .await?;
-                                scan.replace_home_section(section_id, &entries).await?;
+                                scan.replace_home_section(section.id(), None, &entries)
+                                    .await?;
                                 scan.finish().await
                             }
                             .await;

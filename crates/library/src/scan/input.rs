@@ -110,6 +110,12 @@ pub struct PlaylistInput {
     pub metadata_writable: Option<bool>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlaylistEntryInput {
+    pub object_id: String,
+    pub track_id: String,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum RecordInput {
     Track(Box<TrackInput>),

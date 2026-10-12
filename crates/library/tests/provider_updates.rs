@@ -196,11 +196,15 @@ async fn favorite_snapshots_replace_only_source_favorites_and_keep_catalog_fresh
 async fn home_sections_refresh_and_clear_without_replacing_their_entities() {
     let (directory, database) = fixture().await;
     let mut raw = super::support::connection(&directory.path().join("library.sqlite3")).await;
-    for (populated, changed) in [(true, true), (true, false), (false, true)] {
+    for (in_batch, populated, title, changed) in [
+        (false, true, Some("Played"), true),
+        (true, true, Some("Played"), false),
+        (true, true, Some("Popular"), true),
+        (false, false, None, true),
+    ] {
         let mut scan = Scan::begin_items(&database, "source").await.unwrap();
         let entries = if populated {
             vec![library::HomeEntryInput {
-                section_id: "most-played".into(),
                 position: 0,
                 kind: library::HomeEntryKind::Album,
                 entity_object_id: "album".into(),
@@ -210,9 +214,43 @@ async fn home_sections_refresh_and_clear_without_replacing_their_entities() {
         } else {
             vec![]
         };
-        scan.replace_home_section("most-played", &entries)
+        let previous = sqlx::query_as::<_, (String, Option<String>)>(
+            "SELECT title,section_title FROM home_entries",
+        )
+        .fetch_all(&mut raw)
+        .await
+        .unwrap();
+        if in_batch {
+            scan.begin_batch().await.unwrap();
+        }
+        scan.replace_home_section("most-played", title, &entries)
             .await
             .unwrap();
+        if in_batch {
+            assert_eq!(
+                sqlx::query_as::<_, (String, Option<String>)>(
+                    "SELECT title,section_title FROM home_entries",
+                )
+                .fetch_all(&mut raw)
+                .await
+                .unwrap(),
+                previous,
+            );
+            scan.finish_batch().await.unwrap();
+        }
+        assert_eq!(
+            sqlx::query_as::<_, (String, Option<String>)>(
+                "SELECT title,section_title FROM home_entries",
+            )
+            .fetch_all(&mut raw)
+            .await
+            .unwrap(),
+            if populated {
+                vec![("Album".into(), title.map(str::to_string))]
+            } else {
+                vec![]
+            },
+        );
         let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
         database.observe_catalog(move |update| {
             let _ = updates_tx.send(update);
@@ -255,8 +293,8 @@ async fn incomplete_catalog_keeps_home_sections_when_their_refresh_fails() {
     let mut scan = Scan::begin_items(&database, "source").await.unwrap();
     scan.replace_home_section(
         "most-played",
+        None,
         &[library::HomeEntryInput {
-            section_id: "most-played".into(),
             position: 0,
             kind: library::HomeEntryKind::Album,
             entity_object_id: "album".into(),
@@ -270,7 +308,6 @@ async fn incomplete_catalog_keeps_home_sections_when_their_refresh_fails() {
     let mut scan = Scan::begin(&database, "source", "Source", "source", None)
         .await
         .unwrap();
-    scan.incomplete();
     scan.write_album(&library::AlbumInput {
         object_id: "album".into(),
         title: "Album".into(),
@@ -282,15 +319,34 @@ async fn incomplete_catalog_keeps_home_sections_when_their_refresh_fails() {
     })
     .await
     .unwrap();
+    scan.replace_home_section(
+        "newly-added",
+        None,
+        &[library::HomeEntryInput {
+            position: 0,
+            kind: library::HomeEntryKind::Album,
+            entity_object_id: "album".into(),
+            title: "New Album".into(),
+            subtitle: "Artist".into(),
+        }],
+    )
+    .await
+    .unwrap();
+    scan.incomplete();
     scan.retain_home_section("most-played").await.unwrap();
     scan.finish().await.unwrap();
     let mut raw = super::support::connection(&directory.path().join("library.sqlite3")).await;
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM home_entries")
-            .fetch_one(&mut raw)
-            .await
-            .unwrap(),
-        1
+        sqlx::query_as::<_, (String, String)>(
+            "SELECT section_id,title FROM home_entries ORDER BY section_id"
+        )
+        .fetch_all(&mut raw)
+        .await
+        .unwrap(),
+        vec![
+            ("most-played".into(), "Album".into()),
+            ("newly-added".into(), "New Album".into())
+        ]
     );
 }
 
@@ -303,6 +359,7 @@ async fn growing_and_reordering_a_playlist_preserves_occurrence_keys() {
         &["a", "b"][..],
         &["x", "y", "z", "a", "b"][..],
         &["b", "a"][..],
+        &[][..],
     ] {
         let mut scan = Scan::begin_items(&database, "source").await.unwrap();
         scan.write_playlist(&library::PlaylistInput {
@@ -313,11 +370,16 @@ async fn growing_and_reordering_a_playlist_preserves_occurrence_keys() {
         })
         .await
         .unwrap();
-        for (position, id) in ids.iter().enumerate() {
-            scan.write_playlist_entry("playlist", id, "track", position as i64)
-                .await
-                .unwrap();
-        }
+        let entries = ids
+            .iter()
+            .map(|id| library::PlaylistEntryInput {
+                object_id: (*id).into(),
+                track_id: "track".into(),
+            })
+            .collect::<Vec<_>>();
+        scan.write_playlist_page("playlist", 0, &entries, true)
+            .await
+            .unwrap();
         let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
         database.observe_catalog(move |update| {
             let _ = updates_tx.send(update);

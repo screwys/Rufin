@@ -76,7 +76,6 @@ impl HomeEntryKind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct HomeEntryInput {
-    pub section_id: String,
     pub position: i64,
     pub kind: HomeEntryKind,
     pub entity_object_id: String,

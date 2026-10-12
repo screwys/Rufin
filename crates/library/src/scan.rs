@@ -1,7 +1,6 @@
 //! Writes acquired catalog facts directly and tracks completed collection scopes.
 //! Provider acquisition and visible route construction remain outside this module.
 
-use blake3::Hasher;
 use sqlx::query::Query;
 use sqlx::sqlite::{SqliteArguments, SqliteConnection, SqliteQueryResult};
 use sqlx::{Connection, FromRow, QueryBuilder, Sqlite, Transaction};
@@ -10,11 +9,14 @@ use sqlx_core::transaction::TransactionManager;
 mod artwork;
 mod entities;
 mod files;
+mod home;
 mod input;
+mod loudness;
+mod playlists;
 mod relations;
 pub use input::{
     AlbumInput, AlbumRelationsInput, ArtistInput, FolderInput, GenreInput, LoudnessInput,
-    MoodInput, PlaylistInput, RecordInput, TrackInput, TrackRelationsInput,
+    MoodInput, PlaylistEntryInput, PlaylistInput, RecordInput, TrackInput, TrackRelationsInput,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -25,7 +27,6 @@ use crate::{
 
 const MAX_FRESHNESS_BYTES: usize = 64 * 1024;
 const MAX_ROW_BYTES: usize = 8 * 1024 * 1024;
-const LOUDNESS_PAGE_ROWS: i64 = 256;
 
 /// A source-owned cheap fact used to accept an already-current catalog.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -122,6 +123,7 @@ pub struct Scan {
 struct Changes {
     metadata: bool,
     playlists: bool,
+    home: bool,
     artwork: bool,
     tracks_added: bool,
     user_data: bool,
@@ -135,17 +137,6 @@ struct AcceptedSource {
     distinct_track_covers: bool,
     artwork_digest: Vec<u8>,
     catalog_revision: i64,
-}
-
-#[derive(FromRow)]
-struct AlbumAudioKey {
-    album_object_id: String,
-    disc_number: i64,
-    track_number: i64,
-    sort_text: String,
-    object_id: String,
-    source_key: Vec<u8>,
-    current_key: Vec<u8>,
 }
 
 #[derive(Clone, Debug, FromRow)]
@@ -344,21 +335,6 @@ impl Scan {
 
     pub async fn retain_genres(&mut self) -> LibraryResult<()> {
         self.execute(sqlx::query("INSERT OR IGNORE INTO temp.scan_seen(kind,object_id,written) SELECT 'genre',object_id,0 FROM genres WHERE source_key=?1 AND indexed").bind(self.source)).await
-    }
-
-    pub async fn retain_playlists(&mut self) -> LibraryResult<()> {
-        self.execute(sqlx::query("INSERT OR IGNORE INTO temp.scan_seen(kind,object_id,written) SELECT 'playlist',object_id,0 FROM playlists WHERE source_key=?1 AND owner='source' AND indexed").bind(self.source)).await?;
-        self.execute(sqlx::query("DELETE FROM temp.scan_playlist_entries"))
-            .await?;
-        self.execute(sqlx::query("DELETE FROM temp.scan_playlist_scopes"))
-            .await
-    }
-
-    pub async fn retain_home_section(&mut self, section: &str) -> LibraryResult<()> {
-        self.execute(
-            sqlx::query("INSERT OR IGNORE INTO temp.scan_retained_home VALUES(?1)").bind(section),
-        )
-        .await
     }
 
     pub async fn observed_media_uris(&self, uris: &[&str]) -> LibraryResult<Vec<String>> {
@@ -763,175 +739,6 @@ impl Scan {
         .await
     }
 
-    pub async fn retain_playlist_entries_if_fresh(
-        &mut self,
-        object_id: &str,
-        revision: &str,
-        now: i64,
-    ) -> LibraryResult<bool> {
-        let retained = self.execute_result(sqlx::query("UPDATE temp.scan_playlist_scopes SET entries_supplied=0 WHERE object_id=?2 AND EXISTS(SELECT 1 FROM playlists cached WHERE cached.owner='source' AND cached.source_key=?1 AND cached.object_id=?2 AND cached.provider_revision=?3 AND cached.valid_until>?4)").bind(self.source).bind(object_id).bind(revision).bind(now)).await?.rows_affected()>0;
-        if retained {
-            self.execute(sqlx::query("UPDATE temp.scan_artwork AS image SET source=COALESCE(image.source,cached.artwork_binding),binding=COALESCE(image.binding,cached.artwork_binding) FROM playlists cached WHERE cached.owner='source' AND image.kind='playlist' AND image.object_id=?2 AND cached.object_id=image.object_id AND cached.source_key=?1").bind(self.source).bind(object_id)).await?;
-        }
-        Ok(retained)
-    }
-
-    pub async fn write_playlist_freshness(
-        &mut self,
-        object_id: &str,
-        revision: Option<&str>,
-        valid_until: Option<i64>,
-    ) -> LibraryResult<()> {
-        self.execute(sqlx::query("UPDATE playlists SET provider_revision=?3,valid_until=?4 WHERE owner='source' AND source_key=?1 AND object_id=?2 AND (provider_revision,valid_until) IS NOT (?3,?4)").bind(self.source).bind(object_id).bind(revision).bind(valid_until)).await
-    }
-
-    pub async fn write_playlist(&mut self, input: &PlaylistInput) -> LibraryResult<()> {
-        let object_id = input.object_id.as_str();
-        let normalized_name = input.name.to_lowercase();
-        self.require_id("playlist", object_id)?;
-        let first = self.observe("playlist", object_id).await?;
-        self.execute(
-            sqlx::query("INSERT OR IGNORE INTO temp.scan_playlist_scopes(object_id) VALUES(?1)")
-                .bind(object_id),
-        )
-        .await?;
-        self.changes.playlists |= self.execute_result(sqlx::query("INSERT INTO playlists(source_key,owner,object_id,name,normalized_name,sort_text,position)
-            VALUES(?1,'source',?2,?3,?4,?5,(SELECT COALESCE(max(position)+1,0) FROM playlists))
-            ON CONFLICT(source_key,object_id) DO UPDATE SET owner='source',indexed=1,name=excluded.name,normalized_name=excluded.normalized_name,sort_text=excluded.sort_text
-            WHERE (owner,indexed,name,normalized_name,sort_text) IS NOT ('source',1,excluded.name,excluded.normalized_name,excluded.sort_text)")
-            .bind(self.source).bind(object_id).bind(&input.name).bind(normalized_name).bind(&input.sort_text)).await?.rows_affected()>0;
-        self.remember_artwork(
-            "playlist",
-            object_id,
-            input.artwork_binding.as_deref(),
-            first,
-        )
-        .await?;
-        if input.writable.is_some() || input.metadata_writable.is_some() {
-            self.changes.playlists |= self.execute_result(sqlx::query("UPDATE playlists SET writable=COALESCE(?3,writable),metadata_writable=COALESCE(?4,metadata_writable) WHERE owner='source' AND source_key=?1 AND object_id=?2 AND ((?3 IS NOT NULL AND writable IS NOT ?3) OR (?4 IS NOT NULL AND metadata_writable IS NOT ?4))").bind(self.source).bind(object_id).bind(input.writable).bind(input.metadata_writable)).await?.rows_affected()>0;
-        }
-        Ok(())
-    }
-
-    pub async fn write_playlist_entry(
-        &mut self,
-        playlist_id: &str,
-        object_id: &str,
-        track_id: &str,
-        position: i64,
-    ) -> LibraryResult<()> {
-        if self.failed {
-            return Err(LibraryError::ScanFailed);
-        }
-        self.require_id("playlist", playlist_id)?;
-        self.require_id("playlist entry", object_id)?;
-        self.require_id("track", track_id)?;
-        if position < 0 {
-            self.failed = true;
-            return Err(LibraryError::InvalidScan(
-                "playlist position cannot be negative".to_string(),
-            ));
-        }
-        self.require_row_bytes(&[
-            playlist_id.as_bytes(),
-            object_id.as_bytes(),
-            track_id.as_bytes(),
-        ])?;
-        let uri = source_entity_uri(&SourceId::new(&self.source_id), "track", track_id);
-        let result = if let Some(writer) = &mut self.batch_writer {
-            let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-            crate::tracks::remember_song(connection, &uri, Default::default()).await
-        } else {
-            let mut writer = self.database.writer().await?;
-            let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-            if !source_exists(connection, self.source, &self.source_id).await? {
-                self.failed = true;
-                return Err(LibraryError::InvalidScan(
-                    "source was removed during acquisition".into(),
-                ));
-            }
-            crate::tracks::remember_song(connection, &uri, Default::default()).await
-        };
-        if result.is_err() {
-            self.failed = true;
-        }
-        let track = result?;
-        self.execute(
-            sqlx::query("INSERT INTO temp.scan_playlist_entries VALUES (?1,?2,?3,?4) ON CONFLICT DO NOTHING")
-                .bind(playlist_id).bind(object_id).bind(track).bind(position),
-        ).await
-    }
-
-    pub async fn write_home_entry(&mut self, input: &HomeEntryInput) -> LibraryResult<()> {
-        self.require_id("Home section", &input.section_id)?;
-        self.require_id("Home entity", &input.entity_object_id)?;
-        if input.position < 0 {
-            self.failed = true;
-            return Err(LibraryError::InvalidScan(
-                "Home position cannot be negative".to_string(),
-            ));
-        }
-        self.require_row_bytes(&[
-            input.section_id.as_bytes(),
-            input.entity_object_id.as_bytes(),
-            input.title.as_bytes(),
-            input.subtitle.as_bytes(),
-        ])?;
-        self.execute(
-            sqlx::query(
-                "INSERT INTO temp.scan_home_entries SELECT ?1, ?2, ?3, ?4, ?5, ?6, NULL
-                WHERE CASE ?3
-                  WHEN 'track' THEN EXISTS(SELECT 1 FROM tracks WHERE source_key=?7 AND object_id=?4)
-                  WHEN 'album' THEN EXISTS(SELECT 1 FROM albums WHERE source_key=?7 AND object_id=?4)
-                  WHEN 'artist' THEN EXISTS(SELECT 1 FROM artists WHERE source_key=?7 AND object_id=?4)
-                  WHEN 'playlist' THEN EXISTS(SELECT 1 FROM playlists WHERE owner='source' AND source_key=?7 AND object_id=?4)
-                END",
-            )
-            .bind(&input.section_id)
-            .bind(input.position)
-            .bind(input.kind.as_str())
-            .bind(&input.entity_object_id)
-            .bind(&input.title)
-            .bind(&input.subtitle)
-            .bind(self.source),
-        )
-        .await
-    }
-
-    pub async fn write_home_section_title(
-        &mut self,
-        section_id: &str,
-        title: &str,
-    ) -> LibraryResult<()> {
-        self.require_row_bytes(&[section_id.as_bytes(), title.as_bytes()])?;
-        self.execute(
-            sqlx::query("UPDATE temp.scan_home_entries SET section_title=?2 WHERE owner_id=?1")
-                .bind(section_id)
-                .bind(title),
-        )
-        .await
-    }
-
-    pub async fn replace_home_section(
-        &mut self,
-        section: &str,
-        entries: &[HomeEntryInput],
-    ) -> LibraryResult<()> {
-        self.execute(
-            sqlx::query("INSERT OR IGNORE INTO temp.scan_removals VALUES ('home',?1)")
-                .bind(section),
-        )
-        .await?;
-        self.execute(
-            sqlx::query("DELETE FROM temp.scan_home_entries WHERE owner_id=?1").bind(section),
-        )
-        .await?;
-        for entry in entries {
-            self.write_home_entry(entry).await?;
-        }
-        Ok(())
-    }
-
     /// Stages sparse facts only for an admitted entity. Unknown IDs need metadata first.
     pub async fn write_source_user_data(
         &mut self,
@@ -996,14 +803,13 @@ impl Scan {
         changed.playlists |= removed_playlists;
         changed.metadata |=
             relations::prune_relations(&mut transaction, source, self.authoritative).await?;
-        changed.playlists |= publish_playlist_entries(&mut transaction, source).await?;
-        let home_changed = publish_home(&mut transaction, source, full).await?;
+        changed.home |= home::prune_sections(&mut transaction, source, full).await?;
+        let home_changed = changed.home;
         if self.local_point_update {
             changed.metadata |= prune_local_orphans(&mut transaction, source).await?;
         }
-        changed.metadata |= update_album_loudness(&mut transaction, source).await?;
         changed.metadata |=
-            publish_source_loudness(&mut transaction, source, self.authoritative).await?;
+            loudness::finish_measurements(&mut transaction, source, self.authoritative).await?;
         changed.artwork |= artwork::update_artwork(
             &mut transaction,
             source,
@@ -1239,7 +1045,7 @@ async fn create_working_set(connection: &mut SqliteConnection) -> LibraryResult<
     CREATE TEMP TABLE IF NOT EXISTS scan_unresolved_artists(object_id TEXT PRIMARY KEY) STRICT, WITHOUT ROWID;
     CREATE TEMP TABLE IF NOT EXISTS scan_track_albums(track_id TEXT PRIMARY KEY,album_id TEXT NOT NULL) STRICT, WITHOUT ROWID;
     CREATE TEMP TABLE IF NOT EXISTS scan_affected_albums(album_key INTEGER PRIMARY KEY) STRICT;
-    CREATE TEMP TABLE IF NOT EXISTS scan_loudness(kind TEXT NOT NULL,object_id TEXT NOT NULL,integrated_lufs REAL,true_peak REAL,replay_gain_db REAL,replay_gain_peak REAL,PRIMARY KEY(kind,object_id)) STRICT, WITHOUT ROWID;
+    CREATE TEMP TABLE IF NOT EXISTS playlist_read(object_id TEXT PRIMARY KEY,track_key INTEGER NOT NULL,position INTEGER NOT NULL) STRICT, WITHOUT ROWID;
     CREATE TEMP TABLE IF NOT EXISTS scan_artwork(kind TEXT NOT NULL,object_id TEXT NOT NULL,source BLOB,binding BLOB,PRIMARY KEY(kind,object_id)) STRICT, WITHOUT ROWID;
     CREATE TEMP TABLE IF NOT EXISTS scan_local_dependency_paths(path TEXT PRIMARY KEY) STRICT;
     CREATE TEMP TABLE IF NOT EXISTS scan_local_seen(path TEXT PRIMARY KEY,root TEXT NOT NULL,kind TEXT NOT NULL,changed INTEGER NOT NULL,pending_directory INTEGER NOT NULL DEFAULT 0,previous_revision TEXT,previous_parse_version INTEGER,previous_accepted INTEGER NOT NULL DEFAULT 0) STRICT, WITHOUT ROWID;
@@ -1249,145 +1055,17 @@ async fn create_working_set(connection: &mut SqliteConnection) -> LibraryResult<
     CREATE TEMP TABLE IF NOT EXISTS scan_retained_paths(path TEXT PRIMARY KEY) STRICT;
     CREATE TEMP TABLE IF NOT EXISTS scan_local_component_paths(path TEXT PRIMARY KEY) STRICT;
     CREATE TEMP TABLE IF NOT EXISTS scan_removals(entity_kind TEXT NOT NULL,object_id TEXT NOT NULL,PRIMARY KEY(entity_kind,object_id)) STRICT;
-    CREATE TEMP TABLE IF NOT EXISTS scan_playlist_scopes(object_id TEXT PRIMARY KEY,entries_supplied INTEGER NOT NULL DEFAULT 1) STRICT;
-    CREATE TEMP TABLE IF NOT EXISTS scan_playlist_entries(playlist_id TEXT NOT NULL,object_id TEXT NOT NULL,track_key INTEGER NOT NULL,position INTEGER NOT NULL,PRIMARY KEY(playlist_id,object_id)) STRICT;
-    CREATE TEMP TABLE IF NOT EXISTS scan_retained_home(owner_id TEXT PRIMARY KEY) STRICT;
-    CREATE TEMP TABLE IF NOT EXISTS scan_home_entries(owner_id TEXT NOT NULL,position INTEGER NOT NULL,entity_kind TEXT NOT NULL,entity_object_id TEXT NOT NULL,title TEXT NOT NULL,subtitle TEXT NOT NULL,section_title TEXT,PRIMARY KEY(owner_id,position)) STRICT;
     "#).execute(&mut *connection).await?;
     clear_working_set(connection).await
 }
 
 async fn clear_working_set(connection: &mut SqliteConnection) -> LibraryResult<()> {
-    sqlx::raw_sql("DELETE FROM temp.scan_seen; DELETE FROM temp.scan_unresolved_artists; DELETE FROM temp.scan_track_albums; DELETE FROM temp.scan_affected_albums; DELETE FROM temp.scan_loudness; DELETE FROM temp.scan_artwork;
+    sqlx::raw_sql("DELETE FROM temp.scan_seen; DELETE FROM temp.scan_unresolved_artists; DELETE FROM temp.scan_track_albums; DELETE FROM temp.scan_affected_albums; DELETE FROM temp.scan_artwork;
         DELETE FROM temp.scan_local_dependency_paths; DELETE FROM temp.scan_local_seen; DELETE FROM temp.scan_local_file_removals; DELETE FROM temp.scan_retained_paths; DELETE FROM temp.scan_local_component_paths; DELETE FROM temp.scan_removals;
-        DELETE FROM temp.scan_home_entries; DELETE FROM temp.scan_retained_home; DELETE FROM temp.scan_playlist_entries; DELETE FROM temp.scan_playlist_scopes;
+        DELETE FROM temp.playlist_read;
         DELETE FROM temp.scan_relation_seen;")
         .execute(connection).await?;
     Ok(())
-}
-
-async fn update_album_loudness(
-    connection: &mut SqliteConnection,
-    source: i64,
-) -> LibraryResult<bool> {
-    sqlx::query("INSERT OR IGNORE INTO temp.scan_affected_albums SELECT album.album_key FROM albums album WHERE album.source_key=?1 AND (EXISTS(SELECT 1 FROM temp.scan_seen WHERE kind='album' AND written=1 AND object_id=album.object_id) OR EXISTS(SELECT 1 FROM tracks track JOIN temp.scan_seen seen ON seen.kind='track' AND seen.written=1 AND seen.object_id=track.object_id WHERE track.source_key=?1 AND track.album_key=album.album_key))").bind(source).execute(&mut *connection).await?;
-    let empty = *album_loudness_hasher().finalize().as_bytes();
-    let mut changed=sqlx::query("UPDATE albums SET source_loudness_analysis_key=?2,loudness_analysis_key=?2 WHERE source_key=?1 AND album_key IN (SELECT album_key FROM temp.scan_affected_albums) AND NOT EXISTS(SELECT 1 FROM tracks WHERE tracks.indexed AND tracks.album_key=albums.album_key) AND (source_loudness_analysis_key,loudness_analysis_key) IS NOT (?2,?2)").bind(source).bind(empty.as_slice()).execute(&mut *connection).await?.rows_affected()>0;
-    let mut last = (String::new(), -1_i64, -1_i64, String::new(), String::new());
-    let mut current_album: Option<String> = None;
-    let mut source_hasher = album_loudness_hasher();
-    let mut current_hasher = album_loudness_hasher();
-    loop {
-        let page=sqlx::query_as::<_,AlbumAudioKey>("SELECT album.object_id album_object_id,track.disc_number,track.track_number,track.sort_text,track.object_id,track.source_loudness_analysis_key source_key,track.loudness_analysis_key current_key FROM tracks track JOIN albums album USING(album_key) WHERE track.indexed AND track.source_key=?1 AND album.album_key IN (SELECT album_key FROM temp.scan_affected_albums) AND (album.object_id,track.disc_number,track.track_number,track.sort_text,track.object_id)>(?2,?3,?4,?5,?6) ORDER BY album.object_id,track.disc_number,track.track_number,track.sort_text,track.object_id LIMIT ?7").bind(source).bind(&last.0).bind(last.1).bind(last.2).bind(&last.3).bind(&last.4).bind(LOUDNESS_PAGE_ROWS).fetch_all(&mut *connection).await?;
-        let mut updates = Vec::new();
-        if page.is_empty() {
-            if let Some(album) = current_album.take() {
-                updates.push((
-                    album,
-                    *source_hasher.finalize().as_bytes(),
-                    *current_hasher.finalize().as_bytes(),
-                ));
-            }
-            changed |= write_album_loudness_keys(connection, source, &updates).await?;
-            break;
-        }
-        for row in &page {
-            if current_album.as_deref() != Some(row.album_object_id.as_str()) {
-                if let Some(album) = current_album.replace(row.album_object_id.clone()) {
-                    updates.push((
-                        album,
-                        *source_hasher.finalize().as_bytes(),
-                        *current_hasher.finalize().as_bytes(),
-                    ));
-                }
-                source_hasher = album_loudness_hasher();
-                current_hasher = album_loudness_hasher();
-            }
-            source_hasher.update(&row.source_key);
-            current_hasher.update(&row.current_key);
-        }
-        let row = page.last().unwrap();
-        last = (
-            row.album_object_id.clone(),
-            row.disc_number,
-            row.track_number,
-            row.sort_text.clone(),
-            row.object_id.clone(),
-        );
-        changed |= write_album_loudness_keys(connection, source, &updates).await?;
-    }
-    Ok(changed)
-}
-
-fn album_loudness_hasher() -> Hasher {
-    let mut hasher = Hasher::new();
-    hasher.update(b"rufin-album-loudness-v1\0");
-    hasher
-}
-
-async fn write_album_loudness_keys(
-    connection: &mut SqliteConnection,
-    source: i64,
-    updates: &[(String, [u8; 32], [u8; 32])],
-) -> LibraryResult<bool> {
-    if updates.is_empty() {
-        return Ok(false);
-    }
-    let mut query = QueryBuilder::<Sqlite>::new("WITH next(object_id,source_key,current_key) AS (");
-    query.push_values(updates, |mut row, (id, source, current)| {
-        row.push_bind(id)
-            .push_bind(source.as_slice())
-            .push_bind(current.as_slice());
-    });
-    query.push(") UPDATE albums SET source_loudness_analysis_key=next.source_key,loudness_analysis_key=next.current_key FROM next WHERE albums.source_key=").push_bind(source).push(" AND albums.object_id=next.object_id AND (albums.source_loudness_analysis_key,albums.loudness_analysis_key) IS NOT (next.source_key,next.current_key)");
-    Ok(query
-        .build()
-        .persistent(false)
-        .execute(connection)
-        .await?
-        .rows_affected()
-        > 0)
-}
-
-async fn publish_source_loudness(
-    transaction: &mut Transaction<'_, Sqlite>,
-    source: i64,
-    authoritative: bool,
-) -> LibraryResult<bool> {
-    let mut changed = false;
-    for kind in ["track", "album"] {
-        for (table, value, peak, origin) in [
-            (
-                "loudness_measurements",
-                "integrated_lufs",
-                "true_peak",
-                true,
-            ),
-            (
-                "replay_gain_measurements",
-                "replay_gain_db",
-                "replay_gain_peak",
-                false,
-            ),
-        ] {
-            let key = format!("{kind}_key");
-            let origin_filter = if origin { "AND origin='source'" } else { "" };
-            if authoritative || kind == "track" {
-                changed |= sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table} WHERE source_key=?1 AND entity_kind=?2 {origin_filter} AND entity_key IN (SELECT item.{key} FROM {kind}s item JOIN temp.scan_seen seen ON seen.kind=?2 AND seen.written=1 AND seen.object_id=item.object_id WHERE item.source_key=?1) AND NOT EXISTS(SELECT 1 FROM temp.scan_loudness supplied JOIN {kind}s item ON item.source_key=?1 AND item.object_id=supplied.object_id WHERE supplied.kind=?2 AND supplied.{value} IS NOT NULL AND item.source_loudness_analysis_key=item.loudness_analysis_key AND item.{key}={table}.entity_key)"))).bind(source).bind(kind).execute(&mut **transaction).await?.rows_affected()>0;
-            }
-            let (target_value, target_peak) = if origin {
-                ("integrated_lufs", "true_peak")
-            } else {
-                ("gain_db", "peak")
-            };
-            let origin_columns = if origin { ",origin" } else { "" };
-            let origin_value = if origin { ",'source'" } else { "" };
-            let origin_update = if origin { ",origin='source'" } else { "" };
-            let origin_comparison = if origin { ",origin" } else { "" };
-            changed |= sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO {table}(source_key,entity_kind,entity_key,analysis_key,{target_value},{target_peak}{origin_columns}) SELECT ?1,?2,item.{key},item.loudness_analysis_key,supplied.{value},supplied.{peak}{origin_value} FROM temp.scan_loudness supplied JOIN {kind}s item ON item.source_key=?1 AND item.object_id=supplied.object_id WHERE supplied.kind=?2 AND supplied.{value} IS NOT NULL AND item.source_loudness_analysis_key=item.loudness_analysis_key ON CONFLICT(source_key,entity_kind,entity_key) DO UPDATE SET analysis_key=excluded.analysis_key,{target_value}=excluded.{target_value},{target_peak}=excluded.{target_peak}{origin_update} WHERE (analysis_key,{target_value},{target_peak}{origin_comparison}) IS NOT (excluded.analysis_key,excluded.{target_value},excluded.{target_peak}{origin_value})"))).bind(source).bind(kind).execute(&mut **transaction).await?.rows_affected()>0;
-        }
-    }
-    Ok(changed)
 }
 
 async fn prune_local_orphans(
@@ -1454,86 +1132,6 @@ async fn publish_removals(
         }
     }
     Ok((metadata, playlists))
-}
-
-async fn publish_home(
-    transaction: &mut Transaction<'_, Sqlite>,
-    source: i64,
-    full: bool,
-) -> LibraryResult<bool> {
-    let rows = "SELECT ?1 AS source_key,entry.owner_id AS section_id,entry.position,entry.entity_kind,
-        CASE entry.entity_kind
-          WHEN 'track' THEN (SELECT track_key FROM tracks WHERE source_key=?1 AND object_id=entry.entity_object_id)
-          WHEN 'album' THEN (SELECT album_key FROM albums WHERE source_key=?1 AND object_id=entry.entity_object_id)
-          WHEN 'artist' THEN (SELECT artist_key FROM artists WHERE source_key=?1 AND object_id=entry.entity_object_id)
-          WHEN 'playlist' THEN (SELECT playlist_key FROM playlists WHERE source_key=?1 AND object_id=entry.entity_object_id)
-        END AS entity_key,entry.title,entry.subtitle,entry.section_title
-        FROM temp.scan_home_entries entry";
-    let delete = format!("WITH expected AS MATERIALIZED ({rows}) DELETE FROM home_entries AS current WHERE source_key=?1
-        AND ((?2 AND section_id NOT IN (SELECT owner_id FROM temp.scan_retained_home)) OR section_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='home'))
-        AND NOT EXISTS(SELECT 1 FROM expected WHERE expected.section_id=current.section_id AND expected.position=current.position AND expected.entity_key IS NOT NULL)");
-    let mut changed = sqlx::query(sqlx::AssertSqlSafe(delete))
-        .bind(source)
-        .bind(full)
-        .execute(&mut **transaction)
-        .await?
-        .rows_affected()
-        > 0;
-    let insert = format!("WITH expected AS ({rows}) INSERT INTO home_entries(source_key,section_id,position,entity_kind,entity_key,title,subtitle,section_title)
-        SELECT * FROM expected WHERE entity_key IS NOT NULL ON CONFLICT(source_key,section_id,position) DO UPDATE SET
-        entity_kind=excluded.entity_kind,entity_key=excluded.entity_key,title=excluded.title,subtitle=excluded.subtitle,section_title=excluded.section_title
-        WHERE (home_entries.entity_kind,home_entries.entity_key,home_entries.title,home_entries.subtitle,home_entries.section_title)
-        IS NOT (excluded.entity_kind,excluded.entity_key,excluded.title,excluded.subtitle,excluded.section_title)");
-    changed |= sqlx::query(sqlx::AssertSqlSafe(insert))
-        .bind(source)
-        .execute(&mut **transaction)
-        .await?
-        .rows_affected()
-        > 0;
-    Ok(changed)
-}
-
-async fn publish_playlist_entries(
-    transaction: &mut Transaction<'_, Sqlite>,
-    source_key: i64,
-) -> LibraryResult<bool> {
-    sqlx::query("WITH ranked AS (
-        SELECT playlist_id,object_id,row_number() OVER(PARTITION BY playlist_id ORDER BY position,object_id)-1 AS position
-        FROM temp.scan_playlist_entries)
-        UPDATE temp.scan_playlist_entries AS entry SET position=ranked.position FROM ranked
-        WHERE entry.playlist_id=ranked.playlist_id AND entry.object_id=ranked.object_id AND entry.position IS NOT ranked.position")
-        .execute(&mut **transaction).await?;
-    let mut changed = sqlx::query(
-        "WITH moved AS MATERIALIZED (
-             SELECT playlist.playlist_key,max(
-                 (SELECT coalesce(max(position),0) FROM playlist_entries existing WHERE existing.playlist_key=playlist.playlist_key),
-                 (SELECT coalesce(max(position),0) FROM temp.scan_playlist_entries entry WHERE entry.playlist_id=playlist.object_id)
-             )+1 AS offset
-             FROM temp.scan_playlist_scopes staged CROSS JOIN playlists playlist ON playlist.object_id=staged.object_id
-             WHERE playlist.owner='source' AND playlist.source_key=?1 AND staged.entries_supplied AND EXISTS(
-                 SELECT 1 FROM temp.scan_playlist_entries entry LEFT JOIN playlist_entries current
-                 ON current.playlist_key=playlist.playlist_key AND current.object_id=entry.object_id
-                 WHERE entry.playlist_id=playlist.object_id AND entry.position IS NOT current.position)
-         ) UPDATE playlist_entries SET position=position + (SELECT offset FROM moved WHERE moved.playlist_key=playlist_entries.playlist_key)
-         WHERE playlist_entry_key IN (SELECT entry.playlist_entry_key FROM moved CROSS JOIN playlist_entries entry ON entry.playlist_key=moved.playlist_key)",
-    ).bind(source_key).execute(&mut **transaction).await?.rows_affected() > 0;
-    changed |= sqlx::query(
-        "DELETE FROM playlist_entries WHERE playlist_entry_key IN (
-             SELECT entry.playlist_entry_key FROM temp.scan_playlist_scopes staged CROSS JOIN playlists playlist
-             ON playlist.owner='source' AND playlist.source_key=?1 AND playlist.object_id=staged.object_id
-             CROSS JOIN playlist_entries entry ON entry.playlist_key=playlist.playlist_key
-             WHERE staged.entries_supplied AND NOT EXISTS(SELECT 1 FROM temp.scan_playlist_entries supplied
-                 WHERE supplied.playlist_id=staged.object_id AND supplied.object_id=entry.object_id))",
-    ).bind(source_key).execute(&mut **transaction).await?.rows_affected() > 0;
-    changed |= sqlx::query("INSERT INTO playlist_entries(playlist_key,object_id,track_key,position)
-        SELECT playlist.playlist_key,entry.object_id,entry.track_key,entry.position
-        FROM temp.scan_playlist_entries entry JOIN playlists playlist ON playlist.source_key=?1
-            AND playlist.owner='source' AND playlist.object_id=entry.playlist_id
-        WHERE true ON CONFLICT(playlist_key,object_id) DO UPDATE SET
-            track_key=excluded.track_key,position=excluded.position
-        WHERE (playlist_entries.track_key,playlist_entries.position) IS NOT (excluded.track_key,excluded.position)")
-        .bind(source_key).execute(&mut **transaction).await?.rows_affected() > 0;
-    Ok(changed)
 }
 
 #[cfg(test)]

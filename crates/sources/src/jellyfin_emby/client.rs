@@ -427,17 +427,12 @@ impl JellyfinEmbySource {
             let count = items(&response["Items"]).len();
             let page_start = pages.offset();
             let finished = pages.advance(count, field(&response, "TotalRecordCount"))?;
-            scan.begin_batch().await?;
-            for (offset, item) in items(&response["Items"]).iter().enumerate() {
-                let Some((entry_id, track_id, position)) =
-                    playlist_entry(self.kind, item, page_start + offset)
-                else {
-                    continue;
-                };
-                scan.write_playlist_entry(playlist_id, &entry_id, &track_id, position)
-                    .await?;
-            }
-            scan.finish_batch().await?;
+            let entries: Vec<_> = items(&response["Items"])
+                .iter()
+                .filter_map(|item| playlist_entry(self.kind, item))
+                .collect();
+            scan.write_playlist_page(playlist_id, page_start, &entries, finished)
+                .await?;
             if finished {
                 return Ok(());
             }
@@ -445,18 +440,12 @@ impl JellyfinEmbySource {
     }
 }
 
-fn playlist_entry(
-    server: ServerKind,
-    item: &Value,
-    position: usize,
-) -> Option<(String, String, i64)> {
+fn playlist_entry(server: ServerKind, item: &Value) -> Option<library::PlaylistEntryInput> {
     let track_id = id(&item["Id"])?;
-    let entry_id = id(&item["PlaylistItemId"])?;
-    Some((
-        entry_id,
-        server.object_id("track", &track_id),
-        position as i64,
-    ))
+    Some(library::PlaylistEntryInput {
+        object_id: id(&item["PlaylistItemId"])?,
+        track_id: server.object_id("track", &track_id),
+    })
 }
 
 impl JellyfinEmbySource {
@@ -1307,17 +1296,12 @@ mod tests {
         .expect("playlist items");
         let entries = items
             .into_iter()
-            .enumerate()
-            .map(|(position, item)| {
-                playlist_entry(crate::ServerKind::Jellyfin, &item, position)
-                    .expect("complete entry")
-            })
+            .map(|item| playlist_entry(crate::ServerKind::Jellyfin, &item).expect("complete entry"))
             .collect::<Vec<_>>();
 
-        assert_eq!(entries[0].0, "entry-one");
-        assert_eq!(entries[1].0, "entry-two");
-        assert_eq!(entries[0].1, entries[1].1);
-        assert_eq!((entries[0].2, entries[1].2), (0, 1));
+        assert_eq!(entries[0].object_id, "entry-one");
+        assert_eq!(entries[1].object_id, "entry-two");
+        assert_eq!(entries[0].track_id, entries[1].track_id);
     }
 
     #[tokio::test]
@@ -1386,7 +1370,7 @@ mod tests {
             }),
         ] {
             let item: Value = serde_json::from_value(item).expect("playlist item");
-            assert!(playlist_entry(crate::ServerKind::Jellyfin, &item, 0).is_none());
+            assert!(playlist_entry(crate::ServerKind::Jellyfin, &item).is_none());
         }
     }
 

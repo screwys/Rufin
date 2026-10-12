@@ -196,33 +196,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         replay_gain_db: None,
         replay_gain_peak: None,
     };
-    assert!(
-        fixture
-            .database
-            .write_track_source_loudness(fixture.source, work.track_key, &source_fact)
-            .await
-            .expect("accepted source gain wins")
-    );
-    assert!(
-        fixture
-            .database
-            .r128_tag_write_page(fixture.source, None, 64, &cancel)
-            .await
-            .expect("source R128 tag is not Rufin-owned")
-            .is_empty()
-    );
-    assert_eq!(
-        fixture
-            .database
-            .track_loudness(fixture.source, work.track_key, &cancel)
-            .await
-            .expect("read Track loudness"),
-        Some(source_fact.clone())
-    );
-    let mut scan = library::Scan::begin_items(&fixture.database, "source")
-        .await
-        .unwrap();
-    scan.write_track(&library::TrackInput {
+    let mut input = library::TrackInput {
         object_id: "track-0".into(),
         album_object_id: Some("album-a".into()),
         title: "Alpha".into(),
@@ -237,16 +211,48 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         source_format: Some("FLAC".into()),
         comment: Some("Note".into()),
         bpm: Some(100),
-        cue_path: Some("/music/changed.cue".into()),
-        cue_start_millis: Some(1_000),
-        cue_end_millis: Some(181_000),
         favorite: Some(false),
         rating: Some(5),
-        loudness_analysis_key: [99; 32],
+        loudness_analysis_key: work.expected_analysis_key,
+        source_loudness: Some(library::LoudnessInput {
+            integrated_lufs: Some(-11.0),
+            ..Default::default()
+        }),
         ..Default::default()
-    })
-    .await
-    .expect("refresh Track CUE identity");
+    };
+    let mut scan = library::Scan::begin_items(&fixture.database, "source")
+        .await
+        .unwrap();
+    scan.write_track(&input).await.unwrap();
+    scan.finish().await.unwrap();
+    assert!(
+        fixture
+            .database
+            .r128_tag_write_page(fixture.source, None, 64, &cancel)
+            .await
+            .expect("source R128 tag is not Rufin-owned")
+            .is_empty()
+    );
+    assert_eq!(
+        fixture
+            .database
+            .playback_loudness(&fixture.track_uris[0], &cancel)
+            .await
+            .expect("read Track loudness")
+            .0,
+        Some(source_fact.clone())
+    );
+    let mut scan = library::Scan::begin_items(&fixture.database, "source")
+        .await
+        .unwrap();
+    input.cue_path = Some("/music/changed.cue".into());
+    input.cue_start_millis = Some(1_000);
+    input.cue_end_millis = Some(181_000);
+    input.loudness_analysis_key = [99; 32];
+    input.source_loudness = None;
+    scan.write_track(&input)
+        .await
+        .expect("refresh Track CUE identity");
     scan.write_track_relations(
         &[("track-0", "artist-a")],
         &[("track-0", "genre")],
@@ -270,13 +276,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         .unwrap();
     assert_eq!(changed.track_key, work.track_key);
     assert_ne!(changed.expected_analysis_key, work.expected_analysis_key);
-    assert!(
-        !fixture
-            .database
-            .write_track_source_loudness(fixture.source, changed.track_key, &source_fact)
-            .await
-            .expect("reject delayed source result")
-    );
+
     assert!(
         !fixture
             .database
@@ -301,13 +301,15 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         replay_gain_db: None,
         replay_gain_peak: None,
     };
-    assert!(
-        fixture
-            .database
-            .write_track_source_loudness(fixture.source, changed.track_key, &current_source)
-            .await
-            .expect("refresh source gain identity")
-    );
+    input.source_loudness = Some(library::LoudnessInput {
+        integrated_lufs: Some(-10.0),
+        ..Default::default()
+    });
+    let mut scan = library::Scan::begin_items(&fixture.database, "source")
+        .await
+        .unwrap();
+    scan.write_track(&input).await.unwrap();
+    scan.finish().await.unwrap();
     assert!(
         !fixture
             .database
@@ -328,9 +330,10 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     assert_eq!(
         fixture
             .database
-            .track_loudness(fixture.source, changed.track_key, &cancel)
+            .playback_loudness(&fixture.track_uris[0], &cancel)
             .await
-            .unwrap(),
+            .unwrap()
+            .0,
         Some(current_source)
     );
 
@@ -383,6 +386,20 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         )
         .await
         .expect("install exact Local audio identity");
+    let local_analysis = LoudnessMeasurement {
+        analysis_key: [77; 32],
+        integrated_lufs: Some(-18.0),
+        true_peak: Some(0.6),
+        replay_gain_db: None,
+        replay_gain_peak: None,
+    };
+    assert!(
+        fixture
+            .database
+            .write_track_analyzed_loudness(fixture.source, fixture.tracks[1], &local_analysis)
+            .await
+            .unwrap()
+    );
     let mut scan = library::Scan::begin(&fixture.database, "source", "Source", "source", None)
         .await
         .expect("begin membership-changing Scan");
@@ -433,20 +450,28 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
             bpm: Some(100 + index),
             favorite: Some(false),
             loudness_analysis_key: [index as u8 + 10; 32],
+            source_loudness: match index {
+                1 => Some(library::LoudnessInput {
+                    integrated_lufs: Some(-15.0),
+                    ..Default::default()
+                }),
+                2 => Some(library::LoudnessInput {
+                    integrated_lufs: Some(-16.0),
+                    true_peak: Some(0.75),
+                    replay_gain_db: Some(-4.5),
+                    replay_gain_peak: Some(0.9),
+                }),
+                _ => None,
+            },
+            album_loudness: (index == 3).then_some(library::LoudnessInput {
+                integrated_lufs: Some(-13.0),
+                ..Default::default()
+            }),
             ..Default::default()
         })
         .await
         .expect("stage Track");
     }
-    scan.write_track_source_loudness("track-1", Some(-15.0), None, None, None)
-        .await
-        .expect("stage Track R128 fact");
-    scan.write_track_source_loudness("track-2", Some(-16.0), Some(0.75), Some(-4.5), Some(0.9))
-        .await
-        .expect("stage current Track R128 fact");
-    scan.write_album_source_loudness("album-b", Some(-13.0), None, None, None)
-        .await
-        .expect("stage Album R128 fact");
     let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
     fixture.database.observe_catalog(move |update| {
         let _ = updates_tx.send(update);
@@ -458,26 +483,35 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     assert!(
         fixture
             .database
-            .track_loudness(fixture.source, work.track_key, &cancel)
+            .playback_loudness(&fixture.track_uris[0], &cancel)
             .await
             .unwrap()
+            .0
             .is_none(),
         "unstaged old source fact is removed"
     );
-    assert!(
+    assert_eq!(
         fixture
             .database
-            .track_loudness(fixture.source, fixture.tracks[1], &cancel)
+            .playback_loudness(&fixture.track_uris[1], &cancel)
             .await
             .unwrap()
-            .is_none(),
-        "a source fact cannot claim the current Local audio identity"
+            .0,
+        Some(local_analysis),
+        "a source fact cannot replace analysis of current local audio"
     );
+    let next = fixture
+        .database
+        .next_missing_track_loudness(fixture.source, Some(fixture.tracks[0]), &cancel)
+        .await
+        .unwrap();
+    assert!(next.is_none_or(|work| work.track_key != fixture.tracks[1]));
     let staged_track = fixture
         .database
-        .track_loudness(fixture.source, fixture.tracks[2], &cancel)
+        .playback_loudness(&fixture.track_uris[2], &cancel)
         .await
         .unwrap()
+        .0
         .unwrap();
     assert_eq!(staged_track.integrated_lufs, Some(-16.0));
     assert_eq!(staged_track.true_peak, Some(0.75));
@@ -486,9 +520,10 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     assert_eq!(
         fixture
             .database
-            .album_loudness(fixture.source, fixture.albums[1], &cancel)
+            .playback_loudness(&fixture.track_uris[3], &cancel)
             .await
             .unwrap()
+            .1
             .unwrap()
             .integrated_lufs,
         Some(-13.0)
@@ -525,6 +560,30 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     assert!(
         plan.contains("sqlite_autoindex_loudness_measurements_1"),
         "{plan}"
+    );
+    let mut scan = library::Scan::begin_items(&fixture.database, "source")
+        .await
+        .unwrap();
+    scan.write_track(&library::TrackInput {
+        object_id: "track-3".into(),
+        album_object_id: Some("album-b".into()),
+        title: "Delta".into(),
+        sort_text: "delta".into(),
+        loudness_analysis_key: [43; 32],
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    scan.finish().await.unwrap();
+    assert!(
+        fixture
+            .database
+            .playback_loudness(&fixture.track_uris[3], &cancel)
+            .await
+            .unwrap()
+            .1
+            .is_none(),
+        "unsupplied album gain must not acquire a new audio identity"
     );
 }
 
@@ -1057,21 +1116,24 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
         )
         .await
         .expect("write source lyrics");
-    fixture
-        .database
-        .write_track_source_loudness(
-            fixture.source,
-            fixture.tracks[0],
-            &LoudnessMeasurement {
-                analysis_key: [1; 32],
-                integrated_lufs: Some(-12.0),
-                true_peak: Some(0.8),
-                replay_gain_db: None,
-                replay_gain_peak: None,
-            },
-        )
+    let mut scan = library::Scan::begin_items(&fixture.database, "source")
         .await
-        .expect("write source loudness");
+        .unwrap();
+    scan.write_track(&library::TrackInput {
+        object_id: "track-0".into(),
+        title: "Alpha".into(),
+        sort_text: "alpha".into(),
+        loudness_analysis_key: [1; 32],
+        source_loudness: Some(library::LoudnessInput {
+            integrated_lufs: Some(-12.0),
+            true_peak: Some(0.8),
+            ..Default::default()
+        }),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    scan.finish().await.unwrap();
     let queue_media = fixture
         .database
         .queue_items_for_uris(&fixture.track_uris[..1], &ReadCancellation::new())

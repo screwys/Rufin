@@ -12,27 +12,21 @@ impl JellyfinEmbySource {
         &self,
         section: crate::SourceHomeSection,
     ) -> SourceResult<Vec<library::HomeEntryInput>> {
-        let (section_id, item_type, sort_by, kind) = match section {
-            crate::SourceHomeSection::MostPlayed => (
-                "most-played",
-                "Audio",
-                "PlayCount,SortName",
-                library::HomeEntryKind::Track,
-            ),
+        let (item_type, sort_by, kind) = match section {
+            crate::SourceHomeSection::MostPlayed => {
+                ("Audio", "PlayCount,SortName", library::HomeEntryKind::Track)
+            }
             crate::SourceHomeSection::NewlyAdded => (
-                "newly-added",
                 "MusicAlbum",
                 "DateCreated,SortName",
                 library::HomeEntryKind::Album,
             ),
             crate::SourceHomeSection::RecentlyPlayed => (
-                "recently-played",
                 "Audio",
                 "DatePlayed,SortName",
                 library::HomeEntryKind::Track,
             ),
             crate::SourceHomeSection::RecentlyReleased => (
-                "recently-released",
                 "MusicAlbum",
                 "ProductionYear,PremiereDate,SortName",
                 library::HomeEntryKind::Album,
@@ -43,10 +37,9 @@ impl JellyfinEmbySource {
             .await?;
         Ok(items(&page["Items"])
             .iter()
+            .take(24)
             .enumerate()
-            .filter_map(|(position, item)| {
-                home_entry_from_item(self.kind, item, section_id, position, kind)
-            })
+            .filter_map(|(position, item)| home_entry_from_item(self.kind, item, position, kind))
             .collect())
     }
     pub(crate) async fn stage_items(
@@ -545,11 +538,8 @@ impl JellyfinEmbySource {
                     continue;
                 }
             };
-            scan.begin_batch().await?;
-            for entry in entries {
-                scan.write_home_entry(&entry).await?;
-            }
-            scan.finish_batch().await?;
+            scan.replace_home_section(section.id(), None, &entries)
+                .await?;
         }
         Ok(())
     }
@@ -852,18 +842,29 @@ mod tests {
             .await
             .unwrap();
         previous
-            .write_playlist_entry("cached-playlist", "occurrence", "jellyfin:track:removed", 0)
+            .write_playlist_page(
+                "cached-playlist",
+                0,
+                &[library::PlaylistEntryInput {
+                    object_id: "occurrence".into(),
+                    track_id: "jellyfin:track:removed".into(),
+                }],
+                true,
+            )
             .await
             .unwrap();
         previous
-            .write_home_entry(&library::HomeEntryInput {
-                section_id: "recently-played".into(),
-                position: 0,
-                kind: library::HomeEntryKind::Album,
-                entity_object_id: "jellyfin:album:album".into(),
-                title: "Album".into(),
-                subtitle: String::new(),
-            })
+            .replace_home_section(
+                "recently-played",
+                None,
+                &[library::HomeEntryInput {
+                    position: 0,
+                    kind: library::HomeEntryKind::Album,
+                    entity_object_id: "jellyfin:album:album".into(),
+                    title: "Album".into(),
+                    subtitle: String::new(),
+                }],
+            )
             .await
             .unwrap();
         previous.finish().await.unwrap();
@@ -897,24 +898,12 @@ mod tests {
                 assert_eq!(track.musicbrainz_recording_id.as_deref(), Some("recording"));
                 assert!(track.artwork_binding.is_some());
                 assert_eq!(track.artists.len(), 2);
-                assert_eq!(
-                    database
-                        .track_loudness(publication.source, track.track_key, &cancellation)
-                        .await
-                        .unwrap()
-                        .unwrap()
-                        .replay_gain_db,
-                    Some(-4.25)
-                );
-                assert_eq!(
-                    database
-                        .album_loudness(publication.source, track.album_key.unwrap(), &cancellation)
-                        .await
-                        .unwrap()
-                        .unwrap()
-                        .replay_gain_db,
-                    Some(-3.5)
-                );
+                let (track_gain, album_gain) = database
+                    .playback_loudness(&uri, &cancellation)
+                    .await
+                    .unwrap();
+                assert_eq!(track_gain.unwrap().replay_gain_db, Some(-4.25));
+                assert_eq!(album_gain.unwrap().replay_gain_db, Some(-3.5));
             }
         }
         for (id, favorite) in [("credited", true), ("listed", false)] {
@@ -1039,7 +1028,6 @@ mod tests {
             .expect("Jellyfin Newly Added");
 
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].section_id, "newly-added");
         assert_eq!(entries[0].title, "New Album");
     }
 

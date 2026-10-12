@@ -49,7 +49,6 @@ impl Scan {
                     self.write_album_row(album).await?;
                 }
                 self.write_track_row(track).await?;
-                self.write_track_loudness(track).await?;
                 let album_relations = album.relations.as_ref();
                 let track_relations = track.relations.as_ref();
                 let album_credits = album_relations
@@ -133,6 +132,8 @@ impl Scan {
                 }
                 self.write_track_folder_membership(track).await?;
             }
+            self.write_source_loudness(&page.iter().map(|(_, track)| track).collect::<Vec<_>>())
+                .await?;
             self.write_album_relations(
                 &album_artist_links,
                 &album_genre_links,
@@ -302,7 +303,7 @@ impl Scan {
 
     pub async fn write_track(&mut self, input: &TrackInput) -> LibraryResult<bool> {
         let first = self.write_track_row(input).await?;
-        self.write_track_loudness(input).await?;
+        self.write_source_loudness(&[input]).await?;
         if let Some(relations) = &input.relations {
             for artist in relations.artists.iter().chain(&relations.album_artists) {
                 self.write_artist(artist).await?;
@@ -536,28 +537,74 @@ impl Scan {
         Ok(true)
     }
 
-    async fn write_track_loudness(&mut self, input: &TrackInput) -> LibraryResult<()> {
-        if let Some(loudness) = input.source_loudness {
-            self.write_track_source_loudness(
-                &input.object_id,
-                loudness.integrated_lufs,
-                loudness.true_peak,
-                loudness.replay_gain_db,
-                loudness.replay_gain_peak,
-            )
-            .await?;
-        }
-        if let Some(album_id) = &input.album_object_id
-            && let Some(loudness) = input.album_loudness
-        {
-            self.write_album_source_loudness(
-                album_id,
-                loudness.integrated_lufs,
-                loudness.true_peak,
-                loudness.replay_gain_db,
-                loudness.replay_gain_peak,
-            )
-            .await?;
+    async fn write_source_loudness(&mut self, inputs: &[&TrackInput]) -> LibraryResult<()> {
+        for kind in ["track", "album"] {
+            let mut facts = HashMap::new();
+            for input in inputs {
+                let (object_id, measurement) = if kind == "track" {
+                    (Some(input.object_id.as_str()), input.source_loudness)
+                } else {
+                    (input.album_object_id.as_deref(), input.album_loudness)
+                };
+                let (Some(object_id), Some(measurement)) = (object_id, measurement) else {
+                    continue;
+                };
+                if !crate::loudness::valid_measurement(measurement) {
+                    self.failed = true;
+                    return Err(LibraryError::InvalidScan(
+                        "invalid source loudness fact".into(),
+                    ));
+                }
+                facts.insert(object_id, measurement);
+            }
+            if facts.is_empty() {
+                continue;
+            }
+            let rows = facts
+                .into_iter()
+                .map(|(id, fact)| {
+                    (
+                        id,
+                        fact.integrated_lufs,
+                        fact.true_peak,
+                        fact.replay_gain_db,
+                        fact.replay_gain_peak,
+                        i64::from(fact.integrated_lufs.is_some()) * 256
+                            | i64::from(fact.replay_gain_db.is_some()) * 512,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let rows = serde_json::to_string(&rows)
+                .map_err(|error| LibraryError::InvalidScan(error.to_string()))?;
+            self.execute(sqlx::query(sqlx::AssertSqlSafe(format!(
+                "INSERT INTO temp.scan_seen(kind,object_id,supplied)
+                 SELECT ?2,owner.object_id,json_extract(fact.value,'$[5]')
+                 FROM json_each(?3) fact CROSS JOIN {kind}s owner
+                 WHERE owner.source_key=?1 AND owner.object_id=json_extract(fact.value,'$[0]')
+                 ON CONFLICT(kind,object_id) DO UPDATE SET supplied=(supplied & ~768) | excluded.supplied")))
+                .bind(self.source).bind(kind).bind(&rows)).await?;
+            self.changes.metadata |= self.execute_result(sqlx::query(sqlx::AssertSqlSafe(format!(
+                "INSERT INTO loudness_measurements(source_key,entity_kind,entity_key,analysis_key,integrated_lufs,true_peak,origin)
+                 SELECT ?1,?2,owner.{kind}_key,owner.source_loudness_analysis_key,
+                        json_extract(fact.value,'$[1]'),json_extract(fact.value,'$[2]'),'source'
+                 FROM json_each(?3) fact CROSS JOIN {kind}s owner
+                 WHERE owner.source_key=?1 AND owner.object_id=json_extract(fact.value,'$[0]')
+                   AND json_extract(fact.value,'$[1]') IS NOT NULL
+                 ON CONFLICT(source_key,entity_kind,entity_key,origin) DO UPDATE SET
+                    analysis_key=excluded.analysis_key,integrated_lufs=excluded.integrated_lufs,true_peak=excluded.true_peak
+                 WHERE (analysis_key,integrated_lufs,true_peak) IS NOT (excluded.analysis_key,excluded.integrated_lufs,excluded.true_peak)")))
+                .bind(self.source).bind(kind).bind(&rows)).await?.rows_affected()>0;
+            self.changes.metadata |= self.execute_result(sqlx::query(sqlx::AssertSqlSafe(format!(
+                "INSERT INTO replay_gain_measurements(source_key,entity_kind,entity_key,analysis_key,gain_db,peak)
+                 SELECT ?1,?2,owner.{kind}_key,owner.source_loudness_analysis_key,
+                        json_extract(fact.value,'$[3]'),json_extract(fact.value,'$[4]')
+                 FROM json_each(?3) fact CROSS JOIN {kind}s owner
+                 WHERE owner.source_key=?1 AND owner.object_id=json_extract(fact.value,'$[0]')
+                   AND json_extract(fact.value,'$[3]') IS NOT NULL
+                 ON CONFLICT(source_key,entity_kind,entity_key) DO UPDATE SET
+                    analysis_key=excluded.analysis_key,gain_db=excluded.gain_db,peak=excluded.peak
+                 WHERE (analysis_key,gain_db,peak) IS NOT (excluded.analysis_key,excluded.gain_db,excluded.peak)")))
+                .bind(self.source).bind(kind).bind(&rows)).await?.rows_affected()>0;
         }
         Ok(())
     }
@@ -574,44 +621,6 @@ impl Scan {
             .await?;
         }
         Ok(())
-    }
-
-    pub async fn write_track_source_loudness(
-        &mut self,
-        track_object_id: &str,
-        integrated_lufs: Option<f64>,
-        true_peak: Option<f64>,
-        replay_gain_db: Option<f64>,
-        replay_gain_peak: Option<f64>,
-    ) -> LibraryResult<()> {
-        self.write_source_loudness(
-            "track",
-            track_object_id,
-            integrated_lufs,
-            true_peak,
-            replay_gain_db,
-            replay_gain_peak,
-        )
-        .await
-    }
-
-    pub async fn write_album_source_loudness(
-        &mut self,
-        album_object_id: &str,
-        integrated_lufs: Option<f64>,
-        true_peak: Option<f64>,
-        replay_gain_db: Option<f64>,
-        replay_gain_peak: Option<f64>,
-    ) -> LibraryResult<()> {
-        self.write_source_loudness(
-            "album",
-            album_object_id,
-            integrated_lufs,
-            true_peak,
-            replay_gain_db,
-            replay_gain_peak,
-        )
-        .await
     }
 
     /// Full artist records supply their effective sort name, including the display-name fallback.
@@ -818,36 +827,6 @@ impl Scan {
             .rows_affected()
             > 0;
         Ok(())
-    }
-
-    async fn write_source_loudness(
-        &mut self,
-        kind: &'static str,
-        object_id: &str,
-        integrated_lufs: Option<f64>,
-        true_peak: Option<f64>,
-        replay_gain_db: Option<f64>,
-        replay_gain_peak: Option<f64>,
-    ) -> LibraryResult<()> {
-        self.require_id("loudness entity", object_id)?;
-        if (integrated_lufs.is_none() && replay_gain_db.is_none())
-            || integrated_lufs.is_some_and(|value| !value.is_finite())
-            || true_peak.is_some_and(|value| !value.is_finite() || value < 0.0)
-            || replay_gain_db.is_some_and(|value| !value.is_finite())
-            || replay_gain_peak.is_some_and(|value| !value.is_finite() || value < 0.0)
-        {
-            self.failed = true;
-            return Err(LibraryError::InvalidScan(
-                "invalid source loudness fact".to_string(),
-            ));
-        }
-        self.execute(sqlx::query(
-            "INSERT INTO temp.scan_loudness(kind,object_id,integrated_lufs,true_peak,replay_gain_db,replay_gain_peak)
-             VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(kind,object_id) DO UPDATE SET
-                integrated_lufs=excluded.integrated_lufs,true_peak=excluded.true_peak,
-                replay_gain_db=excluded.replay_gain_db,replay_gain_peak=excluded.replay_gain_peak")
-            .bind(kind).bind(object_id).bind(integrated_lufs).bind(true_peak)
-            .bind(replay_gain_db).bind(replay_gain_peak)).await
     }
 }
 

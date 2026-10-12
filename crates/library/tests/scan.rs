@@ -22,12 +22,30 @@ async fn publication_keeps_tracks_and_known_credits_beside_missing_related_objec
     })
     .await
     .unwrap();
-    write_track(&mut scan, "track-one", "One", 0).await;
-    write_track(&mut scan, "track-two", "Two", 1).await;
-    scan.write_track_relations(&[("track-one", "missing-artist")], &[], &[])
+    for (object_id, title) in [("track-one", "One"), ("track-two", "Two")] {
+        scan.write_track(&library::TrackInput {
+            object_id: object_id.into(),
+            album_object_id: Some("album-one".into()),
+            title: title.into(),
+            sort_text: title.to_lowercase(),
+            album_loudness: Some(library::LoudnessInput {
+                replay_gain_db: Some(-6.0),
+                ..Default::default()
+            }),
+            relations: Some(library::TrackRelationsInput {
+                artists: vec![library::ArtistInput {
+                    object_id: "artist-one".into(),
+                    name: "Known Artist".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
         .await
         .unwrap();
-    scan.write_album_source_loudness("album-one", None, None, Some(-6.0), None)
+    }
+    scan.write_track_relations(&[("track-one", "missing-artist")], &[], &[])
         .await
         .unwrap();
     let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
@@ -582,6 +600,16 @@ async fn write_small_catalog(
         let (object_id, track_title, position) = tracks[index];
         write_track(&mut scan, object_id, track_title, position).await;
     }
+    let entries = tracks
+        .iter()
+        .map(|(object_id, _, _)| library::PlaylistEntryInput {
+            object_id: format!("entry-{object_id}"),
+            track_id: (*object_id).into(),
+        })
+        .collect::<Vec<_>>();
+    scan.write_playlist_page("playlist-one", 0, &entries, true)
+        .await
+        .expect("write completed playlist");
     scan.write_album_relations(
         &[("album-one", "artist-one")],
         &[("album-one", "genre-one")],
@@ -642,14 +670,6 @@ async fn write_track(scan: &mut Scan, object_id: &str, title: &str, position: i6
     scan.write_track_folders(&[library::ScanLink::new(object_id, "folder-one", 0)])
         .await
         .expect("coalesce repeated track folder");
-    scan.write_playlist_entry(
-        "playlist-one",
-        &format!("entry-{object_id}"),
-        object_id,
-        position,
-    )
-    .await
-    .expect("stage playlist entry");
 }
 
 #[tokio::test]
@@ -1048,6 +1068,36 @@ async fn incomplete_collection_publishes_valid_pages_without_removal_authority()
     .expect("begin incomplete Scan");
     scan.incomplete();
     write_track(&mut scan, "track-one", "Changed From Valid Page", 0).await;
+    scan.write_playlist(&library::PlaylistInput {
+        object_id: "completed-playlist".into(),
+        name: "Completed".into(),
+        sort_text: "completed".into(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    scan.write_playlist_page(
+        "completed-playlist",
+        0,
+        &[library::PlaylistEntryInput {
+            object_id: "completed-entry".into(),
+            track_id: "track-one".into(),
+        }],
+        true,
+    )
+    .await
+    .unwrap();
+    scan.write_playlist_page(
+        "playlist-one",
+        0,
+        &[library::PlaylistEntryInput {
+            object_id: "unfinished-entry".into(),
+            track_id: "track-two".into(),
+        }],
+        false,
+    )
+    .await
+    .unwrap();
     let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
     database.observe_catalog(move |update| {
         let _ = updates_tx.send(update);
@@ -1077,6 +1127,18 @@ async fn incomplete_collection_publishes_valid_pages_without_removal_authority()
             .await
             .expect("read retained unseen Track"),
         "Track Two"
+    );
+    assert_eq!(sqlx::query_as::<_, (String, i64)>(
+        "SELECT playlist.object_id,count(*) FROM playlists playlist JOIN playlist_entries USING(playlist_key) GROUP BY playlist.object_id ORDER BY playlist.object_id"
+    ).fetch_all(&mut outside).await.unwrap(), [("completed-playlist".into(),1),("playlist-one".into(),2)]);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM playlist_entries WHERE object_id='unfinished-entry'"
+        )
+        .fetch_one(&mut outside)
+        .await
+        .unwrap(),
+        0
     );
 }
 
@@ -1642,7 +1704,15 @@ async fn deleting_one_source_playlist_preserves_other_playlist_entries() {
         .await
         .unwrap();
     point
-        .write_playlist_entry("playlist-one", "entry-one", "track-one", 0)
+        .write_playlist_page(
+            "playlist-one",
+            0,
+            &[library::PlaylistEntryInput {
+                object_id: "entry-one".into(),
+                track_id: "track-one".into(),
+            }],
+            true,
+        )
         .await
         .unwrap();
     point.finish_batch().await.unwrap();
@@ -1693,11 +1763,27 @@ async fn identical_playlist_point_update_is_not_a_catalog_change() {
         .await
         .unwrap();
     point
-        .write_playlist_entry("playlist-one", "entry-track-one", "track-one", 0)
+        .write_playlist_page(
+            "playlist-one",
+            0,
+            &[library::PlaylistEntryInput {
+                object_id: "entry-track-one".into(),
+                track_id: "track-one".into(),
+            }],
+            false,
+        )
         .await
         .unwrap();
     point
-        .write_playlist_entry("playlist-one", "entry-track-two", "track-two", 1)
+        .write_playlist_page(
+            "playlist-one",
+            1,
+            &[library::PlaylistEntryInput {
+                object_id: "entry-track-two".into(),
+                track_id: "track-two".into(),
+            }],
+            true,
+        )
         .await
         .unwrap();
     point.finish_batch().await.unwrap();
@@ -1743,9 +1829,17 @@ async fn repeated_source_playlist_and_folder_observations_coalesce() {
         })
         .await
         .expect("stage repeated playlist");
-        scan.write_playlist_entry("playlist-one", "entry-one", "track-one", 0)
-            .await
-            .expect("stage repeated playlist entry");
+        scan.write_playlist_page(
+            "playlist-one",
+            0,
+            &[library::PlaylistEntryInput {
+                object_id: "entry-one".into(),
+                track_id: "track-one".into(),
+            }],
+            true,
+        )
+        .await
+        .expect("stage repeated playlist entry");
         scan.finish_batch().await.expect("finish repeated batch");
     }
 
@@ -1760,7 +1854,7 @@ async fn repeated_source_playlist_and_folder_observations_coalesce() {
 }
 
 #[tokio::test]
-async fn duplicate_provider_positions_are_normalized_without_rejecting_occurrences() {
+async fn duplicate_provider_entries_keep_first_occurrence_and_dense_positions() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
     let database = Database::open(&path).await.expect("open Library Store");
@@ -1777,26 +1871,44 @@ async fn duplicate_provider_positions_are_normalized_without_rejecting_occurrenc
     })
     .await
     .expect("stage Playlist");
-    scan.write_playlist_entry("playlist-one", "duplicate-a", "track-one", 7)
-        .await
-        .expect("stage first occurrence");
-    scan.write_playlist_entry("playlist-one", "duplicate-b", "track-two", 7)
-        .await
-        .expect("stage second occurrence");
+    scan.write_playlist_page(
+        "playlist-one",
+        0,
+        &[
+            library::PlaylistEntryInput {
+                object_id: "duplicate-a".into(),
+                track_id: "track-one".into(),
+            },
+            library::PlaylistEntryInput {
+                object_id: "duplicate-a".into(),
+                track_id: "track-two".into(),
+            },
+            library::PlaylistEntryInput {
+                object_id: "duplicate-b".into(),
+                track_id: "track-one".into(),
+            },
+        ],
+        true,
+    )
+    .await
+    .expect("write repeated track occurrences");
     scan.finish_batch().await.expect("finish batch");
     scan.finish().await.expect("publish duplicate positions");
 
     let mut outside = connection(&path).await;
     assert_eq!(
-        sqlx::query_scalar::<_, i64>(
-            "SELECT entry.position FROM playlist_entries entry
-             JOIN playlists playlist USING(playlist_key)
+        sqlx::query_as::<_, (String, String, i64)>(
+            "SELECT entry.object_id,track.object_id,entry.position FROM playlist_entries entry
+             JOIN playlists playlist USING(playlist_key) JOIN tracks track USING(track_key)
              WHERE playlist.object_id='playlist-one' ORDER BY entry.position",
         )
         .fetch_all(&mut outside)
         .await
         .expect("read normalized occurrence order"),
-        [0, 1]
+        [
+            ("duplicate-a".into(), "track-one".into(), 0),
+            ("duplicate-b".into(), "track-one".into(), 1)
+        ]
     );
 }
 
@@ -1821,7 +1933,15 @@ async fn playlist_point_update_preserves_playlist_scope() {
         .await
         .unwrap();
     point
-        .write_playlist_entry("playlist-one", "entry-track-two", "track-two", 0)
+        .write_playlist_page(
+            "playlist-one",
+            0,
+            &[library::PlaylistEntryInput {
+                object_id: "entry-track-two".into(),
+                track_id: "track-two".into(),
+            }],
+            true,
+        )
         .await
         .unwrap();
     point.finish_batch().await.unwrap();

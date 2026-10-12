@@ -14,7 +14,7 @@ pub(crate) async fn pragma(
 }
 pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA application_id = 1381320270;
 
-PRAGMA user_version = 57;
+PRAGMA user_version = 58;
 
 CREATE TABLE IF NOT EXISTS queue_contexts (
     context_key INTEGER PRIMARY KEY,
@@ -574,7 +574,7 @@ CREATE TABLE IF NOT EXISTS loudness_measurements (
     integrated_lufs REAL,
     true_peak REAL CHECK (true_peak IS NULL OR true_peak >= 0),
     origin TEXT NOT NULL DEFAULT 'source' CHECK (origin IN ('source', 'analysis')),
-    PRIMARY KEY (source_key, entity_kind, entity_key)
+    PRIMARY KEY (source_key, entity_kind, entity_key, origin)
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS replay_gain_measurements (
@@ -753,15 +753,28 @@ CREATE VIEW IF NOT EXISTS local_access_files AS
 
 pub(crate) async fn initialize_durable(connection: &mut SqliteConnection) -> LibraryResult<()> {
     let version = pragma(connection, "user_version").await?;
-    if !matches!(version, 0 | 56 | 57) {
+    if !matches!(version, 0 | 56 | 57 | 58) {
         return Err(crate::LibraryError::Migration(format!(
             "unsupported library schema {version}"
         )));
     }
     let mut transaction = connection.begin().await?;
+    if matches!(version, 56 | 57) {
+        sqlx::query("ALTER TABLE loudness_measurements RENAME TO previous_loudness_measurements")
+            .execute(&mut *transaction)
+            .await?;
+    }
     sqlx::raw_sql(STORE_SCHEMA)
         .execute(&mut *transaction)
         .await?;
+    if matches!(version, 56 | 57) {
+        sqlx::raw_sql(
+            "INSERT INTO loudness_measurements SELECT * FROM previous_loudness_measurements;
+            DROP TABLE previous_loudness_measurements;",
+        )
+        .execute(&mut *transaction)
+        .await?;
+    }
     if version == 56 {
         // Connect accepted listens without admitting their songs in version 56.
         let mut after = String::new();

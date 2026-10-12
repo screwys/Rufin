@@ -759,7 +759,7 @@ impl Database {
                 .execute(&mut *transaction)
                 .await?;
             if let Some(album) = album {
-                recompute_album_loudness_key(&mut transaction, album).await?;
+                recompute_album_loudness_key(&mut transaction, album, false).await?;
             }
         }
         crate::collections::refresh_facts_on(&mut transaction).await?;
@@ -864,7 +864,7 @@ impl Database {
             sqlx::query("UPDATE tracks SET loudness_analysis_key=COALESCE((SELECT access.loudness_analysis_key FROM local_access_files access WHERE access.media_uri=?2 ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),source_loudness_analysis_key) WHERE track_key=?1")
                 .bind(track).bind(media_uri).execute(&mut *transaction).await?;
             if let Some(album) = album {
-                recompute_album_loudness_key(&mut transaction, album).await?;
+                recompute_album_loudness_key(&mut transaction, album, false).await?;
             }
         }
         transaction.commit().await?;

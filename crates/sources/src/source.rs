@@ -400,7 +400,7 @@ pub enum SourceHomeSection {
 }
 
 impl SourceHomeSection {
-    pub(crate) fn id(self) -> &'static str {
+    pub fn id(self) -> &'static str {
         match self {
             Self::MostPlayed => "most-played",
             Self::NewlyAdded => "newly-added",
@@ -3515,7 +3515,8 @@ impl Source {
                         optional_collection_error(error)?;
                     }
                 }
-                scan.replace_home_section(section.id(), &entries).await?;
+                scan.replace_home_section(section.id(), None, &entries)
+                    .await?;
             }
             Err(error) => optional_collection_error(error)?,
         }

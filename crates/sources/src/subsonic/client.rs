@@ -601,10 +601,7 @@ impl SubsonicSource {
             &json::id(&body["playlist"]["id"]).ok_or(SourceError::NotFound)?,
         );
         let mut entries = playlist_entries_from_json(self, &id, &body["playlist"]["entry"]);
-        if let Some(old_index) = entries
-            .iter()
-            .position(|entry| entry.occurrence_id == entry_id)
-        {
+        if let Some(old_index) = entries.iter().position(|entry| entry.object_id == entry_id) {
             let entry = entries.remove(old_index);
             entries.insert(new_index.min(entries.len()), entry);
         }
@@ -1469,7 +1466,7 @@ mod tests {
         let playlist = source.read_playlist("source", "list").await.unwrap();
         assert_eq!(playlist.entries.len(), 2);
         assert_eq!(
-            playlist.entries[1].occurrence_id,
+            playlist.entries[1].object_id,
             super::playlist_entry_id(&playlist.playlist.header.object_id, 2, "one")
         );
         let folder = source.browse_folder(Some("root"), None).await.unwrap();

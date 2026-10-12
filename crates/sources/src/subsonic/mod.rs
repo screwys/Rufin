@@ -27,7 +27,6 @@ use item::*;
 use crate::{NativeImageRef as ImageRef, SourceId};
 
 type PlaylistId = String;
-type TrackId = String;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct Playlist {
@@ -36,14 +35,9 @@ struct Playlist {
     valid_until: Option<i64>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct PlaylistEntry {
-    occurrence_id: String,
-    track_id: TrackId,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
 struct PlaylistSnapshot {
     playlist: Playlist,
-    entries: Vec<PlaylistEntry>,
+    entries: Vec<library::PlaylistEntryInput>,
 }
 
 fn normalize_release_types(values: Vec<String>) -> Vec<String> {

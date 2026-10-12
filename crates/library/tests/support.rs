@@ -194,14 +194,17 @@ pub async fn fixture() -> Fixture {
     )
     .await
     .expect("stage Album relations");
-    scan.write_home_entry(&HomeEntryInput {
-        section_id: "featured".to_string(),
-        position: 0,
-        kind: HomeEntryKind::Track,
-        entity_object_id: "track-0".to_string(),
-        title: "Featured Track".to_string(),
-        subtitle: "Featured".to_string(),
-    })
+    scan.replace_home_section(
+        "featured",
+        None,
+        &[HomeEntryInput {
+            position: 0,
+            kind: HomeEntryKind::Track,
+            entity_object_id: "track-0".to_string(),
+            title: "Featured Track".to_string(),
+            subtitle: "Featured".to_string(),
+        }],
+    )
     .await
     .expect("stage provider Home entry");
     let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
