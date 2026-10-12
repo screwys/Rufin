@@ -66,6 +66,8 @@ pub struct QueueItem {
     pub year: Option<i64>,
     pub release_date: Option<String>,
     pub source_format: Option<String>,
+    #[serde(default)]
+    pub audio_properties: crate::AudioProperties,
     pub musicbrainz_recording_id: Option<String>,
     pub musicbrainz_release_track_id: Option<String>,
     pub musicbrainz_album_id: Option<String>,
@@ -94,6 +96,7 @@ impl QueueItem {
             year: None,
             release_date: None,
             source_format: None,
+            audio_properties: Default::default(),
             musicbrainz_recording_id: None,
             musicbrainz_release_track_id: None,
             musicbrainz_album_id: None,
@@ -118,6 +121,7 @@ impl<'row> FromRow<'row, SqliteRow> for QueueItem {
             year: row.try_get("year")?,
             release_date: row.try_get("release_date")?,
             source_format: row.try_get("source_format")?,
+            audio_properties: row.try_get("audio_properties")?,
             musicbrainz_recording_id: row.try_get("musicbrainz_recording_id")?,
             musicbrainz_release_track_id: row.try_get("musicbrainz_release_track_id")?,
             musicbrainz_album_id: row.try_get("musicbrainz_album_id")?,
@@ -137,6 +141,7 @@ impl From<crate::PlaylistEntryRow> for QueueItem {
             year: entry.year,
             release_date: entry.release_date,
             source_format: entry.source_format,
+            audio_properties: entry.audio_properties,
             musicbrainz_recording_id: entry.musicbrainz_recording_id,
             musicbrainz_release_track_id: entry.musicbrainz_release_track_id,
             ..Self::direct(
@@ -437,7 +442,6 @@ pub enum QueueReorderTarget {
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueuePageRow {
     pub entry: Arc<QueueRow>,
-    pub audio_properties: crate::AudioProperties,
     pub source_path: Option<String>,
     pub source_name: Option<String>,
     pub favorite: bool,
@@ -525,37 +529,24 @@ impl Database {
         );
         query
             .push(QUEUE_PRIMARY_ARTIST_SQL)
-            .push(",COALESCE(track.audio_properties,'{}'),track.source_path,(SELECT display_name FROM sources WHERE source_key=track.source_key)")
+            .push(",track.source_path,(SELECT display_name FROM sources WHERE source_key=track.source_key)")
             .push(" FROM requested LEFT JOIN tracks track ON track.media_uri=requested.media_uri ORDER BY ordinal");
         let mut connection = self.acquire_reader().await?;
         let facts = query
-            .build_query_as::<(
-                i64,
-                bool,
-                Option<String>,
-                crate::AudioProperties,
-                Option<String>,
-                Option<String>,
-            )>()
+            .build_query_as::<(i64, bool, Option<String>, Option<String>, Option<String>)>()
             .fetch_all(&mut *connection)
             .await?;
         Ok(facts
             .into_iter()
             .map(
-                |(
-                    ordinal,
-                    favorite,
-                    primary_artist_media_uri,
-                    audio_properties,
-                    source_path,
-                    source_name,
-                )| QueuePageRow {
-                    entry: Arc::clone(&window[ordinal as usize]),
-                    audio_properties,
-                    source_path,
-                    source_name,
-                    favorite,
-                    primary_artist_media_uri,
+                |(ordinal, favorite, primary_artist_media_uri, source_path, source_name)| {
+                    QueuePageRow {
+                        entry: Arc::clone(&window[ordinal as usize]),
+                        source_path,
+                        source_name,
+                        favorite,
+                        primary_artist_media_uri,
+                    }
                 },
             )
             .collect())
@@ -1461,6 +1452,8 @@ async fn persist_metadata(
             year: item.year,
             release_date: item.release_date.as_deref(),
             source_format: item.source_format.as_deref(),
+            audio_properties: (item.audio_properties != crate::AudioProperties::default())
+                .then_some(&item.audio_properties),
             musicbrainz_recording_id: item.musicbrainz_recording_id.as_deref(),
             musicbrainz_release_track_id: item.musicbrainz_release_track_id.as_deref(),
             musicbrainz_album_id: item.musicbrainz_album_id.as_deref(),
@@ -1497,7 +1490,7 @@ async fn queue_items_for_uris_on(
 ) -> LibraryResult<Vec<QueueItem>> {
     Ok(sqlx::query_as("SELECT requested.value media_uri,COALESCE(track.title,requested.value) title,COALESCE(track.display_artist,'') artist,COALESCE(track.display_album,'') album,
         COALESCE(album.display_artist,track.album_display_artist) album_display_artist,track.artwork_binding,COALESCE(track.duration_millis,0) duration_millis,track.disc_number,track.track_number,
-        track.year,track.release_date,track.source_format,track.musicbrainz_recording_id,track.musicbrainz_release_track_id,
+        track.year,track.release_date,track.source_format,COALESCE(track.audio_properties,'{}') audio_properties,track.musicbrainz_recording_id,track.musicbrainz_release_track_id,
         COALESCE(album.musicbrainz_release_id,track.musicbrainz_album_id) musicbrainz_album_id,COALESCE(album.musicbrainz_release_group_id,track.musicbrainz_release_group_id) musicbrainz_release_group_id,
         COALESCE((SELECT artist.musicbrainz_artist_id FROM track_artists credit JOIN artists artist USING(artist_key) WHERE credit.track_key=track.track_key ORDER BY credit.position LIMIT 1),track.primary_artist_musicbrainz_id) primary_artist_musicbrainz_id
         FROM json_each(?1) requested LEFT JOIN tracks track ON track.media_uri=requested.value LEFT JOIN albums album USING(album_key) ORDER BY CAST(requested.key AS INTEGER)")

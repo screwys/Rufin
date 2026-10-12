@@ -1,29 +1,32 @@
 use library::{Database, Freshness, ReadCancellation, Scan, ScanLink};
 
 async fn track(scan: &mut Scan, favorite: Option<bool>, play_count: Option<i64>) {
-    scan.write_track(&library::TrackInput {
-        object_id: "track".into(),
-        album_object_id: Some("album".into()),
-        title: "Track".into(),
-        display_album: "Album".into(),
-        display_artist: "Artist".into(),
-        sort_text: "track".into(),
-        duration_millis: 180000,
-        disc_number: 1,
-        track_number: 1,
-        year: Some(2025),
-        release_date: Some("2025-01-01".into()),
-        source_format: Some("FLAC".into()),
-        comment: Some("Comment".into()),
-        bpm: Some(120),
-        musicbrainz_recording_id: Some("recording".into()),
-        musicbrainz_release_track_id: Some("release-track".into()),
-        favorite,
-        rating: Some(8),
-        source_play_count: play_count,
-        loudness_analysis_key: [1; 32],
-        ..Default::default()
-    })
+    scan.write_tracks(&[(
+        &library::TrackInput {
+            object_id: "track".into(),
+            album_object_id: Some("album".into()),
+            title: "Track".into(),
+            display_album: "Album".into(),
+            display_artist: "Artist".into(),
+            sort_text: "track".into(),
+            duration_millis: 180000,
+            disc_number: 1,
+            track_number: 1,
+            year: Some(2025),
+            release_date: Some("2025-01-01".into()),
+            source_format: Some("FLAC".into()),
+            comment: Some("Comment".into()),
+            bpm: Some(120),
+            musicbrainz_recording_id: Some("recording".into()),
+            musicbrainz_release_track_id: Some("release-track".into()),
+            favorite,
+            rating: Some(8),
+            source_play_count: play_count,
+            loudness_analysis_key: [1; 32],
+            ..Default::default()
+        },
+        None,
+    )])
     .await
     .unwrap();
 }

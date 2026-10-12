@@ -427,6 +427,7 @@ pub(crate) mod tests {
         let media_uri =
             library::source_entity_uri(&library::SourceId::new("source"), "track", "track");
         let current = Arc::new(CurrentMedia {
+            stream: None,
             id: CurrentMediaId {
                 run: Some(RunId::new(run)),
                 media_uri: media_uri.into(),
@@ -435,6 +436,7 @@ pub(crate) mod tests {
                 occurrence_id: None,
                 position: 0,
                 item: QueueItem {
+                    audio_properties: Default::default(),
                     media_uri: library::source_entity_uri(
                         &library::SourceId::new("source"),
                         "track",

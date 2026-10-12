@@ -272,7 +272,7 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
     internal fun openOverview(item: io.github.screwys.rufin.core.AndroidOverviewItem, period: String) = runAction {
         val library = browse.library ?: return@runAction
         if (item.detailRoute != null) {
-            item.sourceId?.let { library.selectSource(it) }
+            item.sourceId?.takeIf { it != sources?.selectedSourceId }?.let { library.selectSource(it) }
             browse.openRoute(item.detailRoute!!, item.title, item.kind)
         } else connectedService().playRequest {
             library.playRows("overview:$period:${item.mediaUri}", listOf(item.mediaUri), 0UL, "now", false, translate("Listening overview"))

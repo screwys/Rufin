@@ -1849,6 +1849,7 @@ mod tests {
             track_key: None,
             provenance: playback::Provenance::Manual,
             item: playback::QueueItem {
+                audio_properties: Default::default(),
                 media_uri: library::source_entity_uri(
                     &library::SourceId::new("source"),
                     "track",

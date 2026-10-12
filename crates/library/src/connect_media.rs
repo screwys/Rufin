@@ -176,9 +176,9 @@ impl Database {
         access_uri: String,
         size_bytes: i64,
     ) -> LibraryResult<()> {
-        self.upsert_local_access(
+        self.write_local_access(
             None,
-            &crate::LocalAccessWrite {
+            &[&crate::LocalAccessWrite {
                 media_uri: item.media_uri.clone(),
                 origin: crate::LocalAccessOrigin::Download,
                 path,
@@ -197,7 +197,7 @@ impl Database {
                 duration_millis: item.duration_millis,
                 access_uri,
                 loudness_analysis_key: None,
-            },
+            }],
         )
         .await
         .map(|_| ())

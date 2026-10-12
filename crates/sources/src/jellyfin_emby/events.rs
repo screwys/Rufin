@@ -381,7 +381,7 @@ mod tests {
                 .await
                 .unwrap();
             }
-            scan.write_track(
+            scan.write_tracks(&[(
                 &track_from_item(
                     kind,
                     scan.source_id(),
@@ -392,7 +392,8 @@ mod tests {
                 )
                 .unwrap()
                 .unwrap(),
-            )
+                None,
+            )])
             .await
             .unwrap();
             scan.finish().await.unwrap();

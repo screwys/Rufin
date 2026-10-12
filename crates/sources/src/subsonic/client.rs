@@ -106,7 +106,7 @@ impl SubsonicSource {
                     }
                     scan.begin_batch().await?;
                     for track in tracks {
-                        scan.write_track(&track).await?;
+                        scan.write_tracks(&[(&track, None)]).await?;
                     }
                     scan.finish_batch().await?;
                 }
@@ -291,7 +291,7 @@ impl SubsonicSource {
             }
             for track in tracks.into_iter().take(limit.clamp(1, 100)) {
                 track_ids.push(track.object_id.clone());
-                scan.write_track(&track).await?;
+                scan.write_tracks(&[(&track, None)]).await?;
             }
             scan.finish_batch().await?;
             Ok((track_ids, album_ids, artist_ids))
@@ -367,7 +367,7 @@ impl SubsonicSource {
                 if song.album_object_id.is_none() {
                     song.album_object_id = Some(album_id.to_string());
                 }
-                scan.write_track(&song).await?;
+                scan.write_tracks(&[(&song, None)]).await?;
             }
             scan.finish_batch().await?;
         }

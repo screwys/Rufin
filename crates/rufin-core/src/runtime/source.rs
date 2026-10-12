@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use sources::SourceId;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize)]
 pub struct LocalAccessStatus {
     pub total_track_count: usize,
     pub matched_track_count: usize,
@@ -30,7 +30,7 @@ pub struct LocalFolder {
     pub path: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SourceLocalAccess {
     pub source_id: SourceId,
     pub root_path: PathBuf,
@@ -39,7 +39,7 @@ pub struct SourceLocalAccess {
     pub sample_source_path: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct SourceLocalAccessSummary {
     pub source_id: SourceId,
     pub access: Option<SourceLocalAccess>,

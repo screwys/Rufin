@@ -45,6 +45,7 @@ pub struct StreamWindow {
 
 #[derive(Clone)]
 pub struct ResolvedStream {
+    pub local_input: bool,
     transcoded: bool,
     pub content_type: Option<String>,
     uri: String,
@@ -57,6 +58,7 @@ pub struct ResolvedStream {
 impl PartialEq for ResolvedStream {
     fn eq(&self, other: &Self) -> bool {
         self.uri == other.uri
+            && self.local_input == other.local_input
             && self.transcoded == other.transcoded
             && self.redacted_uri == other.redacted_uri
             && self.trust_invalid_certificate == other.trust_invalid_certificate
@@ -71,6 +73,7 @@ impl ResolvedStream {
     pub fn new(uri: impl Into<String>) -> Self {
         let uri = uri.into();
         Self {
+            local_input: uri.starts_with("file:") || uri.starts_with("content:"),
             redacted_uri: redact_sensitive_uri(&uri),
             transcoded: false,
             uri,
@@ -82,9 +85,11 @@ impl ResolvedStream {
     }
 
     pub fn with_redacted(uri: impl Into<String>, redacted_uri: impl Into<String>) -> Self {
+        let uri = uri.into();
         Self {
+            local_input: uri.starts_with("file:") || uri.starts_with("content:"),
             transcoded: false,
-            uri: uri.into(),
+            uri,
             redacted_uri: redacted_uri.into(),
             trust_invalid_certificate: false,
             window: None,

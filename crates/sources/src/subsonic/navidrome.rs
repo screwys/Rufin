@@ -6,7 +6,6 @@
 
 use std::fmt;
 use std::future::Future;
-use std::pin::Pin;
 
 mod events;
 
@@ -235,98 +234,72 @@ impl SubsonicSource {
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        self.stage_navidrome_pages(
-            "album",
-            SourceReadStage::Albums,
-            scan,
-            progress,
-            cancelled,
-            |scan, raw_id, album| {
-                let album = album_from_navidrome(self, scan.source_id(), &raw_id, &album);
-                Box::pin(async move { scan.write_album(&album?).await })
-            },
-        )
-        .await?;
-        self.stage_navidrome_pages(
-            "song",
-            SourceReadStage::Tracks,
-            scan,
-            progress,
-            cancelled,
-            |scan, raw_id, track| {
-                let track = track_from_navidrome(self, &raw_id, &track);
-                Box::pin(async move {
-                    scan.write_track(&track).await?;
-                    Ok(())
-                })
-            },
-        )
-        .await?;
-        self.stage_navidrome_pages(
-            "artist",
-            SourceReadStage::Artists,
-            scan,
-            progress,
-            cancelled,
-            |scan, raw_id, artist| {
-                let artist = artist_from_navidrome(self, scan.source_id(), &raw_id, &artist);
-                Box::pin(async move { scan.write_artist(&artist?).await })
-            },
-        )
-        .await?;
-
-        Ok(())
-    }
-
-    async fn stage_navidrome_pages(
-        &self,
-        endpoint: &str,
-        stage: SourceReadStage,
-        scan: &mut Scan,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
-        cancelled: &(dyn Fn() -> bool + Send + Sync),
-        mut write: impl for<'scan> FnMut(
-            &'scan mut Scan,
-            String,
-            Value,
-        ) -> Pin<
-            Box<dyn Future<Output = library::LibraryResult<()>> + Send + 'scan>,
-        >,
-    ) -> SourceResult<()> {
-        progress(SourceReadProgress {
-            stage,
-            completed: 0,
-            total: None,
-        });
-        let mut offset = 0;
-        loop {
-            if cancelled() {
-                return Err(SourceError::Cancelled);
-            }
-            let page = self.navidrome_page(endpoint, offset).await?;
-            let page_len = page.len();
-            if page_len == 0 {
-                return Ok(());
-            }
-            offset = offset.checked_add(page_len).ok_or_else(|| {
-                SourceError::Other(format!("Navidrome {endpoint} offset overflowed"))
-            })?;
-            scan.begin_batch().await?;
-            for item in page {
-                if let Some(raw_id) = id(&item["id"]) {
-                    write(scan, raw_id, item).await?;
-                }
-            }
-            scan.finish_batch().await?;
+        use crate::SourceEntityKind::{Album, Artist, Track};
+        for (kind, endpoint, stage) in [
+            (Album, "album", SourceReadStage::Albums),
+            (Track, "song", SourceReadStage::Tracks),
+            (Artist, "artist", SourceReadStage::Artists),
+        ] {
             progress(SourceReadProgress {
                 stage,
-                completed: offset,
+                completed: 0,
                 total: None,
             });
-            if page_len < NAVIDROME_PAGE_SIZE {
-                return Ok(());
+            let mut offset = 0usize;
+            loop {
+                if cancelled() {
+                    return Err(SourceError::Cancelled);
+                }
+                let page = self.navidrome_page(endpoint, offset).await?;
+                let page_len = page.len();
+                if page_len == 0 {
+                    break;
+                }
+                offset = offset.checked_add(page_len).ok_or_else(|| {
+                    SourceError::Other(format!("Navidrome {endpoint} offset overflowed"))
+                })?;
+                let mut tracks = Vec::new();
+                scan.begin_batch().await?;
+                for item in page {
+                    let Some(raw_id) = id(&item["id"]) else {
+                        continue;
+                    };
+                    match kind {
+                        Album => {
+                            scan.write_album(&album_from_navidrome(
+                                self,
+                                scan.source_id(),
+                                &raw_id,
+                                &item,
+                            )?)
+                            .await?
+                        }
+                        Track => tracks.push(track_from_navidrome(self, &raw_id, &item)),
+                        Artist => {
+                            scan.write_artist(&artist_from_navidrome(
+                                self,
+                                scan.source_id(),
+                                &raw_id,
+                                &item,
+                            )?)
+                            .await?
+                        }
+                    }
+                }
+                scan.write_tracks(&tracks.iter().map(|track| (track, None)).collect::<Vec<_>>())
+                    .await?;
+                scan.finish_batch().await?;
+                progress(SourceReadProgress {
+                    stage,
+                    completed: offset,
+                    total: None,
+                });
+                if page_len < NAVIDROME_PAGE_SIZE {
+                    break;
+                }
             }
         }
+        Ok(())
     }
 
     async fn navidrome_page(&self, kind: &str, offset: usize) -> SourceResult<Vec<Value>> {

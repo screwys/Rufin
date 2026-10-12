@@ -3399,6 +3399,9 @@ msgstr ""
 msgid "Stream quality"
 msgstr ""
 
+msgid "Streaming"
+msgstr ""
+
 msgid "Studio"
 msgstr ""
 

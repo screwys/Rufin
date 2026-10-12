@@ -2092,14 +2092,17 @@ mod tests {
         let mut scan = library::Scan::begin(&source, "server", "Server", "server", None)
             .await
             .unwrap();
-        scan.write_track(&library::TrackInput {
-            object_id: "track".into(),
-            title: "Track".into(),
-            display_artist: "Artist".into(),
-            sort_text: "track".into(),
-            artwork_binding: Some(art.to_vec()),
-            ..Default::default()
-        })
+        scan.write_tracks(&[(
+            &library::TrackInput {
+                object_id: "track".into(),
+                title: "Track".into(),
+                display_artist: "Artist".into(),
+                sort_text: "track".into(),
+                artwork_binding: Some(art.to_vec()),
+                ..Default::default()
+            },
+            None,
+        )])
         .await
         .unwrap();
         scan.finish().await.unwrap();

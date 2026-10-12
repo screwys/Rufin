@@ -626,6 +626,7 @@ async fn import_queue(
                     year: number("year"),
                     release_date: text("release_date"),
                     source_format: text("source_format"),
+                    audio_properties: Default::default(),
                     musicbrainz_recording_id: text("musicbrainz_recording_id").filter(|value| !value.is_empty()),
                     musicbrainz_release_track_id: text("musicbrainz_release_track_id").filter(|value| !value.is_empty()),
                     musicbrainz_album_id: text("musicbrainz_album_id").filter(|value| !value.is_empty()),

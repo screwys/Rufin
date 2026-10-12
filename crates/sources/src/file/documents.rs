@@ -148,6 +148,168 @@ pub fn find_document(root: &str, components: &[String]) -> SourceResult<Option<D
     Ok(Some(entry))
 }
 
+/// Resolve one bounded page of paths, listing each shared directory once.
+pub(crate) fn find_document_paths(
+    root: &str,
+    paths: &[Option<String>],
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> SourceResult<Vec<Option<DocumentEntry>>> {
+    let mut result = vec![None; paths.len()];
+    let mut pending = vec![(
+        root.to_owned(),
+        paths
+            .iter()
+            .enumerate()
+            .filter_map(|(index, path)| Some((index, path.as_deref()?.to_owned())))
+            .collect::<Vec<_>>(),
+    )];
+    while let Some((parent, wanted)) = pending.pop() {
+        let mut offset = 0;
+        loop {
+            if cancelled.load(std::sync::atomic::Ordering::Acquire) {
+                return Err(SourceError::Cancelled);
+            }
+            let page = list_documents(&parent, offset)?;
+            for entry in page.entries {
+                let mut children = Vec::new();
+                for (index, path) in &wanted {
+                    let (name, rest) = path
+                        .split_once('/')
+                        .map_or((path.as_str(), None), |(name, rest)| (name, Some(rest)));
+                    if name != entry.name {
+                        continue;
+                    }
+                    match rest {
+                        Some(rest) if entry.directory => children.push((*index, rest.to_owned())),
+                        None if !entry.directory => result[*index] = Some(entry.clone()),
+                        _ => {}
+                    }
+                }
+                if !children.is_empty() {
+                    pending.push((entry.uri, children));
+                }
+            }
+            let Some(next) = page.next else {
+                break;
+            };
+            offset = next;
+        }
+    }
+    Ok(result)
+}
+
+pub(crate) fn save_mapped_artwork(
+    locator: &library::LocalLocatorWrite,
+    edit: Option<&crate::ArtworkEdit>,
+    previous_artist: Option<&str>,
+    next_artist: Option<&str>,
+) -> Result<bool, crate::SourceMetadataError> {
+    let failure = |error: SourceError| crate::SourceMetadataError::Write(error.to_string());
+    let parent = locator
+        .relative_path
+        .rsplit_once('/')
+        .map_or("", |(parent, _)| parent);
+    let directory = find_document(
+        &locator.root,
+        &parent
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>(),
+    )
+    .map_err(failure)?
+    .ok_or(crate::SourceMetadataError::Unavailable)?;
+    let mut current: Option<DocumentEntry> = None;
+    let rank = |name: &str| {
+        previous_artist.map_or_else(
+            || super::artwork::image_rank(name),
+            |artist| super::artwork::artist_image_rank_for(name, artist, false),
+        )
+    };
+    let mut offset = 0;
+    loop {
+        let page = list_documents(&directory.uri, offset).map_err(failure)?;
+        for entry in page.entries {
+            if !entry.directory
+                && rank(&entry.name)
+                    < current
+                        .as_ref()
+                        .map_or(usize::MAX, |current| rank(&current.name))
+            {
+                current = Some(entry);
+            }
+        }
+        let Some(next) = page.next else {
+            break;
+        };
+        offset = next;
+    }
+    let Some(edit) = edit else {
+        if let Some(current) = current
+            && let Some(name) = next_artist
+        {
+            let extension = Path::new(&current.name)
+                .extension()
+                .and_then(|part| part.to_str())
+                .unwrap_or("jpg");
+            let filename = super::metadata::folder_artwork_filename(
+                Some(std::ffi::OsStr::new(&current.name)),
+                Some(name),
+                extension,
+            );
+            if filename.to_string_lossy() != current.name {
+                rename_document(&current.uri, &filename.to_string_lossy()).map_err(failure)?;
+                return Ok(true);
+            }
+        }
+        return Ok(false);
+    };
+    let crate::ArtworkChange::Replace(image) = &edit.change else {
+        if let Some(current) = current {
+            delete_document(&current.uri).map_err(failure)?;
+            return Ok(true);
+        }
+        return Ok(false);
+    };
+    let extension = super::metadata::artwork_extension(image)?;
+    let filename = super::metadata::folder_artwork_filename(
+        current
+            .as_ref()
+            .map(|entry| std::ffi::OsStr::new(&entry.name)),
+        next_artist.or(previous_artist),
+        extension,
+    );
+    let file = tempfile::NamedTempFile::new()
+        .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?;
+    std::fs::write(file.path(), &image.bytes)
+        .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?;
+    if let Some(current) = current
+        .as_ref()
+        .filter(|current| current.name == filename.to_string_lossy())
+    {
+        save_document(&current.uri, file.path(), current.revision.as_deref()).map_err(failure)?;
+    } else {
+        create_document(
+            &directory.uri,
+            &filename.to_string_lossy(),
+            image
+                .content_type
+                .as_deref()
+                .unwrap_or("application/octet-stream"),
+            file.path(),
+        )
+        .map_err(failure)?;
+        if let Some(current) = current {
+            delete_document(&current.uri).map_err(|error| {
+                crate::SourceMetadataError::PartiallySaved {
+                    message: error.to_string(),
+                }
+            })?;
+        }
+    }
+    Ok(true)
+}
+
 pub fn create_document_directories(
     root: &str,
     components: &[String],

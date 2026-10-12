@@ -76,6 +76,11 @@ pub(crate) fn hash_file_revision(hash: &mut blake3::Hasher, uri: &str, revision:
 }
 
 pub(crate) fn revision(path: &Path) -> Result<String, SourceMetadataError> {
+    if path.to_string_lossy().starts_with("content:") {
+        return super::documents::stat_document(&path.to_string_lossy())
+            .map(|entry| entry.revision.unwrap_or_default())
+            .map_err(write_error);
+    }
     let metadata = fs::metadata(path).map_err(write_error)?;
     let modified = metadata
         .modified()
@@ -1689,6 +1694,19 @@ fn read_metadata_file(
     path: &Path,
     source_format: Option<&str>,
 ) -> Result<(Option<::lofty::file::TaggedFile>, Option<MetadataWriter>), SourceMetadataError> {
+    if path.to_string_lossy().starts_with("content:") {
+        let reader =
+            super::documents::open_document_input(&path.to_string_lossy()).map_err(write_error)?;
+        let tagged = super::lofty::read_lofty_file(
+            reader,
+            ::lofty::config::ParseOptions::new().read_cover_art(false),
+        )
+        .map_err(write_error)?;
+        let writer = tagged
+            .as_ref()
+            .and_then(|file| MetadataWriter::for_file_type(file.file_type()));
+        return Ok((tagged, writer));
+    }
     let writer = source_format
         .and_then(MetadataWriter::for_source_format)
         .or_else(|| MetadataWriter::for_path(path));

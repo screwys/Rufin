@@ -75,6 +75,10 @@ internal fun MetadataEditorScreen(model: RufinConnection, kind: String, mediaUri
             }
         }
     }
+    (connection.failure as? AndroidMetadataException.LocalAccessRequired)?.let { failure ->
+        io.github.screwys.rufin.sources.LocalAccessDialog(model, failure.sourceId, failure.sourcePath,
+            onDismiss = onDismiss, onSaved = { connection.reload() })
+    }
     if (confirmReload) AlertDialog(onDismissRequest = { confirmReload = false },
         title = { Text(translate("Discard changes?")) },
         text = { Text(translate("Reload metadata to review the current values.")) },

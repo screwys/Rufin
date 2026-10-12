@@ -427,6 +427,7 @@ mod tests {
             media_uri: media_uri.clone().into(),
         };
         let media = Arc::new(CurrentMedia {
+            stream: None,
             id: media_id.clone(),
             row: Arc::new(playback::QueueRow {
                 occurrence_id: None,

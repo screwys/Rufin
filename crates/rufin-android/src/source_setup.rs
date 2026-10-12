@@ -218,6 +218,37 @@ impl AndroidSourceSetup {
             .map_err(error)?
     }
 
+    pub async fn local_access(&self, id: String) -> Result<Option<String>, AndroidError> {
+        let source = self.source.clone();
+        self.runtime
+            .spawn_blocking(move || {
+                source
+                    .list_sources()
+                    .local_access
+                    .iter()
+                    .find(|summary| summary.source_id.as_str() == id)
+                    .map(serde_json::to_string)
+                    .transpose()
+                    .map_err(error)
+            })
+            .await
+            .map_err(error)?
+    }
+
+    pub async fn save_local_access(&self, form: String) -> Result<(), AndroidError> {
+        let input = serde_json::from_str(&form).map_err(error)?;
+        self.source
+            .save_local_access(input, true)
+            .recv()
+            .await
+            .map_err(error)?
+            .map_err(error)
+    }
+
+    pub fn clear_local_access(&self, id: String) {
+        self.source.clear_local_access(sources::SourceId::new(id));
+    }
+
     pub async fn submit(
         &self,
         form: String,

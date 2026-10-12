@@ -135,6 +135,7 @@ pub(crate) fn queue_item(scanned: ScannedTrack, uri: String) -> library::QueueIt
     item.year = track.year;
     item.release_date = track.release_date;
     item.source_format = track.source_format;
+    item.audio_properties = track.audio_properties;
     item.musicbrainz_recording_id = track.musicbrainz_recording_id;
     item.musicbrainz_release_track_id = track.musicbrainz_release_track_id;
     item.musicbrainz_album_id = album.musicbrainz_release_id;

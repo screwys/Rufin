@@ -1471,7 +1471,6 @@ mod tests {
                 track_key: None,
                 provenance: library::QueueProvenance::Manual,
             }),
-            audio_properties: Default::default(),
             source_path: None,
             source_name: None,
             primary_artist_media_uri: None,

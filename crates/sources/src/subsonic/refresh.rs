@@ -328,7 +328,7 @@ impl SubsonicSource {
                 offset = offset.checked_add(page.len()).ok_or_else(|| {
                     SourceError::Other("OpenSubsonic track offset overflowed".to_string())
                 })?;
-                scan.begin_batch().await?;
+                let mut tracks = Vec::with_capacity(page.len());
                 let mut folder_links = Vec::new();
                 for song in page {
                     let Some(track) = track_from_json(self, scan.source_id(), song)? else {
@@ -337,10 +337,13 @@ impl SubsonicSource {
                     if let Some(folder) = folder {
                         folder_links.push((track.object_id.clone(), folder.object_id.clone()));
                     }
-                    if scan.write_track(&track).await? {
-                        emitted += 1;
-                    }
+                    tracks.push(track);
                 }
+                drop(body);
+                scan.begin_batch().await?;
+                emitted += scan
+                    .write_tracks(&tracks.iter().map(|track| (track, None)).collect::<Vec<_>>())
+                    .await?;
                 scan.write_track_folders(
                     &folder_links
                         .iter()
@@ -807,7 +810,7 @@ mod tests {
         )
         .await
         .unwrap();
-        scan.write_track(&super::track_from_json(&source, "source", &serde_json::json!({"id":"track","title":"Track","albumId":"album","comment":"Keep","duration":42,"userRating":4})).unwrap().unwrap()).await.unwrap();
+        scan.write_tracks(&[(&super::track_from_json(&source, "source", &serde_json::json!({"id":"track","title":"Track","albumId":"album","comment":"Keep","duration":42,"userRating":4})).unwrap().unwrap(), None)]).await.unwrap();
         source.stage_favorites(&mut scan).await.unwrap();
         source
             .stage_playlist_snapshot(&mut scan, "subsonic:playlist:playlist")
@@ -965,8 +968,8 @@ mod tests {
                     )
                     .await
                     .unwrap();
-                previous.write_track(&super::track_from_json(&source, "source", &serde_json::json!({"id":"removed","title":"Vanished","albumId":"album"})).unwrap()
-                    .unwrap())
+                previous.write_tracks(&[(&super::track_from_json(&source, "source", &serde_json::json!({"id":"removed","title":"Vanished","albumId":"album"})).unwrap()
+                    .unwrap(), None)])
                 .await
                 .unwrap();
                 previous

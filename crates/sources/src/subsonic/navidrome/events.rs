@@ -286,14 +286,17 @@ mod tests {
         )
         .await
         .unwrap();
-        scan.write_track(&track_from_navidrome(&baseline, "track", &item))
+        scan.write_tracks(&[(&track_from_navidrome(&baseline, "track", &item), None)])
             .await
             .unwrap();
-        scan.write_track(&track_from_navidrome(
-            &baseline,
-            "second",
-            &serde_json::json!({"id":"second","title":"Second"}),
-        ))
+        scan.write_tracks(&[(
+            &track_from_navidrome(
+                &baseline,
+                "second",
+                &serde_json::json!({"id":"second","title":"Second"}),
+            ),
+            None,
+        )])
         .await
         .unwrap();
         scan.finish().await.unwrap();

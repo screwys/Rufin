@@ -80,7 +80,13 @@ pub(crate) async fn stage_metadata_paths(scan: &mut Scan, paths: &[PathBuf]) -> 
             .into_iter()
             .map(|track| track.into_inputs(scan.accepted_at()))
             .collect::<SourceResult<Vec<_>>>()?;
-        scan.write_album_tracks(&inputs).await?;
+        scan.write_tracks(
+            &(&inputs)
+                .iter()
+                .map(|(album, track)| (track, Some(album)))
+                .collect::<Vec<_>>(),
+        )
+        .await?;
         scan.finish_batch().await?;
     }
     Ok(())
@@ -576,7 +582,13 @@ async fn stage_exact_cue(
         .into_iter()
         .map(|track| track.into_inputs(scan.accepted_at()))
         .collect::<SourceResult<Vec<_>>>()?;
-    scan.write_album_tracks(&inputs).await?;
+    scan.write_tracks(
+        &(&inputs)
+            .iter()
+            .map(|(album, track)| (track, Some(album)))
+            .collect::<Vec<_>>(),
+    )
+    .await?;
     if retain {
         scan.retain_local_cue_path(path.to_string_lossy().as_ref())
             .await?;
@@ -1005,7 +1017,13 @@ async fn stage_audio_batch(
         .into_iter()
         .map(|track| track.into_inputs(scan.accepted_at()))
         .collect::<SourceResult<Vec<_>>>()?;
-    scan.write_album_tracks(&inputs).await?;
+    scan.write_tracks(
+        &(&inputs)
+            .iter()
+            .map(|(album, track)| (track, Some(album)))
+            .collect::<Vec<_>>(),
+    )
+    .await?;
     scan.retain_local_media_paths(&retained).await?;
     scan.finish_batch().await?;
     Ok(accepted_count)
@@ -1461,7 +1479,13 @@ pub(crate) async fn stage_imported_paths(
             .into_iter()
             .map(|track| track.into_inputs(scan.accepted_at()))
             .collect::<SourceResult<Vec<_>>>()?;
-        scan.write_album_tracks(&inputs).await?;
+        scan.write_tracks(
+            &(&inputs)
+                .iter()
+                .map(|(album, track)| (track, Some(album)))
+                .collect::<Vec<_>>(),
+        )
+        .await?;
         scan.finish_batch().await?;
     }
     Ok(())

@@ -813,9 +813,9 @@ impl Database {
             Some(id) => self.source_identity_key(&crate::SourceId::new(id)).await?,
             None => None,
         };
-        self.upsert_local_access(
+        self.write_local_access(
             source,
-            &crate::LocalAccessWrite {
+            &[&crate::LocalAccessWrite {
                 media_uri: media_uri.to_owned(),
                 origin: if managed {
                     crate::LocalAccessOrigin::Download
@@ -847,7 +847,7 @@ impl Database {
                 duration_millis: reference["duration_millis"].as_i64().unwrap_or(0),
                 access_uri,
                 loudness_analysis_key: None,
-            },
+            }],
         )
         .await?;
         Ok(())
@@ -982,6 +982,11 @@ async fn remember_media(
     uri: &str,
     value: &Value,
 ) -> LibraryResult<crate::TrackKey> {
+    let audio_properties = value
+        .get("audio_properties")
+        .filter(|value| !value.is_null())
+        .map(|value| serde_json::from_value(value.clone()))
+        .transpose()?;
     let key = crate::tracks::remember_song(
         connection,
         uri,
@@ -1004,6 +1009,7 @@ async fn remember_media(
             year: value["year"].as_i64(),
             release_date: value["release_date"].as_str(),
             source_format: value["source_format"].as_str(),
+            audio_properties: audio_properties.as_ref(),
             musicbrainz_recording_id: value["musicbrainz_recording_id"].as_str(),
             musicbrainz_release_track_id: value["musicbrainz_release_track_id"].as_str(),
             musicbrainz_album_id: value["musicbrainz_album_id"].as_str(),
@@ -1391,21 +1397,24 @@ mod tests {
         })
         .await
         .unwrap();
-        scan.write_track(&crate::TrackInput {
-            object_id: "track".into(),
-            album_object_id: Some("album".into()),
-            title: "Track".into(),
-            display_album: "Album".into(),
-            display_artist: "Artist".into(),
-            sort_text: "track".into(),
-            duration_millis: 180000,
-            disc_number: 1,
-            track_number: 1,
-            artwork_binding: Some(art.to_vec()),
-            favorite: Some(false),
-            loudness_analysis_key: [1; 32],
-            ..Default::default()
-        })
+        scan.write_tracks(&[(
+            &crate::TrackInput {
+                object_id: "track".into(),
+                album_object_id: Some("album".into()),
+                title: "Track".into(),
+                display_album: "Album".into(),
+                display_artist: "Artist".into(),
+                sort_text: "track".into(),
+                duration_millis: 180000,
+                disc_number: 1,
+                track_number: 1,
+                artwork_binding: Some(art.to_vec()),
+                favorite: Some(false),
+                loudness_analysis_key: [1; 32],
+                ..Default::default()
+            },
+            None,
+        )])
         .await
         .unwrap();
         scan.write_track_relations(&[("track", "artist")], &[], &[])

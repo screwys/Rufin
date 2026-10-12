@@ -42,6 +42,63 @@ pub fn audio_source_label(format: Option<&str>, path: Option<&str>) -> Option<St
     })
 }
 
+pub fn now_playing_labels(media: Option<&playback::CurrentMedia>) -> Vec<String> {
+    let Some(media) = media else {
+        return Vec::new();
+    };
+    let mut labels = Vec::new();
+    let original = audio_source_label(media.source_format.as_deref(), Some(&media.media_uri));
+    let same_format = media.stream.as_ref().is_none_or(|stream| {
+        !stream.transcoded
+            && stream.format.as_ref().is_none_or(|format| {
+                original
+                    .as_deref()
+                    .and_then(crate::playback::audio_mime)
+                    .as_ref()
+                    == Some(format)
+            })
+    });
+    if let Some(stream) = &media.stream {
+        labels.push(localization::tr(if stream.local {
+            msgid("Local")
+        } else {
+            msgid("Streaming")
+        }));
+    }
+    let format = if same_format {
+        original
+    } else {
+        media
+            .stream
+            .as_ref()
+            .and_then(|stream| audio_source_label(stream.format.as_deref(), None))
+    };
+    labels.extend(format);
+    labels.extend(
+        media
+            .year
+            .filter(|year| *year > 0)
+            .map(|year| year.to_string()),
+    );
+    if same_format {
+        labels.extend(
+            media
+                .audio_properties
+                .bit_depth
+                .filter(|bits| *bits > 0)
+                .map(|bits| format!("{bits} bit")),
+        );
+        labels.extend(
+            media
+                .audio_properties
+                .sample_rate_hz
+                .filter(|rate| *rate > 0)
+                .map(|rate| format!("{} kHz", f64::from(rate) / 1000.0)),
+        );
+    }
+    labels
+}
+
 pub fn home_provider_title(section_id: &str, title: Option<&str>) -> String {
     title.map(str::to_owned).unwrap_or_else(|| {
         section_id

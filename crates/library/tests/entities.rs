@@ -1581,26 +1581,29 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
         let mut scan = library::Scan::begin_items(&fixture.database, "source")
             .await
             .unwrap();
-        scan.write_track(&library::TrackInput {
-            object_id: "track-0".into(),
-            album_object_id: Some("album-a".into()),
-            title: "Edited".into(),
-            display_album: "Album A".into(),
-            display_artist: "Artist A".into(),
-            sort_text: "edited".into(),
-            duration_millis: 181_000,
-            disc_number: 1,
-            track_number: 1,
-            year: Some(2025),
-            date_added: Some("2025-01-01".into()),
-            source_format: Some("FLAC".into()),
-            comment: Some("Changed".into()),
-            bpm: Some(121),
-            favorite: Some(false),
-            rating: Some(5),
-            loudness_analysis_key: [1; 32],
-            ..Default::default()
-        })
+        scan.write_tracks(&[(
+            &library::TrackInput {
+                object_id: "track-0".into(),
+                album_object_id: Some("album-a".into()),
+                title: "Edited".into(),
+                display_album: "Album A".into(),
+                display_artist: "Artist A".into(),
+                sort_text: "edited".into(),
+                duration_millis: 181_000,
+                disc_number: 1,
+                track_number: 1,
+                year: Some(2025),
+                date_added: Some("2025-01-01".into()),
+                source_format: Some("FLAC".into()),
+                comment: Some("Changed".into()),
+                bpm: Some(121),
+                favorite: Some(false),
+                rating: Some(5),
+                loudness_analysis_key: [1; 32],
+                ..Default::default()
+            },
+            None,
+        )])
         .await
         .expect("refresh Track metadata");
         scan.write_track_relations(

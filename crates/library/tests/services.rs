@@ -223,7 +223,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     let mut scan = library::Scan::begin_items(&fixture.database, "source")
         .await
         .unwrap();
-    scan.write_track(&input).await.unwrap();
+    scan.write_tracks(&[(&input, None)]).await.unwrap();
     scan.finish().await.unwrap();
     assert!(
         fixture
@@ -250,7 +250,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     input.cue_end_millis = Some(181_000);
     input.loudness_analysis_key = [99; 32];
     input.source_loudness = None;
-    scan.write_track(&input)
+    scan.write_tracks(&[(&input, None)])
         .await
         .expect("refresh Track CUE identity");
     scan.write_track_relations(
@@ -308,7 +308,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     let mut scan = library::Scan::begin_items(&fixture.database, "source")
         .await
         .unwrap();
-    scan.write_track(&input).await.unwrap();
+    scan.write_tracks(&[(&input, None)]).await.unwrap();
     scan.finish().await.unwrap();
     assert!(
         !fixture
@@ -361,9 +361,9 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     let old_album_key = album.expected_analysis_key;
     fixture
         .database
-        .upsert_local_access(
+        .write_local_access(
             Some(fixture.source),
-            &LocalAccessWrite {
+            &[&LocalAccessWrite {
                 media_uri: fixture.track_uris[1].clone(),
                 origin: library::LocalAccessOrigin::Mapping,
                 path: "/generic/local-track.flac".to_string(),
@@ -382,7 +382,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
                 duration_millis: 181_000,
                 access_uri: "file:///generic/local-track.flac".to_string(),
                 loudness_analysis_key: Some([77; 32]),
-            },
+            }],
         )
         .await
         .expect("install exact Local audio identity");
@@ -428,47 +428,50 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         (2, "album-a", "Artist B", "Gamma"),
         (3, "album-b", "Artist B", "Delta"),
     ] {
-        scan.write_track(&library::TrackInput {
-            object_id: format!("track-{index}"),
-            album_object_id: Some(album_id.to_owned()),
-            title: title.to_owned(),
-            display_album: (if album_id == "album-a" {
-                "Album A"
-            } else {
-                "Album B"
-            })
-            .to_owned(),
-            display_artist: artist.to_owned(),
-            sort_text: title.to_lowercase(),
-            duration_millis: 180_000 + index * 1_000,
-            disc_number: 1,
-            track_number: index + 1,
-            year: Some(2020 + index),
-            date_added: Some("2024-01-02".into()),
-            source_format: Some("FLAC".into()),
-            comment: Some("Note".into()),
-            bpm: Some(100 + index),
-            favorite: Some(false),
-            loudness_analysis_key: [index as u8 + 10; 32],
-            source_loudness: match index {
-                1 => Some(library::LoudnessInput {
-                    integrated_lufs: Some(-15.0),
+        scan.write_tracks(&[(
+            &library::TrackInput {
+                object_id: format!("track-{index}"),
+                album_object_id: Some(album_id.to_owned()),
+                title: title.to_owned(),
+                display_album: (if album_id == "album-a" {
+                    "Album A"
+                } else {
+                    "Album B"
+                })
+                .to_owned(),
+                display_artist: artist.to_owned(),
+                sort_text: title.to_lowercase(),
+                duration_millis: 180_000 + index * 1_000,
+                disc_number: 1,
+                track_number: index + 1,
+                year: Some(2020 + index),
+                date_added: Some("2024-01-02".into()),
+                source_format: Some("FLAC".into()),
+                comment: Some("Note".into()),
+                bpm: Some(100 + index),
+                favorite: Some(false),
+                loudness_analysis_key: [index as u8 + 10; 32],
+                source_loudness: match index {
+                    1 => Some(library::LoudnessInput {
+                        integrated_lufs: Some(-15.0),
+                        ..Default::default()
+                    }),
+                    2 => Some(library::LoudnessInput {
+                        integrated_lufs: Some(-16.0),
+                        true_peak: Some(0.75),
+                        replay_gain_db: Some(-4.5),
+                        replay_gain_peak: Some(0.9),
+                    }),
+                    _ => None,
+                },
+                album_loudness: (index == 3).then_some(library::LoudnessInput {
+                    integrated_lufs: Some(-13.0),
                     ..Default::default()
                 }),
-                2 => Some(library::LoudnessInput {
-                    integrated_lufs: Some(-16.0),
-                    true_peak: Some(0.75),
-                    replay_gain_db: Some(-4.5),
-                    replay_gain_peak: Some(0.9),
-                }),
-                _ => None,
-            },
-            album_loudness: (index == 3).then_some(library::LoudnessInput {
-                integrated_lufs: Some(-13.0),
                 ..Default::default()
-            }),
-            ..Default::default()
-        })
+            },
+            None,
+        )])
         .await
         .expect("stage Track");
     }
@@ -564,14 +567,17 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     let mut scan = library::Scan::begin_items(&fixture.database, "source")
         .await
         .unwrap();
-    scan.write_track(&library::TrackInput {
-        object_id: "track-3".into(),
-        album_object_id: Some("album-b".into()),
-        title: "Delta".into(),
-        sort_text: "delta".into(),
-        loudness_analysis_key: [43; 32],
-        ..Default::default()
-    })
+    scan.write_tracks(&[(
+        &library::TrackInput {
+            object_id: "track-3".into(),
+            album_object_id: Some("album-b".into()),
+            title: "Delta".into(),
+            sort_text: "delta".into(),
+            loudness_analysis_key: [43; 32],
+            ..Default::default()
+        },
+        None,
+    )])
     .await
     .unwrap();
     scan.finish().await.unwrap();
@@ -788,7 +794,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
     };
     fixture
         .database
-        .upsert_local_access(Some(fixture.source), &metadata)
+        .write_local_access(Some(fixture.source), &[&metadata])
         .await
         .expect("write metadata Local access");
     let exact = LocalAccessWrite {
@@ -801,7 +807,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
     };
     fixture
         .database
-        .upsert_local_access(Some(fixture.source), &exact)
+        .write_local_access(Some(fixture.source), &[&exact])
         .await
         .expect("write exact Local access");
     let local_loudness = fixture
@@ -1119,18 +1125,21 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
     let mut scan = library::Scan::begin_items(&fixture.database, "source")
         .await
         .unwrap();
-    scan.write_track(&library::TrackInput {
-        object_id: "track-0".into(),
-        title: "Alpha".into(),
-        sort_text: "alpha".into(),
-        loudness_analysis_key: [1; 32],
-        source_loudness: Some(library::LoudnessInput {
-            integrated_lufs: Some(-12.0),
-            true_peak: Some(0.8),
+    scan.write_tracks(&[(
+        &library::TrackInput {
+            object_id: "track-0".into(),
+            title: "Alpha".into(),
+            sort_text: "alpha".into(),
+            loudness_analysis_key: [1; 32],
+            source_loudness: Some(library::LoudnessInput {
+                integrated_lufs: Some(-12.0),
+                true_peak: Some(0.8),
+                ..Default::default()
+            }),
             ..Default::default()
-        }),
-        ..Default::default()
-    })
+        },
+        None,
+    )])
     .await
     .unwrap();
     scan.finish().await.unwrap();

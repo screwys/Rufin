@@ -1161,13 +1161,36 @@ mod playback_refresh_tests {
         assert_eq!(presentation.title, "Next");
         assert_eq!(presentation.artist, "Artist");
         assert_eq!(presentation.album, "Album");
-        assert_eq!(presentation.meta, ["MP3", "2026"]);
+        assert_eq!(
+            presentation.meta,
+            ["Local", "FLAC", "2026", "24 bit", "96 kHz"]
+        );
+        let mut streaming = current_change.clone();
+        let current = Arc::make_mut(streaming.transport.current.as_mut().unwrap());
+        current.stream = Some(playback::CurrentStream {
+            local: false,
+            format: Some("audio/mpeg".into()),
+            transcoded: true,
+        });
+        assert_eq!(
+            NowPlayingPresentation::new(Some(&streaming)).meta,
+            ["Streaming", "MP3", "2026"]
+        );
+        assert_eq!(
+            fullscreen_playback_refresh(Some(&current_change), &streaming),
+            FullscreenPlaybackRefresh::Static
+        );
     }
 
     fn current_media(title: &str, _source: library::SourceKey) -> CurrentMedia {
         let media_uri =
             library::source_entity_uri(&library::SourceId::new("source"), "track", title);
         CurrentMedia {
+            stream: Some(playback::CurrentStream {
+                local: true,
+                format: Some("audio/flac".into()),
+                transcoded: false,
+            }),
             id: CurrentMediaId {
                 run: Some(RunId::new(1)),
                 media_uri: media_uri.into(),
@@ -1176,6 +1199,11 @@ mod playback_refresh_tests {
                 occurrence_id: None,
                 position: 0,
                 item: QueueItem {
+                    audio_properties: library::AudioProperties {
+                        bit_depth: Some(24),
+                        sample_rate_hz: Some(96_000),
+                        ..Default::default()
+                    },
                     media_uri: library::source_entity_uri(
                         &library::SourceId::new("source"),
                         "track",
@@ -1191,7 +1219,7 @@ mod playback_refresh_tests {
                     track_number: None,
                     year: Some(2026),
                     release_date: None,
-                    source_format: Some("audio/mpeg".to_string()),
+                    source_format: Some("audio/flac".to_string()),
                     musicbrainz_recording_id: None,
                     musicbrainz_release_track_id: None,
                     musicbrainz_album_id: None,

@@ -75,27 +75,41 @@ impl PlexSource {
                     } else {
                         Value::Null
                     };
+                    let mut tracks = Vec::new();
+                    let mut folder_tracks = Vec::new();
                     scan.begin_batch().await?;
-                    for item in items(&details["MediaContainer"]["Metadata"]) {
+                    for item in items(&details["MediaContainer"]["Metadata"])
+                        .iter()
+                        .chain(rows)
+                    {
                         for record in records(scan.source_id(), item)? {
-                            scan.write_record(&record).await?;
+                            match record {
+                                RecordInput::Track(track) => tracks.push(track),
+                                record => scan.write_record(&record).await?,
+                            }
                         }
                     }
                     for item in rows {
-                        for record in records(scan.source_id(), item)? {
-                            scan.write_record(&record).await?;
-                        }
                         if kind == "10"
                             && let Some(raw) = id(&item["ratingKey"])
                         {
-                            scan.write_track_folders(&[library::ScanLink::new(
-                                &plex_id("track", &raw),
-                                &folder,
-                                0,
-                            )])
-                            .await?;
+                            folder_tracks.push(plex_id("track", &raw));
                         }
                     }
+                    scan.write_tracks(
+                        &tracks
+                            .iter()
+                            .map(|track| (track.as_ref(), None))
+                            .collect::<Vec<_>>(),
+                    )
+                    .await?;
+                    scan.write_track_folders(
+                        &folder_tracks
+                            .iter()
+                            .map(|track| library::ScanLink::new(track, &folder, 0))
+                            .collect::<Vec<_>>(),
+                    )
+                    .await?;
                     // The section response owns its display name, not a track's optional copy.
                     scan.write_record(&section_record).await?;
                     scan.finish_batch().await?;

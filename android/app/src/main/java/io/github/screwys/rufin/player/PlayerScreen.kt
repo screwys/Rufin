@@ -332,25 +332,18 @@ private fun PlayerControls(player: PlayerConnection, modifier: Modifier) {
     }
 }
 
-private data class PlayerSourceFacts(val local: Boolean, val output: String?, val format: String?, val bits: UInt?, val sampleRate: UInt?)
+private data class PlayerSourceFacts(val labels: List<String>, val output: String?)
 
 @Composable
 private fun PlayerSourceInfo(player: PlayerConnection) {
     val facts by remember(player) { derivedStateOf { player.playback?.let {
-        PlayerSourceFacts(it.localOutput, it.outputName, it.sourceFormat, it.bitDepth, it.sampleRateHz)
+        PlayerSourceFacts(it.sourceLabels, it.outputName)
     } } }
     val current = facts ?: return
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)) {
-        Text(current.output ?: translate(if (current.local) "Local" else "Audio output"),
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        current.format?.let { Text(it.uppercase(java.util.Locale.ROOT),
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        current.bits?.takeIf { it > 0U }?.let { Text("$it bit", style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        current.sampleRate?.takeIf { it > 0U }?.let {
-            val rate = java.math.BigDecimal.valueOf(it.toDouble() / 1000.0).stripTrailingZeros().toPlainString()
-            Text("$rate kHz", style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    FlowRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)) {
+        (current.labels + listOfNotNull(current.output)).forEach { label ->
+            Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 

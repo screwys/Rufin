@@ -30,8 +30,16 @@ pub struct QueueSummaryView {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CurrentMedia {
+    pub stream: Option<CurrentStream>,
     pub id: CurrentMediaId,
     pub row: Arc<QueueRow>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CurrentStream {
+    pub local: bool,
+    pub format: Option<String>,
+    pub transcoded: bool,
 }
 
 impl std::ops::Deref for CurrentMedia {

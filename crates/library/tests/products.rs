@@ -1811,9 +1811,9 @@ async fn downloaded_row_facts_require_download_owned_local_access() {
         let track = &rows[index];
         fixture
             .database
-            .upsert_local_access(
+            .write_local_access(
                 Some(fixture.source),
-                &LocalAccessWrite {
+                &[&LocalAccessWrite {
                     media_uri: track.media_uri.clone(),
                     origin,
                     path: format!(
@@ -1841,7 +1841,7 @@ async fn downloaded_row_facts_require_download_owned_local_access() {
                         track.object_id.as_deref().expect("indexed track object")
                     ),
                     loudness_analysis_key: Some(track.loudness_analysis_key),
-                },
+                }],
             )
             .await
             .expect("write accepted Local access provenance");
@@ -2815,9 +2815,9 @@ async fn completed_direct_download_keeps_access_without_smart_membership() {
     let direct = "https://media.example/download.flac".to_string();
     fixture
         .database
-        .upsert_local_access(
+        .write_local_access(
             None,
-            &LocalAccessWrite {
+            &[&LocalAccessWrite {
                 media_uri: direct.clone(),
                 origin: LocalAccessOrigin::Download,
                 path: "/downloads/direct.flac".to_string(),
@@ -2836,7 +2836,7 @@ async fn completed_direct_download_keeps_access_without_smart_membership() {
                 duration_millis: 42_000,
                 access_uri: "file:///downloads/direct.flac".to_string(),
                 loudness_analysis_key: None,
-            },
+            }],
         )
         .await
         .expect("record completed direct download");

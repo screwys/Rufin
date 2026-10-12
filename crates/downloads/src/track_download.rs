@@ -1186,9 +1186,9 @@ pub(super) async fn attach_downloaded_files(
                 .await?
                 .ok_or("The downloaded file is unavailable")?;
             database
-                .upsert_local_access(
+                .write_local_access(
                     Some(source_key),
-                    &library::LocalAccessWrite {
+                    &[&library::LocalAccessWrite {
                         media_uri: track.media_uri.clone(),
                         origin: library::LocalAccessOrigin::Download,
                         path: paths.audio.location()?,
@@ -1217,7 +1217,7 @@ pub(super) async fn attach_downloaded_files(
                         duration_millis: track.duration_millis,
                         access_uri: paths.audio.access_uri()?,
                         loudness_analysis_key: Some(track.loudness_analysis_key),
-                    },
+                    }],
                 )
                 .await
                 .map_err(|error| error.to_string())?;

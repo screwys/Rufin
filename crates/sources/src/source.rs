@@ -83,8 +83,23 @@ enum MetadataTargets {
 struct CollectionFile {
     target: MetadataFileTarget,
     revision: Option<String>,
-    copy: Option<WorkingFile>,
+    copy: Option<CollectionCopy>,
     readable: bool,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum FileContents {
+    Revision,
+    Read,
+    Write,
+}
+
+enum CollectionCopy {
+    Remote(WorkingFile),
+    Document {
+        _file: tempfile::TempPath,
+        uri: String,
+    },
 }
 
 impl MetadataOwner {
@@ -1578,33 +1593,52 @@ impl Source {
             Implementation::JellyfinEmby(jellyfin) => jellyfin.read_track_metadata(track).await?,
             Implementation::Plex(plex) => plex.read_track_metadata(track).await?,
             Implementation::Local(_) | Implementation::OpenSubsonic(_) => {
-                let (path, format) = self.metadata_file_target(database, &track).await?;
+                let file = self
+                    .collection_file(database, &track, FileContents::Read)
+                    .await?;
                 if matches!(self.implementation, Implementation::OpenSubsonic(_))
                     && !self.mapped_metadata_ready().await
                 {
                     return Err(crate::SourceMetadataError::Unavailable);
                 }
-                let mut metadata = if track.cue_path.is_some() {
-                    crate::file::metadata::readonly_track_metadata(
-                        &track,
-                        Some(crate::file::metadata::revision(&path)?),
-                    )
-                } else {
-                    crate::file::metadata::read_track_metadata(&path, format.as_deref())?
-                };
-                if !metadata.fields.iter().any(|field| field.writable) {
-                    let artwork = metadata.artwork;
-                    metadata =
-                        crate::file::metadata::readonly_track_metadata(&track, metadata.revision);
-                    metadata.artwork = artwork;
-                } else {
-                    metadata.suggest("musicbrainz_recording_id", track.musicbrainz_recording_id);
-                    metadata.suggest(
-                        "musicbrainz_release_track_id",
-                        track.musicbrainz_release_track_id,
-                    );
-                }
-                metadata
+                tokio::task::spawn_blocking(move || {
+                    let path = &file.target.path;
+                    let format = &file.target.format;
+                    let mut metadata = if track.cue_path.is_some() {
+                        crate::file::metadata::readonly_track_metadata(
+                            &track,
+                            file.revision.clone(),
+                        )
+                    } else {
+                        crate::file::metadata::read_track_metadata(path, format.as_deref())?
+                    };
+                    metadata.revision = file.revision.clone();
+                    if !file.target.tag_writable {
+                        metadata
+                            .fields
+                            .iter_mut()
+                            .for_each(|field| field.writable = false);
+                        metadata.artwork.can_embed = false;
+                    }
+                    if !metadata.fields.iter().any(|field| field.writable) {
+                        let artwork = metadata.artwork;
+                        metadata = crate::file::metadata::readonly_track_metadata(
+                            &track,
+                            metadata.revision,
+                        );
+                        metadata.artwork = artwork;
+                    } else {
+                        metadata
+                            .suggest("musicbrainz_recording_id", track.musicbrainz_recording_id);
+                        metadata.suggest(
+                            "musicbrainz_release_track_id",
+                            track.musicbrainz_release_track_id,
+                        );
+                    }
+                    Ok::<_, crate::SourceMetadataError>(metadata)
+                })
+                .await
+                .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))??
             }
         };
         metadata.artwork = metadata.artwork.with_binding(binding, server);
@@ -2002,7 +2036,9 @@ impl Source {
                 let mut hash = blake3::Hasher::new();
                 let mut count = 0;
                 while let Some(track) = tracks.next().await? {
-                    let file = self.collection_file(database, &track, true).await?;
+                    let file = self
+                        .collection_file(database, &track, FileContents::Read)
+                        .await?;
                     hash_file_revision(&mut hash, &track.media_uri, file.revision.as_deref());
                     let owner = owner.clone();
                     combined = Some(
@@ -2058,7 +2094,7 @@ impl Source {
         &self,
         database: &Database,
         track: &library::TrackRow,
-        contents: bool,
+        contents: FileContents,
     ) -> Result<CollectionFile, crate::SourceMetadataError> {
         let format = track.source_format.clone();
         if let Some(files) = self.file_source(track.source_path.as_deref()) {
@@ -2094,7 +2130,7 @@ impl Source {
             } else {
                 true
             };
-            let copy = if contents && readable {
+            let copy = if contents != FileContents::Revision && readable {
                 Some(files.working_file(database, track).await?)
             } else {
                 None
@@ -2120,11 +2156,53 @@ impl Source {
                     tag_writable: readable && writable,
                 },
                 revision,
-                copy,
+                copy: copy.map(CollectionCopy::Remote),
                 readable,
             });
         }
         let (path, format) = self.metadata_file_target(database, track).await?;
+        if path.to_string_lossy().starts_with("content:") {
+            let uri = path.to_string_lossy().into_owned();
+            let track_cue_free = track.cue_path.is_none();
+            return tokio::task::spawn_blocking(move || {
+                let entry = crate::file::documents::stat_document(&uri)
+                    .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?;
+                let readable = track_cue_free
+                    && crate::file::metadata::metadata_file_available(
+                        std::path::Path::new(&entry.name),
+                        format.as_deref(),
+                    );
+                let copy = if contents == FileContents::Write && readable {
+                    let file = tempfile::NamedTempFile::new()
+                        .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?
+                        .into_temp_path();
+                    crate::file::documents::copy_document(&uri, &file)
+                        .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?;
+                    if crate::file::documents::stat_document(&uri)
+                        .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?
+                        .revision
+                        != entry.revision
+                    {
+                        return Err(crate::SourceMetadataError::Conflict);
+                    }
+                    Some(file)
+                } else {
+                    None
+                };
+                Ok(CollectionFile {
+                    target: MetadataFileTarget {
+                        path: copy.as_ref().map_or(path, |file| file.to_path_buf()),
+                        format,
+                        tag_writable: readable && entry.writable,
+                    },
+                    revision: entry.revision,
+                    copy: copy.map(|file| CollectionCopy::Document { _file: file, uri }),
+                    readable,
+                })
+            })
+            .await
+            .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?;
+        }
         let track_cue_free = track.cue_path.is_none();
         tokio::task::spawn_blocking(move || {
             let readable = track_cue_free
@@ -2154,6 +2232,7 @@ impl Source {
         edit: &crate::MetadataEdit,
         folder_image: Option<&str>,
     ) -> Result<(), crate::SourceMetadataError> {
+        let mapped = matches!(self.implementation, Implementation::OpenSubsonic(_));
         let remote = matches!(self.implementation, Implementation::Files(_));
         let folder_relative = if let Implementation::Files(files) = &self.implementation {
             folder_image
@@ -2177,12 +2256,21 @@ impl Source {
         let mut hash = blake3::Hasher::new();
         let mut tracks = CollectionTracks::new(database, media_uri);
         let mut writable = true;
+        let mut track_revision = None;
         while let Some(track) = tracks.next().await? {
-            let file = self.collection_file(database, &track, false).await?;
+            let file = self
+                .collection_file(database, &track, FileContents::Revision)
+                .await?;
+            track_revision = file.revision.clone();
             hash_file_revision(&mut hash, &track.media_uri, file.revision.as_deref());
             writable &= file.target.tag_writable;
         }
-        if hash.finalize().to_hex().as_str() != expected_revision {
+        let current = if matches!(owner, MetadataOwner::Track(_)) {
+            track_revision.unwrap_or_default()
+        } else {
+            hash.finalize().to_hex().to_string()
+        };
+        if current != expected_revision {
             return Err(crate::SourceMetadataError::Conflict);
         }
         if !remote
@@ -2246,12 +2334,18 @@ impl Source {
             None
         };
         let edit = Arc::new(edit);
-        let mut scan = if remote {
-            Scan::begin_items(database, self.source_id.as_str()).await
+        let mut scan = if mapped {
+            None
         } else {
-            Scan::begin_local_items(database, self.source_id.as_str()).await
-        }
-        .map_err(metadata_database_error)?;
+            Some(
+                if remote {
+                    Scan::begin_items(database, self.source_id.as_str()).await
+                } else {
+                    Scan::begin_local_items(database, self.source_id.as_str()).await
+                }
+                .map_err(metadata_database_error)?,
+            )
+        };
         let mut saved = false;
         let mut mp4_image = None;
         let result = async {
@@ -2262,7 +2356,17 @@ impl Source {
             let mut tracks = CollectionTracks::new(database, media_uri);
             while let Some(track) = tracks.next().await? {
                 let files = self.file_source(track.source_path.as_deref());
-                let file = self.collection_file(database, &track, tags_changed).await?;
+                let file = self
+                    .collection_file(
+                        database,
+                        &track,
+                        if tags_changed {
+                            FileContents::Write
+                        } else {
+                            FileContents::Revision
+                        },
+                    )
+                    .await?;
                 let audio = if files.is_some() {
                     track
                         .source_path
@@ -2304,12 +2408,25 @@ impl Source {
                     .await
                     .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))??;
                     mp4_image = image;
-                    if let Some(files) = files {
-                        let copy = file.copy.as_ref().unwrap();
+                    if let Some(CollectionCopy::Document { uri, .. }) = &file.copy {
+                        let uri = uri.clone();
+                        let revision = file.revision.clone();
+                        let path = file.target.path.clone();
+                        tokio::task::spawn_blocking(move || {
+                            crate::file::documents::save_document(&uri, &path, revision.as_deref())
+                        })
+                        .await
+                        .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?
+                        .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?;
+                        saved = true;
+                    } else if let Some(files) = files {
+                        let Some(CollectionCopy::Remote(copy)) = file.copy.as_ref() else {
+                            unreachable!()
+                        };
                         files.save_file(copy).await?;
                         saved = true;
                         files
-                            .stage_saved_file(&mut scan, &track.media_uri, copy)
+                            .stage_saved_file(scan.as_mut().unwrap(), &track.media_uri, copy)
                             .await
                             .map_err(|error| {
                                 crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
@@ -2320,20 +2437,60 @@ impl Source {
                             unreachable!()
                         };
                         local
-                            .stage_metadata_paths(&mut scan, &[file.target.path])
+                            .stage_metadata_paths(scan.as_mut().unwrap(), &[file.target.path])
                             .await
                             .map_err(|error| {
                                 crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
                             })?;
                     }
+                } else if mapped {
                 } else if let Some(cue) = &track.cue_path {
-                    scan.retain_local_cue_path(cue)
+                    scan.as_mut()
+                        .unwrap()
+                        .retain_local_cue_path(cue)
                         .await
                         .map_err(metadata_database_error)?;
                 } else {
-                    scan.retain_local_media_paths(std::slice::from_ref(&audio))
+                    scan.as_mut()
+                        .unwrap()
+                        .retain_local_media_paths(std::slice::from_ref(&audio))
                         .await
                         .map_err(metadata_database_error)?;
+                }
+                if mapped {
+                    if folder_artwork.is_some()
+                        || (edit.kind == SourceEntityKind::Artist
+                            && edit.changes.contains_key("title"))
+                    {
+                        let locator = database
+                            .original_file(&track.media_uri)
+                            .await
+                            .map_err(metadata_database_error)?
+                            .ok_or(crate::SourceMetadataError::Unavailable)?;
+                        let parent = locator
+                            .relative_path
+                            .rsplit_once('/')
+                            .map_or("", |(parent, _)| parent);
+                        if directories.insert(format!("{}:{parent}", locator.root)) {
+                            let artwork = folder_artwork.clone();
+                            let previous = (edit.kind == SourceEntityKind::Artist)
+                                .then(|| owner.artist_name().to_owned());
+                            let next = edit.changes.get("title").cloned();
+                            saved |= tokio::task::spawn_blocking(move || {
+                                crate::file::documents::save_mapped_artwork(
+                                    &locator,
+                                    artwork.as_ref(),
+                                    previous.as_deref(),
+                                    next.as_deref(),
+                                )
+                            })
+                            .await
+                            .map_err(|error| {
+                                crate::SourceMetadataError::Write(error.to_string())
+                            })??;
+                        }
+                    }
+                    continue;
                 }
                 if (remote || folder_image.is_none())
                     && let Some(artwork) = &folder_artwork
@@ -2352,7 +2509,7 @@ impl Source {
                     let directory = location.rsplit_once('/').map_or("", |(parent, _)| parent);
                     if directories.insert(directory.to_string()) {
                         self.save_collection_folder_artwork(
-                            &mut scan,
+                            scan.as_mut().unwrap(),
                             &audio,
                             artwork,
                             (edit.kind == SourceEntityKind::Artist).then(|| {
@@ -2368,11 +2525,12 @@ impl Source {
                 }
             }
             if !remote
+                && !mapped
                 && let Some(path) = folder_image
                 && let Some(artwork) = &folder_artwork
             {
                 self.save_collection_folder_artwork(
-                    &mut scan,
+                    scan.as_mut().unwrap(),
                     path,
                     artwork,
                     (edit.kind == SourceEntityKind::Artist).then(|| {
@@ -2385,7 +2543,8 @@ impl Source {
                 .await?;
                 saved = true;
             }
-            if tags_changed && !remote {
+            if tags_changed && !remote && !mapped {
+                let scan = scan.as_mut().unwrap();
                 match owner {
                     MetadataOwner::Album(album) => scan.remove_album(&album.object_id).await,
                     MetadataOwner::Artist(artist) => scan.remove_artist(&artist.object_id).await,
@@ -2396,6 +2555,16 @@ impl Source {
             Ok(())
         }
         .await;
+        if mapped {
+            if !saved {
+                return result;
+            }
+            let refresh = self
+                .refresh_mapped_metadata(database, media_uri, owner, edit.kind)
+                .await;
+            return crate::operations::finish_metadata_save(result, refresh, saved);
+        }
+        let mut scan = scan.unwrap();
         if result.is_err() {
             scan.incomplete();
         }
@@ -2463,12 +2632,19 @@ impl Source {
         let targets = match owner {
             MetadataOwner::Track(track) => {
                 let (path, format) = self.metadata_file_target(database, track).await?;
-                MetadataTargets::Native(vec![MetadataFileTarget {
-                    tag_writable: track.cue_path.is_none()
-                        && crate::file::metadata::metadata_file_available(&path, format.as_deref()),
-                    path,
-                    format,
-                }])
+                if path.to_string_lossy().starts_with("content:") {
+                    MetadataTargets::Documents
+                } else {
+                    MetadataTargets::Native(vec![MetadataFileTarget {
+                        tag_writable: track.cue_path.is_none()
+                            && crate::file::metadata::metadata_file_available(
+                                &path,
+                                format.as_deref(),
+                            ),
+                        path,
+                        format,
+                    }])
+                }
             }
             MetadataOwner::Album(album) => {
                 self.metadata_targets(database, &album.media_uri).await?
@@ -2543,69 +2719,80 @@ impl Source {
                         .await
                         .map_err(crate::operations::metadata_refresh_error)
                 }
-                Implementation::OpenSubsonic(source) => {
-                    let refreshed = async {
-                        self.refresh_remote_metadata_index().await?;
-                        let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
-                        let result = async {
-                            let mut albums = std::collections::HashSet::new();
-                            let mut items = Vec::new();
-                            if !matches!(owner, MetadataOwner::Track(_)) {
-                                let object_id = owner.object_id().ok_or(SourceError::NotFound)?;
-                                items.push(self.item_request_id(edit.kind.as_str(), object_id));
-                                if matches!(owner, MetadataOwner::Album(_)) {
-                                    albums.insert(object_id.to_string());
-                                }
-                            }
-                            // Song IDs still locate the files after their album IDs change.
-                            let mut tracks = CollectionTracks::new(database, media_uri);
-                            let mut track = match owner {
-                                MetadataOwner::Track(track) => Some((**track).clone()),
-                                _ => tracks
-                                    .next()
-                                    .await
-                                    .map_err(|error| SourceError::Other(error.to_string()))?,
-                            };
-                            while let Some(current) = track {
-                                if let Some((_, _, album)) = current
-                                    .album_media_uri
-                                    .as_deref()
-                                    .and_then(library::source_entity_parts)
-                                    && albums.insert(album.clone())
-                                    && !scan.contains_entity("album", &album, false).await?
-                                {
-                                    items.push(self.item_request_id("album", &album));
-                                }
-                                items.push(self.item_request_id(
-                                    "track",
-                                    current.object_id.as_deref().ok_or(SourceError::NotFound)?,
-                                ));
-                                if items.len() >= 128 {
-                                    source
-                                        .stage_items(&mut scan, std::mem::take(&mut items), true)
-                                        .await?;
-                                }
-                                track = tracks
-                                    .next()
-                                    .await
-                                    .map_err(|error| SourceError::Other(error.to_string()))?;
-                            }
-                            if !items.is_empty() {
-                                source.stage_items(&mut scan, items, true).await?;
-                            }
-                            self.stage_item_relations(&mut scan).await
-                        }
-                        .await;
-                        crate::finish_scan(scan, result).await
-                    }
-                    .await;
-                    refreshed.map_err(crate::operations::metadata_refresh_error)
+                Implementation::OpenSubsonic(_) => {
+                    self.refresh_mapped_metadata(database, media_uri, owner, edit.kind)
+                        .await
                 }
                 _ => unreachable!(),
             }
         }
         .await;
         crate::operations::finish_metadata_save(result, refresh, false)
+    }
+
+    async fn refresh_mapped_metadata(
+        &self,
+        database: &Database,
+        media_uri: &str,
+        owner: &MetadataOwner,
+        kind: SourceEntityKind,
+    ) -> Result<(), crate::SourceMetadataError> {
+        let Implementation::OpenSubsonic(source) = &self.implementation else {
+            unreachable!()
+        };
+        let refreshed = async {
+            self.refresh_remote_metadata_index().await?;
+            let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
+            let result = async {
+                let mut albums = std::collections::HashSet::new();
+                let mut items = Vec::new();
+                if !matches!(owner, MetadataOwner::Track(_)) {
+                    let object_id = owner.object_id().ok_or(SourceError::NotFound)?;
+                    items.push(self.item_request_id(kind.as_str(), object_id));
+                    if matches!(owner, MetadataOwner::Album(_)) {
+                        albums.insert(object_id.to_string());
+                    }
+                }
+                // Song IDs still locate the files after their album IDs change.
+                let mut tracks = CollectionTracks::new(database, media_uri);
+                let mut track = tracks
+                    .next()
+                    .await
+                    .map_err(|error| SourceError::Other(error.to_string()))?;
+                while let Some(current) = track {
+                    if let Some((_, _, album)) = current
+                        .album_media_uri
+                        .as_deref()
+                        .and_then(library::source_entity_parts)
+                        && albums.insert(album.clone())
+                        && !scan.contains_entity("album", &album, false).await?
+                    {
+                        items.push(self.item_request_id("album", &album));
+                    }
+                    items.push(self.item_request_id(
+                        "track",
+                        current.object_id.as_deref().ok_or(SourceError::NotFound)?,
+                    ));
+                    if items.len() >= 128 {
+                        source
+                            .stage_items(&mut scan, std::mem::take(&mut items), true)
+                            .await?;
+                    }
+                    track = tracks
+                        .next()
+                        .await
+                        .map_err(|error| SourceError::Other(error.to_string()))?;
+                }
+                if !items.is_empty() {
+                    source.stage_items(&mut scan, items, true).await?;
+                }
+                self.stage_item_relations(&mut scan).await
+            }
+            .await;
+            crate::finish_scan(scan, result).await
+        }
+        .await;
+        refreshed.map_err(crate::operations::metadata_refresh_error)
     }
 
     async fn publish_local_artwork(
@@ -2685,6 +2872,9 @@ impl Source {
                     return Ok(MetadataTargets::Documents);
                 }
                 let (path, format) = self.metadata_file_target(database, &row).await?;
+                if path.to_string_lossy().starts_with("content:") {
+                    return Ok(MetadataTargets::Documents);
+                }
                 let tag_writable = row.cue_path.is_none()
                     && crate::file::metadata::metadata_file_available(&path, format.as_deref());
                 targets.push(MetadataFileTarget {
@@ -2716,8 +2906,11 @@ impl Source {
         if track.cue_path.is_some() {
             return Ok(None);
         }
-        if let Some(path) = database.original_file_path(&track.media_uri).await? {
-            return Ok(Some((PathBuf::from(path), track.source_format.clone())));
+        if let Some(path) = database.original_file(&track.media_uri).await? {
+            return Ok(Some((
+                PathBuf::from(path.path),
+                track.source_format.clone(),
+            )));
         }
         if let Some(path) = library::file_media_path(&track.media_uri) {
             return Ok(Some((path, track.source_format.clone())));
@@ -2732,11 +2925,11 @@ impl Source {
     ) -> Result<(PathBuf, Option<String>), crate::SourceMetadataError> {
         if track.cue_path.is_some() {
             if let Some(path) = database
-                .original_file_path(&track.media_uri)
+                .original_file(&track.media_uri)
                 .await
                 .map_err(metadata_database_error)?
             {
-                return Ok((PathBuf::from(path), track.source_format.clone()));
+                return Ok((PathBuf::from(path.path), track.source_format.clone()));
             }
             if matches!(self.implementation, Implementation::Local(_))
                 && let Some(file) = database
@@ -3792,8 +3985,7 @@ impl Source {
         let server_prefix = server_prefix.map(str::to_owned);
         let local_prefix = local_prefix.map(str::to_owned);
         let (root, server_prefix, access) = tokio::task::spawn_blocking(move || {
-            let root = std::fs::canonicalize(root)
-                .map_err(|error| SourceError::Other(error.to_string()))?;
+            let root = mapping_root(&root)?;
             let server_prefix = match_local_access_sample(
                 &root,
                 server_prefix.as_deref(),
@@ -3820,7 +4012,9 @@ impl Source {
             return Err(SourceError::Cancelled);
         }
         database.clear_mapping_access(source).await?;
-        database.upsert_local_access(Some(source), &access).await?;
+        database
+            .write_local_access(Some(source), &[&access])
+            .await?;
         Ok((root, server_prefix))
     }
 
@@ -3833,9 +4027,7 @@ impl Source {
         local_prefix: Option<&str>,
         cancelled: Arc<AtomicBool>,
     ) -> SourceResult<usize> {
-        let root = tokio::fs::canonicalize(root)
-            .await
-            .map_err(|error| SourceError::Other(error.to_string()))?;
+        let root = root.to_path_buf();
         let mut after = None;
         let mut accepted = 0;
         loop {
@@ -3854,6 +4046,31 @@ impl Source {
             let local_prefix = local_prefix.map(str::to_owned);
             let worker_cancelled = Arc::clone(&cancelled);
             let accesses = tokio::task::spawn_blocking(move || {
+                if root.to_string_lossy().starts_with("content:") {
+                    let paths = tracks
+                        .iter()
+                        .map(|track| {
+                            mapped_document_path(
+                                server_prefix.as_deref(),
+                                local_prefix.as_deref(),
+                                &track.source_path,
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    let entries = crate::file::documents::find_document_paths(
+                        &root.to_string_lossy(),
+                        &paths,
+                        &worker_cancelled,
+                    )?;
+                    return Ok(tracks
+                        .into_iter()
+                        .zip(paths)
+                        .zip(entries)
+                        .filter_map(|((track, path), entry)| {
+                            Some(mapped_document_access(&root, &path?, track, entry?))
+                        })
+                        .collect::<Vec<_>>());
+                }
                 let mut accesses = Vec::new();
                 for track in tracks {
                     if worker_cancelled.load(Ordering::Acquire) {
@@ -3872,13 +4089,13 @@ impl Source {
             })
             .await
             .map_err(|error| SourceError::Other(error.to_string()))??;
-            for access in accesses {
-                if cancelled.load(Ordering::Acquire) {
-                    return Err(SourceError::Cancelled);
-                }
-                database.upsert_local_access(Some(source), &access).await?;
-                accepted += 1;
+            if cancelled.load(Ordering::Acquire) {
+                return Err(SourceError::Cancelled);
             }
+            database
+                .write_local_access(Some(source), &accesses.iter().collect::<Vec<_>>())
+                .await?;
+            accepted += accesses.len();
         }
         Ok(accepted)
     }
@@ -3927,12 +4144,109 @@ async fn direct_stream(
     Ok(Some(stream))
 }
 
+fn mapping_root(root: &std::path::Path) -> SourceResult<PathBuf> {
+    if root.to_string_lossy().starts_with("content:") {
+        let entry = crate::file::documents::stat_document(&root.to_string_lossy())?;
+        return if entry.directory {
+            Ok(PathBuf::from(entry.uri))
+        } else {
+            Err(SourceError::NotFound)
+        };
+    }
+    std::fs::canonicalize(root).map_err(|error| SourceError::Other(error.to_string()))
+}
+
+fn mapped_document_path(
+    server_prefix: Option<&str>,
+    local_prefix: Option<&str>,
+    path: &str,
+) -> Option<String> {
+    let relative =
+        project_local_access_path(std::path::Path::new(""), server_prefix, local_prefix, path)?;
+    if relative.components().any(|part| {
+        !matches!(
+            part,
+            std::path::Component::Normal(_) | std::path::Component::CurDir
+        )
+    }) {
+        return None;
+    }
+    Some(relative.to_string_lossy().into_owned())
+}
+
+fn mapping_path_exists(
+    root: &std::path::Path,
+    server: Option<&str>,
+    local: Option<&str>,
+    path: &str,
+) -> bool {
+    if root.to_string_lossy().starts_with("content:") {
+        return mapped_document_path(server, local, path)
+            .and_then(|path| {
+                crate::file::documents::find_document(
+                    &root.to_string_lossy(),
+                    &path.split('/').map(str::to_owned).collect::<Vec<_>>(),
+                )
+                .ok()
+                .flatten()
+            })
+            .is_some_and(|entry| !entry.directory);
+    }
+    mapped_local_path(root, server, local, path).is_some()
+}
+
+fn mapped_document_access(
+    root: &std::path::Path,
+    relative: &str,
+    track: library::MappingTrackRow,
+    entry: crate::DocumentEntry,
+) -> library::LocalAccessWrite {
+    let mut hash = blake3::Hasher::new();
+    hash.update(entry.uri.as_bytes());
+    hash.update(entry.revision.as_deref().unwrap_or_default().as_bytes());
+    library::LocalAccessWrite {
+        media_uri: track.media_uri,
+        origin: library::LocalAccessOrigin::Mapping,
+        path: entry.uri.clone(),
+        root: root.to_string_lossy().into_owned(),
+        relative_path: relative.into(),
+        size_bytes: entry
+            .size
+            .and_then(|size| i64::try_from(size).ok())
+            .unwrap_or_default(),
+        mtime_ns: 0,
+        device_id: None,
+        inode: None,
+        parser_version: 1,
+        title: track.title,
+        album: track.album,
+        artist: track.artist,
+        disc_number: track.disc_number,
+        track_number: track.track_number,
+        duration_millis: track.duration_millis,
+        access_uri: entry.uri,
+        loudness_analysis_key: Some(*hash.finalize().as_bytes()),
+    }
+}
+
 fn mapped_track_access(
     root: &std::path::Path,
     server_prefix: Option<&str>,
     local_prefix: Option<&str>,
     track: library::MappingTrackRow,
 ) -> SourceResult<Option<library::LocalAccessWrite>> {
+    if root.to_string_lossy().starts_with("content:") {
+        let Some(path) = mapped_document_path(server_prefix, local_prefix, &track.source_path)
+        else {
+            return Ok(None);
+        };
+        let components = path.split('/').map(str::to_owned).collect::<Vec<_>>();
+        return Ok(
+            crate::file::documents::find_document(&root.to_string_lossy(), &components)?
+                .filter(|entry| !entry.directory)
+                .map(|entry| mapped_document_access(root, &path, track, entry)),
+        );
+    }
     let Some(path) = mapped_local_path(root, server_prefix, local_prefix, &track.source_path)
     else {
         return Ok(None);
@@ -4004,18 +4318,18 @@ fn match_local_access_sample(
     local_prefix: Option<&str>,
     source_path: &str,
 ) -> Option<Option<String>> {
-    let root = std::fs::canonicalize(root).ok()?;
+    let root = mapping_root(root).ok()?;
     let server_prefix = server_prefix
         .map(str::trim)
         .filter(|prefix| !prefix.is_empty());
-    if mapped_local_path(&root, server_prefix, local_prefix, source_path).is_some() {
+    if mapping_path_exists(&root, server_prefix, local_prefix, source_path) {
         return Some(server_prefix.map(str::to_string));
     }
     if server_prefix.is_some() {
         return None;
     }
     let inferred = infer_server_prefix(&root, local_prefix, source_path)?;
-    mapped_local_path(&root, Some(&inferred), local_prefix, source_path).map(|_| Some(inferred))
+    mapping_path_exists(&root, Some(&inferred), local_prefix, source_path).then_some(Some(inferred))
 }
 
 fn infer_server_prefix(
@@ -4023,13 +4337,6 @@ fn infer_server_prefix(
     local_prefix: Option<&str>,
     source_path: &str,
 ) -> Option<String> {
-    let mut base = root.to_path_buf();
-    if let Some(prefix) = local_prefix
-        .map(str::trim)
-        .filter(|prefix| !prefix.is_empty())
-    {
-        base.push(prefix);
-    }
     let starts = std::iter::once(0).chain(
         source_path
             .char_indices()
@@ -4041,18 +4348,18 @@ fn infer_server_prefix(
         if suffix.is_empty() {
             continue;
         }
-        let candidate = base.join(suffix.replace('\\', "/"));
-        if mapped_file(root, candidate).is_some() {
-            let prefix = source_path.get(..start)?.trim_end_matches(['/', '\\']);
-            return Some(if prefix.is_empty() {
-                source_path
-                    .chars()
-                    .next()
-                    .filter(|character| *character == '/' || *character == '\\')
-                    .map_or_else(String::new, |character| character.to_string())
-            } else {
-                prefix.to_string()
-            });
+        let prefix = source_path.get(..start)?.trim_end_matches(['/', '\\']);
+        let prefix = if prefix.is_empty() {
+            source_path
+                .chars()
+                .next()
+                .filter(|character| *character == '/' || *character == '\\')
+                .map_or_else(String::new, |character| character.to_string())
+        } else {
+            prefix.to_string()
+        };
+        if mapping_path_exists(root, Some(&prefix), local_prefix, source_path) {
+            return Some(prefix);
         }
     }
     None
@@ -4271,21 +4578,24 @@ mod refresh_laws {
             ("two", "/server/music/Artist/two.flac"),
             ("other", "/different/root/Artist/other.flac"),
         ] {
-            scan.write_track(&library::TrackInput {
-                object_id: id.to_owned(),
-                title: id.to_owned(),
-                display_album: "Album".into(),
-                display_artist: "Artist".into(),
-                sort_text: id.to_owned(),
-                duration_millis: 1000,
-                disc_number: 1,
-                track_number: 1,
-                source_format: Some("flac".into()),
-                favorite: Some(false),
-                source_path: Some(path.to_owned()),
-                loudness_analysis_key: [0; 32],
-                ..Default::default()
-            })
+            scan.write_tracks(&[(
+                &library::TrackInput {
+                    object_id: id.to_owned(),
+                    title: id.to_owned(),
+                    display_album: "Album".into(),
+                    display_artist: "Artist".into(),
+                    sort_text: id.to_owned(),
+                    duration_millis: 1000,
+                    disc_number: 1,
+                    track_number: 1,
+                    source_format: Some("flac".into()),
+                    favorite: Some(false),
+                    source_path: Some(path.to_owned()),
+                    loudness_analysis_key: [0; 32],
+                    ..Default::default()
+                },
+                None,
+            )])
             .await
             .unwrap();
         }

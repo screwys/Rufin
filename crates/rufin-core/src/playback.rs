@@ -1126,15 +1126,28 @@ where
     }
     // Downloads names its owned file using the actual transcoded extension.
     // Mapped and original files still use their parsed source format.
-    let content_type = access
-        .as_ref()
-        .filter(|(_, origin)| *origin == library::LocalAccessOrigin::Download)
-        .and_then(|(uri, _)| library::file_media_path(uri))
-        .and_then(|path| {
+    let content_type = if let Some((uri, library::LocalAccessOrigin::Download)) = &access {
+        let path = if uri.starts_with("content:") {
+            let uri = uri.clone();
+            Some(
+                tokio::task::spawn_blocking(move || sources::stat_document(&uri))
+                    .await
+                    .map_err(string_error)?
+                    .map_err(string_error)?
+                    .name
+                    .into(),
+            )
+        } else {
+            library::file_media_path(uri)
+        };
+        path.and_then(|path: std::path::PathBuf| {
             path.extension()
                 .and_then(|extension| extension.to_str())
                 .and_then(audio_mime)
-        });
+        })
+    } else {
+        None
+    };
     let access_uri = access.map(|(uri, _)| uri).or(fetched_uri);
     let window = database
         .connect_media_window(&request.media_uri)
@@ -1215,7 +1228,7 @@ fn cached_cast_artwork(
     })
 }
 
-fn audio_mime(source_format: &str) -> Option<String> {
+pub(crate) fn audio_mime(source_format: &str) -> Option<String> {
     let mime = match source_format.trim().to_ascii_lowercase().as_str() {
         "mp3" | "mp2" | "mpeg" => "audio/mpeg",
         "flac" => "audio/flac",
@@ -1277,6 +1290,7 @@ mod tests {
 
     fn test_media(source_format: &str) -> playback::QueueItem {
         playback::QueueItem {
+            audio_properties: Default::default(),
             media_uri: library::source_entity_uri(
                 &library::SourceId::new("source"),
                 "track",
@@ -1352,9 +1366,9 @@ mod tests {
         std::fs::write(&path, b"downloaded audio").unwrap();
         let uri = url::Url::from_file_path(&path).unwrap().to_string();
         database
-            .upsert_local_access(
+            .write_local_access(
                 None,
-                &library::LocalAccessWrite {
+                &[&library::LocalAccessWrite {
                     media_uri: occurrence.media_uri.clone(),
                     origin: library::LocalAccessOrigin::Download,
                     path: path.to_string_lossy().into_owned(),
@@ -1373,7 +1387,7 @@ mod tests {
                     duration_millis: 180_000,
                     access_uri: uri.clone(),
                     loudness_analysis_key: None,
-                },
+                }],
             )
             .await
             .unwrap();

@@ -351,6 +351,10 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
             CompositionLocalProvider(LocalPlayerBottomPadding provides playerPadding) {
             Column(Modifier.fillMaxSize()) {
                 model.startupError?.let { ErrorRow(it, label("Retry"), model::retryStartup) }
+                model.libraryState?.takeIf { it.busy }?.status?.let {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Text(it, Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
+                }
                 Box(Modifier.weight(1f)) {
                     if (browse.section == AppSection.Browse && !browse.detail) Column(Modifier.fillMaxSize()) {
                     if (browse.configuredRoutes.isNotEmpty()) BrowseRouteTabs(browse, routePosition) { id -> selectRoute(id) }

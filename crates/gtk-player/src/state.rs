@@ -7,7 +7,7 @@ use playback::{CurrentMediaId, PlaybackView, RemoteOutput};
 
 use gtk_widgets::detail_links::DetailLinks;
 use localization::tr;
-use rufin_core::settings::presentation::audio_source_label;
+use rufin_core::settings::presentation::now_playing_labels;
 
 #[derive(Default)]
 pub struct PlaybackState {
@@ -50,30 +50,12 @@ impl NowPlayingPresentation {
                 .and_then(|entry| entry.artwork_binding.as_deref())
                 .map(ArtworkBinding::opaque)
                 .unwrap_or_default(),
-            meta: now_playing_meta_parts(current),
+            meta: now_playing_labels(current),
             title,
             artist,
             album,
         }
     }
-}
-
-fn now_playing_meta_parts(entry: Option<&playback::CurrentMedia>) -> Vec<String> {
-    let Some(entry) = entry else {
-        return Vec::new();
-    };
-    let mut parts = Vec::new();
-    if let Some(source) = queue_entry_source_label(entry) {
-        parts.push(source);
-    }
-    if let Some(year) = entry.year.filter(|year| *year > 0) {
-        parts.push(year.to_string());
-    }
-    parts
-}
-
-fn queue_entry_source_label(entry: &playback::CurrentMedia) -> Option<String> {
-    audio_source_label(entry.source_format.as_deref(), Some(&entry.media_uri))
 }
 
 pub fn current_playback_track(player: Option<&PlaybackView>) -> Option<playback::QueueItem> {

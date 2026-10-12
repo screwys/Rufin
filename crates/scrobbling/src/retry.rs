@@ -877,20 +877,23 @@ mod tests {
         let mut scan = Scan::begin(&database, "source", "Source", "source", None)
             .await
             .expect("begin Scan");
-        scan.write_track(&library::TrackInput {
-            object_id: "track".into(),
-            title: "Track".into(),
-            display_album: "Album".into(),
-            display_artist: "Artist".into(),
-            sort_text: "track".into(),
-            duration_millis: 180_000,
-            disc_number: 1,
-            track_number: 1,
-            source_format: Some("FLAC".into()),
-            favorite: Some(false),
-            loudness_analysis_key: [1; 32],
-            ..Default::default()
-        })
+        scan.write_tracks(&[(
+            &library::TrackInput {
+                object_id: "track".into(),
+                title: "Track".into(),
+                display_album: "Album".into(),
+                display_artist: "Artist".into(),
+                sort_text: "track".into(),
+                duration_millis: 180_000,
+                disc_number: 1,
+                track_number: 1,
+                source_format: Some("FLAC".into()),
+                favorite: Some(false),
+                loudness_analysis_key: [1; 32],
+                ..Default::default()
+            },
+            None,
+        )])
         .await
         .expect("stage Track");
         let source = scan.source();

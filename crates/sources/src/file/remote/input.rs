@@ -88,8 +88,10 @@ impl FileInputServer {
             .expect("HTTP URL")
             .pop_if_empty()
             .push(path);
-        playback::ResolvedStream::with_redacted(url.as_str(), media_uri)
-            .with_resource(Arc::clone(self) as Arc<dyn Send + Sync>)
+        let mut stream = playback::ResolvedStream::with_redacted(url.as_str(), media_uri)
+            .with_resource(Arc::clone(self) as Arc<dyn Send + Sync>);
+        stream.local_input = matches!(&*self.input, FileInput::Documents(_));
+        stream
     }
 
     pub async fn playback_stream(

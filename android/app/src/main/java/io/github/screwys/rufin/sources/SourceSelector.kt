@@ -24,7 +24,7 @@ internal fun SourceSelector(expanded: Boolean, model: RufinConnection, browse: B
     val sources = model.sources
     val selectedId = sources?.selectedSourceId
     var folders by remember(selectedId) { mutableStateOf<AndroidMusicFolderState?>(null) }
-    LaunchedEffect(expanded, browse.library, selectedId, model.libraryState) {
+    LaunchedEffect(expanded, browse.library, selectedId, model.libraryState?.sourceId, model.libraryState?.revision) {
         val library = browse.library ?: return@LaunchedEffect
         if (!expanded || selectedId != model.libraryState?.sourceId) return@LaunchedEffect
         try { folders = library.musicFolders() }
@@ -37,7 +37,7 @@ internal fun SourceSelector(expanded: Boolean, model: RufinConnection, browse: B
         if (sources == null) CircularProgressIndicator(Modifier.padding(16.dp).size(24.dp))
         else sources.sources.sortedBy { it.id != selectedId }.forEach { source ->
             val selected = source.id == selectedId
-            DropdownMenuItem(text = { Text(source.name) }, onClick = { dismiss(); model.selectSource(source.id) },
+            DropdownMenuItem(text = { Text(source.name) }, onClick = { dismiss(); if (!selected) model.selectSource(source.id) },
                 leadingIcon = { SourceIcon(source.kind, Modifier.size(20.dp)) },
                 trailingIcon = if (selected) ({ RufinIcon("rufin-object-select-symbolic", null, Modifier.size(16.dp)) }) else null,
                 modifier = Modifier.padding(horizontal = 4.dp).background(

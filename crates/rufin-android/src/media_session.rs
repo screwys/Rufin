@@ -59,10 +59,7 @@ pub struct AndroidPlaybackState {
     pub context_title: Option<String>,
     pub context_category: Option<String>,
     pub context_kind: String,
-    pub source_format: Option<String>,
-    pub bitrate_kbps: Option<u32>,
-    pub bit_depth: Option<u32>,
-    pub sample_rate_hz: Option<u32>,
+    pub source_labels: Vec<String>,
     pub position_millis: u64,
     pub position_observed_at_millis: u64,
     pub position_advancing: bool,
@@ -105,10 +102,7 @@ impl AndroidPlaybackState {
             context_title: None,
             context_category: None,
             context_kind: String::new(),
-            source_format: None,
-            bitrate_kbps: None,
-            bit_depth: None,
-            sample_rate_hz: None,
+            source_labels: Vec::new(),
             position_millis: 0,
             position_observed_at_millis: 0,
             position_advancing: false,
@@ -190,15 +184,7 @@ impl From<&PlaybackView> for AndroidPlaybackState {
                 }
                 .into()
             }),
-            source_format: current.and_then(|media| {
-                rufin_core::settings::presentation::audio_source_label(
-                    media.source_format.as_deref(),
-                    Some(&media.media_uri),
-                )
-            }),
-            bitrate_kbps: None,
-            bit_depth: None,
-            sample_rate_hz: None,
+            source_labels: rufin_core::settings::presentation::now_playing_labels(current),
             position_millis: transport.position_millis,
             position_observed_at_millis: transport.position_observed_at_millis,
             position_advancing: transport.state == TransportStatus::Playing,
@@ -245,7 +231,7 @@ struct PlaybackChanges {
     playback: playback::PlaybackSubscription,
     catalog: tokio::sync::watch::Receiver<()>,
     intents: tokio::sync::watch::Receiver<u64>,
-    current_facts: Option<(String, bool, library::AudioProperties, Option<String>)>,
+    current_facts: Option<(String, bool)>,
     queue_view: Option<std::sync::Arc<PlaybackView>>,
     queue_window_revision: u64,
 }
@@ -333,48 +319,19 @@ impl AndroidPlaybackSubscription {
             let uri = &current.media_uri;
             if changes.current_facts.is_none() {
                 let database = self.database.clone();
-                let row = std::sync::Arc::clone(&current.row);
-                let row = self
+                let target = library::FavoriteTarget::Track(uri.clone());
+                let favorite = self
                     .runtime
-                    .spawn(async move { database.prepared_queue_page(&[row]).await })
+                    .spawn(async move { database.favorite(&target).await })
                     .await
                     .map_err(error)?
-                    .map_err(error)?
-                    .pop()
-                    .expect("Current queue row");
-                tracing::info!(
-                    favorite = row.favorite,
-                    run = current.id.run.map(playback::RunId::get),
-                    catalog_changed,
-                    "Android current track favorite loaded"
-                );
-                let format = rufin_core::settings::presentation::audio_source_label(
-                    current.source_format.as_deref(),
-                    row.source_path.as_deref().or(Some(uri)),
-                );
-                changes.current_facts =
-                    Some((uri.clone(), row.favorite, row.audio_properties, format));
+                    .map_err(error)?;
+                changes.current_facts = Some((uri.clone(), favorite));
             }
             state.favorite = changes
                 .current_facts
                 .as_ref()
-                .is_some_and(|(_, value, _, _)| *value);
-            state.bitrate_kbps = changes
-                .current_facts
-                .as_ref()
-                .and_then(|(_, _, value, _)| value.bitrate_kbps);
-            state.bit_depth = changes
-                .current_facts
-                .as_ref()
-                .and_then(|(_, _, value, _)| value.bit_depth);
-            state.sample_rate_hz = changes
-                .current_facts
-                .as_ref()
-                .and_then(|(_, _, value, _)| value.sample_rate_hz);
-            state.source_format = changes
-                .current_facts
-                .as_ref()
-                .and_then(|(_, _, _, value)| value.clone());
+                .is_some_and(|(_, value)| *value);
             state.favorite = self.intents.projected_item_favorite(
                 &library::FavoriteTarget::Track(uri.clone()),
                 state.favorite,

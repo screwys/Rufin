@@ -179,8 +179,8 @@ impl FileSource {
                             track.track.object_id = format!("{prefix}:{}", cue.number);
                             track.track.cue_path = Some(file.path.clone());
                             scan.begin_batch().await?;
-                            scan.write_album_tracks(&[track.into_inputs(scan.accepted_at())?])
-                                .await?;
+                            let (album, track) = track.into_inputs(scan.accepted_at())?;
+                            scan.write_tracks(&[(&track, Some(&album))]).await?;
                             scan.finish_batch().await?;
                             completed += 1;
                             progress(completed);

@@ -25,7 +25,7 @@ impl MetadataWriter {
         Self::for_file_type(FileType::from_ext(source_format)?)
     }
 
-    fn for_file_type(file_type: FileType) -> Option<Self> {
+    pub(crate) fn for_file_type(file_type: FileType) -> Option<Self> {
         file_type
             .tag_support(file_type.primary_tag_type())
             .is_writable()

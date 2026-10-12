@@ -23,25 +23,28 @@ async fn publication_keeps_tracks_and_known_credits_beside_missing_related_objec
     .await
     .unwrap();
     for (object_id, title) in [("track-one", "One"), ("track-two", "Two")] {
-        scan.write_track(&library::TrackInput {
-            object_id: object_id.into(),
-            album_object_id: Some("album-one".into()),
-            title: title.into(),
-            sort_text: title.to_lowercase(),
-            album_loudness: Some(library::LoudnessInput {
-                replay_gain_db: Some(-6.0),
-                ..Default::default()
-            }),
-            relations: Some(library::TrackRelationsInput {
-                artists: vec![library::ArtistInput {
-                    object_id: "artist-one".into(),
-                    name: "Known Artist".into(),
+        scan.write_tracks(&[(
+            &library::TrackInput {
+                object_id: object_id.into(),
+                album_object_id: Some("album-one".into()),
+                title: title.into(),
+                sort_text: title.to_lowercase(),
+                album_loudness: Some(library::LoudnessInput {
+                    replay_gain_db: Some(-6.0),
                     ..Default::default()
-                }],
+                }),
+                relations: Some(library::TrackRelationsInput {
+                    artists: vec![library::ArtistInput {
+                        object_id: "artist-one".into(),
+                        name: "Known Artist".into(),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }),
                 ..Default::default()
-            }),
-            ..Default::default()
-        })
+            },
+            None,
+        )])
         .await
         .unwrap();
     }
@@ -107,21 +110,24 @@ async fn remote_relocation_keeps_media_identity_and_updates_observed_access() {
         let mut scan = Scan::begin(&database, source_id.as_str(), "DAV", "dav", None)
             .await
             .unwrap();
-        scan.write_track(&library::TrackInput {
-            object_id: "stable-track".into(),
-            title: "A track".into(),
-            display_album: "Album".into(),
-            display_artist: "Artist".into(),
-            sort_text: "a track".into(),
-            duration_millis: 2000,
-            disc_number: 1,
-            track_number: 1,
-            source_format: Some("FLAC".into()),
-            favorite: Some(false),
-            source_path: Some(observation.path.to_owned()),
-            loudness_analysis_key: [1; 32],
-            ..Default::default()
-        })
+        scan.write_tracks(&[(
+            &library::TrackInput {
+                object_id: "stable-track".into(),
+                title: "A track".into(),
+                display_album: "Album".into(),
+                display_artist: "Artist".into(),
+                sort_text: "a track".into(),
+                duration_millis: 2000,
+                disc_number: 1,
+                track_number: 1,
+                source_format: Some("FLAC".into()),
+                favorite: Some(false),
+                source_path: Some(observation.path.to_owned()),
+                loudness_analysis_key: [1; 32],
+                ..Default::default()
+            },
+            None,
+        )])
         .await
         .unwrap();
         scan.write_local_files(&[(observation.clone(), Vec::new())])
@@ -624,37 +630,40 @@ async fn write_small_catalog(
 async fn write_track(scan: &mut Scan, object_id: &str, title: &str, position: i64) {
     let normalized = format!("{} album one artist one note", title.to_lowercase());
     let media_uri = format!("file:///music/{object_id}.flac");
-    scan.write_track(&library::TrackInput {
-        object_id: object_id.to_owned(),
-        album_object_id: Some("album-one".into()),
-        title: title.to_owned(),
-        display_album: "Album One".into(),
-        display_artist: "Artist One".into(),
-        sort_text: normalized,
-        duration_millis: 180_000,
-        disc_number: 1,
-        track_number: position + 1,
-        year: Some(2025),
-        release_date: Some("2025-01-01".into()),
-        date_added: Some("2025-01-02".into()),
-        media_uri: Some(media_uri),
-        source_format: Some("FLAC".into()),
-        comment: Some("Note".into()),
-        bpm: Some(120),
-        musicbrainz_recording_id: Some("recording-one".into()),
-        musicbrainz_release_track_id: Some("release-track-one".into()),
-        cue_path: Some("/music/album.cue".into()),
-        cue_start_millis: Some(1_000),
-        cue_end_millis: Some(181_000),
-        artwork_binding: Some(format!("art-{object_id}").into_bytes()),
-        favorite: Some(false),
-        first_seen_at: Some(10 + position),
-        source_play_count: Some(20 + position),
-        source_skip_count: Some(position),
-        source_last_played: Some(1_700_000_000 + position),
-        loudness_analysis_key: [position as u8 + 1; 32],
-        ..Default::default()
-    })
+    scan.write_tracks(&[(
+        &library::TrackInput {
+            object_id: object_id.to_owned(),
+            album_object_id: Some("album-one".into()),
+            title: title.to_owned(),
+            display_album: "Album One".into(),
+            display_artist: "Artist One".into(),
+            sort_text: normalized,
+            duration_millis: 180_000,
+            disc_number: 1,
+            track_number: position + 1,
+            year: Some(2025),
+            release_date: Some("2025-01-01".into()),
+            date_added: Some("2025-01-02".into()),
+            media_uri: Some(media_uri),
+            source_format: Some("FLAC".into()),
+            comment: Some("Note".into()),
+            bpm: Some(120),
+            musicbrainz_recording_id: Some("recording-one".into()),
+            musicbrainz_release_track_id: Some("release-track-one".into()),
+            cue_path: Some("/music/album.cue".into()),
+            cue_start_millis: Some(1_000),
+            cue_end_millis: Some(181_000),
+            artwork_binding: Some(format!("art-{object_id}").into_bytes()),
+            favorite: Some(false),
+            first_seen_at: Some(10 + position),
+            source_play_count: Some(20 + position),
+            source_skip_count: Some(position),
+            source_last_played: Some(1_700_000_000 + position),
+            loudness_analysis_key: [position as u8 + 1; 32],
+            ..Default::default()
+        },
+        None,
+    )])
     .await
     .expect("stage track");
     scan.write_track_relations(
@@ -1369,14 +1378,17 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         .await
         .expect("write a useful record");
     failed
-        .write_track(&library::TrackInput {
-            object_id: "known".into(),
-            title: "Known".into(),
-            sort_text: "known".into(),
-            favorite: Some(false),
-            source_play_count: Some(1),
-            ..Default::default()
-        })
+        .write_tracks(&[(
+            &library::TrackInput {
+                object_id: "known".into(),
+                title: "Known".into(),
+                sort_text: "known".into(),
+                favorite: Some(false),
+                source_play_count: Some(1),
+                ..Default::default()
+            },
+            None,
+        )])
         .await
         .unwrap();
     failed.finish_batch().await.expect("commit first batch");
@@ -1410,19 +1422,22 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         .await
         .unwrap();
     failed
-        .write_track(&library::TrackInput {
-            object_id: "".into(),
-            title: "Bad".into(),
-            display_album: "".into(),
-            display_artist: "".into(),
-            sort_text: "bad".into(),
-            duration_millis: 0,
-            disc_number: 0,
-            track_number: 0,
-            favorite: Some(false),
-            loudness_analysis_key: [0; 32],
-            ..Default::default()
-        })
+        .write_tracks(&[(
+            &library::TrackInput {
+                object_id: "".into(),
+                title: "Bad".into(),
+                display_album: "".into(),
+                display_artist: "".into(),
+                sort_text: "bad".into(),
+                duration_millis: 0,
+                disc_number: 0,
+                track_number: 0,
+                favorite: Some(false),
+                loudness_analysis_key: [0; 32],
+                ..Default::default()
+            },
+            None,
+        )])
         .await
         .expect_err("empty identity fails the current batch");
     failed
@@ -1561,20 +1576,23 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         .await
         .expect("begin invalid scan");
     invalid
-        .write_track(&library::TrackInput {
-            object_id: "orphan-track".into(),
-            album_object_id: Some("missing-album".into()),
-            title: "Orphan".into(),
-            display_album: "Missing".into(),
-            display_artist: "Artist".into(),
-            sort_text: "orphan".into(),
-            duration_millis: 1,
-            disc_number: 1,
-            track_number: 1,
-            favorite: Some(false),
-            loudness_analysis_key: [1; 32],
-            ..Default::default()
-        })
+        .write_tracks(&[(
+            &library::TrackInput {
+                object_id: "orphan-track".into(),
+                album_object_id: Some("missing-album".into()),
+                title: "Orphan".into(),
+                display_album: "Missing".into(),
+                display_artist: "Artist".into(),
+                sort_text: "orphan".into(),
+                duration_millis: 1,
+                disc_number: 1,
+                track_number: 1,
+                favorite: Some(false),
+                loudness_analysis_key: [1; 32],
+                ..Default::default()
+            },
+            None,
+        )])
         .await
         .expect("stage song with unavailable album relationship");
     let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();

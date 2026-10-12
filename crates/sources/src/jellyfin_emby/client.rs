@@ -197,7 +197,7 @@ impl JellyfinEmbySource {
                     )
                     .await?;
                 }
-                scan.write_track(&track).await?;
+                scan.write_tracks(&[(&track, None)]).await?;
             }
             scan.finish_batch().await?;
             if finished {
@@ -342,7 +342,7 @@ impl JellyfinEmbySource {
             for item in tracks {
                 if let Some(track) = track_from_item(self.kind, scan.source_id(), &item)? {
                     track_ids.push(track.object_id.clone());
-                    scan.write_track(&track).await?;
+                    scan.write_tracks(&[(&track, None)]).await?;
                 }
             }
             scan.finish_batch().await?;
@@ -1211,7 +1211,7 @@ mod tests {
         let mut scan = library::Scan::begin(&database, "source", "Jellyfin", "jellyfin", None)
             .await
             .unwrap();
-        scan.write_track(
+        scan.write_tracks(&[(
             &track_from_item(
                 crate::ServerKind::Jellyfin,
                 scan.source_id(),
@@ -1219,7 +1219,8 @@ mod tests {
             )
             .unwrap()
             .unwrap(),
-        )
+            None,
+        )])
         .await
         .unwrap();
         scan.write_playlist(&library::PlaylistInput {
@@ -1604,11 +1605,12 @@ mod tests {
             )
             .await
             .unwrap();
-            scan.write_track(
+            scan.write_tracks(&[(
                 &track_from_item(kind, scan.source_id(), &track)
                     .unwrap()
                     .unwrap(),
-            )
+                None,
+            )])
             .await
             .unwrap();
             scan.write_artist(&super::artist_from_item(kind, scan.source_id(), &serde_json::json!({
@@ -1779,7 +1781,7 @@ mod tests {
         )
         .await
         .expect("stage old Album");
-        scan.write_track(
+        scan.write_tracks(&[(
             &track_from_item(
                 crate::ServerKind::Jellyfin,
                 scan.source_id(),
@@ -1791,7 +1793,8 @@ mod tests {
             )
             .unwrap()
             .unwrap(),
-        )
+            None,
+        )])
         .await
         .expect("stage old Track");
         scan.finish_batch().await.expect("finish initial batch");

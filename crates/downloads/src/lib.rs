@@ -2130,9 +2130,9 @@ impl Actor {
         };
         let (storage_root, relative_path) = local_access_projection(paths)?;
         self.database
-            .upsert_local_access(
+            .write_local_access(
                 source,
-                &library::LocalAccessWrite {
+                &[&library::LocalAccessWrite {
                     media_uri: media_uri.to_string(),
                     origin: library::LocalAccessOrigin::Download,
                     path: paths.audio.location()?,
@@ -2151,7 +2151,7 @@ impl Actor {
                     duration_millis,
                     access_uri: paths.audio.access_uri()?,
                     loudness_analysis_key: loudness,
-                },
+                }],
             )
             .await
             .map(|_| ())
@@ -2941,20 +2941,23 @@ mod tests {
         let mut scan = library::Scan::begin(&database, source_id, "Source", "source", None)
             .await
             .expect("begin source scan");
-        scan.write_track(&library::TrackInput {
-            object_id: track_object_id.to_owned(),
-            title: "Track".into(),
-            display_album: "Album".into(),
-            display_artist: "Artist".into(),
-            sort_text: "track".into(),
-            duration_millis: 180_000,
-            disc_number: 1,
-            track_number: 1,
-            source_format: Some("FLAC".into()),
-            favorite: Some(false),
-            loudness_analysis_key: [7; 32],
-            ..Default::default()
-        })
+        scan.write_tracks(&[(
+            &library::TrackInput {
+                object_id: track_object_id.to_owned(),
+                title: "Track".into(),
+                display_album: "Album".into(),
+                display_artist: "Artist".into(),
+                sort_text: "track".into(),
+                duration_millis: 180_000,
+                disc_number: 1,
+                track_number: 1,
+                source_format: Some("FLAC".into()),
+                favorite: Some(false),
+                loudness_analysis_key: [7; 32],
+                ..Default::default()
+            },
+            None,
+        )])
         .await
         .expect("stage Track");
         let source = scan.source();

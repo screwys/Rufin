@@ -88,7 +88,7 @@ impl JellyfinEmbySource {
                 }
                 scan.begin_batch().await?;
                 if let Some(mapped) = track {
-                    scan.write_track(&mapped).await?;
+                    scan.write_tracks(&[(&mapped, None)]).await?;
                 }
                 scan.finish_batch().await?;
                 if let Some(folders) = self.stage_item_folders(scan, &raw_id).await? {
@@ -263,12 +263,14 @@ impl JellyfinEmbySource {
                 .await?;
             let count = items(&page["Items"]).len();
             let finished = pages.advance(count, field(&page, "TotalRecordCount"))?;
+            let tracks = items(&page["Items"])
+                .iter()
+                .filter_map(|item| track_from_item(self.kind, scan.source_id(), item).transpose())
+                .collect::<library::LibraryResult<Vec<_>>>()?;
+            drop(page);
             scan.begin_batch().await?;
-            for item in items(&page["Items"]) {
-                if let Some(mapped) = track_from_item(self.kind, scan.source_id(), item)? {
-                    scan.write_track(&mapped).await?;
-                }
-            }
+            scan.write_tracks(&tracks.iter().map(|track| (track, None)).collect::<Vec<_>>())
+                .await?;
             scan.finish_batch().await?;
             progress(stage(
                 SourceReadStage::Tracks,
@@ -801,7 +803,7 @@ mod tests {
             )
             .await
             .unwrap();
-        previous.write_track(&super::track_from_item(crate::ServerKind::Jellyfin, previous.source_id(), &serde_json::from_value(serde_json::json!({"Id":"removed","Name":"Removed","Type":"Audio","AlbumId":"album"})).unwrap()).unwrap().unwrap()).await.unwrap();
+        previous.write_tracks(&[(&super::track_from_item(crate::ServerKind::Jellyfin, previous.source_id(), &serde_json::from_value(serde_json::json!({"Id":"removed","Name":"Removed","Type":"Audio","AlbumId":"album"})).unwrap()).unwrap().unwrap(), None)]).await.unwrap();
         previous
             .write_genre(&library::GenreInput {
                 object_id: "cached-genre".into(),

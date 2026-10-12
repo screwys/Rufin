@@ -121,8 +121,8 @@ impl FileSource {
         self.locate_track(&mut track, &observation);
         observation.state = LocalFileState::Accepted;
         scan.begin_batch().await?;
-        scan.write_album_tracks(&[track.into_inputs(scan.accepted_at())?])
-            .await?;
+        let (album, track) = track.into_inputs(scan.accepted_at())?;
+        scan.write_tracks(&[(&track, Some(&album))]).await?;
         scan.write_local_files(&[(observation, vec![])]).await?;
         scan.finish_batch().await?;
         Ok(())
@@ -352,89 +352,106 @@ impl FileSource {
                 },
             ))
             .buffered(workers.len());
-            while let Some((mut file, reusable, parsed)) = files.next().await {
-                if cancelled() {
-                    return Err(SourceError::Cancelled);
-                }
-                if dependencies.contains(&file.path) || reusable.is_some() {
-                    continue;
-                }
-                file.parse_version = Some(PARSER_VERSION);
-                let exact = candidates.iter().find(|old| old.path == file.path);
-                let renamed = if let Some((old, new)) = rename
-                    && let Some(suffix) = file.path.strip_prefix(new)
-                    && (suffix.is_empty() || suffix.starts_with('/'))
-                {
-                    let mut from = file.clone();
-                    from.path = format!("{old}{suffix}");
-                    scan.local_file_reuse_candidates(&[from]).await?
-                } else {
-                    vec![]
-                };
-                let mut prior = exact.or_else(|| renamed.first());
-                if prior.is_none()
-                    && let Some(id) = &file.native_id
-                {
-                    let mut matches = candidates
-                        .iter()
-                        .filter(|old| old.native_id.as_ref() == Some(id));
-                    let first = matches.next();
-                    if matches.next().is_none()
-                        && scan.local_inventory_native_paths(id).await? == [file.path.clone()]
+            let mut accepted = Vec::new();
+            let mut observations = Vec::new();
+            let result: SourceResult<()> = async {
+                while let Some((mut file, reusable, parsed)) = files.next().await {
+                    if cancelled() {
+                        return Err(SourceError::Cancelled);
+                    }
+                    if dependencies.contains(&file.path) || reusable.is_some() {
+                        continue;
+                    }
+                    file.parse_version = Some(PARSER_VERSION);
+                    let exact = candidates.iter().find(|old| old.path == file.path);
+                    let renamed = if let Some((old, new)) = rename
+                        && let Some(suffix) = file.path.strip_prefix(new)
+                        && (suffix.is_empty() || suffix.starts_with('/'))
                     {
-                        prior = first;
-                    }
-                }
-                let parsed = match parsed.expect("uncached media is read before staging") {
-                    Ok(parsed) => parsed,
-                    Err(SourceError::Cancelled) => return Err(SourceError::Cancelled),
-                    Err(error) => {
-                        tracing::warn!(error = %error, "could not read remote media file");
-                        media::MediaRead::Unreadable
-                    }
-                };
-                match parsed {
-                    media::MediaRead::Accepted(mut track) => {
-                        if let Some(id) = prior.and_then(|old| old.track_object_id.as_ref()) {
-                            track.track.object_id = id.clone();
-                        } else {
-                            track.track.object_id = format!(
-                                "file:{:016x}",
-                                crate::policy::stable_hash(&super::file_identity(&file.path))
-                            );
+                        let mut from = file.clone();
+                        from.path = format!("{old}{suffix}");
+                        scan.local_file_reuse_candidates(&[from]).await?
+                    } else {
+                        vec![]
+                    };
+                    let mut prior = exact.or_else(|| renamed.first());
+                    if prior.is_none()
+                        && let Some(id) = &file.native_id
+                    {
+                        let mut matches = candidates
+                            .iter()
+                            .filter(|old| old.native_id.as_ref() == Some(id));
+                        let first = matches.next();
+                        if matches.next().is_none()
+                            && scan.local_inventory_native_paths(id).await? == [file.path.clone()]
+                        {
+                            prior = first;
                         }
-                        file.picture_index = match &track.local_artwork {
-                            Some(LocalImageRef::Embedded { picture_index, .. }) => {
-                                Some(i64::from(*picture_index))
+                    }
+                    let parsed = match parsed.expect("uncached media is read before staging") {
+                        Ok(parsed) => parsed,
+                        Err(SourceError::Cancelled) => return Err(SourceError::Cancelled),
+                        Err(error) => {
+                            tracing::warn!(error = %error, "could not read remote media file");
+                            media::MediaRead::Unreadable
+                        }
+                    };
+                    match parsed {
+                        media::MediaRead::Accepted(mut track) => {
+                            if let Some(id) = prior.and_then(|old| old.track_object_id.as_ref()) {
+                                track.track.object_id = id.clone();
+                            } else {
+                                track.track.object_id = format!(
+                                    "file:{:016x}",
+                                    crate::policy::stable_hash(&super::file_identity(&file.path))
+                                );
                             }
-                            _ => None,
-                        };
-                        file.artist_pictures = Some(serde_json::to_string(&track.artist_pictures)?);
-                        self.locate_track(&mut track, &file);
-                        file.state = LocalFileState::Accepted;
-                        scan.begin_batch().await?;
-                        scan.write_album_tracks(&[track.into_inputs(scan.accepted_at())?])
-                            .await?;
-                        scan.write_local_files(&[(file, vec![])]).await?;
-                        scan.finish_batch().await?;
-                        completed += 1;
-                        report(completed);
-                    }
-                    media::MediaRead::Rejected => {
-                        file.state = LocalFileState::Rejected;
-                        scan.write_local_files(&[(file, vec![])]).await?;
-                    }
-                    media::MediaRead::Unreadable => {
-                        file.state = LocalFileState::Unreadable;
-                        scan.clear_freshness();
-                        if let Some(old) = prior {
-                            scan.retain_local_media_paths(std::slice::from_ref(&old.path))
-                                .await?;
+                            file.picture_index = match &track.local_artwork {
+                                Some(LocalImageRef::Embedded { picture_index, .. }) => {
+                                    Some(i64::from(*picture_index))
+                                }
+                                _ => None,
+                            };
+                            file.artist_pictures =
+                                Some(serde_json::to_string(&track.artist_pictures)?);
+                            self.locate_track(&mut track, &file);
+                            file.state = LocalFileState::Accepted;
+                            accepted.push(track.into_inputs(scan.accepted_at())?);
+                            observations.push((file, vec![]));
                         }
-                        scan.write_local_files(&[(file, vec![])]).await?;
+                        media::MediaRead::Rejected => {
+                            file.state = LocalFileState::Rejected;
+                            observations.push((file, vec![]));
+                        }
+                        media::MediaRead::Unreadable => {
+                            file.state = LocalFileState::Unreadable;
+                            scan.clear_freshness();
+                            if let Some(old) = prior {
+                                scan.retain_local_media_paths(std::slice::from_ref(&old.path))
+                                    .await?;
+                            }
+                            observations.push((file, vec![]));
+                        }
                     }
                 }
+                Ok(())
             }
+            .await;
+            if !observations.is_empty() {
+                scan.begin_batch().await?;
+                scan.write_tracks(
+                    &accepted
+                        .iter()
+                        .map(|(album, track)| (track, Some(album)))
+                        .collect::<Vec<_>>(),
+                )
+                .await?;
+                scan.write_local_files(&observations).await?;
+                scan.finish_batch().await?;
+                completed += accepted.len();
+                report(completed);
+            }
+            result?;
         }
         Ok(())
     }

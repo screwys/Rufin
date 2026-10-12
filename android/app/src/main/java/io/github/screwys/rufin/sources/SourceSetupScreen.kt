@@ -28,6 +28,7 @@ import kotlinx.coroutines.delay
 internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sourceId: String? = null, connectionsOnly: Boolean = false) {
     val setup = remember(model, sourceId) { model.sourceSetupSession(sourceId) }
     val form = setup.form
+    var mapping by remember { mutableStateOf(false) }
     var saved by remember(setup) { mutableStateOf(false) }
     LaunchedEffect(saved) {
         if (saved) { delay(2000); saved = false }
@@ -47,6 +48,8 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
         "emby" -> form.manualEmby && form.url.isNotBlank() || setup.authorized && setup.choices.isNotEmpty() || sourceId != null
         else -> setup.authorized || form.url.isNotBlank()
     }
+    if (mapping && sourceId != null) LocalAccessDialog(model, sourceId,
+        onDismiss = { mapping = false }, onSaved = { mapping = false })
     Scaffold(topBar = {
             TopAppBar(title = {
                 Text(setup.providers.firstOrNull { it.kind == form.kind }?.title ?: translate(
@@ -72,7 +75,12 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
         }
     }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
-            if (setup.working) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (setup.working) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+                model.libraryState?.takeIf { it.busy }?.status?.let {
+                    Text(it, Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
+                }
+            }
             setup.failure?.let { io.github.screwys.rufin.ui.ErrorNotice(it) }
             if (!setup.ready) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { if (setup.failure == null) CircularProgressIndicator() }
             else if (form.kind == null) LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp)) {
@@ -97,6 +105,11 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
                 }
             } else LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (sourceId != null && !form.integration && form.kind in setOf("jellyfin", "emby", "plex", "navidrome", "subsonic")) item {
+                    SettingsGroup { SettingsRow(translate("Local File Mapping"),
+                        trailing = { RufinIcon("rufin-go-next-symbolic", null) },
+                        modifier = Modifier.clickable(enabled = !setup.working) { mapping = true }) }
+                }
                 item { SourceTextField("Name", form.name, { form.name = it }, !setup.working) }
                 when (form.kind) {
                     "jellyfin", "emby" -> item { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

@@ -1634,25 +1634,17 @@ impl SourceOwner {
 
     async fn publish_mapping_count(
         &self,
-        selected: &SelectedSourceState,
+        source: SourceKey,
         formula_match_count: usize,
     ) -> Result<(), String> {
-        let current = {
-            let Some(session) = self.shared.selected_session() else {
-                return Ok(());
-            };
-            let Some(current) = session.update(selected.source_key, |current| {
-                current.local_access_status.matched_track_count = formula_match_count;
-            }) else {
-                return Ok(());
-            };
-            current
-        };
+        if let Some(session) = self.shared.selected_session() {
+            session.update(source, |current| {
+                current.local_access_status.matched_track_count = formula_match_count
+            });
+        }
         self.shared.playback()?.stream_inputs_changed()?;
         self.shared
-            .send(SourceEvent::Configured(
-                self.shared.configured_sources(Some(&current)),
-            ))
+            .send(SourceEvent::Configured(self.list_sources()))
             .await;
         Ok(())
     }
@@ -2564,19 +2556,11 @@ impl SourceOwner {
         let owner = self.clone();
         self.shared.runtime.spawn(async move {
             let result = async {
-                let selected = owner
-                    .shared
-                    .selected()
-                    .filter(|selected| selected.source_id() == &input.source_id)
-                    .ok_or_else(|| "the mapped source is not selected".to_string())?;
-                let source = selected
-                    .source
-                    .as_ref()
-                    .ok_or_else(source_access_unavailable)?;
+                let (source, source_key) = owner.source_target(&input.source_id).await?;
                 let (root_path, server_prefix) = source
                     .apply_local_mapping(
-                        &selected.database,
-                        selected.source_key,
+                        &owner.shared.database,
+                        source_key,
                         &input.root_path,
                         input.server_prefix.as_deref(),
                         input.local_prefix.as_deref(),
@@ -2600,10 +2584,11 @@ impl SourceOwner {
                     });
                     Ok(())
                 })?;
-                let formula_match_count = selected
+                let formula_match_count = owner
+                    .shared
                     .database
                     .mapping_formula_match_count(
-                        selected.source_key,
+                        source_key,
                         root_path.to_string_lossy().as_ref(),
                         input.server_prefix.as_deref(),
                         &ReadCancellation::new(),
@@ -2611,12 +2596,12 @@ impl SourceOwner {
                     .await
                     .map_err(string_error)?;
                 owner
-                    .publish_mapping_count(&selected, formula_match_count)
+                    .publish_mapping_count(source_key, formula_match_count)
                     .await?;
-                Ok((formula_match_count, root_path))
+                Ok((formula_match_count, root_path, source, source_key))
             }
             .await;
-            let (formula_match_count, root_path) = match result {
+            let (formula_match_count, root_path, source, source_key) = match result {
                 Ok(completed) => completed,
                 Err(error) => {
                     let _ = sender.send(Err(error)).await;
@@ -2630,19 +2615,10 @@ impl SourceOwner {
                 if cancelled.load(Ordering::Acquire) {
                     return Err("Local file mapping was cancelled".to_string());
                 }
-                let selected = owner
-                    .shared
-                    .selected()
-                    .filter(|selected| selected.source_id() == &input.source_id)
-                    .ok_or_else(|| "the mapped source is no longer selected".to_string())?;
-                let source = selected
-                    .source
-                    .as_ref()
-                    .ok_or_else(source_access_unavailable)?;
                 source
                     .complete_local_mapping(
-                        &selected.database,
-                        selected.source_key,
+                        &owner.shared.database,
+                        source_key,
                         &root_path,
                         input.server_prefix.as_deref(),
                         input.local_prefix.as_deref(),
@@ -2651,7 +2627,7 @@ impl SourceOwner {
                     .await
                     .map_err(string_error)?;
                 owner
-                    .publish_mapping_count(&selected, formula_match_count)
+                    .publish_mapping_count(source_key, formula_match_count)
                     .await
             }
             .await;
@@ -2666,18 +2642,11 @@ impl SourceOwner {
 
     pub fn clear_local_access(&self, source_id: SourceId) {
         self.spawn_serialized(move |owner| async move {
-            if let Some(selected) = owner
-                .shared
-                .selected()
-                .filter(|selected| selected.source_id() == &source_id)
-            {
-                let _ = selected
-                    .database
-                    .clear_mapping_access(selected.source_key)
-                    .await;
+            if let Ok(Some(source)) = owner.shared.database.source_identity_key(&source_id).await {
+                let _ = owner.shared.database.clear_mapping_access(source).await;
                 if let Some(session) = owner.shared.selected_session() {
-                    session.update(selected.source_key, |current| {
-                        current.local_access_status.matched_track_count = 0;
+                    session.update(source, |current| {
+                        current.local_access_status.matched_track_count = 0
                     });
                 }
                 let _ = owner
@@ -4744,20 +4713,23 @@ mod artwork_preparation_tests {
             })
             .await
             .unwrap();
-            scan.write_track(&library::TrackInput {
-                object_id: "new-track".into(),
-                album_object_id: Some("album".into()),
-                title: "New Track".into(),
-                display_album: "Cached Album".into(),
-                display_artist: "Artist".into(),
-                sort_text: "new track".into(),
-                duration_millis: 1_000,
-                disc_number: 1,
-                track_number: 1,
-                favorite: Some(false),
-                loudness_analysis_key: [0; 32],
-                ..Default::default()
-            })
+            scan.write_tracks(&[(
+                &library::TrackInput {
+                    object_id: "new-track".into(),
+                    album_object_id: Some("album".into()),
+                    title: "New Track".into(),
+                    display_album: "Cached Album".into(),
+                    display_artist: "Artist".into(),
+                    sort_text: "new track".into(),
+                    duration_millis: 1_000,
+                    disc_number: 1,
+                    track_number: 1,
+                    favorite: Some(false),
+                    loudness_analysis_key: [0; 32],
+                    ..Default::default()
+                },
+                None,
+            )])
             .await
             .unwrap();
             scan.write_track_folders(&[library::ScanLink {

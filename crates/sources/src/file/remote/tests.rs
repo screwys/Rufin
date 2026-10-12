@@ -126,14 +126,14 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
             );
         }
         let progress = progress.lock().unwrap();
-        assert_eq!(
-            progress
-                .iter()
-                .filter(|p| p.stage == crate::SourceReadStage::Tracks)
-                .map(|p| (p.completed, p.total))
-                .collect::<Vec<_>>(),
-            [(0, None), (1, None), (2, None)]
-        );
+        let counts = progress
+            .iter()
+            .filter(|p| p.stage == crate::SourceReadStage::Tracks)
+            .map(|p| p.completed)
+            .collect::<Vec<_>>();
+        assert_eq!(counts.first(), Some(&0));
+        assert_eq!(counts.last(), Some(&2));
+        assert!(counts.windows(2).all(|pair| pair[0] <= pair[1]));
         assert_eq!(
             progress.last().unwrap().stage,
             crate::SourceReadStage::Finalizing

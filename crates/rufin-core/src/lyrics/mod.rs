@@ -1955,6 +1955,7 @@ mod tests {
             };
             service.set_current(Some(LyricsContext {
                 media: Arc::new(CurrentMedia {
+                    stream: None,
                     id: media_id.clone(),
                     row: Arc::new(library::QueueRow {
                         occurrence_id: None,
@@ -1989,9 +1990,10 @@ mod tests {
         }
         assert_eq!(
             database
-                .original_file_path(&downloaded_uri)
+                .original_file(&downloaded_uri)
                 .await
-                .expect("original path"),
+                .expect("original path")
+                .map(|file| file.path),
             Some(original.to_string_lossy().into_owned())
         );
     }
