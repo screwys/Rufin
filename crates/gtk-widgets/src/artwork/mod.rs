@@ -127,10 +127,9 @@ impl ArtworkState {
         refresh_desktop_on_ready: bool,
         cache_only: bool,
     ) {
-        tile.install_request_cleanup_once();
         tile.set_animation_scale(self.artwork_scale());
         if artwork.stable_identity().is_empty() {
-            self.cancel_artwork_tile_request(tile);
+            tile.cancel_artwork_request();
             tile.bind_missing();
             return;
         }
@@ -152,17 +151,8 @@ impl ArtworkState {
         } else {
             request
         };
-        let outcome =
-            tile.bind_selected_cover(self.service.key(&request), refresh_desktop_on_ready);
-        if !outcome.request_needed {
-            return;
-        }
-        if !outcome.request_changed && tile.has_artwork_request() {
-            return;
-        }
-        self.cancel_artwork_tile_request(tile);
-
-        self.load_artwork_tile(tile, outcome.generation, refresh_desktop_on_ready, request);
+        let key = self.service.key(&request);
+        tile.bind_artwork_request(Rc::downgrade(self), key, request, refresh_desktop_on_ready);
     }
 
     fn load_artwork_tile(
@@ -185,6 +175,32 @@ impl ArtworkState {
                 return;
             }
         }
+        let immediate = refresh_desktop_on_ready || request.cache_only;
+        let pending = if immediate {
+            match self.service.load(request.clone()) {
+                artwork::ArtworkLoad::Pending(pending) => Some(pending),
+                artwork::ArtworkLoad::Ready(image) => {
+                    self.apply_artwork(
+                        tile,
+                        generation,
+                        artwork::ArtworkOutcome::Ready(image),
+                        refresh_desktop_on_ready,
+                    );
+                    return;
+                }
+                artwork::ArtworkLoad::Missing => {
+                    self.apply_artwork(
+                        tile,
+                        generation,
+                        artwork::ArtworkOutcome::Missing,
+                        refresh_desktop_on_ready,
+                    );
+                    return;
+                }
+            }
+        } else {
+            None
+        };
         let preview = refresh_desktop_on_ready.then(|| {
             ArtworkRequest::new(
                 request.binding.clone(),
@@ -194,33 +210,88 @@ impl ArtworkState {
             .with_external(request.external.clone())
             .cache_only()
         });
-        match self.service.load(request) {
-            artwork::ArtworkLoad::Pending(pending) => {
-                self.start_artwork_tile_request(
-                    tile,
-                    generation,
-                    refresh_desktop_on_ready,
-                    pending,
-                    preview,
-                );
-            }
-            artwork::ArtworkLoad::Ready(image) => {
-                self.apply_artwork(
-                    tile,
-                    generation,
-                    artwork::ArtworkOutcome::Ready(image),
-                    refresh_desktop_on_ready,
-                );
-            }
-            artwork::ArtworkLoad::Missing => {
-                self.apply_artwork(
-                    tile,
-                    generation,
-                    artwork::ArtworkOutcome::Missing,
-                    refresh_desktop_on_ready,
-                );
-            }
-        }
+        let tile_weak = tile.downgrade();
+        let shell = Rc::downgrade(self);
+        // Let GTK allocation unmap offscreen pooled rows before starting their cover work.
+        let priority = if immediate {
+            glib::Priority::DEFAULT
+        } else {
+            glib::Priority::DEFAULT_IDLE
+        };
+        let request = glib::MainContext::ref_thread_default().spawn_local_with_priority(
+            priority,
+            async move {
+                let load = if let Some(pending) = pending {
+                    artwork::ArtworkLoad::Pending(pending)
+                } else {
+                    let (Some(tile), Some(shell)) = (tile_weak.upgrade(), shell.upgrade()) else {
+                        return;
+                    };
+                    if !tile.generation_is_current(generation) || !tile.area.is_mapped() {
+                        return;
+                    }
+                    shell.service.load(request)
+                };
+                let (outcome, preview_shown) = match load {
+                    artwork::ArtworkLoad::Ready(image) => {
+                        (artwork::ArtworkOutcome::Ready(image), false)
+                    }
+                    artwork::ArtworkLoad::Missing => (artwork::ArtworkOutcome::Missing, false),
+                    artwork::ArtworkLoad::Pending(pending) => {
+                        let preview = preview.and_then(|request| {
+                            let shell = shell.upgrade()?;
+                            shell
+                                .service
+                                .cache_only_file(&request)
+                                .map(|_| shell.service.load(request))
+                        });
+                        let preview = match preview {
+                            Some(artwork::ArtworkLoad::Ready(loaded)) => Some(loaded),
+                            Some(artwork::ArtworkLoad::Pending(preview)) => {
+                                match preview.finish().await {
+                                    artwork::ArtworkOutcome::Ready(loaded) => Some(loaded),
+                                    _ => None,
+                                }
+                            }
+                            _ => None,
+                        };
+                        let shown = preview.is_some_and(|loaded| {
+                            let (Some(tile), Some(shell)) = (tile_weak.upgrade(), shell.upgrade())
+                            else {
+                                return false;
+                            };
+                            shell.texture_for_decoded(loaded).is_some_and(|texture| {
+                                tile.set_preview_if_current(generation, texture)
+                            })
+                        });
+                        if shown && let Some(shell) = shell.upgrade() {
+                            (shell.playback_ready)();
+                        }
+                        (pending.finish().await, shown)
+                    }
+                };
+                let (Some(tile), Some(shell)) = (tile_weak.upgrade(), shell.upgrade()) else {
+                    return;
+                };
+                let ready = if preview_shown
+                    && matches!(
+                        outcome,
+                        artwork::ArtworkOutcome::Missing | artwork::ArtworkOutcome::Failed(_)
+                    ) {
+                    if let artwork::ArtworkOutcome::Failed(error) = outcome {
+                        warn!(%error, "original cover request failed");
+                    }
+                    tile.complete_preview_if_current(generation);
+                    false
+                } else {
+                    shell.apply_artwork(&tile, generation, outcome, refresh_desktop_on_ready)
+                };
+                if ready && refresh_desktop_on_ready {
+                    (shell.playback_ready)();
+                }
+            },
+        );
+        tile.replace_artwork_request(request);
     }
 
     fn apply_artwork(
@@ -271,81 +342,41 @@ impl ArtworkState {
         }
     }
 
-    fn start_artwork_tile_request(
-        self: &Rc<Self>,
-        tile: &ArtworkTile,
-        generation: u64,
-        refresh_desktop_on_ready: bool,
-        pending: artwork::PendingArtwork,
-        preview: Option<ArtworkRequest>,
-    ) {
-        let preview = preview.and_then(|request| {
-            self.service
-                .cache_only_file(&request)
-                .map(|_| self.service.load(request))
-        });
-        let tile_weak = tile.downgrade();
-        let shell = Rc::downgrade(self);
-        let request = glib::spawn_future_local(async move {
-            let preview = match preview {
-                Some(artwork::ArtworkLoad::Ready(loaded)) => Some(loaded),
-                Some(artwork::ArtworkLoad::Pending(preview)) => match preview.finish().await {
-                    artwork::ArtworkOutcome::Ready(loaded) => Some(loaded),
-                    _ => None,
-                },
-                _ => None,
-            };
-            let preview_shown = preview.is_some_and(|loaded| {
-                let (Some(tile), Some(shell)) = (tile_weak.upgrade(), shell.upgrade()) else {
-                    return false;
-                };
-                shell
-                    .texture_for_decoded(loaded)
-                    .is_some_and(|texture| tile.set_preview_if_current(generation, texture))
-            });
-            if preview_shown {
-                if let Some(shell) = shell.upgrade() {
-                    (shell.playback_ready)();
-                }
-            }
-            let outcome = pending.finish().await;
-            let Some(tile) = tile_weak.upgrade() else {
-                return;
-            };
-            let Some(shell) = shell.upgrade() else {
-                return;
-            };
-            let ready = if preview_shown
-                && matches!(
-                    outcome,
-                    artwork::ArtworkOutcome::Missing | artwork::ArtworkOutcome::Failed(_)
-                ) {
-                if let artwork::ArtworkOutcome::Failed(error) = outcome {
-                    warn!(%error, "original cover request failed");
-                }
-                tile.complete_preview_if_current(generation);
-                false
-            } else {
-                shell.apply_artwork(&tile, generation, outcome, refresh_desktop_on_ready)
-            };
-            if ready && refresh_desktop_on_ready {
-                (shell.playback_ready)();
-            }
-        });
-        tile.replace_artwork_request(request);
+    pub fn clear_artwork_tile(self: &Rc<Self>, tile: &ArtworkTile) {
+        tile.cancel_artwork_request();
+        tile.clear_image();
     }
 
-    pub fn clear_artwork_tile(self: &Rc<Self>, tile: &ArtworkTile) {
-        self.cancel_artwork_tile_request(tile);
-        tile.clear_image();
+    pub async fn load_texture(
+        &self,
+        binding: ArtworkBinding,
+        display_size: i32,
+        fetch_size_cap: u32,
+    ) -> Option<gtk::gdk::Texture> {
+        if binding.stable_identity().is_empty() {
+            return None;
+        }
+        let (fetch_size, render_size) =
+            cover_request_sizes(display_size, fetch_size_cap, self.artwork_scale());
+        let request = ArtworkRequest::new(binding, fetch_size, render_size)
+            .with_external(artwork_external_policy(&self.settings.current.borrow()));
+        let outcome = match self.service.load(request) {
+            artwork::ArtworkLoad::Ready(image) => artwork::ArtworkOutcome::Ready(image),
+            artwork::ArtworkLoad::Missing => artwork::ArtworkOutcome::Missing,
+            artwork::ArtworkLoad::Pending(pending) => pending.finish().await,
+        };
+        match outcome {
+            artwork::ArtworkOutcome::Ready(image) => self.texture_for_decoded(image),
+            artwork::ArtworkOutcome::Failed(error) => {
+                warn!(%error, "artwork request failed");
+                None
+            }
+            _ => None,
+        }
     }
 
     fn texture_for_decoded(&self, image: Arc<artwork::DecodedImage>) -> Option<gtk::gdk::Texture> {
         self.textures.borrow_mut().texture(image)
-    }
-
-    fn cancel_artwork_tile_request(self: &Rc<Self>, tile: &ArtworkTile) {
-        tile.cancel_artwork_request();
     }
 
     pub fn current_playback_cached_artwork_path(

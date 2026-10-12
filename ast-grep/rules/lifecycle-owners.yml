@@ -165,20 +165,6 @@ rule:
           })
         };
 ---
-id: artwork-tile-must-not-admit-on-map
-language: Rust
-severity: error
-message: Do not start artwork from connect_map; remapping a row would repeat requests that factory bind already owns.
-rule:
-  all:
-    - pattern: $WIDGET.connect_map($$$ARGS)
-    - inside:
-        pattern: |
-          impl ArtworkTile {
-            $$$MEMBERS
-          }
-        stopBy: end
----
 id: sparse-ready-handlers-must-not-append
 language: Rust
 severity: error

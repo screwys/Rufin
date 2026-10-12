@@ -1435,8 +1435,9 @@ impl Shell {
         render_started: RouteTiming,
         build: impl FnOnce(Rc<gtk_library::CatalogUi>) -> MountedRoute,
     ) {
-        let replacement_started = render_started.as_ref().map(|_| Instant::now());
+        let teardown_started = render_started.as_ref().map(|_| Instant::now());
         let previous = self.begin_mounted_route_replacement();
+        let release_ms = teardown_started.map(elapsed_ms);
         let model_started = render_started.as_ref().map(|_| Instant::now());
         let catalog = self.build_catalog(&route, source_id.as_ref());
         catalog.refresh_current_route_now_playing_selections(route_current_track(
@@ -1448,7 +1449,7 @@ impl Shell {
         let view = build(catalog);
         let model_ms = model_started.map(elapsed_ms);
 
-        let mount_started = render_started.as_ref().map(|_| Instant::now());
+        let removal_started = render_started.as_ref().map(|_| Instant::now());
         let widget = view.widget();
         if let Some(previous) = previous {
             if gtk::prelude::RootExt::focus(&self.chrome.window).is_some_and(|focus| {
@@ -1461,6 +1462,9 @@ impl Shell {
             self.route_viewport.route_host.remove(&previous.surface);
             drop(previous);
         }
+        let teardown_ms =
+            removal_started.map(|started| elapsed_ms(started) + release_ms.unwrap_or(0));
+        let mount_started = render_started.as_ref().map(|_| Instant::now());
         let scroll_adjustment = primary_route_scroll_adjustment(&widget);
         let position_key = source_id
             .filter(|_| scroll_adjustment.is_some())
@@ -1500,14 +1504,9 @@ impl Shell {
         debug_assert!(displaced.is_none());
         self.route_viewport.route_host.set_visible_child(&surface);
         self.prepare_startup_content_readiness();
-        if let (
-            Some(render_started),
-            Some(replacement_started),
-            Some(model_ms),
-            Some(mount_started),
-        ) = (render_started, replacement_started, model_ms, mount_started)
+        if let (Some(render_started), Some(teardown_ms), Some(model_ms), Some(mount_started)) =
+            (render_started, teardown_ms, model_ms, mount_started)
         {
-            let teardown_ms = elapsed_ms(replacement_started).saturating_sub(model_ms);
             let mount_ms = elapsed_ms(mount_started);
             let total_ms = elapsed_ms(render_started);
             debug!(

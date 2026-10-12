@@ -4,9 +4,7 @@ use gtk::{gdk, gio, glib};
 use gtk_library::activity::ActivityCollections;
 use gtk_player::fullscreen_background::FullscreenBackground;
 use gtk_widgets::{
-    artwork::{ArtworkTile, cover_fetch_size_for_display},
-    mounted_route::route_current_track,
-    route::Route,
+    artwork::cover_fetch_size_for_display, mounted_route::route_current_track, route::Route,
 };
 use library::{ActivityOverview, CalendarActivityPeriod};
 use localization::{tr, tr_with};
@@ -46,7 +44,8 @@ pub(super) struct ActivityView {
     changing_period: Cell<bool>,
     data: RefCell<Option<ActivityOverview>>,
     task: RefCell<Option<tokio::task::AbortHandle>>,
-    bg_tile: ArtworkTile,
+    background_texture: RefCell<Option<gdk::Texture>>,
+    background_task: RefCell<Option<glib::JoinHandle<()>>>,
     shell: Weak<Shell>,
 }
 
@@ -56,7 +55,9 @@ impl Drop for ActivityView {
         if let Some(task) = self.task.get_mut().take() {
             task.abort();
         }
-        self.bg_tile.cancel_artwork_request();
+        if let Some(task) = self.background_task.get_mut().take() {
+            task.abort();
+        }
     }
 }
 
@@ -273,7 +274,8 @@ impl ActivityView {
             changing_period: Cell::new(false),
             data: RefCell::new(None),
             task: RefCell::new(None),
-            bg_tile: ArtworkTile::new(256),
+            background_texture: RefCell::new(None),
+            background_task: RefCell::new(None),
             shell: Rc::downgrade(shell),
         });
         let weak = Rc::downgrade(shell);
@@ -414,14 +416,6 @@ impl ActivityView {
                 view.export_png();
             }
         });
-        let weak = Rc::downgrade(&view);
-        view.bg_tile
-            .drag_paintable_source()
-            .connect_paintable_notify(move |_| {
-                if let Some(view) = weak.upgrade() {
-                    view.refresh_background();
-                }
-            });
         view.refresh_background();
         minimize.grab_focus();
         view
@@ -548,6 +542,9 @@ impl ActivityView {
         if let Some(task) = self.task.borrow_mut().take() {
             task.abort();
         }
+        if let Some(task) = self.background_task.borrow_mut().take() {
+            task.abort();
+        }
         self.export.set_sensitive(false);
         if self.data.borrow().is_none() || !self.report.is_visible() {
             self.report.set_visible(false);
@@ -588,6 +585,16 @@ impl ActivityView {
                         view.outgoing_content
                             .set_height_request(view.content.height());
                     }
+                    let artwork_changed = view
+                        .data
+                        .borrow()
+                        .as_ref()
+                        .and_then(|data| data.tracks.first())
+                        .and_then(|row| row.artwork_binding.as_ref())
+                        != data
+                            .tracks
+                            .first()
+                            .and_then(|row| row.artwork_binding.as_ref());
                     let first_artwork = data
                         .tracks
                         .first()
@@ -595,14 +602,31 @@ impl ActivityView {
                         .map(artwork::ArtworkBinding::opaque)
                         .unwrap_or_default();
                     view.data.replace(Some(data));
-                    if let Some(shell) = view.shell.upgrade() {
-                        let fetch_size = cover_fetch_size_for_display(256);
-                        shell.artwork.bind_artwork_tile(
-                            &view.bg_tile,
-                            first_artwork,
-                            256,
-                            fetch_size,
-                        );
+                    if (artwork_changed || view.background_texture.borrow().is_none())
+                        && let Some(shell) = view.shell.upgrade()
+                    {
+                        view.background_texture.borrow_mut().take();
+                        view.refresh_background();
+                        let artwork = Rc::clone(&shell.artwork);
+                        let weak = Rc::downgrade(&view);
+                        let task =
+                            glib::MainContext::ref_thread_default().spawn_local(async move {
+                                let texture = artwork
+                                    .load_texture(
+                                        first_artwork,
+                                        256,
+                                        cover_fetch_size_for_display(256),
+                                    )
+                                    .await;
+                                let Some(view) = weak.upgrade() else { return };
+                                if view.selected_period() == Some(period) {
+                                    view.background_texture.replace(texture);
+                                    view.refresh_background();
+                                }
+                            });
+                        if let Some(previous) = view.background_task.replace(Some(task)) {
+                            previous.abort();
+                        }
                     }
                     view.apply_data();
                     if animate {
@@ -737,10 +761,12 @@ impl ActivityView {
         let settings = shell.settings.current.borrow().activity_overview.clone();
         self.background.set_visible(settings.dynamic_background);
         if settings.dynamic_background {
-            self.background.update(
-                self.bg_tile.drag_paintable_source().paintable(),
-                settings.background_image,
-            );
+            let texture = self
+                .background_texture
+                .borrow()
+                .clone()
+                .map(|texture| texture.upcast());
+            self.background.update(texture, settings.background_image);
         }
     }
 

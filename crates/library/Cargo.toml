@@ -20,6 +20,7 @@ percent-encoding.workspace = true
 process-memory.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+libsqlite3-sys.workspace = true
 sqlx.workspace = true
 sqlx-core.workspace = true
 regex.workspace = true

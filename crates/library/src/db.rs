@@ -379,12 +379,27 @@ impl Database {
     }
 }
 
+#[allow(unsafe_code)]
 pub(crate) async fn open_writer(path: &Path) -> LibraryResult<SqliteConnection> {
     let options = base_options(path)
         .create_if_missing(true)
         .statement_cache_capacity(WRITER_STATEMENTS)
         .thread_name(|id| format!("rufin-library-writer-{id}"));
     let mut connection = SqliteConnection::connect_with(&options).await?;
+    {
+        let mut handle = connection.lock_handle().await?;
+        // Replanning each bound UPSERT recompiles all its update triggers for every source row.
+        // SAFETY: SQLx owns the live handle and excludes its worker while this guard is held.
+        let result = unsafe {
+            libsqlite3_sys::sqlite3_db_config(
+                handle.as_raw_handle().as_ptr(),
+                libsqlite3_sys::SQLITE_DBCONFIG_ENABLE_QPSG,
+                1,
+                std::ptr::null_mut::<i32>(),
+            )
+        };
+        debug_assert_eq!(result, libsqlite3_sys::SQLITE_OK);
+    }
     // Own the handle before configuring it so failures can await its release before replacement.
     let result = sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
         "PRAGMA page_size={PAGE_SIZE_BYTES}; PRAGMA journal_mode=WAL;
