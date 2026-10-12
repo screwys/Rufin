@@ -383,7 +383,7 @@ impl JellyfinEmbySource {
             crate::source::optional_collection_error(error)?;
             scan.retain_playlists().await?;
         }
-        self.stage_home(scan).await?;
+        crate::source::stage_home(scan, |section| self.home_section(section)).await?;
         progress(stage(SourceReadStage::Finalizing, 1, Some(1)));
         Ok(())
     }
@@ -521,27 +521,6 @@ impl JellyfinEmbySource {
                 return Ok(());
             }
         }
-    }
-
-    async fn stage_home(&self, scan: &mut Scan) -> SourceResult<()> {
-        for section in [
-            crate::SourceHomeSection::MostPlayed,
-            crate::SourceHomeSection::NewlyAdded,
-            crate::SourceHomeSection::RecentlyPlayed,
-            crate::SourceHomeSection::RecentlyReleased,
-        ] {
-            let entries = match self.home_section(section).await {
-                Ok(entries) => entries,
-                Err(error) => {
-                    crate::source::optional_collection_error(error)?;
-                    scan.retain_home_section(section.id()).await?;
-                    continue;
-                }
-            };
-            scan.replace_home_section(section.id(), None, &entries)
-                .await?;
-        }
-        Ok(())
     }
 }
 

@@ -997,34 +997,6 @@ fn field_title(field: MetadataField) -> &'static str {
     }
 }
 
-pub enum MetadataReceiver {
-    Track(async_channel::Receiver<Result<TrackMetadata, SourceMetadataError>>),
-    Album(async_channel::Receiver<Result<AlbumMetadata, SourceMetadataError>>),
-    Artist(async_channel::Receiver<Result<ArtistMetadata, SourceMetadataError>>),
-}
-
-impl MetadataReceiver {
-    pub async fn recv(self) -> Result<MetadataDraft, SourceMetadataError> {
-        match self {
-            Self::Track(receiver) => receiver
-                .recv()
-                .await
-                .map_err(|_| SourceMetadataError::Unavailable)?
-                .map(MetadataDraft::Track),
-            Self::Album(receiver) => receiver
-                .recv()
-                .await
-                .map_err(|_| SourceMetadataError::Unavailable)?
-                .map(MetadataDraft::Album),
-            Self::Artist(receiver) => receiver
-                .recv()
-                .await
-                .map_err(|_| SourceMetadataError::Unavailable)?
-                .map(MetadataDraft::Artist),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

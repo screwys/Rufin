@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use rufin_core::{
-    metadata::{self, MetadataEditor, MetadataField, MetadataReceiver},
+    metadata::{self, MetadataEditor, MetadataField, MetadataItemId},
     runtime::SourceHandle,
 };
 use sources::{ArtworkChange, ArtworkEdit, ArtworkStorage, ImageBytes, SourceMetadataError};
@@ -151,25 +151,25 @@ impl AndroidLibrary {
         kind: String,
         media_uri: String,
     ) -> Result<Arc<AndroidMetadataEditor>, AndroidMetadataError> {
-        let receiver = match kind.as_str() {
-            "track" => {
-                MetadataReceiver::Track(metadata::track_metadata(&self.source, media_uri.clone()))
-            }
-            "album" | "album_header" => {
-                MetadataReceiver::Album(metadata::album_metadata(&self.source, media_uri.clone()))
-            }
-            "artist" => {
-                MetadataReceiver::Artist(metadata::artist_metadata(&self.source, media_uri.clone()))
-            }
+        let item = match kind.as_str() {
+            "track" => MetadataItemId::Track(media_uri.clone()),
+            "album" | "album_header" => MetadataItemId::Album(media_uri.clone()),
+            "artist" => MetadataItemId::Artist(media_uri.clone()),
             _ => {
                 return Err(AndroidMetadataError::Failure {
                     reason: "Choose a track, album or artist".into(),
                 });
             }
         };
+        let receiver = metadata::read_metadata(&self.source, item);
         let draft = self
             .runtime
-            .spawn(async move { receiver.recv().await })
+            .spawn(async move {
+                receiver
+                    .recv()
+                    .await
+                    .unwrap_or(Err(SourceMetadataError::Unavailable))
+            })
             .await
             .map_err(|value| AndroidMetadataError::Failure {
                 reason: value.to_string(),

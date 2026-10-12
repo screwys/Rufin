@@ -374,12 +374,6 @@ impl PlaybackOwner {
         });
     }
 
-    fn record_listening(&self, fact: playback::ListeningFact) {
-        if let playback::ListeningFact::Started { item, .. } = fact {
-            self.scrobbler.now_playing(&item);
-        }
-    }
-
     fn record_activity(
         &self,
         key: Option<library::TrackKey>,

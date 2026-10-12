@@ -418,6 +418,31 @@ pub(crate) fn optional_collection_error(error: SourceError) -> SourceResult<()> 
     Ok(())
 }
 
+pub(crate) async fn stage_home<F, Work>(scan: &mut Scan, mut read: F) -> SourceResult<()>
+where
+    F: FnMut(SourceHomeSection) -> Work,
+    Work: std::future::Future<Output = SourceResult<Vec<library::HomeEntryInput>>>,
+{
+    for section in [
+        SourceHomeSection::MostPlayed,
+        SourceHomeSection::NewlyAdded,
+        SourceHomeSection::RecentlyPlayed,
+        SourceHomeSection::RecentlyReleased,
+    ] {
+        match read(section).await {
+            Ok(entries) => {
+                scan.replace_home_section(section.id(), None, &entries)
+                    .await?
+            }
+            Err(error) => {
+                optional_collection_error(error)?;
+                scan.retain_home_section(section.id()).await?;
+            }
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum RemoteItemUpdate {
     Metadata,

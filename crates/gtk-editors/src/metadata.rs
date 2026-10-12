@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 const EDITOR_WIDTH: i32 = 650;
 
-pub use rufin_core::metadata::{MetadataDraft, MetadataReceiver};
+pub use rufin_core::metadata::MetadataDraft;
 use rufin_core::metadata::{
     MetadataEditor, MetadataField, MetadataItemId, identification_available,
 };

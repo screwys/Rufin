@@ -14,10 +14,10 @@ use std::sync::{Arc, Weak};
 use tokio::task::JoinHandle;
 
 use playback::{
-    BackendCommand, BackendEvent, BackendState, ListeningFact, NextTransition, Placement,
-    PlaybackOutput, PlaybackSettings, PlaybackTransitionMode, PreparedNext, PreparedStream,
-    Provenance, QueueItem, QueueRow, RepeatMode, RunEndReason, RunId, StreamRequest,
-    manual_end_is_skip, qualified_play_threshold_millis,
+    BackendCommand, BackendEvent, BackendState, NextTransition, Placement, PlaybackOutput,
+    PlaybackSettings, PlaybackTransitionMode, PreparedNext, PreparedStream, Provenance, QueueItem,
+    QueueRow, RepeatMode, RunEndReason, RunId, StreamRequest, manual_end_is_skip,
+    qualified_play_threshold_millis,
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -2419,13 +2419,8 @@ impl Player {
             current.last_monotonic_millis = Some(sample.monotonic_millis);
             (current.id, current.row.clone())
         };
-        let track = row.item.clone();
-        self.record_listening(ListeningFact::Started {
-            run,
-            started_at_unix_seconds: sample.unix_seconds,
-            local_period: sample.local_period.clone(),
-            item: Box::new(track),
-        });
+        self.notices.push(PlaybackNotice::RunStarted(run));
+        self.owner().scrobbler.now_playing(&row.item);
         if let Some(current) = self.current_run.as_ref() {
             self.owner().report_source(self.source_report(
                 current,
@@ -2438,7 +2433,7 @@ impl Player {
 
     fn emit_progress_facts(&mut self) -> bool {
         let playhead_millis = self.sequence.progress_millis();
-        let (run, audible_millis, bucket_changed) = {
+        let bucket_changed = {
             let Some(current) = self.current_run.as_mut() else {
                 return false;
             };
@@ -2450,13 +2445,8 @@ impl Player {
             if bucket_changed {
                 current.last_progress_bucket = Some(bucket);
             }
-            (current.id, current.audible_millis, bucket_changed)
+            bucket_changed
         };
-        self.record_listening(ListeningFact::Progress {
-            run,
-            audible_millis,
-            playhead_millis,
-        });
         self.qualify_current();
         if bucket_changed {
             self.sequence.persist_state();
@@ -2534,12 +2524,6 @@ impl Player {
         let track = current.row.item.clone();
         self.current_media_changed = true;
         if current.started_at_unix_seconds.is_some() {
-            self.record_listening(ListeningFact::Ended {
-                run: current.id,
-                reason,
-                audible_millis: current.audible_millis,
-                playhead_millis: self.sequence.progress_millis(),
-            });
             self.owner().report_source(self.source_report(
                 &current,
                 SourceReportPhase::Ended,
@@ -2779,13 +2763,6 @@ impl Player {
         if let Some((_, _, task)) = self.pending_queue.take() {
             task.abort();
         }
-    }
-
-    fn record_listening(&mut self, fact: ListeningFact) {
-        if let ListeningFact::Started { run, .. } = &fact {
-            self.notices.push(PlaybackNotice::RunStarted(*run));
-        }
-        self.owner().record_listening(fact);
     }
 
     pub(super) fn report_error(&mut self, error: String) {

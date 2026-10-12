@@ -113,23 +113,7 @@ impl PlexSource {
             self.stage_hubs(scan, &section_id).await?;
         }
         self.stage_playlists(scan, cancelled).await?;
-        for section in [
-            SourceHomeSection::MostPlayed,
-            SourceHomeSection::NewlyAdded,
-            SourceHomeSection::RecentlyPlayed,
-            SourceHomeSection::RecentlyReleased,
-        ] {
-            match self.home_section(section).await {
-                Ok(entries) => {
-                    scan.replace_home_section(section.id(), None, &entries)
-                        .await?;
-                }
-                Err(error) => {
-                    crate::source::optional_collection_error(error)?;
-                    scan.retain_home_section(section.id()).await?;
-                }
-            }
-        }
+        crate::source::stage_home(scan, |section| self.home_section(section)).await?;
         progress(SourceReadProgress {
             stage: SourceReadStage::Finalizing,
             completed: 1,

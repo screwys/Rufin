@@ -5,52 +5,38 @@ use crate::source::{SourceOwner, string_error};
 use async_channel::Receiver;
 pub use editor::{
     MetadataDraft, MetadataEditor, MetadataField, MetadataFieldState, MetadataIdentification,
-    MetadataIdentifyReceiver, MetadataReceiver, MetadataValues, identification_available,
+    MetadataIdentifyReceiver, MetadataValues, identification_available,
 };
 pub use metadata_lookup::{ArtworkQuery, ArtworkResult};
 use sources::{
-    AlbumMetadata, AlbumMetadataValues, ArtistMetadata, ArtistMetadataValues, Source,
-    SourceMetadataError, TrackMetadata, TrackMetadataValues,
+    AlbumMetadataValues, ArtistMetadataValues, Source, SourceMetadataError, TrackMetadataValues,
 };
 use std::sync::Arc;
 pub const MAX_ARTWORK_BYTES: usize = 32 * 1024 * 1024;
 
-pub fn track_metadata(
+pub fn read_metadata(
     owner: &SourceOwner,
-    media_uri: String,
-) -> Receiver<Result<TrackMetadata, SourceMetadataError>> {
+    item: MetadataItemId,
+) -> Receiver<Result<MetadataDraft, SourceMetadataError>> {
     owner.reply(move |owner, database| async move {
-        let target = owner.media_client(&media_uri).await;
-        match target {
-            Ok(source) => source.read_track_metadata(&database, &media_uri).await,
-            Err(_) => Source::read_direct_file_metadata(&media_uri),
+        let target = owner.media_client(item.media_uri()).await;
+        match item {
+            MetadataItemId::Track(uri) => match target {
+                Ok(source) => source.read_track_metadata(&database, &uri).await,
+                Err(_) => Source::read_direct_file_metadata(&uri),
+            }
+            .map(MetadataDraft::Track),
+            MetadataItemId::Album(uri) => target
+                .map_err(|_| SourceMetadataError::Unavailable)?
+                .read_album_metadata(&database, &uri)
+                .await
+                .map(MetadataDraft::Album),
+            MetadataItemId::Artist(uri) => target
+                .map_err(|_| SourceMetadataError::Unavailable)?
+                .read_artist_metadata(&database, &uri)
+                .await
+                .map(MetadataDraft::Artist),
         }
-    })
-}
-
-pub fn album_metadata(
-    owner: &SourceOwner,
-    media_uri: String,
-) -> Receiver<Result<AlbumMetadata, SourceMetadataError>> {
-    owner.reply(move |owner, database| async move {
-        let target = owner.media_client(&media_uri).await;
-        target
-            .map_err(|_| SourceMetadataError::Unavailable)?
-            .read_album_metadata(&database, &media_uri)
-            .await
-    })
-}
-
-pub fn artist_metadata(
-    owner: &SourceOwner,
-    media_uri: String,
-) -> Receiver<Result<ArtistMetadata, SourceMetadataError>> {
-    owner.reply(move |owner, database| async move {
-        let target = owner.media_client(&media_uri).await;
-        target
-            .map_err(|_| SourceMetadataError::Unavailable)?
-            .read_artist_metadata(&database, &media_uri)
-            .await
     })
 }
 

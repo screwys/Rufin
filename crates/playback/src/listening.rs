@@ -84,27 +84,6 @@ pub enum RunEndReason {
     Failed,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum ListeningFact {
-    Started {
-        run: RunId,
-        started_at_unix_seconds: i64,
-        local_period: String,
-        item: Box<QueueItem>,
-    },
-    Progress {
-        run: RunId,
-        audible_millis: u64,
-        playhead_millis: u64,
-    },
-    Ended {
-        run: RunId,
-        reason: RunEndReason,
-        audible_millis: u64,
-        playhead_millis: u64,
-    },
-}
-
 pub fn qualified_play_threshold_millis(duration_millis: u64) -> u64 {
     let duration_seconds = duration_millis / 1_000;
     let threshold_seconds = if duration_seconds <= 10 {
