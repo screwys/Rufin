@@ -159,6 +159,15 @@ pub(crate) async fn catch_up(
                 .filter(|file| cached_observation_changed(file))
                 .map(|file| PathBuf::from(&file.path))
                 .collect::<Vec<_>>();
+            completed = completed.saturating_add(page.len());
+            changed |= !changed_paths.is_empty();
+            if changed {
+                progress(SourceReadProgress {
+                    stage: SourceReadStage::Files,
+                    completed,
+                    total: None,
+                });
+            }
             if !changed_paths.is_empty() {
                 let seeds = changed_paths
                     .iter()
@@ -166,14 +175,7 @@ pub(crate) async fn catch_up(
                     .collect::<Vec<_>>();
                 stage_component_paths(&mut scan, source, local, &changed_paths, &seeds, cancelled)
                     .await?;
-                changed = true;
             }
-            completed = completed.saturating_add(page.len());
-            progress(SourceReadProgress {
-                stage: SourceReadStage::Files,
-                completed,
-                total: None,
-            });
         }
         if changed {
             stage_component(
@@ -188,12 +190,12 @@ pub(crate) async fn catch_up(
             crate::file::artwork::ArtworkFiles::Local
                 .stage(database, &mut scan, cancelled)
                 .await?;
+            progress(SourceReadProgress {
+                stage: SourceReadStage::Finalizing,
+                completed: 0,
+                total: None,
+            });
         }
-        progress(SourceReadProgress {
-            stage: SourceReadStage::Finalizing,
-            completed: 0,
-            total: None,
-        });
         Ok(())
     }
     .await;

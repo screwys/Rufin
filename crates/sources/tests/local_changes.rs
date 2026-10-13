@@ -523,16 +523,18 @@ async fn restart_catch_up_accepts_file_bookkeeping_without_catalog_change() {
             .filter(|file| file.kind == library::LocalFileKind::Directory)
             .all(|file| file.state == library::LocalFileState::Accepted)
     );
+    let progress = Mutex::new(Vec::new());
     source
         .catch_up_local(
             &database,
             initial.source,
-            &|_| {},
+            &|update| progress.lock().unwrap().push(update),
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
         )
         .await
         .unwrap();
     assert!(!updates.try_recv().unwrap().changed());
+    assert!(progress.into_inner().unwrap().is_empty());
 }
 
 #[tokio::test]
