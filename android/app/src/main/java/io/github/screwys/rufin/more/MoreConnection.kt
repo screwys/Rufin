@@ -87,7 +87,7 @@ internal class MoreConnection(private val connection: RufinConnection, scope: Co
                     }
                     releaseOwner.check()
                     while (isActive) {
-                        val next = changes.next()
+                        val next = withContext(Dispatchers.Default) { changes.next() }
                         when (next) {
                             is ReleaseUpdate.Refreshed -> {
                                 releases = next.history

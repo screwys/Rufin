@@ -64,7 +64,7 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
                 discoverySubscription = subscription
                 launch {
                     try { while (isActive) {
-                        val update = subscription.next()
+                        val update = withContext(Dispatchers.Default) { subscription.next() }
                         discovery = update
                         if (update.provider == DiscoveryProvider.PLEX) plexLan = update.servers
                     } }
@@ -117,7 +117,7 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
         val setup = bridge ?: return@run
         val session = withContext(Dispatchers.IO) { setup.authorize(method) }
         replaceAuthorization(session)
-        while (true) when (val event = session.next()) {
+        while (true) when (val event = withContext(Dispatchers.Default) { session.next() }) {
             is SourceAuthorizationEvent.Code -> { code = event.code; browserUrl = event.url }
             is SourceAuthorizationEvent.OpenBrowser -> { browserUrl = event.url; openBrowser(event.url) }
             is SourceAuthorizationEvent.Ready -> {

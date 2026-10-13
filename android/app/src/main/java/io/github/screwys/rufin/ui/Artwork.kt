@@ -36,7 +36,7 @@ import kotlinx.coroutines.sync.withLock
 import io.github.screwys.rufin.settings.LocalReduceMotion
 import java.util.TreeMap
 
-private class ArtworkScene {
+internal class ArtworkScene(val key: Any? = Unit) {
     var pending by mutableIntStateOf(0)
     var laidOut by mutableStateOf(false)
     var revealed by mutableStateOf(false)
@@ -46,8 +46,22 @@ private val LocalArtworkScene = staticCompositionLocalOf<ArtworkScene?> { null }
 private data class ArtworkLoad(val artwork: PlayerArtwork?, val complete: Boolean)
 
 @Composable
-internal fun ArtworkReadyContent(key: Any? = Unit, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    val scene = remember(key) { ArtworkScene() }
+internal fun HoldInitialReveal(loading: Boolean) {
+    val scene = LocalArtworkScene.current
+    DisposableEffect(scene, loading) {
+        if (scene != null && loading) {
+            scene.pending++
+            onDispose { scene.pending-- }
+        } else onDispose {}
+    }
+}
+
+@Composable
+internal fun ArtworkReadyContent(key: Any? = Unit, modifier: Modifier = Modifier, owner: ArtworkScene? = null, content: @Composable () -> Unit) {
+    val scene = owner ?: remember(key) { ArtworkScene(key) }
+    DisposableEffect(scene) {
+        onDispose { scene.laidOut = false; scene.revealed = false }
+    }
     if (scene.laidOut && scene.pending == 0) SideEffect { if (scene.pending == 0) scene.revealed = true }
     Box(modifier.onGloballyPositioned {
         scene.laidOut = true
@@ -71,7 +85,6 @@ internal fun rememberArtwork(identityBytes: ByteArray?, player: PlayerConnection
     val identity = remember(identityBytes) { identityBytes?.toList() } ?: return null
     val bridge = player.bridge
     val revision = player.artworkRevision
-    val scene = LocalArtworkScene.current
     return key(identity, pixels) {
         val cached = remember(bridge, revision) { if (reuseCached) player.artworkCache.peekNearby(identity, pixels) else player.artworkCache.peek(identity, pixels) }
         val loaded by produceState(ArtworkLoad(cached, cached != null || bridge == null), bridge, revision) {
@@ -83,12 +96,7 @@ internal fun rememberArtwork(identityBytes: ByteArray?, player: PlayerConnection
                 catch (error: Exception) { value = ArtworkLoad(value.artwork, true); player.reportError(error) }
             } else value = ArtworkLoad(cached, true)
         }
-        DisposableEffect(scene, loaded.complete) {
-            if (scene != null && !loaded.complete) {
-                scene.pending++
-                onDispose { scene.pending-- }
-            } else onDispose {}
-        }
+        HoldInitialReveal(!loaded.complete)
         loaded.artwork
     }
 }

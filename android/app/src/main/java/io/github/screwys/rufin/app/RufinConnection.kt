@@ -174,16 +174,16 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
                 val catalog = owner.subscribeCatalog()
                 debugLogging = core.debugLogging()
                 try {
-                    sources = sourceChanges.next()
-                    sourceOperation = operations.next()
-                    catalog.next()
+                    sources = withContext(Dispatchers.Default) { sourceChanges.next() }
+                    sourceOperation = withContext(Dispatchers.Default) { operations.next() }
+                    withContext(Dispatchers.Default) { catalog.next() }
                     catalogRevision++
                     ready = true
                     coroutineScope {
                         launch { connected.playbackNotices.collect { showFeedback(it) } }
                         launch {
                             while (isActive) {
-                                val event = events.next()
+                                val event = withContext(Dispatchers.Default) { events.next() }
                                 favoriteRevision++
                                 event.favorite?.let { settlements.emit(it) }
                                 event.notice?.let { showFeedback(it) }
@@ -191,18 +191,18 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
                         }
                         launch {
                             while (isActive) {
-                                sources = sourceChanges.next()
+                                sources = withContext(Dispatchers.Default) { sourceChanges.next() }
                                 catalogRevision++
                             }
                         }
                         launch {
                             while (isActive) {
-                                catalog.next()
+                                withContext(Dispatchers.Default) { catalog.next() }
                                 catalogRevision++
                             }
                         }
                         while (isActive) {
-                            val operation = operations.next()
+                            val operation = withContext(Dispatchers.Default) { operations.next() }
                             if (operation is SourceOperation.Failed && operation != sourceOperation) showFeedback(operation.message)
                             sourceOperation = operation
                         }

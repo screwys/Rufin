@@ -2,9 +2,13 @@ package io.github.screwys.rufin.browse
 
 import io.github.screwys.rufin.core.AndroidBrowseItem
 import io.github.screwys.rufin.core.AndroidBrowseRow
+import io.github.screwys.rufin.core.AndroidDetailSummary
 import io.github.screwys.rufin.shared.library.sourceIdForUri
 import io.github.screwys.rufin.shared.rufin_core.RecentSearchKind
 import io.github.screwys.rufin.shared.rufin_core.Route
+
+internal val AndroidDetailSummary.showsReleases: Boolean
+    get() = mode.kind in listOf("ArtistDetail", "AlbumArtistDetail", "ArtistDiscography", "AlbumArtistDiscography")
 
 internal val AndroidBrowseRow.kind: String
     get() = when (val item = item) {

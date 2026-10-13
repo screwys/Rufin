@@ -103,7 +103,7 @@ internal fun ScrobblingPage(preferences: PreferencesConnection, embedded: Boolea
                         value = current.listenbrainz.userToken; connectToken = true; edit = id
                     } else perform(id) { owner ->
                     val session = owner.connect(if (id == "lastfm") ScrobblingConnection.LastFm(current.lastfm.apiKey, current.lastfm.apiSecret) else ScrobblingConnection.LibreFm)
-                    try { while (true) when (val event = session.next()) {
+                    try { while (true) when (val event = withContext(Dispatchers.Default) { session.next() }) {
                         is ScrobblingConnectionEvent.OpenUrl -> {
                             var error: String? = null
                             try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(event.url))) }

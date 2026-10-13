@@ -57,7 +57,7 @@ internal class ConnectConnection(private val model: RufinConnection) {
                             }
                         }
                         while (isActive) {
-                            val next = subscription.next()
+                            val next = withContext(Dispatchers.Default) { subscription.next() }
                             if (next.connecting) setupActive = true
                             if (!next.connecting && !next.settings.setupPending && !next.settings.adopting) setupActive = false
                             state = next

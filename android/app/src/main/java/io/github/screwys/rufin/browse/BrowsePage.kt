@@ -26,6 +26,7 @@ internal class BrowsePage(
     private val embedded: Boolean = false,
     private val parent: BrowsePage? = null,
 ) {
+    var artworkScene by mutableStateOf<io.github.screwys.rufin.ui.ArtworkScene?>(null)
     var active by mutableStateOf(false)
     var favoritesPage by mutableStateOf<BrowsePage?>(null)
         private set
@@ -59,7 +60,8 @@ internal class BrowsePage(
         private set
     private var revision by mutableIntStateOf(0)
     private var currentQuery by mutableStateOf<AndroidBrowseQuery?>(null)
-    val contentKey get() = currentQuery
+    var contentKey by mutableStateOf<Any?>(null)
+        private set
     private var capturedLabelsVersion = browse.labelsVersion
     private val data = MutableStateFlow<PagingData<BrowseItem>>(PagingData.empty())
     val pages: Flow<PagingData<BrowseItem>> = data.cachedIn(scope)
@@ -95,7 +97,7 @@ internal class BrowsePage(
         val homeBlocks: String?,
     )
 
-    fun refresh() { revision++ }
+    fun refresh() { loading = true; revision++ }
     suspend fun sourceUri(): String? = currentQuery?.detailSourceUri()
     fun chooseSort(field: LibraryField, direction: Boolean) = connection.runAction {
         withContext(Dispatchers.IO) { browse.library?.setBrowseSort(location.route, options.category, field, direction) }
@@ -126,8 +128,18 @@ internal class BrowsePage(
     }
 
     suspend fun observe(): Unit = withContext(Dispatchers.IO) { coroutineScope {
+        val childJobs = mutableMapOf<BrowsePage, Job>()
+        fun childPage(childLocation: BrowseLocation, groupId: String? = null): BrowsePage {
+            val childJob = Job(coroutineContext[Job])
+            val childScope = CoroutineScope(coroutineContext + childJob)
+            val page = BrowsePage(connection, browse, childLocation, childLocation.options, childScope,
+                releaseGroupId = groupId, embedded = true, parent = this@BrowsePage)
+            childJobs[page] = childJob
+            childScope.launch { page.observe() }
+            return page
+        }
         launch {
-            snapshotFlow { Triple((parent?.active ?: active) || pins, browse.labelsVersion, currentQuery) }
+            snapshotFlow { Triple(parent?.active ?: active, browse.labelsVersion, currentQuery) }
                 .filter { it.first && it.third != null && it.second != capturedLabelsVersion }
                 .distinctUntilChangedBy { it.second }
                 .collectLatest { (_, labelsVersion, query) ->
@@ -158,10 +170,10 @@ internal class BrowsePage(
                 }
         }
         snapshotFlow {
-            if (options.preparing || (!(parent?.active ?: active) && !pins)) null else PageContext(browse.library, connection.sources?.selectedSourceId, connection.catalogRevision,
+            if (options.preparing || !(parent?.active ?: active)) null else PageContext(browse.library, connection.sources?.selectedSourceId, connection.catalogRevision,
                 location.route, options.category, options.filter, options.sort, options.descending, options.favoritesOnly, options.downloadedOnly,
-                revision, if (artistAlbums) browse.artistAlbumsRevision else 0,
-                if (options.downloadedOnly || browse.showDownloadedBadges) connection.downloads.state?.revision else null,
+                revision + (parent?.revision ?: 0), if (artistAlbums) browse.artistAlbumsRevision else 0,
+                if (options.downloadedOnly || browse.showDownloadedBadges) connection.downloads.state?.revision ?: 0UL else null,
                 if (location.kind == "Home") browse.homeBlocksFingerprint else null)
         }.filterNotNull().distinctUntilChanged().collectLatest { context ->
             val library = context.library ?: return@collectLatest
@@ -186,7 +198,7 @@ internal class BrowsePage(
                 val trackFields = query?.detailTrackFields().orEmpty()
                 val crumbs = if (embedded) emptyList() else query?.breadcrumbs().orEmpty()
                 val folders = if (kind == "Folders") library.musicFolders() else null
-                val groups = if (detail?.mode?.kind in listOf("ArtistDetail", "AlbumArtistDetail", "ArtistDiscography", "AlbumArtistDiscography")) query?.artistReleaseGroups().orEmpty() else emptyList()
+                val groups = if (detail?.showsReleases == true) query?.artistReleaseGroups().orEmpty() else emptyList()
                 val isHome = !pins && routeId == "Home"
                 val home = if (isHome && query != null) {
                     val rows = mutableListOf<BrowseItem>()
@@ -199,9 +211,31 @@ internal class BrowsePage(
                     }
                     rows
                 } else emptyList()
+                val favorite = detail?.favoriteRoute?.takeIf {
+                    detail.showsReleases && detail.mode.kind in listOf("ArtistDetail", "AlbumArtistDetail")
+                }?.let { route ->
+                    favoritesPage?.takeIf { it.location.route == route && it in childJobs } ?: run {
+                        val childOptions = BrowseOptions().also { it.filter = context.filter }
+                        childPage(BrowseLocation(route, "Favorite tracks", "ArtistFavoriteTracks", childOptions, location.playbackTitle))
+                    }
+                }
+                val releases = groups.filter { it.total > 0UL }.map { group ->
+                    val existing = releasePages.firstOrNull {
+                        it.first.id == group.id && it.first.route == group.route && it.second in childJobs
+                    }?.second
+                    val page = existing ?: run {
+                        val childOptions = BrowseOptions().also { it.category = "albums"; it.filter = context.filter }
+                        childPage(BrowseLocation(group.route, group.title, "ArtistDiscography", childOptions, location.playbackTitle), group.id)
+                    }
+                    group to page
+                }
+                childJobs.entries.removeAll { (page, job) ->
+                    if (page !== favorite && releases.none { it.second === page }) { job.cancel(); true } else false
+                }
                 Snapshot.withMutableSnapshot {
                     capturedLabelsVersion = labelsVersion
                     currentQuery = query
+                    contentKey = context.copy(catalog = null, revision = 0, downloadsRevision = null)
                     scrollSections = emptyList()
                     supportsFavoriteFilter = favoriteFilter
                     supportsDownloadedFilter = downloadedFilter
@@ -212,29 +246,14 @@ internal class BrowsePage(
                     breadcrumbs = crumbs
                     musicFolders = folders
                     homeRows = home
-                }
-                if (isHome) return@collectLatest
-                if (detail?.mode?.kind in listOf("ArtistDetail", "AlbumArtistDetail", "ArtistDiscography", "AlbumArtistDiscography")) {
-                    coroutineScope {
-                        val favorite = detail?.favoriteRoute?.takeIf {
-                            detail.mode.kind in listOf("ArtistDetail", "AlbumArtistDetail")
-                        }?.let { route ->
-                            val childOptions = BrowseOptions().also { it.filter = context.filter }
-                            val childLocation = BrowseLocation(route, "Favorite tracks", "ArtistFavoriteTracks", childOptions, location.playbackTitle)
-                            BrowsePage(connection, browse, childLocation, childOptions, this, embedded = true, parent = this@BrowsePage)
-                        }
-                        val releases = groups.filter { it.total > 0UL }.map { group ->
-                            val childOptions = BrowseOptions().also { it.category = "albums"; it.filter = context.filter }
-                            val childLocation = BrowseLocation(group.route, group.title, "ArtistDiscography", childOptions, location.playbackTitle)
-                            group to BrowsePage(connection, browse, childLocation, childOptions, this,
-                                releaseGroupId = group.id, embedded = true, parent = this@BrowsePage)
-                        }
-                        Snapshot.withMutableSnapshot { favoritesPage = favorite; releasePages = releases; loading = false }
-                        favorite?.let { launch { it.observe() } }
-                        releases.forEach { (_, page) -> launch { page.observe() } }
-                        awaitCancellation()
+                    childJobs.keys.forEach { page ->
+                        if (page.options.filter != context.filter) page.loading = true
+                        page.options.filter = context.filter
                     }
+                    favoritesPage = favorite
+                    releasePages = releases
                 }
+                if (isHome || detail?.showsReleases == true) return@collectLatest
                 Pager(PagingConfig(pageSize = 64, initialLoadSize = 64, prefetchDistance = 24,
                     maxSize = 192, enablePlaceholders = !pins,
                     jumpThreshold = if (pins) PagingSource.LoadResult.Page.COUNT_UNDEFINED else 192)) {

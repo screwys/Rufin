@@ -80,7 +80,7 @@ internal class DownloadsConnection(private val model: RufinConnection, scope: Co
                 try {
                     refreshSources()
                     while (isActive) {
-                        val next = changes.next()
+                        val next = withContext(Dispatchers.Default) { changes.next() }
                         state = next
                     }
                 } catch (cancelled: CancellationException) { throw cancelled }

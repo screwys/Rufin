@@ -1,8 +1,6 @@
 package io.github.screwys.rufin.browse
 
-import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.ui.ErrorRow
-import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.LocalPlayerBottomPadding
 import io.github.screwys.rufin.app.RufinConnection
 
@@ -11,6 +9,9 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import io.github.screwys.rufin.ui.Artwork
+import io.github.screwys.rufin.ui.HoldInitialReveal
+import io.github.screwys.rufin.ui.ArtworkReadyContent
+import io.github.screwys.rufin.ui.ArtworkScene
 import io.github.screwys.rufin.ui.rememberArtwork
 import io.github.screwys.rufin.player.PlayerConnection
 import io.github.screwys.rufin.player.PlayerIconButton
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
@@ -29,19 +31,26 @@ import io.github.screwys.rufin.core.translate
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-internal fun PinsContent(model: RufinConnection, browse: BrowseConnection, player: PlayerConnection) {
-    val scope = rememberCoroutineScope()
-    val options = remember { BrowseOptions() }
-    val location = remember { BrowseLocation(Route.Home, "Pins", "Pins", options) }
-    val page = remember(model, browse) { BrowsePage(model, browse, location, options, scope, pins = true) }
-    LaunchedEffect(page) { page.observe() }
+internal fun PinsContent(model: RufinConnection, browse: BrowseConnection, player: PlayerConnection, page: BrowsePage) {
+    DisposableEffect(page) {
+        page.active = true
+        onDispose { page.active = false }
+    }
     SideEffect { browse.visiblePage = page }
     val rows = page.pages.collectAsLazyPagingItems()
     var action by remember { mutableStateOf<BrowseItem?>(null) }
     var playlist by remember { mutableStateOf<BrowseItem?>(null) }
     var metadata by remember { mutableStateOf<BrowseItem?>(null) }
+    if (rows.itemSnapshotList.items.isEmpty() && (page.loading || rows.loadState.refresh is LoadState.Loading)) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        return
+    }
+    val artworkScene = page.artworkScene?.takeIf { it.key == page.contentKey }
+        ?: ArtworkScene(page.contentKey).also { page.artworkScene = it }
+    ArtworkReadyContent(modifier = Modifier.fillMaxSize(), owner = artworkScene) {
+    HoldInitialReveal(page.loading || rows.loadState.refresh is LoadState.Loading)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp + LocalPlayerBottomPadding.current)) {
-        items(rows.itemCount, key = rows.itemKey { "${it.row.pin}:${it.index}" }) { index ->
+        items(rows.itemCount, key = rows.itemKey { it.row.pin.toString() }) { index ->
             val item = rows[index]
             if (item == null) Spacer(Modifier.height(64.dp)) else {
                 val artwork = rememberArtwork(item.row.artworkIdentity, player, with(LocalDensity.current) { 50.dp.roundToPx() })
@@ -66,6 +75,7 @@ internal fun PinsContent(model: RufinConnection, browse: BrowseConnection, playe
         }
         val failure = (rows.loadState.refresh as? LoadState.Error)?.error ?: (rows.loadState.append as? LoadState.Error)?.error
         failure?.let { error -> item { ErrorRow(error, translate("Retry"), rows::retry) } }
+    }
     }
     action?.let { item -> BrowseMenuSheet(model, browse, item, player, { action = null },
         { playlist = item; action = null }, { metadata = item; action = null },

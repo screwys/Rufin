@@ -75,14 +75,11 @@ fn initialize<'local>(
 }
 
 #[uniffi::export]
-pub fn install_catalogs(catalogs: Vec<String>) -> Result<(), AndroidError> {
+pub fn install_catalogs(
+    catalogs: Vec<String>,
+) -> Result<std::collections::HashMap<String, String>, AndroidError> {
     localization::install_catalogs(&catalogs.iter().map(String::as_str).collect::<Vec<_>>())
         .map_err(error)
-}
-
-#[uniffi::export]
-pub fn translate(message: String) -> String {
-    localization::tr(&message)
 }
 
 #[uniffi::export]

@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import io.github.screwys.rufin.core.AndroidPreferences
 import io.github.screwys.rufin.core.AndroidPreferencesState
 import io.github.screwys.rufin.core.installCatalogs
+import io.github.screwys.rufin.core.installTranslations
 import io.github.screwys.rufin.browse.BrowseSwipeAction
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
@@ -72,7 +73,7 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
                     applicationSettings = settings!!.applicationPreferences()
                     connection.more.setReleaseCheckInterval(applicationSettings!!.releaseCheckIntervalHours.toLong())
                     while (currentCoroutineContext().isActive) {
-                        val next = subscription.next()
+                        val next = withContext(Dispatchers.Default) { subscription.next() }
                         applyLanguage(next.language)
                         state = next
                     }
@@ -108,7 +109,9 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
         }
         if (catalogs == installedCatalogIds) return@withLock
         withContext(Dispatchers.IO) {
-            installCatalogs(catalogs.map { context.assets.open(it).bufferedReader().use { reader -> reader.readText() } })
+            installTranslations(installCatalogs(catalogs.map {
+                context.assets.open(it).bufferedReader().use { reader -> reader.readText() }
+            }))
         }
         installedCatalogIds = catalogs
         translationRevision += 1

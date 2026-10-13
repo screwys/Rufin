@@ -11,6 +11,7 @@ import io.github.screwys.rufin.ui.rememberArtwork
 import io.github.screwys.rufin.ui.DetailLinkIcon
 import io.github.screwys.rufin.ui.LocalPlayerBottomPadding
 import io.github.screwys.rufin.ui.FallbackCover
+import io.github.screwys.rufin.ui.HoldInitialReveal
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.SourceIcon
 import io.github.screwys.rufin.ui.rufinMarquee
@@ -85,7 +86,7 @@ internal fun DetailContent(
     }
     val headerItem = remember(summary, page.displaySettings) { BrowseItem(summary.row, 0UL, null, page.displaySettings) }
     val artist = summary.mode.kind == "ArtistDetail" || summary.mode.kind == "AlbumArtistDetail"
-    val releasesVisible = artist || summary.mode.kind == "ArtistDiscography" || summary.mode.kind == "AlbumArtistDiscography"
+    val releasesVisible = summary.showsReleases
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val width = maxWidth
         LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp + LocalPlayerBottomPadding.current)) {
@@ -93,6 +94,7 @@ internal fun DetailContent(
                 DetailHeader(summary, headerItem, player, onPlay, onFavorite, onOpenRoute, onLink, onMenu, onRadio)
             }
             if (artist && favorites != null && favoritesPage != null && summary.favoriteTotal > 0UL) item("detail-favorites") {
+                HoldInitialReveal(favoritesPage.loading || favorites.loadState.refresh is LoadState.Loading)
                 Column {
                     DetailSectionHeading(translate("Favorite tracks"))
                     if (summary.showTrackHeader) DetailTrackHeader(favoritesPage.detailTrackFields, favoritesPage.displaySettings?.size)
@@ -120,14 +122,16 @@ internal fun DetailContent(
                     val cardSize = when (display?.size) { DisplaySize.COMPACT -> 104.dp; DisplaySize.LARGE -> 176.dp; else -> 128.dp }
                     val gap = when (display?.gridSpacing) { DisplaySize.COMPACT -> 4.dp; DisplaySize.LARGE -> 16.dp; else -> 12.dp }
                     val columns = if (grid) ((width - 32.dp + gap) / (cardSize + gap)).toInt().coerceAtLeast(1) else 1
-                    val count = albums.itemCount
+                    val loading = owner.loading || albums.loadState.refresh is LoadState.Loading
+                    val count = if (loading && albums.itemCount == 0) group.total.toInt() else albums.itemCount
                     item("release-heading:${group.id}") { DetailSectionHeading(group.title) }
                     items((count + columns - 1) / columns, key = { "release:${group.id}:$it" }) { rowIndex ->
+                            HoldInitialReveal(loading)
                             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
                                 repeat(columns) { column ->
                                     val position = rowIndex * columns + column
                                     if (position >= count) Spacer(Modifier.weight(1f)) else {
-                                        val item = albums[position]
+                                        val item = if (position < albums.itemCount) albums[position] else null
                                         Box(Modifier.weight(1f)) {
                                             if (item == null) Spacer(Modifier.height(if (grid) cardSize + 64.dp else 76.dp))
                                             else if (grid) CoverCard(item.copy(displaySettings = owner.options.displaySettings ?: owner.displaySettings), player, Modifier.fillMaxWidth().padding(bottom = 12.dp), onActivate, onMenu)

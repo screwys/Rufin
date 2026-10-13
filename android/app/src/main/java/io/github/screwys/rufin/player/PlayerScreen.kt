@@ -71,6 +71,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawBehind
 import kotlinx.coroutines.launch
 
 private enum class PlayerSurface { LYRICS, VISUALIZER }
@@ -91,7 +92,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     val currentLineEnabled = application?.display?.fullscreenCurrentLyricsLineVisible != false
     val visualizerEnabled = application?.display?.fullscreenVisualizerVisible == true
     val combined = lyricsEnabled && visualizerEnabled && application?.rightPanel?.combined == true
-    val background by animateColorAsState(
+    val background = animateColorAsState(
         if (application?.display?.fullscreenDynamicBackground == true)
             lerp(MaterialTheme.colorScheme.surface, player.artwork?.color ?: MaterialTheme.colorScheme.surface, .12f)
         else MaterialTheme.colorScheme.surface, tween(if (reduceMotion) 0 else 320), label = "fullPlayerColor")
@@ -106,6 +107,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     DisposableEffect(player) { onDispose { player.visualizer(false) } }
     BackHandler { if (surface != null) surface = null else onClose() }
     Surface(Modifier.fillMaxSize().graphicsLayer { translationY = verticalOffset.value }
+        .drawBehind { drawRect(background.value) }
         .pointerInput(surface, threshold, reduceMotion) {
             if (surface != null) return@pointerInput
             var distance = 0f
@@ -132,7 +134,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                 else if (distance > threshold && player.currentId != null) player.previous()
                 scope.launch { trackOffset.animateTo(0f, tween(if (reduceMotion) 0 else 180)) }
             }, onDragCancel = { scope.launch { trackOffset.animateTo(0f, tween(if (reduceMotion) 0 else 180)) } })
-        }, color = background, contentColor = MaterialTheme.colorScheme.onSurface) {
+        }, color = Color.Transparent, contentColor = MaterialTheme.colorScheme.onSurface) {
         Box(Modifier.fillMaxSize()) {
             if (application?.display?.fullscreenBackgroundImage == true) player.artwork?.let { artwork ->
                 Image(artwork.bitmap.asImageBitmap(), null, Modifier.matchParentSize().blur(48.dp).alpha(.12f), contentScale = ContentScale.Crop)

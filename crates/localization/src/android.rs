@@ -1,4 +1,4 @@
-use std::sync::RwLock;
+use std::{collections::HashMap, sync::RwLock};
 
 use spiritless_po::Catalog;
 
@@ -10,7 +10,7 @@ static CATALOGS: RwLock<Vec<Catalog>> = RwLock::new(Vec::new());
 /// packaged assets. An empty list selects English. Invalid catalogs leave the
 /// current translations in place; successful installation also updates readers
 /// while the playback service remains alive.
-pub fn install_catalogs(catalogs: &[&str]) -> Result<(), String> {
+pub fn install_catalogs(catalogs: &[&str]) -> Result<HashMap<String, String>, String> {
     let catalogs = catalogs
         .iter()
         .enumerate()
@@ -21,11 +21,21 @@ pub fn install_catalogs(catalogs: &[&str]) -> Result<(), String> {
                 .map_err(|error| format!("could not parse translation catalog {index}: {error}"))?;
             Ok(catalog)
         })
-        .collect::<Result<_, String>>()?;
+        .collect::<Result<Vec<_>, String>>()?;
+    let messages = catalogs
+        .iter()
+        .rev()
+        .flat_map(|catalog| {
+            catalog
+                .index()
+                .keys()
+                .map(|message| (message.clone(), catalog.gettext(message).to_owned()))
+        })
+        .collect();
     *CATALOGS
         .write()
         .map_err(|error| format!("could not update translation catalogs: {error}"))? = catalogs;
-    Ok(())
+    Ok(messages)
 }
 
 pub fn tr(message: &str) -> String {

@@ -33,7 +33,7 @@ internal class ControllerConnection(private val model: RufinConnection) {
             bridge = owner
             try {
                 while (currentCoroutineContext().isActive) {
-                    val next = changes.next()
+                    val next = withContext(Dispatchers.Default) { changes.next() }
                     val previousError = state?.error ?: addressError
                     addressError = null
                     links = try {

@@ -66,8 +66,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.updateTransition
-import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.SeekableTransitionState
+import androidx.compose.animation.core.rememberTransition
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.BasicTextField
@@ -78,15 +79,12 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material3.ripple
-import androidx.compose.animation.Crossfade
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -122,6 +120,10 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.PagingData
 import io.github.screwys.rufin.core.translate
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
+import io.github.screwys.rufin.ui.pageMotion
+
+private data class BrowseDestination(val root: String, val depth: Int, val location: BrowseLocation?)
 
 @Composable
 internal fun FeedbackToast(model: RufinConnection, player: PlayerConnection) {
@@ -214,10 +216,9 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         }
     }
     var routeMenu by remember { mutableStateOf(false) }
-    val libraryTransition = updateTransition(browse.rootId, label = "libraryRoute")
-    val routePosition = libraryTransition.animateFloat(transitionSpec = { tween(if (reduceMotion) 0 else 180) }, label = "libraryTab") { id ->
-        browse.configuredRoutes.indexOfFirst { it.id == id }.coerceAtLeast(0).toFloat()
-    }
+    val routePosition = animateFloatAsState(
+        browse.configuredRoutes.indexOfFirst { it.id == browse.rootId }.coerceAtLeast(0).toFloat(),
+        tween(if (reduceMotion) 0 else 180), label = "libraryTab")
     val routeState = rememberSaveableStateHolder()
     val detailState = rememberSaveableStateHolder()
     val rootPages = browse.configuredRoutes.filter { it.id != "Search" }.associate { route -> key(route.id) {
@@ -234,6 +235,27 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         LaunchedEffect(page) { page.observe() }
         page
     } }
+    val pinsLifetime = rememberCoroutineScope()
+    val pinsPage = remember(model, browse) {
+        val options = BrowseOptions()
+        val location = BrowseLocation(Route.Home, "Pins", "Pins", options)
+        BrowsePage(model, browse, location, options, pinsLifetime, pins = true)
+    }
+    LaunchedEffect(pinsPage) { pinsPage.observe() }
+    val destination = BrowseDestination(browse.rootId, browse.details.size, browse.details.lastOrNull())
+    val destinationPage = if (destination.location != null) detailPages[destination.location]
+        else rootPages[destination.root]?.takeIf {
+            browse.library != null && browse.routes.any { it.id == destination.root } &&
+                (model.sources?.sources?.isEmpty() != true || destination.root in listOf("History", "Playlists"))
+        }
+    val navigation = remember(browse.section) { SeekableTransitionState(destination) }
+    val navigationTransition = rememberTransition(navigation, label = "libraryNavigation")
+    LaunchedEffect(destination, destinationPage, browse.section, reduceMotion) {
+        if (browse.section != AppSection.Browse) return@LaunchedEffect
+        navigation.seekTo(0f, destination)
+        destinationPage?.let { page -> snapshotFlow { page.artworkScene?.revealed == true }.first { it } }
+        if (reduceMotion) navigation.snapTo(destination) else navigation.animateTo(destination)
+    }
     val hasMedia by remember(player) { derivedStateOf { player.currentId?.mediaUri != null } }
     val density = LocalDensity.current
     val playerPadding = if (hasMedia) maxOf(52.dp, with(density) {
@@ -337,6 +359,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                                     keyboard?.hide(); focusManager.clearFocus(); routeMenu = false
                                     if (section == AppSection.Search) browse.searchText = ""
                                     if (section == AppSection.More) moreStack = listOf(MoreDestination.Root)
+                                    if (section == AppSection.Pins && !selected) pinsPage.refresh()
                                     browse.section = section; searchExpanded = false
                                 }
                             }
@@ -368,49 +391,51 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                     Text(it, Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
                 }
                 Box(Modifier.weight(1f)) {
-                    if (browse.section == AppSection.Browse && !browse.detail) Column(Modifier.fillMaxSize()) {
-                    if (browse.configuredRoutes.isNotEmpty()) BrowseRouteTabs(browse, routePosition) { id -> selectRoute(id) }
-                    libraryTransition.Crossfade(Modifier.weight(1f).fillMaxWidth(), animationSpec = tween(if (reduceMotion) 0 else 180)) { routeId ->
-                        if (browse.library == null) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(Modifier.semantics { contentDescription = label("Loading...") })
+                    if (browse.section == AppSection.Browse) navigationTransition.AnimatedContent(
+                        Modifier.fillMaxSize(), transitionSpec = {
+                            if (initialState.depth == 0 && targetState.depth == 0)
+                                fadeIn(tween(if (reduceMotion) 0 else 180)) togetherWith fadeOut(tween(if (reduceMotion) 0 else 180))
+                            else pageMotion(targetState.depth > initialState.depth, reduceMotion)
+                        }, contentKey = { it.location ?: it.root },
+                    ) { visible ->
+                        val location = visible.location
+                        if (location == null) Column(Modifier.fillMaxSize()) {
+                            if (browse.configuredRoutes.isNotEmpty()) BrowseRouteTabs(browse, routePosition) { id -> selectRoute(id) }
+                            val routeId = visible.root
+                            Box(Modifier.weight(1f).fillMaxWidth()) {
+                                if (browse.library == null) {
+                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        CircularProgressIndicator(Modifier.semantics { contentDescription = label("Loading...") })
+                                    }
+                                } else if (model.sources?.sources?.isEmpty() == true && routeId !in listOf("History", "Playlists")) {
+                                    Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                                        RufinIcon("rufin-library-symbolic", null, Modifier.size(48.dp))
+                                        Text(translate("No sources configured"), Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
+                                        Button({ editSourceId = null; sources = true }) { Text(translate("Add Source")) }
+                                    }
+                                } else
+                                browse.routes.firstOrNull { it.id == routeId }?.let { route ->
+                                val options = remember(route.id) { browse.optionsFor(route.id) }
+                                val location = remember(route.id, route.route) { BrowseLocation(route.route, route.title, route.id, options) }
+                                routeState.SaveableStateProvider(route.id) {
+                                    BrowsePageContent(model, browse, player, location, options, !fullPlayer && !browse.detail && route.id == browse.rootId,
+                                        { menu = it }, { playlist = it }, { scrolled = it }, owner = rootPages[route.id])
+                                }
+                                } ?: if (browse.configuredRoutes.none { it.id != "Search" }) Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center) {
+                                    RufinIcon("rufin-library-symbolic", null, Modifier.size(48.dp), MaterialTheme.colorScheme.onSurfaceVariant)
+                                    TextButton({ openMore(MoreDestination.Routes) }) { Text(label("Library")) }
+                                } else Spacer(Modifier.fillMaxSize())
                             }
-                        } else if (model.sources?.sources?.isEmpty() == true && routeId !in listOf("History", "Playlists")) {
-                            Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                                RufinIcon("rufin-library-symbolic", null, Modifier.size(48.dp))
-                                Text(translate("No sources configured"), Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
-                                Button({ editSourceId = null; sources = true }) { Text(translate("Add Source")) }
-                            }
-                        } else
-                        browse.routes.firstOrNull { it.id == routeId }?.let { route ->
-                        val options = remember(route.id) { browse.optionsFor(route.id) }
-                        val location = remember(route.id, route.route) { BrowseLocation(route.route, route.title, route.id, options) }
-                        routeState.SaveableStateProvider(route.id) {
-                            BrowsePageContent(model, browse, player, location, options, !fullPlayer && route.id == browse.rootId,
-                                { menu = it }, { playlist = it }, { scrolled = it }, owner = rootPages[route.id])
-                        }
-                        } ?: if (browse.configuredRoutes.none { it.id != "Search" }) Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center) {
-                            RufinIcon("rufin-library-symbolic", null, Modifier.size(48.dp), MaterialTheme.colorScheme.onSurfaceVariant)
-                            TextButton({ openMore(MoreDestination.Routes) }) { Text(label("Library")) }
-                        } else Spacer(Modifier.fillMaxSize())
-                    }
-                    }
-                    val detail = if (browse.section == AppSection.Browse) browse.details.size to browse.details.lastOrNull() else 0 to null
-                    AnimatedContent(detail, Modifier.fillMaxSize(), transitionSpec = {
-                        val direction = if (targetState.first > initialState.first) 1 else -1
-                        (slideInHorizontally(tween(if (reduceMotion) 0 else 220)) { it * direction } + fadeIn(tween(if (reduceMotion) 0 else 120))) togetherWith
-                            (slideOutHorizontally(tween(if (reduceMotion) 0 else 220)) { -it * direction / 3 } + fadeOut(tween(if (reduceMotion) 0 else 120)))
-                    }, label = "libraryDetail") { (depth, location) ->
-                        if (location != null) detailState.SaveableStateProvider("$depth:${location.route}") {
+                        } else detailState.SaveableStateProvider("${visible.depth}:${location.route}") {
                             val page = remember(location) { detailPages[location] }
                             DisposableEffect(location) {
-                                onDispose { if (location !in browse.details) detailState.removeState("$depth:${location.route}") }
+                                onDispose { if (location !in browse.details) detailState.removeState("${visible.depth}:${location.route}") }
                             }
                             Surface(Modifier.fillMaxSize()) {
-                            BrowsePageContent(model, browse, player, location, location.options,
-                                browse.section == AppSection.Browse && !fullPlayer && browse.details.lastOrNull() === location,
-                                { menu = it }, { playlist = it }, { scrolled = it }, owner = page)
+                                BrowsePageContent(model, browse, player, location, location.options,
+                                    !fullPlayer && browse.details.lastOrNull() === location,
+                                    { menu = it }, { playlist = it }, { scrolled = it }, owner = page)
                             }
                         }
                     }
@@ -424,7 +449,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                     } else if (browse.section == AppSection.Search) {
                         SearchContent(browse, player, { menu = it }, { playlist = it }, { scrolled = it })
                     } else if (browse.section == AppSection.Pins) {
-                        routeState.SaveableStateProvider("section:Pins") { PinsContent(model, browse, player) }
+                        routeState.SaveableStateProvider("section:Pins") { PinsContent(model, browse, player, pinsPage) }
                     }
                 }
                 }
@@ -519,9 +544,9 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
     DisposableEffect(page) { onDispose { page.active = false } }
     SideEffect { page.active = active; if (active) browse.visiblePage = page }
     val rows = page.pages.collectAsLazyPagingItems()
-    if (page.homeRows.isEmpty() && rows.itemSnapshotList.items.isEmpty() &&
+    if (page.summary?.showsReleases != true && page.homeRows.isEmpty() && rows.itemSnapshotList.items.isEmpty() &&
         (page.loading || rows.loadState.refresh is LoadState.Loading)) {
-        Spacer(Modifier.fillMaxSize())
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         return
     }
     val summary = page.summary
@@ -530,7 +555,10 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
         "artist" -> browse.categories.filter { it.id != "artists" }
         else -> emptyList()
     }
-    ArtworkReadyContent(listOf(page.contentKey, options.category, options.displaySettings ?: page.displaySettings), Modifier.fillMaxSize()) {
+    val artworkKey = listOf(page.contentKey, options.category, options.displaySettings ?: page.displaySettings)
+    val artworkScene = page.artworkScene?.takeIf { it.key == artworkKey }
+        ?: io.github.screwys.rufin.ui.ArtworkScene(artworkKey).also { page.artworkScene = it }
+    ArtworkReadyContent(modifier = Modifier.fillMaxSize(), owner = artworkScene) {
     Column(Modifier.fillMaxSize()) {
         if (location.kind == "History") {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

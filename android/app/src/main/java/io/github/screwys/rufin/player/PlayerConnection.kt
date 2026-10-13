@@ -18,8 +18,6 @@ import io.github.screwys.rufin.shared.rufin_core.PlayerPreferenceOptions
 import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
 import io.github.screwys.rufin.core.AndroidVisualizerDrawing
 import io.github.screwys.rufin.core.AndroidRgb
-import io.github.screwys.rufin.core.AndroidLyricsHighlight
-import io.github.screwys.rufin.core.AndroidLyricsPosition
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.shared.playback.*
 import io.github.screwys.rufin.shared.library.QueueItem
@@ -137,7 +135,7 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                     settings = withContext(Dispatchers.IO) { owner.playerPreferences() }
                     coroutineScope {
                         launch { while (isActive) {
-                            val frame = player.nextWaveform()
+                            val frame = withContext(Dispatchers.Default) { player.nextWaveform() }
                             try { waveform = frame.mediaId() to frame.amplitudes() } finally { frame.destroy() }
                         } }
                         launch {
@@ -153,7 +151,7 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                         }
                         launch {
                             while (isActive) {
-                                val raw = lyricSubscription.next()
+                                val raw = withContext(Dispatchers.Default) { lyricSubscription.next() }
                                 val previous = sourceLyrics
                                 if (raw.documentChanged(previous)) lyricsOffset = 0L
                                 sourceLyrics = raw
@@ -163,13 +161,13 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                         }
                         launch {
                             while (isActive) {
-                                levels = visualizerSubscription.next()
+                                levels = withContext(Dispatchers.Default) { visualizerSubscription.next() }
                                 visualizerObservedAt = SystemClock.elapsedRealtimeNanos()
                             }
                         }
                         launch {
                             while (isActive) {
-                                val event = player.nextLyricsEvent()
+                                val event = withContext(Dispatchers.Default) { player.nextLyricsEvent() }
                                 try {
                                     event.dictionaryStatus()?.let { status ->
                                         dictionaryState = status

@@ -8,12 +8,7 @@ import io.github.screwys.rufin.player.PlayerConnection
 import io.github.screwys.rufin.player.PlayerSettingsContent
 import io.github.screwys.rufin.player.PlayerSettingsPage
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.tween
+import io.github.screwys.rufin.ui.pageMotion
 import io.github.screwys.rufin.settings.PreferencesConnection
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.browse.BrowseConnection
@@ -65,7 +60,7 @@ internal fun MoreContent(model: RufinConnection, preferences: PreferencesConnect
     navigationDepth: Int,
 ) {
     val more = model.more
-    val motionMillis = if (LocalReduceMotion.current) 0 else 220
+    val reduceMotion = LocalReduceMotion.current
     val destinations = rememberSaveableStateHolder()
     LaunchedEffect(destination, more.bridge) {
         more.overviewVisible = destination == MoreDestination.Overview
@@ -73,9 +68,7 @@ internal fun MoreContent(model: RufinConnection, preferences: PreferencesConnect
     }
     DisposableEffect(more) { onDispose { more.overviewVisible = false } }
     AnimatedContent(destination to navigationDepth, Modifier.fillMaxSize(), transitionSpec = {
-        val direction = if (targetState.second > initialState.second) 1 else -1
-        (slideInHorizontally(tween(motionMillis)) { it * direction } + fadeIn(tween(motionMillis / 2))) togetherWith
-            (slideOutHorizontally(tween(motionMillis)) { -it * direction / 3 } + fadeOut(tween(motionMillis / 2)))
+        pageMotion(targetState.second > initialState.second, reduceMotion)
     }, contentKey = { it.first }, label = "moreNavigation") { location ->
     val visible = location.first
     destinations.SaveableStateProvider(visible.name) {

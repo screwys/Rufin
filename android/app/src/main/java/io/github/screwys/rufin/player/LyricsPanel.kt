@@ -49,14 +49,19 @@ import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.core.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.withContext
 import io.github.screwys.rufin.shared.lyrics.UserPreferences
 import io.github.screwys.rufin.shared.lyrics.LyricsAgentRole
 import io.github.screwys.rufin.shared.lyrics.externalLyricsProviderTitle
 import io.github.screwys.rufin.shared.lyrics.shiftLrcTextTimestamps
 import io.github.screwys.rufin.shared.playback.CurrentMediaId
+import io.github.screwys.rufin.shared.playback.TransportStatus
 import kotlinx.coroutines.CancellationException
 import io.github.screwys.rufin.settings.LocalReduceMotion
 import io.github.screwys.rufin.settings.settingsTextFieldColors
+import kotlin.math.ceil
 
 @Composable
 internal fun LyricsPanel(player: PlayerConnection, state: LazyListState) {
@@ -130,21 +135,12 @@ internal fun CurrentLyricsPreview(player: PlayerConnection) {
     val current = player.currentLyrics
     val document = current?.document
     val snapshot = current?.snapshot
-    var active by remember(current?.mediaId, document) { mutableStateOf<Int?>(null) }
-    var highlights by remember(current?.mediaId, document) { mutableStateOf<List<AndroidLyricsHighlight>>(emptyList()) }
     val preferences = player.settings?.lyrics
     val karaoke = preferences?.karaokeMode == true
     val reduceMotion = LocalReduceMotion.current
-    LaunchedEffect(snapshot, document, player.lyricsOffset, karaoke) {
-        if (snapshot == null || document == null) return@LaunchedEffect
-        while (true) {
-            val position = player.positionNow()
-            val line = snapshot.position(position, player.lyricsOffset).activeLine
-            active = line?.toInt()
-            highlights = if (karaoke && line != null) snapshot.highlights(position, player.lyricsOffset, line, line) else emptyList()
-            delay(if (karaoke) 16L else 100L)
-        }
-    }
+    val frame by rememberLyricsFrame(player, snapshot, karaoke)
+    val active = frame?.activeLine?.toInt()
+    val highlights = frame?.highlights.orEmpty()
     val normal = MaterialTheme.colorScheme.onSurface
     val selected = preferences?.lyricsHighlightColor?.let { playerLyricsColor(it) }
         ?: MaterialTheme.colorScheme.primary
@@ -180,6 +176,41 @@ internal fun CurrentLyricsPreview(player: PlayerConnection) {
             }
         }
     }
+}
+
+@Composable
+private fun rememberLyricsFrame(player: PlayerConnection, snapshot: AndroidLyricsSnapshot?, karaoke: Boolean,
+    state: LazyListState? = null,
+): State<AndroidLyricsFrame?> {
+    val frame = remember(snapshot) { mutableStateOf<AndroidLyricsFrame?>(null) }
+    val offset = player.lyricsOffset
+    LaunchedEffect(snapshot, karaoke, offset, state) {
+        if (snapshot == null) return@LaunchedEffect
+        snapshotFlow {
+            val lines = state?.layoutInfo?.visibleItemsInfo?.let { visible ->
+                val first = visible.firstOrNull()?.index ?: 0
+                first..(visible.lastOrNull()?.index ?: first)
+            }
+            player.playback?.transport to lines
+        }.collectLatest { (transport, lines) ->
+            if (transport == null) return@collectLatest
+            while (true) {
+                val position = player.positionNow()
+                val started = SystemClock.elapsedRealtime()
+                val next = withContext(Dispatchers.Default) {
+                    snapshot.frame(position, offset, karaoke, currentLineOnly = lines == null,
+                        firstLine = (lines?.first ?: 0).toUInt(), lastLine = (lines?.last ?: 0).toUInt())
+                }
+                frame.value = next
+                if (transport.state != TransportStatus.PLAYING) break
+                val updateAfter = next.updateAfterMillis ?: break
+                val remaining = ceil(updateAfter.toDouble() / transport.playbackRate).toLong() -
+                    (SystemClock.elapsedRealtime() - started)
+                delay(remaining.coerceAtLeast(1L))
+            }
+        }
+    }
+    return frame
 }
 
 @Composable
@@ -221,9 +252,9 @@ private fun LyricsDocumentView(player: PlayerConnection, current: AndroidLyricsS
 ) {
     val snapshot = current.snapshot!!
     val scope = rememberCoroutineScope()
-    var timing by remember(snapshot, document) { mutableStateOf<AndroidLyricsPosition?>(null) }
-    var highlights by remember(snapshot, document) { mutableStateOf<List<AndroidLyricsHighlight>>(emptyList()) }
     val karaoke = preferences?.karaokeMode == true
+    val timing by rememberLyricsFrame(player, snapshot, karaoke, state)
+    val highlights = timing?.highlights.orEmpty()
     val dragged by state.interactionSource.collectIsDraggedAsState()
     var pausedUntil by remember { mutableLongStateOf(0L) }
     var hadDrag by remember { mutableStateOf(false) }
@@ -239,18 +270,6 @@ private fun LyricsDocumentView(player: PlayerConnection, current: AndroidLyricsS
         }
     }
     LaunchedEffect(current.mediaId) { hadDrag = false; pausedUntil = 0 }
-    LaunchedEffect(snapshot, document, karaoke, player.lyricsOffset) {
-        while (true) {
-            val position = player.positionNow()
-            timing = snapshot.position(position, player.lyricsOffset)
-            if (karaoke) {
-                val first = state.layoutInfo.visibleItemsInfo.firstOrNull()?.index ?: 0
-                val last = state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: first
-                highlights = snapshot.highlights(position, player.lyricsOffset, first.toUInt(), last.toUInt())
-            } else highlights = emptyList()
-            delay(if (karaoke) 16L else 100L)
-        }
-    }
     val active = timing?.activeLine?.toInt()
     val scroll = timing?.scrollLine?.toInt()
     LaunchedEffect(scroll, followRevision) {

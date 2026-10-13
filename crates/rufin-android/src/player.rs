@@ -347,7 +347,7 @@ impl AndroidPlayer {
             }
         }
         let mut projected = AndroidLyricsDocument::from(document.as_ref());
-        let mut reading_timings: Vec<Vec<_>> = if settings.preferences.karaoke_mode {
+        let mut highlight_timings: Vec<Vec<_>> = if settings.preferences.karaoke_mode {
             document.lines.iter().map(|_| Vec::new()).collect()
         } else {
             Vec::new()
@@ -371,6 +371,62 @@ impl AndroidPlayer {
                 } else {
                     None
                 };
+                let cues: Vec<_> = if settings.preferences.karaoke_mode {
+                    cue_line
+                        .cues
+                        .iter()
+                        .enumerate()
+                        .map(|(cue_index, cue)| {
+                            (
+                                cue,
+                                lyrics::effective_cue_end(
+                                    &document.lines,
+                                    index,
+                                    cue_line,
+                                    cue_index,
+                                ),
+                            )
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                for (cue_part, (cue, end)) in cues.iter().enumerate() {
+                    if let Some(timing) = lyrics::KaraokeTiming::for_text_range(
+                        &cue_line.text,
+                        cue.byte_start..cue.byte_end_exclusive,
+                        cue,
+                        *end,
+                    ) {
+                        highlight_timings[index].push(LyricsHighlightTiming {
+                            cue_line: cue_index,
+                            target: AndroidLyricsHighlightTarget::Cue {
+                                index: cue_part as u32,
+                            },
+                            timings: vec![timing],
+                        });
+                    }
+                }
+                let mut add_timing = |range: std::ops::Range<usize>, target| {
+                    let timings: Vec<_> = cues
+                        .iter()
+                        .filter_map(|(cue, end)| {
+                            lyrics::KaraokeTiming::for_text_range(
+                                &cue_line.text,
+                                range.clone(),
+                                cue,
+                                *end,
+                            )
+                        })
+                        .collect();
+                    if !timings.is_empty() {
+                        highlight_timings[index].push(LyricsHighlightTiming {
+                            cue_line: cue_index,
+                            target,
+                            timings,
+                        });
+                    }
+                };
                 if readings {
                     let reading = reading_for(
                         &cue_line.text,
@@ -380,42 +436,6 @@ impl AndroidPlayer {
                     );
                     if let Some(reading) = reading {
                         if settings.preferences.karaoke_mode {
-                            let cues: Vec<_> = cue_line
-                                .cues
-                                .iter()
-                                .enumerate()
-                                .map(|(cue_index, cue)| {
-                                    (
-                                        cue,
-                                        lyrics::effective_cue_end(
-                                            &document.lines,
-                                            index,
-                                            cue_line,
-                                            cue_index,
-                                        ),
-                                    )
-                                })
-                                .collect();
-                            let mut add_timing = |range: std::ops::Range<usize>, target| {
-                                let timings: Vec<_> = cues
-                                    .iter()
-                                    .filter_map(|(cue, end)| {
-                                        lyrics::KaraokeTiming::for_text_range(
-                                            &cue_line.text,
-                                            range.clone(),
-                                            cue,
-                                            *end,
-                                        )
-                                    })
-                                    .collect();
-                                if !timings.is_empty() {
-                                    reading_timings[index].push(ReadingCueTiming {
-                                        cue_line: cue_index,
-                                        target,
-                                        timings,
-                                    });
-                                }
-                            };
                             let mut cursor = 0;
                             for (segment_index, segment) in reading.segments.iter().enumerate() {
                                 let range = cursor..cursor + segment.surface.len();
@@ -447,7 +467,8 @@ impl AndroidPlayer {
         }
         state.snapshot = Some(Arc::new(AndroidLyricsSnapshot {
             document: Arc::clone(document),
-            reading_timings,
+            timing: lyrics::LyricsTiming::new(&document.lines),
+            highlight_timings,
         }));
         state.document = Some(projected);
         state
@@ -654,10 +675,12 @@ pub struct AndroidLyricsHighlight {
 }
 
 #[derive(uniffi::Record)]
-pub struct AndroidLyricsPosition {
+pub struct AndroidLyricsFrame {
     pub active_line: Option<u32>,
     pub scroll_line: Option<u32>,
     pub highlight_all: bool,
+    pub highlights: Vec<AndroidLyricsHighlight>,
+    pub update_after_millis: Option<u64>,
 }
 
 impl From<lyrics::JapaneseReading> for AndroidJapaneseReading {
@@ -756,10 +779,11 @@ impl From<&lyrics::LyricsDocument> for AndroidLyricsDocument {
 #[derive(uniffi::Object)]
 pub struct AndroidLyricsSnapshot {
     document: Arc<lyrics::LyricsDocument>,
-    reading_timings: Vec<Vec<ReadingCueTiming>>,
+    timing: lyrics::LyricsTiming,
+    highlight_timings: Vec<Vec<LyricsHighlightTiming>>,
 }
 
-struct ReadingCueTiming {
+struct LyricsHighlightTiming {
     cue_line: usize,
     target: AndroidLyricsHighlightTarget,
     timings: Vec<lyrics::KaraokeTiming>,
@@ -767,82 +791,58 @@ struct ReadingCueTiming {
 
 #[uniffi::export]
 impl AndroidLyricsSnapshot {
-    pub fn position(&self, position: u64, offset: i64) -> AndroidLyricsPosition {
+    pub fn frame(
+        &self,
+        position: u64,
+        offset: i64,
+        karaoke: bool,
+        current_line_only: bool,
+        first_line: u32,
+        last_line: u32,
+    ) -> AndroidLyricsFrame {
         let position = i128::from(position) + i128::from(offset);
         let active = lyrics::active_lyrics_line_index(&self.document.lines, position);
-        AndroidLyricsPosition {
+        let range = if current_line_only {
+            active.map(|index| index..=index)
+        } else {
+            Some(first_line as usize..=last_line as usize)
+        };
+        let mut highlights = Vec::new();
+        if karaoke && let Some(range) = range {
+            for (line, timings) in self
+                .highlight_timings
+                .iter()
+                .enumerate()
+                .take(range.end().saturating_add(1))
+                .skip(*range.start())
+            {
+                for timing in timings {
+                    highlights.push(AndroidLyricsHighlight {
+                        line: line as u32,
+                        cue_line: timing.cue_line as u32,
+                        target: timing.target.clone(),
+                        progress: timing
+                            .timings
+                            .iter()
+                            .map(|timing| timing.progress(position))
+                            .sum::<f64>()
+                            .clamp(0.0, 1.0),
+                    });
+                }
+            }
+        }
+        AndroidLyricsFrame {
             active_line: active.map(|index| index as u32),
             scroll_line: active
                 .or_else(|| lyrics::intro_lyrics_line_index(&self.document.lines, position))
                 .map(|index| index as u32),
             highlight_all: lyrics::should_highlight_all_lyrics_lines(&self.document.lines),
+            highlights,
+            update_after_millis: self
+                .timing
+                .next_after(position, karaoke)
+                .and_then(|next| u64::try_from(i128::from(next) - position).ok()),
         }
-    }
-
-    pub fn highlights(
-        &self,
-        position: u64,
-        offset: i64,
-        first_line: u32,
-        last_line: u32,
-    ) -> Vec<AndroidLyricsHighlight> {
-        let position = i128::from(position) + i128::from(offset);
-        let mut output = Vec::new();
-        for (line_index, line) in self
-            .document
-            .lines
-            .iter()
-            .enumerate()
-            .take(last_line as usize + 1)
-            .skip(first_line as usize)
-        {
-            for (cue_line_index, cue_line) in line.cue_lines.iter().enumerate() {
-                for (cue_index, cue) in cue_line.cues.iter().enumerate() {
-                    if let Some(timing) = lyrics::KaraokeTiming::for_text_range(
-                        &cue_line.text,
-                        cue.byte_start..cue.byte_end_exclusive,
-                        cue,
-                        lyrics::effective_cue_end(
-                            &self.document.lines,
-                            line_index,
-                            cue_line,
-                            cue_index,
-                        ),
-                    ) {
-                        output.push(AndroidLyricsHighlight {
-                            line: line_index as u32,
-                            cue_line: cue_line_index as u32,
-                            target: AndroidLyricsHighlightTarget::Cue {
-                                index: cue_index as u32,
-                            },
-                            progress: timing.progress(position),
-                        });
-                    }
-                }
-            }
-        }
-        for (line, timings) in self
-            .reading_timings
-            .iter()
-            .enumerate()
-            .take(last_line as usize + 1)
-            .skip(first_line as usize)
-        {
-            for timing in timings {
-                output.push(AndroidLyricsHighlight {
-                    line: line as u32,
-                    cue_line: timing.cue_line as u32,
-                    target: timing.target.clone(),
-                    progress: timing
-                        .timings
-                        .iter()
-                        .map(|timing| timing.progress(position))
-                        .sum::<f64>()
-                        .clamp(0.0, 1.0),
-                });
-            }
-        }
-        output
     }
 }
 

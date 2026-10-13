@@ -156,7 +156,7 @@ class RufinService : MediaSessionService() {
                 val network = started.subscribeNetwork()
                 try {
                     while (isActive) {
-                        val nearby = network.nearbyDiscovery()
+                        val nearby = withContext(Dispatchers.Default) { network.nearbyDiscovery() }
                         multicastLock?.let { lock ->
                             if (nearby && !lock.isHeld) lock.acquire()
                             if (!nearby && lock.isHeld) lock.release()
@@ -181,7 +181,7 @@ class RufinService : MediaSessionService() {
                         }
                     }
                     while (isActive) {
-                        val state = sources.next()
+                        val state = withContext(Dispatchers.Default) { sources.next() }
                         selectedSource = state.selectedSourceId
                         libraryObserver.update(state.documentRoots.map { it.uri })
                     }
@@ -191,7 +191,7 @@ class RufinService : MediaSessionService() {
             val subscription = started.subscribePlayback()
             try {
                 while (isActive) {
-                    val state = subscription.next()
+                    val state = withContext(Dispatchers.Default) { subscription.next() }
                     state.notices.filterIsInstance<PlaybackNotice.OperationFailed>().forEach { mutablePlaybackNotices.tryEmit(it.v1) }
                     val previous = mutablePlayback.value
                     nativePlayer.update(state)
@@ -326,7 +326,7 @@ class RufinService : MediaSessionService() {
             val source = started.source()
             val sources = source.subscribe()
             try {
-                val configured = sources.next()
+                val configured = withContext(Dispatchers.Default) { sources.next() }
                 configured.sources.firstOrNull { it.kind == "local" }?.let { local ->
                     if (!alreadyGranted || configured.selectedSourceId != local.id) source.selectSource(local.id)
                 }
@@ -354,7 +354,7 @@ class RufinService : MediaSessionService() {
         if (requestLocalNetworkAccess()) {
             val source = core().source()
             val sources = source.subscribe()
-            try { sources.next().selectedSourceId?.let { source.refreshSource(it) } }
+            try { withContext(Dispatchers.Default) { sources.next() }.selectedSourceId?.let { source.refreshSource(it) } }
             finally { sources.destroy(); source.destroy() }
         }
     }.await()
