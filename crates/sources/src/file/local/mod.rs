@@ -214,10 +214,20 @@ impl LocalSource {
                 .stage_media_files(scan, progress, cancelled, None, 0)
                 .await?;
         }
+        progress(SourceReadProgress {
+            stage: crate::SourceReadStage::Artwork,
+            completed: 0,
+            total: None,
+        });
         crate::file::artwork::ArtworkFiles::Local
             .stage(database, scan, cancelled)
             .await?;
         scan.retain_connected_file_tracks().await?;
+        progress(SourceReadProgress {
+            stage: crate::SourceReadStage::Finalizing,
+            completed: 0,
+            total: None,
+        });
         Ok(())
     }
 
@@ -278,7 +288,20 @@ impl LocalSource {
         progress: &(dyn Fn(crate::SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        if !self.documents.is_empty() {
+        if !self.documents.is_empty()
+            || database
+                .local_file_roots(source)
+                .await?
+                .iter()
+                .map(std::path::Path::new)
+                .collect::<std::collections::BTreeSet<_>>()
+                != self
+                    .roots
+                    .iter()
+                    .filter(|root| !self.excludes(root))
+                    .map(PathBuf::as_path)
+                    .collect()
+        {
             let mut scan =
                 library::Scan::begin(database, source_id, "Local", "local", None).await?;
             let result = self

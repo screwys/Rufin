@@ -342,15 +342,29 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
         let _ = sender.send(update);
         std::future::ready(())
     });
+    let progress = Mutex::new(Vec::new());
     source
         .catch_up_local(
             &database,
             initial.source,
-            &|_| {},
+            &|update| progress.lock().unwrap().push(update),
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
         )
         .await
         .expect("restart catch-up");
+    let progress = progress.into_inner().unwrap();
+    assert!(progress.iter().any(|update| {
+        update.stage == sources::SourceReadStage::Tracks && update.completed > 0
+    }));
+    assert!(
+        progress
+            .iter()
+            .any(|update| update.stage == sources::SourceReadStage::Artwork)
+    );
+    assert_eq!(
+        progress.last().unwrap().stage,
+        sources::SourceReadStage::Finalizing
+    );
     let changed = updates.try_recv().expect("catalog update");
     assert!(changed.metadata);
     assert_eq!(

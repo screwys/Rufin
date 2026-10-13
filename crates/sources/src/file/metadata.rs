@@ -1452,16 +1452,42 @@ mod tests {
 
     #[tokio::test]
     async fn removing_last_local_root_clears_catalog_without_deleting_files() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+
         let directory = tempfile::tempdir().unwrap();
-        let audio = directory.path().canonicalize().unwrap().join("track.wav");
-        fs::write(&audio, silent_wav()).unwrap();
-        let database = library::Database::open(directory.path().join("library.db"))
-            .await
+        let root = directory.path().canonicalize().unwrap();
+        let old_root = root.join("old");
+        let new_root = root.join("new");
+        fs::create_dir(&old_root).unwrap();
+        fs::create_dir(&new_root).unwrap();
+        let audio = old_root.join("track.wav");
+        let imported = old_root.join("imported.wav");
+        let new_audio = new_root.join("new.wav");
+        let file_root = root.join("individual.wav");
+        let paths = [&audio, &imported, &new_audio, &file_root];
+        for path in paths {
+            fs::write(path, silent_wav()).unwrap();
+            write_metadata(
+                &[MetadataFileTarget {
+                    path: path.to_path_buf(),
+                    format: Some("wav".into()),
+                    tag_writable: true,
+                }],
+                &revision(path).unwrap(),
+                "",
+                &track_edit(&[("album", "Album"), ("artist", "Artist")]),
+                None,
+            )
             .unwrap();
+        }
+        let original_files = paths.map(|path| fs::read(path).unwrap());
+        let database_path = root.join("library.db");
+        let database = library::Database::open(&database_path).await.unwrap();
         let connected = crate::Source::connect(
             crate::SourceId::new("remove-local-root"),
             crate::SourceSetup::Local {
-                roots: vec![directory.path().to_path_buf()],
+                roots: vec![old_root.clone()],
             },
             "",
         )
@@ -1473,7 +1499,7 @@ mod tests {
                 &database,
                 "Local",
                 &|_| {},
-                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                Arc::new(AtomicBool::new(false)),
             )
             .await
             .unwrap();
@@ -1485,13 +1511,24 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+        let playlist = source
+            .import_local_paths(&database, vec![imported.clone()], "Imported", &|_| {})
+            .await
+            .unwrap();
+        let imported_uri = url::Url::from_file_path(&imported).unwrap().to_string();
+        let new_uri = url::Url::from_file_path(&new_audio).unwrap().to_string();
+        let key = database
+            .source_identity_key(source.source_id())
+            .await
+            .unwrap()
+            .unwrap();
         let source_id = configuration.source_id.clone();
         let edit = crate::Source::edit(
             configuration,
             None,
             crate::SourceSettingsChange::Local {
                 source_id,
-                roots: Vec::new(),
+                roots: vec![new_root.clone()],
                 excluded_folders: None,
             },
             None,
@@ -1501,13 +1538,166 @@ mod tests {
         let crate::SourceEditResult::Connected(connected) = edit else {
             panic!("expected changed Local source")
         };
+        let (configuration, source, _) = (*connected).into_parts();
+        let first_files = tokio::sync::Notify::new();
+        let progress = |progress: crate::SourceReadProgress| {
+            if progress.stage == crate::SourceReadStage::Files {
+                first_files.notify_one();
+            }
+        };
+        tokio::select! {
+            biased;
+            () = first_files.notified() => {}
+            result = source.manual_refresh(
+                &database,
+                "Local",
+                &progress,
+                Arc::new(AtomicBool::new(false)),
+            ) => panic!("refresh completed before interruption: {result:?}"),
+        }
+        assert!(
+            database
+                .cached_source(
+                    source.source_id().as_str(),
+                    &library::ReadCancellation::new()
+                )
+                .await
+                .unwrap()
+                .unwrap()
+                .catalog_complete
+        );
+        drop(source);
+        database.close().await.unwrap();
+
+        let database = library::Database::open(&database_path).await.unwrap();
+        let source = crate::Source::open(configuration.clone(), None, None).unwrap();
+        source
+            .catch_up_local(&database, key, &|_| {}, Arc::new(AtomicBool::new(false)))
+            .await
+            .expect("catch up the edited roots after an interrupted refresh");
+        let tracks = database
+            .song_rows(
+                &library::SongQuery::new(library::SongScope::Tracks(key)),
+                0,
+                10,
+                &library::ReadCancellation::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(tracks.len(), 2);
+        assert!(tracks.iter().any(|track| track.media_uri == new_uri));
+        assert!(tracks.iter().any(|track| track.media_uri == imported_uri));
+        assert!(tracks.iter().all(|track| track.media_uri != uri));
+        let entries = database
+            .playlist_entry_uri_page(playlist, -1)
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].2, imported_uri);
+        let inventory = database
+            .local_file_page(key, None, 128, &library::ReadCancellation::new())
+            .await
+            .unwrap();
+        assert!(!inventory.is_empty());
+        assert!(
+            inventory
+                .iter()
+                .all(|file| Path::new(&file.root) == new_root)
+        );
+        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = sender.send(update);
+            std::future::ready(())
+        });
+        source
+            .catch_up_local(&database, key, &|_| {}, Arc::new(AtomicBool::new(false)))
+            .await
+            .unwrap();
+        while let Ok(update) = updates.try_recv() {
+            assert!(!update.changed());
+        }
+
+        let edit = crate::Source::edit(
+            configuration,
+            None,
+            crate::SourceSettingsChange::Local {
+                source_id: source.source_id().clone(),
+                roots: vec![new_root.clone(), file_root.clone()],
+                excluded_folders: None,
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        let crate::SourceEditResult::Connected(connected) = edit else {
+            panic!("expected added Local file root")
+        };
+        let (configuration, source, _) = (*connected).into_parts();
+        drop(source);
+        database.close().await.unwrap();
+        let database = library::Database::open(&database_path).await.unwrap();
+        let source = crate::Source::open(configuration.clone(), None, None).unwrap();
+        source
+            .catch_up_local(&database, key, &|_| {}, Arc::new(AtomicBool::new(false)))
+            .await
+            .unwrap();
+        let file_uri = url::Url::from_file_path(&file_root).unwrap().to_string();
+        let tracks = database
+            .song_rows(
+                &library::SongQuery::new(library::SongScope::Tracks(key)),
+                0,
+                10,
+                &library::ReadCancellation::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(tracks.len(), 3);
+        assert!(tracks.iter().any(|track| track.media_uri == file_uri));
+        let inventory = database
+            .local_file_page(key, None, 128, &library::ReadCancellation::new())
+            .await
+            .unwrap();
+        assert!(
+            inventory
+                .iter()
+                .any(|file| Path::new(&file.root) == file_root)
+        );
+        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |update| {
+            let _ = sender.send(update);
+            std::future::ready(())
+        });
+        source
+            .catch_up_local(&database, key, &|_| {}, Arc::new(AtomicBool::new(false)))
+            .await
+            .unwrap();
+        while let Ok(update) = updates.try_recv() {
+            assert!(!update.changed());
+        }
+
+        database.delete_playlist(None, playlist).await.unwrap();
+        let edit = crate::Source::edit(
+            configuration,
+            None,
+            crate::SourceSettingsChange::Local {
+                source_id: source.source_id().clone(),
+                roots: Vec::new(),
+                excluded_folders: None,
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        let crate::SourceEditResult::Connected(connected) = edit else {
+            panic!("expected removed Local roots")
+        };
         let (_, source, _) = (*connected).into_parts();
         source
             .manual_refresh(
                 &database,
                 "Local",
                 &|_| {},
-                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                Arc::new(AtomicBool::new(false)),
             )
             .await
             .unwrap();
@@ -1533,7 +1723,9 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
-        assert!(audio.exists());
+        for (path, original) in paths.into_iter().zip(original_files) {
+            assert_eq!(fs::read(path).unwrap(), original);
+        }
     }
 
     #[tokio::test]

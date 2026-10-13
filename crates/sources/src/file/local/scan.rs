@@ -176,11 +176,24 @@ pub(crate) async fn catch_up(
             });
         }
         if changed {
-            stage_component(database, source, roots, &mut scan, false, None, cancelled).await?;
+            stage_component(
+                database, source, roots, &mut scan, false, None, progress, cancelled,
+            )
+            .await?;
+            progress(SourceReadProgress {
+                stage: SourceReadStage::Artwork,
+                completed: 0,
+                total: None,
+            });
             crate::file::artwork::ArtworkFiles::Local
                 .stage(database, &mut scan, cancelled)
                 .await?;
         }
+        progress(SourceReadProgress {
+            stage: SourceReadStage::Finalizing,
+            completed: 0,
+            total: None,
+        });
         Ok(())
     }
     .await;
@@ -266,6 +279,7 @@ pub(crate) async fn publish_paths(
             &mut scan,
             artwork_only,
             rename.as_ref(),
+            &|_| {},
             &|| false,
         )
         .await?;
@@ -410,8 +424,15 @@ async fn stage_component(
     scan: &mut Scan,
     artwork_only: bool,
     rename: Option<&(PathBuf, PathBuf)>,
+    progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
     cancelled: &(dyn Fn() -> bool + Send + Sync),
 ) -> SourceResult<()> {
+    let mut parsed = 0;
+    progress(SourceReadProgress {
+        stage: SourceReadStage::Tracks,
+        completed: parsed,
+        total: None,
+    });
     scan.begin_batch().await?;
     scan.expand_local_component(source).await?;
     scan.finish_batch().await?;
@@ -455,10 +476,15 @@ async fn stage_component(
             scan.finish_batch().await?;
         }
         for path in cues {
-            stage_exact_cue(roots, scan, &path, true).await?;
+            parsed += stage_exact_cue(roots, scan, &path, true).await?;
+            progress(SourceReadProgress {
+                stage: SourceReadStage::Tracks,
+                completed: parsed,
+                total: None,
+            });
         }
         if !audio.is_empty() {
-            stage_audio_batch(
+            parsed += stage_audio_batch(
                 database,
                 roots,
                 scan,
@@ -469,6 +495,11 @@ async fn stage_component(
                 &mut parsers,
             )
             .await?;
+            progress(SourceReadProgress {
+                stage: SourceReadStage::Tracks,
+                completed: parsed,
+                total: None,
+            });
         }
         if !observations.is_empty() {
             scan.begin_batch().await?;
@@ -478,6 +509,11 @@ async fn stage_component(
     }
 
     if !artwork_only {
+        progress(SourceReadProgress {
+            stage: SourceReadStage::Finalizing,
+            completed: parsed,
+            total: None,
+        });
         scan.begin_batch().await?;
         scan.remove_local_component_tracks(source).await?;
         scan.finish_batch().await?;

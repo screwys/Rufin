@@ -657,6 +657,16 @@ impl Database {
         .await?)
     }
 
+    pub async fn local_file_roots(&self, source: SourceKey) -> LibraryResult<Vec<String>> {
+        let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
+        Ok(
+            sqlx::query_scalar("SELECT DISTINCT root FROM local_files WHERE source_key=?1")
+                .bind(source)
+                .fetch_all(&mut *connection)
+                .await?,
+        )
+    }
+
     pub async fn local_file_page(
         &self,
         source: SourceKey,
