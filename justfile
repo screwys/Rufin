@@ -404,7 +404,11 @@ i18n *args:
     @scripts/container run default none cargo run --locked -p xtask -- generate i18n-template {{ args }}
 
 test *args:
-    @scripts/container run default none just _test {{ args }}
+    @if [[ "{{ args }}" == "android" ]]; then \
+        android/gradlew -p android -PandroidAbis=arm64-v8a testDevelopmentDebugUnitTest lintDevelopmentDebug; \
+    else \
+        scripts/container run default none just _test {{ args }}; \
+    fi
 
 _test *args:
     @if [[ "$(uname -s)" == Darwin ]]; then \
