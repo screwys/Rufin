@@ -16,8 +16,7 @@ use adw::prelude::*;
 use rufin_core::runtime::source::{DiscoveryStatus, EditableSource, SourceHandle, SourceOperation};
 
 use sources::{
-    CredentialInput, CredentialPreset, SourceSettingsChange, SourceSetup, SubsonicAuthentication,
-    SubsonicFlavor,
+    CredentialInput, CredentialPreset, SourceSetup, SubsonicAuthentication, SubsonicFlavor,
 };
 
 use super::folder_selected_text;
@@ -496,10 +495,11 @@ fn subsonic_setup_flow_for(
         authentication: Rc::new(Cell::new(authentication)),
         offer_authentication,
         submit: Rc::new(move |source, input, authentication| {
-            source.configure_source(SourceSetup::OpenSubsonic {
-                kind,
-                authentication,
-                credentials: input,
+            let source = source.clone();
+            gtk::glib::spawn_future_local(async move {
+                let _ = source
+                    .save_subsonic(None, kind, authentication, input)
+                    .await;
             });
         }),
     })
@@ -532,63 +532,17 @@ fn subsonic_settings_group_for(
             .open_subsonic_authentication
             .unwrap_or(SubsonicAuthentication::Password),
     );
-    Ok(credential_source_settings_group(
-        shell,
-        saved.credentials.clone(),
-        gtk_widgets::source_labels::source_kind_title(presentation.kind)
-            .expect("registered source presentation"),
-        authentication,
-        None,
-        move |source, input, authentication| {
-            source.update_source(SourceSettingsChange::OpenSubsonic {
-                source_id: source_id.clone(),
-                kind,
-                authentication: authentication.unwrap_or(SubsonicAuthentication::Password),
-                credentials: input,
-            })
-        },
-    ))
-}
-
-fn navidrome_settings_group(
-    shell: &Rc<Preferences>,
-    saved: &EditableSource,
-    presentation: &'static SourcePresentation,
-) -> Result<gtk::Widget, String> {
-    subsonic_settings_group_for(shell, saved, presentation, SubsonicFlavor::Navidrome)
-}
-
-fn subsonic_settings_group(
-    shell: &Rc<Preferences>,
-    saved: &EditableSource,
-    presentation: &'static SourcePresentation,
-) -> Result<gtk::Widget, String> {
-    subsonic_settings_group_for(shell, saved, presentation, SubsonicFlavor::Subsonic)
-}
-
-fn credential_source_settings_group(
-    shell: &Rc<Preferences>,
-    preset: CredentialPreset,
-    source_title: &'static str,
-    authentication: Option<SubsonicAuthentication>,
-    extra: Option<adw::SwitchRow>,
-    submit: impl Fn(
-        &SourceHandle,
-        CredentialInput,
-        Option<SubsonicAuthentication>,
-    ) -> async_channel::Receiver<Result<(), String>>
-    + 'static,
-) -> gtk::Widget {
-    let snapshot = credential_draft(Some(preset));
+    let snapshot = credential_draft(Some(saved.credentials.clone()));
     let authentication = authentication.map(|value| Rc::new(Cell::new(value)));
     let host = credential_host_view(&snapshot, true, authentication);
     host.fields_group.set_title(&tr("Server Settings"));
-    host.fields_group.set_description(Some(&tr(source_title)));
+    host.fields_group
+        .set_description(Some(&tr(gtk_widgets::source_labels::source_kind_title(
+            presentation.kind,
+        )
+        .expect("registered source presentation"))));
     host.cert_verify
         .set_subtitle(&tr("Off only for a server you control"));
-    if let Some(extra) = extra.as_ref() {
-        host.rows.add(extra);
-    }
 
     let save = &host.save;
     save.set_visible(true);
@@ -605,28 +559,47 @@ fn credential_source_settings_group(
         let authentication = authentication
             .as_ref()
             .map(|authentication| authentication.get());
-        let result = submit(
-            &source,
-            CredentialInput {
-                source_name: Some(name.text().trim().to_string()),
-                server_url: url.text().trim().to_string(),
-                username: username.text().trim().to_string(),
-                secret: password.text().to_string(),
-                trust_invalid_cert: !cert_verify.is_active(),
-            },
-            authentication,
-        );
+        let source = source.clone();
+        let source_id = source_id.clone();
+        let credentials = CredentialInput {
+            source_name: Some(name.text().trim().to_string()),
+            server_url: url.text().trim().to_string(),
+            username: username.text().trim().to_string(),
+            secret: password.text().to_string(),
+            trust_invalid_cert: !cert_verify.is_active(),
+        };
         if let Some(shell) = weak_shell.upgrade() {
             complete_source_save(&shell, button, async move {
-                result
-                    .recv()
+                source
+                    .save_subsonic(
+                        Some(source_id),
+                        kind,
+                        authentication.unwrap_or(SubsonicAuthentication::Password),
+                        credentials,
+                    )
                     .await
-                    .unwrap_or_else(|error| Err(error.to_string()))
+                    .map_err(|error| error.to_string())
             });
         }
     });
 
-    host.widget.upcast()
+    Ok(host.widget.upcast())
+}
+
+fn navidrome_settings_group(
+    shell: &Rc<Preferences>,
+    saved: &EditableSource,
+    presentation: &'static SourcePresentation,
+) -> Result<gtk::Widget, String> {
+    subsonic_settings_group_for(shell, saved, presentation, SubsonicFlavor::Navidrome)
+}
+
+fn subsonic_settings_group(
+    shell: &Rc<Preferences>,
+    saved: &EditableSource,
+    presentation: &'static SourcePresentation,
+) -> Result<gtk::Widget, String> {
+    subsonic_settings_group_for(shell, saved, presentation, SubsonicFlavor::Subsonic)
 }
 
 fn complete_source_save(

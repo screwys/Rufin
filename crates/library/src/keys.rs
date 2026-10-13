@@ -186,6 +186,12 @@ macro_rules! integer_key {
         #[sqlx(transparent)]
         pub struct $name(i64);
 
+        #[cfg(feature = "bindings")]
+        uniffi::custom_type!($name, i64, {
+            lower: |value| value.raw(),
+            try_lift: |value| Ok($name::from_raw(value)),
+        });
+
         impl $name {
             pub const fn from_raw(value: i64) -> Self {
                 Self(value)
@@ -267,4 +273,9 @@ mod tests {
         assert!(file_media_path("https://example.test/song.flac").is_none());
         assert!(file_media_path("file://user:secret@localhost/song.flac").is_none());
     }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub fn source_id_for_uri(uri: String) -> Option<SourceId> {
+    source_entity_parts(&uri).map(|(source, _, _)| source)
 }

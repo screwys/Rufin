@@ -520,13 +520,15 @@ pub(super) fn settings_group(
     let source_id = saved.source.id.clone();
     save.connect_clicked(move |_| {
         let draft = draft.borrow();
-        source.update_source(SourceSettingsChange::Plex {
-            source_id: source_id.clone(),
-            settings: sources::PlexSettingsInput {
-                name: draft.name.trim().into(),
-                address_override: optional_address(&draft.address),
-                trust_invalid_cert: draft.trust_invalid_cert,
-            },
+        let settings = sources::PlexSettingsInput {
+            name: draft.name.trim().into(),
+            address_override: optional_address(&draft.address),
+            trust_invalid_cert: draft.trust_invalid_cert,
+        };
+        let source = source.clone();
+        let source_id = source_id.clone();
+        gtk::glib::spawn_future_local(async move {
+            let _ = source.save_plex(source_id, settings).await;
         });
     });
     Ok(section.upcast())

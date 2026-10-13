@@ -266,9 +266,8 @@ impl Shell {
                                         changed_public,
                                         change,
                                     )
-                                    .recv()
                                     .await
-                                    .map_err(|error| error.to_string())??;
+                                    .map_err(|error| error.to_string())?;
                                 }
                                 Ok(())
                             }

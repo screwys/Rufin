@@ -34,7 +34,7 @@ pub struct NowPlayingPresentation {
 
 impl NowPlayingPresentation {
     pub fn new(player: Option<&PlaybackView>) -> Self {
-        let current = player.and_then(|player| player.transport.current.as_deref());
+        let current = player.and_then(|player| player.transport.current.as_ref());
         let title = current
             .map(|entry| entry.title.clone())
             .unwrap_or_else(|| tr("Nothing playing"));

@@ -7,12 +7,14 @@ use serde::{Deserialize, Serialize};
 use crate::settings::SidebarRouteItem;
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct FolderPathItem {
     pub id: String,
     pub name: String,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum CollectionCategory {
     #[default]
     Tracks,
@@ -33,6 +35,7 @@ impl CollectionCategory {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum Route {
     Home,
     Search,

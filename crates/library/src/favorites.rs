@@ -51,6 +51,7 @@ pub(crate) fn source_user_data_query(
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum FavoriteTarget {
     Track(String),
     Album(String),

@@ -20,11 +20,7 @@ impl AndroidBrowseQuery {
                     .row_fields
                     .iter()
                     .map(|field| AndroidFieldValue {
-                        id: serde_json::to_value(field)
-                            .expect("Field serialization")
-                            .as_str()
-                            .expect("Field name")
-                            .to_string(),
+                        id: *field,
                         text: if *field == LibraryField::RowIndex {
                             (offset + index + 1).to_string()
                         } else {
@@ -33,34 +29,8 @@ impl AndroidBrowseQuery {
                     })
                     .collect();
                 AndroidBrowseRow {
-                    track_key: Some(row.track_key.raw()),
-                    album_key: None,
-                    album_media_uri: None,
-                    kind: "track".into(),
-                    playback_context_id: None,
-                    key: row.media_uri.clone(),
-                    artist: row.artist.clone(),
-                    album: row.album.clone(),
                     fields,
-                    media_uri: row.media_uri,
-                    title: row.title,
-                    subtitle: format!("{} · {}", row.artist, row.album),
-                    favorite: row.favorite,
-                    duration_millis: row.duration_millis.max(0) as u64,
-                    detail_route: None,
-                    pin: None,
-                    section: String::new(),
-                    section_id: String::new(),
-                    section_kind: String::new(),
-                    section_refreshable: false,
-                    year: row.year,
-                    track_count: 1,
-                    source_id: None,
-                    source_name: row.source_name.unwrap_or_default(),
-                    last_played: row.last_played,
-                    writable: false,
-                    downloaded: row.is_downloaded,
-                    artwork_identity: row.artwork_binding,
+                    ..AndroidBrowseRow::new(AndroidBrowseItem::History { row })
                 }
             })
             .collect())
@@ -74,11 +44,7 @@ impl AndroidBrowseQuery {
         self.selected_track_fields()
             .iter()
             .map(|field| AndroidFieldValue {
-                id: serde_json::to_value(field)
-                    .expect("Field serialization")
-                    .as_str()
-                    .expect("Field name")
-                    .to_string(),
+                id: *field,
                 text: if *field == LibraryField::RowIndex {
                     (index + 1).to_string()
                 } else {
@@ -88,23 +54,14 @@ impl AndroidBrowseQuery {
             .collect()
     }
 
-    pub(super) fn track_row(&self, mut track: library::TrackRow, index: usize) -> AndroidBrowseRow {
+    pub(super) fn track_row(&self, track: library::TrackRow, index: usize) -> AndroidBrowseRow {
         let fields = self.track_field_values(index, |field| {
             rufin_core::settings::presentation::track_field(&track, field)
         });
-        let (album_key, album_media_uri) = if self.album_detail_layout() {
-            (
-                track.album_key.map(library::AlbumKey::raw),
-                track.album_media_uri.take(),
-            )
-        } else {
-            (None, None)
-        };
-        let mut row: AndroidBrowseRow = track.into();
-        row.album_key = album_key;
-        row.album_media_uri = album_media_uri;
-        row.fields = fields;
-        row
+        AndroidBrowseRow {
+            fields,
+            ..track.into()
+        }
     }
 
     pub(super) fn selected_track_fields(&self) -> &[LibraryField] {
@@ -201,35 +158,10 @@ impl AndroidBrowseQuery {
                     let selection = SongQuery::new(SongScope::Genre(row.genre_key)).selection();
                     rows.push((
                         AndroidBrowseRow {
-                            track_key: None,
-                            album_key: None,
-                            album_media_uri: None,
-                            kind: "genre".into(),
-                            playback_context_id: Some(format!("genre:{}", row.genre_key)),
-                            fields: Vec::new(),
-                            artist: String::new(),
-                            album: String::new(),
-                            key: row.object_id,
-                            media_uri: String::new(),
-                            title: row.name,
-                            subtitle: String::new(),
-                            favorite: false,
-                            duration_millis: 0,
-                            detail_route: Some(route_json(Route::GenreDetail(row.genre_key))),
-                            pin: None,
                             section: localization::tr("Featured genres"),
                             section_id: "Genres".into(),
                             section_kind: "genres".into(),
-                            section_refreshable: false,
-                            year: None,
-                            track_count: row.track_count.max(0) as u64,
-                            source_id: None,
-                            source_name: String::new(),
-                            last_played: None,
-                            writable: false,
-                            downloaded: row.track_count > 0
-                                && row.downloaded_count == row.track_count,
-                            artwork_identity: row.artwork_binding,
+                            ..AndroidBrowseRow::new(AndroidBrowseItem::HomeGenre { row })
                         },
                         selection,
                     ));
@@ -257,11 +189,7 @@ impl AndroidBrowseQuery {
                 let filter = filter.to_lowercase();
                 Ok(rows
                     .into_iter()
-                    .filter(|(row, _)| {
-                        format!("{} {}", row.title, row.subtitle)
-                            .to_lowercase()
-                            .contains(&filter)
-                    })
+                    .filter(|(row, _)| row.matches_filter(&filter))
                     .collect())
             })
             .await
@@ -291,35 +219,8 @@ impl AndroidBrowseQuery {
                             rufin_core::settings::presentation::playlist_entry_field(&row, field)
                         });
                         AndroidBrowseRow {
-                            track_key: Some(row.track_key.raw()),
-                            album_key: None,
-                            album_media_uri: None,
-                            kind: "track".into(),
-                            playback_context_id: None,
                             fields,
-                            artist: row.artist.clone(),
-                            album: row.album.clone(),
-                            key: serde_json::to_string(&row.playlist_entry_key)
-                                .expect("Playlist entry serialization"),
-                            media_uri: row.media_uri,
-                            title: row.title,
-                            subtitle: format!("{} · {}", row.artist, row.album),
-                            favorite: row.favorite,
-                            duration_millis: row.duration_millis.max(0) as u64,
-                            detail_route: None,
-                            pin: None,
-                            section: String::new(),
-                            section_id: String::new(),
-                            section_kind: String::new(),
-                            section_refreshable: false,
-                            year: row.year,
-                            track_count: 1,
-                            source_id: None,
-                            source_name: String::new(),
-                            last_played: row.last_played,
-                            writable: false,
-                            downloaded: row.is_downloaded,
-                            artwork_identity: row.artwork_binding,
+                            ..AndroidBrowseRow::new(AndroidBrowseItem::PlaylistEntry { row })
                         }
                     })
                     .collect());
@@ -343,7 +244,7 @@ impl AndroidBrowseQuery {
                         .map(|item| match item {
                             library::AlbumDetailRow::Album { album, .. } => {
                                 let mut row: AndroidBrowseRow = album.into();
-                                row.kind = "album_header".into();
+                                row.album_header = true;
                                 row
                             }
                             library::AlbumDetailRow::Track { track, index, .. } => {

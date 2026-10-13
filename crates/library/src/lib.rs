@@ -4,9 +4,17 @@
 #[cfg(feature = "bindings")]
 uniffi::setup_scaffolding!();
 
+pub type LibraryIndex = usize;
+#[cfg(feature = "bindings")]
+uniffi::custom_type!(LibraryIndex, u64, {
+    remote,
+    lower: |value| value as u64,
+    try_lift: |value| Ok(usize::try_from(value)?),
+});
+
 mod activity;
 mod activity_overview;
-pub use activity_overview::{ActivityOverview, ActivityTotals};
+pub use activity_overview::{ActivityOverview, ActivityTotals, GenreActivity};
 mod artwork;
 mod backup;
 mod collection_query;
@@ -65,6 +73,7 @@ pub use keys::{
     TrackKey, cue_media_parts, cue_media_uri, document_access_uri, document_fragment_parts,
     document_locator_fragment, document_locator_parts, document_media_id, document_media_uri,
     file_media_path, normalize_direct_media_uri, source_entity_parts, source_entity_uri,
+    source_id_for_uri,
 };
 pub use local::{
     DownloadMetadata, LocalAccessOrigin, LocalAccessRow, LocalAccessWrite, LocalFileKind,

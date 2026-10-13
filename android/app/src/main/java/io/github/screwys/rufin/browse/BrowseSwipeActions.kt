@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.shared.rufin_core.Route
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring

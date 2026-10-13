@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.settings
 
+import io.github.screwys.rufin.shared.rufin_core.ApplicationPreferenceEdit
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -78,7 +80,7 @@ internal fun AppearanceSettingsPage(preferences: PreferencesConnection, browse: 
             HomeSettingsPage(preferences, embedded = true)
             RouteSettingsPage(browse, embedded = true)
             SettingsGroup(translate("Accessibility")) {
-                SettingsSwitch(translate("Reduce motion"), preferences.reduceMotion) { preferences.changePreference("reduce_motion", it) }
+                SettingsSwitch(translate("Reduce motion"), preferences.reduceMotion) { preferences.changePreference(ApplicationPreferenceEdit.ReduceMotion(it)) }
             }
             settings.errors.forEach { io.github.screwys.rufin.ui.ErrorNotice(it) }
             preferences.themeErrors.forEach { io.github.screwys.rufin.ui.ErrorNotice(it) }

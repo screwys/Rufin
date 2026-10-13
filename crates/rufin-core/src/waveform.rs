@@ -424,7 +424,7 @@ mod tests {
             library::source_entity_uri(&sources::SourceId::new("remote"), "track", "track");
         let media_id = CurrentMediaId {
             run: None,
-            media_uri: media_uri.clone().into(),
+            media_uri: media_uri.clone(),
         };
         let media = Arc::new(CurrentMedia {
             stream: None,

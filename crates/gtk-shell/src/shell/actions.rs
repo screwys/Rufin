@@ -692,10 +692,11 @@ fn set_transition_mode_shortcut(shell: &Rc<Shell>, mode: PlaybackTransitionMode)
 
 fn refresh_selected_library(shell: &Shell) {
     if let Some(selected) = shell.selected_library() {
-        shell
-            .products
-            .source
-            .refresh_source(selected.source_id.clone());
+        let source = shell.products.source.clone();
+        let source_id = selected.source_id.clone();
+        gtk::glib::spawn_future_local(async move {
+            let _ = source.refresh_source(source_id).await;
+        });
     }
 }
 

@@ -22,19 +22,16 @@ pub(crate) fn connect_queue_playlist_button(shell: &Rc<Shell>) {
                 return;
             };
             let queue = shell.products.playback.clone();
-            let task = shell
-                .products
-                .runtime
-                .spawn_blocking(move || queue.selection());
             let weak = Rc::downgrade(&shell);
             gtk::glib::spawn_future_local(async move {
-                let result = task.await;
+                let result = queue.selection().await;
                 let Some(shell) = weak.upgrade() else {
                     return;
                 };
                 match result {
-                    Ok(Ok(tracks)) => shell.new_playlist_dialog_with(String::new(), tracks),
-                    Ok(Err(error)) => shell.control_feedback.show_feedback_toast(error),
+                    Ok(tracks) => {
+                        shell.new_playlist_dialog_with(String::new(), tracks.as_ref().clone())
+                    }
                     Err(error) => shell
                         .control_feedback
                         .show_feedback_toast(error.to_string()),

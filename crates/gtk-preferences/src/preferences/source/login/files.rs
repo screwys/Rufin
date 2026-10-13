@@ -115,6 +115,7 @@ impl Draft {
                     credentials,
                 )
                 .await
+                .map_err(|error| error.to_string())
         }
     }
 
@@ -317,11 +318,7 @@ pub fn bind_integrations(
                 let (Some(shell), Some(parent)) = (weak.upgrade(), parent.upgrade()) else {
                     return;
                 };
-                match shell
-                    .products
-                    .source
-                    .file_integration_settings(&connection.id)
-                {
+                match shell.products.source.editable(connection.id.clone()) {
                     Ok(Some(saved)) => present_integration(
                         &shell,
                         &parent,
@@ -334,7 +331,9 @@ pub fn bind_integrations(
                         Rc::new(|_| {}),
                     ),
                     Ok(None) => {}
-                    Err(error) => shell.control_feedback.show_feedback_toast(error),
+                    Err(error) => shell
+                        .control_feedback
+                        .show_feedback_toast(error.to_string()),
                 }
             });
             group.add(&row);
@@ -681,7 +680,7 @@ fn form(
         if let Some(task) = listing.borrow_mut().take() {
             task.abort();
         }
-        let events = source.smb_shares(settings, credentials);
+        let source = source.clone();
         let (share, share_options, status, shares) = (
             share.clone(),
             share_options.clone(),
@@ -691,33 +690,33 @@ fn form(
         button.set_sensitive(false);
         let button = button.downgrade();
         *listing.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
-            if let Ok(result) = events.recv().await {
-                match result {
-                    Ok(values) => {
-                        *shares.borrow_mut() =
-                            values.iter().map(|(_, address)| address.clone()).collect();
-                        if let Some(row) = share.upgrade() {
-                            row.set_selected(gtk::INVALID_LIST_POSITION);
-                        }
-                        if let Some(options) = share_options.upgrade() {
-                            options.splice(
-                                0,
-                                options.n_items(),
-                                &values
-                                    .iter()
-                                    .map(|(name, _)| name.as_str())
-                                    .collect::<Vec<_>>(),
-                            );
-                        }
-                        if let Some(row) = share.upgrade() {
-                            row.set_visible(!values.is_empty());
-                        }
+            match source.smb_shares(settings, credentials).await {
+                Ok(values) => {
+                    *shares.borrow_mut() = values
+                        .iter()
+                        .filter_map(|share| share.address.clone())
+                        .collect();
+                    if let Some(row) = share.upgrade() {
+                        row.set_selected(gtk::INVALID_LIST_POSITION);
                     }
-                    Err(error) => {
-                        if let Some(status) = status.upgrade() {
-                            status.set_text(&error);
-                            status.set_visible(true);
-                        }
+                    if let Some(options) = share_options.upgrade() {
+                        options.splice(
+                            0,
+                            options.n_items(),
+                            &values
+                                .iter()
+                                .map(|share| share.title.as_str())
+                                .collect::<Vec<_>>(),
+                        );
+                    }
+                    if let Some(row) = share.upgrade() {
+                        row.set_visible(!values.is_empty());
+                    }
+                }
+                Err(error) => {
+                    if let Some(status) = status.upgrade() {
+                        status.set_text(&error.to_string());
+                        status.set_visible(true);
                     }
                 }
             }

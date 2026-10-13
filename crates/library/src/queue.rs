@@ -42,6 +42,7 @@ pub enum QueueProvenance {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum QueueRepeatMode {
     #[default]
     Off,
@@ -50,6 +51,7 @@ pub enum QueueRepeatMode {
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, FromRow)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct QueueItem {
     pub media_uri: String,
     pub title: String,
@@ -130,6 +132,7 @@ impl From<crate::PlaylistEntryRow> for QueueItem {
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct QueueRow {
     #[serde(skip)]
     pub track_key: Option<crate::TrackKey>,
@@ -406,6 +409,7 @@ pub enum QueuePlacement {
     End,
 }
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum QueueReorderTarget {
     Before(usize),
     After(usize),
@@ -414,6 +418,7 @@ pub enum QueueReorderTarget {
     End,
 }
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct QueuePageRow {
     pub entry: Arc<QueueRow>,
     pub source_path: Option<String>,
@@ -1469,4 +1474,51 @@ async fn queue_items_for_uris_on(
         COALESCE((SELECT artist.musicbrainz_artist_id FROM track_artists credit JOIN artists artist USING(artist_key) WHERE credit.track_key=track.track_key ORDER BY credit.position LIMIT 1),track.primary_artist_musicbrainz_id) primary_artist_musicbrainz_id
         FROM json_each(?1) requested LEFT JOIN tracks track ON track.media_uri=requested.value LEFT JOIN albums album USING(album_key) ORDER BY CAST(requested.key AS INTEGER)")
         .bind(serde_json::to_string(uris)?).fetch_all(connection).await?)
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl QueueRow {
+    pub fn same_row(&self, other: Arc<QueueRow>) -> bool {
+        std::ptr::eq(self, other.as_ref()) || self == other.as_ref()
+    }
+
+    pub fn item(&self) -> QueueItem {
+        self.item.clone()
+    }
+    pub fn position(&self) -> usize {
+        self.position
+    }
+    pub fn context_id(&self) -> Option<String> {
+        match &self.provenance {
+            QueueProvenance::Context { context_id, .. } => Some(context_id.to_string()),
+            _ => None,
+        }
+    }
+    pub fn context_title(&self) -> Option<String> {
+        match &self.provenance {
+            QueueProvenance::Context { context_title, .. } => context_title
+                .as_ref()
+                .map(|caption| caption.title.to_string()),
+            _ => None,
+        }
+    }
+    pub fn context_category(&self) -> Option<String> {
+        match &self.provenance {
+            QueueProvenance::Context { context_title, .. } => context_title
+                .as_ref()
+                .and_then(|caption| caption.kind.as_deref().map(str::to_owned)),
+            _ => None,
+        }
+    }
+    pub fn context_kind(&self) -> String {
+        match self.provenance {
+            QueueProvenance::Context { .. } => "context",
+            QueueProvenance::Manual => "manual",
+            QueueProvenance::Random => "random",
+            QueueProvenance::Radio => "radio",
+            QueueProvenance::AutoDj => "auto_dj",
+            QueueProvenance::Legacy => "legacy",
+        }
+        .into()
+    }
 }

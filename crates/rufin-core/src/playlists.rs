@@ -333,15 +333,25 @@ pub(crate) async fn export_contents(
     Ok(file.into_temp_path())
 }
 
-pub fn create_playlist(
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct PlaylistCreation {
+    pub object_id: String,
+    pub settings_error: Option<String>,
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub async fn create_playlist(
     owner: &SourceOwner,
     source_id: Option<SourceId>,
     name: String,
-    songs: library::SongSelection,
+    songs: Arc<library::SongSelection>,
     public: Option<bool>,
-) -> Receiver<Result<Option<String>, String>> {
+    current: Option<bool>,
+) -> sources::SourceResult<Option<PlaylistCreation>> {
     crate::playlist_files::run(owner, move |owner| async move {
         let database = &owner.shared.database;
+        let pin_source = source_id.clone();
         let target = match source_id {
             None => PlaylistOwner::Local(None),
             Some(id) => {
@@ -408,8 +418,36 @@ pub fn create_playlist(
         if local {
             local_playlist_changed(&owner, source_key, playlist).await;
         }
-        Ok(Some(object_id))
+        let playlist_id = object_id.clone();
+        let settings = owner.shared.settings.clone();
+        let settings_error = tokio::task::spawn_blocking(move || {
+            settings.update(|stored| {
+                stored.ui.sidebar.set_pinned(
+                    crate::settings::SidebarPin::Playlist {
+                        source_id: pin_source,
+                        playlist_id,
+                    },
+                    true,
+                );
+                if let Some(current) = current {
+                    stored.ui.new_playlist_current = current;
+                }
+                Ok(())
+            })
+        })
+        .await
+        .map_err(string_error)
+        .and_then(|result| result)
+        .err();
+        Ok(Some(PlaylistCreation {
+            object_id,
+            settings_error,
+        }))
     })
+    .recv()
+    .await
+    .map_err(|error| SourceError::Other(error.to_string()))?
+    .map_err(SourceError::Other)
 }
 
 pub fn playlist_public(
@@ -543,16 +581,21 @@ async fn generate_artwork(
     })))
 }
 
-pub fn update_playlist(
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub async fn update_playlist(
     owner: &SourceOwner,
     playlist: PlaylistKey,
     name: Option<String>,
     public: Option<bool>,
     artwork: Option<sources::ArtworkChange>,
-) -> Receiver<Result<bool, String>> {
+) -> sources::SourceResult<bool> {
     crate::playlist_files::run(owner, move |owner| async move {
         update_playlist_on(&owner, playlist, name.as_deref(), public, artwork.as_ref()).await
     })
+    .recv()
+    .await
+    .map_err(|error| SourceError::Other(error.to_string()))?
+    .map_err(SourceError::Other)
 }
 
 pub(crate) async fn update_playlist_on(
@@ -694,10 +737,11 @@ pub(crate) async fn update_playlist_on(
         .map_err(string_error)
 }
 
-pub fn delete_playlist(
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub async fn delete_playlist(
     owner: &SourceOwner,
     playlist: PlaylistKey,
-) -> Receiver<Result<bool, String>> {
+) -> sources::SourceResult<bool> {
     let operation_owner = owner.clone();
     playlist_change(
         &owner,
@@ -734,14 +778,19 @@ pub fn delete_playlist(
             result
         },
     )
+    .recv()
+    .await
+    .map_err(|error| SourceError::Other(error.to_string()))?
+    .map_err(SourceError::Other)
 }
 
-pub fn add_playlist_tracks(
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub async fn add_playlist_tracks(
     owner: &SourceOwner,
     playlist: PlaylistKey,
-    songs: library::SongSelection,
+    songs: Arc<library::SongSelection>,
     skip_duplicates: bool,
-) -> Receiver<Result<usize, String>> {
+) -> sources::SourceResult<usize> {
     let (sender, receiver) = async_channel::bounded(1);
     owner.spawn_serialized(move |owner| async move {
         let target = playlist_source(&owner, playlist, Some(true)).await;
@@ -807,6 +856,10 @@ pub fn add_playlist_tracks(
         let _ = sender.send(reply).await;
     });
     receiver
+        .recv()
+        .await
+        .map_err(|error| SourceError::Other(error.to_string()))?
+        .map_err(SourceError::Other)
 }
 
 pub fn remove_playlist_entries(

@@ -693,6 +693,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "uniffi",
 ]
 
 [[package]]
@@ -2003,6 +2004,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "uniffi",
  "wiremock",
 ]
 
@@ -5354,6 +5356,7 @@ version = "0.16.6"
 dependencies = [
  "futures-util",
  "lindera",
+ "localization",
  "reqwest 0.13.5",
  "serde",
  "serde_json",
@@ -8018,7 +8021,6 @@ dependencies = [
  "lyrics",
  "playback",
  "playback-gstreamer",
- "pulldown-cmark",
  "rufin-connect",
  "rufin-core",
  "rustls-platform-verifier",
@@ -8056,6 +8058,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "uniffi",
  "url",
  "vodozemac",
 ]
@@ -8104,6 +8107,7 @@ dependencies = [
  "playback",
  "playback-cast",
  "presence",
+ "pulldown-cmark",
  "reqwest 0.13.5",
  "resvg",
  "rufin-connect",
@@ -8473,6 +8477,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "uniffi",
  "windows-native-keyring-store",
 ]
 
@@ -10644,6 +10649,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "uniffi",
  "url",
 ]
 

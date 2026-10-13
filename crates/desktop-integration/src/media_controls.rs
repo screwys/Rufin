@@ -664,7 +664,7 @@ mod windows {
         art_url: Option<String>,
     ) -> Option<WindowsMediaState> {
         let playback = playback?;
-        let media = playback.transport.current.as_deref()?;
+        let media = playback.transport.current.as_ref()?;
         let has_active_run = media.id.run.is_some()
             && !matches!(
                 playback.transport.state,
@@ -1086,7 +1086,7 @@ mod macos {
                 self.clear();
                 return;
             };
-            let Some(media) = playback.transport.current.as_deref() else {
+            let Some(media) = playback.transport.current.as_ref() else {
                 self.clear();
                 return;
             };

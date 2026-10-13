@@ -20,6 +20,7 @@ const PERIOD_ACTIVITY: &str = "WITH period_activity AS (
 ) ";
 
 #[derive(Clone, Debug, Default, PartialEq, sqlx::FromRow)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct ActivityTotals {
     pub plays: i64,
     pub duration_millis: i64,
@@ -28,13 +29,14 @@ pub struct ActivityTotals {
 }
 
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct ActivityOverview {
     pub totals: ActivityTotals,
     pub previous: ActivityTotals,
     pub tracks: Vec<HistoryRow>,
     pub albums: Vec<AlbumRow>,
     pub artists: Vec<ArtistRow>,
-    pub genres: Vec<(String, i64)>,
+    pub genres: Vec<GenreActivity>,
 }
 
 impl CalendarActivityPeriod {
@@ -134,7 +136,7 @@ impl Database {
              JOIN genres genre USING(genre_key)
              GROUP BY genre.name ORDER BY plays DESC,genre.name LIMIT ?3"
         );
-        let genres = sqlx::query_as::<_, (String, i64)>(sqlx::AssertSqlSafe(genre_sql.as_str()))
+        let genres = sqlx::query_as::<_, GenreActivity>(sqlx::AssertSqlSafe(genre_sql.as_str()))
             .bind(&from)
             .bind(&until)
             .bind(limit as i64)
@@ -230,4 +232,11 @@ fn history_from_track(row: crate::TrackRow) -> HistoryRow {
         rating: row.rating,
         is_downloaded: row.is_downloaded,
     }
+}
+
+#[derive(Clone, Debug, sqlx::FromRow)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct GenreActivity {
+    pub name: String,
+    pub plays: i64,
 }

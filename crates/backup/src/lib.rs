@@ -1,4 +1,7 @@
 //! Streaming semantic backups. Archive framing is staged before any live owner is changed.
+#[cfg(feature = "bindings")]
+uniffi::setup_scaffolding!();
+
 use chrono::{Datelike, TimeZone};
 use library::{BackupRestoreReport, Database, LibraryError, StateGroups};
 use serde::{Deserialize, Serialize};
@@ -13,6 +16,7 @@ fn invalid(message: impl Into<String>) -> BackupError {
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct BackupContents {
     pub settings: bool,
     pub saved_logins: bool,
@@ -71,6 +75,7 @@ impl BackupContents {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct BackupManifest {
     pub version: u32,
     pub created_at: i64,
@@ -104,7 +109,11 @@ impl StagedBackup {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Error))]
+#[cfg_attr(feature = "bindings", uniffi(flat_error))]
 pub enum BackupError {
+    #[error("{0}")]
+    Operation(String),
     #[error(transparent)]
     Library(#[from] LibraryError),
     #[error(transparent)]
@@ -336,6 +345,7 @@ fn playlist_member_number(name: &str) -> Option<u64> {
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum BackupFrequency {
     #[default]
     Off,
@@ -344,12 +354,13 @@ pub enum BackupFrequency {
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct BackupSchedule {
     pub frequency: BackupFrequency,
     pub hour: u8,
     /// Monday is zero.
     pub weekday: u8,
-    pub retention: usize,
+    pub retention: RetentionCount,
     pub last_successful_at: Option<i64>,
     pub schedule_id: String,
 }
@@ -680,3 +691,11 @@ mod tests {
         );
     }
 }
+
+pub type RetentionCount = usize;
+#[cfg(feature = "bindings")]
+uniffi::custom_type!(RetentionCount, u64, {
+    remote,
+    lower: |value| value as u64,
+    try_lift: |value| Ok(usize::try_from(value)?),
+});

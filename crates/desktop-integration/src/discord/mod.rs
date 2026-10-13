@@ -426,11 +426,11 @@ pub(crate) mod tests {
     ) -> PlaybackView {
         let media_uri =
             library::source_entity_uri(&library::SourceId::new("source"), "track", "track");
-        let current = Arc::new(CurrentMedia {
+        let current = CurrentMedia {
             stream: None,
             id: CurrentMediaId {
                 run: Some(RunId::new(run)),
-                media_uri: media_uri.into(),
+                media_uri,
             },
             row: Arc::new(QueueRow {
                 occurrence_id: None,
@@ -463,7 +463,7 @@ pub(crate) mod tests {
                 track_key: None,
                 provenance: Provenance::Manual,
             }),
-        });
+        };
         PlaybackView {
             queue_loading: false,
             queue_window: Vec::new(),

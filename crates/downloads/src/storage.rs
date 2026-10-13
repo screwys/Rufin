@@ -1,10 +1,17 @@
 use std::path::{Path, PathBuf};
+#[cfg(feature = "bindings")]
+uniffi::custom_type!(PathBuf, String, {
+    remote,
+    lower: |path| path.to_string_lossy().into_owned(),
+    try_lift: |path| Ok(PathBuf::from(path)),
+});
 
 use serde::{Deserialize, Serialize};
 
 /// Native paths keep their released JSON representation. Document roots are URI grants.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(untagged)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum DownloadDirectory {
     Native(PathBuf),
     Document { uri: String },

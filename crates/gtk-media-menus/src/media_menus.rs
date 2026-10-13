@@ -1162,7 +1162,10 @@ pub fn present_playlist_context_menu(
         };
         let menus = Rc::clone(&delete_menus);
         let dialog = gtk_widgets::playlists::delete_playlist_dialog(&playlist.name, move || {
-            rufin_core::playlists::delete_playlist(&menus.source, playlist_key);
+            let source = menus.source.clone();
+            gtk::glib::spawn_future_local(async move {
+                let _ = rufin_core::playlists::delete_playlist(&source, playlist_key).await;
+            });
             (menus.navigate)(Route::Playlists);
         });
         dialog.present(Some(&target));

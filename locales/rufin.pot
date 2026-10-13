@@ -1770,9 +1770,6 @@ msgstr ""
 msgid "Local file access is required before these tags can be saved."
 msgstr ""
 
-msgid "Local file mapping is no longer available"
-msgstr ""
-
 #, rust-format
 msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
@@ -3361,6 +3358,9 @@ msgid "Sort"
 msgstr ""
 
 msgid "Source by position"
+msgstr ""
+
+msgid "Source is no longer available"
 msgstr ""
 
 msgid "Source setup is unavailable"

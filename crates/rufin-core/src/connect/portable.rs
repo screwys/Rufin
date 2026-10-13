@@ -12,6 +12,7 @@ const UNCOMPRESSED_MAGIC: &[u8; 8] = b"RUFINCX1";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum Destination {
     Local {
         path: PathBuf,

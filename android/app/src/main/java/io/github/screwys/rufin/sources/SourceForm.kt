@@ -1,9 +1,11 @@
 package io.github.screwys.rufin.sources
 
+import io.github.screwys.rufin.shared.rufin_core.*
+
 import androidx.compose.runtime.*
-import io.github.screwys.rufin.core.AndroidSourceEditable
+import io.github.screwys.rufin.shared.rufin_core.EditableSource
 import io.github.screwys.rufin.core.translate
-import io.github.screwys.rufin.core.AndroidSourceSetup
+import io.github.screwys.rufin.shared.rufin_core.SourceOwner
 import io.github.screwys.rufin.shared.sources.*
 
 internal class SourceForm {
@@ -29,8 +31,8 @@ internal class SourceForm {
     var encryptSmb by mutableStateOf(false)
     var replaceHeaders by mutableStateOf(true)
 
-    fun load(editable: AndroidSourceEditable) {
-        val saved = editable.form
+    fun load(editable: EditableSource) {
+        val saved = editable
         kind = saved.source.kind; name = saved.source.name; integration = editable.integration
         replaceHeaders = false
         halfStars = saved.source.halfStarsEnabled
@@ -75,18 +77,18 @@ internal class SourceForm {
     fun fileCredentialsEdit(editing: Boolean = true) = FileCredentialsEdit(
         secret.takeUnless { editing && it.isEmpty() }, if (!editing || replaceHeaders) fileHeaders() else null)
 
-    suspend fun submit(setup: AndroidSourceSetup, sourceId: String?) {
+    suspend fun submit(setup: SourceOwner, sourceId: String?) {
         val credentials = CredentialInput(optional(name), url.trim(), username.trim(), secret, trustInvalidCertificate)
         when (kind) {
-            "jellyfin", "emby" -> setup.submitJellyfinEmby(sourceId,
+            "jellyfin", "emby" -> setup.saveJellyfinEmby(sourceId,
                 if (kind == "emby") ServerKind.EMBY else ServerKind.JELLYFIN,
                 credentials, instantMix, kind != "emby" || manualEmby)
-            "navidrome", "subsonic" -> setup.submitSubsonic(sourceId,
+            "navidrome", "subsonic" -> setup.saveSubsonic(sourceId,
                 if (kind == "navidrome") SubsonicFlavor.NAVIDROME else SubsonicFlavor.SUBSONIC,
                 SubsonicAuthentication.valueOf(subsonicAuth.uppercase()), credentials)
-            "webdav", "smb" -> setup.submitFiles(sourceId, kind == "smb", integration, name.trim(),
+            "webdav", "smb" -> setup.saveFiles(sourceId, kind == "smb", integration, name.trim(),
                 fileSettings(), fileCredentialsEdit(sourceId != null))
-            "plex" -> setup.submitPlex(sourceId ?: error(translate("Sign in to Plex first")),
+            "plex" -> setup.savePlex(sourceId ?: error(translate("Sign in to Plex first")),
                 PlexSettingsInput(name.trim(), optional(url), trustInvalidCertificate))
             else -> error(translate("Select Source"))
         }

@@ -42,6 +42,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import io.github.screwys.rufin.core.*
+import io.github.screwys.rufin.shared.rufin_core.releaseNoteHtml
 import kotlinx.coroutines.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -68,7 +69,7 @@ internal fun VersionHistoryPage(more: MoreConnection) {
         }
         history?.let {
             Text("${translate("Installed")}: ${it.installedVersion}", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
-            it.error?.let { message -> io.github.screwys.rufin.ui.ErrorNotice(message) }
+            more.releaseError?.let { message -> io.github.screwys.rufin.ui.ErrorNotice(message) }
         }
         if (note == null) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
             if (more.bridge == null || more.releaseCheck == ReleaseCheck.Checking) CircularProgressIndicator()
@@ -88,7 +89,7 @@ internal fun VersionHistoryPage(more: MoreConnection) {
                 }
             }
         }, update = { web: WebView ->
-            val html = "<html><head><meta charset='utf-8'><style>body{background:${css(colors.surfaceContainerHigh)};color:${css(colors.onSurface)};font-family:sans-serif;padding:10px;line-height:1.5}a{color:${css(colors.primary)}}table{border-collapse:collapse}td,th{padding:6px}img{max-width:100%}</style></head><body>${note.html}</body></html>"
+            val html = "<html><head><meta charset='utf-8'><style>body{background:${css(colors.surfaceContainerHigh)};color:${css(colors.onSurface)};font-family:sans-serif;padding:10px;line-height:1.5}a{color:${css(colors.primary)}}table{border-collapse:collapse}td,th{padding:6px}img{max-width:100%}</style></head><body>${releaseNoteHtml(note.body)}</body></html>"
             val key = note.url to html
             if (web.tag != key) {
                 web.tag = key

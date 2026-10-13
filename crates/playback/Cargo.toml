@@ -11,7 +11,7 @@ readme.workspace = true
 publish.workspace = true
 
 [features]
-bindings = ["dep:uniffi"]
+bindings = ["dep:uniffi", "library/bindings"]
 
 [dependencies]
 uniffi = { workspace = true, optional = true }

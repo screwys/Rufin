@@ -1,5 +1,12 @@
 package io.github.screwys.rufin.settings
 
+import io.github.screwys.rufin.shared.rufin_core.ApplicationPreferences
+import io.github.screwys.rufin.shared.rufin_core.ApplicationPreferenceEdit
+import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
+import io.github.screwys.rufin.shared.rufin_core.ThemePreference
+import io.github.screwys.rufin.shared.rufin_core.AccentPreference
+import io.github.screwys.rufin.shared.rufin_core.ScrobblingOwner
+
 import io.github.screwys.rufin.app.RufinConnection
 
 import android.content.Context
@@ -15,7 +22,6 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import org.json.JSONObject
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 internal class PreferencesConnection(private val connection: RufinConnection, context: Context) {
@@ -35,10 +41,10 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
         private set
     var themeErrors by mutableStateOf<List<String>>(emptyList())
         private set
-    var applicationSettings by mutableStateOf<JSONObject?>(null)
+    var applicationSettings by mutableStateOf<ApplicationPreferences?>(null)
         private set
-    val reduceMotion by derivedStateOf { applicationSettings?.optBoolean("reduce_motion") == true }
-    val showDownloadedBadges by derivedStateOf { applicationSettings?.optBoolean("show_downloaded_badges", true) != false }
+    val reduceMotion by derivedStateOf { applicationSettings?.reduceMotion == true }
+    val showDownloadedBadges by derivedStateOf { applicationSettings?.showDownloadedBadges != false }
 
     fun showThemeErrors(errors: List<String>) { themeErrors = errors }
     fun showFeedback(message: String) { connection.showFeedback(message) }
@@ -58,12 +64,14 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
             service.runtime.collectLatest { result ->
                 val runtime = result?.getOrNull() ?: return@collectLatest
                 val preferences = runtime.preferences()
+                settings = runtime.settings()
+                scrobbling = runtime.scrobbling()
                 installedCatalogIds = null
                 bridge = preferences
                 val subscription = preferences.subscribe(packaged.map { it.removeSuffix(".po") })
                 try {
-                    applicationSettings = JSONObject(preferences.applicationSettings())
-                    connection.more.setReleaseCheckInterval(applicationSettings!!.getLong("release_check_interval_hours"))
+                    applicationSettings = settings!!.applicationPreferences()
+                    connection.more.setReleaseCheckInterval(applicationSettings!!.releaseCheckIntervalHours.toLong())
                     while (currentCoroutineContext().isActive) {
                         val next = subscription.next()
                         applyLanguage(next.language)
@@ -73,6 +81,8 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
                     bridge = null
                     subscription.destroy()
                     preferences.destroy()
+                    settings?.destroy(); settings = null
+                    scrobbling?.destroy(); scrobbling = null
                 }
             }
         }
@@ -105,28 +115,36 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
         translationRevision += 1
     }
 
-    fun selectTheme(id: String) = connection.runAction { bridge?.setTheme(id) }
-    fun refreshApplicationSettings() = connection.runAction {
-        bridge?.let {
-            applicationSettings = JSONObject(it.applicationSettings())
-            connection.more.setReleaseCheckInterval(applicationSettings!!.getLong("release_check_interval_hours"))
-        }
+    fun selectTheme(id: String) = connection.runAction { withContext(Dispatchers.IO) {
+        settings?.setTheme(when (id) { "system" -> ThemePreference.System; "light" -> ThemePreference.Light; "dark" -> ThemePreference.Dark; else -> ThemePreference.Named(id) })
+    } }
+    private var settings: SettingsOwner? = null
+    private var scrobbling: ScrobblingOwner? = null
+    fun refreshApplicationSettings() = connection.runAction { refreshSettings() }
+    private fun refreshSettings() {
+        applicationSettings = settings?.applicationPreferences()
+        applicationSettings?.let { connection.more.setReleaseCheckInterval(it.releaseCheckIntervalHours.toLong()) }
     }
-    fun changePreference(field: String, value: Any) = connection.runAction {
-        val encoded = if (value is String) JSONObject.quote(value) else value.toString()
-        bridge?.let {
-            it.setApplicationPreference(field, encoded)
-            applicationSettings = JSONObject(it.applicationSettings())
-            connection.more.setReleaseCheckInterval(applicationSettings!!.getLong("release_check_interval_hours"))
-        }
+    fun changePreference(edit: ApplicationPreferenceEdit) = connection.runAction {
+        withContext(Dispatchers.IO) { settings?.editApplicationPreferences(edit) }
+        refreshSettings()
     }
-    fun selectAccent(id: String) = connection.runAction { bridge?.setAccent(id) }
-    suspend fun nativePreferences(): AndroidPreferences = checkNotNull(bridge)
+    fun nativeSettings(): SettingsOwner = checkNotNull(settings)
+    fun nativeScrobbling(): ScrobblingOwner = checkNotNull(scrobbling)
+    fun selectAccent(id: String) = connection.runAction { withContext(Dispatchers.IO) { settings?.setAccent(AccentPreference.valueOf(id.uppercase())) } }
     fun changeSecretStorage(mode: String) = connection.runAction {
-        bridge?.let { it.setSecretStorage(mode); applicationSettings = JSONObject(it.applicationSettings()) }
+        val source = connection.connectedService().runtime.value!!.getOrThrow().source()
+        try {
+            source.changeSecretStorage(when (mode) {
+                "system-keyring" -> io.github.screwys.rufin.shared.secrets.SecretStorageMode.SYSTEM_KEYRING
+                "config-file" -> io.github.screwys.rufin.shared.secrets.SecretStorageMode.CONFIG_FILE
+                else -> error("Unknown secret storage")
+            })
+            refreshSettings()
+        } finally { source.destroy() }
     }
-    fun selectThemeAccent(theme: String, id: String) = connection.runAction { bridge?.setThemeAccent(theme, id) }
-    fun selectLanguage(id: String) = connection.runAction { bridge?.setLanguage(id) }
+    fun selectThemeAccent(theme: String, id: String) = connection.runAction { withContext(Dispatchers.IO) { settings?.setThemeAccent(theme, id) } }
+    fun selectLanguage(id: String) = connection.runAction { withContext(Dispatchers.IO) { settings?.setLanguage(id) } }
     fun selectSwipeAction(left: Boolean, id: String) = connection.runAction {
         val action = BrowseSwipeAction.valueOf(id)
         if (left) swipeLeft = action else swipeRight = action

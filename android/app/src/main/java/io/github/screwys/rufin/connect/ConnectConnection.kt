@@ -3,18 +3,26 @@ package io.github.screwys.rufin.connect
 import androidx.compose.runtime.*
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.core.*
+import io.github.screwys.rufin.shared.rufin_core.*
+import io.github.screwys.rufin.shared.rufin_core.Action as ConnectAction
+import io.github.screwys.rufin.shared.rufin_core.Status as ConnectStatus
+import io.github.screwys.rufin.shared.rufin_core.Control as ConnectControl
+import io.github.screwys.rufin.shared.downloads.DownloadDirectory
+
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 import io.github.screwys.rufin.ui.userMessage
 
-internal data class ConnectConfirmation(val kind: AndroidConnectConfirmation, val message: String, val retry: () -> Unit)
+internal data class ConnectMusicFolder(val sourceId: String, val rootId: String, val title: String, val location: String?)
+
+internal data class ConnectConfirmation(val kind: Confirmation, val message: String, val retry: () -> Unit)
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 internal class ConnectConnection(private val model: RufinConnection) {
     var pageVisible by mutableStateOf(false)
     var setupActive by mutableStateOf(false)
         private set
-    var state by mutableStateOf<AndroidConnectStatus?>(null)
+    var state by mutableStateOf<ConnectStatus?>(null)
         private set
     var pending by mutableStateOf(false)
         private set
@@ -22,11 +30,11 @@ internal class ConnectConnection(private val model: RufinConnection) {
         private set
     var confirmation by mutableStateOf<ConnectConfirmation?>(null)
         private set
-    var fileSources by mutableStateOf<List<AndroidConnectFileSource>>(emptyList())
+    var fileSources by mutableStateOf<List<FileIntegration>>(emptyList())
         private set
-    var musicFolders by mutableStateOf<List<AndroidConnectMusicFolder>>(emptyList())
+    var musicFolders by mutableStateOf<List<ConnectMusicFolder>>(emptyList())
         private set
-    private var bridge: AndroidConnect? = null
+    private var bridge: ConnectOwner? = null
     private var dismissedStatusError: String? = null
     val visibleError get() = error ?: state?.error?.takeUnless { it == dismissedStatusError }
 
@@ -38,19 +46,20 @@ internal class ConnectConnection(private val model: RufinConnection) {
                 val runtime = result?.getOrNull() ?: return@collectLatest
                 val owner = runtime.connect()
                 bridge = owner
-                val subscription = owner.subscribe()
+                val subscription = owner.changes()
+                val source = runtime.source()
                 try {
-                    fileSources = withContext(Dispatchers.IO) { owner.fileSources() }
+                    fileSources = withContext(Dispatchers.IO) { source.fileIntegrations() }
                     coroutineScope {
                         launch {
                             snapshotFlow { model.sources }.collect {
-                                fileSources = withContext(Dispatchers.IO) { owner.fileSources() }
+                                fileSources = withContext(Dispatchers.IO) { source.fileIntegrations() }
                             }
                         }
                         while (isActive) {
                             val next = subscription.next()
                             if (next.connecting) setupActive = true
-                            if (!next.connecting && !next.setupPending && !next.adopting) setupActive = false
+                            if (!next.connecting && !next.settings.setupPending && !next.settings.adopting) setupActive = false
                             state = next
                         }
                     }
@@ -61,14 +70,15 @@ internal class ConnectConnection(private val model: RufinConnection) {
                     state = null
                     setupActive = false
                     subscription.destroy()
+                    source.destroy()
                     owner.destroy()
                 }
             }
         }
     }
 
-    private fun request(operation: suspend (AndroidConnect) -> AndroidConnectStatus,
-        confirmed: (suspend (AndroidConnect) -> AndroidConnectStatus)? = null, success: String? = null) {
+    private fun request(operation: suspend (ConnectOwner) -> ConnectStatus,
+        confirmed: (suspend (ConnectOwner) -> ConnectStatus)? = null, success: String? = null) {
         val owner = bridge ?: return
         model.runAction {
             pending = true
@@ -76,26 +86,26 @@ internal class ConnectConnection(private val model: RufinConnection) {
             dismissedStatusError = null
             try { operation(owner).let { if (bridge === owner) { state = it; success?.let { message -> model.showFeedback(message) } } } }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: AndroidConnectException.ConfirmationRequired) {
+            catch (failure: ActionException.ConfirmationRequired) {
                 if (confirmed != null) confirmation = ConnectConfirmation(failure.confirmation, failure.reason) { request(confirmed, success = success) }
                 else error = failure.reason
             }
-            catch (failure: AndroidConnectException.Failed) { error = failure.reason }
+            catch (failure: ActionException.Failed) { error = failure.v1 }
             catch (failure: Exception) { error = failure.userMessage() }
             finally { pending = false }
         }
     }
 
-    fun action(action: AndroidConnectAction) {
+    fun action(action: ConnectAction) {
         val needsLocalNetwork = when (action) {
-            AndroidConnectAction.Discover -> true
-            is AndroidConnectAction.Invite -> state?.nearby == true
-            is AndroidConnectAction.Network -> action.nearby && state?.nearby != true
+            ConnectAction.Discover -> true
+            is ConnectAction.Invite -> state?.settings?.nearby == true
+            is ConnectAction.Network -> action.nearby && state?.settings?.nearby != true
             else -> false
         }
-        val confirmed: (suspend (AndroidConnect) -> AndroidConnectStatus)? =
+        val confirmed: (suspend (ConnectOwner) -> ConnectStatus)? =
             when {
-                action is AndroidConnectAction.Pair && action.approve && !action.replace ->
+                action is ConnectAction.Pair && action.approve && !action.replace ->
                     { owner -> owner.execute(action.copy(replace = true)) }
                 else -> null
             }
@@ -104,26 +114,40 @@ internal class ConnectConnection(private val model: RufinConnection) {
                 throw IllegalStateException(translate("Local network permission was denied"))
             }
             owner.execute(action)
-        }, confirmed = confirmed, success = if (action is AndroidConnectAction.ExportRemote) translate("Saved") else null)
+        }, confirmed = confirmed, success = if (action is ConnectAction.Export) translate("Saved") else null)
     }
-    fun join(invitation: String) = request({ it.execute(AndroidConnectAction.Join(invitation, false)) },
-        { it.execute(AndroidConnectAction.Join(invitation, true)) })
-    fun refreshMusicFolders() = model.runAction { bridge?.let { musicFolders = it.musicFolders() } }
-    fun folder(folder: AndroidConnectMusicFolder, uri: String?) = request({ owner ->
-        val updated = owner.execute(AndroidConnectAction.Folder(folder.sourceId, folder.rootId, uri))
-        musicFolders = owner.musicFolders()
+    fun join(invitation: String) = request({ it.execute(ConnectAction.Join(invitation, false)) },
+        { it.execute(ConnectAction.Join(invitation, true)) })
+    private suspend fun loadMusicFolders(owner: ConnectOwner): List<ConnectMusicFolder> {
+        val settings = owner.status().settings
+        return model.sources?.sources.orEmpty().flatMap { source ->
+            owner.roots(source.id).map { root ->
+                val location = settings.folders["${source.id}/${root.id}"] ?: settings.folders[source.id]
+                ConnectMusicFolder(source.id, root.id, "${source.name} · ${root.label}", when (location) {
+                    is DownloadDirectory.Native -> location.v1
+                    is DownloadDirectory.Document -> location.uri
+                    null -> null
+                })
+            }
+        }
+    }
+    fun storagePath(source: String?): String = if (source == null) "" else state?.let { connectStoragePath(it, source) }.orEmpty()
+    fun refreshMusicFolders() = model.runAction { bridge?.let { musicFolders = loadMusicFolders(it) } }
+    fun folder(folder: ConnectMusicFolder, uri: String?) = request({ owner ->
+        val updated = owner.execute(ConnectAction.Folder(folder.sourceId, folder.rootId, uri?.let { DownloadDirectory.Document(it) } ?: DownloadDirectory.Native("")))
+        musicFolders = loadMusicFolders(owner)
         updated
     })
-    fun encoding(encoding: AndroidConnectEncoding) = request({ it.execute(AndroidConnectAction.Encoding(encoding, false)) },
-        { it.execute(AndroidConnectAction.Encoding(encoding, true)) })
-    fun importDocument(uri: String) = request({ it.importDocument(uri, false) },
-        { it.importDocument(uri, true) }, success = translate("Applied"))
+    fun encoding(encoding: Encoding) = request({ it.execute(ConnectAction.Encoding(encoding, false)) },
+        { it.execute(ConnectAction.Encoding(encoding, true)) })
+    fun importDocument(uri: String) = request({ it.importDocument(uri, false, null) },
+        { it.importDocument(uri, true, null) }, success = translate("Applied"))
     fun exportDocument(uri: String) = request({ it.exportDocument(uri) }, success = translate("Saved"))
     fun importRemote(source: String, path: String) = request({
-        it.execute(AndroidConnectAction.ImportRemote(source, path, false))
-    }, { it.execute(AndroidConnectAction.ImportRemote(source, path, true)) }, success = translate("Applied"))
-    fun exportRemote(source: String, path: String) = action(AndroidConnectAction.ExportRemote(source, path))
-    suspend fun profileFiles(source: String, folder: String): List<String> = bridge?.profileFiles(source, folder).orEmpty()
+        it.execute(ConnectAction.Import(path, source, false, null))
+    }, { it.execute(ConnectAction.Import(path, source, true, null)) }, success = translate("Applied"))
+    fun exportRemote(source: String, path: String) = action(ConnectAction.Export(path, source))
+    suspend fun profileFiles(source: String, folder: String): List<String> = bridge?.listProfileFiles(source, folder).orEmpty()
     fun confirm() { confirmation?.let { choice -> confirmation = null; choice.retry() } }
     fun cancelConfirmation() { confirmation = null }
     fun reportError(failure: Exception) { error = failure.userMessage() }

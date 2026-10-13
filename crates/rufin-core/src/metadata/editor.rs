@@ -46,7 +46,9 @@ pub struct MetadataEditor {
     state: Mutex<Editing>,
 }
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
 impl MetadataEditor {
+    #[cfg_attr(feature = "bindings", uniffi::constructor)]
     pub async fn open(
         source: Arc<SourceOwner>,
         item: MetadataItemId,
@@ -70,7 +72,9 @@ impl MetadataEditor {
             state,
         }))
     }
+}
 
+impl MetadataEditor {
     fn state(&self) -> MutexGuard<'_, Editing> {
         self.state
             .lock()

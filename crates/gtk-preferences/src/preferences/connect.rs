@@ -774,7 +774,7 @@ fn present(shell: &Rc<Preferences>) {
             file.set_text(&if importing {
                 String::new()
             } else {
-                shell.products.connect.status().storage_path(None)
+                rufin_core::connect::connect_storage_path(&shell.products.connect.status(), None)
             });
             storage_changed();
             return;
@@ -821,7 +821,10 @@ fn present(shell: &Rc<Preferences>) {
                 file.set_text(&if importing {
                     String::new()
                 } else {
-                    shell.products.connect.status().storage_path(Some(&id))
+                    rufin_core::connect::connect_storage_path(
+                        &shell.products.connect.status(),
+                        Some(id),
+                    )
                 });
                 changed();
             }),
@@ -854,7 +857,11 @@ fn present(shell: &Rc<Preferences>) {
         let result = shell.products.runtime.spawn(async move {
             let mut mappings = Vec::new();
             for source in sources.iter() {
-                for root in owner.roots(source.id.as_str()).await? {
+                for root in owner
+                    .roots(source.id.to_string())
+                    .await
+                    .map_err(|error| error.to_string())?
+                {
                     mappings.push((source.id.to_string(), source.name.clone(), root));
                 }
             }
@@ -1441,7 +1448,10 @@ fn show_destination(
         1
     });
     draft.borrow_mut().selected = storage.selected();
-    file.set_text(&state.storage_path(source.as_ref()));
+    file.set_text(&rufin_core::connect::connect_storage_path(
+        &state,
+        source.clone(),
+    ));
     storage.set_subtitle(
         source
             .as_ref()

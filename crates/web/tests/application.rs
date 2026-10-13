@@ -75,9 +75,7 @@ async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs
         .products
         .source
         .change_secret_storage(secrets::SecretStorageMode::ConfigFile)
-        .recv()
         .await
-        .unwrap()
         .unwrap();
     let controller = Controller::new(inputs.products.clone());
     let mut status = controller.status();
@@ -169,7 +167,7 @@ async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs
         .await
         .unwrap();
     assert!(connected.chunk().await.unwrap().is_some());
-    let regenerated = controller.regenerate_token().await.unwrap().unwrap();
+    let regenerated = controller.token(true).await.unwrap();
     tokio::time::timeout(Duration::from_secs(5), async {
         while let Ok(Some(_)) = connected.chunk().await {}
     })

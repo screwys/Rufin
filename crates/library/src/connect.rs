@@ -21,6 +21,7 @@ pub struct ConnectChange {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, sqlx::FromRow)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct ConnectRoot {
     pub id: String,
     pub label: String,

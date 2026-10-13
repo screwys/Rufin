@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.sources
 
+import io.github.screwys.rufin.shared.rufin_core.*
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -31,20 +33,20 @@ import kotlinx.coroutines.withContext
 internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (String) -> Unit,
     embedded: Boolean = false, connectionsOnly: Boolean = false) {
     val state = model.sources
-    var bridge by remember { mutableStateOf<AndroidSourceSetup?>(null) }
+    var bridge by remember { mutableStateOf<SourceOwner?>(null) }
     var connections by remember { mutableStateOf<List<FileIntegration>>(emptyList()) }
     var remove by remember { mutableStateOf<Pair<String, String>?>(null) }
     var editingConnection by remember { mutableStateOf<String?>(null) }
     var addingConnection by remember { mutableStateOf(false) }
     LaunchedEffect(model.service, model.ready) {
         val runtime = model.service?.runtime?.value?.getOrNull() ?: return@LaunchedEffect
-        val setup = runtime.sourceSetup()
+        val setup = runtime.source()
         bridge = setup
-        try { connections = withContext(Dispatchers.IO) { setup.fileConnections() } }
+        try { connections = withContext(Dispatchers.IO) { setup.fileIntegrations().filter { !it.musicSource } } }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { model.runAction { throw error } }
     }
-    LaunchedEffect(state, bridge) { bridge?.let { setup -> connections = withContext(Dispatchers.IO) { setup.fileConnections() } } }
+    LaunchedEffect(state, bridge) { bridge?.let { setup -> connections = withContext(Dispatchers.IO) { setup.fileIntegrations().filter { !it.musicSource } } } }
     DisposableEffect(bridge) { val owned = bridge; onDispose { owned?.destroy() } }
     SettingsPage(embedded = embedded) {
         if (!connectionsOnly) {
@@ -56,7 +58,7 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
                 shape = settingsRowShape(index, sources.size + 1), selected = selected,
                 leading = { SourceIcon(source.kind, Modifier.size(24.dp)) }, trailing = {
                     Row {
-                        IconButton({ model.runAction { model.connectedService().runtime.value!!.getOrThrow().refreshSource(source.id) } }) {
+                        IconButton({ model.runAction { model.connectedService().runtime.value!!.getOrThrow().source().use { it.refreshSource(source.id) } } }) {
                             RufinIcon("rufin-view-refresh-symbolic", translate("Refresh"), Modifier.size(20.dp))
                         }
                         IconButton({ remove = source.id to source.name }) {
@@ -89,14 +91,14 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         SourceSetupScreen(model, {
             addingConnection = false; editingConnection = null
-            model.runAction { bridge?.let { connections = it.fileConnections() } }
+            model.runAction { bridge?.let { connections = it.fileIntegrations().filter { !it.musicSource } } }
         }, editingConnection, connectionsOnly = true)
     }
     remove?.let { (id, name) ->
         AlertDialog(onDismissRequest = { remove = null }, title = { Text(translate("Forget Source")) }, text = { Text(name) },
             confirmButton = { TextButton({
                 remove = null
-                model.runAction { (bridge ?: error(translate("Source setup is unavailable"))).forget(id) }
+                model.runAction { (bridge ?: error(translate("Source setup is unavailable"))).forgetSource(id) }
             }) { Text(translate("Forget Source")) } }, dismissButton = { TextButton({ remove = null }) { Text(translate("Cancel")) } })
     }
 }

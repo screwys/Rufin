@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.ui.ErrorRow
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.LocalPlayerBottomPadding
@@ -31,7 +32,7 @@ import io.github.screwys.rufin.core.translate
 internal fun PinsContent(model: RufinConnection, browse: BrowseConnection, player: PlayerConnection) {
     val scope = rememberCoroutineScope()
     val options = remember { BrowseOptions() }
-    val location = remember { BrowseLocation("", "Pins", "Pins", options) }
+    val location = remember { BrowseLocation(Route.Home, "Pins", "Pins", options) }
     val page = remember(model, browse) { BrowsePage(model, browse, location, options, scope, pins = true) }
     LaunchedEffect(page) { page.observe() }
     SideEffect { browse.visiblePage = page }

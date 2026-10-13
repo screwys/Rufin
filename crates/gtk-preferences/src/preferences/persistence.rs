@@ -42,24 +42,14 @@ impl Preferences {
     }
 
     pub(super) async fn set_secret_storage_mode(self: &Rc<Self>, mode: SecretStorageMode) -> bool {
-        match self
-            .products
-            .source
-            .change_secret_storage(mode)
-            .recv()
-            .await
-        {
-            Ok(Ok(())) => {
+        match self.products.source.change_secret_storage(mode).await {
+            Ok(()) => {
                 *self.settings.current.borrow_mut() = self.settings.persistence.load();
                 self.products.scrobbling.storage_reset();
                 true
             }
-            Ok(Err(error)) => {
+            Err(error) => {
                 warn!(%error, "failed to change secret storage mode");
-                false
-            }
-            Err(_) => {
-                warn!("secret storage operation ended before completion");
                 false
             }
         }
@@ -74,7 +64,7 @@ impl Preferences {
         if !update(&mut preferences) {
             return;
         }
-        if let Err(error) = self.products.scrobbling.save(&preferences) {
+        if let Err(error) = self.products.scrobbling.save(preferences) {
             warn!(%error, action = warning_action, "failed to save scrobbling settings");
         }
     }
@@ -82,24 +72,22 @@ impl Preferences {
     pub(super) fn save_scrobbling_credential(
         self: &Rc<Self>,
         warning_action: &'static str,
-        update: impl FnOnce(&mut ScrobblingPreferences) + Send + 'static,
+        edit: rufin_core::scrobbling::ScrobblingCredentialEdit,
     ) {
         let previous = self.products.scrobbling.preferences();
-        let saved = self.products.scrobbling.save_credential(update);
         let shell = Rc::clone(self);
         gtk::glib::spawn_future_local(async move {
-            match saved.recv().await {
-                Ok(Ok(committed)) => {
+            match shell.products.scrobbling.save_credential(edit).await {
+                Ok(committed) => {
                     shell.settings.current.borrow_mut().lastfm_api_key =
                         committed.lastfm.api_key.clone();
                     if previous.lastfm.api_key != committed.lastfm.api_key {
                         shell.retry_external_artwork(warning_action);
                     }
                 }
-                Ok(Err(error)) => {
+                Err(error) => {
                     warn!(%error, action = warning_action, "failed to save scrobbling settings")
                 }
-                Err(_) => {}
             }
         });
     }

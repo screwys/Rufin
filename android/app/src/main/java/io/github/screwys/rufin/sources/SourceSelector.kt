@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.sources
 
+import io.github.screwys.rufin.shared.rufin_core.*
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,9 +26,9 @@ internal fun SourceSelector(expanded: Boolean, model: RufinConnection, browse: B
     val sources = model.sources
     val selectedId = sources?.selectedSourceId
     var folders by remember(selectedId) { mutableStateOf<AndroidMusicFolderState?>(null) }
-    LaunchedEffect(expanded, browse.library, selectedId, model.libraryState?.sourceId, model.libraryState?.revision) {
+    LaunchedEffect(expanded, browse.library, selectedId, model.sources?.selectedSourceId, model.catalogRevision) {
         val library = browse.library ?: return@LaunchedEffect
-        if (!expanded || selectedId != model.libraryState?.sourceId) return@LaunchedEffect
+        if (!expanded || selectedId != model.sources?.selectedSourceId) return@LaunchedEffect
         try { folders = library.musicFolders() }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { model.runAction { throw failure } }

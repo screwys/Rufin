@@ -82,9 +82,13 @@ pub fn scrobbling_page(
     let lastfm_api_shell = Rc::clone(shell);
     lastfm_api_key.connect_apply(move |row| {
         let api_key = row.text().trim().to_string();
-        lastfm_api_shell.save_scrobbling_credential("Last.fm API key setting", move |settings| {
-            settings.lastfm.api_key = api_key;
-        });
+        lastfm_api_shell.save_scrobbling_credential(
+            "Last.fm API key setting",
+            rufin_core::scrobbling::ScrobblingCredentialEdit::LastFm {
+                api_key: Some(api_key),
+                api_secret: None,
+            },
+        );
     });
     lastfm_api_secret.set_text(&drafts.borrow().lastfm.api_secret);
     let secret_drafts = drafts.clone();
@@ -96,8 +100,9 @@ pub fn scrobbling_page(
         let api_secret = row.text().trim().to_string();
         lastfm_secret_shell.save_scrobbling_credential(
             "Last.fm shared secret setting",
-            move |settings| {
-                settings.lastfm.api_secret = api_secret;
+            rufin_core::scrobbling::ScrobblingCredentialEdit::LastFm {
+                api_key: None,
+                api_secret: Some(api_secret),
             },
         );
     });
@@ -250,9 +255,7 @@ pub fn scrobbling_page(
         let token = row.text().trim().to_string();
         listenbrainz_token_shell.save_scrobbling_credential(
             "ListenBrainz token setting",
-            move |settings| {
-                settings.listenbrainz.user_token = token;
-            },
+            rufin_core::scrobbling::ScrobblingCredentialEdit::ListenBrainz { user_token: token },
         );
     });
     listenbrainz_now_playing.set_active(settings.listenbrainz.now_playing_enabled);
@@ -264,13 +267,13 @@ pub fn scrobbling_page(
             replace_if_changed(&mut settings.listenbrainz.now_playing_enabled, active)
         },
     );
-    let loaded = shell.products.scrobbling.load_preferences();
+    let owner = shell.products.scrobbling.clone();
     let initial_key = lastfm_api_key.text();
     let initial_secret = lastfm_api_secret.text();
     let initial_token = listenbrainz_token.text();
     let weak_page = page.downgrade();
     gtk::glib::spawn_future_local(async move {
-        let Ok(loaded) = loaded.recv().await else {
+        let Ok(loaded) = owner.load_preferences().await else {
             return;
         };
         if weak_page.upgrade().is_none() {
@@ -380,17 +383,17 @@ async fn connect_scrobbling(
     refresh_external_artwork: bool,
 ) -> Result<String, String> {
     let events = shell.products.scrobbling.connect(request);
-    while let Ok(event) = events.recv().await {
+    while let Ok(event) = events.next().await {
         match event {
             ScrobblingConnectionEvent::OpenUrl { url, opened } => {
                 let launcher = gtk::UriLauncher::new(&url);
                 match launcher.launch_future(Some(&shell.window)).await {
                     Ok(()) => {
-                        let _ = opened.send(Ok(())).await;
+                        opened.complete(None).await;
                     }
                     Err(error) => {
                         let error = format!("{open_error}{error}");
-                        let _ = opened.send(Err(error.clone())).await;
+                        opened.complete(Some(error.clone())).await;
                         return Err(error);
                     }
                 }

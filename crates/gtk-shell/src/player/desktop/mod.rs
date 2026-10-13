@@ -153,7 +153,7 @@ impl Shell {
         refresh_current: bool,
     ) {
         let artwork = player.and_then(|player| {
-            player.transport.current.as_deref().and_then(|media| {
+            player.transport.current.as_ref().and_then(|media| {
                 self.artwork
                     .current_playback_cached_artwork_path(media, THUMB_COVER_SIZE)
                     .map(|artwork| artwork.path)
@@ -181,7 +181,7 @@ impl Shell {
             playback
                 .transport
                 .current
-                .as_deref()
+                .as_ref()
                 .and_then(|media| self.current_art_url(media))
         });
         self.desktop

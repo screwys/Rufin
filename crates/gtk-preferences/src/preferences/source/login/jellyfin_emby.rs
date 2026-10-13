@@ -522,31 +522,34 @@ impl Flow {
                 } else {
                     host_for_submit.input()
                 };
-                if let Some(source_id) = source_id.clone() {
-                    let result = source.update_source(SourceSettingsChange::JellyfinEmby {
-                        source_id,
-                        credentials,
-                        use_instant_mix,
-                        connect_manually: draft.manual,
-                    });
-                    drop(draft);
+                let editing = source_id.is_some();
+                let source = source.clone();
+                let source_id = source_id.clone();
+                let connect_manually = draft.manual;
+                drop(draft);
+                let result = async move {
+                    source
+                        .save_jellyfin_emby(
+                            source_id,
+                            if emby {
+                                sources::ServerKind::Emby
+                            } else {
+                                sources::ServerKind::Jellyfin
+                            },
+                            credentials,
+                            use_instant_mix,
+                            connect_manually,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())
+                };
+                if editing {
                     if let Some(shell) = weak_shell.upgrade() {
-                        complete_source_save(&shell, button, async move {
-                            result
-                                .recv()
-                                .await
-                                .unwrap_or_else(|error| Err(error.to_string()))
-                        });
+                        complete_source_save(&shell, button, result);
                     }
                 } else {
-                    source.configure_source(SourceSetup::JellyfinEmby {
-                        kind: if emby {
-                            sources::ServerKind::Emby
-                        } else {
-                            sources::ServerKind::Jellyfin
-                        },
-                        credentials,
-                        use_instant_mix,
+                    gtk::glib::spawn_future_local(async move {
+                        let _ = result.await;
                     });
                 }
             }

@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.sources
 
+import io.github.screwys.rufin.shared.rufin_core.*
+
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -25,7 +27,7 @@ internal fun LocalAccessDialog(model: RufinConnection, sourceId: String, sampleP
     onDismiss: () -> Unit, onSaved: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var bridge by remember { mutableStateOf<AndroidSourceSetup?>(null) }
+    var bridge by remember { mutableStateOf<SourceOwner?>(null) }
     var root by remember { mutableStateOf("") }
     var serverPrefix by remember { mutableStateOf("") }
     var localPrefix by remember { mutableStateOf("") }
@@ -37,9 +39,9 @@ internal fun LocalAccessDialog(model: RufinConnection, sourceId: String, sampleP
         try {
             val runtime = model.connectedService().runtime.value?.getOrThrow()
                 ?: error("Service is not connected")
-            val setup = runtime.sourceSetup()
+            val setup = runtime.source()
             bridge = setup
-            val summary = setup.localAccess(sourceId)
+            val summary = setup.listSources().localAccess.find { it.sourceId == sourceId }
             summary?.access?.let { access ->
                 root = access.rootPath
                 serverPrefix = access.serverPrefix.orEmpty()
@@ -89,7 +91,7 @@ internal fun LocalAccessDialog(model: RufinConnection, sourceId: String, sampleP
                 try {
                     val form = SourceLocalAccess(sourceId, root, serverPrefix.trim().ifEmpty { null },
                         localPrefix.trim().ifEmpty { null }, sample.takeIf { it.isNotBlank() })
-                    bridge!!.saveLocalAccess(form)
+                    bridge!!.saveLocalAccess(form, true)
                     onSaved()
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (error: Exception) { failure = error.userMessage() }

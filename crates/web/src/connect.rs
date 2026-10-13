@@ -19,10 +19,15 @@ async fn roots(
 ) -> Result<axum::Json<Vec<library::ConnectRoot>>, Error> {
     products
         .connect
-        .roots(&query.source)
+        .roots(query.source)
         .await
         .map(axum::Json)
-        .map_err(|error| (StatusCode::BAD_REQUEST, axum::Json(json!({"error":error}))))
+        .map_err(|error| {
+            (
+                StatusCode::BAD_REQUEST,
+                axum::Json(json!({"error":error.to_string()})),
+            )
+        })
 }
 
 async fn continuation(

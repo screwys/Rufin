@@ -2693,23 +2693,21 @@ impl Player {
             queue: summary,
             queue_window: sequence.entries().iter().map(projected_row).collect(),
             transport: TransportView {
-                current: sequence.selected().map(|entry| {
-                    Arc::new(CurrentMedia {
-                        stream: self
-                            .current_run
-                            .as_ref()
-                            .and_then(|run| run.resolved_stream.as_ref())
-                            .map(|stream| playback::CurrentStream {
-                                local: stream.local_input,
-                                format: stream.content_type.clone(),
-                                transcoded: stream.transcoded(),
-                            }),
-                        id: CurrentMediaId {
-                            run: self.current_run(),
-                            media_uri: entry.media_uri.clone().into(),
-                        },
-                        row: projected_row(entry),
-                    })
+                current: sequence.selected().map(|entry| CurrentMedia {
+                    stream: self
+                        .current_run
+                        .as_ref()
+                        .and_then(|run| run.resolved_stream.as_ref())
+                        .map(|stream| playback::CurrentStream {
+                            local: stream.local_input,
+                            format: stream.content_type.clone(),
+                            transcoded: stream.transcoded(),
+                        }),
+                    id: CurrentMediaId {
+                        run: self.current_run(),
+                        media_uri: entry.media_uri.clone(),
+                    },
+                    row: projected_row(entry),
                 }),
                 state: self.status(),
                 desired_playing: self.desired_playing(),

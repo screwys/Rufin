@@ -46,22 +46,19 @@ impl AndroidBrowseQuery {
         };
         let mut items = vec![AndroidBreadcrumb {
             title: localization::tr("Folders"),
-            route: route_json(Route::Folders { path: Vec::new() }),
+            route: Route::Folders { path: Vec::new() },
         }];
         items.extend(
             path.iter()
                 .enumerate()
                 .map(|(index, item)| AndroidBreadcrumb {
                     title: item.name.clone(),
-                    route: route_json(Route::Folders {
+                    route: Route::Folders {
                         path: path[..=index].to_vec(),
-                    }),
+                    },
                 }),
         );
         items
-    }
-    pub fn route_kind(&self) -> String {
-        core_route_kind(&self.route)
     }
 
     pub async fn section_positions(
@@ -209,11 +206,7 @@ impl AndroidBrowseQuery {
         rufin_core::settings::available_sort_fields(key)
             .iter()
             .map(|field| AndroidSortField {
-                id: serde_json::to_value(field)
-                    .expect("Sort field serialization")
-                    .as_str()
-                    .expect("Sort field name")
-                    .to_string(),
+                id: *field,
                 title: localization::tr(rufin_core::settings::presentation::library_field_title(
                     *field,
                 )),
@@ -222,21 +215,10 @@ impl AndroidBrowseQuery {
     }
 
     pub fn display_settings(&self) -> AndroidBrowseDisplay {
-        browse_display(library_list_key(&self.route, self.category), &self.display)
-    }
-
-    pub fn sort_selection(&self) -> AndroidSortSelection {
-        AndroidSortSelection {
-            id: serde_json::to_value(self.sort)
-                .expect("Sort field serialization")
-                .as_str()
-                .expect("Sort field name")
-                .to_string(),
-            title: localization::tr(rufin_core::settings::presentation::library_field_title(
-                self.sort,
-            )),
-            descending: self.descending,
-        }
+        let mut display = self.display.clone();
+        display.sort_key = self.sort;
+        display.descending = self.descending;
+        browse_display(library_list_key(&self.route, self.category), &display)
     }
 
     pub async fn page(
@@ -340,8 +322,7 @@ impl AndroidBrowseQuery {
                     let rows = self.rows(0, usize::MAX).await.map_err(error)?;
                     let keys = rows
                         .into_iter()
-                        .filter(|row| row.kind == "track")
-                        .filter_map(|row| row.track_key.map(library::TrackKey::from_raw))
+                        .filter_map(|row| row.track_key())
                         .collect::<Vec<_>>();
                     let anchor = keys
                         .iter()

@@ -3,10 +3,9 @@ package io.github.screwys.rufin.player
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import io.github.screwys.rufin.RufinService
-import io.github.screwys.rufin.core.AndroidOutputKind
-import io.github.screwys.rufin.core.AndroidPlaybackState
-import io.github.screwys.rufin.core.AndroidRepeatMode
-import io.github.screwys.rufin.core.AndroidTransportState
+import io.github.screwys.rufin.core.AndroidPlaybackUpdate
+import io.github.screwys.rufin.shared.playback.*
+import io.github.screwys.rufin.shared.library.*
 import java.time.Duration
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -24,43 +23,28 @@ import org.robolectric.shadows.ShadowSystemClock
 @LooperMode(LooperMode.Mode.PAUSED)
 class RufinPlayerTest {
     private lateinit var player: RufinPlayer
-    private val playing = AndroidPlaybackState(
-        operationFailures = emptyList(),
-        mediaUri = "file:///test/track.wav",
-        mediaRun = 1UL,
-        artworkIdentity = null,
-        artworkRevision = 0UL,
-        favorite = false,
-        queueRevision = 1UL,
-        queueTotal = 1UL,
-        queueIndex = 0UL,
-        title = "Track",
-        artist = "",
-        album = "",
-        contextId = null,
-        contextTitle = null,
-        contextCategory = null,
-        contextKind = "queue",
-        sourceLabels = listOf("WAV", "44.1 kHz"),
-        positionMillis = 10_000UL,
-        positionObservedAtMillis = 1UL,
-        positionAdvancing = true,
-        playbackRate = 1.0,
-        durationMillis = 60_000UL,
-        state = AndroidTransportState.PLAYING,
-        desiredPlaying = true,
-        canSeek = true,
-        canNext = true,
-        canPrevious = true,
-        shuffle = false,
-        autoDj = false,
-        repeat = AndroidRepeatMode.OFF,
-        volume = 1.0,
-        localOutput = true,
-        outputKind = AndroidOutputKind.LOCAL,
-        outputId = "",
-        outputName = null,
-        error = null,
+    private val row = object : QueueRow(io.github.screwys.rufin.shared.library.NoHandle) {
+        override fun sameRow(other: QueueRow) = this === other
+        override fun item() = QueueItem(
+            mediaUri = "file:///test/track.wav", title = "Track", artist = "", album = "",
+            albumDisplayArtist = null, artworkBinding = null, durationMillis = 60_000L,
+            discNumber = null, trackNumber = null, year = null, releaseDate = null, sourceFormat = null,
+            audioProperties = AudioProperties(null, null, null, null),
+            musicbrainzRecordingId = null, musicbrainzReleaseTrackId = null, musicbrainzAlbumId = null,
+            musicbrainzReleaseGroupId = null, primaryArtistMusicbrainzId = null,
+        )
+    }
+    private val playing = AndroidPlaybackUpdate(
+        queueLoading = false,
+        queue = QueueSummaryView(1UL, 1UL, 0UL, null, true),
+        notices = emptyList(), favorite = false, artworkRevision = 0UL, sourceLabels = listOf("WAV", "44.1 kHz"),
+        transport = TransportView(
+            current = CurrentMedia(null, CurrentMediaId(1UL, "file:///test/track.wav"), row),
+            state = TransportStatus.PLAYING, desiredPlaying = true,
+            positionMillis = 10_000UL, positionObservedAtMillis = 1UL, playbackRate = 1.0,
+            durationMillis = 60_000UL, canSeek = true, bufferingPercent = null, error = null,
+        ),
+        controls = ControlsView(QueueRepeatMode.OFF, false, false, 1.0, false, null, PlaybackOutput.Local),
     )
 
     @Before
@@ -80,12 +64,18 @@ class RufinPlayerTest {
         assertEquals(10_250UL, player.positionNow())
         assertEquals(10_250L, player.currentPosition)
 
-        player.update(playing.copy(favorite = true, title = "Updated track"))
+        val updatedRow = object : QueueRow(io.github.screwys.rufin.shared.library.NoHandle) {
+            override fun sameRow(other: QueueRow) = this === other
+            override fun item() = row.item().copy(title = "Updated track")
+        }
+        val updated = playing.copy(favorite = true,
+            transport = playing.transport.copy(current = playing.transport.current!!.copy(row = updatedRow)))
+        player.update(updated)
         ShadowSystemClock.advanceBy(Duration.ofMillis(250))
         assertEquals(10_500UL, player.positionNow())
         assertEquals(10_500L, player.currentPosition)
 
-        player.update(playing.copy(favorite = true, queueRevision = 2UL))
+        player.update(updated.copy(queue = playing.queue.copy(revision = 2UL)))
         ShadowSystemClock.advanceBy(Duration.ofMillis(250))
         assertEquals(10_750UL, player.positionNow())
         assertEquals(10_750L, player.currentPosition)
@@ -95,30 +85,28 @@ class RufinPlayerTest {
     fun pausedSnapshotsStayFixedAndResumeFromTheReportedPosition() {
         player.update(playing)
         ShadowSystemClock.advanceBy(Duration.ofMillis(250))
-        val paused = playing.copy(
+        val paused = playing.copy(transport = playing.transport.copy(
             positionMillis = 10_250UL,
             positionObservedAtMillis = 2UL,
-            positionAdvancing = false,
-            state = AndroidTransportState.PAUSED,
+            state = TransportStatus.PAUSED,
             desiredPlaying = false,
-        )
+        ))
         player.update(paused)
         ShadowSystemClock.advanceBy(Duration.ofSeconds(1))
         assertEquals(10_250UL, player.positionNow())
         assertEquals(10_250L, player.currentPosition)
 
-        player.update(paused.copy(favorite = true, positionObservedAtMillis = 3UL))
+        player.update(paused.copy(transport = paused.transport.copy(positionObservedAtMillis = 3UL)))
         ShadowSystemClock.advanceBy(Duration.ofSeconds(1))
         assertEquals(10_250UL, player.positionNow())
         assertEquals(10_250L, player.currentPosition)
 
-        player.update(paused.copy(
+        player.update(paused.copy(transport = paused.transport.copy(
             positionObservedAtMillis = 4UL,
-            positionAdvancing = true,
             playbackRate = 1.5,
-            state = AndroidTransportState.PLAYING,
+            state = TransportStatus.PLAYING,
             desiredPlaying = true,
-        ))
+        )))
         ShadowSystemClock.advanceBy(Duration.ofMillis(400))
         assertEquals(10_850UL, player.positionNow())
         assertEquals(10_850L, player.currentPosition)
@@ -126,22 +114,23 @@ class RufinPlayerTest {
 
     @Test
     fun repeatRunWaitsAtZeroForAnOutputPosition() {
-        player.update(playing.copy(positionMillis = 59_000UL, repeat = AndroidRepeatMode.ONE))
+        player.update(playing.copy(transport = playing.transport.copy(positionMillis = 59_000UL), controls = playing.controls.copy(repeatMode = QueueRepeatMode.ONE)))
         ShadowSystemClock.advanceBy(Duration.ofMillis(800))
         assertEquals(59_800UL, player.positionNow())
 
         val repeated = playing.copy(
-            mediaRun = 2UL,
-            positionMillis = 0UL,
-            positionObservedAtMillis = 2UL,
-            repeat = AndroidRepeatMode.ONE,
+            transport = playing.transport.copy(
+                current = playing.transport.current!!.copy(id = playing.transport.current!!.id.copy(run = 2UL)),
+                positionMillis = 0UL, positionObservedAtMillis = 2UL,
+            ),
+            controls = playing.controls.copy(repeatMode = QueueRepeatMode.ONE),
         )
         player.update(repeated)
         ShadowSystemClock.advanceBy(Duration.ofSeconds(1))
         assertEquals(0UL, player.positionNow())
         assertEquals(0L, player.currentPosition)
 
-        player.update(repeated.copy(positionMillis = 100UL, positionObservedAtMillis = 3UL))
+        player.update(repeated.copy(transport = repeated.transport.copy(positionMillis = 100UL, positionObservedAtMillis = 3UL)))
         ShadowSystemClock.advanceBy(Duration.ofMillis(500))
         assertEquals(600UL, player.positionNow())
         assertEquals(600L, player.currentPosition)
@@ -151,17 +140,16 @@ class RufinPlayerTest {
     fun pauseFadeKeepsAdvancingUntilTheOutputStops() {
         player.update(playing)
         ShadowSystemClock.advanceBy(Duration.ofMillis(100))
-        player.update(playing.copy(desiredPlaying = false))
+        player.update(playing.copy(transport = playing.transport.copy(desiredPlaying = false)))
         ShadowSystemClock.advanceBy(Duration.ofMillis(200))
         assertEquals(10_300UL, player.positionNow())
 
-        player.update(playing.copy(
+        player.update(playing.copy(transport = playing.transport.copy(
             desiredPlaying = false,
             positionMillis = 10_300UL,
             positionObservedAtMillis = 2UL,
-            positionAdvancing = false,
-            state = AndroidTransportState.PAUSED,
-        ))
+            state = TransportStatus.PAUSED,
+        )))
         ShadowSystemClock.advanceBy(Duration.ofSeconds(1))
         assertEquals(10_300UL, player.positionNow())
         assertEquals(10_300L, player.currentPosition)
@@ -171,12 +159,8 @@ class RufinPlayerTest {
     @Test
     fun remotePlaybackAdvancesFromZeroAndStopsAtTheDuration() {
         player.update(playing.copy(
-            positionMillis = 0UL,
-            playbackRate = 2.0,
-            durationMillis = 1_500UL,
-            localOutput = false,
-            outputKind = AndroidOutputKind.GOOGLE_CAST,
-            outputId = "remote",
+            transport = playing.transport.copy(positionMillis = 0UL, playbackRate = 2.0, durationMillis = 1_500UL),
+            controls = playing.controls.copy(playbackOutput = PlaybackOutput.Remote(RemoteOutput("remote", "Remote", RemoteOutputProtocol.GOOGLE_CAST))),
         ))
         ShadowSystemClock.advanceBy(Duration.ofMillis(500))
         assertEquals(1_000UL, player.positionNow())

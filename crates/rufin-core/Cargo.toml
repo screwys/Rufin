@@ -11,7 +11,7 @@ readme.workspace = true
 publish.workspace = true
 
 [features]
-bindings = ["dep:uniffi", "playback/bindings", "lyrics/bindings", "sources/bindings", "metadata-lookup/bindings"]
+bindings = ["dep:uniffi", "playback/bindings", "lyrics/bindings", "sources/bindings", "metadata-lookup/bindings", "library/bindings", "backup/bindings", "secrets/bindings", "downloads/bindings", "rufin-connect/bindings"]
 
 [dependencies]
 uniffi = { workspace = true, optional = true }
@@ -31,6 +31,7 @@ futures-util.workspace = true
 flate2.workspace = true
 artwork.workspace = true
 presence.workspace = true
+pulldown-cmark = { workspace = true, features = ["html"] }
 directories.workspace = true
 downloads.workspace = true
 getrandom.workspace = true

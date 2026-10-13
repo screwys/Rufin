@@ -59,9 +59,9 @@ private data class MiniMedia(val uri: String, val title: String, val subtitle: S
 @Composable
 internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: () -> Unit) {
     val media by remember(player) { derivedStateOf {
-        player.playback?.let { current -> current.mediaUri?.let { uri ->
-            MiniMedia(uri, current.title, current.artist,
-                current.desiredPlaying, current.durationMillis)
+        player.playback?.let { current -> current.transport.current?.id?.mediaUri?.let { uri ->
+            MiniMedia(uri, player.currentItem?.title.orEmpty(), player.currentItem?.artist.orEmpty(),
+                current.transport.desiredPlaying, current.transport.durationMillis)
         } }
     } }
     val current = media ?: return
@@ -114,7 +114,7 @@ internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: 
                     }
                 }
                 PlayerIconButton("rufin-speaker-front-symbolic", "Audio output", onOutput)
-                val favorite = player.projectedFavorite(current.uri, player.playback?.favorite == true)
+                val favorite = player.projectedFavorite(current.uri, player.favorite)
                 PlayerIconButton(if (favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
                     "Favorite current track", player::favorite, selected = favorite)
                 IconButton(player::togglePlayback) {
@@ -122,7 +122,7 @@ internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: 
                         translate(if (current.playing) "Pause" else "Play"), Modifier.size(24.dp))
                 }
             }
-            if (current.duration > 0UL) MiniProgress(player, current.duration, player.playback?.positionAdvancing == true)
+            if (current.duration > 0UL) MiniProgress(player, current.duration, player.playback?.transport?.state == io.github.screwys.rufin.shared.playback.TransportStatus.PLAYING)
         }
     }
 }
@@ -139,7 +139,7 @@ private fun MiniProgress(player: PlayerConnection, duration: ULong, playing: Boo
         } while (interpolate)
     }
     LinearProgressIndicator(
-        progress = { ((if (interpolate) position else player.playback?.positionMillis ?: 0UL).toDouble() /
+        progress = { ((if (interpolate) position else player.playback?.transport?.positionMillis ?: 0UL).toDouble() /
             duration.toDouble()).toFloat().coerceIn(0f, 1f) },
         modifier = Modifier.fillMaxWidth().height(3.dp), color = MaterialTheme.colorScheme.primary,
         trackColor = Color.Transparent,

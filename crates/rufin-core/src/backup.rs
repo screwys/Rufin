@@ -37,6 +37,7 @@ struct PlaylistPins {
 }
 
 #[derive(Clone)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct BackupOwner {
     default_directory: std::path::PathBuf,
     database: Arc<library::Database>,
@@ -393,19 +394,6 @@ impl BackupOwner {
         )
     }
 
-    pub fn stage_document(
-        &self,
-        uri: String,
-        passphrase: Option<String>,
-        contents: backup::BackupContents,
-    ) -> Receiver<Result<BackupPreview, String>> {
-        self.stage_input(
-            move || sources::open_document_input(&uri).map_err(|error| error.to_string()),
-            passphrase,
-            contents,
-        )
-    }
-
     fn stage_input<R: std::io::Read + Send + 'static>(
         &self,
         open: impl FnOnce() -> Result<R, String> + Send + 'static,
@@ -437,59 +425,87 @@ impl BackupOwner {
         });
         receive
     }
+}
 
-    pub fn export_document(
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl BackupOwner {
+    pub async fn stage_document(
         &self,
         uri: String,
         passphrase: Option<String>,
         contents: backup::BackupContents,
-    ) -> Receiver<Result<(), String>> {
-        let (send, receive) = async_channel::bounded(1);
-        let owner = self.clone();
-        let runtime = self.runtime.clone();
-        self.runtime.spawn_blocking(move || {
-            let result = runtime.block_on(async {
-                let _lane = owner.lane.lock().await;
-                let output = owner.export_now(passphrase, false, Some(contents)).await?;
-                sources::save_document(&uri, &output, None).map_err(|error| error.to_string())
-            });
-            let _ = send.send_blocking(result);
-        });
-        receive
+    ) -> Result<Arc<BackupPreview>, backup::BackupError> {
+        self.stage_input(
+            move || sources::open_document_input(&uri).map_err(|error| error.to_string()),
+            passphrase,
+            contents,
+        )
+        .recv()
+        .await
+        .map_err(|error| backup::BackupError::Operation(error.to_string()))?
+        .map(Arc::new)
+        .map_err(backup::BackupError::Operation)
     }
-    pub fn restore(
+
+    pub async fn export_document(
         &self,
-        preview: BackupPreview,
-    ) -> Receiver<Result<library::BackupRestoreReport, String>> {
-        let (send, receive) = async_channel::bounded(1);
+        uri: String,
+        passphrase: Option<String>,
+        contents: backup::BackupContents,
+    ) -> Result<(), backup::BackupError> {
         let owner = self.clone();
         let runtime = self.runtime.clone();
-        self.runtime.spawn_blocking(move || {
-            let result = runtime.block_on(owner.restore_now(preview));
-            let _ = send.send_blocking(result);
-        });
-        receive
+        self.runtime
+            .spawn_blocking(move || {
+                runtime.block_on(async {
+                    let _lane = owner.lane.lock().await;
+                    let output = owner.export_now(passphrase, false, Some(contents)).await?;
+                    sources::save_document(&uri, &output, None).map_err(|error| error.to_string())
+                })
+            })
+            .await
+            .map_err(|error| backup::BackupError::Operation(error.to_string()))?
+            .map_err(backup::BackupError::Operation)
     }
+
+    pub async fn restore(
+        &self,
+        preview: Arc<BackupPreview>,
+    ) -> Result<library::BackupRestoreReport, backup::BackupError> {
+        let owner = self.clone();
+        let runtime = self.runtime.clone();
+        self.runtime
+            .spawn_blocking(move || runtime.block_on(owner.restore_now((*preview).clone())))
+            .await
+            .map_err(|error| backup::BackupError::Operation(error.to_string()))?
+            .map_err(backup::BackupError::Operation)
+    }
+
     pub fn schedule_error(&self) -> Option<String> {
         self.schedule_error
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .clone()
     }
-    pub fn save_schedule_password(&self, passphrase: String) -> Receiver<Result<(), String>> {
-        let (send, receive) = async_channel::bounded(1);
+
+    pub async fn save_schedule_password(
+        &self,
+        passphrase: String,
+    ) -> Result<(), backup::BackupError> {
         let owner = self.clone();
-        self.runtime.spawn_blocking(move || {
-            let result = if passphrase.is_empty() {
-                Err("The scheduled backup password cannot be empty".into())
-            } else {
+        self.runtime
+            .spawn_blocking(move || {
+                if passphrase.is_empty() {
+                    return Err(backup::BackupError::Operation(
+                        "The scheduled backup password cannot be empty".into(),
+                    ));
+                }
                 backup_password_store(&owner.settings.load(), owner.settings.config_dir())
                     .save_secret(&backup_password_key(), &passphrase)
-                    .map_err(|e| e.to_string())
-            };
-            let _ = send.send_blocking(result);
-        });
-        receive
+                    .map_err(|error| backup::BackupError::Operation(error.to_string()))
+            })
+            .await
+            .map_err(|error| backup::BackupError::Operation(error.to_string()))?
     }
 }
 fn restore_preferences_and_logins(

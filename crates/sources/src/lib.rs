@@ -81,6 +81,8 @@ pub use subsonic::{SubsonicAuthentication, SubsonicFlavor};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Error))]
+#[cfg_attr(feature = "bindings", uniffi(flat_error))]
 pub enum SourceError {
     #[error(transparent)]
     Library(#[from] library::LibraryError),

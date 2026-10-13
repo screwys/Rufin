@@ -1,5 +1,10 @@
 package io.github.screwys.rufin.settings
 
+import io.github.screwys.rufin.shared.backup.BackupContents
+import io.github.screwys.rufin.shared.backup.BackupManifest
+import io.github.screwys.rufin.shared.rufin_core.BackupPreview
+import io.github.screwys.rufin.shared.rufin_core.BackupOwner
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -14,7 +19,6 @@ import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.core.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 
 @Composable
 internal fun BackupsPage(model: RufinConnection, preferences: PreferencesConnection,
@@ -25,14 +29,14 @@ internal fun BackupsPage(model: RufinConnection, preferences: PreferencesConnect
     var contents by remember { mutableStateOf(defaultBackupContents()) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
-    var staged by remember { mutableStateOf<AndroidBackupPreview?>(null) }
-    var summary by remember { mutableStateOf<AndroidBackupSummary?>(null) }
+    var staged by remember { mutableStateOf<BackupPreview?>(null) }
+    var summary by remember { mutableStateOf<BackupManifest?>(null) }
     var scheduleError by remember { mutableStateOf<String?>(null) }
     DisposableEffect(Unit) { onDispose { staged?.destroy() } }
     LaunchedEffect(model.ready) {
         if (model.ready) model.connectedService().runtime.value!!.getOrThrow().backups().use { scheduleError = it.scheduleError() }
     }
-    fun run(action: suspend (AndroidBackups) -> Unit) { scope.launch {
+    fun run(action: suspend (BackupOwner) -> Unit) { scope.launch {
         busy = true
         message = null
         try { model.connectedService().runtime.value!!.getOrThrow().backups().use { action(it) } }
@@ -42,19 +46,19 @@ internal fun BackupsPage(model: RufinConnection, preferences: PreferencesConnect
     } }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         if (uri != null) run {
-            val selected = preferences.applicationSettings?.optJSONObject("backup")?.optJSONObject("contents") ?: defaultBackupContents()
-            it.exportDocument(uri.toString(), password, backupContents(selected))
+            val selected = preferences.applicationSettings?.backup?.contents ?: defaultBackupContents()
+            it.exportDocument(uri.toString(), password, selected)
             password = null
             message = translate("Backup exported")
         }
     }
     val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) run { owner ->
-            val preview = owner.stageDocument(uri.toString(), password, backupContents(contents))
+            val preview = owner.stageDocument(uri.toString(), password, contents)
             password = null
             staged?.destroy()
             staged = preview
-            summary = preview.summary()
+            summary = preview.manifest()
         }
     }
     SettingsPage(embedded = embedded) {
@@ -87,7 +91,7 @@ internal fun BackupsPage(model: RufinConnection, preferences: PreferencesConnect
             text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(translate("Replace the selected contents with this backup? Local folder permissions may need to be selected again."))
                 Text(translate("Playlists") + ": " + preview.playlistCount)
-                preview.removedSources.forEach { Text(it) }
+                staged?.removedSources()?.forEach { Text(it) }
             } },
             confirmButton = { TextButton({ staged?.let { backup -> run { owner ->
                 val report = owner.restore(backup)
@@ -100,8 +104,8 @@ internal fun BackupsPage(model: RufinConnection, preferences: PreferencesConnect
 }
 
 @Composable
-internal fun BackupPasswordDialog(importing: Boolean, contents: JSONObject = defaultBackupContents(),
-    changeContents: (JSONObject) -> Unit = {}, dismiss: () -> Unit, continueAction: (String?) -> Unit) {
+internal fun BackupPasswordDialog(importing: Boolean, contents: BackupContents = defaultBackupContents(),
+    changeContents: (BackupContents) -> Unit = {}, dismiss: () -> Unit, continueAction: (String?) -> Unit) {
     var password by remember { mutableStateOf("") }
     var unencrypted by remember { mutableStateOf(false) }
     AlertDialog(onDismissRequest = dismiss, title = { Text(translate("Backup Password")) }, text = {
@@ -120,22 +124,16 @@ internal fun BackupPasswordDialog(importing: Boolean, contents: JSONObject = def
 }
 
 @Composable
-internal fun BackupContentsControls(contents: JSONObject, change: (JSONObject) -> Unit) {
+internal fun BackupContentsControls(contents: BackupContents, change: (BackupContents) -> Unit) {
     SettingsGroup(translate("Contents")) {
-        listOf("settings" to "Settings and sources", "saved_logins" to "Saved logins", "playlists" to "Playlists",
-            "favorites" to "Favorites and ratings", "local_imports" to "Local imports and access",
-            "activity" to "Activity", "queue" to "Queue").forEach { (key, label) ->
-            SettingsSwitch(translate(label), contents.optBoolean(key, true)) {
-                change(JSONObject(contents.toString()).put(key, it))
-            }
-        }
+        SettingsSwitch(translate("Settings and sources"), contents.settings) { change(contents.copy(settings = it)) }
+        SettingsSwitch(translate("Saved logins"), contents.savedLogins) { change(contents.copy(savedLogins = it)) }
+        SettingsSwitch(translate("Playlists"), contents.playlists) { change(contents.copy(playlists = it)) }
+        SettingsSwitch(translate("Favorites and ratings"), contents.favorites) { change(contents.copy(favorites = it)) }
+        SettingsSwitch(translate("Local imports and access"), contents.localImports) { change(contents.copy(localImports = it)) }
+        SettingsSwitch(translate("Activity"), contents.activity) { change(contents.copy(activity = it)) }
+        SettingsSwitch(translate("Queue"), contents.queue) { change(contents.copy(queue = it)) }
     }
 }
 
-internal fun defaultBackupContents() = JSONObject().apply {
-    listOf("settings", "saved_logins", "playlists", "favorites", "local_imports", "activity", "queue").forEach { put(it, true) }
-}
-
-private fun backupContents(contents: JSONObject) = AndroidBackupContents(contents.optBoolean("settings", true),
-    contents.optBoolean("saved_logins", true), contents.optBoolean("playlists", true), contents.optBoolean("favorites", true),
-    contents.optBoolean("local_imports", true), contents.optBoolean("activity", true), contents.optBoolean("queue", true))
+internal fun defaultBackupContents() = BackupContents(true, true, true, true, true, true, true)

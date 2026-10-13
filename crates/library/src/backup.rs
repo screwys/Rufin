@@ -31,6 +31,7 @@ impl StateGroups {
 }
 
 #[derive(Debug, Default)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct BackupRestoreReport {
     pub playlists: u64,
     pub playlist_entries: u64,

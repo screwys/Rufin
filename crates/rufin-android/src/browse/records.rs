@@ -7,19 +7,12 @@ pub struct AndroidPlaylistImport {
 }
 
 #[derive(uniffi::Record)]
-pub struct AndroidRatingState {
-    pub value: Option<u8>,
-    pub half_stars: bool,
-    pub visible: bool,
-}
-
-#[derive(uniffi::Record)]
 pub struct AndroidRouteDescriptor {
     pub id: String,
     pub title: String,
     pub icon_name: String,
     pub selected_icon_name: String,
-    pub route: String,
+    pub route: Route,
 }
 
 #[derive(uniffi::Record)]
@@ -30,32 +23,20 @@ pub struct AndroidRouteSetting {
 
 #[derive(uniffi::Record)]
 pub struct AndroidSortField {
-    pub id: String,
+    pub id: LibraryField,
     pub title: String,
 }
 
 #[derive(Clone, uniffi::Record)]
 pub struct AndroidFieldValue {
-    pub id: String,
+    pub id: LibraryField,
     pub text: String,
 }
 
 #[derive(uniffi::Record)]
-pub struct AndroidSortSelection {
-    pub id: String,
-    pub title: String,
-    pub descending: bool,
-}
-
-#[derive(uniffi::Record)]
 pub struct AndroidBrowseDisplay {
-    pub layout: String,
-    pub show_header: bool,
-    pub layouts: Vec<AndroidSortField>,
-    pub size: String,
-    pub grid_spacing: String,
-    pub sizes: Vec<AndroidSortField>,
-    pub grid_spacings: Vec<AndroidSortField>,
+    pub settings: LibraryListSettings,
+    pub layouts: Vec<LibraryLayout>,
 }
 
 #[derive(uniffi::Record)]
@@ -70,7 +51,7 @@ pub struct AndroidArtistLink {
     pub start: u32,
     pub end: u32,
     pub title: String,
-    pub route: String,
+    pub route: Route,
     pub artwork_identity: Option<Vec<u8>>,
 }
 
@@ -95,7 +76,7 @@ impl AndroidArtistLink {
                     start,
                     end,
                     title: text.to_string(),
-                    route: route_json(span.route.clone()),
+                    route: span.route.clone(),
                     artwork_identity: None,
                 })
             })
@@ -110,13 +91,13 @@ pub struct AndroidDetailSummary {
     pub artist_text: String,
     pub artist_links: Vec<AndroidArtistLink>,
     pub label: String,
-    pub mode: String,
+    pub mode: Route,
     pub album_count: u64,
     pub links: Vec<AndroidDetailLink>,
-    pub favorite_route: Option<String>,
+    pub favorite_route: Option<Route>,
     pub favorite_total: u64,
-    pub discography_route: Option<String>,
-    pub tracks_route: Option<String>,
+    pub discography_route: Option<Route>,
+    pub tracks_route: Option<Route>,
     pub show_track_images: bool,
     pub show_track_header: bool,
 }
@@ -127,7 +108,7 @@ pub struct AndroidArtistReleaseGroup {
     pub title: String,
     pub total: u64,
     pub index: u64,
-    pub route: String,
+    pub route: Route,
 }
 
 #[derive(uniffi::Record)]
@@ -145,7 +126,7 @@ pub struct AndroidMusicFolderState {
 #[derive(uniffi::Record)]
 pub struct AndroidBreadcrumb {
     pub title: String,
-    pub route: String,
+    pub route: Route,
 }
 
 #[derive(uniffi::Record)]
@@ -168,198 +149,120 @@ pub struct AndroidPinPage {
     pub total: u64,
 }
 
+#[derive(Clone, uniffi::Enum)]
+pub enum AndroidBrowseItem {
+    Track {
+        row: library::TrackRow,
+    },
+    History {
+        row: library::HistoryRow,
+    },
+    PlaylistEntry {
+        row: library::PlaylistEntryRow,
+    },
+    Album {
+        row: library::AlbumRow,
+    },
+    Artist {
+        row: library::ArtistRow,
+        album_artist: bool,
+    },
+    Genre {
+        row: library::GenreRow,
+    },
+    HomeGenre {
+        row: library::HomeGenreRow,
+    },
+    Mood {
+        row: library::MoodRow,
+    },
+    Playlist {
+        row: library::PlaylistRow,
+    },
+    SmartPlaylist {
+        row: library::SmartPlaylistRow,
+    },
+    Recent {
+        row: rufin_core::settings::app::RecentSearchResult,
+    },
+    Queued {
+        row: library::QueueItem,
+        favorite: bool,
+        downloaded: bool,
+    },
+    Folder {
+        key: String,
+        title: String,
+        route: Route,
+        artwork: Option<Vec<u8>>,
+    },
+}
+
 #[derive(Clone, uniffi::Record)]
 pub struct AndroidBrowseRow {
-    pub track_key: Option<i64>,
-    pub album_key: Option<i64>,
-    pub album_media_uri: Option<String>,
-    pub kind: String,
-    pub key: String,
-    pub media_uri: String,
-    pub title: String,
-    pub artist: String,
-    pub album: String,
+    pub item: AndroidBrowseItem,
     pub fields: Vec<AndroidFieldValue>,
-    pub subtitle: String,
-    pub favorite: bool,
-    pub duration_millis: u64,
-    pub detail_route: Option<String>,
-    pub playback_context_id: Option<String>,
-    pub pin: Option<String>,
+    pub display_title: Option<String>,
+    pub album_header: bool,
+    pub pin: Option<SidebarPin>,
     pub section: String,
     pub section_id: String,
     pub section_kind: String,
     pub section_refreshable: bool,
-    pub year: Option<i64>,
-    pub track_count: u64,
-    pub artwork_identity: Option<Vec<u8>>,
-    pub downloaded: bool,
-    pub source_id: Option<String>,
-    pub source_name: String,
-    pub last_played: Option<i64>,
-    pub writable: bool,
+    pub context_source_id: Option<String>,
+    pub context_source_name: String,
 }
 
-impl From<library::SmartPlaylistRow> for AndroidBrowseRow {
-    fn from(row: library::SmartPlaylistRow) -> Self {
-        let title = rufin_core::playlists::smart_playlist_display_name(&row);
-        let pin = SidebarPin::SmartPlaylist {
-            playlist_id: row.object_id.clone(),
-        };
+impl AndroidBrowseRow {
+    pub(crate) fn new(item: AndroidBrowseItem) -> Self {
         Self {
-            track_key: None,
-            album_key: None,
-            album_media_uri: None,
-            kind: "smart_playlist".into(),
-            playback_context_id: Some(format!("smart-playlist:{}", row.smart_playlist_key)),
+            item,
             fields: Vec::new(),
-            artist: String::new(),
-            album: String::new(),
-            key: row.object_id,
-            media_uri: String::new(),
-            title,
-            subtitle: String::new(),
-            favorite: false,
-            duration_millis: row.duration_millis.max(0) as u64,
-            detail_route: Some(route_json(Route::SmartPlaylistDetail(
-                row.smart_playlist_key,
-            ))),
-            pin: Some(serde_json::to_string(&pin).expect("Pin serialization")),
-            section: String::new(),
-            section_id: String::new(),
-            section_kind: String::new(),
-            section_refreshable: false,
-            year: None,
-            track_count: row.track_count.max(0) as u64,
-            source_id: None,
-            source_name: String::new(),
-            last_played: None,
-            writable: false,
-            downloaded: row.track_count > 0 && row.downloaded_count == row.track_count,
-            artwork_identity: row
-                .artwork_binding
-                .or_else(|| row.artwork_bindings.into_iter().next()),
-        }
-    }
-}
-
-impl From<library::PlaylistRow> for AndroidBrowseRow {
-    fn from(row: library::PlaylistRow) -> Self {
-        let pin = SidebarPin::Playlist {
-            source_id: row.source_id.clone().map(sources::SourceId::new),
-            playlist_id: row.object_id.clone(),
-        };
-        Self {
-            track_key: None,
-            album_key: None,
-            album_media_uri: None,
-            kind: "playlist".into(),
-            playback_context_id: Some(format!("playlist:{}", row.playlist_key)),
-            fields: Vec::new(),
-            artist: String::new(),
-            album: String::new(),
-            key: row.object_id,
-            media_uri: String::new(),
-            title: row.name,
-            subtitle: String::new(),
-            favorite: false,
-            duration_millis: row.duration_millis.max(0) as u64,
-            detail_route: Some(route_json(Route::PlaylistDetail(row.playlist_key))),
-            pin: Some(serde_json::to_string(&pin).expect("Pin serialization")),
-            section: String::new(),
-            section_id: String::new(),
-            section_kind: String::new(),
-            section_refreshable: false,
-            year: None,
-            track_count: row.track_count.max(0) as u64,
-            source_id: row.source_id,
-            source_name: String::new(),
-            last_played: None,
-            writable: row.writable,
-            downloaded: row.track_count > 0 && row.downloaded_count == row.track_count,
-            artwork_identity: row
-                .artwork_binding
-                .or_else(|| row.representative_artwork.into_iter().next()),
-        }
-    }
-}
-
-impl From<library::GenreRow> for AndroidBrowseRow {
-    fn from(row: library::GenreRow) -> Self {
-        let pin = SidebarPin::Genre {
-            source_id: sources::SourceId::new(row.source_id.clone()),
-            genre_id: row.object_id.clone(),
-        };
-        Self {
-            track_key: None,
-            album_key: None,
-            album_media_uri: None,
-            kind: "genre".into(),
-            playback_context_id: Some(format!("genre:{}", row.genre_key)),
-            fields: Vec::new(),
-            artist: String::new(),
-            album: String::new(),
-            key: row.object_id,
-            media_uri: String::new(),
-            title: row.name,
-            subtitle: String::new(),
-            favorite: false,
-            duration_millis: row.duration_millis.max(0) as u64,
-            detail_route: Some(route_json(Route::GenreDetail(row.genre_key))),
-            pin: Some(serde_json::to_string(&pin).expect("Pin serialization")),
-            section: String::new(),
-            section_id: String::new(),
-            section_kind: String::new(),
-            section_refreshable: false,
-            year: None,
-            track_count: row.track_count.max(0) as u64,
-            source_id: Some(row.source_id),
-            source_name: String::new(),
-            last_played: None,
-            writable: false,
-            downloaded: row.track_count > 0 && row.downloaded_count == row.track_count,
-            artwork_identity: row
-                .artwork_binding
-                .or_else(|| row.representative_artwork.into_iter().next()),
-        }
-    }
-}
-
-impl From<library::MoodRow> for AndroidBrowseRow {
-    fn from(row: library::MoodRow) -> Self {
-        Self {
-            track_key: None,
-            album_key: None,
-            album_media_uri: None,
-            kind: "mood".into(),
-            playback_context_id: Some(format!("mood:{}", row.mood_key)),
-            key: row.mood_key.to_string(),
-            media_uri: String::new(),
-            title: row.name,
-            artist: String::new(),
-            album: String::new(),
-            fields: Vec::new(),
-            subtitle: String::new(),
-            favorite: false,
-            duration_millis: row.duration_millis.max(0) as u64,
-            detail_route: Some(route_json(Route::MoodDetail(row.mood_key))),
+            display_title: None,
+            album_header: false,
             pin: None,
             section: String::new(),
             section_id: String::new(),
             section_kind: String::new(),
             section_refreshable: false,
-            year: None,
-            track_count: row.track_count.max(0) as u64,
-            source_id: None,
-            source_name: String::new(),
-            last_played: None,
-            writable: false,
-            downloaded: row.track_count > 0 && row.downloaded_count == row.track_count,
-            artwork_identity: row.representative_artwork.into_iter().next(),
+            context_source_id: None,
+            context_source_name: String::new(),
         }
+    }
+
+    pub(super) fn track_key(&self) -> Option<library::TrackKey> {
+        match &self.item {
+            AndroidBrowseItem::Track { row } => Some(row.track_key),
+            AndroidBrowseItem::History { row } => Some(row.track_key),
+            AndroidBrowseItem::PlaylistEntry { row } => Some(row.track_key),
+            _ => None,
+        }
+    }
+
+    pub(super) fn matches_filter(&self, filter: &str) -> bool {
+        let (title, subtitle) = match &self.item {
+            AndroidBrowseItem::Track { row } => {
+                (&row.title, format!("{} · {}", row.artist, row.album))
+            }
+            AndroidBrowseItem::Album { row } => (&row.title, row.display_artist.clone()),
+            AndroidBrowseItem::HomeGenre { row } => (&row.name, String::new()),
+            _ => return true,
+        };
+        format!(
+            "{} {}",
+            self.display_title.as_ref().unwrap_or(title),
+            subtitle
+        )
+        .to_lowercase()
+        .contains(filter)
     }
 }
 
+impl From<library::TrackRow> for AndroidBrowseRow {
+    fn from(row: library::TrackRow) -> Self {
+        Self::new(AndroidBrowseItem::Track { row })
+    }
+}
 impl From<library::AlbumRow> for AndroidBrowseRow {
     fn from(row: library::AlbumRow) -> Self {
         let pin = library::source_entity_parts(&row.media_uri).map(|(source_id, _, album_id)| {
@@ -369,87 +272,68 @@ impl From<library::AlbumRow> for AndroidBrowseRow {
             }
         });
         Self {
-            track_key: None,
-            album_key: None,
-            album_media_uri: None,
-            kind: "album".into(),
-            playback_context_id: Some(format!("album:{}", row.media_uri)),
-            fields: Vec::new(),
-            artist: row.display_artist.clone(),
-            album: row.title.clone(),
-            key: row.object_id,
-            detail_route: Some(route_json(Route::AlbumDetail(row.media_uri.clone()))),
-            media_uri: row.media_uri,
-            title: row.title,
-            subtitle: row.display_artist,
-            favorite: row.favorite,
-            duration_millis: row.duration_millis.max(0) as u64,
-            pin: pin.map(|pin| serde_json::to_string(&pin).expect("Pin serialization")),
-            section: String::new(),
-            section_id: String::new(),
-            section_kind: String::new(),
-            section_refreshable: false,
-            year: row.year,
-            track_count: row.track_count.max(0) as u64,
-            source_id: None,
-            source_name: String::new(),
-            last_played: None,
-            writable: false,
-            downloaded: row.track_count > 0 && row.downloaded_count == row.track_count,
-            artwork_identity: row.artwork_binding,
+            pin,
+            ..Self::new(AndroidBrowseItem::Album { row })
         }
     }
 }
-
+impl From<library::GenreRow> for AndroidBrowseRow {
+    fn from(row: library::GenreRow) -> Self {
+        let pin = Some(SidebarPin::Genre {
+            source_id: sources::SourceId::new(row.source_id.clone()),
+            genre_id: row.object_id.clone(),
+        });
+        Self {
+            context_source_id: Some(row.source_id.clone()),
+            pin,
+            ..Self::new(AndroidBrowseItem::Genre { row })
+        }
+    }
+}
+impl From<library::MoodRow> for AndroidBrowseRow {
+    fn from(row: library::MoodRow) -> Self {
+        Self::new(AndroidBrowseItem::Mood { row })
+    }
+}
+impl From<library::PlaylistRow> for AndroidBrowseRow {
+    fn from(row: library::PlaylistRow) -> Self {
+        let pin = Some(SidebarPin::Playlist {
+            source_id: row.source_id.as_ref().map(sources::SourceId::new),
+            playlist_id: row.object_id.clone(),
+        });
+        Self {
+            context_source_id: row.source_id.clone(),
+            pin,
+            ..Self::new(AndroidBrowseItem::Playlist { row })
+        }
+    }
+}
+impl From<library::SmartPlaylistRow> for AndroidBrowseRow {
+    fn from(row: library::SmartPlaylistRow) -> Self {
+        let title = Some(rufin_core::playlists::smart_playlist_display_name(&row));
+        let pin = Some(SidebarPin::SmartPlaylist {
+            playlist_id: row.object_id.clone(),
+        });
+        Self {
+            display_title: title,
+            pin,
+            ..Self::new(AndroidBrowseItem::SmartPlaylist { row })
+        }
+    }
+}
 impl From<library::HomeAlbumRow> for AndroidBrowseRow {
     fn from(row: library::HomeAlbumRow) -> Self {
-        let mut result: Self = row.album.into();
-        result.title = row.title;
-        result
+        Self {
+            display_title: Some(row.title),
+            ..row.album.into()
+        }
     }
 }
-
 impl From<library::HomeTrackRow> for AndroidBrowseRow {
     fn from(row: library::HomeTrackRow) -> Self {
-        let subtitle = format!("{}\n{}", row.track.artist, row.track.album);
-        let mut result: Self = row.track.into();
-        result.title = row.title;
-        result.subtitle = subtitle;
-        result
-    }
-}
-
-impl From<library::TrackRow> for AndroidBrowseRow {
-    fn from(row: library::TrackRow) -> Self {
         Self {
-            track_key: Some(row.track_key.raw()),
-            album_key: None,
-            album_media_uri: None,
-            kind: "track".into(),
-            playback_context_id: None,
-            fields: Vec::new(),
-            artist: row.artist.clone(),
-            album: row.album.clone(),
-            key: row.media_uri.clone(),
-            media_uri: row.media_uri,
-            title: row.title,
-            subtitle: format!("{} · {}", row.artist, row.album),
-            favorite: row.favorite,
-            duration_millis: row.duration_millis.max(0) as u64,
-            detail_route: None,
-            pin: None,
-            section: String::new(),
-            section_id: String::new(),
-            section_kind: String::new(),
-            section_refreshable: false,
-            year: row.year,
-            track_count: 1,
-            source_id: row.source_id,
-            source_name: row.source_name,
-            last_played: row.last_played,
-            writable: false,
-            downloaded: row.is_downloaded,
-            artwork_identity: row.artwork_binding,
+            display_title: Some(row.title),
+            ..row.track.into()
         }
     }
 }
@@ -462,4 +346,10 @@ impl From<rufin_core::detail_links::DetailLink> for AndroidDetailLink {
             icon_id: link.icon_name.into(),
         }
     }
+}
+
+#[derive(uniffi::Record)]
+pub struct AndroidTargetDownloadStatus {
+    pub total: u64,
+    pub downloaded: u64,
 }

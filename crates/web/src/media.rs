@@ -90,12 +90,11 @@ pub(super) async fn favorite(
         "artist" => library::FavoriteTarget::Artist(input.uri),
         _ => return Err(bad_request("Unknown favorite type")),
     };
-    let favorite = completion(
-        products
-            .source
-            .set_favorite_with_result(target, input.favorite),
-    )
-    .await?;
+    let favorite = products
+        .source
+        .set_favorite_with_result(target, input.favorite)
+        .await
+        .map_err(bad_request)?;
     Ok(json_response(StatusCode::OK, json!({"favorite":favorite})))
 }
 

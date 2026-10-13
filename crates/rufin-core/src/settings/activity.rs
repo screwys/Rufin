@@ -2,6 +2,35 @@ use super::app::ActivityOverviewSettings;
 use library::CalendarActivityPeriod;
 
 impl ActivityOverviewSettings {
+    pub fn startup_period(
+        &self,
+        today: &glib::DateTime,
+        months: &[String],
+    ) -> Option<CalendarActivityPeriod> {
+        self.startup_periods(today)
+            .into_iter()
+            .flatten()
+            .find(|period| match period {
+                CalendarActivityPeriod::Month { .. } => {
+                    months.contains(&crate::activity::period_key(*period))
+                }
+                CalendarActivityPeriod::Year(year) => months
+                    .iter()
+                    .any(|month| month.starts_with(&format!("{year}-"))),
+                CalendarActivityPeriod::Lifetime => false,
+            })
+    }
+
+    pub fn mark_opened(&mut self, period: CalendarActivityPeriod) {
+        match period {
+            CalendarActivityPeriod::Month { .. } => {
+                self.opened_month = Some(crate::activity::period_key(period))
+            }
+            CalendarActivityPeriod::Year(year) => self.opened_year = Some(year),
+            CalendarActivityPeriod::Lifetime => {}
+        }
+    }
+
     /// Eligible reports at launch, with the yearly report first when windows overlap.
     pub fn startup_periods(&self, today: &glib::DateTime) -> [Option<CalendarActivityPeriod>; 2] {
         let (year, month, day) = (today.year(), today.month(), today.day_of_month() as u32);

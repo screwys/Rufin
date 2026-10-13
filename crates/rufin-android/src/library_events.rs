@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use library::FavoriteTarget;
 use rufin_core::{
     favorites::FavoriteIntents,
     runtime::{SourceEvent, SourceNoticeKind},
@@ -9,33 +8,9 @@ use rufin_core::{
 use crate::host::{AndroidError, error};
 
 #[derive(uniffi::Record)]
-pub struct AndroidFavoriteSettlement {
-    pub kind: String,
-    pub media_uri: String,
-    pub effective: bool,
-}
-
-#[derive(uniffi::Record)]
 pub struct AndroidLibraryEvent {
-    pub favorite: Option<AndroidFavoriteSettlement>,
+    pub favorite: Option<rufin_core::runtime::FavoriteSettlement>,
     pub notice: Option<String>,
-}
-
-pub(crate) fn favorite_target(kind: &str, uri: String) -> Result<FavoriteTarget, AndroidError> {
-    match kind {
-        "track" => Ok(FavoriteTarget::Track(uri)),
-        "album" | "album_header" => Ok(FavoriteTarget::Album(uri)),
-        "artist" => Ok(FavoriteTarget::Artist(uri)),
-        _ => Err(error("This item has no favorite action")),
-    }
-}
-
-fn identity(target: FavoriteTarget) -> (String, String) {
-    match target {
-        FavoriteTarget::Track(uri) => ("track".into(), uri),
-        FavoriteTarget::Album(uri) => ("album".into(), uri),
-        FavoriteTarget::Artist(uri) => ("artist".into(), uri),
-    }
 }
 
 #[derive(uniffi::Object)]
@@ -61,36 +36,8 @@ impl AndroidLibraryEvents {
 
 #[uniffi::export]
 impl AndroidLibraryEvents {
-    pub fn projected_favorite(
-        &self,
-        kind: String,
-        media_uri: String,
-        fallback: bool,
-    ) -> Result<bool, AndroidError> {
-        Ok(self
-            .intents
-            .projected_item_favorite(&favorite_target(&kind, media_uri)?, fallback))
-    }
-    pub fn set_favorite_intent(
-        &self,
-        kind: String,
-        media_uri: String,
-        favorite: bool,
-    ) -> Result<(), AndroidError> {
-        self.intents
-            .set_pending(favorite_target(&kind, media_uri)?, favorite);
-        Ok(())
-    }
-
-    pub fn release_favorite_intent(
-        &self,
-        kind: String,
-        media_uri: String,
-        requested: bool,
-    ) -> Result<(), AndroidError> {
-        self.intents
-            .response_matches_pending(&favorite_target(&kind, media_uri)?, requested);
-        Ok(())
+    pub fn favorite_intents(&self) -> Arc<FavoriteIntents> {
+        self.intents.clone()
     }
 
     pub async fn next(&self) -> Result<AndroidLibraryEvent, AndroidError> {
@@ -105,8 +52,7 @@ impl AndroidLibraryEvents {
                         if let Some(settlement) = publication.favorite {
                             // The caller releases its intent when the favorite operation finishes.
                             if self.intents.projected_item_favorite(&settlement.target, settlement.requested) == settlement.requested {
-                                let (kind, media_uri) = identity(settlement.target);
-                                favorite = Some(AndroidFavoriteSettlement { kind, media_uri, effective: settlement.effective });
+                                favorite = Some(settlement);
                             }
                         } else { continue; }
                     }

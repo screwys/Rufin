@@ -258,6 +258,7 @@ pub fn identify_metadata(
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum MetadataItemId {
     Track(String),
     Album(String),

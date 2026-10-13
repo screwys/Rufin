@@ -1,7 +1,6 @@
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::media_session::{AndroidPlaybackSubscription, AndroidRepeatMode};
-use crate::source_state::AndroidSourceSubscription;
+use crate::media_session::AndroidPlaybackSubscription;
 use gstreamer::{self as gst, prelude::*};
 use jni::{Env, objects::JObject};
 use rufin_core::{
@@ -110,9 +109,7 @@ pub struct AndroidRuntime {
     preferences: Arc<crate::preferences::AndroidPreferences>,
     more: Arc<crate::more::AndroidMore>,
     controller_owner: Arc<web::Controller>,
-    controller: Arc<crate::controller::AndroidController>,
-    source_setup: Arc<crate::source_setup::AndroidSourceSetup>,
-    downloads: Arc<crate::downloads::AndroidDownloads>,
+    release_events: async_channel::Receiver<rufin_core::runtime::ReleaseUpdate>,
     library_events: Arc<crate::library_events::AndroidLibraryEvents>,
     runtime: Option<tokio::runtime::Runtime>,
 }
@@ -165,26 +162,10 @@ impl AndroidRuntime {
             &inputs.products,
             theme_directory,
         ));
-        let more = Arc::new(crate::more::AndroidMore::new(
-            &inputs.products,
-            inputs.release_history,
-            inputs.receivers.release_updates,
-        ));
+        let more = Arc::new(crate::more::AndroidMore::new(&inputs.products));
         let controller_owner = Arc::new(web::Controller::new(inputs.products.clone()));
-        let source_setup = Arc::new(crate::source_setup::AndroidSourceSetup::new(
-            &inputs.products,
-            inputs.receivers.source_discovery,
-        ));
-        let downloads = Arc::new(crate::downloads::AndroidDownloads::new(
-            &inputs.products,
-            inputs.receivers.downloads,
-        ));
         let library_events = Arc::new(crate::library_events::AndroidLibraryEvents::new(
             inputs.receivers.source,
-        ));
-        let controller = Arc::new(crate::controller::AndroidController::new(
-            controller_owner.clone(),
-            &inputs.products,
         ));
         Ok(Arc::new(Self {
             products: inputs.products,
@@ -193,9 +174,7 @@ impl AndroidRuntime {
             preferences,
             more,
             controller_owner,
-            controller,
-            source_setup,
-            downloads,
+            release_events: inputs.receivers.release_updates,
             library_events,
             runtime: Some(runtime),
         }))
@@ -223,12 +202,12 @@ impl AndroidRuntime {
         self.more.clone()
     }
 
-    pub fn controller(&self) -> Arc<crate::controller::AndroidController> {
-        self.controller.clone()
+    pub fn controller(&self) -> Arc<web::Controller> {
+        self.controller_owner.clone()
     }
 
-    pub fn connect(&self) -> Arc<crate::connect::AndroidConnect> {
-        Arc::new(crate::connect::AndroidConnect::new(&self.products))
+    pub fn connect(&self) -> Arc<rufin_core::connect::ConnectOwner> {
+        self.products.connect.clone()
     }
 
     pub fn library(&self) -> Arc<crate::library::AndroidLibrary> {
@@ -247,11 +226,11 @@ impl AndroidRuntime {
         Arc::clone(&self.preferences)
     }
 
-    pub fn source_setup(&self) -> Arc<crate::source_setup::AndroidSourceSetup> {
-        self.source_setup.clone()
+    pub fn source(&self) -> Arc<rufin_core::source::SourceOwner> {
+        self.products.source.clone()
     }
-    pub fn downloads(&self) -> Arc<crate::downloads::AndroidDownloads> {
-        self.downloads.clone()
+    pub fn downloads(&self) -> Arc<downloads::Downloads> {
+        Arc::new(self.products.downloads.clone())
     }
 
     pub fn has_document_root(&self, uri: String) -> Result<bool, AndroidError> {
@@ -262,29 +241,8 @@ impl AndroidRuntime {
             .map_err(error)
     }
 
-    pub fn backups(&self) -> Arc<crate::backups::AndroidBackups> {
-        Arc::new(crate::backups::AndroidBackups::new(
-            self.products.backup.clone(),
-        ))
-    }
-
-    pub async fn set_download_document_directory(
-        &self,
-        source_id: String,
-        uri: Option<String>,
-    ) -> Result<(), AndroidError> {
-        let settings = self.products.settings.clone();
-        self.products
-            .runtime
-            .spawn_blocking(move || {
-                settings.set_download_location(
-                    sources::SourceId::new(source_id),
-                    uri.map(|uri| downloads::DownloadDirectory::Document { uri }),
-                )
-            })
-            .await
-            .map_err(error)?
-            .map_err(error)
+    pub fn backups(&self) -> rufin_core::runtime::BackupHandle {
+        self.products.backup.clone()
     }
 
     pub async fn add_document_root(&self, uri: String) -> Result<(), AndroidError> {
@@ -311,24 +269,10 @@ impl AndroidRuntime {
         ))
     }
 
-    pub fn subscribe_sources(&self) -> Arc<AndroidSourceSubscription> {
-        Arc::new(AndroidSourceSubscription::new(self.products.source.clone()))
-    }
-
     pub fn subscribe_network(&self) -> Arc<crate::network::AndroidNetworkSubscription> {
         Arc::new(crate::network::AndroidNetworkSubscription::new(
             self.products.connect.subscribe(),
         ))
-    }
-
-    pub async fn refresh_source(&self, source_id: String) -> Result<(), AndroidError> {
-        self.products
-            .source
-            .refresh_source(sources::SourceId::new(source_id))
-            .recv()
-            .await
-            .map_err(error)?
-            .map_err(error)
     }
 
     pub async fn open_uris(&self, uris: Vec<String>) -> Result<(), AndroidError> {
@@ -351,33 +295,26 @@ impl AndroidRuntime {
             .map_err(error)
     }
 
-    pub fn play(&self) {
-        self.products.playback.play();
+    pub fn settings(&self) -> rufin_core::SettingsHandle {
+        self.products.settings.clone()
     }
-    pub fn pause(&self) {
-        self.products.playback.pause();
+    pub fn scrobbling(&self) -> rufin_core::runtime::ScrobblingHandle {
+        self.products.scrobbling.clone()
     }
-    pub fn stop(&self) {
-        self.products.playback.stop();
+    pub fn release_updates(&self) -> rufin_core::runtime::ReleaseUpdateHandle {
+        self.products.release_updates.clone()
     }
-    pub fn next(&self) {
-        self.products.playback.next();
+    pub fn release_events(&self) -> Arc<rufin_core::runtime::release_update::ReleaseSubscription> {
+        rufin_core::runtime::release_update::ReleaseSubscription::new(
+            self.products.release_updates.initial_history(),
+            self.release_events.clone(),
+        )
     }
-    pub fn previous(&self) {
-        self.products.playback.previous();
+    pub fn playback_owner(&self) -> Arc<rufin_core::playback::PlaybackOwner> {
+        self.products.playback.clone()
     }
-    pub fn seek_millis(&self, millis: u64) {
-        self.products.playback.seek_millis(millis);
-    }
-    pub fn set_volume(&self, volume: f64) {
-        self.products.playback.set_volume(volume);
-        self.products.playback.persist_volume(volume);
-    }
-    pub fn set_shuffle(&self, enabled: bool) {
-        self.products.playback.set_shuffle(enabled);
-    }
-    pub fn set_repeat(&self, mode: AndroidRepeatMode) {
-        self.products.playback.set_repeat(mode.into());
+    pub fn lyrics_owner(&self) -> Arc<rufin_core::lyrics::LyricsHandle> {
+        Arc::new(self.products.lyrics.clone())
     }
 }
 

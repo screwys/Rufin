@@ -44,12 +44,12 @@ internal fun ControllerPage(model: RufinConnection, embedded: Boolean = false) {
         SettingsGroup {
         SettingsRow(translate("Enable Controller"),
             leading = { RufinIcon("rufin-phonelink-symbolic", null) },
-            trailing = { Switch(state?.enabled == true, connection::enable, enabled = state != null) })
+            trailing = { Switch(state?.settings?.enabled == true, connection::enable, enabled = state != null) })
         SettingsRow(translate("Allow remote connections"),
             leading = { RufinIcon("rufin-network-workgroup-symbolic", null) },
-            trailing = { Switch(state?.remote == true, connection::remote, enabled = state != null) })
-        SettingsRow(translate("Port"), summary = state?.port?.toString().orEmpty(),
-            trailing = { TextButton({ port = state?.port?.toString().orEmpty(); changePort = true }, enabled = state != null) { Text(translate("Change")) } })
+            trailing = { Switch(state?.settings?.remote == true, connection::remote, enabled = state != null) })
+        SettingsRow(translate("Port"), summary = state?.settings?.port?.toString().orEmpty(),
+            trailing = { TextButton({ port = state?.settings?.port?.toString().orEmpty(); changePort = true }, enabled = state != null) { Text(translate("Change")) } })
         SettingsRow(translate("Access token"), trailing = {
             Row {
                 PlayerIconButton("rufin-view-refresh-symbolic", "Regenerate access token", { regenerate = true }, enabled = state != null)
@@ -62,11 +62,11 @@ internal fun ControllerPage(model: RufinConnection, embedded: Boolean = false) {
         SettingsGroup(translate("Controller status")) {
         if (state == null) Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         else {
-            state.error?.let { io.github.screwys.rufin.ui.ErrorNotice(it) }
-            Text(state.address ?: if (state.enabled) translate("Starting...") else translate("Disabled"),
+            (state.error ?: connection.addressError)?.let { io.github.screwys.rufin.ui.ErrorNotice(it) }
+            Text(state.address?.let { "http://$it/" } ?: if (state.settings.enabled) translate("Starting...") else translate("Disabled"),
                 Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-            state.links.forEach { link ->
+            connection.links.forEach { link ->
                 var copied by remember(link) { mutableIntStateOf(0) }
                 LaunchedEffect(copied) { if (copied > 0) { delay(1500); copied = 0 } }
                 SettingsRow(link.substringBefore('#'), trailing = {

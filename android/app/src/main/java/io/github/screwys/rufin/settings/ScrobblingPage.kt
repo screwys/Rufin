@@ -18,13 +18,15 @@ import androidx.compose.ui.unit.dp
 import io.github.screwys.rufin.core.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import org.json.JSONObject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import io.github.screwys.rufin.shared.rufin_core.*
 
 @Composable
 internal fun ScrobblingPage(preferences: PreferencesConnection, embedded: Boolean = false) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var state by remember { mutableStateOf<JSONObject?>(null) }
+    var state by remember { mutableStateOf<ScrobblingPreferences?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
     var pending by remember { mutableStateOf<String?>(null) }
     var edit by remember { mutableStateOf<String?>(null) }
@@ -32,11 +34,11 @@ internal fun ScrobblingPage(preferences: PreferencesConnection, embedded: Boolea
     var value by remember { mutableStateOf("") }
     var secret by remember { mutableStateOf("") }
     val linkColor = MaterialTheme.colorScheme.primary
-    fun perform(service: String, feedback: String? = null, action: suspend (AndroidPreferences) -> String) {
+    fun perform(service: String, feedback: String? = null, action: suspend (ScrobblingOwner) -> ScrobblingPreferences) {
         scope.launch { pending = service; failure = null
             try {
-                val next = action(preferences.nativePreferences())
-                state = JSONObject(next)
+                val next = action(preferences.nativeScrobbling())
+                state = next
                 feedback?.let(preferences::showFeedback)
             }
             catch (cancelled: CancellationException) { throw cancelled }
@@ -48,13 +50,21 @@ internal fun ScrobblingPage(preferences: PreferencesConnection, embedded: Boolea
         try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
         catch (error: Exception) { failure = error.message ?: translate("Could not open browser") }
     }
-    LaunchedEffect(preferences) { perform("load") { it.scrobblingPreferences() } }
+    LaunchedEffect(preferences) { perform("load") { it.loadPreferences() } }
     SettingsPage(embedded = embedded) {
         if (state == null && pending == "load") CircularProgressIndicator(Modifier.size(24.dp))
         if (edit == null) failure?.let { message -> io.github.screwys.rufin.ui.ErrorNotice(message) }
         state?.let { current ->
         for ((id, name) in listOf("lastfm" to "Last.fm", "librefm" to "Libre.fm", "listenbrainz" to "ListenBrainz")) {
-            val p = current.getJSONObject(id)
+            val enabled = when (id) { "lastfm" -> current.lastfm.enabled; "librefm" -> current.librefm.enabled; else -> current.listenbrainz.enabled }
+            val nowPlaying = when (id) { "lastfm" -> current.lastfm.nowPlayingEnabled; "librefm" -> current.librefm.nowPlayingEnabled; else -> current.listenbrainz.nowPlayingEnabled }
+            val username = when (id) { "lastfm" -> current.lastfm.username; "librefm" -> current.librefm.username; else -> current.listenbrainz.username }
+            val connected = when (id) { "lastfm" -> current.lastfm.connected; "librefm" -> current.librefm.connected; else -> current.listenbrainz.userToken.isNotEmpty() && username.isNotEmpty() }
+            fun update(enabled: Boolean, nowPlaying: Boolean) = when (id) {
+                "lastfm" -> current.copy(lastfm = current.lastfm.copy(enabled = enabled, nowPlayingEnabled = nowPlaying))
+                "librefm" -> current.copy(librefm = current.librefm.copy(enabled = enabled, nowPlayingEnabled = nowPlaying))
+                else -> current.copy(listenbrainz = current.listenbrainz.copy(enabled = enabled, nowPlayingEnabled = nowPlaying))
+            }
             SettingsGroup(name) {
             if (id == "lastfm" || id == "listenbrainz") {
                 val help = buildAnnotatedString {
@@ -76,40 +86,40 @@ internal fun ScrobblingPage(preferences: PreferencesConnection, embedded: Boolea
                 "lastfm" -> translate("Last.fm scrobbling")
                 "librefm" -> translate("Libre.fm scrobbling")
                 else -> translate("ListenBrainz scrobbling")
-            }, p.optBoolean("enabled")) { enabled -> perform(id) { it.setScrobbling(id, enabled, p.optBoolean("now_playing", true)) } }
-            SettingsSwitch(translate("Now playing updates"), p.optBoolean("now_playing", true)) { enabled -> perform(id) { it.setScrobbling(id, p.optBoolean("enabled"), enabled) } }
+            }, enabled) { enabled -> perform(id) { owner -> withContext(Dispatchers.IO) { owner.save(update(enabled, nowPlaying)) } } }
+            SettingsSwitch(translate("Now playing updates"), nowPlaying) { value -> perform(id) { owner -> withContext(Dispatchers.IO) { owner.save(update(enabled, value)) } } }
             if (id != "librefm") SettingsRow(if (id == "lastfm") translate("API keys") else translate("User token"),
                 modifier = Modifier.clickable {
-                    value = p.optString(if (id == "lastfm") "api_key" else "token"); secret = p.optString("api_secret"); connectToken = false; edit = id
+                    value = if (id == "lastfm") current.lastfm.apiKey else current.listenbrainz.userToken; secret = current.lastfm.apiSecret; connectToken = false; edit = id
                 })
             SettingsRow(translate("Connection"),
-                summary = if (p.optBoolean("connected")) {
-                    p.optString("username").takeIf(String::isNotBlank)?.let {
+                summary = if (connected) {
+                    username.takeIf(String::isNotBlank)?.let {
                         translate("Connected as {username}").replace("{username}", it)
                     } ?: translate("Connected")
-                } else translate(if (id == "listenbrainz" && p.optString("token").isNotBlank()) "Saved" else "Not connected"),
+                } else translate(if (id == "listenbrainz" && current.listenbrainz.userToken.isNotBlank()) "Saved" else "Not connected"),
                 trailing = { if (pending == id) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) else TextButton({
                     if (id == "listenbrainz") {
-                        value = p.optString("token"); connectToken = true; edit = id
+                        value = current.listenbrainz.userToken; connectToken = true; edit = id
                     } else perform(id) { owner ->
-                    val session = owner.authorizeScrobbling(id)
+                    val session = owner.connect(if (id == "lastfm") ScrobblingConnection.LastFm(current.lastfm.apiKey, current.lastfm.apiSecret) else ScrobblingConnection.LibreFm)
                     try { while (true) when (val event = session.next()) {
-                        is AndroidScrobblingEvent.OpenBrowser -> {
+                        is ScrobblingConnectionEvent.OpenUrl -> {
                             var error: String? = null
                             try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(event.url))) }
                             catch (failure: Exception) { error = failure.message ?: translate("Could not open browser") }
-                            session.browserOpened(error)
+                            event.opened.use { it.complete(error) }
                         }
-                        is AndroidScrobblingEvent.Connected -> {
+                        is ScrobblingConnectionEvent.Connected -> {
                             preferences.showFeedback(translate("Connected as {username}").replace("{username}", event.username))
                             break
                         }
-                        is AndroidScrobblingEvent.Failed -> error(event.reason)
-                        AndroidScrobblingEvent.TimedOut -> error(translate("Authorization timed out"))
+                        is ScrobblingConnectionEvent.Failed -> error(event.v1)
+                        ScrobblingConnectionEvent.TimedOut -> error(translate("Authorization timed out"))
                     } } finally { session.destroy() }
-                    owner.scrobblingPreferences()
+                    owner.loadPreferences()
                     }
-                }, enabled = pending == null && state != null) { Text(translate(if (p.optBoolean("connected")) "Reconnect" else "Connect")) } })
+                }, enabled = pending == null && state != null) { Text(translate(if (connected) "Reconnect" else "Connect")) } })
             }
         }
         }
@@ -122,12 +132,12 @@ internal fun ScrobblingPage(preferences: PreferencesConnection, embedded: Boolea
         } }, confirmButton = { TextButton({
             if (id == "listenbrainz" && connectToken) perform(id) { owner ->
                 val saved = owner.connectListenbrainz(value)
-                val username = JSONObject(saved).getJSONObject(id).optString("username")
+                val username = saved.listenbrainz.username
                 preferences.showFeedback(translate("Connected as {username}").replace("{username}", username))
                 edit = null
                 saved
             } else perform(id, translate("Saved")) { owner ->
-                val saved = owner.setScrobblingCredential(id, value, secret)
+                val saved = owner.saveCredential(if (id == "lastfm") ScrobblingCredentialEdit.LastFm(value, secret) else ScrobblingCredentialEdit.ListenBrainz(value))
                 edit = null
                 saved
             }

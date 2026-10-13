@@ -59,6 +59,7 @@ pub(crate) struct SourceBootstrap {
 }
 
 #[derive(Clone)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct SourceOwner {
     pub(crate) shared: Arc<Shared>,
 }
@@ -168,6 +169,7 @@ pub(crate) struct Shared {
     operation: tokio::sync::watch::Sender<SourceOperation>,
     catalog_changed: tokio::sync::watch::Sender<()>,
     configuration_changed: tokio::sync::watch::Sender<()>,
+    discovery: tokio::sync::watch::Sender<Option<DiscoveryUpdate>>,
     selected: Mutex<Option<SelectedLibrary>>,
     catalog_counts: Mutex<HashMap<SourceId, (usize, usize)>>,
     observer: Mutex<Option<Arc<SelectedFeed>>>,
@@ -374,6 +376,7 @@ impl SourceOwner {
             runtime,
             outputs,
             operation: tokio::sync::watch::channel(operation.clone()).0,
+            discovery: tokio::sync::watch::channel(None).0,
             selected: Mutex::new(None),
             catalog_counts: Mutex::new(HashMap::new()),
             observer: Mutex::new(None),
@@ -422,7 +425,10 @@ impl SourceOwner {
             let configured = owner.shared.configured_sources(None);
             owner.shared.send(SourceEvent::Configured(configured)).await;
             if let Some(source_id) = stored.sources.selected_source_id {
-                owner.select_source(source_id);
+                let runtime = owner.shared.runtime.clone();
+                runtime.spawn(async move {
+                    let _ = owner.select_source(source_id).await;
+                });
             }
         });
         let weak = Arc::downgrade(&self.shared);
@@ -486,7 +492,10 @@ impl SourceOwner {
                     .iter()
                     .any(|source| source.configuration.source_id == *id)
             }) {
-                self.select_source(source);
+                let owner = self.clone();
+                self.shared.runtime.spawn(async move {
+                    let _ = owner.select_source(source).await;
+                });
             }
         }
         self.shared
@@ -531,7 +540,10 @@ impl SourceOwner {
                     })
                     .map(|source| source.configuration.source_id.clone())
             }) {
-                self.select_source(source);
+                let owner = self.clone();
+                self.shared.runtime.spawn(async move {
+                    let _ = owner.select_source(source).await;
+                });
             }
         }
         if let Ok(playback) = self.shared.playback() {
@@ -1517,18 +1529,39 @@ impl SourceOwner {
             self.shared.home_explore_variation.load(Ordering::Relaxed),
         )
     }
-    pub fn smb_shares(
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceOwner {
+    pub async fn smb_shares(
         &self,
         settings: sources::FileSourceSettings,
         credentials: sources::FileCredentials,
-    ) -> Receiver<Result<Vec<(String, String)>, String>> {
-        self.reply(move |_, _| async move {
-            sources::list_smb_shares(settings, credentials)
-                .await
-                .map_err(string_error)
-        })
+    ) -> sources::SourceResult<Vec<authorization::SourceChoice>> {
+        self.shared
+            .runtime
+            .spawn(async move {
+                sources::list_smb_shares(settings, credentials)
+                    .await
+                    .map(|shares| {
+                        shares
+                            .into_iter()
+                            .enumerate()
+                            .map(|(index, (title, address))| authorization::SourceChoice {
+                                index: index as u32,
+                                title,
+                                address: Some(address),
+                                pin_required: false,
+                            })
+                            .collect()
+                    })
+            })
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))?
     }
+}
 
+impl SourceOwner {
     fn login_events<E: Send + 'static>(
         &self,
         method: authorization::SourceAuthorizationMethod,
@@ -1721,27 +1754,17 @@ impl SourceOwner {
             result.map_err(string_error)
         })
     }
+}
 
-    pub fn configured_source(
-        &self,
-        source_id: &SourceId,
-    ) -> Result<Option<EditableSource>, String> {
-        self.shared
-            .settings
-            .load()
-            .sources
-            .configured
-            .iter()
-            .find(|source| &source.configuration.source_id == source_id)
-            .map(|source| editable_source(&source.configuration))
-            .transpose()
-    }
-
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceOwner {
     pub fn list_sources(&self) -> ConfiguredSources {
         self.shared
             .configured_sources(self.shared.selected().as_ref())
     }
+}
 
+impl SourceOwner {
     pub fn operation(&self) -> tokio::sync::watch::Receiver<SourceOperation> {
         self.shared.operation.subscribe()
     }
@@ -1818,12 +1841,19 @@ impl SourceOwner {
                 .ok_or_else(|| SourceError::NotFound.to_string())
         })
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceOwner {
     pub fn discover_servers(&self, provider: sources::DiscoveryProvider) {
-        let events = self.shared.outputs.discovery.clone();
-        let _ = events.try_send(DiscoveryUpdate {
+        let owner = self.clone();
+        let publish = move |update: DiscoveryUpdate| {
+            owner.shared.discovery.send_replace(Some(update.clone()));
+            let _ = owner.shared.outputs.discovery.try_send(update);
+        };
+        publish(DiscoveryUpdate {
             provider,
-            servers: Arc::from([]),
+            servers: Vec::new(),
             status: DiscoveryStatus::Searching,
         });
         self.shared.runtime.spawn(async move {
@@ -1831,7 +1861,7 @@ impl SourceOwner {
                 match sources::discover_servers(provider, Duration::from_millis(1_500)).await {
                     Ok(servers) if servers.is_empty() => DiscoveryUpdate {
                         provider,
-                        servers: Arc::from([]),
+                        servers: Vec::new(),
                         status: DiscoveryStatus::Empty,
                     },
                     Ok(servers) => DiscoveryUpdate {
@@ -1841,14 +1871,16 @@ impl SourceOwner {
                     },
                     Err(error) => DiscoveryUpdate {
                         provider,
-                        servers: Arc::from([]),
+                        servers: Vec::new(),
                         status: DiscoveryStatus::Failed(error.to_string()),
                     },
                 };
-            let _ = events.try_send(update);
+            publish(update);
         });
     }
+}
 
+impl SourceOwner {
     pub fn configure_source(
         &self,
         mut input: SourceSetup,
@@ -1997,7 +2029,10 @@ impl SourceOwner {
         });
         receiver
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceOwner {
     pub fn set_half_stars(&self, source_id: SourceId, enabled: bool) {
         self.spawn_serialized(move |owner| async move {
             if let Err(error) = owner.shared.settings.update(|stored| {
@@ -2023,10 +2058,13 @@ impl SourceOwner {
                 .await;
         });
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceOwner {
     /// Completes when the source's stored catalog is selected. Connection and refresh
     /// continue in the background, including while credentials are being unlocked.
-    pub fn select_source(&self, source_id: SourceId) -> Receiver<Result<SelectedLibrary, String>> {
+    pub async fn select_source(&self, source_id: SourceId) -> sources::SourceResult<SourceId> {
         let (sender, receiver) = async_channel::bounded(1);
         let cancelled = self.shared.begin_acquisition();
         self.shared.cancel_observer();
@@ -2069,9 +2107,20 @@ impl SourceOwner {
             }));
         });
         receiver
+            .recv()
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))?
+            .map_err(SourceError::Other)
+            .map(|selected| selected.source_id)
     }
+}
 
-    pub fn change_secret_storage(&self, mode: SecretStorageMode) -> Receiver<Result<(), String>> {
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceOwner {
+    pub async fn change_secret_storage(
+        &self,
+        mode: SecretStorageMode,
+    ) -> sources::SourceResult<()> {
         let (sender, receiver) = async_channel::bounded(1);
         let owner = self.clone();
         self.shared.cancel_acquisition();
@@ -2149,7 +2198,10 @@ impl SourceOwner {
                     .clear();
                 owner.release_selected(true).await;
                 if let Some(selected) = owner.shared.settings.load().sources.selected_source_id {
-                    owner.select_source(selected);
+                    let selected_owner = owner.clone();
+                    owner.shared.runtime.spawn(async move {
+                        let _ = selected_owner.select_source(selected).await;
+                    });
                 }
                 owner
                     .shared
@@ -2160,8 +2212,14 @@ impl SourceOwner {
             }
         });
         receiver
+            .recv()
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))?
+            .map_err(SourceError::Other)
     }
+}
 
+impl SourceOwner {
     pub(crate) async fn ensure_local_source(&self) -> Result<Arc<Source>, String> {
         let stored = self.shared.settings.load();
         let local = stored
@@ -2320,8 +2378,11 @@ impl SourceOwner {
             roots.retain(|root| root.to_string_lossy() != path)
         });
     }
+}
 
-    pub fn refresh_source(&self, source_id: SourceId) -> Receiver<Result<(), String>> {
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceOwner {
+    pub async fn refresh_source(&self, source_id: SourceId) -> sources::SourceResult<()> {
         let acquisition = self.shared.begin_acquisition();
         let (sender, receiver) = async_channel::bounded(1);
         let owner = self.clone();
@@ -2362,13 +2423,20 @@ impl SourceOwner {
             let _ = sender.try_send(result);
         });
         receiver
+            .recv()
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))?
+            .map_err(SourceError::Other)
     }
+}
 
-    pub fn save_local_access(
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceOwner {
+    pub async fn save_local_access(
         &self,
         mut input: SourceLocalAccess,
         wait_until_mapped: bool,
-    ) -> Receiver<Result<(), String>> {
+    ) -> sources::SourceResult<()> {
         let (sender, receiver) = async_channel::bounded(1);
         let cancelled = self.shared.begin_acquisition();
         let owner = self.clone();
@@ -2456,8 +2524,15 @@ impl SourceOwner {
             }
         });
         receiver
+            .recv()
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))?
+            .map_err(SourceError::Other)
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceOwner {
     pub fn clear_local_access(&self, source_id: SourceId) {
         self.spawn_serialized(move |owner| async move {
             if let Ok(Some(source)) = owner.shared.database.source_identity_key(&source_id).await {
@@ -2498,8 +2573,11 @@ impl SourceOwner {
                 .await;
         });
     }
+}
 
-    pub fn forget_source(&self, source_id: SourceId) -> Receiver<Result<(), String>> {
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceOwner {
+    pub async fn forget_source(&self, source_id: SourceId) -> sources::SourceResult<()> {
         let (sender, receiver) = async_channel::bounded(1);
         self.spawn_serialized(move |owner| async move {
             let stored = owner.shared.settings.load();
@@ -2572,8 +2650,14 @@ impl SourceOwner {
             let _ = sender.try_send(removed);
         });
         receiver
+            .recv()
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))?
+            .map_err(SourceError::Other)
     }
+}
 
+impl SourceOwner {
     pub(crate) fn install_connect(&self, connect: &Arc<crate::connect::ConnectOwner>) {
         *self
             .shared
@@ -2635,14 +2719,20 @@ impl SourceOwner {
     }
 
     pub fn set_favorite(&self, target: FavoriteTarget, favorite: bool) {
-        self.set_favorite_with_result(target, favorite);
+        let owner = self.clone();
+        self.shared.runtime.spawn(async move {
+            let _ = owner.set_favorite_with_result(target, favorite).await;
+        });
     }
+}
 
-    pub fn set_favorite_with_result(
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceOwner {
+    pub async fn set_favorite_with_result(
         &self,
         target: FavoriteTarget,
         favorite: bool,
-    ) -> Receiver<Result<bool, String>> {
+    ) -> sources::SourceResult<bool> {
         info!(kind = target.kind(), favorite, "Favorite requested");
         let (sender, receiver) = async_channel::bounded(1);
         self.spawn_serialized(move |owner| async move {
@@ -2658,8 +2748,15 @@ impl SourceOwner {
             let _ = sender.try_send(result);
         });
         receiver
+            .recv()
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))?
+            .map_err(SourceError::Other)
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceOwner {
     pub fn set_rating(&self, target: FavoriteTarget, rating: Option<u8>) {
         self.spawn_serialized(move |owner| async move {
             owner.apply_rating(target, rating).await;
@@ -2704,7 +2801,9 @@ impl SourceOwner {
     ) -> Receiver<Result<(), String>> {
         use crate::settings::HomeSectionKind;
         if kind == HomeSectionKind::NewlyAdded {
-            return self.refresh_source(source_id);
+            return self.reply(move |owner, _| async move {
+                owner.refresh_source(source_id).await.map_err(string_error)
+            });
         }
         self.reply(move |owner, database| async move {
             if kind == HomeSectionKind::Explore {
@@ -3456,7 +3555,19 @@ fn configured_sources(
             })
             .collect::<Vec<_>>()
             .into(),
-        local_access: local_access.into(),
+        local_access,
+        document_roots: stored
+            .sources
+            .configured
+            .iter()
+            .filter(|source| {
+                Some(&source.configuration.source_id) == stored.sources.selected_source_id.as_ref()
+            })
+            .flat_map(|source| match source.configuration.editable() {
+                Ok(sources::EditableSource::Local { document_roots, .. }) => document_roots,
+                _ => Vec::new(),
+            })
+            .collect(),
     }
 }
 
@@ -3481,6 +3592,7 @@ fn source_refresh_error_text(error: &SourceError) -> String {
 
 fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource, String> {
     let mut editable = EditableSource {
+        integration: false,
         source: SourceSummary {
             id: configuration.source_id.clone(),
             kind: configuration.kind.clone(),
@@ -4150,12 +4262,11 @@ mod artwork_preparation_tests {
                 1
             );
             let completion = owner.select_source(source_id.clone());
-            let selected = tokio::time::timeout(Duration::from_secs(2), completion.recv())
+            let selected = tokio::time::timeout(Duration::from_secs(2), completion)
                 .await
                 .expect("selection result must not wait for credentials")
-                .unwrap()
                 .unwrap();
-            assert_eq!(selected.source_id, source_id);
+            assert_eq!(selected, source_id);
             drop(selected);
             let published = tokio::time::timeout(Duration::from_secs(2), async {
                 loop {
@@ -4347,7 +4458,10 @@ mod artwork_preparation_tests {
                     .finish()
                     .await
                     .unwrap();
-                owner.select_source(local_id.clone());
+                let selecting = owner.clone();
+                let selected_id = local_id.clone();
+                let selection =
+                    tokio::spawn(async move { selecting.select_source(selected_id).await });
                 let replacement = tokio::time::timeout(Duration::from_secs(2), async {
                     loop {
                         match receiver.recv().await.unwrap() {
@@ -4359,6 +4473,7 @@ mod artwork_preparation_tests {
                 .await
                 .expect("another cached source can be selected during unlock");
                 assert_eq!(replacement.source_id, local_id);
+                assert_eq!(selection.await.unwrap().unwrap(), local_id);
                 let configured = owner.shared.configured_sources(None);
                 assert_eq!(
                     (
@@ -4498,51 +4613,48 @@ mod artwork_preparation_tests {
             assert_eq!(owner.list_sources().sources.len(), 2);
             assert!(owner.selected_library().is_none());
             let missing = owner.select_source(SourceId::new("missing"));
-            let error = tokio::time::timeout(Duration::from_secs(5), missing.recv())
+            let error = tokio::time::timeout(Duration::from_secs(5), missing)
                 .await
-                .unwrap()
                 .unwrap()
                 .err()
                 .expect("unknown source returns an error to its caller");
-            assert!(!error.is_empty());
+            assert!(!error.to_string().is_empty());
             assert!(owner.selected_library().is_none());
 
             // Hold the operation lane so replacement happens before either request starts.
             let lane = owner.shared.lane.lock().await;
-            let superseded = owner.select_source(second.clone());
-            let initial = owner.select_source(first.clone());
+            let mut superseded = Box::pin(owner.select_source(second.clone()));
+            let mut initial = Box::pin(owner.select_source(first.clone()));
+            assert!(futures_util::poll!(superseded.as_mut()).is_pending());
+            assert!(futures_util::poll!(initial.as_mut()).is_pending());
             drop(lane);
             assert_eq!(
-                tokio::time::timeout(Duration::from_secs(5), superseded.recv())
+                tokio::time::timeout(Duration::from_secs(5), superseded)
                     .await
                     .unwrap()
-                    .unwrap()
-                    .err(),
-                Some(SourceError::Cancelled.to_string()),
+                    .err()
+                    .map(|error| error.to_string()),
+                Some(SourceError::Other(SourceError::Cancelled.to_string()).to_string()),
             );
+            let mut initial = Some(initial);
             for id in [&first, &second] {
                 let selection = if id == &first {
-                    initial.clone()
+                    initial.take().unwrap()
                 } else {
-                    owner.select_source(id.clone())
+                    Box::pin(owner.select_source(id.clone()))
                 };
-                let selected = tokio::time::timeout(Duration::from_secs(5), selection.recv())
+                let selected = tokio::time::timeout(Duration::from_secs(5), selection)
                     .await
                     .expect("selection completes without consuming events")
-                    .unwrap()
                     .unwrap();
-                assert_eq!(&selected.source_id, id);
+                assert_eq!(&selected, id);
                 assert_eq!(owner.list_sources().selected_source_id.as_ref(), Some(id));
                 assert_eq!(owner.selected_library().unwrap().source_id, *id);
             }
-            tokio::time::timeout(
-                Duration::from_secs(5),
-                owner.forget_source(second.clone()).recv(),
-            )
-            .await
-            .expect("removal completes without consuming events")
-            .unwrap()
-            .unwrap();
+            tokio::time::timeout(Duration::from_secs(5), owner.forget_source(second.clone()))
+                .await
+                .expect("removal completes without consuming events")
+                .unwrap();
             assert_eq!(owner.list_sources().sources.len(), 1);
             assert!(owner.shared.selected().is_none());
             assert!(
@@ -4571,12 +4683,7 @@ mod artwork_preparation_tests {
             owner.shared.cancel_observer();
             owner.shared.cancel_acquisition();
 
-            owner
-                .forget_source(second.clone())
-                .recv()
-                .await
-                .unwrap()
-                .unwrap();
+            owner.forget_source(second.clone()).await.unwrap();
             assert_eq!(
                 owner.list_sources().sources.len(),
                 1,
@@ -4584,15 +4691,15 @@ mod artwork_preparation_tests {
             );
             std::fs::remove_file(&settings_path).unwrap();
             std::fs::create_dir(&settings_path).unwrap();
-            let error = tokio::time::timeout(
-                Duration::from_secs(5),
-                owner.forget_source(first.clone()).recv(),
-            )
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap_err();
-            assert!(!error.is_empty(), "failed settings writes reach the caller");
+            let error =
+                tokio::time::timeout(Duration::from_secs(5), owner.forget_source(first.clone()))
+                    .await
+                    .unwrap()
+                    .unwrap_err();
+            assert!(
+                !error.to_string().is_empty(),
+                "failed settings writes reach the caller"
+            );
             assert_eq!(owner.list_sources().sources[0].id, first);
         }
     }
@@ -4728,5 +4835,227 @@ mod artwork_preparation_tests {
         assert!(second.completed > first.completed);
         assert_eq!(first.stage, SourceProgressStage::Artwork);
         assert_eq!(second.total, None);
+    }
+}
+
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
+pub struct SourceSubscription {
+    source: SourceOwner,
+    changes: tokio::sync::Mutex<tokio::sync::watch::Receiver<()>>,
+}
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
+pub struct SourceOperationSubscription {
+    changes: tokio::sync::Mutex<tokio::sync::watch::Receiver<SourceOperation>>,
+}
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
+pub struct SourceDiscoverySubscription {
+    changes: tokio::sync::Mutex<tokio::sync::watch::Receiver<Option<DiscoveryUpdate>>>,
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceOwner {
+    pub fn subscribe(&self) -> Arc<SourceSubscription> {
+        let mut changes = self.configuration_changes();
+        changes.mark_changed();
+        Arc::new(SourceSubscription {
+            source: self.clone(),
+            changes: tokio::sync::Mutex::new(changes),
+        })
+    }
+    pub fn subscribe_operation(&self) -> Arc<SourceOperationSubscription> {
+        let mut changes = self.operation();
+        changes.mark_changed();
+        Arc::new(SourceOperationSubscription {
+            changes: tokio::sync::Mutex::new(changes),
+        })
+    }
+    pub fn subscribe_discovery(&self) -> Arc<SourceDiscoverySubscription> {
+        let mut changes = self.shared.discovery.subscribe();
+        changes.mark_changed();
+        Arc::new(SourceDiscoverySubscription {
+            changes: tokio::sync::Mutex::new(changes),
+        })
+    }
+    pub fn authorize(
+        self: Arc<Self>,
+        method: authorization::SourceAuthorizationMethod,
+    ) -> Arc<authorization::SourceAuthorization> {
+        authorization::SourceAuthorization::new(self, method)
+    }
+    pub async fn saved_plex_logins(
+        self: Arc<Self>,
+    ) -> sources::SourceResult<Arc<authorization::SourceAuthorization>> {
+        authorization::SourceAuthorization::saved_plex(self)
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))
+    }
+    pub async fn save_jellyfin_emby(
+        &self,
+        source_id: Option<SourceId>,
+        kind: sources::ServerKind,
+        credentials: sources::CredentialInput,
+        use_instant_mix: bool,
+        connect_manually: bool,
+    ) -> sources::SourceResult<()> {
+        if let Some(source_id) = source_id {
+            self.update_source(SourceSettingsChange::JellyfinEmby {
+                source_id,
+                credentials,
+                use_instant_mix,
+                connect_manually,
+            })
+            .recv()
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))?
+            .map_err(SourceError::Other)
+        } else {
+            self.configure_source(SourceSetup::JellyfinEmby {
+                kind,
+                credentials,
+                use_instant_mix,
+            })
+            .recv()
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))?
+            .map(|_| ())
+            .map_err(SourceError::Other)
+        }
+    }
+    pub async fn save_subsonic(
+        &self,
+        source_id: Option<SourceId>,
+        kind: sources::SubsonicFlavor,
+        authentication: sources::SubsonicAuthentication,
+        credentials: sources::CredentialInput,
+    ) -> sources::SourceResult<()> {
+        if let Some(source_id) = source_id {
+            self.update_source(SourceSettingsChange::OpenSubsonic {
+                source_id,
+                kind,
+                authentication,
+                credentials,
+            })
+            .recv()
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))?
+            .map_err(SourceError::Other)
+        } else {
+            self.configure_source(SourceSetup::OpenSubsonic {
+                kind,
+                authentication,
+                credentials,
+            })
+            .recv()
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))?
+            .map(|_| ())
+            .map_err(SourceError::Other)
+        }
+    }
+    pub async fn save_plex(
+        &self,
+        source_id: SourceId,
+        settings: sources::PlexSettingsInput,
+    ) -> sources::SourceResult<()> {
+        self.update_source(SourceSettingsChange::Plex {
+            source_id,
+            settings,
+        })
+        .recv()
+        .await
+        .map_err(|error| SourceError::Other(error.to_string()))?
+        .map_err(SourceError::Other)
+    }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceSubscription {
+    pub async fn next(&self) -> sources::SourceResult<ConfiguredSources> {
+        self.changes
+            .lock()
+            .await
+            .changed()
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))?;
+        Ok(self.source.list_sources())
+    }
+}
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceOperationSubscription {
+    pub async fn next(&self) -> sources::SourceResult<SourceOperation> {
+        let mut changes = self.changes.lock().await;
+        changes
+            .changed()
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))?;
+        Ok(changes.borrow_and_update().clone())
+    }
+}
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceDiscoverySubscription {
+    pub async fn next(&self) -> sources::SourceResult<DiscoveryUpdate> {
+        let mut changes = self.changes.lock().await;
+        loop {
+            changes
+                .changed()
+                .await
+                .map_err(|error| SourceError::Other(error.to_string()))?;
+            if let Some(update) = changes.borrow_and_update().clone() {
+                return Ok(update);
+            }
+        }
+    }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceOwner {
+    pub fn editable(&self, source_id: SourceId) -> sources::SourceResult<Option<EditableSource>> {
+        let stored = self.shared.settings.load();
+        stored
+            .sources
+            .configured
+            .iter()
+            .map(|source| (source, false))
+            .chain(
+                stored
+                    .sources
+                    .integrations
+                    .iter()
+                    .map(|source| (source, true)),
+            )
+            .find(|(source, _)| source.configuration.source_id == source_id)
+            .map(|(source, integration)| {
+                let mut form =
+                    editable_source(&source.configuration).map_err(SourceError::Other)?;
+                form.integration = integration;
+                Ok(form)
+            })
+            .transpose()
+    }
+}
+
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
+pub struct SourceCatalogSubscription {
+    changes: tokio::sync::Mutex<tokio::sync::watch::Receiver<()>>,
+}
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceOwner {
+    pub fn subscribe_catalog(&self) -> Arc<SourceCatalogSubscription> {
+        let mut changes = self.catalog_changes();
+        changes.mark_changed();
+        Arc::new(SourceCatalogSubscription {
+            changes: tokio::sync::Mutex::new(changes),
+        })
+    }
+}
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceCatalogSubscription {
+    pub async fn next(&self) -> sources::SourceResult<()> {
+        self.changes
+            .lock()
+            .await
+            .changed()
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))
     }
 }

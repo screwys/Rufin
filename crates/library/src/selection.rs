@@ -79,6 +79,7 @@ impl SongQuery {
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub enum SongSelection {
     Uris(Arc<[String]>),
     Tracks(Arc<[TrackKey]>),
@@ -88,6 +89,14 @@ pub enum SongSelection {
         ranges: Option<Vec<Range<usize>>>,
     },
     Concat(Vec<SongSelection>),
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SongSelection {
+    #[cfg_attr(feature = "bindings", uniffi::constructor)]
+    pub fn from_uris(uris: Vec<String>) -> Arc<Self> {
+        Arc::new(Self::Uris(uris.into()))
+    }
 }
 
 pub(crate) async fn song_query_on(

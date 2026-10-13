@@ -1,5 +1,8 @@
 //! Download queue ownership, command handling, and bounded transfer execution.
 
+#[cfg(feature = "bindings")]
+uniffi::setup_scaffolding!();
+
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -22,6 +25,14 @@ pub use storage::DownloadDirectory;
 
 use track_download::*;
 
+pub type DownloadCount = usize;
+#[cfg(feature = "bindings")]
+uniffi::custom_type!(DownloadCount, u64, {
+    remote,
+    lower: |value| value as u64,
+    try_lift: |value| Ok(usize::try_from(value)?),
+});
+
 const QUEUE_VERSION: u32 = 3;
 const QUEUE_FILE: &str = "queue.json";
 const QUEUE_PART_FILE: &str = "queue.json.part";
@@ -29,10 +40,12 @@ const RETRY_INTERVAL: Duration = Duration::from_secs(30);
 const MAX_ACTIVE_DOWNLOADS: usize = 3;
 
 #[derive(Clone)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct Downloads {
     root: Arc<PathBuf>,
     commands: Sender<Command>,
     connect: Arc<Mutex<Option<Weak<dyn ConnectDownload>>>>,
+    status: tokio::sync::watch::Receiver<DownloadStatus>,
 }
 
 /// Connect supplies peer media; this actor retains download scheduling and files.
@@ -75,6 +88,11 @@ impl Drop for DownloadSuspension {
 }
 
 enum Command {
+    Page {
+        offset: u64,
+        limit: u32,
+        response: Sender<Result<DownloadPage, String>>,
+    },
     Attach {
         source_id: SourceId,
         source_key: SourceKey,
@@ -473,6 +491,7 @@ struct ActiveDownload {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum DownloadRule {
     EntireLibrary,
     Favorites,
@@ -481,6 +500,7 @@ pub enum DownloadRule {
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct DownloadRules {
     #[serde(default)]
     pub entire_library: bool,
@@ -532,6 +552,7 @@ impl DownloadRule {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct SourceDownloadSettings {
     pub source_id: SourceId,
     #[serde(flatten)]
@@ -611,6 +632,7 @@ fn prepare_rules(intent: RuleIntent, prepared: Sender<PreparedRules>) {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum DownloadSubject {
     Rule(DownloadRule),
     Prepared {
@@ -630,6 +652,7 @@ impl DownloadSubject {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum DownloadQueueState {
     Queued,
     Downloading,
@@ -638,14 +661,15 @@ pub enum DownloadQueueState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct DownloadQueueItem {
     pub id: String,
     pub source_id: Option<SourceId>,
     pub subject: DownloadSubject,
     pub preview_uris: Vec<String>,
     pub quality: StreamQuality,
-    pub completed_tracks: usize,
-    pub total_tracks: usize,
+    pub completed_tracks: DownloadCount,
+    pub total_tracks: DownloadCount,
     pub state: DownloadQueueState,
 }
 
@@ -691,7 +715,7 @@ pub enum DownloadEvent {
 struct Actor {
     root: Arc<PathBuf>,
     database: Database,
-    events: Sender<DownloadEvent>,
+    events: DownloadEvents,
     transfers: Arc<TransferClients>,
     connect: Arc<Mutex<Option<Weak<dyn ConnectDownload>>>>,
     prepared_rules: Sender<PreparedRules>,
@@ -722,16 +746,21 @@ impl Downloads {
     ) -> Self {
         let (commands, receiver) = async_channel::unbounded();
         let (prepared_rules, rule_results) = async_channel::unbounded();
+        let (status, changes) = tokio::sync::watch::channel(DownloadStatus::default());
         let downloads = Self {
             root: Arc::new(root),
             commands,
+            status: changes,
             connect: Arc::new(Mutex::new(None)),
         };
         runtime.spawn(run(
             Actor {
                 root: Arc::clone(&downloads.root),
                 database,
-                events,
+                events: DownloadEvents {
+                    sender: events,
+                    status,
+                },
                 transfers: Arc::new(TransferClients::default()),
                 connect: Arc::clone(&downloads.connect),
                 prepared_rules,
@@ -799,7 +828,10 @@ impl Downloads {
     pub fn settings_changed(&self, settings: Vec<SourceDownloadSettings>) {
         self.send(Command::SettingsChanged(settings));
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl Downloads {
     pub fn remove_rule(&self, source_id: SourceId, rule: DownloadRule, delete_downloads: bool) {
         self.send(Command::RemoveRule {
             source_id,
@@ -807,15 +839,22 @@ impl Downloads {
             delete_downloads,
         });
     }
+}
 
+impl Downloads {
     pub fn cancel(&self, source_id: SourceId, job_id: String) {
         self.cancel_job(Some(source_id), job_id);
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl Downloads {
     pub fn cancel_job(&self, source_id: Option<SourceId>, job_id: String) {
         self.send(Command::Cancel { source_id, job_id });
     }
+}
 
+impl Downloads {
     pub fn clear_job(&self, source_id: SourceId, job_id: String) {
         self.send(Command::ClearJob { source_id, job_id });
     }
@@ -833,11 +872,17 @@ impl Downloads {
         completed.recv().await.map_err(|error| error.to_string())?;
         Ok(DownloadSuspension(resume))
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl Downloads {
     pub fn set_paused(&self, paused: bool) {
         self.send(Command::SetPaused(paused));
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl Downloads {
     pub fn move_job(
         &self,
         source_id: SourceId,
@@ -852,11 +897,16 @@ impl Downloads {
             after,
         });
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl Downloads {
     pub fn clear(&self, source_id: SourceId, notify: bool) {
         self.send(Command::Clear { source_id, notify });
     }
+}
 
+impl Downloads {
     fn send(&self, command: Command) {
         if self.commands.try_send(command).is_err() {
             warn!("download operation lane is unavailable");
@@ -1005,6 +1055,13 @@ impl Actor {
 
     async fn apply(&mut self, command: Command, active: &mut Vec<ActiveDownload>) {
         match command {
+            Command::Page {
+                offset,
+                limit,
+                response,
+            } => {
+                let _ = response.send(self.queue_page(offset, limit).await).await;
+            }
             Command::Attach {
                 source_id,
                 source_key,
@@ -2823,22 +2880,7 @@ impl Actor {
             .get(&group)
             .into_iter()
             .flatten()
-            .map(|job| DownloadQueueItem {
-                id: job.id.clone(),
-                source_id: group.clone(),
-                subject: job.subject.clone(),
-                preview_uris: job
-                    .completed
-                    .iter()
-                    .chain(&job.remaining)
-                    .take(4)
-                    .cloned()
-                    .collect(),
-                quality: job.quality,
-                completed_tracks: job.completed.len(),
-                total_tracks: job.completed.len() + job.remaining.len(),
-                state: job.state,
-            })
+            .map(|job| job.queue_item(group.clone()))
             .collect::<Vec<_>>();
         let _ = self
             .events
@@ -3007,7 +3049,7 @@ mod tests {
         let mut actor = actor_for_test(root.path(), database, &source_id, source_key);
         let media_uri = "https://media.example/direct.flac".to_string();
         let (events, received) = async_channel::unbounded();
-        actor.events = events;
+        actor.events.sender = events;
         actor
             .apply(
                 Command::Download {
@@ -3223,7 +3265,7 @@ mod tests {
             let source = SourceId::new("source");
             let mut actor = actor_for_test(root.path(), database, &source, source_key);
             let (events, received) = async_channel::unbounded();
-            actor.events = events;
+            actor.events.sender = events;
             let subject = DownloadSubject::Prepared {
                 context_id: "playlist:1".into(),
                 title: None,
@@ -3474,7 +3516,10 @@ mod tests {
         Actor {
             root: Arc::new(root.to_path_buf()),
             database,
-            events,
+            events: DownloadEvents {
+                sender: events,
+                status: tokio::sync::watch::channel(DownloadStatus::default()).0,
+            },
             transfers: Arc::new(TransferClients::default()),
             prepared_rules,
             connect: Arc::new(Mutex::new(None)),
@@ -3712,5 +3757,188 @@ mod tests {
             actor.pending_rules.as_ref().map(|intent| intent.rules),
             Some(replacement)
         );
+    }
+}
+
+#[derive(Clone, Default)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct DownloadStatus {
+    pub revision: u64,
+    pub queue_revision: u64,
+    pub paused: bool,
+    pub queues: Vec<DownloadQueueSummary>,
+    pub notice: Option<String>,
+}
+
+#[derive(Clone)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct DownloadQueueSummary {
+    pub source_id: Option<SourceId>,
+    pub downloaded_tracks: u64,
+    pub total_jobs: u64,
+}
+
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct DownloadPage {
+    pub total: u64,
+    pub jobs: Vec<DownloadQueueItem>,
+    pub previews: Vec<library::TrackRow>,
+}
+
+struct DownloadEvents {
+    sender: Sender<DownloadEvent>,
+    status: tokio::sync::watch::Sender<DownloadStatus>,
+}
+
+impl DownloadEvents {
+    fn update(&self, event: &DownloadEvent) {
+        self.status.send_if_modified(|state| {
+            match event {
+                DownloadEvent::Changed { .. } => state.revision += 1,
+                DownloadEvent::Notice(message) => state.notice = Some(message.clone()),
+                DownloadEvent::Queue {
+                    source_id,
+                    snapshot,
+                } => {
+                    state.paused = snapshot.paused;
+                    state.queue_revision += 1;
+                    let summary = DownloadQueueSummary {
+                        source_id: source_id.clone(),
+                        downloaded_tracks: snapshot.downloaded_tracks as u64,
+                        total_jobs: snapshot.jobs.len() as u64,
+                    };
+                    if let Some(previous) = state
+                        .queues
+                        .iter_mut()
+                        .find(|queue| &queue.source_id == source_id)
+                    {
+                        *previous = summary;
+                    } else {
+                        state.queues.push(summary);
+                        state.queues.sort_by(|a, b| a.source_id.cmp(&b.source_id));
+                    }
+                }
+                DownloadEvent::Feedback(_) | DownloadEvent::SubjectChanged { .. } => return false,
+            }
+            true
+        });
+    }
+    async fn send(
+        &self,
+        event: DownloadEvent,
+    ) -> Result<(), async_channel::SendError<DownloadEvent>> {
+        self.update(&event);
+        self.sender.send(event).await
+    }
+    fn try_send(
+        &self,
+        event: DownloadEvent,
+    ) -> Result<(), async_channel::TrySendError<DownloadEvent>> {
+        self.update(&event);
+        self.sender.try_send(event)
+    }
+}
+
+impl DownloadJob {
+    fn queue_item(&self, source_id: Option<SourceId>) -> DownloadQueueItem {
+        DownloadQueueItem {
+            id: self.id.clone(),
+            source_id,
+            subject: self.subject.clone(),
+            preview_uris: self
+                .completed
+                .iter()
+                .chain(&self.remaining)
+                .take(4)
+                .cloned()
+                .collect(),
+            quality: self.quality,
+            completed_tracks: self.completed.len(),
+            total_tracks: self.completed.len() + self.remaining.len(),
+            state: self.state,
+        }
+    }
+}
+
+impl Actor {
+    async fn queue_page(&self, offset: u64, limit: u32) -> Result<DownloadPage, String> {
+        let mut groups = self.jobs.iter().collect::<Vec<_>>();
+        groups.sort_by(|(a, _), (b, _)| a.cmp(b));
+        let total = groups.iter().map(|(_, jobs)| jobs.len() as u64).sum();
+        let mut offset = usize::try_from(offset).unwrap_or(usize::MAX);
+        let limit = limit.min(128) as usize;
+        let mut jobs = Vec::with_capacity(limit);
+        for (source, queued) in groups {
+            if offset >= queued.len() {
+                offset -= queued.len();
+                continue;
+            }
+            jobs.extend(
+                queued
+                    .iter()
+                    .skip(offset)
+                    .take(limit - jobs.len())
+                    .map(|job| job.queue_item(source.clone())),
+            );
+            offset = 0;
+            if jobs.len() == limit {
+                break;
+            }
+        }
+        let uris = jobs
+            .iter()
+            .filter_map(|job| job.preview_uris.first().cloned())
+            .collect::<Vec<_>>();
+        let previews = self
+            .database
+            .track_rows_by_uri(&uris, &library::ReadCancellation::new())
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(DownloadPage {
+            total,
+            jobs,
+            previews,
+        })
+    }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl Downloads {
+    pub fn subscribe(&self) -> Arc<DownloadSubscription> {
+        let mut changes = self.status.clone();
+        changes.mark_changed();
+        Arc::new(DownloadSubscription {
+            changes: tokio::sync::Mutex::new(changes),
+        })
+    }
+    pub async fn queue_page(&self, offset: u64, limit: u32) -> sources::SourceResult<DownloadPage> {
+        let (response, receive) = async_channel::bounded(1);
+        self.send(Command::Page {
+            offset,
+            limit,
+            response,
+        });
+        receive
+            .recv()
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))?
+            .map_err(SourceError::Other)
+    }
+}
+
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
+pub struct DownloadSubscription {
+    changes: tokio::sync::Mutex<tokio::sync::watch::Receiver<DownloadStatus>>,
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl DownloadSubscription {
+    pub async fn next(&self) -> sources::SourceResult<DownloadStatus> {
+        let mut changes = self.changes.lock().await;
+        changes
+            .changed()
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))?;
+        Ok(changes.borrow_and_update().clone())
     }
 }

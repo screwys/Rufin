@@ -108,7 +108,7 @@ impl Activity {
         large_image: String,
     ) -> Option<Self> {
         let playback_state = visible_playback_state(settings, view.transport.state)?;
-        let media = Arc::clone(view.transport.current.as_ref()?);
+        let media = Arc::new(view.transport.current.as_ref()?.clone());
         media.id.run?;
         let duration_millis = duration_millis(&media);
         let started_at_millis = match playback_state {
@@ -135,7 +135,7 @@ impl Activity {
                 .transport
                 .current
                 .as_ref()
-                .is_some_and(|media| media.as_ref() == self.media.as_ref())
+                .is_some_and(|media| media == self.media.as_ref())
     }
 }
 

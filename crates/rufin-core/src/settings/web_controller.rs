@@ -1,4 +1,10 @@
 use std::net::{IpAddr, Ipv4Addr};
+#[cfg(feature = "bindings")]
+uniffi::custom_type!(IpAddr, String, {
+    remote,
+    lower: |address| address.to_string(),
+    try_lift: |address| Ok(address.parse()?),
+});
 
 use secrets::SecretKey;
 use serde::{Deserialize, Serialize};
@@ -7,6 +13,7 @@ use super::SettingsOwner;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct ControllerSettings {
     pub enabled: bool,
     pub address: IpAddr,
@@ -23,12 +30,23 @@ impl Default for ControllerSettings {
     }
 }
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
 impl SettingsOwner {
-    pub fn set_controller_enabled(&self, enabled: bool) -> Result<ControllerSettings, String> {
+    pub fn set_controller_enabled(
+        &self,
+        enabled: bool,
+    ) -> Result<ControllerSettings, super::SettingsError> {
         self.update_controller(|settings| settings.enabled = enabled)
+            .map_err(Into::into)
     }
+}
 
-    pub fn set_controller_remote(&self, remote: bool) -> Result<ControllerSettings, String> {
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SettingsOwner {
+    pub fn set_controller_remote(
+        &self,
+        remote: bool,
+    ) -> Result<ControllerSettings, super::SettingsError> {
         self.update_controller(|settings| {
             settings.address = match (settings.address.is_ipv6(), remote) {
                 (false, false) => Ipv4Addr::LOCALHOST.into(),
@@ -37,12 +55,22 @@ impl SettingsOwner {
                 (true, true) => std::net::Ipv6Addr::UNSPECIFIED.into(),
             };
         })
+        .map_err(Into::into)
     }
+}
 
-    pub fn set_controller_port(&self, port: u16) -> Result<ControllerSettings, String> {
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SettingsOwner {
+    pub fn set_controller_port(
+        &self,
+        port: u16,
+    ) -> Result<ControllerSettings, super::SettingsError> {
         self.update_controller(|settings| settings.port = port)
+            .map_err(Into::into)
     }
+}
 
+impl SettingsOwner {
     fn update_controller(
         &self,
         edit: impl FnOnce(&mut ControllerSettings),

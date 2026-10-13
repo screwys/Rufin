@@ -87,7 +87,7 @@ fn manage_server_content(
         save: gtk::Button,
     });
     clamp.set_maximum_size(large_popup_content_width(MANAGE_SERVER_CLAMP_WIDTH));
-    match shell.products.source.configured_source(&server.id) {
+    match shell.products.source.editable(server.id.clone()) {
         Ok(Some(saved)) => {
             if let Some(settings_group) = source_settings_group(shell, &saved) {
                 let settings = match settings_group {
@@ -98,7 +98,7 @@ fn manage_server_content(
             }
         }
         Ok(None) => {}
-        Err(error) => content.append(&source_settings_error(&error)),
+        Err(error) => content.append(&source_settings_error(&error.to_string())),
     }
 
     if let Some(row) = super::playlist_auto_save_row(shell, &server) {
@@ -304,7 +304,11 @@ fn server_actions_group(
         let exit = exit.clone();
         let preferences_dialog = preferences_dialog.downgrade();
         select.connect_clicked(move |_| {
-            source.select_source(source_id.clone());
+            let source = source.clone();
+            let source_id = source_id.clone();
+            gtk::glib::spawn_future_local(async move {
+                let _ = source.select_source(source_id).await;
+            });
             close_manage_server(&exit);
             if let Some(dialog) = preferences_dialog.upgrade() {
                 dialog.close();
@@ -318,7 +322,11 @@ fn server_actions_group(
     let source_id = server.id.clone();
     let preferences_dialog_for_resync = preferences_dialog.downgrade();
     resync.connect_clicked(move |_| {
-        source.refresh_source(source_id.clone());
+        let source = source.clone();
+        let source_id = source_id.clone();
+        gtk::glib::spawn_future_local(async move {
+            let _ = source.refresh_source(source_id).await;
+        });
         if let Some(dialog) = preferences_dialog_for_resync.upgrade() {
             dialog.close();
         }
@@ -374,7 +382,9 @@ pub fn confirm_forget_source(
         None::<&gio::Cancellable>,
         move |response| {
             if response.as_str() == "forget" {
-                source.forget_source(source_id.clone());
+                gtk::glib::spawn_future_local(async move {
+                    let _ = source.forget_source(source_id).await;
+                });
                 after_forget();
             }
         },

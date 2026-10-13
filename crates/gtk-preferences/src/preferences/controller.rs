@@ -53,10 +53,9 @@ pub(super) fn bind(
             }
             let result = shell
                 .web_controller
-                .regenerate_token()
+                .token(true)
                 .await
-                .map_err(|error| error.to_string())
-                .and_then(|result| result);
+                .map_err(|error| error.to_string());
             if let Some(button) = button.upgrade() {
                 button.set_sensitive(true);
             }
@@ -66,7 +65,7 @@ pub(super) fn bind(
                 }
                 Err(error) => {
                     if let Some(status) = status.upgrade() {
-                        status.set_subtitle(&error);
+                        status.set_subtitle(&error.to_string());
                     }
                 }
             }
@@ -253,10 +252,10 @@ fn bind_address_action(
             return;
         };
         let state = shell.web_controller.status().borrow().clone();
-        let addresses = match state.addresses() {
+        let addresses = match web::controller_addresses(&state) {
             Ok(addresses) => addresses,
             Err(error) => {
-                status.set_subtitle(&error);
+                status.set_subtitle(&error.to_string());
                 return;
             }
         };
@@ -368,10 +367,14 @@ pub(super) fn copy_action(button: &gtk::Widget, icon: &gtk::Image) -> impl Fn(&s
     }
 }
 
-fn save(shell: &Preferences, status: &adw::ActionRow, result: Result<ControllerSettings, String>) {
+fn save(
+    shell: &Preferences,
+    status: &adw::ActionRow,
+    result: Result<ControllerSettings, rufin_core::settings::SettingsError>,
+) {
     match result {
         Ok(_) => *shell.settings.current.borrow_mut() = shell.settings.persistence.load(),
-        Err(error) => status.set_subtitle(&error),
+        Err(error) => status.set_subtitle(&error.to_string()),
     }
 }
 

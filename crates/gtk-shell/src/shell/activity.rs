@@ -86,13 +86,12 @@ impl Shell {
             let Some(shell) = weak.upgrade() else {
                 return;
             };
-            let period = periods.into_iter().flatten().find(|period| match period {
-                CalendarActivityPeriod::Month { .. } => months.contains(&period_key(*period)),
-                CalendarActivityPeriod::Year(year) => months
-                    .iter()
-                    .any(|month| month.starts_with(&format!("{year}-"))),
-                CalendarActivityPeriod::Lifetime => false,
-            });
+            let period = shell
+                .settings
+                .current
+                .borrow()
+                .activity_overview
+                .startup_period(&now, &months);
             let Some(period) = period else {
                 return;
             };
@@ -101,13 +100,7 @@ impl Shell {
                 .settings
                 .update_app_settings("automatic activity overview", |settings| {
                     let settings = &mut settings.activity_overview;
-                    match period {
-                        CalendarActivityPeriod::Month { .. } => {
-                            settings.opened_month = Some(period_key(period))
-                        }
-                        CalendarActivityPeriod::Year(year) => settings.opened_year = Some(year),
-                        CalendarActivityPeriod::Lifetime => {}
-                    }
+                    settings.mark_opened(period);
                     true
                 });
         });
@@ -700,11 +693,12 @@ impl ActivityView {
             change.set_text(&comparison);
             change.set_visible(settings.show_comparison && !comparison.is_empty());
         }
-        let maximum = data.genres.first().map_or(1, |(_, count)| *count).max(1) as f64;
+        let maximum = data.genres.first().map_or(1, |genre| genre.plays).max(1) as f64;
         for (index, (row, name, count, bar)) in self.genre_rows.iter().enumerate() {
             let value = data.genres.get(index).filter(|_| index < limit);
             row.set_visible(value.is_some());
-            if let Some((genre, plays)) = value {
+            if let Some(genre) = value {
+                let (genre, plays) = (&genre.name, &genre.plays);
                 name.set_text(genre);
                 count.set_text(&plays.to_string());
                 bar.set_fraction(*plays as f64 / maximum);

@@ -651,7 +651,7 @@ fn webdav_exchange_leaves_an_unchanged_profile_file_untouched() {
             assert_eq!(inputs.products.source.file_integrations(), vec![crate::source::FileIntegration {
                 id: source_id.clone(), name: "Profile storage".into(), kind: "webdav".into(), music_source: false,
             }]);
-            let preset = inputs.products.source.file_integration_settings(&source_id).unwrap().unwrap();
+            let preset = inputs.products.source.editable(source_id.clone()).unwrap().unwrap();
             inputs.products.source.update_file_integration(sources::SourceSettingsChange::Files {
                 source_id: source_id.clone(), name: "Files".into(), settings: preset.file_settings.unwrap(),
                 credentials: sources::FileCredentialsEdit { secret: None, headers: None },
@@ -779,9 +779,7 @@ async fn device(
         .products
         .source
         .change_secret_storage(secrets::SecretStorageMode::ConfigFile)
-        .recv()
         .await
-        .unwrap()
         .unwrap();
     inputs.products.connect.secrets.replace(secret_store);
     inputs

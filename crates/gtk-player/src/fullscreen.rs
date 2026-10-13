@@ -1151,7 +1151,7 @@ mod playback_refresh_tests {
         );
 
         let mut current_change = previous.clone();
-        current_change.transport.current = Some(Arc::new(current_media("Next", source)));
+        current_change.transport.current = Some(current_media("Next", source));
         assert_eq!(
             fullscreen_playback_refresh(Some(&previous), &current_change),
             FullscreenPlaybackRefresh::Static
@@ -1166,7 +1166,7 @@ mod playback_refresh_tests {
             ["2026", "FLAC", "24 bit", "96 kHz", "Local"]
         );
         let mut streaming = current_change.clone();
-        let current = Arc::make_mut(streaming.transport.current.as_mut().unwrap());
+        let current = streaming.transport.current.as_mut().unwrap();
         current.stream = Some(playback::CurrentStream {
             local: false,
             format: Some("audio/mpeg".into()),
@@ -1178,7 +1178,7 @@ mod playback_refresh_tests {
         );
         assert_eq!(
             rufin_core::settings::presentation::now_playing_labels(
-                streaming.transport.current.as_deref(),
+                streaming.transport.current.as_ref(),
                 Some("Living room")
             ),
             ["2026", "MP3", "Living room", "Streaming"]
@@ -1256,7 +1256,7 @@ mod playback_refresh_tests {
                 can_next: false,
             },
             transport: TransportView {
-                current: current.map(Arc::new),
+                current,
                 state: TransportStatus::Playing,
                 desired_playing: true,
                 position_millis,

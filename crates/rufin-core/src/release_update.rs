@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use crate::runtime::{ReleaseHistory, ReleaseNote, ReleaseUpdate};
-use async_channel::{Receiver, Sender};
+use async_channel::Sender;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
@@ -38,6 +38,7 @@ struct ReleaseCheckRequest {
     feedback: Vec<Sender<bool>>,
 }
 
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct ReleaseUpdateOwner {
     settings: SettingsFile,
     runtime: tokio::runtime::Handle,
@@ -95,7 +96,7 @@ impl ReleaseUpdateOwner {
         })
     }
 
-    pub(crate) fn initial_history(&self) -> ReleaseHistory {
+    pub fn initial_history(&self) -> ReleaseHistory {
         let installed_version = mutex_lock(&self.effective_installed_version).clone();
         release_history(
             &mutex_lock(&self.cache),
@@ -240,16 +241,6 @@ impl ReleaseUpdateOwner {
 }
 
 impl ReleaseUpdateOwner {
-    pub fn check(&self) {
-        self.check_with_automatic_update(false, None);
-    }
-
-    pub fn check_now(&self) -> Receiver<bool> {
-        let (sender, receiver) = async_channel::bounded(1);
-        self.check_with_automatic_update(false, Some(sender));
-        receiver
-    }
-
     pub fn check_and_update(&self) {
         self.check_with_automatic_update(true, None);
     }
@@ -291,10 +282,6 @@ impl ReleaseUpdateOwner {
             installer,
             version,
         );
-    }
-
-    pub fn mark_seen(&self, version: String) -> Result<(), String> {
-        mark_release_notification_seen(&self.settings, &version)
     }
 
     pub fn ready_version(&self) -> Option<String> {
@@ -465,7 +452,7 @@ fn release_history(
     installed_version: &str,
 ) -> ReleaseHistory {
     ReleaseHistory {
-        notes: cache.notes.clone().into(),
+        notes: cache.notes.clone(),
         installed_version: installed_version.to_string(),
         available_version: release_update_available(cache, updates_supported, installed_version)
             .map(str::to_string),
@@ -1060,5 +1047,22 @@ mod tests {
             release_update_available(&cache, true, "1.0.0"),
             Some("2.0.0")
         );
+    }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl ReleaseUpdateOwner {
+    pub fn check(&self) {
+        self.check_with_automatic_update(false, None);
+    }
+
+    pub async fn check_now(&self) -> bool {
+        let (sender, receiver) = async_channel::bounded(1);
+        self.check_with_automatic_update(false, Some(sender));
+        receiver.recv().await.unwrap_or(false)
+    }
+
+    pub fn mark_seen(&self, version: String) -> Result<(), crate::settings::SettingsError> {
+        mark_release_notification_seen(&self.settings, &version).map_err(Into::into)
     }
 }

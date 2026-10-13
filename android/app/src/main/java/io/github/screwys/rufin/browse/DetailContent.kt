@@ -1,5 +1,10 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.shared.rufin_core.LibraryField
+import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
+import io.github.screwys.rufin.shared.rufin_core.DisplaySize
+
+import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.ui.PlayerArtwork
 import io.github.screwys.rufin.ui.Artwork
 import io.github.screwys.rufin.ui.rememberArtwork
@@ -59,7 +64,7 @@ internal fun DetailContent(
     favoritesPage: BrowsePage?, releasePages: List<Pair<AndroidArtistReleaseGroup, BrowsePage>>,
     onActivate: (BrowseItem) -> Unit, onMenu: (BrowseItem) -> Unit,
     onPlay: (BrowseItem, String, Boolean) -> Unit, onFavorite: (BrowseItem) -> Unit,
-    onAddToPlaylist: (BrowseItem) -> Unit, onOpenRoute: (String, String) -> Unit,
+    onAddToPlaylist: (BrowseItem) -> Unit, onOpenRoute: (Route, String) -> Unit,
     onLink: (AndroidDetailLink) -> Unit, onScrolled: (Boolean) -> Unit, onRadio: (BrowseItem) -> Unit,
 ) {
     val tracks = page.pages.collectAsLazyPagingItems()
@@ -79,8 +84,8 @@ internal fun DetailContent(
         return
     }
     val headerItem = remember(summary, page.displaySettings) { BrowseItem(summary.row, 0UL, null, page.displaySettings) }
-    val artist = summary.mode == "ArtistDetail" || summary.mode == "AlbumArtistDetail"
-    val releasesVisible = artist || summary.mode == "ArtistDiscography" || summary.mode == "AlbumArtistDiscography"
+    val artist = summary.mode.kind == "ArtistDetail" || summary.mode.kind == "AlbumArtistDetail"
+    val releasesVisible = artist || summary.mode.kind == "ArtistDiscography" || summary.mode.kind == "AlbumArtistDiscography"
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val width = maxWidth
         LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp + LocalPlayerBottomPadding.current)) {
@@ -93,7 +98,7 @@ internal fun DetailContent(
                     if (summary.showTrackHeader) DetailTrackHeader(favoritesPage.detailTrackFields, favoritesPage.displaySettings?.size)
                     val visibleRows = if (favorites.loadState.refresh is LoadState.Loading)
                         minOf(summary.favoriteTotal, 4UL).toInt() else minOf(favorites.itemCount, 4)
-                    val baseHeight = when (favoritesPage.displaySettings?.size) { "Compact" -> 48.dp; "Large" -> 80.dp; else -> 64.dp }
+                    val baseHeight = when (favoritesPage.displaySettings?.size) { DisplaySize.COMPACT -> 48.dp; DisplaySize.LARGE -> 80.dp; else -> 64.dp }
                     val rowHeight = baseHeight * LocalDensity.current.fontScale.coerceAtLeast(1f)
                     if (favorites.itemCount == 0 && favorites.loadState.refresh is LoadState.NotLoading) {
                         BrowseEmptyState(favoritesPage.hasActiveFilters, resetFilters = page::resetFilters)
@@ -111,9 +116,9 @@ internal fun DetailContent(
             if (releasesVisible) {
                 releases.forEach { (group, owner, albums) ->
                     val display = owner.displaySettings
-                    val grid = display?.layout == "Grid"
-                    val cardSize = when (display?.size) { "Compact" -> 104.dp; "Large" -> 176.dp; else -> 128.dp }
-                    val gap = when (display?.gridSpacing) { "Small" -> 4.dp; "Wide" -> 16.dp; else -> 12.dp }
+                    val grid = display?.layout == LibraryLayout.GRID
+                    val cardSize = when (display?.size) { DisplaySize.COMPACT -> 104.dp; DisplaySize.LARGE -> 176.dp; else -> 128.dp }
+                    val gap = when (display?.gridSpacing) { DisplaySize.COMPACT -> 4.dp; DisplaySize.LARGE -> 16.dp; else -> 12.dp }
                     val columns = if (grid) ((width - 32.dp + gap) / (cardSize + gap)).toInt().coerceAtLeast(1) else 1
                     val count = albums.itemCount
                     item("release-heading:${group.id}") { DetailSectionHeading(group.title) }
@@ -141,9 +146,9 @@ internal fun DetailContent(
                 }
             } else {
                 val display = page.options.displaySettings ?: page.displaySettings
-                if (display?.layout == "Grid") {
-                    val cardSize = when (display.size) { "Compact" -> 104.dp; "Large" -> 176.dp; else -> 128.dp }
-                    val gap = when (display.gridSpacing) { "Small" -> 4.dp; "Wide" -> 16.dp; else -> 12.dp }
+                if (display?.layout == LibraryLayout.GRID) {
+                    val cardSize = when (display.size) { DisplaySize.COMPACT -> 104.dp; DisplaySize.LARGE -> 176.dp; else -> 128.dp }
+                    val gap = when (display.gridSpacing) { DisplaySize.COMPACT -> 4.dp; DisplaySize.LARGE -> 16.dp; else -> 12.dp }
                     val columns = ((width - 32.dp + gap) / (cardSize + gap)).toInt().coerceAtLeast(1)
                     items((tracks.itemCount + columns - 1) / columns, key = { "detail-grid:$it" }) { rowIndex ->
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
@@ -180,16 +185,16 @@ internal fun DetailContent(
 private fun DetailHeader(
     summary: AndroidDetailSummary, item: BrowseItem, player: PlayerConnection,
     onPlay: (BrowseItem, String, Boolean) -> Unit, onFavorite: (BrowseItem) -> Unit,
-    onOpenRoute: (String, String) -> Unit, onLink: (AndroidDetailLink) -> Unit, onMenu: (BrowseItem) -> Unit,
+    onOpenRoute: (Route, String) -> Unit, onLink: (AndroidDetailLink) -> Unit, onMenu: (BrowseItem) -> Unit,
     onRadio: (BrowseItem) -> Unit,
 ) {
     val projected = favoriteItem(player.model, item)
-    if (summary.mode in setOf("ArtistDiscography", "AlbumArtistDiscography", "ArtistTracks", "AlbumArtistTracks", "ArtistFavoriteTracks", "AlbumArtistFavoriteTracks")) {
+    if (summary.mode.kind in setOf("ArtistDiscography", "AlbumArtistDiscography", "ArtistTracks", "AlbumArtistTracks", "ArtistFavoriteTracks", "AlbumArtistFavoriteTracks")) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).then(showcasePaint(item.row.key)).padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(translate(when {
-                summary.mode.endsWith("Discography") -> "Discography"
-                summary.mode.endsWith("FavoriteTracks") -> "Favorite tracks"
+                summary.mode.kind.endsWith("Discography") -> "Discography"
+                summary.mode.kind.endsWith("FavoriteTracks") -> "Favorite tracks"
                 else -> "Tracks"
             }).uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             BrowseTitle(item.row, maxLines = 1, style = MaterialTheme.typography.titleLarge, marquee = true, player = player)
@@ -229,7 +234,7 @@ private fun DetailHeader(
                     val credited = buildAnnotatedString {
                         append(summary.artistText)
                         summary.artistLinks.forEach { artist ->
-                            addLink(LinkAnnotation.Clickable(artist.route,
+                            addLink(LinkAnnotation.Clickable(artist.route.toString(),
                                 TextLinkStyles(SpanStyle(color = linkColor, textDecoration = TextDecoration.None)),
                                 { onOpenRoute(artist.route, artist.title) }), artist.start.toInt(), artist.end.toInt())
                         }
@@ -279,15 +284,13 @@ private fun DetailHeader(
 private fun DetailHeaderCover(summary: AndroidDetailSummary, player: PlayerConnection, size: Dp) {
     val bindings = summary.artworkBindings
     if (bindings.size <= 1) {
-        val row = summary.row.copy(artworkIdentity = bindings.firstOrNull() ?: summary.row.artworkIdentity)
-        DetailCover(row, detailArtwork(row, player, size), Modifier.size(size))
+        DetailCover(detailArtwork(bindings.firstOrNull() ?: summary.row.artworkIdentity, player, size), Modifier.size(size))
     } else {
         Column(Modifier.size(size).clip(RoundedCornerShape(12.dp))) {
             repeat(2) { y ->
                 Row {
                     repeat(2) { x ->
-                        val row = summary.row.copy(artworkIdentity = bindings[(y * 2 + x) % bindings.size])
-                        Artwork(detailArtwork(row, player, size / 2f), Modifier.size(size / 2f))
+                        Artwork(detailArtwork(bindings[(y * 2 + x) % bindings.size], player, size / 2f), Modifier.size(size / 2f))
                     }
                 }
             }
@@ -313,13 +316,13 @@ private fun DetailSectionHeading(title: String) {
 }
 
 @Composable
-private fun detailArtwork(row: AndroidBrowseRow, player: PlayerConnection, size: Dp): PlayerArtwork? {
+private fun detailArtwork(identity: ByteArray?, player: PlayerConnection, size: Dp): PlayerArtwork? {
     val pixels = with(LocalDensity.current) { size.roundToPx() }.coerceAtLeast(1)
-    return rememberArtwork(row.artworkIdentity, player, pixels)
+    return rememberArtwork(identity, player, pixels)
 }
 
 @Composable
-private fun DetailCover(row: AndroidBrowseRow, artwork: PlayerArtwork?, modifier: Modifier,
+private fun DetailCover(artwork: PlayerArtwork?, modifier: Modifier,
 ) {
     Box(modifier.clip(RoundedCornerShape(8.dp))) {
         if (artwork == null) FallbackCover(Modifier.fillMaxSize()) else Artwork(artwork, Modifier.fillMaxSize())
@@ -333,12 +336,12 @@ internal fun DetailTrackRow(
     activate: (BrowseItem) -> Unit, menu: (BrowseItem) -> Unit,
     favorite: (BrowseItem) -> Unit, playlist: (BrowseItem) -> Unit, allowSwipe: Boolean = true,
 ) {
-    val projected = if (fields.any { it.id == "Favorite" }) favoriteItem(player.model, item) else item
+    val projected = if (fields.any { it.id == LibraryField.FAVORITE }) favoriteItem(player.model, item) else item
     val size = item.displaySettings?.size
-    val merged = fields.any { it.id == "TitleMerged" }
-    val imageSize = when (size) { "Compact" -> 36.dp; "Large" -> 64.dp; else -> 48.dp }
-    val rowPadding = if (size == "Compact") 0.dp else 4.dp
-    val baseHeight = when (size) { "Compact" -> 48.dp; "Large" -> 80.dp; else -> if (merged) 64.dp else 56.dp }
+    val merged = fields.any { it.id == LibraryField.TITLE_MERGED }
+    val imageSize = when (size) { DisplaySize.COMPACT -> 36.dp; DisplaySize.LARGE -> 64.dp; else -> 48.dp }
+    val rowPadding = if (size == DisplaySize.COMPACT) 0.dp else 4.dp
+    val baseHeight = when (size) { DisplaySize.COMPACT -> 48.dp; DisplaySize.LARGE -> 80.dp; else -> if (merged) 64.dp else 56.dp }
     val rowHeight = baseHeight * LocalDensity.current.fontScale.coerceAtLeast(1f)
     BrowseSwipeActions(item, allowSwipe) {
     Row(Modifier.fillMaxWidth().heightIn(min = rowHeight).combinedClickable(onClick = { activate(item) }, onLongClick = { menu(item) }).padding(start = 8.dp, end = 4.dp, top = rowPadding, bottom = rowPadding),
@@ -346,54 +349,54 @@ internal fun DetailTrackRow(
         fields.forEach { field ->
             val value = item.row.fields.firstOrNull { it.id == field.id }?.text.orEmpty()
             when (field.id) {
-                "Image" -> if (showImage) DetailCover(item.row, detailArtwork(item.row, player, imageSize), Modifier.size(imageSize))
-                "Tools" -> PlayerIconButton("rufin-view-more-symbolic", "More", { menu(item) })
-                "Favorite" -> IconButton({ favorite(projected) }) {
+                LibraryField.IMAGE -> if (showImage) DetailCover(detailArtwork(item.row.artworkIdentity, player, imageSize), Modifier.size(imageSize))
+                LibraryField.TOOLS -> PlayerIconButton("rufin-view-more-symbolic", "More", { menu(item) })
+                LibraryField.FAVORITE -> IconButton({ favorite(projected) }) {
                     RufinIcon(if (projected.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic", translate("Favorite"), Modifier.size(24.dp),
                         if (projected.row.favorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
                 }
-                "RowIndex" -> Text(value, detailColumn(field.id), textAlign = TextAlign.Center,
+                LibraryField.ROW_INDEX -> Text(value, detailColumn(field.id), textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.bodySmall)
-                "TitleMerged" -> Row(detailColumn(field.id), verticalAlignment = Alignment.CenterVertically,
+                LibraryField.TITLE_MERGED -> Row(detailColumn(field.id), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (showImage) DetailCover(item.row, detailArtwork(item.row, player, imageSize), Modifier.size(imageSize))
+                    if (showImage) DetailCover(detailArtwork(item.row.artworkIdentity, player, imageSize), Modifier.size(imageSize))
                     Column(Modifier.weight(1f)) {
-                        BrowseTitle(item.row.copy(title = value), maxLines = 1, style = MaterialTheme.typography.bodyMedium, player = player)
+                        BrowseTitle(item.row.copy(displayTitle = value), maxLines = 1, style = MaterialTheme.typography.bodyMedium, player = player)
                         Text(item.row.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                else -> if (field.id == "Title") BrowseTitle(item.row.copy(title = value), detailColumn(field.id), maxLines = 2,
+                else -> if (field.id == LibraryField.TITLE) BrowseTitle(item.row.copy(displayTitle = value), detailColumn(field.id), maxLines = 2,
                     style = MaterialTheme.typography.bodyMedium, player = player)
                 else Text(value, detailColumn(field.id), maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    style = if (field.id == "Title") MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall)
+                    style = if (field.id == LibraryField.TITLE) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall)
             }
         }
     }
     }
 }
 
-private fun RowScope.detailColumn(id: String, imageSize: Dp = 48.dp): Modifier = when (id) {
-    "RowIndex" -> Modifier.width(28.dp)
-    "Duration" -> Modifier.width(44.dp)
-    "Year" -> Modifier.width(40.dp)
-    "Image" -> Modifier.width(imageSize)
-    "Tools" -> Modifier.width(48.dp)
-    "Title", "TitleMerged" -> Modifier.weight(1f)
+private fun RowScope.detailColumn(id: LibraryField, imageSize: Dp = 48.dp): Modifier = when (id) {
+    LibraryField.ROW_INDEX -> Modifier.width(28.dp)
+    LibraryField.DURATION -> Modifier.width(44.dp)
+    LibraryField.YEAR -> Modifier.width(40.dp)
+    LibraryField.IMAGE -> Modifier.width(imageSize)
+    LibraryField.TOOLS -> Modifier.width(48.dp)
+    LibraryField.TITLE, LibraryField.TITLE_MERGED -> Modifier.weight(1f)
     else -> Modifier.weight(.65f)
 }
 
 @Composable
-internal fun DetailTrackHeader(fields: List<AndroidSortField>, displaySize: String?) {
-    val imageSize = when (displaySize) { "Compact" -> 36.dp; "Large" -> 64.dp; else -> 48.dp }
+internal fun DetailTrackHeader(fields: List<AndroidSortField>, displaySize: DisplaySize?) {
+    val imageSize = when (displaySize) { DisplaySize.COMPACT -> 36.dp; DisplaySize.LARGE -> 64.dp; else -> 48.dp }
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically) {
         fields.forEach { field ->
-            if (field.id == "Image" || field.id == "Tools") Spacer(detailColumn(field.id, imageSize))
-            else if (field.id == "Duration") Box(detailColumn(field.id)) {
+            if (field.id == LibraryField.IMAGE || field.id == LibraryField.TOOLS) Spacer(detailColumn(field.id, imageSize))
+            else if (field.id == LibraryField.DURATION) Box(detailColumn(field.id)) {
                 RufinIcon("rufin-preferences-system-time-symbolic", translate("Duration"), Modifier.size(14.dp))
-            } else Text(if (field.id == "TitleMerged") translate("Title") else field.title, detailColumn(field.id), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                textAlign = if (field.id == "RowIndex") TextAlign.Center else TextAlign.Start,
+            } else Text(if (field.id == LibraryField.TITLE_MERGED) translate("Title") else field.title, detailColumn(field.id), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                textAlign = if (field.id == LibraryField.ROW_INDEX) TextAlign.Center else TextAlign.Start,
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
@@ -405,13 +408,13 @@ internal fun DetailTrackHeader(fields: List<AndroidSortField>, displaySize: Stri
 private fun DetailAlbumRow(item: BrowseItem, player: PlayerConnection, activate: (BrowseItem) -> Unit,
     menu: (BrowseItem) -> Unit, favorite: (BrowseItem) -> Unit,
 ) {
-    val compact = item.displaySettings?.size == "Compact"
-    val imageSize = when (item.displaySettings?.size) { "Compact" -> 36.dp; "Large" -> 64.dp; else -> 48.dp }
+    val compact = item.displaySettings?.size == DisplaySize.COMPACT
+    val imageSize = when (item.displaySettings?.size) { DisplaySize.COMPACT -> 36.dp; DisplaySize.LARGE -> 64.dp; else -> 48.dp }
     val padding = if (compact) 0.dp else 6.dp
     BrowseSwipeActions(item, true) {
     Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).combinedClickable(onClick = { activate(item) }, onLongClick = { menu(item) }).padding(start = 16.dp, end = 8.dp, top = padding, bottom = padding), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        DetailCover(item.row, detailArtwork(item.row, player, imageSize), Modifier.size(imageSize))
+        DetailCover(detailArtwork(item.row.artworkIdentity, player, imageSize), Modifier.size(imageSize))
         Column(Modifier.weight(1f)) {
             BrowseTitle(item.row, style = MaterialTheme.typography.bodyMedium, player = player)
             Text(item.row.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)

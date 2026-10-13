@@ -103,6 +103,7 @@ pub struct ActivityImportReport {
 }
 
 #[derive(Clone, Debug, FromRow, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct HistoryRow {
     pub track_key: TrackKey,
     pub audio_properties: crate::AudioProperties,
@@ -157,6 +158,7 @@ pub struct ActivityTrackRow {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum CalendarActivityPeriod {
     Month { year: i32, month: u8 },
     Year(i32),

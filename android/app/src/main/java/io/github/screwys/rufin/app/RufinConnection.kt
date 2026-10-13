@@ -1,5 +1,8 @@
 package io.github.screwys.rufin.app
 
+import io.github.screwys.rufin.shared.rufin_core.Route
+import io.github.screwys.rufin.shared.library.sourceIdForUri
+
 import io.github.screwys.rufin.browse.BrowseConnection
 import io.github.screwys.rufin.more.MoreConnection
 import io.github.screwys.rufin.connect.ConnectConnection
@@ -19,10 +22,14 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
 import io.github.screwys.rufin.core.AndroidLibrary
-import io.github.screwys.rufin.core.AndroidLibraryState
 import io.github.screwys.rufin.core.AndroidLibraryEvents
-import io.github.screwys.rufin.core.AndroidFavoriteSettlement
-import io.github.screwys.rufin.core.AndroidSourceState
+import io.github.screwys.rufin.shared.rufin_core.FavoriteSettlement
+import io.github.screwys.rufin.shared.rufin_core.FavoriteIntents
+import io.github.screwys.rufin.browse.favoriteTarget
+import io.github.screwys.rufin.shared.rufin_core.ConfiguredSources
+import io.github.screwys.rufin.shared.rufin_core.SourceOperation
+import io.github.screwys.rufin.shared.rufin_core.SourceOwner
+import io.github.screwys.rufin.shared.rufin_core.sourceOperationText
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.ui.userMessage
 import kotlinx.coroutines.*
@@ -44,22 +51,24 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
         feedbackTimeout = viewModelScope.launch { delay(2000); feedback = null }
     }
     internal fun showFeedback(failure: Throwable) = showFeedback(failure.userMessage())
+    internal var favoriteIntents: FavoriteIntents? = null
+        private set
     internal var libraryEvents: AndroidLibraryEvents? = null
         private set
     internal var favoriteRevision by mutableLongStateOf(0)
         private set
-    private val settlements = MutableSharedFlow<AndroidFavoriteSettlement>(extraBufferCapacity = 32)
+    private val settlements = MutableSharedFlow<FavoriteSettlement>(extraBufferCapacity = 32)
     internal val favoriteSettlements = settlements.asSharedFlow()
     internal fun projectedFavorite(kind: String, uri: String, fallback: Boolean): Boolean {
         favoriteRevision
-        return libraryEvents?.projectedFavorite(kind, uri, fallback) ?: fallback
+        return favoriteIntents?.projectedItemFavorite(favoriteTarget(kind, uri), fallback) ?: fallback
     }
     internal fun setFavoriteIntent(kind: String, uri: String, value: Boolean) {
-        libraryEvents?.setFavoriteIntent(kind, uri, value)
+        favoriteIntents?.setPending(favoriteTarget(kind, uri), value)
         favoriteRevision++
     }
     internal fun releaseFavoriteIntent(kind: String, uri: String, requested: Boolean) {
-        libraryEvents?.releaseFavoriteIntent(kind, uri, requested)
+        favoriteIntents?.responseMatchesPending(favoriteTarget(kind, uri), requested)
         favoriteRevision++
     }
     internal var overviewExportName by mutableStateOf<String?>(null)
@@ -104,9 +113,16 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
         private set
     var pendingActions by mutableIntStateOf(0)
         private set
-    var libraryState by mutableStateOf<AndroidLibraryState?>(null)
+    var catalogRevision by mutableStateOf(0UL)
         private set
-    var sources by mutableStateOf<AndroidSourceState?>(null)
+    var sourceOperation by mutableStateOf<SourceOperation>(SourceOperation.Idle)
+        private set
+    internal var sourceOwner by mutableStateOf<SourceOwner?>(null)
+        private set
+    val sourceBusy get() = sourceOperation !is SourceOperation.Idle && sourceOperation !is SourceOperation.Failed
+    val sourceStatus get() = if (sourceBusy) sourceOperationText(sourceOperation) else null
+    val selectedSourceName get() = sources?.sources?.firstOrNull { it.id == sources?.selectedSourceId }?.name.orEmpty()
+    var sources by mutableStateOf<ConfiguredSources?>(null)
         private set
     var debugLogging by mutableStateOf(false)
         private set
@@ -122,7 +138,7 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
             observation?.cancel()
             service = null
             ready = false
-            libraryState = null
+            sourceOperation = SourceOperation.Idle
             sources = null
             debugLogging = false
         }
@@ -143,19 +159,25 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
         observation = viewModelScope.launch {
             connected.runtime.collectLatest { result ->
                 ready = false
-                libraryState = null
+                sourceOperation = SourceOperation.Idle
                 sources = null
                 debugLogging = false
                 startupError = result?.exceptionOrNull()?.userMessage()
                 val core = result?.getOrNull() ?: return@collectLatest
-                val library = core.library()
                 val events = core.libraryEvents()
                 libraryEvents = events
-                val changes = library.subscribe()
-                val sourceChanges = core.subscribeSources()
+                favoriteIntents = events.favoriteIntents()
+                val owner = core.source()
+                sourceOwner = owner
+                val sourceChanges = owner.subscribe()
+                val operations = owner.subscribeOperation()
+                val catalog = owner.subscribeCatalog()
                 debugLogging = core.debugLogging()
                 try {
-                    libraryState = changes.next()
+                    sources = sourceChanges.next()
+                    sourceOperation = operations.next()
+                    catalog.next()
+                    catalogRevision++
                     ready = true
                     coroutineScope {
                         launch { connected.playbackNotices.collect { showFeedback(it) } }
@@ -168,12 +190,21 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
                             }
                         }
                         launch {
-                            while (isActive) sources = sourceChanges.next()
+                            while (isActive) {
+                                sources = sourceChanges.next()
+                                catalogRevision++
+                            }
+                        }
+                        launch {
+                            while (isActive) {
+                                catalog.next()
+                                catalogRevision++
+                            }
                         }
                         while (isActive) {
-                            val state = changes.next()
-                            if (state.error != libraryState?.error) state.error?.let { showFeedback(it) }
-                            libraryState = state
+                            val operation = operations.next()
+                            if (operation is SourceOperation.Failed && operation != sourceOperation) showFeedback(operation.message)
+                            sourceOperation = operation
                         }
                     }
                 } catch (cancelled: CancellationException) {
@@ -182,11 +213,15 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
                     showFeedback(error)
                 } finally {
                     ready = false
-                    libraryState = null
+                    sourceOperation = SourceOperation.Idle
                     sources = null
-                    changes.destroy()
+                    operations.destroy()
+                    catalog.destroy()
                     sourceChanges.destroy()
-                    library.destroy()
+                    sourceOwner = null
+                    owner.destroy()
+                    favoriteIntents?.destroy()
+                    favoriteIntents = null
                     libraryEvents = null
                     events.destroy()
                 }
@@ -239,26 +274,27 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
 
     private suspend fun selectLocalSource(service: RufinService) {
         val core = service.runtime.value!!.getOrThrow()
-        core.subscribeSources().use { subscription ->
+        core.source().use { owner -> owner.subscribe().use { subscription ->
             val state = subscription.next()
             state.sources.firstOrNull { it.kind == "local" }?.let { local ->
-                if (state.selectedSourceId != local.id) core.library().use { it.selectSource(local.id) }
+                if (state.selectedSourceId != local.id) core.source().use { it.selectSource(local.id) }
             }
-        }
+        } }
     }
 
     private fun addLocalSource(add: suspend (RufinService) -> Unit) = runAction {
         val connected = connectedService()
         add(connected)
         val core = connected.runtime.value!!.getOrThrow()
-        val subscription = core.subscribeSources()
+        val owner = core.source()
+        val subscription = owner.subscribe()
         try {
             val state = subscription.next()
             val local = state.sources.firstOrNull { it.kind == "local" }
             if (local != null && state.selectedSourceId != local.id) {
-                core.library().use { it.selectSource(local.id) }
+                core.source().use { it.selectSource(local.id) }
             }
-        } finally { subscription.destroy() }
+        } finally { subscription.destroy(); owner.destroy() }
     }
 
     private fun retainGrant(uri: Uri, flags: Int) {
@@ -269,13 +305,18 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
     }
 
     fun requestLocalNetwork() = runAction { connectedService().requestLocalNetwork() }
-    internal fun openOverview(item: io.github.screwys.rufin.core.AndroidOverviewItem, period: String) = runAction {
+    internal fun openOverview(mediaUri: String, title: String, kind: String, period: String) = runAction {
         val library = browse.library ?: return@runAction
-        if (item.detailRoute != null) {
-            item.sourceId?.takeIf { it != sources?.selectedSourceId }?.let { library.selectSource(it) }
-            browse.openRoute(item.detailRoute!!, item.title, item.kind)
+        val route = when (kind) {
+            "album" -> Route.AlbumDetail(mediaUri)
+            "artist" -> Route.ArtistDetail(mediaUri)
+            else -> null
+        }
+        if (route != null) {
+            sourceIdForUri(mediaUri)?.takeIf { it != sources?.selectedSourceId }?.let { sourceOwner?.selectSource(it) }
+            browse.openRoute(route, title, kind)
         } else connectedService().playRequest {
-            library.playRows("overview:$period:${item.mediaUri}", listOf(item.mediaUri), 0UL, "now", false, translate("Listening overview"))
+            library.playRows("overview:$period:$mediaUri", listOf(mediaUri), 0UL, "now", false, translate("Listening overview"))
         }
     }
 
@@ -296,11 +337,11 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
     }
 
     fun refresh() = runAction {
-        connectedService().runtime.value!!.getOrThrow().library().use { it.refresh() }
+        sources?.selectedSourceId?.let { sourceOwner?.refreshSource(it) }
     }
 
     fun selectSource(id: String) = runAction {
-        connectedService().runtime.value!!.getOrThrow().library().use { it.selectSource(id) }
+        sourceOwner?.selectSource(id)
     }
 
     fun retryStartup() {

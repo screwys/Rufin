@@ -4,11 +4,19 @@ use std::time::Duration;
 
 use lindera::dictionary::load_fs_dictionary;
 
+#[cfg(feature = "bindings")]
+uniffi::custom_type!(PathBuf, String, {
+    remote,
+    lower: |path| path.to_string_lossy().into_owned(),
+    try_lift: |path| Ok(PathBuf::from(path)),
+});
+
 const DICTIONARY_DIRECTORY: &str = "ipadic-6.0.0";
 const DICTIONARY_URL: &str =
     "https://github.com/lindera/lindera/releases/download/v6.0.0/lindera-ipadic-6.0.0.zip";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum JapaneseDictionaryStatus {
     #[default]
     Idle,

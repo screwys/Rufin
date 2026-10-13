@@ -1701,6 +1701,7 @@ pub fn lyrics_to_lrc_text(lyrics: &LyricsDocument, offset_millis: i64) -> String
         .join("\n")
 }
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
 pub fn shift_lrc_text_timestamps(text: &str, offset_delta_millis: i64) -> String {
     let mut output = String::with_capacity(text.len());
     let mut cursor = 0;

@@ -71,6 +71,7 @@ pub async fn export_png(
     .map_err(|error| error.to_string())?
 }
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
 pub fn period_key(period: CalendarActivityPeriod) -> String {
     match period {
         CalendarActivityPeriod::Month { year, month } => format!("{year:04}-{month:02}"),
@@ -79,6 +80,7 @@ pub fn period_key(period: CalendarActivityPeriod) -> String {
     }
 }
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
 pub fn period_label(period: CalendarActivityPeriod) -> String {
     match period {
         CalendarActivityPeriod::Month { year, month } => {

@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.settings
 
+import io.github.screwys.rufin.shared.rufin_core.ApplicationPreferenceEdit
+
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
@@ -12,23 +14,24 @@ import io.github.screwys.rufin.core.translate
 @Composable
 internal fun OverviewSettingsPage(preferences: PreferencesConnection) {
     LaunchedEffect(preferences) { preferences.refreshApplicationSettings() }
-    val settings = preferences.applicationSettings?.optJSONObject("activity_overview")
+    val settings = preferences.applicationSettings?.activityOverview
     if (settings == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         return
     }
     SettingsPage {
         listOf("monthly" to "Monthly", "yearly" to "Yearly").forEach { (period, label) ->
-            val enabled = settings.optBoolean("${period}_enabled", true)
+            val monthly = period == "monthly"
+            val enabled = if (monthly) settings.monthlyEnabled else settings.yearlyEnabled
             SettingsGroup(translate(label)) {
-                SettingsSwitch(translate("Open automatically"), enabled) { preferences.changePreference("activity_overview.${period}_enabled", it) }
+                SettingsSwitch(translate("Open automatically"), enabled) { preferences.changePreference(ApplicationPreferenceEdit.ActivityOverview(if (monthly) settings.copy(monthlyEnabled = it) else settings.copy(yearlyEnabled = it))) }
                 SettingsNumber(translate(if (period == "monthly") "Days before month ends" else "Days before year ends"),
-                    settings.optDouble("${period}_days_before_end"), 0.0..31.0, enabled = enabled) {
-                    preferences.changePreference("activity_overview.${period}_days_before_end", it)
+                    (if (monthly) settings.monthlyDaysBeforeEnd else settings.yearlyDaysBeforeEnd).toDouble(), 0.0..31.0, enabled = enabled) {
+                    preferences.changePreference(ApplicationPreferenceEdit.ActivityOverview(if (monthly) settings.copy(monthlyDaysBeforeEnd = (it as Number).toLong().toUInt()) else settings.copy(yearlyDaysBeforeEnd = (it as Number).toLong().toUInt())))
                 }
                 SettingsNumber(translate(if (period == "monthly") "Days after month ends" else "Days after year ends"),
-                    settings.optDouble("${period}_days_after_end"), 0.0..31.0, enabled = enabled) {
-                    preferences.changePreference("activity_overview.${period}_days_after_end", it)
+                    (if (monthly) settings.monthlyDaysAfterEnd else settings.yearlyDaysAfterEnd).toDouble(), 0.0..31.0, enabled = enabled) {
+                    preferences.changePreference(ApplicationPreferenceEdit.ActivityOverview(if (monthly) settings.copy(monthlyDaysAfterEnd = (it as Number).toLong().toUInt()) else settings.copy(yearlyDaysAfterEnd = (it as Number).toLong().toUInt())))
                 }
             }
         }

@@ -124,34 +124,13 @@ impl AndroidBrowseQuery {
             name: name.clone(),
         });
         AndroidBrowseRow {
-            track_key: None,
-            album_key: None,
-            album_media_uri: None,
-            kind: "folder".into(),
-            playback_context_id: None,
-            key: id,
-            title: name,
-            artist: String::new(),
-            album: String::new(),
-            fields: Vec::new(),
-            media_uri: String::new(),
-            subtitle: String::new(),
-            favorite: false,
-            duration_millis: 0,
-            detail_route: Some(route_json(Route::Folders { path })),
-            pin: None,
-            section: String::new(),
-            section_id: String::new(),
-            section_kind: String::new(),
-            section_refreshable: false,
-            year: None,
-            track_count: 0,
-            source_id: Some(self.selected().source_id.to_string()),
-            source_name: String::new(),
-            last_played: None,
-            writable: false,
-            downloaded: false,
-            artwork_identity,
+            context_source_id: Some(self.selected().source_id.to_string()),
+            ..AndroidBrowseRow::new(AndroidBrowseItem::Folder {
+                key: id,
+                title: name,
+                route: Route::Folders { path },
+                artwork: artwork_identity,
+            })
         }
     }
 

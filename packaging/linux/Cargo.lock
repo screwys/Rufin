@@ -687,6 +687,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "uniffi",
 ]
 
 [[package]]
@@ -1958,6 +1959,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "uniffi",
  "wiremock",
 ]
 
@@ -5308,6 +5310,7 @@ version = "0.16.6"
 dependencies = [
  "futures-util",
  "lindera",
+ "localization",
  "reqwest 0.13.5",
  "serde",
  "serde_json",
@@ -7371,8 +7374,15 @@ checksum = "e9f068eba8e7071c5f9511831b44f32c740d5adf574e990f946ddb53db2f314e"
 dependencies = [
  "bitflags 2.13.1",
  "memchr",
+ "pulldown-cmark-escape",
  "unicase",
 ]
+
+[[package]]
+name = "pulldown-cmark-escape"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "007d8adb5ddab6f8e3f491ac63566a7d5002cc7ed73901f72057943fa71ae1ae"
 
 [[package]]
 name = "pxfm"
@@ -7971,6 +7981,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "uniffi",
  "url",
  "vodozemac",
 ]
@@ -8019,6 +8030,7 @@ dependencies = [
  "playback",
  "playback-cast",
  "presence",
+ "pulldown-cmark",
  "reqwest 0.13.5",
  "resvg",
  "rufin-connect",
@@ -8388,6 +8400,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "uniffi",
  "windows-native-keyring-store",
 ]
 
@@ -10557,6 +10570,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "uniffi",
  "url",
 ]
 

@@ -1102,10 +1102,10 @@ fn general_page(
                 .source
                 .selected_library()
             {
-                distinct_track_covers_shell
-                    .products
-                    .source
-                    .refresh_source(selected.source_id);
+                let source = distinct_track_covers_shell.products.source.clone();
+                gtk::glib::spawn_future_local(async move {
+                    let _ = source.refresh_source(selected.source_id).await;
+                });
             }
         }
     });

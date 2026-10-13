@@ -35,6 +35,7 @@ pub struct SourceSummary {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct LocalFolder {
     pub path: String,
 }
@@ -61,12 +62,14 @@ pub struct SourceLocalAccessSummary {
 }
 
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct ConfiguredSources {
-    pub sources: Arc<[SourceSummary]>,
+    pub sources: Vec<SourceSummary>,
     pub selected_source_id: Option<SourceId>,
-    pub local_folders: Arc<[LocalFolder]>,
-    pub local_excluded_folders: Arc<[PathBuf]>,
-    pub local_access: Arc<[SourceLocalAccessSummary]>,
+    pub local_folders: Vec<LocalFolder>,
+    pub local_excluded_folders: Vec<PathBuf>,
+    pub local_access: Vec<SourceLocalAccessSummary>,
+    pub document_roots: Vec<sources::DocumentRoot>,
 }
 
 impl ConfiguredSources {
@@ -85,6 +88,7 @@ impl ConfiguredSources {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct EditableSource {
+    pub integration: bool,
     pub plex_settings: Option<sources::PlexSettingsInput>,
     pub file_settings: Option<sources::FileSourceSettings>,
     pub source: SourceSummary,
@@ -95,6 +99,7 @@ pub struct EditableSource {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum SourceProgressStage {
     Connecting,
     Albums,
@@ -109,6 +114,7 @@ pub enum SourceProgressStage {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct SourceProgress {
     pub stage: SourceProgressStage,
     pub completed: usize,
@@ -117,6 +123,7 @@ pub struct SourceProgress {
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum SourceOperation {
     Idle,
     Adding {
@@ -170,6 +177,7 @@ pub fn source_progress_text(progress: &SourceProgress) -> String {
     }
 }
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
 pub fn source_operation_text(operation: &SourceOperation) -> Option<String> {
     match operation {
         SourceOperation::Idle => None,
@@ -194,9 +202,10 @@ pub enum DiscoveryStatus {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct DiscoveryUpdate {
     pub provider: DiscoveryProvider,
-    pub servers: Arc<[DiscoveredServer]>,
+    pub servers: Vec<DiscoveredServer>,
     pub status: DiscoveryStatus,
 }
 

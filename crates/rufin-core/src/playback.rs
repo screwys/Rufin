@@ -45,6 +45,7 @@ struct OutputSelection {
     prepared: Option<Box<dyn PlaybackBackend>>,
 }
 
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct PlaybackOwner {
     database: Arc<Database>,
     settings: SettingsFile,
@@ -288,7 +289,7 @@ impl PlaybackOwner {
 
     fn publish(&self, projection: PlaybackProjection, current_media_changed: bool) {
         if current_media_changed {
-            self.publish_current_media(projection.view.transport.current.clone());
+            self.publish_current_media(projection.view.transport.current.clone().map(Arc::new));
         }
         (self.observe_playback)(
             Some(&projection),
@@ -558,6 +559,7 @@ impl PlaybackOwner {
         self.updates
             .current()
             .and_then(|view| view.transport.current.clone())
+            .map(Arc::new)
     }
 
     fn active(&self) -> Option<Playback> {
@@ -730,11 +732,6 @@ impl PlaybackOwner {
 }
 
 impl PlaybackOwner {
-    pub fn page(&self, offset: u64, limit: u32, filter: String) -> Result<QueuePage, String> {
-        self.runtime
-            .block_on(self.receiver_queue_page(offset, limit, filter))
-    }
-
     pub fn snapshot(&self) -> Result<library::QueueRestore, String> {
         let receiver = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone();
         if let Some(receiver) = receiver {
@@ -750,17 +747,6 @@ impl PlaybackOwner {
             .handoff_snapshot()
             .map(|(queue, _, _)| queue)
             .map_err(string_error)
-    }
-
-    pub fn selection(&self) -> Result<library::SongSelection, String> {
-        let queue = self.snapshot()?;
-        Ok(library::SongSelection::Tracks(
-            queue
-                .order
-                .iter()
-                .map(|index| queue.entries[*index as usize].track_key)
-                .collect(),
-        ))
     }
 
     pub fn play_selection(&self, request: PlayRequest) {
@@ -780,6 +766,10 @@ impl PlaybackOwner {
     pub fn insert(&self, input: library::SongSelection, target: QueueReorderTarget) {
         self.insert_load(library::QueueReadRequest::songs(input), target);
     }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl PlaybackOwner {
     pub fn remove(&self, position: usize) {
         self.send(Command::Remove(position));
     }
@@ -877,6 +867,7 @@ impl PlaybackOwner {
     }
 }
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
 impl PlaybackOwner {
     pub fn play_pause(&self) {
         self.send(Command::PlayPause)
@@ -976,6 +967,9 @@ impl PlaybackOwner {
     pub fn set_visualizer_enabled(&self, enabled: bool) {
         self.send(Command::SetVisualizerEnabled(enabled))
     }
+}
+
+impl PlaybackOwner {
     pub fn available_audio_outputs(&self) -> Vec<playback::AudioOutput> {
         (self.audio_outputs)()
     }
@@ -1415,5 +1409,101 @@ mod tests {
         assert_eq!(prepared.uri(), uri);
         assert_eq!(prepared.content_type.as_deref(), Some("audio/ogg"));
         assert_eq!(prepared.row.as_ref().unwrap().media_uri, canonical);
+    }
+}
+
+#[cfg_attr(feature = "bindings", derive(uniffi::Error))]
+#[cfg_attr(feature = "bindings", uniffi(flat_error))]
+#[derive(Debug, thiserror::Error)]
+pub enum PlaybackError {
+    #[error("{0}")]
+    Message(String),
+}
+
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct PreparedQueuePage {
+    pub revision: u64,
+    pub rows: Vec<library::QueuePageRow>,
+    pub total: u64,
+    pub window_offset: u64,
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl PlaybackOwner {
+    pub async fn selection(self: Arc<Self>) -> Result<Arc<library::SongSelection>, PlaybackError> {
+        let runtime = self.runtime.clone();
+        runtime
+            .spawn_blocking(move || {
+                let queue = self.snapshot().map_err(PlaybackError::Message)?;
+                Ok(Arc::new(library::SongSelection::Tracks(
+                    queue
+                        .order
+                        .iter()
+                        .map(|index| queue.entries[*index as usize].track_key)
+                        .collect(),
+                )))
+            })
+            .await
+            .map_err(|error| PlaybackError::Message(error.to_string()))?
+    }
+
+    pub async fn queue_page(
+        self: Arc<Self>,
+        offset: u64,
+        limit: u32,
+        filter: String,
+    ) -> Result<PreparedQueuePage, PlaybackError> {
+        let runtime = self.runtime.clone();
+        runtime
+            .spawn(async move {
+                let revision = self.updates.current().map_or(0, |view| view.queue.revision);
+                let page = self
+                    .receiver_queue_page(offset, limit, filter)
+                    .await
+                    .map_err(PlaybackError::Message)?;
+                let rows = self
+                    .database
+                    .prepared_queue_page(&page.rows)
+                    .await
+                    .map_err(|error| PlaybackError::Message(error.to_string()))?;
+                Ok(PreparedQueuePage {
+                    revision,
+                    rows,
+                    total: page.total,
+                    window_offset: page.window_offset,
+                })
+            })
+            .await
+            .map_err(|error| PlaybackError::Message(error.to_string()))?
+    }
+
+    pub async fn remote_outputs(
+        self: Arc<Self>,
+    ) -> Result<Vec<playback::RemoteOutput>, PlaybackError> {
+        let runtime = self.runtime.clone();
+        runtime
+            .spawn_blocking(move || {
+                self.discover_remote_outputs()
+                    .map_err(PlaybackError::Message)
+            })
+            .await
+            .map_err(|error| PlaybackError::Message(error.to_string()))?
+    }
+
+    pub async fn choose_output(
+        self: Arc<Self>,
+        output: playback::PlaybackOutput,
+    ) -> Result<(), PlaybackError> {
+        let runtime = self.runtime.clone();
+        runtime
+            .spawn_blocking(move || {
+                self.select_playback_output(
+                    output,
+                    Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                )
+                .map_err(PlaybackError::Message)
+            })
+            .await
+            .map_err(|error| PlaybackError::Message(error.to_string()))?
     }
 }

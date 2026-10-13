@@ -146,6 +146,7 @@ impl TrackSort {
 }
 
 #[derive(Clone, Debug, FromRow, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct TrackArtistLink {
     pub artist_key: ArtistKey,
     pub media_uri: String,
@@ -163,6 +164,7 @@ pub(crate) const TRACK_LINK_COLUMNS: &str = "
        WHERE credit.album_key=track.album_key) album_artists,";
 
 #[derive(Clone, Debug, FromRow, PartialEq, serde::Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct TrackGenreLink {
     pub genre_key: GenreKey,
     pub name: String,
@@ -170,6 +172,7 @@ pub struct TrackGenreLink {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct AudioProperties {
     pub bitrate_kbps: Option<u32>,
     pub sample_rate_hz: Option<u32>,
@@ -190,7 +193,16 @@ impl<'row> sqlx::Decode<'row, Sqlite> for AudioProperties {
     }
 }
 
+pub type LoudnessAnalysisKey = [u8; 32];
+#[cfg(feature = "bindings")]
+uniffi::custom_type!(LoudnessAnalysisKey, Vec<u8>, {
+    remote,
+    lower: |value| value.to_vec(),
+    try_lift: |value| value.try_into().map_err(|_| uniffi::deps::anyhow::anyhow!("Loudness key must contain 32 bytes")),
+});
+
 #[derive(Clone, Debug, PartialEq, FromRow)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct TrackRow {
     pub audio_properties: AudioProperties,
     pub source_path: Option<String>,
@@ -221,7 +233,7 @@ pub struct TrackRow {
     pub cue_start_millis: Option<i64>,
     pub cue_end_millis: Option<i64>,
     #[sqlx(try_from = "Vec<u8>")]
-    pub loudness_analysis_key: [u8; 32],
+    pub loudness_analysis_key: LoudnessAnalysisKey,
     pub artwork_binding: Option<Vec<u8>>,
     pub favorite: bool,
     pub rating: Option<i64>,

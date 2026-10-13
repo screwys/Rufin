@@ -20,10 +20,16 @@ pub fn add_media_to_playlist(
     skip_existing: bool,
     settled: Rc<dyn Fn(usize)>,
 ) {
-    let result =
-        rufin_core::playlists::add_playlist_tracks(source, playlist, selection, skip_existing);
+    let source = source.clone();
     gtk::glib::spawn_future_local(async move {
-        let accepted = result.recv().await.ok().and_then(Result::ok).unwrap_or(0);
+        let accepted = rufin_core::playlists::add_playlist_tracks(
+            &source,
+            playlist,
+            selection.into(),
+            skip_existing,
+        )
+        .await
+        .unwrap_or(0);
         settled(accepted);
     });
 }

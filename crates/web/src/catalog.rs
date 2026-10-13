@@ -187,15 +187,14 @@ async fn refresh_home(
         .selected_library()
         .filter(|selected| selected.source_id == input.source)
     {
-        Some(selected) => selected,
-        None => completion(products.source.select_source(input.source)).await?,
-    };
-    completion(
-        products
+        Some(selected) => selected.source_id,
+        None => products
             .source
-            .refresh_home(selected.source_id, input.block),
-    )
-    .await?;
+            .select_source(input.source)
+            .await
+            .map_err(bad_request)?,
+    };
+    completion(products.source.refresh_home(selected, input.block)).await?;
     Ok(accepted())
 }
 

@@ -163,6 +163,7 @@ pub struct ArtworkEdit {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum ArtworkChange {
     Replace(std::sync::Arc<ImageBytes>),
     Remove,

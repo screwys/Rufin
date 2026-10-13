@@ -131,6 +131,7 @@ pub enum PlaylistSort {
 }
 
 #[derive(Clone, Debug, PartialEq, FromRow)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct PlaylistRow {
     pub playlist_key: PlaylistKey,
     pub source_key: Option<SourceKey>,
@@ -151,6 +152,7 @@ pub struct PlaylistRow {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct PlaylistGenreLink {
     pub genre_key: crate::GenreKey,
     pub name: String,
@@ -166,6 +168,7 @@ pub struct PlaylistEditEntry {
 }
 
 #[derive(Clone, Debug, FromRow, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct PlaylistEntryRow {
     pub track_key: crate::TrackKey,
     pub audio_properties: crate::AudioProperties,

@@ -4,32 +4,62 @@ import androidx.compose.runtime.*
 import androidx.paging.*
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.core.*
+import io.github.screwys.rufin.shared.downloads.*
+import io.github.screwys.rufin.shared.library.TrackRow
+import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
+import io.github.screwys.rufin.shared.rufin_core.SourceSummary
+import io.github.screwys.rufin.shared.playback.StreamQuality
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+
+internal data class DownloadRow(val job: DownloadQueueItem, val preview: TrackRow?)
+internal data class DownloadSource(val source: SourceSummary, val settings: SourceDownloadSettings)
+internal fun DownloadRule.title() = translate(when (this) {
+    DownloadRule.ENTIRE_LIBRARY -> "Entire Library"
+    DownloadRule.FAVORITES -> "Favorites"
+    DownloadRule.ALL_PLAYLISTS -> "All Playlists"
+    DownloadRule.LATEST_FIVE_ALBUMS -> "5 Latest Albums"
+})
+internal fun DownloadRules.enabled(rule: DownloadRule) = when (rule) {
+    DownloadRule.ENTIRE_LIBRARY -> entireLibrary
+    DownloadRule.FAVORITES -> favorites
+    DownloadRule.ALL_PLAYLISTS -> allPlaylists
+    DownloadRule.LATEST_FIVE_ALBUMS -> latestFiveAlbums
+}
+internal fun DownloadSubject.title() = when (this) {
+    is DownloadSubject.Rule -> v1.title()
+    is DownloadSubject.Prepared -> title ?: translate("Downloads")
+}
+internal fun DownloadQueueState.title() = translate(when (this) {
+    DownloadQueueState.QUEUED -> "Queued"
+    DownloadQueueState.DOWNLOADING -> "Downloading"
+    DownloadQueueState.WAITING_FOR_CONNECTION -> "Waiting for connection"
+    DownloadQueueState.NEEDS_ATTENTION -> "Needs attention"
+})
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class DownloadsConnection(private val model: RufinConnection, scope: CoroutineScope) {
-    var state by mutableStateOf<AndroidDownloadsState?>(null)
+    var state by mutableStateOf<DownloadStatus?>(null)
         private set
-    var sources by mutableStateOf<List<AndroidDownloadSource>>(emptyList())
+    var sources by mutableStateOf<List<DownloadSource>>(emptyList())
         private set
     var queueVisible by mutableStateOf(false)
-    private var bridge by mutableStateOf<AndroidDownloads?>(null)
-    private var queueSource: PagingSource<Int, AndroidDownloadJob>? = null
+    private var bridge by mutableStateOf<Downloads?>(null)
+    private var queueSource: PagingSource<Int, DownloadRow>? = null
 
-    val pages: Flow<PagingData<AndroidDownloadJob>> = snapshotFlow { bridge }.flatMapLatest { owner ->
+    val pages: Flow<PagingData<DownloadRow>> = snapshotFlow { bridge }.flatMapLatest { owner ->
         if (owner == null) flowOf(PagingData.empty()) else Pager(PagingConfig(pageSize = 32, initialLoadSize = 32,
             prefetchDistance = 12, maxSize = 96, enablePlaceholders = false)) {
-            object : PagingSource<Int, AndroidDownloadJob>() {
-                override suspend fun load(params: LoadParams<Int>): LoadResult<Int, AndroidDownloadJob> = try {
+            object : PagingSource<Int, DownloadRow>() {
+                override suspend fun load(params: LoadParams<Int>): LoadResult<Int, DownloadRow> = try {
                     val offset = params.key ?: 0
                     val page = owner.queuePage(offset.toULong(), params.loadSize.toUInt())
-                    LoadResult.Page(page.jobs, if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
+                    LoadResult.Page(page.jobs.map { job -> DownloadRow(job, page.previews.find { it.mediaUri == job.previewUris.firstOrNull() }) }, if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
                         if (offset.toULong() + page.jobs.size.toULong() >= page.total) null else offset + page.jobs.size)
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (error: Exception) { LoadResult.Error(error) }
-                override fun getRefreshKey(state: PagingState<Int, AndroidDownloadJob>): Int? = state.anchorPosition?.let {
+                override fun getRefreshKey(state: PagingState<Int, DownloadRow>): Int? = state.anchorPosition?.let {
                     val page = state.closestPageToPosition(it)
                     page?.prevKey?.plus(state.config.pageSize) ?: page?.nextKey?.minus(state.config.pageSize)
                 }
@@ -46,7 +76,7 @@ internal class DownloadsConnection(private val model: RufinConnection, scope: Co
                 val changes = owner.subscribe()
                 bridge = owner
                 try {
-                    sources = owner.sources()
+                    refreshSources()
                     while (isActive) {
                         val next = changes.next()
                         state = next
@@ -65,16 +95,25 @@ internal class DownloadsConnection(private val model: RufinConnection, scope: Co
         }
     }
 
-    suspend fun refreshSources() { bridge?.let { sources = it.sources() } }
-    fun pause(paused: Boolean) = model.runAction { bridge?.setPaused(paused) }
-    fun cancel(job: AndroidDownloadJob) = model.runAction { bridge?.cancel(job.sourceId, job.id) }
-    fun rule(source: String, id: String, enabled: Boolean, deleteDownloads: Boolean = false) = model.runAction {
-        bridge?.setRule(source, id, enabled, deleteDownloads); refreshSources()
+    private suspend fun <T> withSettings(action: (SettingsOwner) -> T) = withContext(Dispatchers.IO) {
+        model.connectedService().runtime.value!!.getOrThrow().settings().use(action)
     }
-    fun quality(source: String, bitrate: UInt?) = model.runAction { bridge?.setQuality(source, bitrate); refreshSources() }
+    suspend fun refreshSources() {
+        if (bridge == null) return
+        sources = withSettings { settings ->
+            model.sources?.sources.orEmpty().filter { it.kind != "local" }
+                .map { DownloadSource(it, settings.downloadSettings(it.id)) }
+        }
+    }
+    fun pause(paused: Boolean) = model.runAction { bridge?.setPaused(paused) }
+    fun cancel(job: DownloadQueueItem) = model.runAction { bridge?.cancelJob(job.sourceId, job.id) }
+    fun rule(source: String, rule: DownloadRule, enabled: Boolean, deleteDownloads: Boolean = false) = model.runAction {
+        withSettings { it.setDownloadRule(source, rule, enabled) }; if (!enabled) bridge?.removeRule(source, rule, deleteDownloads); refreshSources()
+    }
+    fun quality(source: String, bitrate: UInt?) = model.runAction { withSettings { it.setDownloadQuality(source, bitrate?.let { value -> StreamQuality.MaxBitrateKbps(value) } ?: StreamQuality.Original) }; refreshSources() }
     fun directory(source: String, uri: String?) = model.runAction {
-        model.connectedService().runtime.value?.getOrThrow()?.setDownloadDocumentDirectory(source, uri)
+        withSettings { it.setDownloadLocation(source, uri?.let { value -> DownloadDirectory.Document(value) }) }
         refreshSources()
     }
-    fun clear(source: String) = model.runAction { bridge?.clearSource(source); refreshSources() }
+    fun clear(source: String) = model.runAction { withSettings { it.clearDownloadRules(source) }; bridge?.clear(source, true); refreshSources() }
 }

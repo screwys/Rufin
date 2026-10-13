@@ -22,6 +22,7 @@ use super::{
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct ActivityOverviewSettings {
     pub autoplay_first_track: bool,
     pub dynamic_background: bool,
@@ -30,7 +31,7 @@ pub struct ActivityOverviewSettings {
     pub artists: bool,
     pub albums: bool,
     pub genres: bool,
-    pub result_count: usize,
+    pub result_count: super::visualizer::PreferenceIndex,
     pub show_comparison: bool,
     pub show_rufin_in_headline: bool,
     pub monthly_enabled: bool,
@@ -69,6 +70,7 @@ impl Default for ActivityOverviewSettings {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct ExternalSiteLinkSettings {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -98,6 +100,7 @@ const MIN_RANDOM_PLAY_YEAR: u16 = 1850;
 const MAX_RANDOM_PLAY_YEAR: u16 = 2050;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct RandomPlayGenreSelection {
     pub source_id: SourceId,
     #[serde(default)]
@@ -107,8 +110,9 @@ pub struct RandomPlayGenreSelection {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct RandomPlaySettings {
-    pub limit: usize,
+    pub limit: super::visualizer::PreferenceIndex,
     pub min_year: Option<u16>,
     pub max_year: Option<u16>,
     pub genre: Option<RandomPlayGenreSelection>,
@@ -156,6 +160,7 @@ pub use library::{HomeBlockKind, HomeSectionKind};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum RecentSearchKind {
     Track,
     Album,
@@ -163,6 +168,7 @@ pub enum RecentSearchKind {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct RecentSearchResult {
     pub kind: RecentSearchKind,
     pub media_uri: String,

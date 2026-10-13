@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.player
 
+import io.github.screwys.rufin.shared.rufin_core.ApplicationPreferenceEdit
+
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.PagerTabIndicator
 import io.github.screwys.rufin.settings.PreferenceChoice
@@ -49,6 +51,7 @@ import io.github.screwys.rufin.shared.rufin_core.VisualizerPreferenceEdit
 import io.github.screwys.rufin.shared.rufin_core.VisualizerStyle
 import io.github.screwys.rufin.settings.SettingsNumber
 import io.github.screwys.rufin.core.translate
+import io.github.screwys.rufin.shared.lyrics.JapaneseDictionaryStatus
 import io.github.screwys.rufin.ui.LocalPlayerBottomPadding
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -123,7 +126,7 @@ internal fun PlaybackPreferences(player: PlayerConnection, preferences: Preferen
             select = { change(PlayerPreferenceEdit.VolumeScale(VolumeScale.valueOf(it))) })
         PreferenceSwitch("Clearing queue also clears the current song", state.clearQueueIncludesCurrent) { change(PlayerPreferenceEdit.ClearQueueIncludesCurrent(it)) }
         if (output != null) preferences?.applicationSettings?.let { application ->
-            SettingsNumber(translate("Auto DJ refill threshold"), application.optDouble("auto_dj_refill_threshold", 1.0), 1.0..10.0) { preferences.changePreference("auto_dj_refill_threshold", it) }
+            SettingsNumber(translate("Auto DJ refill threshold"), application.autoDjRefillThreshold.toDouble(), 1.0..10.0) { preferences.changePreference(ApplicationPreferenceEdit.AutoDjRefillThreshold((it as Number).toInt().toUByte())) }
         }
     }
     if (output != null) SettingsGroup(translate("Audio")) {
@@ -260,8 +263,9 @@ private fun LyricsSettings(player: PlayerConnection) {
     }
     player.dictionaryState?.let { state ->
         when (state) {
-            "loading", "downloading" -> Text(translate("Downloading Japanese dictionary..."), style = MaterialTheme.typography.bodySmall)
-            "failed" -> TextButton(player::prepareDictionary) { Text(translate("Retry")) }
+            JapaneseDictionaryStatus.Loading, JapaneseDictionaryStatus.Downloading -> Text(translate("Downloading Japanese dictionary..."), style = MaterialTheme.typography.bodySmall)
+            JapaneseDictionaryStatus.Failed -> TextButton(player::prepareDictionary) { Text(translate("Retry")) }
+            else -> Unit
         }
     }
     SettingsGroup(translate("Karaoke Playback")) {

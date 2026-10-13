@@ -120,7 +120,7 @@ fn library_sources_page(
             let credentials = shell
                 .products
                 .source
-                .configured_source(&server.id)
+                .editable(server.id.clone())
                 .ok()
                 .flatten()
                 .map(|saved| saved.credentials);
@@ -498,7 +498,9 @@ pub fn local_sources_page(shell: &Rc<Preferences>, dialog: &adw::Dialog) -> adw:
                 None::<&gio::Cancellable>,
                 move |response| {
                     if response == "forget" {
-                        source.forget_source(source_id);
+                        gtk::glib::spawn_future_local(async move {
+                            let _ = source.forget_source(source_id).await;
+                        });
                         if let Some(dialog) = dialog.upgrade() {
                             dialog.close();
                         }
@@ -514,7 +516,10 @@ pub fn local_sources_page(shell: &Rc<Preferences>, dialog: &adw::Dialog) -> adw:
     let resync_source_id = local_source_id.clone();
     resync_local.connect_clicked(move |_| {
         if let Some(source_id) = resync_source_id.clone() {
-            source.refresh_source(source_id);
+            let source = source.clone();
+            gtk::glib::spawn_future_local(async move {
+                let _ = source.refresh_source(source_id).await;
+            });
         }
         if let Some(dialog) = resync_dialog.upgrade() {
             dialog.close();

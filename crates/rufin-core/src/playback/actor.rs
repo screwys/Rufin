@@ -300,7 +300,7 @@ impl Playback {
         })
     }
     pub(crate) fn current_media(&self) -> PlaybackResult<Option<Arc<playback::CurrentMedia>>> {
-        self.request(|player, _| Ok(player.view().transport.current))
+        self.request(|player, _| Ok(player.view().transport.current.map(Arc::new)))
     }
     pub(crate) fn projection(&self) -> PlaybackResult<PlaybackProjection> {
         self.request(|player, _| Ok(player.projection()))

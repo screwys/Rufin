@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -49,6 +50,10 @@ import io.github.screwys.rufin.core.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import io.github.screwys.rufin.shared.lyrics.UserPreferences
+import io.github.screwys.rufin.shared.lyrics.LyricsAgentRole
+import io.github.screwys.rufin.shared.lyrics.externalLyricsProviderTitle
+import io.github.screwys.rufin.shared.lyrics.shiftLrcTextTimestamps
+import io.github.screwys.rufin.shared.playback.CurrentMediaId
 import kotlinx.coroutines.CancellationException
 import io.github.screwys.rufin.settings.LocalReduceMotion
 import io.github.screwys.rufin.settings.settingsTextFieldColors
@@ -78,7 +83,10 @@ internal fun LyricsActions(player: PlayerConnection) {
     var edit by remember { mutableStateOf(false) }
     var editOffset by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
-    var exportToken by rememberSaveable { mutableStateOf<String?>(null) }
+    var exportToken by rememberSaveable(stateSaver = listSaver<CurrentMediaId?, String>(
+        save = { media -> media?.let { listOf(it.mediaUri, it.run?.toString().orEmpty()) }.orEmpty() },
+        restore = { values -> values.takeIf { it.size == 2 }?.let { CurrentMediaId(it[1].toULongOrNull(), it[0]) } },
+    )) { mutableStateOf<CurrentMediaId?>(null) }
     var exportOffset by rememberSaveable { mutableLongStateOf(0L) }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         if (uri != null) exportToken?.let { player.exportLyrics(uri, it, exportOffset) }
@@ -101,7 +109,7 @@ internal fun LyricsActions(player: PlayerConnection) {
                     else {
                         exportToken = captured
                         exportOffset = player.lyricsOffset
-                        export.launch("${player.playback?.title.orEmpty()}.lrc")
+                        export.launch("${player.currentItem?.title.orEmpty()}.lrc")
                     }
                 }, leadingIcon = { RufinIcon("rufin-download-symbolic", null) })
                 DropdownMenuItem(text = { Text(translate("Lyrics offset (ms)") + " · " + player.lyricsOffset) },
@@ -122,8 +130,8 @@ internal fun CurrentLyricsPreview(player: PlayerConnection) {
     val current = player.currentLyrics
     val document = current?.document
     val snapshot = current?.snapshot
-    var active by remember(current?.mediaUri, current?.mediaRun, document) { mutableStateOf<Int?>(null) }
-    var highlights by remember(current?.mediaUri, current?.mediaRun, document) { mutableStateOf<List<AndroidLyricsHighlight>>(emptyList()) }
+    var active by remember(current?.mediaId, document) { mutableStateOf<Int?>(null) }
+    var highlights by remember(current?.mediaId, document) { mutableStateOf<List<AndroidLyricsHighlight>>(emptyList()) }
     val preferences = player.settings?.lyrics
     val karaoke = preferences?.karaokeMode == true
     val reduceMotion = LocalReduceMotion.current
@@ -150,7 +158,7 @@ internal fun CurrentLyricsPreview(player: PlayerConnection) {
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
             line?.let {
                 if (it.cueLines.isNotEmpty()) it.cueLines.forEachIndexed { cueIndex, cueLine ->
-                    val color = if (document?.agents?.firstOrNull { voice -> voice.id == cueLine.agentId }?.role == "background")
+                    val color = if (document?.agents?.firstOrNull { voice -> voice.id == cueLine.agentId }?.role == LyricsAgentRole.BACKGROUND)
                         MaterialTheme.colorScheme.secondary else selected
                     val cueHighlights = highlights.filter { part -> part.line.toInt() == index && part.cueLine.toInt() == cueIndex }
                     LyricsText(cueText(cueLine, cueHighlights, color, normal), cueLine.reading, preferences,
@@ -230,7 +238,7 @@ private fun LyricsDocumentView(player: PlayerConnection, current: AndroidLyricsS
             followRevision++
         }
     }
-    LaunchedEffect(current.mediaUri, current.mediaRun) { hadDrag = false; pausedUntil = 0 }
+    LaunchedEffect(current.mediaId) { hadDrag = false; pausedUntil = 0 }
     LaunchedEffect(snapshot, document, karaoke, player.lyricsOffset) {
         while (true) {
             val position = player.positionNow()
@@ -287,12 +295,12 @@ private fun LyricsDocumentView(player: PlayerConnection, current: AndroidLyricsS
                 scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
                     state.stopScroll()
                     if (index == scroll) followRevision++
-                    current.currentMediaToken?.let { player.seekFromLyrics(it, line.startMillis!!) }
+                    current.currentMediaId?.let { player.seekFromLyrics(it, line.startMillis!!) }
                 }
             }), horizontalAlignment = Alignment.CenterHorizontally) {
                 if (line.cueLines.isNotEmpty()) line.cueLines.forEachIndexed { cueIndex, cueLine ->
                     val voice = document.agents.firstOrNull { it.id == cueLine.agentId }
-                    val voiceColor = if (voice?.role == "background") MaterialTheme.colorScheme.secondary else selectedColor
+                    val voiceColor = if (voice?.role == LyricsAgentRole.BACKGROUND) MaterialTheme.colorScheme.secondary else selectedColor
                     voice?.name?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = normal) }
                     val cueHighlights = highlights.filter { it.line.toInt() == index && it.cueLine.toInt() == cueIndex }
                     val text = cueText(cueLine, cueHighlights, voiceColor, color)
@@ -384,23 +392,24 @@ private fun romanizationText(reading: AndroidJapaneseReading, highlights: List<A
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LyricsSearchSheet(player: PlayerConnection, token: String, onDismiss: () -> Unit) {
-    var artist by rememberSaveable(token) { mutableStateOf(player.playback?.artist.orEmpty()) }
-    var title by rememberSaveable(token) { mutableStateOf(player.playback?.title.orEmpty()) }
-    val operation = player.lyricsOperation?.takeIf { it.mediaToken == token && it.artist == artist && it.title == title }
+private fun LyricsSearchSheet(player: PlayerConnection, token: CurrentMediaId, onDismiss: () -> Unit) {
+    var artist by rememberSaveable(token) { mutableStateOf(player.currentItem?.artist.orEmpty()) }
+    var title by rememberSaveable(token) { mutableStateOf(player.currentItem?.title.orEmpty()) }
+    val matchingSearch = player.lyricsSearch?.let { it.first == token && it.second.artistName == artist.trim() && it.second.trackName == title.trim() } == true
+    val results = if (matchingSearch) player.lyricsResults else null
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().imePadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(translate("Search Lyrics"), style = MaterialTheme.typography.titleLarge)
             OutlinedTextField(artist, { artist = it }, label = { Text(translate("Artist")) }, singleLine = true, modifier = Modifier.fillMaxWidth(), colors = settingsTextFieldColors())
             OutlinedTextField(title, { title = it }, label = { Text(translate("Song")) }, singleLine = true, modifier = Modifier.fillMaxWidth(), colors = settingsTextFieldColors())
             Button({ player.searchLyrics(token, artist, title) }, enabled = player.lyricsToken == token && player.settings?.privateMode != true) { Text(translate("Search")) }
-            if (operation?.kind == "searching") CircularProgressIndicator()
+            if (matchingSearch && player.lyricsSearching) CircularProgressIndicator()
             LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
-                items(operation?.results.orEmpty(), key = { it.key }) { hit ->
-                    ListItem(headlineContent = { Text(hit.title) }, supportingContent = { Text("${hit.artist} · ${hit.album}\n${hit.provider}") },
-                        modifier = Modifier.clickable { player.previewLyrics(token, hit.key); onDismiss() })
+                items(results.orEmpty(), key = { "${it.provider}:${it.id}" }) { hit ->
+                    ListItem(headlineContent = { Text(hit.trackName) }, supportingContent = { Text("${hit.artistName} · ${hit.albumName}\n${externalLyricsProviderTitle(hit.provider)}") },
+                        modifier = Modifier.clickable { player.previewLyrics(token, hit); onDismiss() })
                 }
-                if (operation?.kind == "search" && operation.message == null && operation.results.isEmpty()) item {
+                if (matchingSearch && !player.lyricsSearching && results?.isEmpty() == true) item {
                     Text(translate("No results"), Modifier.padding(16.dp))
                 }
             }
@@ -410,7 +419,7 @@ private fun LyricsSearchSheet(player: PlayerConnection, token: String, onDismiss
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LyricsEditSheet(player: PlayerConnection, token: String, onDismiss: () -> Unit) {
+private fun LyricsEditSheet(player: PlayerConnection, token: CurrentMediaId, onDismiss: () -> Unit) {
     var text by rememberSaveable(token) { mutableStateOf("") }
     var appliedOffset by rememberSaveable(token) { mutableLongStateOf(player.lyricsOffset) }
     var loaded by rememberSaveable(token) { mutableStateOf(false) }
@@ -430,7 +439,8 @@ private fun LyricsEditSheet(player: PlayerConnection, token: String, onDismiss: 
             }
             if (!loaded) LinearProgressIndicator(Modifier.fillMaxWidth())
             LyricsOffsetControls(appliedOffset, loaded) { offset ->
-                val shifted = player.bridge?.applyLyricsTextOffset(text, appliedOffset, offset) ?: return@LyricsOffsetControls
+                val delta = (offset.toBigInteger() - appliedOffset.toBigInteger()).coerceIn(Long.MIN_VALUE.toBigInteger(), Long.MAX_VALUE.toBigInteger()).toLong()
+                val shifted = shiftLrcTextTimestamps(text, delta)
                 text = shifted
                 appliedOffset = offset
                 player.lyricsOffset = offset

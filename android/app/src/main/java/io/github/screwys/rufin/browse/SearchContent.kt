@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.shared.rufin_core.Route
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*

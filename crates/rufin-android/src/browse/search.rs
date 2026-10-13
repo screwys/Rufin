@@ -17,66 +17,12 @@ impl AndroidLibrary {
             .load()
             .recent_search_results
             .into_iter()
-            .map(|result| {
-                let (kind, route, playback_context_id) = match result.kind {
-                    RecentSearchKind::Track => ("track", None, None),
-                    RecentSearchKind::Album => (
-                        "album",
-                        Some(route_json(Route::AlbumDetail(result.media_uri.clone()))),
-                        Some(format!("album:{}", result.media_uri)),
-                    ),
-                    RecentSearchKind::Artist => (
-                        "artist",
-                        Some(route_json(Route::ArtistDetail(result.media_uri.clone()))),
-                        Some(format!("artist:{}", result.media_uri)),
-                    ),
-                };
-                let source_id = library::source_entity_parts(&result.media_uri)
-                    .map(|(source, _, _)| source.to_string());
-                AndroidBrowseRow {
-                    track_key: None,
-                    album_key: None,
-                    album_media_uri: None,
-                    kind: kind.into(),
-                    playback_context_id,
-                    key: result.media_uri.clone(),
-                    media_uri: result.media_uri,
-                    title: result.title,
-                    subtitle: result.subtitle,
-                    artist: String::new(),
-                    album: String::new(),
-                    fields: Vec::new(),
-                    favorite: false,
-                    duration_millis: 0,
-                    detail_route: route,
-                    pin: None,
-                    section: String::new(),
-                    section_id: String::new(),
-                    section_kind: String::new(),
-                    section_refreshable: false,
-                    year: None,
-                    track_count: 0,
-                    downloaded: false,
-                    artwork_identity: result.artwork_binding,
-                    source_id,
-                    source_name: String::new(),
-                    last_played: None,
-                    writable: false,
-                }
-            })
+            .map(|row| AndroidBrowseRow::new(AndroidBrowseItem::Recent { row }))
             .collect()
     }
 
-    pub fn remember_search_result(&self, row: AndroidBrowseRow) -> Result<bool, AndroidError> {
-        self.settings
-            .remember_search_result(RecentSearchResult {
-                kind: search_kind(&row.kind)?,
-                media_uri: row.media_uri,
-                title: row.title,
-                subtitle: row.subtitle,
-                artwork_binding: row.artwork_identity,
-            })
-            .map_err(error)
+    pub fn remember_search_result(&self, row: RecentSearchResult) -> Result<bool, AndroidError> {
+        self.settings.remember_search_result(row).map_err(error)
     }
 
     pub fn remove_search_result(

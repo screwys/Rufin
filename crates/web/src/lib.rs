@@ -1,5 +1,8 @@
 //! Optional HTTP access to the same product owners used by native clients.
 
+#[cfg(feature = "bindings")]
+uniffi::setup_scaffolding!();
+
 mod browser;
 mod catalog;
 mod connect;
@@ -8,7 +11,7 @@ mod media;
 mod pins;
 mod playlists;
 mod source;
-pub use controller::{Controller, ControllerStatus};
+pub use controller::{Controller, ControllerStatus, controller_addresses};
 
 use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;

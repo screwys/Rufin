@@ -315,8 +315,7 @@ async fn playlist_file_location(shell: &Rc<Shell>, filename: &str) -> Option<Fil
     let selected = shell
         .selected_library()
         .map(|selected| selected.source_id.clone());
-    let source =
-        selected.and_then(|id| shell.products.source.configured_source(&id).ok().flatten());
+    let source = selected.and_then(|id| shell.products.source.editable(id.clone()).ok().flatten());
     let Some(source) = source.filter(|source| source.file_settings.is_some()) else {
         return Some(FileLocation::Device);
     };

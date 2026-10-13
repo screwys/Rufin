@@ -265,8 +265,9 @@ pub(super) fn png(
         if show_genres {
             let x = MARGIN + if settings.tracks { COLUMN + GAP } else { 0.0 };
             svg.text(x, y, 32.0, 700, &tr("Top genres"), width);
-            let maximum = data.genres.first().map_or(1, |(_, count)| *count).max(1) as f32;
-            for (index, (name, count)) in data.genres.iter().take(limit).enumerate() {
+            let maximum = data.genres.first().map_or(1, |genre| genre.plays).max(1) as f32;
+            for (index, genre) in data.genres.iter().take(limit).enumerate() {
+                let (name, count) = (&genre.name, &genre.plays);
                 let top = y + 52.0 + index as f32 * 82.0;
                 svg.text(x, top, 23.0, 400, name, width - 100.0);
                 let label = count.to_string();

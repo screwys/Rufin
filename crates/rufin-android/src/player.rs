@@ -11,12 +11,6 @@ use crate::browse::AndroidArtistLink;
 use crate::host::{AndroidError, error};
 
 #[derive(uniffi::Record)]
-pub struct AndroidArtwork {
-    pub identity: Vec<u8>,
-    pub bytes: Vec<u8>,
-}
-
-#[derive(uniffi::Record)]
 pub struct AndroidPlayerMetadata {
     pub media_uri: String,
     pub source_id: Option<String>,
@@ -65,134 +59,36 @@ struct VisualizerDrawingState {
     last_frame: Option<u64>,
 }
 
-#[derive(Clone, uniffi::Record)]
-pub struct AndroidLyricsSearchHit {
-    pub key: String,
-    pub provider: String,
-    pub title: String,
-    pub artist: String,
-    pub album: String,
-    pub duration_seconds: u32,
-    pub synced: bool,
-    pub instrumental: bool,
-}
-
-#[derive(Clone, uniffi::Record)]
-pub struct AndroidLyricsOperation {
-    pub revision: u64,
-    pub media_token: Option<String>,
-    pub kind: String,
-    pub artist: String,
-    pub title: String,
-    pub results: Vec<AndroidLyricsSearchHit>,
-    pub message: Option<String>,
-}
-
-#[derive(Clone, Default, uniffi::Record)]
-pub struct AndroidLyricsOperations {
-    pub search: Option<AndroidLyricsOperation>,
-    pub save: Option<AndroidLyricsOperation>,
-    pub dictionary: Option<String>,
-}
-
-type LyricsSearchResults = Option<(playback::CurrentMediaId, Vec<lyrics::LyricsSearchResult>)>;
-
-#[derive(uniffi::Record)]
-pub struct AndroidWaveform {
-    pub media_uri: Option<String>,
-    pub media_run: Option<u64>,
-    pub peaks: Vec<f64>,
-}
-
-#[derive(Clone, Copy, uniffi::Enum)]
-pub enum AndroidOutputKind {
-    Local,
-    Upnp,
-    GoogleCast,
-    PlexCompanion,
-    Connect,
-}
-
-impl From<playback::RemoteOutputProtocol> for AndroidOutputKind {
-    fn from(protocol: playback::RemoteOutputProtocol) -> Self {
-        match protocol {
-            playback::RemoteOutputProtocol::Upnp => Self::Upnp,
-            playback::RemoteOutputProtocol::GoogleCast => Self::GoogleCast,
-            playback::RemoteOutputProtocol::PlexCompanion => Self::PlexCompanion,
-            playback::RemoteOutputProtocol::RufinConnect => Self::Connect,
-        }
-    }
-}
-
-#[derive(uniffi::Record)]
-pub struct AndroidOutput {
-    pub id: String,
-    pub name: String,
-    pub kind: AndroidOutputKind,
-    pub selected: bool,
-    pub available: bool,
-    pub has_playback: bool,
-}
-
-#[derive(uniffi::Record)]
-pub struct AndroidOutputChoices {
-    pub outputs: Vec<AndroidOutput>,
-    pub discovery_error: Option<String>,
-}
-
-#[derive(uniffi::Record)]
-pub struct AndroidQueueRow {
-    pub position: u64,
-    pub media_uri: String,
-    pub title: String,
-    pub artist: String,
-    pub album: String,
-    pub duration_millis: u64,
-    pub favorite: bool,
-    pub artwork_identity: Option<Vec<u8>>,
-}
-
-#[derive(uniffi::Record)]
-pub struct AndroidQueuePage {
-    pub revision: u64,
-    pub total: u64,
-    pub window_offset: u64,
-    pub window_count: u64,
-    pub current_index: Option<u64>,
-    pub rows: Vec<AndroidQueueRow>,
-}
-
 #[derive(uniffi::Object)]
 pub struct AndroidPlayer {
     products: ProductHandles,
     visualizer: tokio::sync::watch::Receiver<Arc<VisualizerPublication>>,
     drawing: Mutex<VisualizerDrawingState>,
-    lyrics_operations: tokio::sync::watch::Sender<Arc<AndroidLyricsOperations>>,
-    search_results: Arc<Mutex<LyricsSearchResults>>,
+    lyrics_events: tokio::sync::Mutex<async_channel::Receiver<rufin_core::lyrics::LyricsEvent>>,
     waveform: tokio::sync::Mutex<async_channel::Receiver<rufin_core::runtime::WaveformProjection>>,
 }
 
 #[uniffi::export]
 impl AndroidPlayer {
-    pub async fn next_waveform(&self) -> Result<AndroidWaveform, AndroidError> {
-        let frame = self.waveform.lock().await.recv().await.map_err(error)?;
-        Ok(AndroidWaveform {
-            media_uri: frame.media_id.as_ref().map(|id| id.media_uri.to_string()),
-            media_run: frame
-                .media_id
-                .as_ref()
-                .and_then(|id| id.run.map(playback::RunId::get)),
-            peaks: frame
-                .peaks
-                .as_ref()
-                .map(|peaks| {
-                    peaks
-                        .iter()
-                        .map(|(low, high)| low.abs().max(high.abs()))
-                        .collect()
-                })
-                .unwrap_or_default(),
-        })
+    pub async fn next_waveform(
+        &self,
+    ) -> Result<Arc<rufin_core::runtime::WaveformProjection>, AndroidError> {
+        Ok(Arc::new(
+            self.waveform.lock().await.recv().await.map_err(error)?,
+        ))
+    }
+
+    pub async fn next_lyrics_event(
+        &self,
+    ) -> Result<Arc<rufin_core::lyrics::LyricsEvent>, AndroidError> {
+        Ok(Arc::new(
+            self.lyrics_events
+                .lock()
+                .await
+                .recv()
+                .await
+                .map_err(error)?,
+        ))
     }
 }
 
@@ -212,140 +108,24 @@ impl AndroidPlayer {
                 sender.send_replace(Arc::new(frame));
             }
         });
-        let (lyrics_operations, _) =
-            tokio::sync::watch::channel(Arc::new(AndroidLyricsOperations::default()));
-        let operations = lyrics_operations.clone();
-        let search_results = Arc::new(Mutex::new(None));
-        let results = Arc::clone(&search_results);
+        let (events, operations) = async_channel::unbounded();
         products.runtime.spawn(async move {
-            use rufin_core::lyrics::LyricsEvent;
-            let mut revision = 0;
             while let Ok(event) = lyrics_events.recv().await {
-                revision += 1;
-                let mut operation = AndroidLyricsOperation {
-                    revision,
-                    media_token: None,
-                    kind: String::new(),
-                    artist: String::new(),
-                    title: String::new(),
-                    results: Vec::new(),
-                    message: None,
-                };
-                match event {
-                    LyricsEvent::SearchFinished {
-                        media_id,
-                        query,
-                        result,
-                    } => {
-                        operation.media_token = Some(media_token(&media_id));
-                        operation.artist = query.artist_name;
-                        operation.title = query.track_name;
-                        operation.kind = "search".into();
-                        match result {
-                            Ok(found) => {
-                                operation.results = found
-                                    .iter()
-                                    .map(|hit| AndroidLyricsSearchHit {
-                                        key: search_result_key(hit),
-                                        provider: localization::tr(hit.provider.title()),
-                                        title: hit.track_name.clone(),
-                                        artist: hit.artist_name.clone(),
-                                        album: hit.album_name.clone(),
-                                        duration_seconds: hit.duration_seconds,
-                                        synced: hit.content.synced_lyrics().is_some(),
-                                        instrumental: matches!(
-                                            hit.content,
-                                            lyrics::LyricsSearchContent::Instrumental
-                                        ),
-                                    })
-                                    .collect();
-                                *results
-                                    .lock()
-                                    .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-                                    Some((media_id, found));
-                            }
-                            Err(message) => operation.message = Some(message),
-                        }
-                    }
-                    LyricsEvent::Saved { media_id, .. } => {
-                        operation.media_token = Some(media_token(&media_id));
-                        operation.kind = "saved".into();
-                        operation.message = Some(localization::tr("Saved"));
-                    }
-                    LyricsEvent::SourceSaveFailed { media_id, error } => {
-                        operation.media_token = Some(media_token(&media_id));
-                        operation.kind = "error".into();
-                        operation.message = Some(error.to_string());
-                    }
-                    LyricsEvent::JapaneseDictionaryChanged(status) => {
-                        operation.kind = "dictionary".into();
-                        operation.message = Some(
-                            match status {
-                                lyrics::JapaneseDictionaryStatus::Idle => "idle",
-                                lyrics::JapaneseDictionaryStatus::Loading => "loading",
-                                lyrics::JapaneseDictionaryStatus::Downloading => "downloading",
-                                lyrics::JapaneseDictionaryStatus::Ready(_) => "ready",
-                                lyrics::JapaneseDictionaryStatus::Failed => "failed",
-                            }
-                            .into(),
-                        );
-                    }
-                    LyricsEvent::Current(_) => continue,
+                if !matches!(event, rufin_core::lyrics::LyricsEvent::Current(_))
+                    && events.send(event).await.is_err()
+                {
+                    break;
                 }
-                let mut state = operations.borrow().as_ref().clone();
-                match operation.kind.as_str() {
-                    "search" => state.search = Some(operation),
-                    "dictionary" => state.dictionary = operation.message,
-                    _ => state.save = Some(operation),
-                }
-                operations.send_replace(Arc::new(state));
             }
         });
         Self {
             products: products.clone(),
             visualizer,
             drawing: Mutex::new(VisualizerDrawingState::default()),
-            lyrics_operations,
-            search_results,
+            lyrics_events: tokio::sync::Mutex::new(operations),
             waveform: tokio::sync::Mutex::new(waveform),
         }
     }
-
-    async fn select_playback_output(
-        &self,
-        selected: playback::PlaybackOutput,
-    ) -> Result<(), AndroidError> {
-        let transport = self.products.playback.clone();
-        self.products
-            .runtime
-            .spawn_blocking(move || {
-                transport.select_playback_output(
-                    selected,
-                    Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                )
-            })
-            .await
-            .map_err(error)?
-            .map_err(error)
-    }
-
-    fn current_media(&self, token: &str) -> Result<playback::CurrentMediaId, AndroidError> {
-        let media = self
-            .products
-            .playback
-            .updates
-            .current()
-            .and_then(|view| view.transport.current.clone())
-            .ok_or_else(|| error(localization::tr("Nothing playing")))?;
-        if media_token(&media.id) != token {
-            return Err(error(localization::tr("This isn't available")));
-        }
-        Ok(media.id.clone())
-    }
-}
-
-fn search_result_key(result: &lyrics::LyricsSearchResult) -> String {
-    format!("{}:{}", result.provider.key(), result.id)
 }
 
 fn reading_for(
@@ -374,38 +154,12 @@ fn reading_for(
     })
 }
 
-#[derive(uniffi::Object)]
-pub struct AndroidLyricsOperationSubscription {
-    current: tokio::sync::Mutex<(
-        tokio::sync::watch::Receiver<Arc<AndroidLyricsOperations>>,
-        bool,
-    )>,
-}
-
-#[uniffi::export]
-impl AndroidLyricsOperationSubscription {
-    pub async fn next(&self) -> Result<AndroidLyricsOperations, AndroidError> {
-        let mut current = self.current.lock().await;
-        if current.1 {
-            current.1 = false;
-        } else {
-            current.0.changed().await.map_err(error)?;
-        }
-        let result = current.0.borrow_and_update().as_ref().clone();
-        Ok(result)
-    }
-}
-
-fn media_token(id: &playback::CurrentMediaId) -> String {
-    serde_json::json!({"media_uri": id.media_uri.to_string(), "run": id.run.map(playback::RunId::get)}).to_string()
-}
-
 #[uniffi::export]
 impl AndroidPlayer {
     pub async fn metadata_links(
         &self,
         media_uri: String,
-        origin_route: Option<String>,
+        origin_route: Option<rufin_core::route::Route>,
     ) -> Result<Option<AndroidPlayerMetadata>, AndroidError> {
         let database = self.products.library.clone();
         self.products
@@ -416,10 +170,6 @@ impl AndroidPlayer {
                     DetailLinks, metadata_links, track_artist_links,
                 };
                 use rufin_core::settings::layout::LibraryField;
-                let origin_route = origin_route
-                    .map(|route| serde_json::from_str::<Route>(&route))
-                    .transpose()
-                    .map_err(error)?;
                 let cancellation = library::ReadCancellation::new();
                 let entity = library::source_entity_parts(&media_uri);
                 let (artists, album, source_id) = match entity {
@@ -532,7 +282,10 @@ impl AndroidPlayer {
             .map_err(error)?
     }
 
-    pub fn current_lyrics(&self, source: Arc<AndroidLyricsSource>) -> AndroidLyricsState {
+    pub fn current_lyrics(
+        &self,
+        source: Arc<rufin_core::lyrics::CurrentLyrics>,
+    ) -> AndroidLyricsState {
         use rufin_core::lyrics::{CurrentLyrics, CurrentLyricsContent};
         let media = self
             .products
@@ -547,17 +300,15 @@ impl AndroidPlayer {
         }
         let mut state = AndroidLyricsState {
             snapshot: None,
-            current_media_token: media.as_ref().map(|media| media_token(&media.id)),
-            media_uri: None,
-            media_run: None,
-            media_token: None,
+            current_media_id: media.as_ref().map(|media| media.id.clone()),
+            media_id: None,
             writable: false,
             clearable: false,
-            loading: matches!(source.current, CurrentLyrics::Loading { .. }),
+            loading: matches!(source.as_ref(), CurrentLyrics::Loading { .. }),
             instrumental: false,
             document: None,
         };
-        let (media_id, content) = match &source.current {
+        let (media_id, content) = match source.as_ref() {
             CurrentLyrics::Cleared => return state,
             CurrentLyrics::Loading { media_id } => (media_id, None),
             CurrentLyrics::Ready {
@@ -576,9 +327,7 @@ impl AndroidPlayer {
                 (media_id, content.as_ref())
             }
         };
-        state.media_run = media_id.run.map(playback::RunId::get);
-        state.media_token = Some(media_token(media_id));
-        state.media_uri = Some(media_id.media_uri.to_string());
+        state.media_id = Some(media_id.clone());
         state.instrumental = matches!(content, Some(CurrentLyricsContent::Instrumental));
         let Some(CurrentLyricsContent::Document {
             document,
@@ -715,169 +464,6 @@ impl AndroidPlayer {
         lyrics::release_japanese_reader();
     }
 
-    pub fn prepare_lyrics_dictionary(&self, retry: bool) {
-        self.products.lyrics.japanese_dictionary(retry);
-    }
-
-    pub fn seek_from_lyrics(
-        &self,
-        token: String,
-        position: u64,
-        offset: i64,
-    ) -> Result<(), AndroidError> {
-        self.current_media(&token)?;
-        self.products
-            .playback
-            .seek_millis(lyrics::playback_position_for_lyrics_position(
-                position, offset,
-            ));
-        Ok(())
-    }
-
-    pub fn subscribe_lyrics_operations(&self) -> Arc<AndroidLyricsOperationSubscription> {
-        Arc::new(AndroidLyricsOperationSubscription {
-            current: tokio::sync::Mutex::new((self.lyrics_operations.subscribe(), true)),
-        })
-    }
-
-    pub fn search_lyrics(
-        &self,
-        token: String,
-        artist: String,
-        title: String,
-    ) -> Result<(), AndroidError> {
-        let id = self.current_media(&token)?;
-        *self
-            .search_results
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
-        let mut state = self.lyrics_operations.borrow().as_ref().clone();
-        state.search = Some(AndroidLyricsOperation {
-            revision: 0,
-            media_token: Some(token),
-            kind: "searching".into(),
-            artist: artist.clone(),
-            title: title.clone(),
-            results: Vec::new(),
-            message: None,
-        });
-        self.lyrics_operations.send_replace(Arc::new(state));
-        self.products.lyrics.search(
-            id,
-            lyrics::LyricsQuery {
-                artist_name: artist,
-                track_name: title,
-            },
-        );
-        Ok(())
-    }
-
-    pub fn preview_lyrics_result(&self, token: String, key: String) -> Result<(), AndroidError> {
-        let id = self.current_media(&token)?;
-        let results = self
-            .search_results
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let result = results
-            .as_ref()
-            .filter(|(media, _)| media == &id)
-            .and_then(|(_, results)| {
-                results
-                    .iter()
-                    .find(|result| search_result_key(result) == key)
-            })
-            .ok_or_else(|| error(localization::tr("This isn't available")))?
-            .clone();
-        self.products.lyrics.preview(id, result);
-        Ok(())
-    }
-
-    pub fn save_lyrics_result_to_source(
-        &self,
-        token: String,
-        key: String,
-    ) -> Result<(), AndroidError> {
-        let id = self.current_media(&token)?;
-        let results = self
-            .search_results
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let result = results
-            .as_ref()
-            .filter(|(media, _)| media == &id)
-            .and_then(|(_, results)| {
-                results
-                    .iter()
-                    .find(|result| search_result_key(result) == key)
-            })
-            .ok_or_else(|| error(localization::tr("This isn't available")))?
-            .clone();
-        self.products.lyrics.save_result_to_source(id, result);
-        Ok(())
-    }
-
-    pub fn edit_lyrics(&self, token: String, text: String) -> Result<(), AndroidError> {
-        self.products
-            .lyrics
-            .update_lyrics_text(self.current_media(&token)?, text);
-        Ok(())
-    }
-
-    pub fn apply_lyrics_text_offset(
-        &self,
-        text: String,
-        previous_offset: i64,
-        offset: i64,
-    ) -> String {
-        lyrics::shift_lrc_text_timestamps(&text, offset.saturating_sub(previous_offset))
-    }
-
-    pub fn save_lyrics_to_source(&self, token: String, offset: i64) -> Result<(), AndroidError> {
-        self.products
-            .lyrics
-            .save_current_to_source(self.current_media(&token)?, offset);
-        Ok(())
-    }
-
-    pub async fn clear_fetched_lyrics(&self, token: String) -> Result<(), AndroidError> {
-        let media = self
-            .products
-            .playback
-            .updates
-            .current()
-            .and_then(|view| view.transport.current.clone())
-            .ok_or_else(|| error(localization::tr("Nothing playing")))?;
-        if media_token(&media.id) != token {
-            return Err(error(localization::tr("This isn't available")));
-        }
-        self.products.lyrics.clear_fetched(media.id.clone());
-        let settings = self.products.settings.clone();
-        self.products
-            .runtime
-            .spawn_blocking(move || {
-                settings
-                    .suppress_fetched_lyrics(media.media_uri.clone())
-                    .map_err(error)
-            })
-            .await
-            .map_err(error)??;
-        Ok(())
-    }
-
-    pub fn lyrics_text(&self, token: String, offset: i64) -> Result<String, AndroidError> {
-        let id = self.current_media(&token)?;
-        let current = self.products.lyrics.current().borrow().clone();
-        if let rufin_core::lyrics::CurrentLyrics::Ready {
-            media_id,
-            content: Some(rufin_core::lyrics::CurrentLyricsContent::Document { document, .. }),
-            ..
-        } = current
-            && media_id == id
-        {
-            return Ok(lyrics::lyrics_to_lrc_text(&document, offset));
-        }
-        Err(error(localization::tr("No lyrics available.")))
-    }
     pub fn visualizer_drawing(
         &self,
         targets: Vec<f64>,
@@ -964,90 +550,11 @@ impl AndroidPlayer {
             end_color: color(colors[1]),
         }
     }
-    pub fn settings_owner(&self) -> Arc<rufin_core::settings::SettingsOwner> {
-        self.products.settings.clone()
-    }
-
-    pub async fn outputs(&self) -> Result<AndroidOutputChoices, AndroidError> {
-        let transport = self.products.playback.clone();
-        let remotes = self
-            .products
-            .runtime
-            .spawn_blocking(move || transport.discover_remote_outputs())
-            .await
-            .map_err(error)?;
-        let (mut remotes, discovery_error) = match remotes {
-            Ok(remotes) => (remotes, None),
-            Err(error) => (Vec::new(), Some(error)),
-        };
-        let selected = self.products.playback.playback_output();
-        let connect = self.products.connect.status();
-        if let playback::PlaybackOutput::Remote(remote) = &selected
-            && !remotes
-                .iter()
-                .any(|candidate| candidate.id == remote.id && candidate.protocol == remote.protocol)
-        {
-            remotes.push(remote.clone());
-        }
-        let mut outputs = vec![AndroidOutput {
-            id: String::new(),
-            name: localization::tr("This device"),
-            kind: AndroidOutputKind::Local,
-            selected: selected.is_local(),
-            available: true,
-            has_playback: false,
-        }];
-        outputs.extend(remotes.into_iter().map(|remote| {
-            let device = (remote.protocol == playback::RemoteOutputProtocol::RufinConnect)
-                .then(|| connect.devices.iter().find(|device| device.id == remote.id))
-                .flatten();
-            AndroidOutput {
-                selected: matches!(&selected, playback::PlaybackOutput::Remote(current)
-                if current.id == remote.id && current.protocol == remote.protocol),
-                kind: remote.protocol.into(),
-                id: remote.id,
-                name: remote.name,
-                available: remote.protocol != playback::RemoteOutputProtocol::RufinConnect
-                    || (connect.settings.enabled
-                        && device.is_some_and(|device| device.enrolled && device.reachable)),
-                has_playback: device.is_some_and(|device| device.has_playback),
-            }
-        }));
-        Ok(AndroidOutputChoices {
-            outputs,
-            discovery_error,
-        })
-    }
-
-    pub async fn select_output(&self, output: AndroidOutput) -> Result<(), AndroidError> {
-        let protocol = match output.kind {
-            AndroidOutputKind::Local => None,
-            AndroidOutputKind::Upnp => Some(playback::RemoteOutputProtocol::Upnp),
-            AndroidOutputKind::GoogleCast => Some(playback::RemoteOutputProtocol::GoogleCast),
-            AndroidOutputKind::PlexCompanion => Some(playback::RemoteOutputProtocol::PlexCompanion),
-            AndroidOutputKind::Connect => Some(playback::RemoteOutputProtocol::RufinConnect),
-        };
-        let selected = match protocol {
-            None => playback::PlaybackOutput::Local,
-            Some(protocol) => playback::PlaybackOutput::Remote(playback::RemoteOutput {
-                id: output.id,
-                name: output.name,
-                protocol,
-            }),
-        };
-        self.select_playback_output(selected).await
-    }
-
-    pub async fn select_local_output(&self) -> Result<(), AndroidError> {
-        self.select_playback_output(playback::PlaybackOutput::Local)
-            .await
-    }
-
     pub async fn artwork(
         &self,
         identity: Vec<u8>,
         size: u32,
-    ) -> Result<Option<AndroidArtwork>, AndroidError> {
+    ) -> Result<Option<Vec<u8>>, AndroidError> {
         let stored = self.products.settings.load();
         let request =
             artwork::ArtworkRequest::new(artwork::ArtworkBinding::opaque(&identity), size, size)
@@ -1064,157 +571,7 @@ impl AndroidPlayer {
             .await
             .map_err(error)?
             .map_err(error)?;
-        Ok(bytes.map(|bytes| AndroidArtwork { identity, bytes }))
-    }
-
-    pub async fn set_favorite(
-        &self,
-        media_uri: String,
-        favorite: bool,
-    ) -> Result<bool, AndroidError> {
-        let current = self.products.playback.updates.current();
-        let current = current
-            .as_ref()
-            .and_then(|view| view.transport.current.as_ref());
-        tracing::info!(
-            favorite,
-            run = current.and_then(|current| current.id.run.map(playback::RunId::get)),
-            current_target = current.is_some_and(|current| current.media_uri == media_uri),
-            "Android player favorite requested"
-        );
-        self.products
-            .source
-            .set_favorite_with_result(library::FavoriteTarget::Track(media_uri), favorite)
-            .recv()
-            .await
-            .map_err(error)?
-            .map_err(error)
-    }
-
-    pub async fn queue_page(
-        &self,
-        offset: u64,
-        limit: u32,
-        filter: String,
-    ) -> Result<AndroidQueuePage, AndroidError> {
-        let view = self.products.playback.updates.current();
-        let Some(view) = view else {
-            return Ok(AndroidQueuePage {
-                revision: 0,
-                total: 0,
-                window_offset: 0,
-                window_count: 0,
-                current_index: None,
-                rows: Vec::new(),
-            });
-        };
-        let database = self.products.library.clone();
-        let queue = self.products.playback.clone();
-        let (rows, total, window_offset) = self
-            .products
-            .runtime
-            .spawn(async move {
-                let page = tokio::task::spawn_blocking(move || queue.page(offset, limit, filter))
-                    .await
-                    .map_err(error)?
-                    .map_err(error)?;
-                Ok::<_, AndroidError>((
-                    database
-                        .prepared_queue_page(&page.rows)
-                        .await
-                        .map_err(error)?,
-                    page.total,
-                    page.window_offset,
-                ))
-            })
-            .await
-            .map_err(error)?
-            .map_err(error)?;
-        Ok(AndroidQueuePage {
-            revision: view.queue.revision,
-            total: view.queue.total as u64,
-            window_offset: window_offset as u64,
-            window_count: total,
-            current_index: view.queue.current_index.map(|position| position as u64),
-            rows: rows
-                .into_iter()
-                .map(|row| AndroidQueueRow {
-                    position: row.position as u64,
-                    media_uri: row.media_uri.clone(),
-                    title: row.title.clone(),
-                    artist: row.artist.clone(),
-                    album: row.album.clone(),
-                    duration_millis: row.duration_millis.max(0) as u64,
-                    favorite: row.favorite,
-                    artwork_identity: row.artwork_binding.clone(),
-                })
-                .collect(),
-        })
-    }
-
-    pub fn activate_queue(&self, position: u64) {
-        self.products.playback.activate(position as usize);
-    }
-
-    pub fn remove_queue(&self, position: u64) {
-        self.products.playback.remove(position as usize);
-    }
-
-    pub fn move_queue(&self, position: u64, target_position: Option<u64>, after: bool) {
-        self.products.playback.reorder(
-            rufin_core::playback::QueueSelection::Positions(vec![position as usize]),
-            target_position.map_or(library::QueueReorderTarget::End, |id| {
-                if after {
-                    library::QueueReorderTarget::After(id as usize)
-                } else {
-                    library::QueueReorderTarget::Before(id as usize)
-                }
-            }),
-        );
-    }
-
-    pub fn clear_queue(&self, include_current: bool) {
-        self.products.playback.clear(include_current);
-    }
-
-    pub async fn create_queue_playlist(
-        &self,
-        name: String,
-        use_current_source: bool,
-        public: Option<bool>,
-    ) -> Result<(), AndroidError> {
-        let queue = self.products.playback.clone();
-        let selection = self
-            .products
-            .runtime
-            .spawn_blocking(move || queue.selection())
-            .await
-            .map_err(error)?
-            .map_err(error)?;
-        let source = self
-            .products
-            .source
-            .list_sources()
-            .selected_source_id
-            .filter(|_| use_current_source);
-        let created = rufin_core::playlists::create_playlist(
-            &self.products.source,
-            source.clone(),
-            name,
-            selection,
-            public,
-        )
-        .recv()
-        .await
-        .map_err(error)?
-        .map_err(error)?;
-        if let Some(id) = created {
-            self.products
-                .settings
-                .remember_created_playlist(source, id, Some(use_current_source))
-                .map_err(error)?;
-        }
-        Ok(())
+        Ok(bytes)
     }
 
     pub fn subscribe_lyrics(&self) -> Arc<AndroidLyricsSubscription> {
@@ -1234,10 +591,6 @@ impl AndroidPlayer {
                 VisualizerDrawingState::default();
         }
         self.products.playback.set_visualizer_enabled(enabled);
-    }
-
-    pub fn toggle_auto_dj(&self) {
-        self.products.playback.toggle_auto_dj();
     }
 
     pub fn subscribe_visualizer(&self) -> Arc<AndroidVisualizerSubscription> {
@@ -1273,14 +626,8 @@ pub struct AndroidLyricsCueLine {
 }
 
 #[derive(uniffi::Record)]
-pub struct AndroidReadingSegment {
-    pub surface: String,
-    pub furigana: Option<String>,
-}
-
-#[derive(uniffi::Record)]
 pub struct AndroidJapaneseReading {
-    pub segments: Vec<AndroidReadingSegment>,
+    pub segments: Vec<lyrics::JapaneseReadingSegment>,
     pub romanization: String,
     pub romanization_spans: Vec<AndroidRomanizationSpan>,
 }
@@ -1331,14 +678,7 @@ impl From<lyrics::JapaneseReading> for AndroidJapaneseReading {
             })
             .collect();
         Self {
-            segments: reading
-                .segments
-                .into_iter()
-                .map(|segment| AndroidReadingSegment {
-                    surface: segment.surface,
-                    furigana: segment.furigana,
-                })
-                .collect(),
+            segments: reading.segments,
             romanization: reading.romanization,
             romanization_spans,
         }
@@ -1350,32 +690,23 @@ pub struct AndroidLyricsCue {
     pub text: String,
     pub start_millis: u64,
     pub end_millis: Option<u64>,
-    pub byte_start: u64,
-    pub byte_end_exclusive: u64,
     pub utf16_start: Option<u64>,
     pub utf16_end: Option<u64>,
 }
 
 #[derive(uniffi::Record)]
-pub struct AndroidLyricsAgent {
-    pub id: String,
-    pub role: String,
-    pub name: Option<String>,
-}
-
-#[derive(uniffi::Record)]
 pub struct AndroidLyricsDocument {
-    pub role: String,
+    pub role: lyrics::LyricsRole,
     pub language: Option<String>,
     pub offset_millis: i64,
     pub lines: Vec<AndroidLyricsLine>,
-    pub agents: Vec<AndroidLyricsAgent>,
+    pub agents: Vec<lyrics::LyricsAgent>,
 }
 
 impl From<&lyrics::LyricsDocument> for AndroidLyricsDocument {
     fn from(document: &lyrics::LyricsDocument) -> Self {
         Self {
-            role: document.role.key().to_string(),
+            role: document.role,
             language: document.language.clone(),
             offset_millis: document.offset_millis,
             lines: document
@@ -1403,8 +734,6 @@ impl From<&lyrics::LyricsDocument> for AndroidLyricsDocument {
                                     text: cue.text.clone(),
                                     start_millis: cue.start_millis,
                                     end_millis: cue.end_millis,
-                                    byte_start: cue.byte_start as u64,
-                                    byte_end_exclusive: cue.byte_end_exclusive as u64,
                                     utf16_start: line
                                         .text
                                         .get(..cue.byte_start)
@@ -1419,21 +748,7 @@ impl From<&lyrics::LyricsDocument> for AndroidLyricsDocument {
                         .collect(),
                 })
                 .collect(),
-            agents: document
-                .agents
-                .iter()
-                .map(|agent| AndroidLyricsAgent {
-                    id: agent.id.clone(),
-                    name: agent.name.clone(),
-                    role: match agent.role {
-                        lyrics::LyricsAgentRole::Main => "main",
-                        lyrics::LyricsAgentRole::Voice => "voice",
-                        lyrics::LyricsAgentRole::Background => "background",
-                        lyrics::LyricsAgentRole::Group => "group",
-                    }
-                    .to_string(),
-                })
-                .collect(),
+            agents: document.agents.clone(),
         }
     }
 }
@@ -1534,10 +849,8 @@ impl AndroidLyricsSnapshot {
 #[derive(uniffi::Record)]
 pub struct AndroidLyricsState {
     pub snapshot: Option<Arc<AndroidLyricsSnapshot>>,
-    pub current_media_token: Option<String>,
-    pub media_uri: Option<String>,
-    pub media_run: Option<u64>,
-    pub media_token: Option<String>,
+    pub current_media_id: Option<playback::CurrentMediaId>,
+    pub media_id: Option<playback::CurrentMediaId>,
     pub writable: bool,
     pub clearable: bool,
     pub loading: bool,
@@ -1556,7 +869,7 @@ pub struct AndroidLyricsSubscription {
 
 #[uniffi::export]
 impl AndroidLyricsSubscription {
-    pub async fn next(&self) -> Result<Arc<AndroidLyricsSource>, AndroidError> {
+    pub async fn next(&self) -> Result<Arc<rufin_core::lyrics::CurrentLyrics>, AndroidError> {
         let mut current = self.current.lock().await;
         if current.1 {
             current.1 = false;
@@ -1565,44 +878,8 @@ impl AndroidLyricsSubscription {
         }
         let snapshot = current.0.borrow_and_update().clone();
         self.lyrics.load_current();
-        Ok(Arc::new(AndroidLyricsSource { current: snapshot }))
+        Ok(Arc::new(snapshot))
     }
-}
-
-#[derive(uniffi::Object)]
-pub struct AndroidLyricsSource {
-    current: rufin_core::lyrics::CurrentLyrics,
-}
-
-impl AndroidLyricsSource {
-    fn document(&self) -> (Option<&str>, Option<&Arc<lyrics::LyricsDocument>>) {
-        use rufin_core::lyrics::{CurrentLyrics, CurrentLyricsContent};
-        match &self.current {
-            CurrentLyrics::Cleared => (None, None),
-            CurrentLyrics::Loading { media_id } => (Some(&media_id.media_uri), None),
-            CurrentLyrics::Ready {
-                media_id, content, ..
-            } => (
-                Some(&media_id.media_uri),
-                match content {
-                    Some(CurrentLyricsContent::Document { document, .. }) => Some(document),
-                    _ => None,
-                },
-            ),
-        }
-    }
-}
-
-#[uniffi::export]
-impl AndroidLyricsSource {
-    pub fn document_changed(&self, previous: Option<Arc<AndroidLyricsSource>>) -> bool {
-        self.document() != previous.as_deref().map(Self::document).unwrap_or_default()
-    }
-}
-
-#[derive(uniffi::Record)]
-pub struct AndroidVisualizerFrame {
-    pub levels: Vec<f64>,
 }
 
 #[derive(uniffi::Object)]
@@ -1619,7 +896,7 @@ struct VisualizerChanges {
 
 #[uniffi::export]
 impl AndroidVisualizerSubscription {
-    pub async fn next(&self) -> Result<AndroidVisualizerFrame, AndroidError> {
+    pub async fn next(&self) -> Result<Vec<f64>, AndroidError> {
         let mut current = self.current.lock().await;
         if current.initial {
             current.initial = false;
@@ -1635,7 +912,7 @@ impl AndroidVisualizerSubscription {
                         if view.as_ref().is_none_or(|projection| projection.view.transport.effective_state() != playback::TransportStatus::Playing
                             || !projection.view.controls.playback_output.is_local()
                             || projection.view.transport.current.as_ref().is_none_or(|media| media.id.run != Some(frames.borrow().run))) {
-                            return Ok(AndroidVisualizerFrame { levels: Vec::new() });
+                            return Ok(Vec::new());
                         }
                     },
                 }
@@ -1651,12 +928,10 @@ impl AndroidVisualizerSubscription {
             })
             .and_then(|view| view.transport.current.clone())
             .is_some_and(|media| media.id.run == Some(frame.run));
-        Ok(AndroidVisualizerFrame {
-            levels: if active {
-                frame.levels.clone()
-            } else {
-                Vec::new()
-            },
+        Ok(if active {
+            frame.levels.clone()
+        } else {
+            Vec::new()
         })
     }
 }

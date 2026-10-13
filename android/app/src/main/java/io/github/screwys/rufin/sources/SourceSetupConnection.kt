@@ -14,15 +14,15 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
     var form by mutableStateOf(SourceForm())
         private set
     private val scope = CoroutineScope(SupervisorJob(model.viewModelScope.coroutineContext[Job]) + Dispatchers.Main.immediate)
-    private var bridge: AndroidSourceSetup? = null
+    private var bridge: SourceOwner? = null
     private var auth: SourceAuthorization? = null
     private var saved: SourceAuthorization? = null
     private var task: Job? = null
     private var plexLan = emptyList<DiscoveredServer>()
-    private var discoverySubscription: AndroidSourceDiscoverySubscription? = null
+    private var discoverySubscription: SourceDiscoverySubscription? = null
     var closed = false
         private set
-    var providers by mutableStateOf<List<AndroidSourceProvider>>(emptyList())
+    var providers by mutableStateOf<List<Pair<String, String>>>(emptyList())
         private set
     var ready by mutableStateOf(false)
         private set
@@ -30,7 +30,7 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
         private set
     var failure by mutableStateOf<String?>(null)
         private set
-    var discovery by mutableStateOf<AndroidSourceDiscovery?>(null)
+    var discovery by mutableStateOf<DiscoveryUpdate?>(null)
         private set
     var choices by mutableStateOf<List<SourceChoice>>(emptyList())
         private set
@@ -55,10 +55,10 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
             try {
                 val service = model.connectedService()
                 val runtime = service.runtime.value?.getOrThrow() ?: return@launch
-                val setup = runtime.sourceSetup()
+                val setup = runtime.source()
                 bridge = setup
-                providers = withContext(Dispatchers.IO) { setup.providers() }
-                sourceId?.let { form.load(setup.editable(it)) }
+                providers = listOf("local" to "Local", "jellyfin" to "Jellyfin", "emby" to "Emby", "plex" to "Plex", "navidrome" to "Navidrome", "subsonic" to "OpenSubsonic", "webdav" to "WebDAV", "smb" to "SMB / Samba").map { (kind, title) -> kind to translate(title) }
+                sourceId?.let { form.load(withContext(Dispatchers.IO) { setup.editable(it) } ?: error(translate("Source is no longer available"))) }
                 ready = true
                 val subscription = setup.subscribeDiscovery()
                 discoverySubscription = subscription
@@ -90,9 +90,9 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
     fun reportError(error: Exception) { failure = error.userMessage() }
     fun setHalfStars(enabled: Boolean) = model.runAction {
         val id = sourceId ?: return@runAction
-        val preferences = model.connectedService().runtime.value!!.getOrThrow().preferences()
-        try { preferences.setHalfStars(id, enabled); form.halfStars = enabled }
-        finally { preferences.destroy() }
+        val source = model.connectedService().runtime.value!!.getOrThrow().source()
+        try { source.setHalfStars(id, enabled); form.halfStars = enabled }
+        finally { source.destroy() }
     }
     fun selectProvider(kind: String) {
         cancelAuthorization()
@@ -165,7 +165,7 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
         val provider = when (form.kind) { "jellyfin" -> DiscoveryProvider.JELLYFIN; "emby" -> DiscoveryProvider.EMBY; "plex" -> DiscoveryProvider.PLEX; else -> return }
         try {
             if (!model.connectedService().requestLocalNetworkAccess()) error(translate("Local network permission was denied"))
-            bridge?.discover(provider)
+            bridge?.discoverServers(provider)
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { failure = error.userMessage() }
     }

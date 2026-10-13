@@ -73,7 +73,7 @@ async fn edit_file_integration(
         .ok_or_else(|| bad_request("id is required"))?;
     let preset = products
         .source
-        .file_integration_settings(&sources::SourceId::new(id))
+        .editable(sources::SourceId::new(id))
         .map_err(bad_request)?
         .ok_or_else(|| bad_request("Connection not found"))?;
     Ok(json_response(StatusCode::OK, json!(preset)))
@@ -111,15 +111,14 @@ pub(super) async fn select_library(
         .selected_library()
         .filter(|selected| selected.source_id == input.source)
     {
-        Some(selected) => selected,
-        None => completion(products.source.select_source(input.source)).await?,
-    };
-    completion(
-        products
+        Some(selected) => selected.source_id,
+        None => products
             .source
-            .set_music_folder(selected.source_id, input.library),
-    )
-    .await?;
+            .select_source(input.source)
+            .await
+            .map_err(bad_request)?,
+    };
+    completion(products.source.set_music_folder(selected, input.library)).await?;
     Ok(accepted())
 }
 
@@ -145,7 +144,7 @@ async fn editable(
     }
     let preset = products
         .source
-        .configured_source(&id)
+        .editable(id.clone())
         .map_err(bad_request)?
         .ok_or_else(|| bad_request("Source not found"))?;
     Ok(json_response(
@@ -233,14 +232,11 @@ pub(super) async fn select(
     }
     let id = sources::SourceId::new(input.id);
     if path.ends_with("/refresh") {
-        completion(source.refresh_source(id)).await?;
+        source.refresh_source(id).await.map_err(bad_request)?;
         Ok(json_response(StatusCode::OK, json!({"refreshed":true})))
     } else {
-        let selected = completion(source.select_source(id)).await?;
-        Ok(json_response(
-            StatusCode::OK,
-            json!({"id":selected.source_id}),
-        ))
+        let selected = source.select_source(id).await.map_err(bad_request)?;
+        Ok(json_response(StatusCode::OK, json!({"id":selected})))
     }
 }
 
@@ -251,7 +247,10 @@ async fn forget(
     let products = &products;
     let parameters = &parameters;
     let source = &products.source;
-    completion(source.forget_source(sources::SourceId::new(required(parameters, "id")?))).await?;
+    source
+        .forget_source(sources::SourceId::new(required(parameters, "id")?))
+        .await
+        .map_err(bad_request)?;
     Ok(json_response(StatusCode::OK, json!({"removed":true})))
 }
 
@@ -324,7 +323,14 @@ async fn smb_shares(
     let products = &products;
     let source = &products.source;
     let input: Files = body(request).await?;
-    let shares = completion(source.smb_shares(input.settings, input.credentials)).await?;
+    let shares = source
+        .smb_shares(input.settings, input.credentials)
+        .await
+        .map_err(bad_request)?;
+    let shares = shares
+        .into_iter()
+        .map(|share| (share.title, share.address.unwrap_or_default()))
+        .collect::<Vec<_>>();
     Ok(json_response(StatusCode::OK, json!({"shares":shares})))
 }
 

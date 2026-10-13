@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.sources
 
+import io.github.screwys.rufin.shared.rufin_core.*
+
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
@@ -52,7 +54,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
         onDismiss = { mapping = false }, onSaved = { mapping = false })
     Scaffold(topBar = {
             TopAppBar(title = {
-                Text(setup.providers.firstOrNull { it.kind == form.kind }?.title ?: translate(
+                Text(setup.providers.firstOrNull { it.first == form.kind }?.second ?: translate(
                     if (sourceId != null) "Edit Source" else if (connectionsOnly) "File connection" else "Add Source"))
             }, navigationIcon = {
                 IconButton({ if (sourceId == null && form.kind != null) { setup.cancelAuthorization(); form.kind = null } else close() }) {
@@ -77,7 +79,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
         Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
             if (setup.working) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
-                model.libraryState?.takeIf { it.busy }?.status?.let {
+                model.sourceStatus?.let {
                     Text(it, Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
                 }
             }
@@ -85,10 +87,10 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
             if (!setup.ready) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { if (setup.failure == null) CircularProgressIndicator() }
             else if (form.kind == null) LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp)) {
                 item { SettingsGroup {
-                setup.providers.filter { !connectionsOnly || it.kind in setOf("webdav", "smb") }.forEach { provider ->
-                    SettingsRow(provider.title, leading = { SourceIcon(provider.kind, Modifier.size(24.dp)) },
+                setup.providers.filter { !connectionsOnly || it.first in setOf("webdav", "smb") }.forEach { provider ->
+                    SettingsRow(provider.second, leading = { SourceIcon(provider.first, Modifier.size(24.dp)) },
                         trailing = { RufinIcon("rufin-go-next-symbolic", null) }, modifier = Modifier.clickable {
-                            setup.selectProvider(provider.kind)
+                            setup.selectProvider(provider.first)
                             if (connectionsOnly) setup.form.integration = true
                         })
                 }

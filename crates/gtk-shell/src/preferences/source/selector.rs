@@ -1,4 +1,4 @@
-use std::{rc::Rc, sync::Arc};
+use std::rc::Rc;
 
 use ::library::FolderRow;
 use adw::prelude::*;
@@ -22,13 +22,13 @@ const ADD_LIBRARY_ACTION: &str = "add-music-library";
 const MANAGE_LIBRARIES_DETAILED_ACTION: &str = "win.manage-music-libraries";
 const ADD_LIBRARY_DETAILED_ACTION: &str = "win.add-music-library";
 
-struct SourceMenuContent {
+struct SourceMenuContent<'a> {
     name: String,
     icon_name: &'static str,
     selected_source_id: Option<SourceId>,
-    sources: Arc<[SourceSummary]>,
-    local_folders: Arc<[LocalFolder]>,
-    music_folders: Arc<[FolderRow]>,
+    sources: &'a [SourceSummary],
+    local_folders: &'a [LocalFolder],
+    music_folders: &'a [FolderRow],
     selected_music_folder_id: Option<String>,
 }
 
@@ -165,10 +165,10 @@ fn source_menu_item(label: &str, action: &str, icon_name: &str) -> gio::MenuItem
     item
 }
 
-fn source_menu_content(
-    configured: &ConfiguredSources,
-    selected: Option<&SelectedLibrary>,
-) -> SourceMenuContent {
+fn source_menu_content<'a>(
+    configured: &'a ConfiguredSources,
+    selected: Option<&'a SelectedLibrary>,
+) -> SourceMenuContent<'a> {
     let selected_source_id = configured.selected_source_id.clone();
     let active_source = selected_source_id.as_ref().and_then(|selected| {
         configured
@@ -182,9 +182,9 @@ fn source_menu_content(
             name: tr("No source"),
             icon_name: "rufin-network-server-symbolic",
             selected_source_id,
-            sources: Arc::clone(&configured.sources),
-            local_folders: Arc::clone(&configured.local_folders),
-            music_folders: Arc::from([]),
+            sources: &configured.sources,
+            local_folders: &configured.local_folders,
+            music_folders: &[],
             selected_music_folder_id: None,
         };
     };
@@ -192,8 +192,8 @@ fn source_menu_content(
     let icon_name = configured_source_icon_name(&source);
     let music_folders = selected
         .filter(|selected| selected.source_id == source.id)
-        .map(|selected| Arc::clone(&selected.music_folders))
-        .unwrap_or_else(|| Arc::from([]));
+        .map(|selected| selected.music_folders.as_ref())
+        .unwrap_or(&[]);
     let selected_music_folder_id = if music_folders.is_empty() {
         None
     } else {
@@ -204,14 +204,14 @@ fn source_menu_content(
         name,
         icon_name,
         selected_source_id,
-        sources: Arc::clone(&configured.sources),
-        local_folders: Arc::clone(&configured.local_folders),
+        sources: &configured.sources,
+        local_folders: &configured.local_folders,
         music_folders,
         selected_music_folder_id,
     }
 }
 
-fn replace_selection_actions(shell: &Rc<Shell>, content: &SourceMenuContent) {
+fn replace_selection_actions(shell: &Rc<Shell>, content: &SourceMenuContent<'_>) {
     for name in shell.chrome.window.list_actions() {
         if name.starts_with(SOURCE_CHOICE_ACTION_PREFIX)
             || name.starts_with(MUSIC_FOLDER_CHOICE_ACTION_PREFIX)
@@ -262,7 +262,10 @@ fn replace_selection_actions(shell: &Rc<Shell>, content: &SourceMenuContent) {
 fn select_source(shell: &Shell, source_id: SourceId) {
     popdown_primary_menu(shell);
     if shell.source.configured.borrow().selected_source_id.as_ref() != Some(&source_id) {
-        shell.products.source.select_source(source_id);
+        let source = shell.products.source.clone();
+        gtk::glib::spawn_future_local(async move {
+            let _ = source.select_source(source_id).await;
+        });
     }
 }
 

@@ -19,6 +19,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.core.*
+import io.github.screwys.rufin.shared.rufin_core.*
+import io.github.screwys.rufin.shared.rufin_core.Action as ConnectAction
+import io.github.screwys.rufin.shared.rufin_core.Status as ConnectStatus
+import io.github.screwys.rufin.shared.rufin_core.Control as ConnectControl
+import io.github.screwys.rufin.shared.downloads.DownloadDirectory
+
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.settings.SettingsPage
 import io.github.screwys.rufin.settings.SettingsGroup
@@ -31,7 +37,7 @@ internal fun ConnectSetupScreen(model: RufinConnection) {
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(translate("Rufin Connect"), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-                TextButton({ model.connect.action(AndroidConnectAction.CancelPairing) }) { Text(translate("Cancel")) }
+                TextButton({ model.connect.action(ConnectAction.CancelPairing) }) { Text(translate("Cancel")) }
             }
             Box(Modifier.weight(1f)) { ConnectPage(model, setupOnly = true) }
         }
@@ -44,12 +50,12 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, setu
     val connect = model.connect
     DisposableEffect(connect) { connect.pageVisible = true; onDispose { connect.pageVisible = false } }
     val state = connect.state
-    LaunchedEffect(state?.profile, state?.enabled) {
-        if (!setupOnly && state?.profile != null && state.enabled) {
+    LaunchedEffect(state?.settings?.profile, state?.settings?.enabled) {
+        if (!setupOnly && state?.settings?.profile != null && state.settings.enabled) {
             if (!model.connectedService().requestLocalNetworkAccess()) {
                 model.showFeedback(translate("Local network permission was denied"))
             }
-            connect.action(AndroidConnectAction.Refresh)
+            connect.action(ConnectAction.Refresh)
         }
     }
     val context = LocalContext.current
@@ -59,18 +65,18 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, setu
     var disable by remember { mutableStateOf(false) }
     var remoteStorage by remember { mutableStateOf(false) }
     var storageChoice by remember { mutableStateOf(false) }
-    var musicFolderChoice by remember { mutableStateOf<AndroidConnectMusicFolder?>(null) }
+    var musicFolderChoice by remember { mutableStateOf<ConnectMusicFolder?>(null) }
     var relayEdit by remember { mutableStateOf(false) }
     var remoteFile by remember { mutableStateOf<Boolean?>(null) }
-    var controlDevice by remember { mutableStateOf<AndroidConnectDevice?>(null) }
-    var removeDevice by remember { mutableStateOf<AndroidConnectDevice?>(null) }
+    var controlDevice by remember { mutableStateOf<Device?>(null) }
+    var removeDevice by remember { mutableStateOf<Device?>(null) }
     var invitationCopied by remember { mutableIntStateOf(0) }
     LaunchedEffect(invitationCopied) { if (invitationCopied > 0) { delay(1500); invitationCopied = 0 } }
     LaunchedEffect(connect, state != null) {
-        if (state?.nearby == true && state.identity == null) connect.action(AndroidConnectAction.Discover)
+        if (state?.settings?.nearby == true && state.identity == null) connect.action(ConnectAction.Discover)
     }
-    LaunchedEffect(connect, state?.profile, state?.setupPending, state?.connecting, model.sources) {
-        if (state?.profile != null && !state.connecting) connect.refreshMusicFolders()
+    LaunchedEffect(connect, state?.settings?.profile, state?.settings?.setupPending, state?.connecting, model.sources) {
+        if (state?.settings?.profile != null && !state.connecting) connect.refreshMusicFolders()
     }
     val chooseMusicFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         val folder = musicFolderChoice
@@ -83,7 +89,7 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, setu
     val chooseFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) try {
             context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            connect.action(AndroidConnectAction.Destination(AndroidConnectDestination.Document(uri.toString())))
+            connect.action(ConnectAction.Destination(Destination.Document(uri.toString())))
         } catch (failure: Exception) { connect.reportError(failure) }
     }
     val importFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -104,24 +110,24 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, setu
     SettingsPage(embedded = embedded) {
         SettingsGroup {
             if (!setupOnly) {
-            SettingsRow(translate("Device name"), summary = state.name,
+            SettingsRow(translate("Device name"), summary = state.settings.name,
                 trailing = { IconButton({ rename = true }, enabled = enabled) { RufinIcon("rufin-document-edit-symbolic", translate("Edit")) } },
                 modifier = Modifier.clickable(enabled) { rename = true })
-            if (state.profile == null) {
-                Button({ connect.action(AndroidConnectAction.Create) }, Modifier.fillMaxWidth(), enabled = enabled) {
+            if (state.settings.profile == null) {
+                Button({ connect.action(ConnectAction.Create) }, Modifier.fillMaxWidth(), enabled = enabled) {
                     Text(translate("Enable Rufin Connect"))
                 }
             } else SettingsRow(translate("Enable Rufin Connect"), summary = state.profileStatus,
-                trailing = { Switch(state.enabled, {
-                    if (it) connect.action(AndroidConnectAction.Enable(true)) else disable = true
+                trailing = { Switch(state.settings.enabled, {
+                    if (it) connect.action(ConnectAction.Enable(true)) else disable = true
                 }, enabled = enabled) })
             }
             if (setupOnly) Text(state.profileStatus, Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.titleMedium)
             Box(Modifier.fillMaxWidth().height(2.dp)) {
-                if (connect.pending || state.connecting || state.adopting || state.receivingCollection) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (connect.pending || state.connecting || state.settings.adopting || state.receivingCollection) LinearProgressIndicator(Modifier.fillMaxWidth())
             }
             if (!setupOnly && state.connecting && state.pairing == null) SettingsRow(state.profileStatus,
-                trailing = { TextButton({ connect.action(AndroidConnectAction.CancelPairing) }, enabled = enabled) {
+                trailing = { TextButton({ connect.action(ConnectAction.CancelPairing) }, enabled = enabled) {
                     Text(translate("Cancel"))
                 } })
             connect.visibleError?.let { message ->
@@ -132,7 +138,7 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, setu
         SettingsGroup {
             SettingsRow(translate("Join profile"),
                 modifier = Modifier.clickable(enabled) { join = true })
-            if (state.profile != null) {
+            if (state.settings.profile != null) {
                 state.invitation?.let { invitation ->
                     SettingsRow(translate("Connect a device"),
                         trailing = { IconButton({
@@ -151,7 +157,7 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, setu
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(translate("Nearby devices"), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-                IconButton({ connect.action(AndroidConnectAction.Discover) }, enabled = enabled) {
+                IconButton({ connect.action(ConnectAction.Discover) }, enabled = enabled) {
                     RufinIcon("rufin-view-refresh-symbolic", translate("Refresh"))
                 }
             }
@@ -165,7 +171,7 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, setu
         if (connected.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(translate("Connected devices"), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-                IconButton({ connect.action(AndroidConnectAction.Refresh) }, enabled = enabled) { RufinIcon("rufin-view-refresh-symbolic", translate("Refresh")) }
+                IconButton({ connect.action(ConnectAction.Refresh) }, enabled = enabled) { RufinIcon("rufin-view-refresh-symbolic", translate("Refresh")) }
             }
             SettingsGroup { connected.forEach { device ->
                 key(device.id) { ConnectDeviceRow(device, connect, { controlDevice = device }, { removeDevice = device }) }
@@ -173,14 +179,14 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, setu
         }
         SettingsGroup(translate("Connection settings")) {
             SettingsRow(translate("Nearby discovery"),
-                trailing = { Switch(state.nearby, { connect.action(AndroidConnectAction.Network(it, state.relay, state.publicRelay)) }, enabled = enabled) })
-            SettingsRow(translate("Relay address"), summary = state.relay ?: translate("Default"),
+                trailing = { Switch(state.settings.nearby, { connect.action(ConnectAction.Network(it, state.settings.relay, state.settings.publicRelay)) }, enabled = enabled) })
+            SettingsRow(translate("Relay address"), summary = state.settings.relay ?: translate("Default"),
                 modifier = Modifier.clickable(enabled) { relayEdit = true })
             SettingsRow(translate("Use a public relay"),
-                trailing = { Switch(state.publicRelay, { connect.action(AndroidConnectAction.Network(state.nearby, state.relay, it)) }, enabled = enabled) })
+                trailing = { Switch(state.settings.publicRelay, { connect.action(ConnectAction.Network(state.settings.nearby, state.settings.relay, it)) }, enabled = enabled) })
         }
         }
-        if (!setupOnly || (state.setupPending && !state.connecting)) {
+        if (!setupOnly || (state.settings.setupPending && !state.connecting)) {
         if (connect.musicFolders.isNotEmpty()) SettingsGroup(translate("Local music folders")) {
             connect.musicFolders.forEach { folder ->
                 key(folder.sourceId, folder.rootId) {
@@ -196,57 +202,57 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, setu
         SettingsGroup(translate("Music on this device")) {
             Text(translate("Download quality"), Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyLarge)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(state.encoding == AndroidConnectEncoding.ORIGINAL, { connect.encoding(AndroidConnectEncoding.ORIGINAL) },
+                FilterChip(state.settings.encoding == Encoding.ORIGINAL, { connect.encoding(Encoding.ORIGINAL) },
                     label = { Text(translate("Original")) }, enabled = enabled)
-                FilterChip(state.encoding == AndroidConnectEncoding.MP3, { connect.encoding(AndroidConnectEncoding.MP3) },
+                FilterChip(state.settings.encoding == Encoding.MP3, { connect.encoding(Encoding.MP3) },
                     label = { Text(translate("MP3")) }, enabled = enabled)
             }
             state.mediaStatus?.let { Text(it, Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall) }
         }
         SettingsGroup(translate("Profile storage")) {
-            SettingsRow(translate("Storage"), summary = when (val destination = state.destination) {
-                    is AndroidConnectDestination.Document -> translate("This device")
-                    is AndroidConnectDestination.Local -> destination.path
-                    is AndroidConnectDestination.Remote -> listOf(connect.fileSources.firstOrNull { it.id == destination.sourceId }?.name.orEmpty(), destination.path).filter(String::isNotBlank).joinToString(" · ")
+            SettingsRow(translate("Storage"), summary = when (val destination = state.settings.destination) {
+                    is Destination.Document -> translate("This device")
+                    is Destination.Local -> destination.path
+                    is Destination.Remote -> listOf(connect.fileSources.firstOrNull { it.id == destination.sourceId }?.name.orEmpty(), destination.path).filter(String::isNotBlank).joinToString(" · ")
                     else -> translate("Rufin data folder")
                 },
                 modifier = Modifier.clickable(enabled) { storageChoice = true })
         }
         }
-        if (state.setupPending && !state.connecting) Button({ connect.action(AndroidConnectAction.FinishSetup) },
+        if (state.settings.setupPending && !state.connecting) Button({ connect.action(ConnectAction.FinishSetup) },
             Modifier.fillMaxWidth(), enabled = enabled) { Text(translate("Continue")) }
         if (!setupOnly) {
         SettingsGroup {
             SettingsRow(translate("Import"),
                 modifier = Modifier.clickable(enabled) { importFile.launch(arrayOf("*/*")) })
             SettingsRow(translate("Export"),
-                modifier = Modifier.clickable(enabled && state.profile != null) { exportFile.launch("Rufin.rufin-connect") })
+                modifier = Modifier.clickable(enabled && state.settings.profile != null) { exportFile.launch("Rufin.rufin-connect") })
             SettingsRow(translate("Import from connection"), modifier = Modifier.clickable(enabled) { remoteFile = true })
-            SettingsRow(translate("Export to connection"), modifier = Modifier.clickable(enabled && state.profile != null) { remoteFile = false })
+            SettingsRow(translate("Export to connection"), modifier = Modifier.clickable(enabled && state.settings.profile != null) { remoteFile = false })
         }
         }
     }
     if (join) ConnectJoinDialog(connect, { join = false }) { connect.join(it); join = false }
-    if (relayEdit) ConnectTextDialog(translate("Relay address"), translate("Relay address"), state.relay.orEmpty(), { relayEdit = false }, allowEmpty = true) {
-        connect.action(AndroidConnectAction.Network(state.nearby, it.trim().takeIf(String::isNotEmpty), state.publicRelay)); relayEdit = false
+    if (relayEdit) ConnectTextDialog(translate("Relay address"), translate("Relay address"), state.settings.relay.orEmpty(), { relayEdit = false }, allowEmpty = true) {
+        connect.action(ConnectAction.Network(state.settings.nearby, it.trim().takeIf(String::isNotEmpty), state.settings.publicRelay)); relayEdit = false
     }
-    if (rename) ConnectTextDialog(translate("Device name"), translate("Name"), state.name, { rename = false }) { connect.action(AndroidConnectAction.Rename(it)); rename = false }
+    if (rename) ConnectTextDialog(translate("Device name"), translate("Name"), state.settings.name, { rename = false }) { connect.action(ConnectAction.Rename(it)); rename = false }
     if (disable) AlertDialog(onDismissRequest = { disable = false }, title = { Text(translate("Rufin Connect")) },
         text = { Text(translate("This will remove all configured state. Do you want to continue?")) },
-        confirmButton = { TextButton({ connect.action(AndroidConnectAction.Enable(false)); disable = false }) { Text(translate("Continue")) } },
+        confirmButton = { TextButton({ connect.action(ConnectAction.Enable(false)); disable = false }) { Text(translate("Continue")) } },
         dismissButton = { TextButton({ disable = false }) { Text(translate("Cancel")) } })
     if (leave) AlertDialog(onDismissRequest = { leave = false }, title = { Text(translate("Disconnect this device?")) },
-        confirmButton = { TextButton({ connect.action(AndroidConnectAction.Leave); leave = false }) { Text(translate("Disconnect")) } },
+        confirmButton = { TextButton({ connect.action(ConnectAction.Leave); leave = false }) { Text(translate("Disconnect")) } },
         dismissButton = { TextButton({ leave = false }) { Text(translate("Cancel")) } })
     removeDevice?.let { device -> AlertDialog(onDismissRequest = { removeDevice = null }, title = { Text(translate("Remove device")) }, text = { Text(device.name) },
-        confirmButton = { TextButton({ connect.action(AndroidConnectAction.Remove(device.id)); removeDevice = null }) { Text(translate("Remove")) } },
+        confirmButton = { TextButton({ connect.action(ConnectAction.Remove(device.id)); removeDevice = null }) { Text(translate("Remove")) } },
         dismissButton = { TextButton({ removeDevice = null }) { Text(translate("Cancel")) } }) }
-    if (remoteStorage) ConnectRemoteStorageDialog(connect, state.destination, { remoteStorage = false }) { destination ->
-        connect.action(AndroidConnectAction.Destination(destination)); remoteStorage = false
+    if (remoteStorage) ConnectRemoteStorageDialog(connect, state.settings.destination, { remoteStorage = false }) { destination ->
+        connect.action(ConnectAction.Destination(destination)); remoteStorage = false
     }
-    if (storageChoice) ConnectStorageDialog(state.destination, { storageChoice = false },
-        useDefault = { connect.action(AndroidConnectAction.Destination(null)) },
-        chooseFolder = { chooseFolder.launch((state.destination as? AndroidConnectDestination.Document)?.uri?.let(android.net.Uri::parse)) },
+    if (storageChoice) ConnectStorageDialog(state.settings.destination, { storageChoice = false },
+        useDefault = { connect.action(ConnectAction.Destination(null)) },
+        chooseFolder = { chooseFolder.launch((state.settings.destination as? Destination.Document)?.uri?.let(android.net.Uri::parse)) },
         chooseConnection = { remoteStorage = true })
     remoteFile?.let { importing -> ConnectRemoteFileDialog(connect, importing, { remoteFile = null }) }
     controlDevice?.let { device -> ConnectDeviceControls(device, connect) { controlDevice = null } }

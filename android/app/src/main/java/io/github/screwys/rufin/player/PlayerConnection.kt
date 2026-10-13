@@ -11,27 +11,25 @@ import android.util.Log
 import androidx.compose.runtime.*
 import io.github.screwys.rufin.core.AndroidLyricsState
 import io.github.screwys.rufin.core.AndroidPlayer
-import io.github.screwys.rufin.core.AndroidPlaybackState
+import io.github.screwys.rufin.core.AndroidPlaybackUpdate
 import io.github.screwys.rufin.core.AndroidPlayerMetadata
-import io.github.screwys.rufin.core.AndroidQueuePage
-import io.github.screwys.rufin.core.AndroidRepeatMode
-import io.github.screwys.rufin.core.AndroidOutput
-import io.github.screwys.rufin.core.AndroidOutputChoices
 import io.github.screwys.rufin.shared.rufin_core.PlayerPreferences
 import io.github.screwys.rufin.shared.rufin_core.PlayerPreferenceOptions
 import io.github.screwys.rufin.shared.rufin_core.PlayerPreferenceEdit
 import io.github.screwys.rufin.shared.rufin_core.VisualizerPreferenceEdit
 import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
 import io.github.screwys.rufin.shared.lyrics.LyricsPreferenceEdit
-import io.github.screwys.rufin.core.AndroidLyricsOperation
-import io.github.screwys.rufin.core.AndroidLyricsSource
 import io.github.screwys.rufin.core.AndroidVisualizerDrawing
 import io.github.screwys.rufin.core.AndroidRgb
-import io.github.screwys.rufin.core.AndroidWaveform
 import io.github.screwys.rufin.core.AndroidLyricsHighlight
 import io.github.screwys.rufin.core.AndroidLyricsPosition
-import io.github.screwys.rufin.core.AndroidTransportState
 import io.github.screwys.rufin.core.translate
+import io.github.screwys.rufin.shared.playback.*
+import io.github.screwys.rufin.shared.library.QueueItem
+import io.github.screwys.rufin.shared.library.FavoriteTarget
+import io.github.screwys.rufin.shared.library.QueueReorderTarget
+import io.github.screwys.rufin.shared.rufin_core.*
+import io.github.screwys.rufin.shared.lyrics.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 import java.util.concurrent.Executors
@@ -46,24 +44,44 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     var preferenceOptions by mutableStateOf<PlayerPreferenceOptions?>(null)
         private set
     private var settingsOwner: SettingsOwner? = null
-    var lyricsOperation by mutableStateOf<AndroidLyricsOperation?>(null)
+    var lyricsSearch by mutableStateOf<Pair<CurrentMediaId, LyricsQuery>?>(null)
         private set
-    var dictionaryState by mutableStateOf<String?>(null)
+    var lyricsResults by mutableStateOf<List<LyricsSearchResult>?>(null)
+        private set
+    var lyricsSearching by mutableStateOf(false)
+        private set
+    private var playbackOwner: PlaybackOwner? = null
+    private var lyricsOwner: LyricsHandle? = null
+    private var sourceOwner: SourceOwner? = null
+    var dictionaryState by mutableStateOf<JapaneseDictionaryStatus?>(null)
         private set
     var lyricsOffset by mutableLongStateOf(0L)
-    private var sourceLyrics: AndroidLyricsSource? = null
+    private var sourceLyrics: CurrentLyrics? = null
     internal var visualizerObservedAt = SystemClock.elapsedRealtimeNanos()
         private set
-    var playback by mutableStateOf<AndroidPlaybackState?>(null)
+    var playback by mutableStateOf<AndroidPlaybackUpdate?>(null)
         private set
+    var currentItem by mutableStateOf<QueueItem?>(null)
+        private set
+    var favorite by mutableStateOf(false)
+        private set
+    var artworkRevision by mutableStateOf(0UL)
+        private set
+    var sourceLabels by mutableStateOf<List<String>>(emptyList())
+        private set
+    var currentContextId by mutableStateOf<String?>(null)
+        private set
+    var currentContext by mutableStateOf<Triple<String?, String, String?>?>(null)
+        private set
+    val currentId get() = playback?.transport?.current?.id
     private var displayedArtwork by mutableStateOf<Pair<List<Byte>, PlayerArtwork>?>(null)
     val artwork: PlayerArtwork? get() = displayedArtwork?.second
     val displayedArtworkIdentity: List<Byte>? get() = displayedArtwork?.first
     var metadataLinks by mutableStateOf<AndroidPlayerMetadata?>(null)
         private set
-    var outputChoices by mutableStateOf<AndroidOutputChoices?>(null)
+    var outputChoices by mutableStateOf<List<RemoteOutput>>(emptyList())
         private set
-    var waveform by mutableStateOf<AndroidWaveform?>(null)
+    var waveform by mutableStateOf<Pair<CurrentMediaId?, List<Double>>?>(null)
         private set
     var lyrics by mutableStateOf<AndroidLyricsState?>(null)
         private set
@@ -72,8 +90,8 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     internal var bridge by mutableStateOf<AndroidPlayer?>(null)
         private set
     val service get() = connection.service
-    val currentLyrics get() = lyrics?.takeIf { it.mediaUri != null && it.mediaUri == playback?.mediaUri && it.mediaRun == playback?.mediaRun }
-    val lyricsToken get() = lyrics?.currentMediaToken
+    val currentLyrics get() = lyrics?.takeIf { it.mediaId != null && it.mediaId == currentId }
+    val lyricsToken get() = lyrics?.currentMediaId
     private fun showFeedback(message: String?) {
         message?.let { connection.showFeedback(it, control = true) }
     }
@@ -93,6 +111,9 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         try {
         snapshotFlow { connection.service }.collectLatest { service ->
             playback = null
+            currentItem = null
+            currentContextId = null
+            currentContext = null
             displayedArtwork = null
             metadataLinks = null
             if (service == null) return@collectLatest
@@ -100,24 +121,29 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                 val runtime = result?.getOrNull() ?: return@collectLatest
                 val player = runtime.player()
                 bridge = player
-                val owner = player.settingsOwner()
+                playbackOwner = runtime.playbackOwner()
+                lyricsOwner = runtime.lyricsOwner()
+                sourceOwner = runtime.source()
+                val owner = runtime.settings()
                 settingsOwner = owner
-                outputChoices = null
+                outputChoices = emptyList()
                 val lyricSubscription = player.subscribeLyrics()
                 val visualizerSubscription = player.subscribeVisualizer()
-                val operations = player.subscribeLyricsOperations()
                 try {
                     withContext(Dispatchers.IO) { owner.playerPreferenceOptions() }.let { preferenceOptions = it }
                     settings = withContext(Dispatchers.IO) { owner.playerPreferences() }
                     coroutineScope {
-                        launch { while (isActive) waveform = player.nextWaveform() }
+                        launch { while (isActive) {
+                            val frame = player.nextWaveform()
+                            try { waveform = frame.mediaId() to frame.amplitudes() } finally { frame.destroy() }
+                        } }
                         launch {
-                            snapshotFlow { playback?.mediaUri }.collectLatest { uri ->
+                            snapshotFlow { currentId?.mediaUri }.collectLatest { uri ->
                                 metadataLinks = null
                                 if (uri == null) return@collectLatest
                                 try {
                                     val loaded = player.metadataLinks(uri, null)
-                                    if (bridge === player && playback?.mediaUri == uri) metadataLinks = loaded
+                                    if (bridge === player && currentId?.mediaUri == uri) metadataLinks = loaded
                                 } catch (cancelled: CancellationException) { throw cancelled }
                                 catch (error: Exception) { reportError(error) }
                             }
@@ -134,52 +160,62 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                         }
                         launch {
                             while (isActive) {
-                                levels = visualizerSubscription.next().levels
+                                levels = visualizerSubscription.next()
                                 visualizerObservedAt = SystemClock.elapsedRealtimeNanos()
                             }
                         }
                         launch {
-                            var savedRevision: ULong? = null
                             while (isActive) {
-                                val update = operations.next()
-                                if (dictionaryState != update.dictionary) {
-                                    dictionaryState = update.dictionary
-                                    if (update.dictionary == "ready") refreshLyrics(player)
-                                }
-                                update.search?.takeIf { it.mediaToken == lyricsToken }?.let { search ->
-                                    if (search != lyricsOperation) {
-                                        lyricsOperation = search
-                                        search.message?.let { reportError(Exception(it)) }
+                                val event = player.nextLyricsEvent()
+                                try {
+                                    event.dictionaryStatus()?.let { status ->
+                                        dictionaryState = status
+                                        if (status is JapaneseDictionaryStatus.Ready) refreshLyrics(player)
                                     }
-                                }
-                                update.save?.takeIf { it.revision != savedRevision }?.let { save ->
-                                    savedRevision = save.revision
-                                    if (save.mediaToken == lyricsToken) {
-                                        if (save.kind == "error") save.message?.let { reportError(Exception(it)) }
-                                        else showFeedback(save.message)
+                                    val media = event.mediaId()
+                                    val query = event.query()
+                                    if (media == lyricsToken) {
+                                        if (query != null && lyricsSearch == (media to query)) {
+                                            lyricsResults = if (event.error() == null) event.results() else null
+                                            lyricsSearching = false
+                                        }
+                                        event.error()?.let { reportError(Exception(it)) }
+                                        if (event.saved()) showFeedback(translate("Saved"))
                                     }
-                                }
+                                } finally { event.destroy() }
                             }
                         }
                         launch {
-                            service.playback.collect {
-                                val changed = it?.mediaUri != playback?.mediaUri || it?.mediaRun != playback?.mediaRun
-                                val identity = it?.artworkIdentity?.toList()
-                                it?.let { state -> artworkCache.updateRevision(state.artworkRevision) }
-                                if (identity != null && identity != playback?.artworkIdentity?.toList())
+                            service.playback.collect { update ->
+                                val changed = update?.transport?.current?.id != currentId
+                                val row = update?.transport?.current?.row
+                                val previousRow = playback?.transport?.current?.row
+                                val rowChanged = if (row == null) previousRow != null else previousRow == null ||
+                                    row !== previousRow && !row.sameRow(previousRow)
+                                if (rowChanged) {
+                                    currentItem = row?.item()
+                                    currentContextId = row?.contextId()
+                                    currentContext = row?.let { Triple(it.contextTitle(), it.contextKind(), it.contextCategory()) }
+                                }
+                                val identity = currentItem?.artworkBinding?.toList()
+                                artworkRevision = update?.artworkRevision ?: 0UL
+                                artworkCache.updateRevision(artworkRevision)
+                                if (identity != null && rowChanged)
                                     artworkCache.peek(identity, 1024)?.let { displayedArtwork = identity to it }
-                                playback = it
+                                favorite = update?.favorite ?: false
+                                sourceLabels = update?.sourceLabels.orEmpty()
+                                playback = update
                                 if (changed) refreshLyrics(player)
                             }
                         }
-                        snapshotFlow { playback?.let { state -> state.artworkIdentity?.toList()?.let { it to state.artworkRevision } } }.collectLatest { key ->
+                        snapshotFlow { currentItem?.artworkBinding?.toList()?.let { it to artworkRevision } }.collectLatest { key ->
                             if (key == null) displayedArtwork = null
                             else {
                                 val (identity, revision) = key
                                 artworkCache.peek(identity, 1024)?.let { displayedArtwork = identity to it }
                                 try {
                                     val loaded = artworkCache.load(player, identity, 1024)
-                                    if (playback?.artworkIdentity?.toList() == identity && playback?.artworkRevision == revision)
+                                    if (currentItem?.artworkBinding?.toList() == identity && artworkRevision == revision)
                                         displayedArtwork = loaded?.let { identity to it }
                                 }
                                 catch (cancelled: CancellationException) { throw cancelled }
@@ -196,13 +232,20 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                     preferenceOptions = null
                     metadataLinks = null
                     waveform = null
-                    lyricsOperation = null
+                    lyricsSearch = null
+                    lyricsResults = null
+                    lyricsSearching = false
                     dictionaryState = null
                     lyrics = null
                     levels = emptyList()
                     lyricSubscription.destroy()
                     visualizerSubscription.destroy()
-                    operations.destroy()
+                    playbackOwner?.destroy()
+                    playbackOwner = null
+                    lyricsOwner?.destroy()
+                    lyricsOwner = null
+                    sourceOwner?.destroy()
+                    sourceOwner = null
                     player.destroy()
                 }
             }
@@ -244,21 +287,30 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         val text = withContext(Dispatchers.IO) { current.copyVisualizerPreset() }
         copy(text)
     }
-    fun searchLyrics(token: String, artist: String, title: String) = action { bridge?.searchLyrics(token, artist, title) }
-    fun previewLyrics(token: String, key: String) = action { bridge?.previewLyricsResult(token, key) }
-    fun saveLyricsResult(token: String, key: String) = action { bridge?.saveLyricsResultToSource(token, key) }
-    fun editLyrics(token: String, text: String) = action { bridge?.editLyrics(token, text) }
-    fun saveLyrics(token: String) = action { bridge?.saveLyricsToSource(token, lyricsOffset) }
-    fun clearLyrics(token: String) = action {
-        val current = bridge ?: return@action
-        current.clearFetchedLyrics(token)
-        changeSettings {}
-        refreshLyrics(current)
+    fun searchLyrics(token: CurrentMediaId, artist: String, title: String) = action {
+        val query = LyricsQuery(artist.trim(), title.trim())
+        lyricsSearch = token to query
+        lyricsResults = null
+        lyricsSearching = true
+        lyricsOwner?.search(token, query)
     }
-    fun prepareDictionary() = action { bridge?.prepareLyricsDictionary(true) }
-    suspend fun lyricsText(token: String): String? = withContext(readings) { bridge?.lyricsText(token, lyricsOffset) }
-    fun exportLyrics(uri: Uri, token: String, offset: Long) = action {
-        val text = withContext(readings) { bridge?.lyricsText(token, offset) } ?: return@action
+    fun previewLyrics(token: CurrentMediaId, result: LyricsSearchResult) = action { lyricsOwner?.preview(token, result) }
+    fun saveLyricsResult(token: CurrentMediaId, result: LyricsSearchResult) = action { lyricsOwner?.saveResultToSource(token, result) }
+    fun editLyrics(token: CurrentMediaId, text: String) = action { lyricsOwner?.updateLyricsText(token, text) }
+    fun saveLyrics(token: CurrentMediaId) = action { lyricsOwner?.saveCurrentToSource(token, lyricsOffset) }
+    fun clearLyrics(token: CurrentMediaId) = action {
+        if (currentId != token) return@action
+        lyricsOwner?.clearFetched(token)
+        changeSettings { it.suppressFetchedLyrics(token.mediaUri) }
+        bridge?.let { refreshLyrics(it) }
+    }
+    fun prepareDictionary() = action { lyricsOwner?.japaneseDictionary(true) }
+    suspend fun lyricsText(token: CurrentMediaId, offset: Long = lyricsOffset): String = withContext(readings) {
+        check(currentId == token) { translate("This isn't available") }
+        sourceLyrics?.takeIf { it.mediaId() == token }?.text(offset) ?: error(translate("No lyrics available."))
+    }
+    fun exportLyrics(uri: Uri, token: CurrentMediaId, offset: Long) = action {
+        val text = lyricsText(token, offset)
         withContext(Dispatchers.IO) {
             val output = connection.getApplication<Application>().contentResolver.openOutputStream(uri, "wt")
                 ?: error(translate("Save Lyrics"))
@@ -269,27 +321,29 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     fun drawing(targets: List<Double>, width: Float, height: Float, frameNanos: Long, accent: AndroidRgb): AndroidVisualizerDrawing? =
         bridge?.visualizerDrawing(targets, width.toDouble(), height.toDouble(), frameNanos.toULong(), accent)
 
-    fun togglePlayback() = action { service?.let { if (playback?.desiredPlaying == true) it.pause() else it.play() } }
+    fun togglePlayback() = action { service?.let { if (playback?.transport?.desiredPlaying == true) it.pause() else it.play() } }
     fun next() {
-        if (connection.debugLogging) Log.d("Rufin", "Player next clicked run=${playback?.mediaRun}")
+        if (connection.debugLogging) Log.d("Rufin", "Player next clicked run=${currentId?.run}")
         action { service?.next() }
     }
     fun previous() = action { service?.previous() }
     fun seek(millis: ULong) = action { service?.seekMillis(millis) }
-    fun seekFromLyrics(token: String, millis: ULong) = action { bridge?.seekFromLyrics(token, millis, lyricsOffset) }
+    fun seekFromLyrics(token: CurrentMediaId, millis: ULong) = action {
+        if (token == currentId) service?.seekMillis(playbackPositionForLyricsPosition(millis, lyricsOffset))
+    }
     fun favorite() {
         val current = playback ?: return
-        val uri = current.mediaUri ?: return
-        val effective = connection.projectedFavorite("track", uri, current.favorite)
+        val uri = current.transport.current?.id?.mediaUri ?: return
+        val effective = connection.projectedFavorite("track", uri, favorite)
         val favorite = !effective
-        if (connection.debugLogging) Log.d("Rufin", "Player favorite clicked run=${current.mediaRun} effective=$effective requested=$favorite")
+        if (connection.debugLogging) Log.d("Rufin", "Player favorite clicked run=${currentId?.run} effective=$effective requested=$favorite")
         connection.setFavoriteIntent("track", uri, favorite)
-        playback = current.copy(favorite = favorite)
+        this.favorite = favorite
         action {
             try {
-                val result = bridge?.setFavorite(uri, favorite)
-                if (result != null && playback?.mediaUri == uri && projectedFavorite(uri, favorite) == favorite)
-                    playback = playback?.copy(favorite = result)
+                val result = sourceOwner?.setFavoriteWithResult(FavoriteTarget.Track(uri), favorite)
+                if (result != null && currentId?.mediaUri == uri && projectedFavorite(uri, favorite) == favorite)
+                    this.favorite = result
             }
             finally {
                 connection.releaseFavoriteIntent("track", uri, favorite)
@@ -297,53 +351,53 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         }
     }
     fun shuffle() = action {
-        val enabled = playback?.shuffle != true
+        val enabled = playback?.controls?.shuffleEnabled != true
         val current = service ?: return@action
         withContext(Dispatchers.IO) { current.setShuffle(enabled) }
     }
     fun autoDj() = action {
-        val current = bridge ?: return@action
+        val current = playbackOwner ?: return@action
         withContext(Dispatchers.IO) { current.toggleAutoDj() }
     }
     fun repeat() = action {
-        val next = when (playback?.repeat) {
-            AndroidRepeatMode.OFF -> AndroidRepeatMode.ALL
-            AndroidRepeatMode.ALL -> AndroidRepeatMode.ONE
-            else -> AndroidRepeatMode.OFF
-        }
-        val current = service ?: return@action
-        withContext(Dispatchers.IO) { current.setRepeat(next) }
+        val current = playbackOwner ?: return@action
+        withContext(Dispatchers.IO) { current.cycleRepeat() }
     }
-    suspend fun queuePage(offset: ULong, search: String = ""): AndroidQueuePage? = bridge?.queuePage(offset, 80u, search)
-    suspend fun createQueuePlaylist(name: String, useCurrentSource: Boolean, public: Boolean?) {
-        bridge?.createQueuePlaylist(name, useCurrentSource, public)
+    suspend fun queuePage(offset: ULong, search: String = ""): PreparedQueuePage? = playbackOwner?.queuePage(offset, 80u, search)
+    suspend fun createQueuePlaylist(name: String, sourceId: String?, public: Boolean?) {
+        val source = sourceOwner ?: return
+        val selection = playbackOwner?.selection() ?: return
+        try { createPlaylist(source, sourceId, name, selection, public, sourceId != null)?.settingsError?.let { error(it) } }
+        finally { selection.destroy() }
         connection.showFeedback(translate("Saved"))
     }
     suspend fun queueFavorite(mediaUri: String, favorite: Boolean): Boolean? {
-        if (connection.debugLogging) Log.d("Rufin", "Queue favorite clicked run=${playback?.mediaRun} current=${playback?.mediaUri == mediaUri} requested=$favorite")
+        if (connection.debugLogging) Log.d("Rufin", "Queue favorite clicked run=${currentId?.run} current=${currentId?.mediaUri == mediaUri} requested=$favorite")
         connection.setFavoriteIntent("track", mediaUri, favorite)
-        return try { bridge?.setFavorite(mediaUri, favorite) }
+        return try { sourceOwner?.setFavoriteWithResult(FavoriteTarget.Track(mediaUri), favorite) }
         finally {
             connection.releaseFavoriteIntent("track", mediaUri, favorite)
         }
     }
     internal fun projectedFavorite(uri: String, fallback: Boolean) = connection.projectedFavorite("track", uri, fallback)
-    fun activateQueue(position: ULong) = action { bridge?.activateQueue(position) }
-    fun removeQueue(position: ULong) = action { bridge?.removeQueue(position) }
+    fun activateQueue(position: ULong) = action { playbackOwner?.activate(position) }
+    fun removeQueue(position: ULong) = action { playbackOwner?.remove(position) }
     suspend fun moveQueue(position: ULong, target: ULong?, after: Boolean = false) {
-        val current = bridge ?: return
-        withContext(Dispatchers.IO) { current.moveQueue(position, target, after) }
+        val current = playbackOwner ?: return
+        val destination = target?.let { if (after) QueueReorderTarget.After(it) else QueueReorderTarget.Before(it) } ?: QueueReorderTarget.End
+        withContext(Dispatchers.IO) { current.reorder(QueueSelection.Positions(listOf(position)), destination) }
     }
-    fun clearQueue(includeCurrent: Boolean) = action { bridge?.clearQueue(includeCurrent) }
+    fun clearQueue(includeCurrent: Boolean) = action { playbackOwner?.clear(includeCurrent) }
     fun visualizer(enabled: Boolean) = action { bridge?.setVisualizerEnabled(enabled) }
-    suspend fun outputs(): AndroidOutputChoices? {
-        val choices = bridge?.outputs()
+    suspend fun outputs(): List<RemoteOutput> {
+        outputChoices = emptyList()
+        val choices = playbackOwner?.remoteOutputs().orEmpty()
         outputChoices = choices
         return choices
     }
-    suspend fun selectOutput(output: AndroidOutput) { bridge?.selectOutput(output) }
+    suspend fun selectOutput(output: PlaybackOutput) { playbackOwner?.chooseOutput(output) }
     suspend fun selectAndroidOutput(routeId: String) {
-        bridge?.selectLocalOutput()
+        playbackOwner?.chooseOutput(PlaybackOutput.Local)
         service?.outputs?.select(routeId)
     }
     fun volume(value: Double) = action { service?.setVolume(value) }

@@ -1,4 +1,7 @@
 //! Shared Connect transport, verified enrollment, media and profile state.
+#[cfg(feature = "bindings")]
+uniffi::setup_scaffolding!();
+
 pub mod media;
 pub mod network;
 pub mod pairing;

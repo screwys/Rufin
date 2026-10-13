@@ -50,7 +50,7 @@ async fn overview_uses_full_duration_qualified_plays_and_calendar_comparisons() 
     );
     assert_eq!(month.albums[0].play_count, 3);
     assert_eq!(month.artists[0].play_count, 3);
-    assert_eq!(month.genres[0].1, 3);
+    assert_eq!(month.genres[0].plays, 3);
     let year = fixture
         .database
         .activity_overview(CalendarActivityPeriod::Year(2026), 5, &cancel)

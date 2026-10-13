@@ -1,216 +1,17 @@
-use playback::{PlaybackView, RepeatMode, TransportStatus};
 use rufin_core::SettingsHandle;
 
 use crate::host::{AndroidError, error};
 
-#[derive(Clone, Copy, uniffi::Enum)]
-pub enum AndroidRepeatMode {
-    Off,
-    One,
-    All,
-}
-
-impl From<RepeatMode> for AndroidRepeatMode {
-    fn from(value: RepeatMode) -> Self {
-        match value {
-            RepeatMode::Off => Self::Off,
-            RepeatMode::One => Self::One,
-            RepeatMode::All => Self::All,
-        }
-    }
-}
-
-impl From<AndroidRepeatMode> for RepeatMode {
-    fn from(value: AndroidRepeatMode) -> Self {
-        match value {
-            AndroidRepeatMode::Off => Self::Off,
-            AndroidRepeatMode::One => Self::One,
-            AndroidRepeatMode::All => Self::All,
-        }
-    }
-}
-
-#[derive(Clone, Copy, uniffi::Enum)]
-pub enum AndroidTransportState {
-    Stopped,
-    Buffering,
-    Playing,
-    Paused,
-    Failed,
-}
-
 #[derive(uniffi::Record)]
-pub struct AndroidPlaybackState {
-    pub operation_failures: Vec<String>,
-    pub media_uri: Option<String>,
-    pub media_run: Option<u64>,
-    pub artwork_identity: Option<Vec<u8>>,
-    pub artwork_revision: u64,
+pub struct AndroidPlaybackUpdate {
+    pub transport: playback::TransportView,
+    pub controls: playback::ControlsView,
+    pub queue: playback::QueueSummaryView,
+    pub queue_loading: bool,
+    pub notices: Vec<playback::PlaybackNotice>,
     pub favorite: bool,
-    pub queue_revision: u64,
-    pub queue_total: u64,
-    pub queue_index: Option<u64>,
-    pub title: String,
-    pub artist: String,
-    pub album: String,
-    pub context_id: Option<String>,
-    pub context_title: Option<String>,
-    pub context_category: Option<String>,
-    pub context_kind: String,
+    pub artwork_revision: u64,
     pub source_labels: Vec<String>,
-    pub position_millis: u64,
-    pub position_observed_at_millis: u64,
-    pub position_advancing: bool,
-    pub playback_rate: f64,
-    pub duration_millis: u64,
-    pub state: AndroidTransportState,
-    pub desired_playing: bool,
-    pub can_seek: bool,
-    pub can_next: bool,
-    pub can_previous: bool,
-    pub shuffle: bool,
-    pub auto_dj: bool,
-    pub repeat: AndroidRepeatMode,
-    pub volume: f64,
-    pub local_output: bool,
-    pub output_kind: crate::player::AndroidOutputKind,
-    pub output_id: String,
-    pub output_name: Option<String>,
-    pub error: Option<String>,
-}
-
-impl AndroidPlaybackState {
-    fn idle(settings: &rufin_core::settings::Settings) -> Self {
-        Self {
-            operation_failures: Vec::new(),
-            media_uri: None,
-            media_run: None,
-            artwork_identity: None,
-            artwork_revision: 0,
-            favorite: false,
-            queue_revision: 0,
-            queue_total: 0,
-            queue_index: None,
-            title: String::new(),
-            artist: String::new(),
-            album: String::new(),
-            context_id: None,
-            context_title: None,
-            context_category: None,
-            context_kind: String::new(),
-            source_labels: Vec::new(),
-            position_millis: 0,
-            position_observed_at_millis: 0,
-            position_advancing: false,
-            playback_rate: settings.playback.playback_rate,
-            duration_millis: 0,
-            state: AndroidTransportState::Stopped,
-            desired_playing: false,
-            can_seek: false,
-            can_next: false,
-            can_previous: false,
-            shuffle: settings.shuffle_enabled,
-            auto_dj: settings.auto_dj_enabled,
-            repeat: settings.repeat_mode.into(),
-            volume: settings.playback.volume,
-            local_output: true,
-            output_kind: crate::player::AndroidOutputKind::Local,
-            output_id: String::new(),
-            output_name: None,
-            error: None,
-        }
-    }
-}
-
-impl From<&PlaybackView> for AndroidPlaybackState {
-    fn from(view: &PlaybackView) -> Self {
-        let transport = &view.transport;
-        let (output_kind, output_id, output_name) = match &view.controls.playback_output {
-            playback::PlaybackOutput::Local => {
-                (crate::player::AndroidOutputKind::Local, String::new(), None)
-            }
-            playback::PlaybackOutput::Remote(output) => (
-                output.protocol.into(),
-                output.id.clone(),
-                Some(output.name.clone()),
-            ),
-        };
-        let current = transport.current.as_deref();
-        Self {
-            operation_failures: Vec::new(),
-            media_uri: current.map(|media| media.media_uri.clone()),
-            media_run: current.and_then(|media| media.id.run.map(playback::RunId::get)),
-            artwork_identity: current.and_then(|media| media.artwork_binding.clone()),
-            artwork_revision: 0,
-            favorite: false,
-            queue_revision: view.queue.revision,
-            queue_total: view.queue.total as u64,
-            queue_index: view.queue.current_index.map(|index| index as u64),
-            title: current.map_or_else(String::new, |media| media.title.clone()),
-            artist: current.map_or_else(String::new, |media| media.artist.clone()),
-            album: current.map_or_else(String::new, |media| media.album.clone()),
-            context_id: current.and_then(|media| match &media.provenance {
-                library::QueueProvenance::Context { context_id, .. } => {
-                    Some(context_id.to_string())
-                }
-                _ => None,
-            }),
-            context_title: current.and_then(|media| match &media.provenance {
-                library::QueueProvenance::Context { context_title, .. } => context_title
-                    .as_ref()
-                    .map(|caption| caption.title.to_string()),
-                _ => None,
-            }),
-            context_category: current.and_then(|media| match &media.provenance {
-                library::QueueProvenance::Context { context_title, .. } => context_title
-                    .as_ref()
-                    .and_then(|caption| caption.kind.as_deref().map(str::to_owned)),
-                _ => None,
-            }),
-            context_kind: current.map_or_else(String::new, |media| {
-                match &media.provenance {
-                    library::QueueProvenance::Context { .. } => "context",
-                    library::QueueProvenance::Manual => "manual",
-                    library::QueueProvenance::Random => "random",
-                    library::QueueProvenance::Radio => "radio",
-                    library::QueueProvenance::AutoDj => "auto_dj",
-                    library::QueueProvenance::Legacy => "legacy",
-                }
-                .into()
-            }),
-            source_labels: rufin_core::settings::presentation::now_playing_labels(
-                current,
-                output_name.as_deref(),
-            ),
-            position_millis: transport.position_millis,
-            position_observed_at_millis: transport.position_observed_at_millis,
-            position_advancing: transport.state == TransportStatus::Playing,
-            playback_rate: transport.playback_rate,
-            duration_millis: transport.duration_millis,
-            state: match transport.effective_state() {
-                TransportStatus::Stopped => AndroidTransportState::Stopped,
-                TransportStatus::Resolving | TransportStatus::Buffering => {
-                    AndroidTransportState::Buffering
-                }
-                TransportStatus::Playing => AndroidTransportState::Playing,
-                TransportStatus::Paused => AndroidTransportState::Paused,
-                TransportStatus::Failed => AndroidTransportState::Failed,
-            },
-            desired_playing: transport.desired_playing,
-            can_seek: transport.can_seek,
-            can_next: view.queue.can_next,
-            can_previous: current.is_some(),
-            shuffle: view.controls.shuffle_enabled,
-            auto_dj: view.controls.auto_dj_enabled,
-            repeat: view.controls.repeat_mode.into(),
-            volume: view.controls.volume,
-            local_output: view.controls.playback_output.is_local(),
-            output_kind,
-            output_id,
-            output_name,
-            error: transport.error.clone(),
-        }
-    }
 }
 
 #[derive(uniffi::Object)]
@@ -255,7 +56,7 @@ impl AndroidPlaybackSubscription {
 
 #[uniffi::export]
 impl AndroidPlaybackSubscription {
-    pub async fn next(&self) -> Result<AndroidPlaybackState, AndroidError> {
+    pub async fn next(&self) -> Result<AndroidPlaybackUpdate, AndroidError> {
         let mut changes = self.subscription.lock().await;
         let PlaybackChanges {
             playback,
@@ -282,18 +83,7 @@ impl AndroidPlaybackSubscription {
             changes.current_facts = None;
         }
         changes.catalog.borrow_and_update();
-        let mut state = view.as_ref().map_or_else(
-            || AndroidPlaybackState::idle(&self.settings.load()),
-            |view| AndroidPlaybackState::from(view.as_ref()),
-        );
-        state.artwork_revision = self.artwork.cache_revision();
-        state.operation_failures = notices
-            .into_iter()
-            .filter_map(|notice| match notice {
-                playback::PlaybackNotice::OperationFailed(message) => Some(message),
-                _ => None,
-            })
-            .collect();
+        let mut favorite = false;
         if let Some(current) = view
             .as_ref()
             .and_then(|view| view.transport.current.as_ref())
@@ -310,15 +100,59 @@ impl AndroidPlaybackSubscription {
                     .map_err(error)?;
                 changes.current_facts = Some((uri.clone(), favorite));
             }
-            state.favorite = changes
+            favorite = changes
                 .current_facts
                 .as_ref()
                 .is_some_and(|(_, value)| *value);
-            state.favorite = self.intents.projected_item_favorite(
-                &library::FavoriteTarget::Track(uri.clone()),
-                state.favorite,
-            );
+            favorite = self
+                .intents
+                .projected_item_favorite(&library::FavoriteTarget::Track(uri.clone()), favorite);
         }
-        Ok(state)
+        let (transport, controls, queue, queue_loading) = view.as_ref().map_or_else(
+            || {
+                let settings = self.settings.load();
+                (
+                    playback::TransportView {
+                        playback_rate: settings.playback.playback_rate,
+                        ..Default::default()
+                    },
+                    playback::ControlsView {
+                        repeat_mode: settings.repeat_mode,
+                        shuffle_enabled: settings.shuffle_enabled,
+                        auto_dj_enabled: settings.auto_dj_enabled,
+                        volume: settings.playback.volume,
+                        ..Default::default()
+                    },
+                    playback::QueueSummaryView::default(),
+                    false,
+                )
+            },
+            |view| {
+                (
+                    view.transport.clone(),
+                    view.controls.clone(),
+                    view.queue.clone(),
+                    view.queue_loading,
+                )
+            },
+        );
+        let output_name = match &controls.playback_output {
+            playback::PlaybackOutput::Remote(output) => Some(output.name.as_str()),
+            _ => None,
+        };
+        let source_labels = rufin_core::settings::presentation::now_playing_labels(
+            transport.current.as_ref(),
+            output_name,
+        );
+        Ok(AndroidPlaybackUpdate {
+            transport,
+            controls,
+            queue,
+            queue_loading,
+            notices,
+            favorite,
+            artwork_revision: self.artwork.cache_revision(),
+            source_labels,
+        })
     }
 }

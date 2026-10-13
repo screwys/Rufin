@@ -37,6 +37,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import io.github.screwys.rufin.core.*
+import io.github.screwys.rufin.shared.rufin_core.ActivityOverviewSettings
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -46,14 +47,14 @@ internal fun ListeningOverviewPage(model: RufinConnection, more: MoreConnection,
     var customize by remember { mutableStateOf(false) }
     val colors = MaterialTheme.colorScheme
     val preferences = more.preferences
-    val limit = preferences?.optInt("result_count", 3) ?: 3
-    val dynamic = preferences?.optBoolean("dynamic_background", true) != false
-    val background = rememberArtwork(report?.tracks?.firstOrNull()?.artworkIdentity, player,
+    val limit = preferences?.resultCount?.toInt() ?: 3
+    val dynamic = preferences?.dynamicBackground != false
+    val background = rememberArtwork(report?.tracks?.firstOrNull()?.artworkBinding, player,
         with(LocalDensity.current) { 256.dp.roundToPx() })
     val surface = if (dynamic && background != null) lerp(colors.surface, background.color, .12f) else colors.surface
     Surface(Modifier.fillMaxSize(), color = surface) {
         Box(Modifier.fillMaxSize()) {
-            if (dynamic && preferences?.optBoolean("background_image", true) != false && background != null) {
+            if (dynamic && preferences?.backgroundImage != false && background != null) {
                 Image(background.bitmap.asImageBitmap(), null,
                     Modifier.fillMaxSize().blur(32.dp), alpha = .15f, contentScale = ContentScale.Crop)
             }
@@ -61,13 +62,13 @@ internal fun ListeningOverviewPage(model: RufinConnection, more: MoreConnection,
                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     PlayerIconButton("rufin-go-previous-symbolic", "Previous", { more.movePeriod(true) })
                     TextButton({ periods = true }, Modifier.weight(1f)) {
-                        Text(report?.takeIf { it.key == more.selectedPeriod.key }?.title ?: more.selectedPeriod.key)
+                        Text(more.reportTitle.takeIf { more.reportPeriod == more.selectedPeriod } ?: more.selectedPeriod.key)
                     }
                     PlayerIconButton("rufin-go-next-symbolic", "Next", { more.movePeriod(false) })
                     PlayerIconButton("rufin-sliders-2-symbolic", "Customize display", { customize = true })
                     IconButton({ more.exportOverview(colors.surface.luminance() < .5f, colors.onSurface.toArgb(),
                         colors.surface.toArgb(), colors.primary.toArgb()) },
-                        enabled = report?.key == more.selectedPeriod.key && more.reportError == null && !more.reportLoading && !more.exporting) {
+                        enabled = more.reportPeriod == more.selectedPeriod && more.reportError == null && !more.reportLoading && !more.exporting) {
                         if (more.exporting) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                         else RufinIcon("rufin-image-x-generic-symbolic", translate("Export PNG"))
                     }
@@ -82,10 +83,10 @@ internal fun ListeningOverviewPage(model: RufinConnection, more: MoreConnection,
                     if (more.reportError == null) CircularProgressIndicator()
                 } else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 12.dp + LocalPlayerBottomPadding.current), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     item {
-                        val headline = if (preferences?.optBoolean("show_rufin_in_headline", true) != false)
+                        val headline = if (preferences?.showRufinInHeadline != false)
                             translate("Your {period} in Rufin") else translate("Your {period}")
-                        Text(headline.replace("{period}", report.title), style = MaterialTheme.typography.headlineSmall)
-                        val compare = preferences?.optBoolean("show_comparison", true) != false
+                        Text(headline.replace("{period}", more.reportTitle), style = MaterialTheme.typography.headlineSmall)
+                        val compare = preferences?.showComparison != false
                         fun change(current: Long, previous: Long) = if (!compare || previous == 0L) "" else
                             "(%+.0f%%)".format((current.toDouble() - previous) * 100 / previous)
                         Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -104,19 +105,31 @@ internal fun ListeningOverviewPage(model: RufinConnection, more: MoreConnection,
                         }
                         if (report.totals.plays == 0L) Text(translate("No listening activity in this period"), Modifier.padding(vertical = 16.dp))
                     }
-                    listOf(Triple("Top tracks", "tracks", report.tracks), Triple("Top albums", "albums", report.albums), Triple("Top artists", "artists", report.artists)).forEach { (title, key, rows) ->
-                        if (preferences?.optBoolean(key, true) != false && rows.isNotEmpty()) {
-                            item { Text(translate(title), style = MaterialTheme.typography.titleLarge) }
-                            items(rows.take(limit), key = { "$key:${it.mediaUri}" }) { row ->
-                                val artwork = rememberArtwork(row.artworkIdentity, player, with(LocalDensity.current) { 48.dp.roundToPx() })
-                                ListItem(headlineContent = { Text(row.title) }, supportingContent = { Text(row.subtitle) }, trailingContent = { Text(row.plays.toString()) },
-                                    leadingContent = { Artwork(artwork, Modifier.size(48.dp).clip(RoundedCornerShape(8.dp))) },
-                                    colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                                    modifier = Modifier.clickable { model.openOverview(row, report.key) })
+                    if (preferences?.tracks != false && report.tracks.isNotEmpty()) {
+                        item { Text(translate("Top tracks"), style = MaterialTheme.typography.titleLarge) }
+                        items(report.tracks.take(limit), key = { "track:${it.mediaUri}" }) { row ->
+                            OverviewRow(row.title, "${row.artist} · ${row.album}", row.playCount, row.artworkBinding, player) {
+                                model.openOverview(row.mediaUri, row.title, "track", more.reportPeriod!!.key)
                             }
                         }
                     }
-                    if (preferences?.optBoolean("genres", true) != false && report.genres.isNotEmpty()) {
+                    if (preferences?.albums != false && report.albums.isNotEmpty()) {
+                        item { Text(translate("Top albums"), style = MaterialTheme.typography.titleLarge) }
+                        items(report.albums.take(limit), key = { "album:${it.mediaUri}" }) { row ->
+                            OverviewRow(row.title, row.displayArtist, row.playCount, row.artworkBinding, player) {
+                                model.openOverview(row.mediaUri, row.title, "album", more.reportPeriod!!.key)
+                            }
+                        }
+                    }
+                    if (preferences?.artists != false && report.artists.isNotEmpty()) {
+                        item { Text(translate("Top artists"), style = MaterialTheme.typography.titleLarge) }
+                        items(report.artists.take(limit), key = { "artist:${it.mediaUri}" }) { row ->
+                            OverviewRow(row.name, "", row.playCount, row.artworkBinding, player) {
+                                model.openOverview(row.mediaUri, row.name, "artist", more.reportPeriod!!.key)
+                            }
+                        }
+                    }
+                    if (preferences?.genres != false && report.genres.isNotEmpty()) {
                         item { Text(translate("Top genres"), style = MaterialTheme.typography.titleLarge) }
                         items(report.genres.take(limit), key = { it.name }) { genre -> Column {
                             Text("${genre.name} · ${genre.plays}")
@@ -141,20 +154,18 @@ internal fun ListeningOverviewPage(model: RufinConnection, more: MoreConnection,
 
 @Composable
 internal fun OverviewPreferences(more: MoreConnection) {
-    val preferences = more.preferences
-    val dynamic = preferences?.optBoolean("dynamic_background", true) != false
-    val limit = preferences?.optInt("result_count", 3) ?: 3
+    val preferences = more.preferences ?: return
     SettingsGroup(translate("Listening overview")) {
-        listOf("autoplay_first_track" to "Start playing automatically", "dynamic_background" to "Dynamic background",
-            "background_image" to "Enable background image", "tracks" to "Top tracks", "artists" to "Top artists", "albums" to "Top albums",
-            "genres" to "Top genres", "show_comparison" to "Show comparison", "show_rufin_in_headline" to "Show Rufin in headline").forEach { (key, label) ->
-            val checked = preferences?.optBoolean(key, true) ?: true
-            val enabled = more.bridge != null && preferences != null && (key != "background_image" || dynamic)
-            SettingsRow(translate(label), modifier = Modifier.toggleable(checked, enabled = enabled, role = Role.Switch,
-                onValueChange = { more.updatePreference(key, it) }),
-                trailing = { Switch(checked, null, enabled = enabled) })
-        }
-        PreferenceChoice(translate("Results per section"), limit.toString(), listOf("3" to "3", "5" to "5", "10" to "10")) { more.updatePreference("result_count", it.toInt()) }
+        OverviewSwitch(more, "Start playing automatically", preferences.autoplayFirstTrack) { copy(autoplayFirstTrack = it) }
+        OverviewSwitch(more, "Dynamic background", preferences.dynamicBackground) { copy(dynamicBackground = it) }
+        OverviewSwitch(more, "Enable background image", preferences.backgroundImage, preferences.dynamicBackground) { copy(backgroundImage = it) }
+        OverviewSwitch(more, "Top tracks", preferences.tracks) { copy(tracks = it) }
+        OverviewSwitch(more, "Top artists", preferences.artists) { copy(artists = it) }
+        OverviewSwitch(more, "Top albums", preferences.albums) { copy(albums = it) }
+        OverviewSwitch(more, "Top genres", preferences.genres) { copy(genres = it) }
+        OverviewSwitch(more, "Show comparison", preferences.showComparison) { copy(showComparison = it) }
+        OverviewSwitch(more, "Show Rufin in headline", preferences.showRufinInHeadline) { copy(showRufinInHeadline = it) }
+        PreferenceChoice(translate("Results per section"), preferences.resultCount.toString(), listOf("3" to "3", "5" to "5", "10" to "10")) { value -> more.updatePreferences { it.copy(resultCount = value.toULong()) } }
     }
 }
 
@@ -171,4 +182,21 @@ private fun OverviewStat(icon: String, label: String, value: String, comparison:
             }
         }
     }
+}
+
+@Composable
+private fun OverviewSwitch(more: MoreConnection, label: String, checked: Boolean, enabled: Boolean = true,
+    update: ActivityOverviewSettings.(Boolean) -> ActivityOverviewSettings) {
+    SettingsRow(translate(label), modifier = Modifier.toggleable(checked, enabled = enabled && more.bridge != null,
+        role = Role.Switch, onValueChange = { value -> more.updatePreferences { it.update(value) } }),
+        trailing = { Switch(checked, null, enabled = enabled && more.bridge != null) })
+}
+
+@Composable
+private fun OverviewRow(title: String, subtitle: String, plays: Long, binding: ByteArray?, player: PlayerConnection, open: () -> Unit) {
+    val artwork = rememberArtwork(binding, player, with(LocalDensity.current) { 48.dp.roundToPx() })
+    ListItem(headlineContent = { Text(title) }, supportingContent = { Text(subtitle) }, trailingContent = { Text(plays.toString()) },
+        leadingContent = { Artwork(artwork, Modifier.size(48.dp).clip(RoundedCornerShape(8.dp))) },
+        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+        modifier = Modifier.clickable(onClick = open))
 }

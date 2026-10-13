@@ -258,6 +258,7 @@ impl<'de> Deserialize<'de> for LayoutSettings {
     }
 }
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum ThemePreference {
     System,
     Light,
@@ -265,6 +266,7 @@ pub enum ThemePreference {
     Named(String),
 }
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum AccentPreference {
     #[default]
     System,
@@ -307,6 +309,7 @@ impl AccentPreference {
     ];
 }
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum LibraryLayout {
     Row,
     Grid,
@@ -412,6 +415,7 @@ impl LibraryListKey {
     }
 }
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum LibraryField {
     RowIndex,
     Image,
@@ -541,6 +545,7 @@ impl LibraryField {
     }
 }
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum DisplaySize {
     Compact,
     #[default]
@@ -550,6 +555,7 @@ pub enum DisplaySize {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct DisplaySettings {
     pub size: DisplaySize,
     pub grid_spacing: DisplaySize,
@@ -575,6 +581,7 @@ impl Default for DisplaySettings {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct LibraryListSettings {
     #[serde(default)]
     pub display: DisplaySettings,

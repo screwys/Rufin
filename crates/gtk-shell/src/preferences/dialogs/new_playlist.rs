@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use crate::SidebarPin;
 use crate::shell::Shell;
 
 impl Shell {
@@ -11,32 +10,26 @@ impl Shell {
         source_id: Option<library::SourceId>,
         public: Option<bool>,
     ) {
-        let result = rufin_core::playlists::create_playlist(
-            &self.products.source,
-            source_id.clone(),
-            name,
-            selection,
-            public,
-        );
+        let source = self.products.source.clone();
         let shell = Rc::downgrade(self);
         gtk::glib::spawn_future_local(async move {
-            let result = result.recv().await;
-            if let Some(shell) = shell.upgrade() {
-                let playlist_id = match result {
-                    Ok(Ok(Some(id))) => id,
-                    Ok(Err(error)) => {
-                        shell.control_feedback.show_feedback_toast(error);
-                        return;
-                    }
-                    _ => return,
-                };
-                shell.set_sidebar_pin(
-                    SidebarPin::Playlist {
-                        source_id,
-                        playlist_id,
-                    },
-                    true,
-                );
+            let result = rufin_core::playlists::create_playlist(
+                &source,
+                source_id,
+                name,
+                selection.into(),
+                public,
+                None,
+            )
+            .await;
+            let error = match result {
+                Ok(created) => created.and_then(|created| created.settings_error),
+                Err(error) => Some(error.to_string()),
+            };
+            if let Some(shell) = shell.upgrade()
+                && let Some(error) = error
+            {
+                shell.control_feedback.show_feedback_toast(error);
             }
         });
     }

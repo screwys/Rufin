@@ -177,6 +177,7 @@ pub struct LyricsService {
 }
 
 #[derive(Clone)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct LyricsHandle {
     service: Arc<LyricsService>,
 }
@@ -1539,7 +1540,10 @@ impl LyricsHandle {
             self.load(media_id);
         }
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl LyricsHandle {
     pub fn japanese_dictionary(&self, retry: bool) -> ::lyrics::JapaneseDictionaryStatus {
         use ::lyrics::JapaneseDictionaryStatus;
 
@@ -1581,7 +1585,10 @@ impl LyricsHandle {
         }
         status.clone()
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl LyricsHandle {
     pub fn load(&self, media_id: CurrentMediaId) {
         self.service.load(media_id);
     }
@@ -1593,20 +1600,30 @@ impl LyricsHandle {
     pub fn preview(&self, media_id: CurrentMediaId, result: LyricsSearchResult) {
         self.service.preview(media_id, result);
     }
+}
 
+impl LyricsHandle {
     pub fn save_result(&self, media_id: CurrentMediaId, result: LyricsSearchResult, path: PathBuf) {
         self.service.save_result(media_id, result, Some(path));
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl LyricsHandle {
     pub fn save_result_to_source(&self, media_id: CurrentMediaId, result: LyricsSearchResult) {
         self.service.save_result(media_id, result, None);
     }
+}
 
+impl LyricsHandle {
     pub fn save_current(&self, media_id: CurrentMediaId, offset_millis: i64, path: PathBuf) {
         self.service
             .save_current(media_id, offset_millis, Some(path));
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl LyricsHandle {
     pub fn save_current_to_source(&self, media_id: CurrentMediaId, offset_millis: i64) {
         self.service.save_current(media_id, offset_millis, None);
     }

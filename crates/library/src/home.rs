@@ -11,6 +11,7 @@ use crate::{
 const HOME_LIMIT: i64 = 24;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum HomeBlockKind {
     Showcase,
     Explore,
@@ -96,6 +97,7 @@ pub struct HomeAlbumRow {
 }
 
 #[derive(Clone, Debug, FromRow, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct HomeGenreRow {
     pub genre_key: GenreKey,
     pub object_id: String,

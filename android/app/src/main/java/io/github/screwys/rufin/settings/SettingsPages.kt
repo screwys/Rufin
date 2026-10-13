@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.settings
 
+import io.github.screwys.rufin.shared.rufin_core.ApplicationPreferenceEdit
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.toggleable
@@ -26,7 +28,6 @@ import io.github.screwys.rufin.player.PlayerSettingsPage
 import io.github.screwys.rufin.player.PlaybackPreferences
 import io.github.screwys.rufin.shared.lyrics.LyricsPreferenceEdit
 import io.github.screwys.rufin.sources.SourcesPage
-import org.json.JSONObject
 import kotlin.math.round
 
 @Composable
@@ -127,7 +128,6 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
     LaunchedEffect(destination) { preferences.refreshApplicationSettings(); player.refreshSettings() }
     val state = preferences.applicationSettings
     if (state == null) { Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) { CircularProgressIndicator() }; return }
-    fun bool(key: String, value: Boolean) = preferences.changePreference(key, value)
     SettingsPage {
         when (destination) {
             MoreDestination.General -> {
@@ -136,26 +136,26 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
                         preferences.state?.languages.orEmpty().map { it.id to if (it.id == "system") translate("System default") else it.title }, select = preferences::selectLanguage)
                 }
                 SettingsGroup(translate("App settings")) {
-                    PreferenceChoice(translate("Update check interval"), state.optInt("release_check_interval_hours", 6).toString(),
+                    PreferenceChoice(translate("Update check interval"), state.releaseCheckIntervalHours.toString(),
                         listOf("1" to translate("1 hour"), "6" to translate("6 hours"), "12" to translate("12 hours"), "24" to translate("24 hours")),
-                        select = { preferences.changePreference("release_check_interval_hours", it.toInt()) })
+                        select = { preferences.changePreference(ApplicationPreferenceEdit.ReleaseCheckIntervalHours(it.toUInt())) })
                     SettingsLink(null, translate("Listening overview")) { navigate(MoreDestination.OverviewSettings) }
                 }
                 SettingsGroup(translate("Notifications")) {
-                    SettingsSwitch(translate("Control notifications"), state.optBoolean("control_notifications_enabled")) { bool("control_notifications_enabled", it) }
-                    SettingsSwitch(translate("Release notifications"), state.optBoolean("release_notifications_enabled")) { bool("release_notifications_enabled", it) }
+                    SettingsSwitch(translate("Control notifications"), state.controlNotificationsEnabled) { preferences.changePreference(ApplicationPreferenceEdit.ControlNotificationsEnabled(it)) }
+                    SettingsSwitch(translate("Release notifications"), state.releaseNotificationsEnabled) { preferences.changePreference(ApplicationPreferenceEdit.ReleaseNotificationsEnabled(it)) }
                 }
                 SettingsGroup(translate("Metadata")) {
-                    SettingsSwitch(translate("Prefer distinct track covers"), state.optBoolean("prefer_distinct_track_covers")) { bool("prefer_distinct_track_covers", it) }
-                    SettingsSwitch(translate("External metadata lookup"), state.optBoolean("external_metadata_enabled")) { bool("external_metadata_enabled", it) }
+                    SettingsSwitch(translate("Prefer distinct track covers"), state.preferDistinctTrackCovers) { preferences.changePreference(ApplicationPreferenceEdit.PreferDistinctTrackCovers(it)) }
+                    SettingsSwitch(translate("External metadata lookup"), state.externalMetadataEnabled) { preferences.changePreference(ApplicationPreferenceEdit.ExternalMetadataEnabled(it)) }
                     player.settings?.lyrics?.let { lyrics -> SettingsSwitch(translate("External lyrics lookup"), lyrics.externalLyricsEnabled) { player.lyricsPreference(LyricsPreferenceEdit.ExternalLyricsEnabled(it)) } }
                 }
-                val links = state.optJSONObject("external_site_links") ?: JSONObject()
+                val links = state.externalSiteLinks
                 SettingsGroup(translate("External site links")) {
-                    SettingsSwitch(translate("Show external site links"), links.optBoolean("enabled")) { bool("external_site_links.enabled", it) }
-                    SettingsSwitch("Last.fm", links.optBoolean("lastfm")) { bool("external_site_links.lastfm", it) }
-                    SettingsSwitch("MusicBrainz", links.optBoolean("musicbrainz")) { bool("external_site_links.musicbrainz", it) }
-                    SettingsSwitch(translate("Server"), links.optBoolean("server")) { bool("external_site_links.server", it) }
+                    SettingsSwitch(translate("Show external site links"), links.enabled) { preferences.changePreference(ApplicationPreferenceEdit.ExternalSiteLinks(links.copy(enabled = it))) }
+                    SettingsSwitch("Last.fm", links.lastfm) { preferences.changePreference(ApplicationPreferenceEdit.ExternalSiteLinks(links.copy(lastfm = it))) }
+                    SettingsSwitch("MusicBrainz", links.musicbrainz) { preferences.changePreference(ApplicationPreferenceEdit.ExternalSiteLinks(links.copy(musicbrainz = it))) }
+                    SettingsSwitch(translate("Server"), links.server) { preferences.changePreference(ApplicationPreferenceEdit.ExternalSiteLinks(links.copy(server = it))) }
                 }
                 BackupsPage(model, preferences, embedded = true, openSettings = { navigate(MoreDestination.BackupSettings) })
             }
@@ -175,9 +175,9 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
             }
             MoreDestination.Privacy -> {
                 SettingsGroup {
-                    SettingsSwitch(translate("Private mode"), state.optBoolean("private_mode")) { bool("private_mode", it) }
-                    SettingsSwitch(translate("Proxy casting through Rufin"), state.optBoolean("cast_proxy_enabled")) { bool("cast_proxy_enabled", it) }
-                    PreferenceChoice(translate("Secret storage"), state.optString("secret_storage_mode"), listOf("system-keyring" to translate("System keyring"), "config-file" to translate("Legacy")), select = preferences::changeSecretStorage)
+                    SettingsSwitch(translate("Private mode"), state.privateMode) { preferences.changePreference(ApplicationPreferenceEdit.PrivateMode(it)) }
+                    SettingsSwitch(translate("Proxy casting through Rufin"), state.castProxyEnabled) { preferences.changePreference(ApplicationPreferenceEdit.CastProxyEnabled(it)) }
+                    PreferenceChoice(translate("Secret storage"), if (state.secretStorageMode == io.github.screwys.rufin.shared.secrets.SecretStorageMode.SYSTEM_KEYRING) "system-keyring" else "config-file", listOf("system-keyring" to translate("System keyring"), "config-file" to translate("Legacy")), select = preferences::changeSecretStorage)
                 }
             }
             else -> Unit

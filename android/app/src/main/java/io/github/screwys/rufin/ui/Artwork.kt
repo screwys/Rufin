@@ -70,7 +70,7 @@ internal fun ArtworkReadyContent(key: Any? = Unit, modifier: Modifier = Modifier
 internal fun rememberArtwork(identityBytes: ByteArray?, player: PlayerConnection, pixels: Int, reuseCached: Boolean = true): PlayerArtwork? {
     val identity = remember(identityBytes) { identityBytes?.toList() } ?: return null
     val bridge = player.bridge
-    val revision = player.playback?.artworkRevision ?: 0UL
+    val revision = player.artworkRevision
     val scene = LocalArtworkScene.current
     return key(identity, pixels) {
         val cached = remember(bridge, revision) { if (reuseCached) player.artworkCache.peekNearby(identity, pixels) else player.artworkCache.peek(identity, pixels) }
@@ -147,7 +147,7 @@ internal class ArtworkCache {
             return load.mutex.withLock {
                 decoded.get(key)?.let { return@withLock it }
                 val encoded = player.artwork(identity.toByteArray(), pixels.toUInt()) ?: return@withLock null
-                val artwork = decodePlayerArtwork(encoded.bytes, pixels) ?: return@withLock null
+                val artwork = decodePlayerArtwork(encoded, pixels) ?: return@withLock null
                 synchronized(decoded) {
                     if (key.revision != revision) null
                     else {

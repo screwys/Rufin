@@ -18,6 +18,7 @@ const NEVER_PLAYED_OBJECT_ID: &str = "builtin:never_played";
 const MOST_SKIPPED_OBJECT_ID: &str = "builtin:most_skipped";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum SmartPlaylistRuleField {
     Title,
     Artist,
@@ -37,6 +38,7 @@ pub enum SmartPlaylistRuleField {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum SmartPlaylistRuleOperator {
     Contains,
     NotContains,
@@ -54,6 +56,7 @@ pub enum SmartPlaylistRuleOperator {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum SmartPlaylistRuleValue {
     Text(String),
     Number(i64),
@@ -212,6 +215,7 @@ impl SmartPlaylistRuleField {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct SmartPlaylistRule {
     pub field: SmartPlaylistRuleField,
     pub operator: SmartPlaylistRuleOperator,
@@ -220,6 +224,7 @@ pub struct SmartPlaylistRule {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum SmartPlaylistSort {
     Title,
     Artist,
@@ -251,6 +256,7 @@ impl SmartPlaylistSort {
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum SmartPlaylistActivityPeriod {
     Weekly,
     Monthly,
@@ -280,6 +286,7 @@ pub enum SmartPlaylistListSort {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct SmartPlaylistDefinition {
     #[serde(default)]
     pub current: bool,
@@ -292,7 +299,7 @@ pub struct SmartPlaylistDefinition {
     #[serde(default)]
     pub activity_period: SmartPlaylistActivityPeriod,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub limit: Option<usize>,
+    pub limit: Option<crate::LibraryIndex>,
 }
 
 impl Default for SmartPlaylistDefinition {
@@ -366,6 +373,7 @@ fn default_smart_playlists() -> [(&'static str, &'static str, SmartPlaylistDefin
 }
 
 #[derive(Clone, Debug, PartialEq, FromRow)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct SmartPlaylistRow {
     pub smart_playlist_key: SmartPlaylistKey,
     pub object_id: String,

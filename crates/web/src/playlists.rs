@@ -442,26 +442,21 @@ async fn create(
         input.folder,
     )
     .await?;
-    let object_id = completion(rufin_core::playlists::create_playlist(
+    let created = rufin_core::playlists::create_playlist(
         &products.source,
         input.source,
         input.name,
-        selection,
+        selection.into(),
         input.public,
-    ))
-    .await?;
-    let mut settings_error = None;
-    let id = if let Some(object) = object_id.as_deref() {
-        let settings = products.settings.clone();
-        let playlist_source = source.clone();
-        let playlist_id = object.to_owned();
-        settings_error = tokio::task::spawn_blocking(move || {
-            settings.remember_created_playlist(playlist_source, playlist_id, input.current)
-        })
-        .await
-        .map_err(|error| error.to_string())
-        .and_then(|result| result)
-        .err();
+        input.current,
+    )
+    .await
+    .map_err(bad_request)?;
+    let settings_error = created
+        .as_ref()
+        .and_then(|created| created.settings_error.as_ref());
+    let object_id = created.as_ref().map(|created| created.object_id.as_str());
+    let id = if let Some(object) = object_id {
         products
             .library
             .playlist_key_by_identity(source.as_ref(), object, &cancellation)
@@ -489,14 +484,15 @@ async fn rename(
         public: Option<bool>,
     }
     let input: Input = body(request).await?;
-    let changed = completion(rufin_core::playlists::update_playlist(
+    let changed = rufin_core::playlists::update_playlist(
         &products.source,
         input.id,
         input.name,
         input.public,
         None,
-    ))
-    .await?;
+    )
+    .await
+    .map_err(bad_request)?;
     Ok(json_response(StatusCode::OK, json!({"changed":changed})))
 }
 
@@ -507,11 +503,9 @@ async fn delete(
     let products = &products;
     let parameters = &parameters;
 
-    let changed = completion(rufin_core::playlists::delete_playlist(
-        &products.source,
-        key(parameters, "id")?,
-    ))
-    .await?;
+    let changed = rufin_core::playlists::delete_playlist(&products.source, key(parameters, "id")?)
+        .await
+        .map_err(bad_request)?;
     Ok(json_response(StatusCode::OK, json!({"changed":changed})))
 }
 
@@ -541,13 +535,14 @@ async fn add_entries(
         input.folder,
     )
     .await?;
-    let added = completion(rufin_core::playlists::add_playlist_tracks(
+    let added = rufin_core::playlists::add_playlist_tracks(
         &products.source,
         input.id,
-        selection,
+        selection.into(),
         input.skip_duplicates,
-    ))
-    .await?;
+    )
+    .await
+    .map_err(bad_request)?;
     Ok(json_response(StatusCode::OK, json!({"added":added})))
 }
 

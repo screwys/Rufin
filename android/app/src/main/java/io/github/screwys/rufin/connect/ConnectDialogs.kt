@@ -13,6 +13,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.screwys.rufin.core.*
+import io.github.screwys.rufin.shared.rufin_core.*
+import io.github.screwys.rufin.shared.rufin_core.Action as ConnectAction
+import io.github.screwys.rufin.shared.rufin_core.Status as ConnectStatus
+import io.github.screwys.rufin.shared.rufin_core.Control as ConnectControl
+import io.github.screwys.rufin.shared.downloads.DownloadDirectory
+
 import kotlinx.coroutines.CancellationException
 import io.github.screwys.rufin.ui.SourceIcon
 import io.github.screwys.rufin.ui.RufinIcon
@@ -20,12 +26,12 @@ import io.github.screwys.rufin.ui.RufinIcon
 @Composable
 internal fun ConnectJoinDialog(connect: ConnectConnection, dismiss: () -> Unit, join: (String) -> Unit) {
     var invitation by remember { mutableStateOf("") }
-    LaunchedEffect(connect) { connect.action(AndroidConnectAction.Discover) }
+    LaunchedEffect(connect) { connect.action(ConnectAction.Discover) }
     AlertDialog(onDismissRequest = dismiss, title = { Text(translate("Join profile")) }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 Text(translate("Nearby devices"), Modifier.weight(1f))
-                IconButton({ connect.action(AndroidConnectAction.Discover) }, enabled = !connect.pending) {
+                IconButton({ connect.action(ConnectAction.Discover) }, enabled = !connect.pending) {
                     RufinIcon("rufin-view-refresh-symbolic", translate("Refresh"))
                 }
             }
@@ -58,14 +64,14 @@ internal fun ConnectTextDialog(title: String, label: String, initial: String, di
 }
 
 @Composable
-internal fun ConnectStorageDialog(current: AndroidConnectDestination?, dismiss: () -> Unit,
+internal fun ConnectStorageDialog(current: Destination?, dismiss: () -> Unit,
     useDefault: () -> Unit, chooseFolder: () -> Unit, chooseConnection: () -> Unit) {
     AlertDialog(onDismissRequest = dismiss, title = { Text(translate("Storage")) }, text = {
         Column {
             listOf(
                 Triple(translate("Default"), current == null, useDefault),
-                Triple(translate("This device"), current is AndroidConnectDestination.Document || current is AndroidConnectDestination.Local, chooseFolder),
-                Triple(translate("File connection"), current is AndroidConnectDestination.Remote, chooseConnection),
+                Triple(translate("This device"), current is Destination.Document || current is Destination.Local, chooseFolder),
+                Triple(translate("File connection"), current is Destination.Remote, chooseConnection),
             ).forEach { (title, selected, choose) ->
                 ListItem(headlineContent = { Text(title) }, trailingContent = { RadioButton(selected, null) },
                     colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
@@ -80,8 +86,8 @@ internal fun ConnectConfirmationDialog(connect: ConnectConnection) {
     connect.confirmation?.let { confirmation ->
         AlertDialog(onDismissRequest = connect::cancelConfirmation,
             title = { Text(when (confirmation.kind) {
-                AndroidConnectConfirmation.REPLACE_PROFILE -> translate("Join profile")
-                AndroidConnectConfirmation.REDOWNLOAD_FILES -> translate("Download quality")
+                Confirmation.REPLACE_PROFILE -> translate("Join profile")
+                Confirmation.REDOWNLOAD_FILES -> translate("Download quality")
             }) }, text = { Text(confirmation.message) },
             confirmButton = { TextButton(connect::confirm) { Text(translate("Continue")) } },
             dismissButton = { TextButton(connect::cancelConfirmation) { Text(translate("Cancel")) } })
@@ -89,19 +95,19 @@ internal fun ConnectConfirmationDialog(connect: ConnectConnection) {
 }
 
 @Composable
-internal fun ConnectRemoteStorageDialog(connect: ConnectConnection, current: AndroidConnectDestination?,
-    dismiss: () -> Unit, accept: (AndroidConnectDestination.Remote) -> Unit) {
-    var selected by remember { mutableStateOf((current as? AndroidConnectDestination.Remote)?.sourceId ?: connect.fileSources.firstOrNull()?.id) }
+internal fun ConnectRemoteStorageDialog(connect: ConnectConnection, current: Destination?,
+    dismiss: () -> Unit, accept: (Destination.Remote) -> Unit) {
+    var selected by remember { mutableStateOf((current as? Destination.Remote)?.sourceId ?: connect.fileSources.firstOrNull()?.id) }
     val source = connect.fileSources.firstOrNull { it.id == selected }
     var path by remember(selected) { mutableStateOf(
-        (current as? AndroidConnectDestination.Remote)?.takeIf { it.sourceId == selected }?.path ?: source?.path.orEmpty()
+        (current as? Destination.Remote)?.takeIf { it.sourceId == selected }?.path ?: connect.storagePath(source?.id)
     ) }
     AlertDialog(onDismissRequest = dismiss, title = { Text(translate("Profile storage")) }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             ConnectFileSourceChoices(connect, selected) { selected = it }
             OutlinedTextField(path, { path = it }, Modifier.fillMaxWidth(), label = { Text(translate("Folder path")) }, singleLine = true)
         }
-    }, confirmButton = { TextButton({ selected?.let { accept(AndroidConnectDestination.Remote(it, path)) } },
+    }, confirmButton = { TextButton({ selected?.let { accept(Destination.Remote(it, path)) } },
         enabled = selected != null && !connect.pending) { Text(translate("Apply")) } },
         dismissButton = { TextButton(dismiss) { Text(translate("Cancel")) } })
 }
@@ -122,7 +128,7 @@ private fun ConnectFileSourceChoices(connect: ConnectConnection, selected: Strin
 internal fun ConnectRemoteFileDialog(connect: ConnectConnection, importing: Boolean, dismiss: () -> Unit) {
     var selected by remember { mutableStateOf(connect.fileSources.firstOrNull()?.id) }
     val source = connect.fileSources.firstOrNull { it.id == selected }
-    var folder by remember(selected) { mutableStateOf(source?.path.orEmpty()) }
+    var folder by remember(selected) { mutableStateOf(connect.storagePath(source?.id)) }
     var files by remember { mutableStateOf<List<String>>(emptyList()) }
     var path by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }

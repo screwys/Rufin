@@ -7,11 +7,7 @@ impl AndroidBrowseQuery {
         self.selected_track_fields()
             .iter()
             .map(|field| AndroidSortField {
-                id: serde_json::to_value(field)
-                    .expect("Field serialization")
-                    .as_str()
-                    .expect("Field name")
-                    .to_string(),
+                id: *field,
                 title: localization::tr(rufin_core::settings::presentation::library_field_title(
                     *field,
                 )),
@@ -25,11 +21,11 @@ impl AndroidBrowseQuery {
         let Some((uri, album_artist)) = self.artist_release_identity() else {
             return Ok(Vec::new());
         };
-        let route = route_json(if album_artist {
+        let route = if album_artist {
             Route::AlbumArtistDiscography(uri.to_string())
         } else {
             Route::ArtistDiscography(uri.to_string())
-        });
+        };
         let runtime = self.runtime.clone();
         runtime
             .spawn(async move {
@@ -128,7 +124,8 @@ impl AndroidBrowseQuery {
                             let current = row.definition.current;
                             let mut projected = AndroidBrowseRow::from(row);
                             if current {
-                                projected.source_id = Some(self.selected().source_id.to_string());
+                                projected.context_source_id =
+                                    Some(self.selected().source_id.to_string());
                             }
                             (projected, artwork, "Playlist")
                         }),
@@ -156,22 +153,24 @@ impl AndroidBrowseQuery {
                     _ => None,
                 };
                 if let Some((mut row, artwork_bindings, label)) = named {
-                    let configuration = row.source_id.as_ref().and_then(|id| {
+                    let configuration = row.context_source_id.as_ref().and_then(|id| {
                         self.source
                             .configuration(&sources::SourceId::new(id.clone()))
                     });
-                    row.source_name = configuration
+                    row.context_source_name = configuration
                         .as_ref()
                         .map(|source| source.name.clone())
                         .unwrap_or_default();
-                    let links = if row.kind == "playlist" {
+                    let links = if let AndroidBrowseItem::Playlist { row: playlist } = &row.item {
                         configuration
                             .as_ref()
                             .and_then(|source| {
                                 rufin_core::runtime::source::source_kind_icon_name(&source.kind)
                                     .map(|icon| AndroidDetailLink {
                                         title: source.name.clone(),
-                                        url: source.detail_web_url("playlist", &row.key).ok(),
+                                        url: source
+                                            .detail_web_url("playlist", &playlist.object_id)
+                                            .ok(),
                                         icon_id: icon.to_owned(),
                                     })
                             })
@@ -189,13 +188,13 @@ impl AndroidBrowseQuery {
                         artist_text: String::new(),
                         artist_links: Vec::new(),
                         label: localization::tr(label),
-                        mode: core_route_kind(&self.route),
+                        mode: self.route.clone(),
                         album_count: 0,
                         links,
                         favorite_route: None,
                         favorite_total: 0,
                         discography_route: None,
-                        tracks_route: Some(route_json(self.route.clone())),
+                        tracks_route: Some(self.route.clone()),
                         show_track_images,
                         show_track_header: self.display.display.show_header,
                     }));
@@ -255,22 +254,23 @@ impl AndroidBrowseQuery {
                     let credited = rufin_core::route::detail_links::album_artist_links(&album);
                     let artist_text = credited.display_text().to_string();
                     let artist_links = AndroidArtistLink::from_detail_links(&credited)?;
+                    let artwork_bindings = album.artwork_binding.iter().cloned().collect();
                     let mut row: AndroidBrowseRow = album.into();
-                    row.source_id =
+                    row.context_source_id =
                         library::source_entity_parts(&uri).map(|(source, _, _)| source.to_string());
                     return Ok(Some(AndroidDetailSummary {
-                        artwork_bindings: row.artwork_identity.iter().cloned().collect(),
+                        artwork_bindings,
                         row,
                         artist_text,
                         artist_links,
                         label: localization::tr("Album"),
-                        mode: core_route_kind(&self.route),
+                        mode: self.route.clone(),
                         album_count: 1,
                         links,
                         favorite_route: None,
                         favorite_total: 0,
                         discography_route: None,
-                        tracks_route: Some(route_json(Route::AlbumDetail(uri))),
+                        tracks_route: Some(Route::AlbumDetail(uri)),
                         show_track_images,
                         show_track_header: self.display.display.show_header,
                     }));
@@ -309,10 +309,9 @@ impl AndroidBrowseQuery {
                     &artist,
                 ));
                 let album_count = artist.album_count.max(0) as u64;
-                let track_count = artist.track_count.max(0) as u64;
+                let artwork_bindings = artist.artwork_binding.iter().cloned().collect();
                 let mut row = artist_row(artist, album_artist);
-                row.track_count = track_count;
-                row.source_id =
+                row.context_source_id =
                     library::source_entity_parts(&uri).map(|(source, _, _)| source.to_string());
                 let favorite_route = if album_artist {
                     Route::AlbumArtistFavoriteTracks(uri.clone())
@@ -334,18 +333,18 @@ impl AndroidBrowseQuery {
                         matches!(field, LibraryField::Image | LibraryField::TitleMerged)
                     });
                 Ok(Some(AndroidDetailSummary {
-                    artwork_bindings: row.artwork_identity.iter().cloned().collect(),
+                    artwork_bindings,
                     row,
                     artist_text: String::new(),
                     artist_links: Vec::new(),
                     label: localization::tr("Artist"),
-                    mode: core_route_kind(&self.route),
+                    mode: self.route.clone(),
                     album_count,
                     links,
-                    favorite_route: Some(route_json(favorite_route)),
+                    favorite_route: Some(favorite_route),
                     favorite_total,
-                    discography_route: Some(route_json(discography_route)),
-                    tracks_route: Some(route_json(tracks_route)),
+                    discography_route: Some(discography_route),
+                    tracks_route: Some(tracks_route),
                     show_track_images,
                     show_track_header: self.artist_tracks.display.show_header,
                 }))

@@ -172,6 +172,7 @@ pub(crate) fn named_scope(
 }
 
 #[derive(Clone, Debug, FromRow, PartialEq, serde::Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct AlbumArtistLink {
     pub artist_key: ArtistKey,
     pub media_uri: String,
@@ -179,12 +180,14 @@ pub struct AlbumArtistLink {
 }
 
 #[derive(Clone, Debug, FromRow, PartialEq, serde::Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct AlbumGenreLink {
     pub genre_key: GenreKey,
     pub name: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum AlbumReleaseClass {
     Album,
     Ep,
@@ -194,6 +197,7 @@ pub enum AlbumReleaseClass {
 }
 
 #[derive(Clone, Debug, PartialEq, FromRow)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct AlbumRow {
     pub album_key: AlbumKey,
     pub source_key: SourceKey,
@@ -225,6 +229,7 @@ pub struct AlbumRow {
 }
 
 #[derive(Clone, Debug, FromRow, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct ArtistRow {
     pub artist_key: ArtistKey,
     pub source_key: SourceKey,
@@ -244,6 +249,7 @@ pub struct ArtistRow {
 }
 
 #[derive(Clone, Debug, PartialEq, FromRow)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct GenreRow {
     pub genre_key: GenreKey,
     pub source_key: SourceKey,
@@ -260,6 +266,7 @@ pub struct GenreRow {
 }
 
 #[derive(Clone, Debug, PartialEq, FromRow)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct MoodRow {
     pub mood_key: MoodKey,
     pub source_key: SourceKey,
@@ -272,6 +279,7 @@ pub struct MoodRow {
 }
 
 #[derive(Clone, Debug, FromRow, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct FolderRow {
     pub folder_key: FolderKey,
     pub source_key: SourceKey,

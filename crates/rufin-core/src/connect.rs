@@ -20,8 +20,17 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub type FolderMappings = BTreeMap<String, downloads::DownloadDirectory>;
+#[cfg(feature = "bindings")]
+uniffi::custom_type!(FolderMappings, std::collections::HashMap<String, downloads::DownloadDirectory>, {
+    remote,
+    lower: |folders| folders.into_iter().collect(),
+    try_lift: |folders| Ok(folders.into_iter().collect()),
+});
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct ConnectSettings {
     pub enabled: bool,
     pub name: String,
@@ -32,7 +41,7 @@ pub struct ConnectSettings {
     pub relay: Option<String>,
     pub public_relay: bool,
     pub destination: Option<portable::Destination>,
-    pub folders: BTreeMap<String, downloads::DownloadDirectory>,
+    pub folders: FolderMappings,
     pub encoding: Encoding,
     pub adopting: bool,
     #[serde(alias = "joined")]
@@ -42,6 +51,7 @@ pub struct ConnectSettings {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum Encoding {
     #[default]
     Original,
@@ -86,6 +96,7 @@ impl ConnectSettings {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct Device {
     pub id: String,
     pub name: String,
@@ -97,11 +108,12 @@ pub struct Device {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct Pairing {
     pub session: String,
     pub peer: String,
     pub name: String,
-    pub emoji: [String; 7],
+    pub emoji: Vec<String>,
     #[serde(default)]
     pub approved: bool,
     #[serde(default)]
@@ -111,6 +123,7 @@ pub struct Pairing {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct Status {
     pub settings: ConnectSettings,
     #[serde(default)]
@@ -136,30 +149,30 @@ impl Status {
             self.settings.enabled && device.enrolled && device.reachable && device.has_playback
         })
     }
+}
 
-    pub fn storage_path(&self, source: Option<&sources::SourceId>) -> String {
-        match (source, self.settings.destination.as_ref()) {
-            (None, Some(portable::Destination::Local { path })) => {
-                path.to_string_lossy().into_owned()
-            }
-            (None, Some(portable::Destination::Document { uri })) => uri.clone(),
-            (Some(selected), Some(portable::Destination::Remote { source_id, path }))
-                if selected == source_id =>
-            {
-                path.clone()
-            }
-            (Some(_), _) => "Rufin Connect".into(),
-            (None, _) => self
-                .local_folder
-                .as_deref()
-                .map(|path| path.to_string_lossy().into_owned())
-                .unwrap_or_default(),
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub fn connect_storage_path(status: &Status, source: Option<sources::SourceId>) -> String {
+    match (source.as_ref(), status.settings.destination.as_ref()) {
+        (None, Some(portable::Destination::Local { path })) => path.to_string_lossy().into_owned(),
+        (None, Some(portable::Destination::Document { uri })) => uri.clone(),
+        (Some(selected), Some(portable::Destination::Remote { source_id, path }))
+            if selected == source_id =>
+        {
+            path.clone()
         }
+        (Some(_), _) => "Rufin Connect".into(),
+        (None, _) => status
+            .local_folder
+            .as_deref()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default(),
     }
 }
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum Action {
     Enable {
         enabled: bool,
@@ -237,19 +250,21 @@ pub enum Action {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum Confirmation {
     ReplaceProfile,
     RedownloadFiles,
 }
 
 #[derive(Debug, thiserror::Error)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Error))]
 pub enum ActionError {
     #[error("{0}")]
     Failed(String),
-    #[error("{message}")]
+    #[error("{reason}")]
     ConfirmationRequired {
         confirmation: Confirmation,
-        message: String,
+        reason: String,
     },
 }
 
@@ -277,13 +292,14 @@ impl Confirmation {
         };
         ActionError::ConfirmationRequired {
             confirmation: self,
-            message,
+            reason: message,
         }
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum Control {
     PlayPause,
     Play,
@@ -403,6 +419,7 @@ struct FileExchange {
     revision: Option<i64>,
 }
 
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct ConnectOwner {
     directory: PathBuf,
     database: Arc<library::Database>,
@@ -490,10 +507,16 @@ impl ConnectOwner {
         owner.source.install_connect(&owner);
         owner
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl ConnectOwner {
     pub fn status(&self) -> Status {
         self.status.borrow().clone()
     }
+}
+
+impl ConnectOwner {
     pub fn subscribe(&self) -> tokio::sync::watch::Receiver<Status> {
         self.status.subscribe()
     }
@@ -531,8 +554,11 @@ impl ConnectOwner {
         }
         Ok(available)
     }
+}
 
-    pub async fn roots(&self, source: &str) -> Result<Vec<library::ConnectRoot>, String> {
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl ConnectOwner {
+    pub async fn roots(&self, source: String) -> Result<Vec<library::ConnectRoot>, ActionError> {
         let sources = self.source.list_sources();
         if !sources
             .sources
@@ -541,9 +567,20 @@ impl ConnectOwner {
         {
             return Ok(Vec::new());
         }
-        self.database.connect_roots(source).await.map_err(error)
+        let database = self.database.clone();
+        self.runtime
+            .spawn(async move {
+                database
+                    .connect_roots(&source)
+                    .await
+                    .map_err(|error| ActionError::Failed(error.to_string()))
+            })
+            .await
+            .map_err(|error| ActionError::Failed(error.to_string()))?
     }
+}
 
+impl ConnectOwner {
     pub(crate) fn start(self: &Arc<Self>) {
         let owner = Arc::clone(self);
         self.runtime.spawn(async move {
@@ -1205,577 +1242,615 @@ impl ConnectOwner {
             .store(false, std::sync::atomic::Ordering::Release);
         Ok(())
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl ConnectOwner {
     pub async fn import_document(
         self: &Arc<Self>,
         uri: String,
         replace: bool,
         key: Option<String>,
     ) -> Result<Status, ActionError> {
-        tokio::fs::create_dir_all(&self.directory)
+        let owner = Arc::clone(self);
+        self.runtime
+            .spawn(async move {
+                tokio::fs::create_dir_all(&owner.directory)
+                    .await
+                    .map_err(error)?;
+                let input = tempfile::NamedTempFile::new_in(&owner.directory).map_err(error)?;
+                let path = input.path().to_owned();
+                tokio::task::spawn_blocking(move || {
+                    sources::copy_document(&uri, &path).map_err(error)
+                })
+                .await
+                .map_err(error)??;
+                owner
+                    .execute(Action::Import {
+                        path: input.path().to_owned(),
+                        source_id: None,
+                        replace,
+                        key,
+                    })
+                    .await
+            })
             .await
-            .map_err(error)?;
-        let input = tempfile::NamedTempFile::new_in(&self.directory).map_err(error)?;
-        let path = input.path().to_owned();
-        tokio::task::spawn_blocking(move || sources::copy_document(&uri, &path).map_err(error))
-            .await
-            .map_err(error)??;
-        self.execute(Action::Import {
-            path: input.path().to_owned(),
-            source_id: None,
-            replace,
-            key,
-        })
-        .await
+            .map_err(|error| ActionError::Failed(error.to_string()))?
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl ConnectOwner {
     pub async fn list_profile_files(
         &self,
         source_id: sources::SourceId,
         folder: String,
-    ) -> Result<Vec<String>, String> {
-        self.source
-            .client(&source_id)?
-            .list_profile_files(&folder)
+    ) -> Result<Vec<String>, ActionError> {
+        let source = self.source.clone();
+        self.runtime
+            .spawn(async move {
+                source
+                    .client(&source_id)?
+                    .list_profile_files(&folder)
+                    .await
+                    .map(|files| files.into_iter().map(|(path, _)| path).collect())
+                    .map_err(|failure| ActionError::Failed(failure.to_string()))
+            })
             .await
-            .map(|files| files.into_iter().map(|(path, _)| path).collect())
-            .map_err(error)
+            .map_err(|error| ActionError::Failed(error.to_string()))?
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl ConnectOwner {
     pub async fn export_document(self: &Arc<Self>, uri: String) -> Result<Status, ActionError> {
-        tokio::fs::create_dir_all(&self.directory)
+        let owner = Arc::clone(self);
+        self.runtime
+            .spawn(async move {
+                tokio::fs::create_dir_all(&owner.directory)
+                    .await
+                    .map_err(error)?;
+                let output = tempfile::NamedTempFile::new_in(&owner.directory).map_err(error)?;
+                owner
+                    .execute(Action::Export {
+                        path: output.path().to_owned(),
+                        source_id: None,
+                    })
+                    .await?;
+                tokio::task::spawn_blocking(move || {
+                    sources::save_document(&uri, output.path(), None).map_err(error)
+                })
+                .await
+                .map_err(error)??;
+                Ok(owner.status())
+            })
             .await
-            .map_err(error)?;
-        let output = tempfile::NamedTempFile::new_in(&self.directory).map_err(error)?;
-        self.execute(Action::Export {
-            path: output.path().to_owned(),
-            source_id: None,
-        })
-        .await?;
-        tokio::task::spawn_blocking(move || {
-            sources::save_document(&uri, output.path(), None).map_err(error)
-        })
-        .await
-        .map_err(error)??;
-        Ok(self.status())
+            .map_err(|error| ActionError::Failed(error.to_string()))?
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl ConnectOwner {
     pub async fn execute(self: &Arc<Self>, action: Action) -> Result<Status, ActionError> {
-        if matches!(action, Action::Join { replace: true, .. }) {
-            if let Some(session) = self.session.read().await.as_ref() {
-                session.stop.cancel();
-            }
-        }
-        if matches!(
-            action,
-            Action::CancelDownload
-                | Action::Leave
-                | Action::Enable { enabled: false }
-                | Action::Join { replace: true, .. }
-                | Action::CancelPairing
-        ) {
-            self.cancel_download();
-        }
-        if matches!(action, Action::CancelDownload) {
-            return Ok(self.status());
-        }
-        if matches!(action, Action::Join { replace: true, .. }) {
-            if self.joining.swap(true, std::sync::atomic::Ordering::AcqRel) {
-                return Err("Pairing is already in progress".into());
-            }
-            self.status.send_modify(|status| {
-                status.connecting = true;
-                status.receiving_collection = false;
-                status.error = None;
-                status.profile_status = localization::tr("Connecting devices");
-            });
-        }
-        // Controlling a player must not wait behind a long media transfer.
-        let _action = if matches!(action, Action::Control { .. }) {
-            None
-        } else {
-            Some(self.actions.lock().await)
-        };
-        match action {
-            Action::Enable { enabled: false } | Action::Leave => self.leave_profile().await?,
-            Action::Enable { enabled: true } => {
-                self.save(|config| config.enabled = true)?;
-                if let Some(profile) = self.status().settings.profile {
-                    if self.session.read().await.is_none() || self.network.lock().await.is_none() {
-                        let _sync = self.sync.lock().await;
-                        self.open(profile, false).await?;
-                    }
-                } else {
-                    let _sync = self.sync.lock().await;
-                    self.create_profile().await?;
+        let owner = Arc::clone(self);
+        self.runtime.spawn(async move {
+            if matches!(action, Action::Join { replace: true, .. }) {
+                if let Some(session) = owner.session.read().await.as_ref() {
+                    session.stop.cancel();
                 }
-                self.synchronize().await?;
-                self.cleanup_profiles(self.status().settings.profile.as_deref())
-                    .await?;
             }
-            Action::Create => {
-                if self.status().settings.profile.is_some() {
-                    return Err("This device already has a Connect profile".into());
-                }
-                self.save(|config| config.enabled = true)?;
-                {
-                    let _sync = self.sync.lock().await;
-                    self.create_profile().await?;
-                }
-                self.synchronize().await?;
-                self.cleanup_profiles(self.status().settings.profile.as_deref())
-                    .await?;
+            if matches!(
+                action,
+                Action::CancelDownload
+                    | Action::Leave
+                    | Action::Enable { enabled: false }
+                    | Action::Join { replace: true, .. }
+                    | Action::CancelPairing
+            ) {
+                owner.cancel_download();
             }
-            Action::Join {
-                invitation,
-                replace,
-            } => {
-                if !replace {
-                    return Err(Confirmation::ReplaceProfile.required());
+            if matches!(action, Action::CancelDownload) {
+                return Ok(owner.status());
+            }
+            if matches!(action, Action::Join { replace: true, .. }) {
+                if owner.joining.swap(true, std::sync::atomic::Ordering::AcqRel) {
+                    return Err("Pairing is already in progress".into());
                 }
-                // An earlier queued disconnect may have completed while this
-                // request waited for the action owner.
-                self.joining
-                    .store(true, std::sync::atomic::Ordering::Release);
-                self.status.send_modify(|status| {
+                owner.status.send_modify(|status| {
                     status.connecting = true;
                     status.receiving_collection = false;
                     status.error = None;
                     status.profile_status = localization::tr("Connecting devices");
                 });
-                let result = async {
-                    self.save(|config| config.enabled = true)?;
-                    self.network().await?.close_profile().await.map_err(error)?;
-                    self.network()
-                        .await?
-                        .begin_pairing(&invitation)
-                        .await
-                        .map_err(error)
-                }
-                .await;
-                if let Err(error) = result {
-                    self.restore_after_pairing().await?;
-                    return Err(error.into());
-                }
             }
-            Action::Invite { peer } => {
-                self.save(|config| config.enabled = true)?;
-                if self.status().settings.profile.is_none() {
-                    self.create_profile().await?;
-                } else if self.network.lock().await.is_none() {
-                    self.open(self.status().settings.profile.unwrap(), false)
+            // Controlling a player must not wait behind a long media transfer.
+            let _action = if matches!(action, Action::Control { .. }) {
+                None
+            } else {
+                Some(owner.actions.lock().await)
+            };
+            match action {
+                Action::Enable { enabled: false } | Action::Leave => owner.leave_profile().await?,
+                Action::Enable { enabled: true } => {
+                    owner.save(|config| config.enabled = true)?;
+                    if let Some(profile) = owner.status().settings.profile {
+                        if owner.session.read().await.is_none() || owner.network.lock().await.is_none() {
+                            let _sync = owner.sync.lock().await;
+                            owner.open(profile, false).await?;
+                        }
+                    } else {
+                        let _sync = owner.sync.lock().await;
+                        owner.create_profile().await?;
+                    }
+                    owner.synchronize().await?;
+                    owner.cleanup_profiles(owner.status().settings.profile.as_deref())
                         .await?;
                 }
-                self.status.send_modify(|status| {
-                    status.connecting = true;
-                    status.profile_status = localization::tr("Connecting devices");
-                });
-                let result = self
-                    .connected_network()
-                    .await?
-                    .invite(&peer)
-                    .await
-                    .map_err(error);
-                if result.is_err() {
-                    self.status.send_modify(|status| status.connecting = false);
+                Action::Create => {
+                    if owner.status().settings.profile.is_some() {
+                        return Err("This device already has a Connect profile".into());
+                    }
+                    owner.save(|config| config.enabled = true)?;
+                    {
+                        let _sync = owner.sync.lock().await;
+                        owner.create_profile().await?;
+                    }
+                    owner.synchronize().await?;
+                    owner.cleanup_profiles(owner.status().settings.profile.as_deref())
+                        .await?;
                 }
-                result?;
-            }
-            Action::Pair {
-                session,
-                approve,
-                replace,
-            } => {
-                if approve
-                    && self
-                        .status()
-                        .pairing
-                        .as_ref()
-                        .is_some_and(|pairing| pairing.session == session && pairing.approved)
-                {
-                    return Ok(self.status());
-                }
-                if approve
-                    && self
-                        .status()
-                        .pairing
-                        .as_ref()
-                        .is_some_and(|pairing| pairing.session == session && pairing.joining)
-                    && !self.joining.load(std::sync::atomic::Ordering::Acquire)
-                {
+                Action::Join {
+                    invitation,
+                    replace,
+                } => {
                     if !replace {
                         return Err(Confirmation::ReplaceProfile.required());
                     }
-                    self.joining
+                    // An earlier queued disconnect may have completed while this
+                    // request waited for the action owner.
+                    owner.joining
                         .store(true, std::sync::atomic::Ordering::Release);
-                    self.cancel_download();
-                    if let Some(session) = self.session.read().await.as_ref() {
-                        session.stop.cancel();
+                    owner.status.send_modify(|status| {
+                        status.connecting = true;
+                        status.receiving_collection = false;
+                        status.error = None;
+                        status.profile_status = localization::tr("Connecting devices");
+                    });
+                    let result = async {
+                        owner.save(|config| config.enabled = true)?;
+                        owner.network().await?.close_profile().await.map_err(error)?;
+                        owner.network()
+                            .await?
+                            .begin_pairing(&invitation)
+                            .await
+                            .map_err(error)
                     }
-                    self.connected_network()
+                    .await;
+                    if let Err(error) = result {
+                        owner.restore_after_pairing().await?;
+                        return Err(error.into());
+                    }
+                }
+                Action::Invite { peer } => {
+                    owner.save(|config| config.enabled = true)?;
+                    if owner.status().settings.profile.is_none() {
+                        owner.create_profile().await?;
+                    } else if owner.network.lock().await.is_none() {
+                        owner.open(owner.status().settings.profile.unwrap(), false)
+                            .await?;
+                    }
+                    owner.status.send_modify(|status| {
+                        status.connecting = true;
+                        status.profile_status = localization::tr("Connecting devices");
+                    });
+                    let result = owner
+                        .connected_network()
                         .await?
-                        .close_profile()
+                        .invite(&peer)
+                        .await
+                        .map_err(error);
+                    if result.is_err() {
+                        owner.status.send_modify(|status| status.connecting = false);
+                    }
+                    result?;
+                }
+                Action::Pair {
+                    session,
+                    approve,
+                    replace,
+                } => {
+                    if approve
+                        && owner
+                            .status()
+                            .pairing
+                            .as_ref()
+                            .is_some_and(|pairing| pairing.session == session && pairing.approved)
+                    {
+                        return Ok(owner.status());
+                    }
+                    if approve
+                        && owner
+                            .status()
+                            .pairing
+                            .as_ref()
+                            .is_some_and(|pairing| pairing.session == session && pairing.joining)
+                        && !owner.joining.load(std::sync::atomic::Ordering::Acquire)
+                    {
+                        if !replace {
+                            return Err(Confirmation::ReplaceProfile.required());
+                        }
+                        owner.joining
+                            .store(true, std::sync::atomic::Ordering::Release);
+                        owner.cancel_download();
+                        if let Some(session) = owner.session.read().await.as_ref() {
+                            session.stop.cancel();
+                        }
+                        owner.connected_network()
+                            .await?
+                            .close_profile()
+                            .await
+                            .map_err(error)?;
+                    }
+                    owner.connected_network()
+                        .await?
+                        .confirm_pairing(&session, approve)
                         .await
                         .map_err(error)?;
-                }
-                self.connected_network()
-                    .await?
-                    .confirm_pairing(&session, approve)
-                    .await
-                    .map_err(error)?;
-                self.status.send_modify(|status| {
-                    if let Some(pairing) = &mut status.pairing
-                        && pairing.session == session
-                    {
-                        pairing.approved = approve;
-                    }
-                });
-                if !approve {
-                    self.status.send_modify(|status| {
-                        status.pairing = None;
-                        status.connecting = false;
+                    owner.status.send_modify(|status| {
+                        if let Some(pairing) = &mut status.pairing
+                            && pairing.session == session
+                        {
+                            pairing.approved = approve;
+                        }
                     });
-                    if self.joining.load(std::sync::atomic::Ordering::Acquire) {
-                        self.restore_after_pairing().await?;
-                    }
-                }
-            }
-            Action::CancelPairing => {
-                self.connected_network().await?.cancel_pairing().await;
-                if self.status().settings.setup_pending {
-                    self.leave_profile().await?;
-                    self.source.connect_changed(false).await?;
-                } else {
-                    self.restore_after_pairing().await?;
-                }
-            }
-            Action::FinishSetup => {
-                if self.status().settings.setup_pending {
-                    let session = self.active().await?;
-                    let network = self.connected_network().await?;
-                    let devices = self.status().devices;
-                    let peer = network
-                        .members()
-                        .await
-                        .map_err(error)?
-                        .into_iter()
-                        .filter(|peer| peer != &session.identity)
-                        .max_by_key(|peer| {
-                            devices
-                                .iter()
-                                .any(|device| device.id == *peer && device.reachable)
-                        })
-                        .ok_or_else(|| error("Waiting for device"))?;
-                    let cancel = tokio_util::sync::CancellationToken::new();
-                    if let Some(previous) = self
-                        .download_cancel
-                        .lock()
-                        .unwrap_or_else(|p| p.into_inner())
-                        .replace(cancel.clone())
-                    {
-                        previous.cancel();
-                    }
-                    self.status.send_modify(|status| {
-                        status.connecting = true;
-                        status.receiving_collection = true;
-                        status.profile_status = localization::tr("Receiving collection");
-                    });
-                    let received = cancel
-                        .run_until_cancelled(async {
-                            let staged = self
-                                .fetch_snapshot(&network, &peer, false, cancel.clone())
-                                .await?;
-                            self.status.send_modify(|status| {
-                                status.profile_status = localization::tr("Applying...")
-                            });
-                            self.read_profile_file(
-                                staged.to_path_buf(),
-                                false,
-                                None,
-                                Some(&session.profile),
-                            )
-                            .await
-                            .map_err(error)?;
-                            Ok::<_, String>(())
-                        })
-                        .await
-                        .unwrap_or_else(|| Err("Transfer cancelled".into()));
-                    self.download_cancel
-                        .lock()
-                        .unwrap_or_else(|p| p.into_inner())
-                        .take();
-                    self.status.send_modify(|status| {
-                        status.connecting = false;
-                        status.receiving_collection = false;
-                    });
-                    if let Err(message) = received {
-                        self.failed(message.clone());
-                        return Err(message.into());
-                    }
-                    if self.status().settings.enabled {
-                        self.connected_network()
-                            .await?
-                            .attach_documents(session.documents.clone())
-                            .await
-                            .map_err(error)?;
-                    }
-                    self.save(|config| config.setup_pending = false)?;
-                    self.start_session(session);
-                    self.source.connect_changed(false).await?;
-                    self.source.connect_media_changed();
-                    self.status.send_modify(|status| {
-                        status.completed_pairings += 1;
-                        status.receiving_collection = false;
-                        status.profile_status = localization::tr("Profile up to date");
-                    });
-                }
-            }
-            Action::Rename { name } => {
-                self.save(|config| config.name = name.clone())?;
-                if let Some(network) = self.network.lock().await.as_ref() {
-                    network.rename(name).await;
-                }
-                self.publish_device().await?;
-            }
-            Action::Remove { peer } => {
-                let session = self.active().await?;
-                self.connected_network()
-                    .await?
-                    .remove_member(&peer)
-                    .await
-                    .map_err(error)?;
-                let key = portable::new_key();
-                let _sync = self.sync.lock().await;
-                self.install_file_key(&session.profile, key.clone()).await?;
-                self.connected_network()
-                    .await?
-                    .set_enrollment_data(
-                        serde_json::to_vec(&Enrollment {
-                            file_key: key.clone(),
-                        })
-                        .map_err(error)?,
-                    )
-                    .await;
-                session
-                    .documents
-                    .write_records(&[
-                        ConnectRecord {
-                            kind: "connect_key".into(),
-                            key: "file".into(),
-                            value: Some(serde_json::json!(key)),
-                        },
-                        ConnectRecord {
-                            kind: "device".into(),
-                            key: peer.clone(),
-                            value: None,
-                        },
-                    ])
-                    .await
-                    .map_err(error)?;
-                drop(_sync);
-                self.synchronize().await?;
-                self.refresh_devices().await?;
-            }
-            Action::Refresh => {
-                if self.session.read().await.is_some() {
-                    self.synchronize().await?;
-                    if let Some(network) = self.network.lock().await.as_ref() {
-                        network.refresh();
-                    }
-                    self.exchange().await?;
-                    if self.status().settings.enabled {
-                        self.refresh_devices().await?;
-                    }
-                }
-            }
-            Action::Discover => {
-                self.save(|config| config.enabled = true)?;
-                if self.network.lock().await.is_none() {
-                    if let Some(profile) = self.status().settings.profile {
-                        let _sync = self.sync.lock().await;
-                        self.open(profile, false).await?;
-                    } else {
-                        self.network().await?;
-                    }
-                }
-            }
-            Action::TestConnection { peer } => {
-                let result = self
-                    .connected_network()
-                    .await?
-                    .test_connection(
-                        &peer,
-                        serde_json::to_vec(&Request::Presence).map_err(error)?,
-                    )
-                    .await
-                    .map(|(route, _)| route)
-                    .map_err(error);
-                self.status.send_modify(|status| {
-                    if let Some(device) = status.devices.iter_mut().find(|device| device.id == peer)
-                    {
-                        device.reachable = result.is_ok();
-                        device.connection = match &result {
-                            Ok(route) => connection_label(route),
-                            Err(_) => localization::tr("Waiting for device"),
-                        };
-                        if result.is_err() {
-                            device.has_playback = false;
+                    if !approve {
+                        owner.status.send_modify(|status| {
+                            status.pairing = None;
+                            status.connecting = false;
+                        });
+                        if owner.joining.load(std::sync::atomic::Ordering::Acquire) {
+                            owner.restore_after_pairing().await?;
                         }
                     }
-                });
-                result?;
-            }
-            Action::Network {
-                nearby,
-                relay,
-                public_relay,
-            } => {
-                if let Some(relay) = &relay {
-                    reqwest::Url::parse(relay).map_err(error)?;
                 }
-                if let Some(session) = self.session.read().await.clone() {
+                Action::CancelPairing => {
+                    owner.connected_network().await?.cancel_pairing().await;
+                    if owner.status().settings.setup_pending {
+                        owner.leave_profile().await?;
+                        owner.source.connect_changed(false).await?;
+                    } else {
+                        owner.restore_after_pairing().await?;
+                    }
+                }
+                Action::FinishSetup => {
+                    if owner.status().settings.setup_pending {
+                        let session = owner.active().await?;
+                        let network = owner.connected_network().await?;
+                        let devices = owner.status().devices;
+                        let peer = network
+                            .members()
+                            .await
+                            .map_err(error)?
+                            .into_iter()
+                            .filter(|peer| peer != &session.identity)
+                            .max_by_key(|peer| {
+                                devices
+                                    .iter()
+                                    .any(|device| device.id == *peer && device.reachable)
+                            })
+                            .ok_or_else(|| error("Waiting for device"))?;
+                        let cancel = tokio_util::sync::CancellationToken::new();
+                        if let Some(previous) = owner
+                            .download_cancel
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .replace(cancel.clone())
+                        {
+                            previous.cancel();
+                        }
+                        owner.status.send_modify(|status| {
+                            status.connecting = true;
+                            status.receiving_collection = true;
+                            status.profile_status = localization::tr("Receiving collection");
+                        });
+                        let received = cancel
+                            .run_until_cancelled(async {
+                                let staged = owner
+                                    .fetch_snapshot(&network, &peer, false, cancel.clone())
+                                    .await?;
+                                owner.status.send_modify(|status| {
+                                    status.profile_status = localization::tr("Applying...")
+                                });
+                                owner.read_profile_file(
+                                    staged.to_path_buf(),
+                                    false,
+                                    None,
+                                    Some(&session.profile),
+                                )
+                                .await
+                                .map_err(error)?;
+                                Ok::<_, String>(())
+                            })
+                            .await
+                            .unwrap_or_else(|| Err("Transfer cancelled".into()));
+                        owner.download_cancel
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .take();
+                        owner.status.send_modify(|status| {
+                            status.connecting = false;
+                            status.receiving_collection = false;
+                        });
+                        if let Err(message) = received {
+                            owner.failed(message.clone());
+                            return Err(message.into());
+                        }
+                        if owner.status().settings.enabled {
+                            owner.connected_network()
+                                .await?
+                                .attach_documents(session.documents.clone())
+                                .await
+                                .map_err(error)?;
+                        }
+                        owner.save(|config| config.setup_pending = false)?;
+                        owner.start_session(session);
+                        owner.source.connect_changed(false).await?;
+                        owner.source.connect_media_changed();
+                        owner.status.send_modify(|status| {
+                            status.completed_pairings += 1;
+                            status.receiving_collection = false;
+                            status.profile_status = localization::tr("Profile up to date");
+                        });
+                    }
+                }
+                Action::Rename { name } => {
+                    owner.save(|config| config.name = name.clone())?;
+                    if let Some(network) = owner.network.lock().await.as_ref() {
+                        network.rename(name).await;
+                    }
+                    owner.publish_device().await?;
+                }
+                Action::Remove { peer } => {
+                    let session = owner.active().await?;
+                    owner.connected_network()
+                        .await?
+                        .remove_member(&peer)
+                        .await
+                        .map_err(error)?;
+                    let key = portable::new_key();
+                    let _sync = owner.sync.lock().await;
+                    owner.install_file_key(&session.profile, key.clone()).await?;
+                    owner.connected_network()
+                        .await?
+                        .set_enrollment_data(
+                            serde_json::to_vec(&Enrollment {
+                                file_key: key.clone(),
+                            })
+                            .map_err(error)?,
+                        )
+                        .await;
                     session
                         .documents
                         .write_records(&[
                             ConnectRecord {
-                                kind: "connect_network".into(),
-                                key: "relay".into(),
-                                value: Some(serde_json::json!(relay)),
+                                kind: "connect_key".into(),
+                                key: "file".into(),
+                                value: Some(serde_json::json!(key)),
                             },
                             ConnectRecord {
-                                kind: "connect_network".into(),
-                                key: "public_relay".into(),
-                                value: Some(serde_json::json!(public_relay)),
+                                kind: "device".into(),
+                                key: peer.clone(),
+                                value: None,
                             },
                         ])
                         .await
                         .map_err(error)?;
-                    self.synchronize().await?;
+                    drop(_sync);
+                    owner.synchronize().await?;
+                    owner.refresh_devices().await?;
                 }
-                self.save(|config| {
-                    config.nearby = nearby;
-                    config.relay = relay;
-                    config.public_relay = public_relay;
-                })?;
-                self.configure_network().await?;
-            }
-            Action::Continue { peer } => self.continue_from(&peer).await?,
-            Action::Control { peer, command } => {
-                self.request(&peer, Request::Control { command }).await?;
-            }
-            Action::Folder {
-                source,
-                root_id,
-                path,
-            } => {
-                let key = root_id.map_or_else(|| source.clone(), |root| format!("{source}/{root}"));
-                self.save(|config| {
-                    if match &path {
-                        downloads::DownloadDirectory::Native(path) => path.as_os_str().is_empty(),
-                        downloads::DownloadDirectory::Document { uri } => uri.is_empty(),
-                    } {
-                        config.folders.remove(&key);
+                Action::Refresh => {
+                    if owner.session.read().await.is_some() {
+                        owner.synchronize().await?;
+                        if let Some(network) = owner.network.lock().await.as_ref() {
+                            network.refresh();
+                        }
+                        owner.exchange().await?;
+                        if owner.status().settings.enabled {
+                            owner.refresh_devices().await?;
+                        }
+                    }
+                }
+                Action::Discover => {
+                    owner.save(|config| config.enabled = true)?;
+                    if owner.network.lock().await.is_none() {
+                        if let Some(profile) = owner.status().settings.profile {
+                            let _sync = owner.sync.lock().await;
+                            owner.open(profile, false).await?;
+                        } else {
+                            owner.network().await?;
+                        }
+                    }
+                }
+                Action::TestConnection { peer } => {
+                    let result = owner
+                        .connected_network()
+                        .await?
+                        .test_connection(
+                            &peer,
+                            serde_json::to_vec(&Request::Presence).map_err(error)?,
+                        )
+                        .await
+                        .map(|(route, _)| route)
+                        .map_err(error);
+                    owner.status.send_modify(|status| {
+                        if let Some(device) = status.devices.iter_mut().find(|device| device.id == peer)
+                        {
+                            device.reachable = result.is_ok();
+                            device.connection = match &result {
+                                Ok(route) => connection_label(route),
+                                Err(_) => localization::tr("Waiting for device"),
+                            };
+                            if result.is_err() {
+                                device.has_playback = false;
+                            }
+                        }
+                    });
+                    result?;
+                }
+                Action::Network {
+                    nearby,
+                    relay,
+                    public_relay,
+                } => {
+                    if let Some(relay) = &relay {
+                        reqwest::Url::parse(relay).map_err(error)?;
+                    }
+                    if let Some(session) = owner.session.read().await.clone() {
+                        session
+                            .documents
+                            .write_records(&[
+                                ConnectRecord {
+                                    kind: "connect_network".into(),
+                                    key: "relay".into(),
+                                    value: Some(serde_json::json!(relay)),
+                                },
+                                ConnectRecord {
+                                    kind: "connect_network".into(),
+                                    key: "public_relay".into(),
+                                    value: Some(serde_json::json!(public_relay)),
+                                },
+                            ])
+                            .await
+                            .map_err(error)?;
+                        owner.synchronize().await?;
+                    }
+                    owner.save(|config| {
+                        config.nearby = nearby;
+                        config.relay = relay;
+                        config.public_relay = public_relay;
+                    })?;
+                    owner.configure_network().await?;
+                }
+                Action::Continue { peer } => owner.continue_from(&peer).await?,
+                Action::Control { peer, command } => {
+                    owner.request(&peer, Request::Control { command }).await?;
+                }
+                Action::Folder {
+                    source,
+                    root_id,
+                    path,
+                } => {
+                    let key = root_id.map_or_else(|| source.clone(), |root| format!("{source}/{root}"));
+                    owner.save(|config| {
+                        if match &path {
+                            downloads::DownloadDirectory::Native(path) => path.as_os_str().is_empty(),
+                            downloads::DownloadDirectory::Document { uri } => uri.is_empty(),
+                        } {
+                            config.folders.remove(&key);
+                        } else {
+                            config.folders.insert(key, path);
+                        }
+                    })?;
+                    owner.source.connect_media_changed();
+                }
+                Action::Encoding { encoding, confirm } => {
+                    let settings = owner.status().settings;
+                    if settings.encoding != encoding {
+                        let redownload = settings.established && !settings.setup_pending;
+                        if redownload && !confirm {
+                            return Err(Confirmation::RedownloadFiles.required());
+                        }
+                        owner.save(|config| config.encoding = encoding)?;
+                        if redownload {
+                            owner.source.connect_media_changed();
+                        }
+                    }
+                }
+                Action::Download { peer, uri } => {
+                    owner.download(&peer, &uri).await?;
+                }
+                Action::CancelDownload => owner.cancel_download(),
+                Action::Destination { destination } => {
+                    let destination = destination.filter(|destination| {
+                        !matches!(destination, portable::Destination::Local { path } if path.as_os_str().is_empty())
+                    }).or_else(|| {
+                        owner.status()
+                            .settings
+                            .profile
+                            .as_deref()
+                            .map(|profile| owner.local_destination(profile))
+                    });
+                    let shared = destination
+                        .as_ref()
+                        .is_some_and(portable::Destination::is_remote)
+                        || matches!(
+                            owner.status().settings.destination,
+                            Some(portable::Destination::Remote { .. })
+                        );
+                    let session = owner.session.read().await.clone();
+                    if shared && let Some(session) = &session {
+                        session
+                            .documents
+                            .write_records(&[ConnectRecord {
+                                kind: "connect_storage".into(),
+                                key: "destination".into(),
+                                value: Some(serde_json::json!(
+                                    destination
+                                        .as_ref()
+                                        .filter(|destination| { destination.is_remote() })
+                                )),
+                            }])
+                            .await
+                            .map_err(error)?;
+                    }
+                    owner.save(|config| config.destination = destination)?;
+                    if shared && session.is_some() {
+                        owner.synchronize().await?;
+                    }
+                }
+                Action::Export { path, source_id } => {
+                    let output = owner.export().await?;
+                    if let Some(source_id) = source_id {
+                        let source = owner.source.client(&source_id)?;
+                        source
+                            .write_profile_file(&path.to_string_lossy(), output, Some(None))
+                            .await
+                            .map_err(error)?;
                     } else {
-                        config.folders.insert(key, path);
-                    }
-                })?;
-                self.source.connect_media_changed();
-            }
-            Action::Encoding { encoding, confirm } => {
-                let settings = self.status().settings;
-                if settings.encoding != encoding {
-                    let redownload = settings.established && !settings.setup_pending;
-                    if redownload && !confirm {
-                        return Err(Confirmation::RedownloadFiles.required());
-                    }
-                    self.save(|config| config.encoding = encoding)?;
-                    if redownload {
-                        self.source.connect_media_changed();
+                        portable::install(output, path).await?;
                     }
                 }
-            }
-            Action::Download { peer, uri } => {
-                self.download(&peer, &uri).await?;
-            }
-            Action::CancelDownload => self.cancel_download(),
-            Action::Destination { destination } => {
-                let destination = destination.filter(|destination| {
-                    !matches!(destination, portable::Destination::Local { path } if path.as_os_str().is_empty())
-                }).or_else(|| {
-                    self.status()
-                        .settings
-                        .profile
-                        .as_deref()
-                        .map(|profile| self.local_destination(profile))
-                });
-                let shared = destination
-                    .as_ref()
-                    .is_some_and(portable::Destination::is_remote)
-                    || matches!(
-                        self.status().settings.destination,
-                        Some(portable::Destination::Remote { .. })
-                    );
-                let session = self.session.read().await.clone();
-                if shared && let Some(session) = &session {
-                    session
-                        .documents
-                        .write_records(&[ConnectRecord {
-                            kind: "connect_storage".into(),
-                            key: "destination".into(),
-                            value: Some(serde_json::json!(
-                                destination
-                                    .as_ref()
-                                    .filter(|destination| { destination.is_remote() })
-                            )),
-                        }])
-                        .await
-                        .map_err(error)?;
-                }
-                self.save(|config| config.destination = destination)?;
-                if shared && session.is_some() {
-                    self.synchronize().await?;
-                }
-            }
-            Action::Export { path, source_id } => {
-                let output = self.export().await?;
-                if let Some(source_id) = source_id {
-                    let source = self.source.client(&source_id)?;
-                    source
-                        .write_profile_file(&path.to_string_lossy(), output, Some(None))
-                        .await
-                        .map_err(error)?;
-                } else {
-                    portable::install(output, path).await?;
-                }
-            }
-            Action::Import {
-                path,
-                source_id,
-                replace,
-                key,
-            } => {
-                if let Some(source_id) = source_id {
-                    let source = self.source.client(&source_id)?;
-                    std::fs::create_dir_all(&self.directory).map_err(error)?;
-                    let incoming =
-                        tempfile::NamedTempFile::new_in(&self.directory).map_err(error)?;
-                    if source
-                        .read_profile_file(&path.to_string_lossy(), incoming.path())
-                        .await
-                        .map_err(error)?
-                        .is_none()
-                    {
-                        return Err("The Connect file was not found".into());
+                Action::Import {
+                    path,
+                    source_id,
+                    replace,
+                    key,
+                } => {
+                    if let Some(source_id) = source_id {
+                        let source = owner.source.client(&source_id)?;
+                        std::fs::create_dir_all(&owner.directory).map_err(error)?;
+                        let incoming =
+                            tempfile::NamedTempFile::new_in(&owner.directory).map_err(error)?;
+                        if source
+                            .read_profile_file(&path.to_string_lossy(), incoming.path())
+                            .await
+                            .map_err(error)?
+                            .is_none()
+                        {
+                            return Err("The Connect file was not found".into());
+                        }
+                        owner.import_file(incoming.path().to_owned(), replace, key)
+                            .await?;
+                    } else {
+                        owner.import_file(path, replace, key).await?;
                     }
-                    self.import_file(incoming.path().to_owned(), replace, key)
-                        .await?;
-                } else {
-                    self.import_file(path, replace, key).await?;
                 }
             }
-        }
-        self.status.send_modify(|status| status.error = None);
-        Ok(self.status())
+            owner.status.send_modify(|status| status.error = None);
+            Ok(owner.status())
+
+        }).await.map_err(|error| ActionError::Failed(error.to_string()))?
     }
 }
 
@@ -1805,7 +1880,7 @@ impl ConnectOwner {
                         session,
                         peer,
                         name,
-                        emoji,
+                        emoji: emoji.into(),
                         approved: false,
                         verified: false,
                         joining,
@@ -2895,7 +2970,7 @@ impl ConnectOwner {
             // Folder identities and labels are setup data; track rows can follow
             // after this device chooses which existing folders to reuse.
             for source in self.source.list_sources().sources.iter() {
-                let roots = self.roots(source.id.as_str()).await?;
+                let roots = self.roots(source.id.to_string()).await.map_err(error)?;
                 let records = roots
                     .into_iter()
                     .map(|root| ConnectRecord {
@@ -3513,5 +3588,33 @@ fn connection_label(value: &str) -> String {
         "Via relay" => localization::tr("Via relay"),
         "Direct" => localization::tr("Direct"),
         other => other.into(),
+    }
+}
+
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
+pub struct ConnectSubscription {
+    changes: tokio::sync::Mutex<tokio::sync::watch::Receiver<Status>>,
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl ConnectOwner {
+    pub fn changes(&self) -> Arc<ConnectSubscription> {
+        let mut changes = self.subscribe();
+        changes.mark_changed();
+        Arc::new(ConnectSubscription {
+            changes: tokio::sync::Mutex::new(changes),
+        })
+    }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl ConnectSubscription {
+    pub async fn next(&self) -> Result<Status, ActionError> {
+        let mut changes = self.changes.lock().await;
+        changes
+            .changed()
+            .await
+            .map_err(|failure| ActionError::Failed(failure.to_string()))?;
+        Ok(changes.borrow_and_update().clone())
     }
 }

@@ -359,6 +359,7 @@ pub enum LyricsOrigin {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum LyricsRole {
     Original,
     Translation,
@@ -410,6 +411,7 @@ pub struct LyricsCue {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum LyricsAgentRole {
     Main,
     Voice,
@@ -418,6 +420,7 @@ pub enum LyricsAgentRole {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct LyricsAgent {
     pub id: String,
     pub role: LyricsAgentRole,
@@ -566,6 +569,7 @@ impl LyricsBundle {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum LyricsSearchContent {
     Instrumental,
     Inline {
@@ -601,6 +605,7 @@ impl LyricsSearchContent {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct LyricsSearchResult {
     pub provider: ExternalLyricsProvider,
     pub id: String,
@@ -612,12 +617,14 @@ pub struct LyricsSearchResult {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct LyricsQuery {
     pub artist_name: String,
     pub track_name: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct JapaneseReadingSegment {
     pub surface: String,
     pub furigana: Option<String>,
@@ -1211,4 +1218,9 @@ mod tests {
             agents: Vec::new(),
         }
     }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub fn external_lyrics_provider_title(provider: ExternalLyricsProvider) -> String {
+    localization::tr(provider.title())
 }

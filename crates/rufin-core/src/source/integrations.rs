@@ -9,6 +9,7 @@ pub struct FileIntegration {
     pub music_source: bool,
 }
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
 impl SourceOwner {
     pub async fn save_files(
         &self,
@@ -18,54 +19,61 @@ impl SourceOwner {
         name: String,
         settings: sources::FileSourceSettings,
         credentials: sources::FileCredentialsEdit,
-    ) -> Result<SourceId, String> {
-        if let Some(source_id) = source_id {
-            let input = SourceSettingsChange::Files {
-                source_id: source_id.clone(),
-                name,
-                settings,
-                credentials,
-            };
-            let result = if integration {
-                self.update_file_integration(input)
-            } else {
-                self.update_source(input)
-            };
-            result.recv().await.map_err(string_error)??;
-            Ok(source_id)
-        } else {
-            let credentials = sources::FileCredentials {
-                secret: credentials.secret.unwrap_or_default(),
-                headers: credentials.headers.unwrap_or_default(),
-            };
-            let input = if smb {
-                SourceSetup::Smb {
+    ) -> sources::SourceResult<SourceId> {
+        let result: Result<SourceId, String> = async {
+            if let Some(source_id) = source_id {
+                let input = SourceSettingsChange::Files {
+                    source_id: source_id.clone(),
                     name,
                     settings,
                     credentials,
-                }
+                };
+                let result = if integration {
+                    self.update_file_integration(input)
+                } else {
+                    self.update_source(input)
+                };
+                result.recv().await.map_err(string_error)??;
+                Ok(source_id)
             } else {
-                SourceSetup::WebDav {
-                    name,
-                    settings,
-                    credentials,
+                let credentials = sources::FileCredentials {
+                    secret: credentials.secret.unwrap_or_default(),
+                    headers: credentials.headers.unwrap_or_default(),
+                };
+                let input = if smb {
+                    SourceSetup::Smb {
+                        name,
+                        settings,
+                        credentials,
+                    }
+                } else {
+                    SourceSetup::WebDav {
+                        name,
+                        settings,
+                        credentials,
+                    }
+                };
+                if integration {
+                    self.configure_file_integration(input)
+                        .recv()
+                        .await
+                        .map_err(string_error)?
+                } else {
+                    self.configure_source(input)
+                        .recv()
+                        .await
+                        .map_err(string_error)?
+                        .map(|selected| selected.source_id)
                 }
-            };
-            if integration {
-                self.configure_file_integration(input)
-                    .recv()
-                    .await
-                    .map_err(string_error)?
-            } else {
-                self.configure_source(input)
-                    .recv()
-                    .await
-                    .map_err(string_error)?
-                    .map(|selected| selected.source_id)
             }
         }
+        .await;
+        result.map_err(SourceError::Other)
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceOwner {
     pub fn file_integrations(&self) -> Vec<FileIntegration> {
         let stored = self.shared.settings.load();
         stored
@@ -83,22 +91,9 @@ impl SourceOwner {
             })
             .collect()
     }
+}
 
-    pub fn file_integration_settings(
-        &self,
-        id: &SourceId,
-    ) -> Result<Option<EditableSource>, String> {
-        let stored = self.shared.settings.load();
-        stored
-            .sources
-            .configured
-            .iter()
-            .chain(&stored.sources.integrations)
-            .find(|s| &s.configuration.source_id == id)
-            .map(|s| editable_source(&s.configuration))
-            .transpose()
-    }
-
+impl SourceOwner {
     /// Authorize a reusable connection without selecting or scanning a music source.
     pub fn configure_file_integration(
         &self,

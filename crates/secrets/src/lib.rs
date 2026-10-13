@@ -1,3 +1,6 @@
+#[cfg(feature = "bindings")]
+uniffi::setup_scaffolding!();
+
 use std::collections::HashMap;
 use std::fs;
 #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
@@ -27,6 +30,7 @@ static SECRET_SERVICE: Mutex<Option<(tokio::runtime::Runtime, Arc<oo7::Keyring>)
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum SecretStorageMode {
     ConfigFile,
     SystemKeyring,

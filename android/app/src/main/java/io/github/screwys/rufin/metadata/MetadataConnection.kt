@@ -7,6 +7,7 @@ import androidx.compose.runtime.*
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.core.*
 import io.github.screwys.rufin.shared.rufin_core.MetadataEditor
+import io.github.screwys.rufin.shared.rufin_core.MetadataItemId
 import io.github.screwys.rufin.shared.rufin_core.MetadataEditorSnapshot
 import io.github.screwys.rufin.shared.sources.ArtworkStorage
 import io.github.screwys.rufin.shared.metadata_lookup.ArtworkResult
@@ -54,8 +55,14 @@ internal class MetadataConnection(
             state = null
             artwork = null
             results = null
-            val library = snapshotFlow { model.browse.library }.filterNotNull().first()
-            val editor = library.editMetadata(kind, mediaUri)
+            val source = snapshotFlow { model.sourceOwner }.filterNotNull().first()
+            val item = when (kind) {
+                "track" -> MetadataItemId.Track(mediaUri)
+                "album", "album_header" -> MetadataItemId.Album(mediaUri)
+                "artist" -> MetadataItemId.Artist(mediaUri)
+                else -> error("Choose a track, album or artist")
+            }
+            val editor = MetadataEditor.open(source, item)
             bridge = editor
             artworkRevision = null
             refresh(editor)

@@ -8,10 +8,10 @@ mod records;
 mod search;
 pub use records::{
     AndroidArtistLink, AndroidArtistReleaseGroup, AndroidBreadcrumb, AndroidBrowseDisplay,
-    AndroidBrowseRow, AndroidCollectionCategory, AndroidDetailSummary, AndroidFieldValue,
-    AndroidMusicFolder, AndroidMusicFolderState, AndroidPinPage, AndroidPlaylistImport,
-    AndroidRatingState, AndroidRouteDescriptor, AndroidRouteSetting, AndroidScrollSection,
-    AndroidSortField, AndroidSortSelection,
+    AndroidBrowseItem, AndroidBrowseRow, AndroidCollectionCategory, AndroidDetailSummary,
+    AndroidFieldValue, AndroidMusicFolder, AndroidMusicFolderState, AndroidPinPage,
+    AndroidPlaylistImport, AndroidRouteDescriptor, AndroidRouteSetting, AndroidScrollSection,
+    AndroidSortField,
 };
 
 use library::{CollectionRows, ReadCancellation, SongQuery, SongScope, SongSelection};
@@ -71,63 +71,16 @@ fn release_index(class: library::AlbumReleaseClass) -> usize {
 }
 
 fn browse_display(key: LibraryListKey, settings: &LibraryListSettings) -> AndroidBrowseDisplay {
-    let id = |value: serde_json::Value| value.as_str().expect("Display setting name").to_string();
-    let layouts = [
-        LibraryLayout::Row,
-        LibraryLayout::Grid,
-        LibraryLayout::Detail,
-    ]
-    .into_iter()
-    .filter(|layout| key.supports_layout(*layout))
-    .map(|layout| AndroidSortField {
-        id: id(serde_json::to_value(layout).expect("Layout serialization")),
-        title: localization::tr(match layout {
-            LibraryLayout::Row => "Rows",
-            LibraryLayout::Grid => "Grid",
-            LibraryLayout::Detail => "Detail",
-        }),
-    })
-    .collect();
-    let sizes = [
-        DisplaySize::Compact,
-        DisplaySize::Default,
-        DisplaySize::Large,
-    ]
-    .into_iter()
-    .map(|size| AndroidSortField {
-        id: id(serde_json::to_value(size).expect("Size serialization")),
-        title: localization::tr(match size {
-            DisplaySize::Compact => "Compact",
-            DisplaySize::Default => "Default",
-            DisplaySize::Large => "Large",
-        }),
-    })
-    .collect();
-    let grid_spacings = [
-        DisplaySize::Compact,
-        DisplaySize::Default,
-        DisplaySize::Large,
-    ]
-    .into_iter()
-    .map(|size| AndroidSortField {
-        id: id(serde_json::to_value(size).expect("Spacing serialization")),
-        title: localization::tr(match size {
-            DisplaySize::Compact => "Small",
-            DisplaySize::Default => "Default",
-            DisplaySize::Large => "Wide",
-        }),
-    })
-    .collect();
     AndroidBrowseDisplay {
-        layout: id(serde_json::to_value(settings.layout).expect("Layout serialization")),
-        show_header: settings.display.show_header,
-        layouts,
-        size: id(serde_json::to_value(settings.display.size).expect("Size serialization")),
-        grid_spacing: id(
-            serde_json::to_value(settings.display.grid_spacing).expect("Spacing serialization")
-        ),
-        sizes,
-        grid_spacings,
+        settings: settings.clone(),
+        layouts: [
+            LibraryLayout::Row,
+            LibraryLayout::Grid,
+            LibraryLayout::Detail,
+        ]
+        .into_iter()
+        .filter(|layout| key.supports_layout(*layout))
+        .collect(),
     }
 }
 
@@ -138,10 +91,6 @@ fn queue_placement(value: &str) -> Result<rufin_core::playback::QueuePlacement, 
         "append" => Ok(rufin_core::playback::QueuePlacement::Last),
         _ => Err(error("Unknown queue placement")),
     }
-}
-
-fn route_json(route: Route) -> String {
-    serde_json::to_string(&route).expect("Route serialization")
 }
 
 fn context_caption(
@@ -171,14 +120,6 @@ fn context_caption(
     })
 }
 
-fn core_route_kind(route: &Route) -> String {
-    match serde_json::to_value(route).expect("Route serialization") {
-        serde_json::Value::String(kind) => kind,
-        serde_json::Value::Object(value) => value.into_iter().next().expect("Route variant").0,
-        _ => unreachable!("Core route variant"),
-    }
-}
-
 fn home_section(row: &mut AndroidBrowseRow, block: library::HomeBlockKind) {
     row.section_id = serde_json::to_value(block)
         .expect("Home block serialization")
@@ -206,46 +147,8 @@ fn artist_row(row: library::ArtistRow, album_artist: bool) -> AndroidBrowseRow {
         }
     });
     AndroidBrowseRow {
-        track_key: None,
-        album_key: None,
-        album_media_uri: None,
-        kind: "artist".into(),
-        playback_context_id: Some(format!(
-            "{}:{}",
-            if album_artist {
-                "album-artist"
-            } else {
-                "artist"
-            },
-            row.media_uri
-        )),
-        fields: Vec::new(),
-        artist: row.name.clone(),
-        album: String::new(),
-        key: row.object_id,
-        detail_route: Some(route_json(if album_artist {
-            Route::AlbumArtistDetail(row.media_uri.clone())
-        } else {
-            Route::ArtistDetail(row.media_uri.clone())
-        })),
-        media_uri: row.media_uri,
-        title: row.name,
-        subtitle: String::new(),
-        favorite: row.favorite,
-        duration_millis: row.duration_millis.max(0) as u64,
-        pin: pin.map(|pin| serde_json::to_string(&pin).expect("Pin serialization")),
-        section: String::new(),
-        section_id: String::new(),
-        section_kind: String::new(),
-        section_refreshable: false,
-        year: None,
-        track_count: 0,
-        source_id: None,
-        source_name: String::new(),
-        last_played: None,
-        writable: false,
-        downloaded: row.track_count > 0 && row.downloaded_count == row.track_count,
-        artwork_identity: row.artwork_binding,
+        pin,
+        ..AndroidBrowseRow::new(AndroidBrowseItem::Artist { row, album_artist })
     }
 }
 
@@ -392,14 +295,6 @@ impl AndroidBrowseQuery {
         Ok(self.query().await?.songs())
     }
 
-    async fn target_selection(&self) -> Result<SongSelection, AndroidError> {
-        self.query()
-            .await
-            .map_err(error)?
-            .collection_selection(matches!(self.route, Route::Folders { .. }))
-            .ok_or_else(|| error("Choose a collection"))
-    }
-
     fn context_id(&self) -> Arc<str> {
         let context = match &self.route {
             Route::AlbumDetail(uri) => format!("album:{uri}"),
@@ -415,7 +310,10 @@ impl AndroidBrowseQuery {
             Route::MoodDetail(key) => format!("mood:{key}"),
             Route::PlaylistDetail(key) => format!("playlist:{key}"),
             Route::SmartPlaylistDetail(key) => format!("smart-playlist:{key}"),
-            _ => format!("android:{}", route_json(self.route.clone())),
+            _ => format!(
+                "android:{}",
+                serde_json::to_string(&self.route).expect("Route serialization")
+            ),
         };
         format!("{context}|query={}|source={}|folder={:?}|sort={:?}|descending={}|favorites={}|downloaded={}",
             self.filter, self.selected.as_ref().map_or("rufin", |selected| selected.source_id.as_str()),
@@ -434,5 +332,23 @@ impl AndroidBrowseQuery {
                     | Route::ArtistFavoriteTracks(_)
                     | Route::AlbumArtistFavoriteTracks(_)
             )
+    }
+}
+
+#[uniffi::export]
+impl AndroidBrowseQuery {
+    pub async fn selection(self: Arc<Self>) -> Result<Arc<SongSelection>, AndroidError> {
+        let runtime = self.runtime.clone();
+        runtime
+            .spawn(async move {
+                self.query()
+                    .await
+                    .map_err(error)?
+                    .collection_selection(matches!(self.route, Route::Folders { .. }))
+                    .map(Arc::new)
+                    .ok_or_else(|| error("Choose a collection"))
+            })
+            .await
+            .map_err(error)?
     }
 }

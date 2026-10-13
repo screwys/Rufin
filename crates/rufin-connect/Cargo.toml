@@ -6,7 +6,11 @@ license.workspace = true
 rust-version = "1.96"
 publish = false
 
+[features]
+bindings = ["dep:uniffi"]
+
 [dependencies]
+uniffi = { workspace = true, optional = true }
 anyhow = "1"
 age.workspace = true
 base64.workspace = true

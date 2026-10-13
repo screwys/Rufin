@@ -424,6 +424,7 @@ mod tests {
     }
 }
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
 pub fn playback_position_for_lyrics_position(position_millis: u64, offset_millis: i64) -> u64 {
     if offset_millis >= 0 {
         position_millis.saturating_sub(offset_millis.unsigned_abs())

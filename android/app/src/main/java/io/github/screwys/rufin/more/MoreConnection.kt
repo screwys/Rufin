@@ -10,12 +10,14 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.Calendar
 import java.util.Locale
-import org.json.JSONArray
-import org.json.JSONObject
+import io.github.screwys.rufin.shared.rufin_core.*
+import io.github.screwys.rufin.shared.library.ActivityOverview
+import io.github.screwys.rufin.shared.library.CalendarActivityPeriod
 
 internal enum class ReleaseCheck { Idle, Checking, Success, Error }
 
 internal data class OverviewPeriod(val year: Int, val month: Int?) {
+    val native get() = month?.let { CalendarActivityPeriod.Month(year, it.toUByte()) } ?: CalendarActivityPeriod.Year(year)
     val key get() = if (month == null) year.toString() else String.format(Locale.ROOT, "%04d-%02d", year, month)
 }
 
@@ -23,9 +25,9 @@ internal data class OverviewPeriod(val year: Int, val month: Int?) {
 internal class MoreConnection(private val connection: RufinConnection, scope: CoroutineScope) {
     var bridge by mutableStateOf<AndroidMore?>(null)
         private set
-    var releases by mutableStateOf<AndroidReleaseHistory?>(null)
+    var releases by mutableStateOf<ReleaseHistory?>(null)
         private set
-    var report by mutableStateOf<AndroidActivityOverview?>(null)
+    var report by mutableStateOf<ActivityOverview?>(null)
         private set
     var releaseCheck by mutableStateOf(ReleaseCheck.Idle)
         private set
@@ -35,8 +37,15 @@ internal class MoreConnection(private val connection: RufinConnection, scope: Co
         private set
     var reportLoading by mutableStateOf(false)
         private set
-    var preferences by mutableStateOf<JSONObject?>(null)
+    var preferences by mutableStateOf<ActivityOverviewSettings?>(null)
         private set
+    var releaseError by mutableStateOf<String?>(null)
+        private set
+    private var releasesOwner by mutableStateOf<ReleaseUpdateOwner?>(null)
+    private var settingsOwner: SettingsOwner? = null
+    var reportPeriod by mutableStateOf<OverviewPeriod?>(null)
+        private set
+    val reportTitle get() = reportPeriod?.let { periodLabel(it.native) }.orEmpty()
     private val now = Calendar.getInstance()
     private val currentMonth = OverviewPeriod(now.get(Calendar.YEAR), now.get(Calendar.MONTH) + 1)
     var periods by mutableStateOf(listOf(currentMonth))
@@ -60,33 +69,50 @@ internal class MoreConnection(private val connection: RufinConnection, scope: Co
                 bridge = null
                 startupPeriod = null
                 if (!ready || service == null) return@collectLatest
-                val owner = service.runtime.value?.getOrNull()?.more() ?: return@collectLatest
-                val changes = owner.subscribeReleases()
+                val runtime = service.runtime.value?.getOrNull() ?: return@collectLatest
+                val owner = runtime.more()
+                val releaseOwner = runtime.releaseUpdates()
+                val settings = runtime.settings()
+                val changes = runtime.releaseEvents()
+                releasesOwner = releaseOwner
+                settingsOwner = settings
                 try {
-                    preferences = withContext(Dispatchers.IO) { JSONObject(owner.activityPreferences()) }
+                    preferences = withContext(Dispatchers.IO) { settings.activityPreferences() }
                     releaseCheck = ReleaseCheck.Idle
                     bridge = owner
-                    startupPeriod = owner.startupActivityPeriod()?.let { OverviewPeriod(it.year, it.month?.toInt()) }
-                    owner.checkReleasesAutomatically()
+                    startupPeriod = when (val period = owner.startupActivityPeriod()) {
+                        is CalendarActivityPeriod.Month -> OverviewPeriod(period.year, period.month.toInt())
+                        is CalendarActivityPeriod.Year -> OverviewPeriod(period.v1, null)
+                        else -> null
+                    }
+                    releaseOwner.check()
                     while (isActive) {
                         val next = changes.next()
-                        releases = next
-                        next.notificationVersion?.let { version ->
-                            connection.showFeedback(translate("New release is available"))
-                            owner.markReleaseSeen(version)
+                        when (next) {
+                            is ReleaseUpdate.Refreshed -> {
+                                releases = next.history
+                                releaseError = null
+                                next.notificationVersion?.let { version ->
+                                    connection.showFeedback(translate("New release is available"))
+                                    withContext(Dispatchers.IO) { releaseOwner.markSeen(version) }
+                                }
+                            }
+                            is ReleaseUpdate.Failed -> releaseError = next.error
+                            is ReleaseUpdate.Updated -> releases = releases?.copy(installedVersion = next.version, availableVersion = null)
+                            else -> Unit
                         }
                     }
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (error: Exception) { connection.runAction { throw error } }
-                finally { bridge = null; changes.destroy(); owner.destroy() }
+                finally { bridge = null; releasesOwner = null; settingsOwner = null; changes.destroy(); owner.destroy(); releaseOwner.destroy(); settings.destroy() }
             }
         }
         scope.launch {
-            snapshotFlow { bridge to releaseCheckIntervalHours }.collectLatest { (owner, hours) ->
+            snapshotFlow { releasesOwner to releaseCheckIntervalHours }.collectLatest { (owner, hours) ->
                 if (owner == null) return@collectLatest
                 while (isActive) {
                     delay(hours * 60 * 60 * 1000)
-                    owner.checkReleasesAutomatically()
+                    owner.check()
                 }
             }
         }
@@ -101,8 +127,9 @@ internal class MoreConnection(private val connection: RufinConnection, scope: Co
                 try {
                     val loaded = owner.activityOverview(period.year, period.month?.toUByte())
                     report = loaded
-                    if (autoplay && preferences?.optBoolean("autoplay_first_track", true) != false) {
-                        loaded.tracks.firstOrNull()?.let { connection.openOverview(it, loaded.key) }
+                    reportPeriod = period
+                    if (autoplay && preferences?.autoplayFirstTrack != false) {
+                        loaded.tracks.firstOrNull()?.let { connection.openOverview(it.mediaUri, it.title, "track", period.key) }
                     }
                 }
                 catch (cancelled: CancellationException) { throw cancelled }
@@ -153,7 +180,7 @@ internal class MoreConnection(private val connection: RufinConnection, scope: Co
         selectedPeriod = period
         yearly = period.month == null
         initializedPeriods = true
-        connection.runAction { bridge?.markActivityOpened(period.year, period.month?.toUByte()) }
+        connection.runAction { withContext(Dispatchers.IO) { settingsOwner?.markActivityOpened(period.native) } }
     }
 
     fun retryOverview() { if (overviewPrepared) reportRevision++ else prepareOverview(autoplay = false) }
@@ -164,23 +191,26 @@ internal class MoreConnection(private val connection: RufinConnection, scope: Co
         periods.getOrNull(index + if (older) 1 else -1)?.let { selectedPeriod = it }
     }
     fun choosePeriod(period: OverviewPeriod) { selectedPeriod = period }
-    fun updatePreference(key: String, value: Any) = connection.runAction {
+    fun updatePreferences(update: (ActivityOverviewSettings) -> ActivityOverviewSettings) = connection.runAction {
         preferenceEdits.withLock {
-            val owner = bridge ?: return@withLock
-            preferences = JSONObject(owner.setActivityPreference(key, JSONArray().put(value).toString().removeSurrounding("[", "]")))
+            val owner = settingsOwner ?: return@withLock
+            preferences = withContext(Dispatchers.IO) {
+                owner.setActivityPreferences(update(owner.activityPreferences()))
+                owner.activityPreferences()
+            }
         }
     }
     fun checkReleases() {
         if (releaseCheck == ReleaseCheck.Checking || bridge == null) return
         releaseCheck = ReleaseCheck.Checking
         connection.runAction {
-            try { releaseCheck = if (bridge?.checkReleases() == true) ReleaseCheck.Success else ReleaseCheck.Error }
+            try { releaseCheck = if (releasesOwner?.checkNow() == true) ReleaseCheck.Success else ReleaseCheck.Error }
             catch (cancelled: CancellationException) { releaseCheck = ReleaseCheck.Idle; throw cancelled }
             catch (error: Exception) { releaseCheck = ReleaseCheck.Error; throw error }
         }
     }
     fun exportOverview(dark: Boolean, foreground: Int, background: Int, accent: Int) {
-        if (exporting || reportLoading || reportError != null || report?.key != selectedPeriod.key) return
+        if (exporting || reportLoading || reportError != null || reportPeriod != selectedPeriod) return
         val owner = bridge ?: return
         val period = selectedPeriod
         exporting = true

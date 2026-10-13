@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct BackupSettings {
     pub enabled: bool,
     pub retention_count: u32,
@@ -25,6 +26,8 @@ impl Default for BackupSettings {
     }
 }
 
+#[derive(Clone)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct BackupPreview {
     pub staged: Arc<backup::StagedBackup>,
     pub removed_sources: Vec<String>,
@@ -52,5 +55,18 @@ mod tests {
         let restored: BackupSettings =
             serde_json::from_str(&serde_json::to_string(&configured).unwrap()).unwrap();
         assert_eq!(restored.retention_count, 7);
+    }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl BackupPreview {
+    pub fn manifest(&self) -> backup::BackupManifest {
+        self.staged.manifest.clone()
+    }
+    pub fn removed_sources(&self) -> Vec<String> {
+        self.removed_sources.clone()
+    }
+    pub fn selected_contents(&self) -> backup::BackupContents {
+        self.contents
     }
 }

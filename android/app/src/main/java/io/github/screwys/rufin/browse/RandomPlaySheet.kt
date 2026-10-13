@@ -23,34 +23,36 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import io.github.screwys.rufin.core.translate
 import kotlinx.coroutines.CancellationException
-import org.json.JSONObject
+import io.github.screwys.rufin.shared.rufin_core.RandomPlaySettings
+import io.github.screwys.rufin.shared.rufin_core.Route
+import io.github.screwys.rufin.shared.library.PlayedFilter
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 internal fun RandomPlaySheet(model: RufinConnection, browse: BrowseConnection, onDismiss: () -> Unit) {
     val library = browse.library
-    var settings by remember { mutableStateOf<String?>(null) }
+    var settings by remember { mutableStateOf<RandomPlaySettings?>(null) }
     var limit by remember { mutableStateOf("") }
     var minYear by remember { mutableStateOf("") }
     var maxYear by remember { mutableStateOf("") }
     var minEnabled by remember { mutableStateOf(false) }
     var maxEnabled by remember { mutableStateOf(false) }
-    var filter by remember { mutableStateOf("All") }
+    var filter by remember { mutableStateOf(PlayedFilter.ALL) }
     var genreTitle by remember { mutableStateOf("") }
     var genres by remember { mutableStateOf(false) }
     var playedFilter by remember { mutableStateOf(false) }
     LaunchedEffect(library) {
         try {
-            val raw = library?.randomSettings() ?: return@LaunchedEffect
-            val saved = JSONObject(raw)
-            settings = raw
-            limit = saved.getInt("limit").toString()
-            minEnabled = !saved.isNull("min_year")
-            maxEnabled = !saved.isNull("max_year")
-            minYear = if (minEnabled) saved.getInt("min_year").toString() else ""
-            maxYear = if (maxEnabled) saved.getInt("max_year").toString() else ""
-            filter = saved.getString("played_filter")
+            if (library == null) return@LaunchedEffect
+            val saved = model.connectedService().runtime.value!!.getOrThrow().settings().use { it.randomPreferences() }
+            settings = saved
+            limit = saved.limit.toString()
+            minEnabled = saved.minYear != null
+            maxEnabled = saved.maxYear != null
+            minYear = saved.minYear?.toString().orEmpty()
+            maxYear = saved.maxYear?.toString().orEmpty()
+            filter = saved.playedFilter
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { model.runAction { throw error } }
     }
@@ -61,18 +63,16 @@ internal fun RandomPlaySheet(model: RufinConnection, browse: BrowseConnection, o
             catch (error: Exception) { model.runAction { throw error } }
         }
     }
-    val valid = settings != null && limit.toIntOrNull() != null &&
-        (!minEnabled || minYear.toIntOrNull() != null) && (!maxEnabled || maxYear.toIntOrNull() != null)
+    val valid = settings != null && limit.toULongOrNull() != null &&
+        (!minEnabled || minYear.toUShortOrNull() != null) && (!maxEnabled || maxYear.toUShortOrNull() != null)
     fun play(placement: String) {
         model.runAction {
-            val saved = JSONObject(settings!!)
-            saved.put("limit", limit.toInt())
-            saved.put("min_year", if (minEnabled) minYear.toInt() else JSONObject.NULL)
-            saved.put("max_year", if (maxEnabled) maxYear.toInt() else JSONObject.NULL)
-            saved.put("played_filter", filter)
+            val saved = settings!!.copy(limit = limit.toULong(),
+                minYear = if (minEnabled) minYear.toUShort() else null,
+                maxYear = if (maxEnabled) maxYear.toUShort() else null, playedFilter = filter)
             model.connectedService().playRequest {
-                val queued = library?.randomPlay(saved.toString(), placement) == true
-                if (queued) onDismiss() else error(translate("No matching tracks found"))
+                val empty = library?.randomPlay(saved, placement) != false
+                if (!empty) onDismiss() else error(translate("No matching tracks found"))
             }
         }
     }
@@ -91,8 +91,8 @@ internal fun RandomPlaySheet(model: RufinConnection, browse: BrowseConnection, o
                 trailing = { RufinIcon("rufin-go-next-symbolic", null, Modifier.size(24.dp)) },
                 modifier = Modifier.clickable(enabled = settings != null) { genres = true })
             SettingsRow(translate("Play filter"), summary = translate(when (filter) {
-                "Unplayed" -> "Only unplayed tracks"
-                "Played" -> "Only played tracks"
+                PlayedFilter.UNPLAYED -> "Only unplayed tracks"
+                PlayedFilter.PLAYED -> "Only played tracks"
                 else -> "All tracks"
             }), trailing = { RufinIcon("rufin-go-next-symbolic", null, Modifier.size(24.dp)) },
                 modifier = Modifier.clickable(enabled = settings != null) { playedFilter = true })
@@ -114,7 +114,7 @@ internal fun RandomPlaySheet(model: RufinConnection, browse: BrowseConnection, o
     }
     if (playedFilter) ModalBottomSheet(onDismissRequest = { playedFilter = false }) {
         Text(translate("Play filter"), Modifier.padding(24.dp), style = MaterialTheme.typography.titleLarge)
-        listOf("All" to "All tracks", "Unplayed" to "Only unplayed tracks", "Played" to "Only played tracks").forEach { (id, title) ->
+        listOf(PlayedFilter.ALL to "All tracks", PlayedFilter.UNPLAYED to "Only unplayed tracks", PlayedFilter.PLAYED to "Only played tracks").forEach { (id, title) ->
             ListItem(headlineContent = { Text(translate(title)) }, leadingContent = { RadioButton(filter == id, null) },
                 modifier = Modifier.clickable { filter = id; playedFilter = false })
         }
@@ -122,7 +122,7 @@ internal fun RandomPlaySheet(model: RufinConnection, browse: BrowseConnection, o
     }
     if (genres) RandomGenreSheet(model, browse, { genres = false }) { route ->
         model.runAction {
-            settings = library?.randomGenre(settings!!, route)
+            settings = settings?.copy(genre = library?.randomGenre(route))
             genres = false
         }
     }
@@ -142,7 +142,7 @@ private fun RandomYearInput(label: String, year: String, setYear: (String) -> Un
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RandomGenreSheet(model: RufinConnection, browse: BrowseConnection, onDismiss: () -> Unit,
-    select: (String?) -> Unit,
+    select: (Route?) -> Unit,
 ) {
     var filter by remember { mutableStateOf("") }
     val library = browse.library

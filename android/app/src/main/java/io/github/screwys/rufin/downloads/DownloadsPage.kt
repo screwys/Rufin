@@ -16,7 +16,7 @@ import androidx.paging.LoadState
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import io.github.screwys.rufin.app.RufinConnection
-import io.github.screwys.rufin.core.AndroidDownloadJob
+import io.github.screwys.rufin.shared.downloads.DownloadQueueItem
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.core.trackCountText
 import io.github.screwys.rufin.player.PlayerConnection
@@ -33,7 +33,7 @@ internal fun DownloadsPage(model: RufinConnection, player: PlayerConnection, onS
     DisposableEffect(downloads) { downloads.queueVisible = true; onDispose { downloads.queueVisible = false } }
     val state = downloads.state
     val jobs = downloads.pages.collectAsLazyPagingItems()
-    var cancel by remember { mutableStateOf<AndroidDownloadJob?>(null) }
+    var cancel by remember { mutableStateOf<DownloadQueueItem?>(null) }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(trackCountText(state?.queues?.sumOf { it.downloadedTracks } ?: 0UL),
@@ -46,21 +46,23 @@ internal fun DownloadsPage(model: RufinConnection, player: PlayerConnection, onS
         }
         state?.notice?.let { Text(it, Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall) }
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 16.dp + LocalPlayerBottomPadding.current)) {
-            items(jobs.itemCount, key = jobs.itemKey { it.id }) { index ->
-                jobs[index]?.let { job ->
-                    val art = rememberArtwork(job.artworkIdentity, player, with(LocalDensity.current) { 56.dp.roundToPx() })
+            items(jobs.itemCount, key = jobs.itemKey { it.job.id }) { index ->
+                jobs[index]?.let { row ->
+                    val job = row.job
+                    val art = rememberArtwork(row.preview?.artworkBinding, player, with(LocalDensity.current) { 56.dp.roundToPx() })
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Artwork(art, Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)))
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                Text(translate(job.title), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
-                                if (job.subtitle.isNotBlank()) Text(job.subtitle, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                Text(job.subject.title(), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
+                                val subtitle = row.preview?.let { "${it.album} · ${it.artist}" }.orEmpty()
+                                if (subtitle.isNotBlank()) Text(subtitle, maxLines = 2, overflow = TextOverflow.Ellipsis,
                                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text("${job.completed}/${job.total} · ${translate(job.state)}", style = MaterialTheme.typography.bodySmall)
+                                Text("${job.completedTracks}/${job.totalTracks} · ${job.state.title()}", style = MaterialTheme.typography.bodySmall)
                             }
                             PlayerIconButton("rufin-window-close-symbolic", "Cancel", { cancel = job })
                         }
-                        LinearProgressIndicator(progress = { if (job.total == 0UL) 0f else job.completed.toFloat() / job.total.toFloat() },
+                        LinearProgressIndicator(progress = { if (job.totalTracks == 0UL) 0f else job.completedTracks.toFloat() / job.totalTracks.toFloat() },
                             modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
                     }
                 }

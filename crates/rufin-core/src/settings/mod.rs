@@ -1,6 +1,8 @@
 mod activity;
 mod player;
+mod preferences;
 pub use player::{PlayerPreferenceEdit, PlayerPreferenceOptions, PlayerPreferences, SettingsError};
+pub use preferences::{ApplicationPreferenceEdit, ApplicationPreferences};
 pub mod app;
 mod connect;
 pub mod context_menu;
@@ -589,46 +591,6 @@ impl SettingsOwner {
         self.file.appearance.subscribe()
     }
 
-    pub fn set_theme(&self, theme: ThemePreference) -> Result<(), String> {
-        self.restore(
-            move |stored| {
-                stored.ui.theme_preference = theme;
-                Ok(())
-            },
-            false,
-        )
-    }
-
-    pub fn set_accent(&self, accent: AccentPreference) -> Result<(), String> {
-        self.restore(
-            move |stored| {
-                stored.ui.accent_preference = accent;
-                Ok(())
-            },
-            false,
-        )
-    }
-
-    pub fn set_theme_accent(&self, theme: String, accent: String) -> Result<(), String> {
-        self.restore(
-            move |stored| {
-                stored.ui.theme_accents.insert(theme, accent);
-                Ok(())
-            },
-            false,
-        )
-    }
-
-    pub fn set_language(&self, language: String) -> Result<(), String> {
-        self.restore(
-            move |stored| {
-                stored.ui.language = localization::sanitize_language_preference(&language);
-                Ok(())
-            },
-            false,
-        )
-    }
-
     pub fn load(&self) -> UiSettings {
         self.file.load().ui
     }
@@ -642,73 +604,6 @@ impl SettingsOwner {
         (
             stored.ui.visualizer.fps_limit,
             stored.ui.visualizer.appearance.clone(),
-        )
-    }
-
-    pub fn suppress_fetched_lyrics(&self, media_uri: String) -> Result<(), String> {
-        self.restore(
-            move |stored| {
-                stored.ui.lyrics.suppress_auto_lyrics(&media_uri);
-                Ok(())
-            },
-            false,
-        )
-    }
-
-    pub fn set_activity_overview_field(
-        &self,
-        field: String,
-        value: serde_json::Value,
-    ) -> Result<(), String> {
-        self.restore(
-            move |stored| {
-                let settings = &mut stored.ui.activity_overview;
-                match field.as_str() {
-                    "autoplay_first_track" => {
-                        settings.autoplay_first_track =
-                            serde_json::from_value(value).map_err(|error| error.to_string())?
-                    }
-                    "dynamic_background" => {
-                        settings.dynamic_background =
-                            serde_json::from_value(value).map_err(|error| error.to_string())?
-                    }
-                    "background_image" => {
-                        settings.background_image =
-                            serde_json::from_value(value).map_err(|error| error.to_string())?
-                    }
-                    "tracks" => {
-                        settings.tracks =
-                            serde_json::from_value(value).map_err(|error| error.to_string())?
-                    }
-                    "artists" => {
-                        settings.artists =
-                            serde_json::from_value(value).map_err(|error| error.to_string())?
-                    }
-                    "albums" => {
-                        settings.albums =
-                            serde_json::from_value(value).map_err(|error| error.to_string())?
-                    }
-                    "genres" => {
-                        settings.genres =
-                            serde_json::from_value(value).map_err(|error| error.to_string())?
-                    }
-                    "result_count" => {
-                        settings.result_count =
-                            serde_json::from_value(value).map_err(|error| error.to_string())?
-                    }
-                    "show_comparison" => {
-                        settings.show_comparison =
-                            serde_json::from_value(value).map_err(|error| error.to_string())?
-                    }
-                    "show_rufin_in_headline" => {
-                        settings.show_rufin_in_headline =
-                            serde_json::from_value(value).map_err(|error| error.to_string())?
-                    }
-                    _ => return Err(localization::tr("This isn't available")),
-                }
-                Ok(())
-            },
-            false,
         )
     }
 
@@ -771,27 +666,6 @@ impl SettingsOwner {
         })
     }
 
-    pub fn remember_created_playlist(
-        &self,
-        source_id: Option<SourceId>,
-        playlist_id: String,
-        current: Option<bool>,
-    ) -> Result<(), String> {
-        self.file.update(|stored| {
-            stored.ui.sidebar.set_pinned(
-                SidebarPin::Playlist {
-                    source_id,
-                    playlist_id,
-                },
-                true,
-            );
-            if let Some(current) = current {
-                stored.ui.new_playlist_current = current;
-            }
-            Ok(())
-        })
-    }
-
     pub fn save(&self, settings: &UiSettings) -> Result<UiSettings, String> {
         self.save_ui(settings)
     }
@@ -802,12 +676,15 @@ impl SettingsOwner {
     ) -> Result<(), String> {
         self.restore(move |stored| edit(&mut stored.ui), false)
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SettingsOwner {
     pub fn set_download_location(
         &self,
         source_id: SourceId,
         location: Option<downloads::DownloadDirectory>,
-    ) -> Result<(), String> {
+    ) -> Result<(), SettingsError> {
         self.restore(
             move |stored| {
                 stored.ui.set_download_location(source_id, location);
@@ -815,14 +692,20 @@ impl SettingsOwner {
             },
             false,
         )
+        .map_err(Into::into)
     }
+}
 
+impl SettingsOwner {}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SettingsOwner {
     pub fn set_download_rule(
         &self,
         source_id: SourceId,
         rule: DownloadRule,
         enabled: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), SettingsError> {
         self.restore(
             move |stored| {
                 let mut rules = stored.ui.download_rules(&source_id);
@@ -832,13 +715,17 @@ impl SettingsOwner {
             },
             false,
         )
+        .map_err(Into::into)
     }
+}
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SettingsOwner {
     pub fn set_download_quality(
         &self,
         source_id: SourceId,
         quality: playback::StreamQuality,
-    ) -> Result<(), String> {
+    ) -> Result<(), SettingsError> {
         self.restore(
             move |stored| {
                 stored.ui.set_download_quality(source_id, quality);
@@ -846,9 +733,13 @@ impl SettingsOwner {
             },
             false,
         )
+        .map_err(Into::into)
     }
+}
 
-    pub fn clear_download_rules(&self, source_id: SourceId) -> Result<(), String> {
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SettingsOwner {
+    pub fn clear_download_rules(&self, source_id: SourceId) -> Result<(), SettingsError> {
         self.restore(
             move |stored| {
                 stored
@@ -858,6 +749,7 @@ impl SettingsOwner {
             },
             false,
         )
+        .map_err(Into::into)
     }
 }
 
@@ -1627,5 +1519,73 @@ mod tests {
         load_scrobbling_settings(&file, &secrets);
 
         assert!(file.load().scrobbling_secrets_present);
+    }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SettingsOwner {
+    pub fn download_settings(&self, source_id: SourceId) -> downloads::SourceDownloadSettings {
+        self.load().download_settings(&source_id)
+    }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SettingsOwner {
+    pub fn suppress_fetched_lyrics(&self, media_uri: String) -> Result<(), SettingsError> {
+        self.restore(
+            move |stored| {
+                stored.ui.lyrics.suppress_auto_lyrics(&media_uri);
+                Ok(())
+            },
+            false,
+        )
+        .map_err(Into::into)
+    }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SettingsOwner {
+    pub fn set_theme(&self, theme: ThemePreference) -> Result<(), SettingsError> {
+        self.restore(
+            move |stored| {
+                stored.ui.theme_preference = theme;
+                Ok(())
+            },
+            false,
+        )
+        .map_err(Into::into)
+    }
+
+    pub fn set_accent(&self, accent: AccentPreference) -> Result<(), SettingsError> {
+        self.restore(
+            move |stored| {
+                stored.ui.accent_preference = accent;
+                Ok(())
+            },
+            false,
+        )
+        .map_err(Into::into)
+    }
+
+    pub fn set_theme_accent(&self, theme: String, accent: String) -> Result<(), SettingsError> {
+        self.restore(
+            move |stored| {
+                stored.ui.theme_accents.insert(theme, accent);
+                Ok(())
+            },
+            false,
+        )
+        .map_err(Into::into)
+    }
+
+    pub fn set_language(&self, language: String) -> Result<(), SettingsError> {
+        self.restore(
+            move |stored| {
+                stored.ui.language = localization::sanitize_language_preference(&language);
+                Ok(())
+            },
+            false,
+        )
+        .map_err(Into::into)
     }
 }

@@ -1,5 +1,10 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.shared.rufin_core.LibraryField
+import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
+import io.github.screwys.rufin.shared.rufin_core.DisplaySize
+
+import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.app.RufinConnection
 
 import androidx.compose.runtime.*
@@ -31,8 +36,7 @@ internal class BrowsePage(
         private set
     var sortFields by mutableStateOf<List<AndroidSortField>>(emptyList())
         private set
-    var sortSelection by mutableStateOf<AndroidSortSelection?>(null)
-        private set
+    val sortSelection get() = capturedDisplay?.settings
     private var capturedDisplay by mutableStateOf<AndroidBrowseDisplay?>(null)
     val displaySettings get() = if (artistAlbums) browse.artistAlbumsDisplay ?: capturedDisplay else capturedDisplay
     var breadcrumbs by mutableStateOf<List<AndroidBreadcrumb>>(emptyList())
@@ -41,7 +45,7 @@ internal class BrowsePage(
         private set
     private val artistAlbums get() = releaseGroupId != null ||
         ((location.kind in listOf("artist", "ArtistDetail", "AlbumArtistDetail", "ArtistDiscography", "AlbumArtistDiscography") ||
-            summary?.mode in listOf("ArtistDetail", "AlbumArtistDetail", "ArtistDiscography", "AlbumArtistDiscography")) && options.category == "albums")
+            summary?.mode?.kind in listOf("ArtistDetail", "AlbumArtistDetail", "ArtistDiscography", "AlbumArtistDiscography")) && options.category == "albums")
     var summary by mutableStateOf<AndroidDetailSummary?>(null)
         private set
     var detailTrackFields by mutableStateOf<List<AndroidSortField>>(emptyList())
@@ -58,7 +62,7 @@ internal class BrowsePage(
     val pages: Flow<PagingData<BrowseItem>> = data.cachedIn(scope)
 
     private val routeId get() = browse.routes.firstOrNull { it.route == location.route }?.id
-    val covers get() = displaySettings?.layout == "Grid"
+    val covers get() = displaySettings?.layout == LibraryLayout.GRID
     val hasActiveFilters get() = options.filter.isNotBlank() ||
         (supportsFavoriteFilter && options.favoritesOnly) || (supportsDownloadedFilter && options.downloadedOnly)
     fun resetFilters() {
@@ -68,7 +72,7 @@ internal class BrowsePage(
             options.downloadedOnly = false
         }
     }
-    val supportsLetterIndex get() = !embedded && sortSelection?.id in listOf("Name", "Title", "Artist", "AlbumArtist", "Album", "Genre")
+    val supportsLetterIndex get() = !embedded && sortSelection?.sortKey in listOf(LibraryField.TITLE, LibraryField.ARTIST, LibraryField.ALBUM_ARTIST, LibraryField.ALBUM, LibraryField.GENRE)
     suspend fun letterPosition(letter: String): ULong? {
         val query = currentQuery ?: return null
         val sections = if (scrollSections.isEmpty()) query.sectionPositions() else scrollSections
@@ -81,7 +85,7 @@ internal class BrowsePage(
 
     private data class PageContext(
         val library: AndroidLibrary?, val source: String?, val catalog: ULong?,
-        val route: String, val category: String, val filter: String, val sort: String,
+        val route: Route, val category: String, val filter: String, val sort: LibraryField?,
         val descending: Boolean, val favoritesOnly: Boolean, val downloadedOnly: Boolean,
         val revision: Int, val artistAlbumsRevision: Int,
         val downloadsRevision: ULong?,
@@ -90,17 +94,17 @@ internal class BrowsePage(
 
     fun refresh() { revision++ }
     suspend fun sourceUri(): String? = currentQuery?.detailSourceUri()
-    fun chooseSort(field: String, direction: Boolean) = connection.runAction {
+    fun chooseSort(field: LibraryField, direction: Boolean) = connection.runAction {
         withContext(Dispatchers.IO) { browse.library?.setBrowseSort(location.route, options.category, field, direction) }
         if (artistAlbums) {
-            options.sort = ""
+            options.sort = null
             browse.artistAlbumsChanged(orderChanged = true)
         } else {
             options.sort = field
             options.descending = direction
         }
     }
-    fun chooseDisplay(layout: String, size: String, spacing: String) = connection.runAction {
+    fun chooseDisplay(layout: LibraryLayout, size: DisplaySize, spacing: DisplaySize) = connection.runAction {
         val previous = (options.displaySettings ?: displaySettings)?.layout
         val display = withContext(Dispatchers.IO) {
             browse.library?.setBrowseDisplay(location.route, options.category, layout, size, spacing)
@@ -108,7 +112,7 @@ internal class BrowsePage(
         if (artistAlbums) {
             options.displaySettings = null
             browse.artistAlbumsChanged(display)
-        } else if ((previous == "Detail") != (display.layout == "Detail")) { options.displaySettings = null; refresh() }
+        } else if ((previous == LibraryLayout.DETAIL) != (display.layout == LibraryLayout.DETAIL)) { options.displaySettings = null; refresh() }
         else options.displaySettings = display
     }
 
@@ -127,7 +131,6 @@ internal class BrowsePage(
                     if (query == null) return@collectLatest
                     try {
                     val fields = query.sortFields()
-                    val selection = query.sortSelection()
                     val display = query.displaySettings()
                     val trackFields = query.detailTrackFields()
                     val detail = if (summary != null) query.detailSummary() else null
@@ -137,7 +140,6 @@ internal class BrowsePage(
                     Snapshot.withMutableSnapshot {
                         capturedLabelsVersion = labelsVersion
                         sortFields = fields
-                        sortSelection = selection
                         capturedDisplay = display
                         detailTrackFields = trackFields
                         if (detail != null) summary = detail
@@ -151,7 +153,7 @@ internal class BrowsePage(
                 }
         }
         snapshotFlow {
-            if (options.preparing || (!active && !embedded && !pins)) null else PageContext(browse.library, connection.libraryState?.sourceId, connection.libraryState?.revision,
+            if (options.preparing || (!active && !embedded && !pins)) null else PageContext(browse.library, connection.sources?.selectedSourceId, connection.catalogRevision,
                 location.route, options.category, options.filter, options.sort, options.descending, options.favoritesOnly, options.downloadedOnly,
                 revision, if (artistAlbums) browse.artistAlbumsRevision else 0,
                 if (options.downloadedOnly || browse.showDownloadedBadges) connection.downloads.state?.revision else null,
@@ -161,7 +163,7 @@ internal class BrowsePage(
             loading = true
             try {
                 val labelsVersion = browse.labelsVersion
-                val kind = if (pins) "Pins" else library.routeKind(context.route)
+                val kind = if (pins) "Pins" else context.route.kind
                 if (!pins && context.source == null && kind !in listOf("Playlists", "PlaylistDetail") &&
                     !(kind == "History" && context.category != "current")) return@collectLatest
                 if (pins) library.importPlaylistPins()
@@ -174,13 +176,12 @@ internal class BrowsePage(
                 val downloadedFilter = query?.supportsDownloadedFilter() == true
                 val count = query?.count()?.toInt()
                 val fields = query?.sortFields().orEmpty()
-                val selection = query?.sortSelection()
                 val display = query?.displaySettings()
                 val detail = if (embedded) null else query?.detailSummary()
                 val trackFields = query?.detailTrackFields().orEmpty()
                 val crumbs = if (embedded) emptyList() else query?.breadcrumbs().orEmpty()
                 val folders = if (kind == "Folders") library.musicFolders() else null
-                val groups = if (detail?.mode in listOf("ArtistDetail", "AlbumArtistDetail", "ArtistDiscography", "AlbumArtistDiscography")) query?.artistReleaseGroups().orEmpty() else emptyList()
+                val groups = if (detail?.mode?.kind in listOf("ArtistDetail", "AlbumArtistDetail", "ArtistDiscography", "AlbumArtistDiscography")) query?.artistReleaseGroups().orEmpty() else emptyList()
                 val isHome = !pins && routeId == "Home"
                 val home = if (isHome && query != null) {
                     val rows = mutableListOf<BrowseItem>()
@@ -199,7 +200,6 @@ internal class BrowsePage(
                     supportsFavoriteFilter = favoriteFilter
                     supportsDownloadedFilter = downloadedFilter
                     sortFields = fields
-                    sortSelection = selection
                     capturedDisplay = display
                     summary = detail
                     detailTrackFields = trackFields
@@ -260,3 +260,8 @@ private class BrowsePagingSource(
         (it - state.config.initialLoadSize / 2).coerceAtLeast(0)
     }
 }
+
+internal val AndroidBrowseDisplay.layout get() = settings.layout
+internal val AndroidBrowseDisplay.size get() = settings.display.size
+internal val AndroidBrowseDisplay.gridSpacing get() = settings.display.gridSpacing
+internal val AndroidBrowseDisplay.showHeader get() = settings.display.showHeader

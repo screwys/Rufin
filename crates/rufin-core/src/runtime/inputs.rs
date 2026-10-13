@@ -58,6 +58,7 @@ pub enum CatalogChange {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct FavoriteSettlement {
     pub target: library::FavoriteTarget,
     pub requested: bool,

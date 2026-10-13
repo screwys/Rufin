@@ -195,6 +195,12 @@ pub struct TrackLoudness {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct RunId(u64);
 
+#[cfg(feature = "bindings")]
+uniffi::custom_type!(RunId, u64, {
+    lower: |value| value.get(),
+    try_lift: |value| Ok(RunId::new(value)),
+});
+
 impl RunId {
     pub const fn new(value: u64) -> Self {
         Self(value)
