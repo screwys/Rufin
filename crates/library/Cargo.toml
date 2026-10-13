@@ -25,7 +25,7 @@ process-memory.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 libsqlite3-sys.workspace = true
-sqlx.workspace = true
+sqlx = { workspace = true, features = ["json"] }
 sqlx-core.workspace = true
 regex.workspace = true
 roxmltree.workspace = true

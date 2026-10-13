@@ -5,7 +5,7 @@ use std::io::{BufRead, Write};
 
 use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
-use sqlx::{Connection, FromRow, Row, SqliteConnection, sqlite::SqliteRow};
+use sqlx::{Connection, FromRow, SqliteConnection};
 
 use crate::{
     AlbumKey, ArtistKey, Database, GenreKey, LibraryError, LibraryResult, ListenKey,
@@ -113,9 +113,9 @@ pub struct HistoryRow {
     pub artist: String,
     pub album: String,
     pub album_media_uri: Option<String>,
-    #[sqlx(skip)]
+    #[sqlx(json)]
     pub artists: Vec<crate::TrackArtistLink>,
-    #[sqlx(skip)]
+    #[sqlx(json)]
     pub album_artists: Vec<crate::TrackArtistLink>,
     pub album_display_artist: Option<String>,
     pub artwork_binding: Option<Vec<u8>>,
@@ -135,17 +135,6 @@ pub struct HistoryRow {
     pub favorite: bool,
     pub rating: Option<i64>,
     pub is_downloaded: bool,
-}
-
-fn history_rows(rows: Vec<SqliteRow>) -> LibraryResult<Vec<HistoryRow>> {
-    rows.iter()
-        .map(|row| {
-            let mut history = HistoryRow::from_row(row)?;
-            history.artists = serde_json::from_str(row.try_get("artists")?)?;
-            history.album_artists = serde_json::from_str(row.try_get("album_artists")?)?;
-            Ok(history)
-        })
-        .collect()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -368,8 +357,8 @@ impl Database {
              ) SELECT {} {HISTORY_ROW_COLUMNS} {HISTORY_ROW_FROM} ORDER BY listen.ordinal",
             crate::tracks::TRACK_LINK_COLUMNS,
         );
-        history_rows(
-            sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+        Ok(
+            sqlx::query_as::<_, HistoryRow>(sqlx::AssertSqlSafe(sql.as_str()))
                 .bind(serde_json::to_string(keys)?)
                 .fetch_all(&mut *connection)
                 .await?,
@@ -999,8 +988,8 @@ pub(crate) async fn load_history_page(
             crate::tracks::TRACK_LINK_COLUMNS
         ))
     );
-    history_rows(
-        sqlx::query_with(sqlx::AssertSqlSafe(sql), query.arguments.clone())
+    Ok(
+        sqlx::query_as_with::<_, HistoryRow, _>(sqlx::AssertSqlSafe(sql), query.arguments.clone())
             .bind(limit.min(HISTORY_LIMIT as usize) as i64)
             .bind(offset.min(i64::MAX as usize) as i64)
             .persistent(false)

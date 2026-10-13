@@ -24,7 +24,7 @@ import io.github.screwys.rufin.shared.rufin_core.VisualizerPreferenceEdit
 import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
 import io.github.screwys.rufin.shared.lyrics.LyricsPreferenceEdit
 import io.github.screwys.rufin.core.AndroidLyricsOperation
-import io.github.screwys.rufin.core.AndroidLyricsDocument
+import io.github.screwys.rufin.core.AndroidLyricsSource
 import io.github.screwys.rufin.core.AndroidVisualizerDrawing
 import io.github.screwys.rufin.core.AndroidRgb
 import io.github.screwys.rufin.core.AndroidWaveform
@@ -51,8 +51,7 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     var dictionaryState by mutableStateOf<String?>(null)
         private set
     var lyricsOffset by mutableLongStateOf(0L)
-    private var sourceDocument: AndroidLyricsDocument? = null
-    private var sourceMediaUri: String? = null
+    private var sourceLyrics: AndroidLyricsSource? = null
     internal var visualizerObservedAt = SystemClock.elapsedRealtimeNanos()
         private set
     var playback by mutableStateOf<AndroidPlaybackState?>(null)
@@ -83,8 +82,11 @@ internal class PlayerConnection(private val connection: RufinConnection) {
 
     private suspend fun refreshLyrics(player: AndroidPlayer) {
         if (bridge !== player) return
-        val projected = withContext(readings) { if (bridge === player) player.currentLyrics() else null }
-        if (bridge === player) lyrics = projected
+        val source = sourceLyrics ?: return
+        val projected = withContext(readings) {
+            if (bridge === player && sourceLyrics === source) player.currentLyrics(source) else null
+        }
+        if (bridge === player && sourceLyrics === source) lyrics = projected
     }
 
     suspend fun observe() {
@@ -123,9 +125,10 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                         launch {
                             while (isActive) {
                                 val raw = lyricSubscription.next()
-                                if (raw.mediaUri != sourceMediaUri || raw.document != sourceDocument) lyricsOffset = 0L
-                                sourceMediaUri = raw.mediaUri
-                                sourceDocument = raw.document
+                                val previous = sourceLyrics
+                                if (raw.documentChanged(previous)) lyricsOffset = 0L
+                                sourceLyrics = raw
+                                withContext(NonCancellable + readings) { previous?.destroy() }
                                 refreshLyrics(player)
                             }
                         }
@@ -204,7 +207,12 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                 }
             }
         }
-        } finally { readings.close() }
+        } finally {
+            val source = sourceLyrics
+            sourceLyrics = null
+            withContext(NonCancellable + readings) { source?.destroy() }
+            readings.close()
+        }
     }
 
     private fun action(block: suspend () -> Unit) = connection.runAction(block)

@@ -140,8 +140,13 @@ async fn random_settings(
     State(products): State<ProductHandles>,
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
-    let (source, folder) = catalog::scope(&products, &parameters).await?;
-    let rows = library::CollectionQuery {
+    let (source, folder) = catalog::scope(
+        &products,
+        required(&parameters, "source")?,
+        parameters.get("folder").map(String::as_str),
+    )
+    .await?;
+    let query = library::CollectionQuery {
         kind: library::CollectionKind::Genres {
             source: source,
             sort: library::GenreSort::Title,
@@ -150,16 +155,17 @@ async fn random_settings(
         filter: (parameters.get("q").map(String::as_str).unwrap_or("")).to_string(),
         descending: false,
         favorites_only: false,
-    }
-    .rows(
-        &products.library,
-        number(&parameters, "offset", 0)?,
-        64,
-        &library::ReadCancellation::new(),
-    )
-    .await
-    .map(|rows| rows.genres())
-    .map_err(internal)?;
+    };
+    let rows = query
+        .rows(
+            &products.library,
+            number(&parameters, "offset", 0)?,
+            64,
+            &library::ReadCancellation::new(),
+        )
+        .await
+        .map(|rows| rows.genres())
+        .map_err(internal)?;
     let settings = products.settings.load().random_play.clone();
     let mut selected_genre = None;
     if let Some(object_id) = settings.selected_genre_id(
@@ -185,7 +191,7 @@ async fn random_settings(
     }
     Ok(json_response(
         StatusCode::OK,
-        json!({"total":catalog::page_total(&products, &parameters, "genres").await?,"settings":settings,"selected_genre":selected_genre,"genres":rows.iter().map(|row|json!({"id":row.genre_key,"object_id":row.object_id,"name":row.name})).collect::<Vec<_>>()}),
+        json!({"total":catalog::page_total(&products, &parameters, &query).await?,"settings":settings,"selected_genre":selected_genre,"genres":rows.iter().map(|row|json!({"id":row.genre_key,"object_id":row.object_id,"name":row.name})).collect::<Vec<_>>()}),
     ))
 }
 
@@ -206,11 +212,8 @@ async fn random(
         mode: String,
     }
     let input: Input = body(request).await?;
-    let mut parameters = HashMap::from([("source".into(), input.source)]);
-    if let Some(folder) = input.folder {
-        parameters.insert("folder".into(), folder);
-    }
-    let (source, folder) = catalog::scope(&products, &parameters).await?;
+    let (source, folder) =
+        catalog::scope(&products, &input.source, input.folder.as_deref()).await?;
     let placement = match input.mode.as_str() {
         "replace" => rufin_core::playback::QueuePlacement::Now,
         "next" => rufin_core::playback::QueuePlacement::Next,
@@ -349,7 +352,12 @@ async fn artwork(
 ) -> Result<Response<Body>, Error> {
     let cancel = library::ReadCancellation::new();
     let binding = if parameters.contains_key("genre") {
-        let (source, folder) = catalog::scope(&products, &parameters).await?;
+        let (source, folder) = catalog::scope(
+            &products,
+            required(&parameters, "source")?,
+            parameters.get("folder").map(String::as_str),
+        )
+        .await?;
         products
             .library
             .genre_rows(source, &[key(&parameters, "genre")?], folder, &cancel)
@@ -389,7 +397,12 @@ async fn artwork(
             })
     } else if parameters.contains_key("smart_playlist") {
         let (source, folder) = if parameters.contains_key("source") {
-            let (source, folder) = catalog::scope(&products, &parameters).await?;
+            let (source, folder) = catalog::scope(
+                &products,
+                required(&parameters, "source")?,
+                parameters.get("folder").map(String::as_str),
+            )
+            .await?;
             (Some(source), folder)
         } else {
             (None, None)

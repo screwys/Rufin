@@ -48,8 +48,6 @@ pub struct AndroidPlaybackState {
     pub artwork_revision: u64,
     pub favorite: bool,
     pub queue_revision: u64,
-    pub queue_window_count: u64,
-    pub queue_window_revision: u64,
     pub queue_total: u64,
     pub queue_index: Option<u64>,
     pub title: String,
@@ -91,8 +89,6 @@ impl AndroidPlaybackState {
             artwork_revision: 0,
             favorite: false,
             queue_revision: 0,
-            queue_window_count: 0,
-            queue_window_revision: 0,
             queue_total: 0,
             queue_index: None,
             title: String::new(),
@@ -148,8 +144,6 @@ impl From<&PlaybackView> for AndroidPlaybackState {
             artwork_revision: 0,
             favorite: false,
             queue_revision: view.queue.revision,
-            queue_window_count: view.queue_window.len() as u64,
-            queue_window_revision: 0,
             queue_total: view.queue.total as u64,
             queue_index: view.queue.current_index.map(|index| index as u64),
             title: current.map_or_else(String::new, |media| media.title.clone()),
@@ -235,8 +229,6 @@ struct PlaybackChanges {
     catalog: tokio::sync::watch::Receiver<()>,
     intents: tokio::sync::watch::Receiver<u64>,
     current_facts: Option<(String, bool)>,
-    queue_view: Option<std::sync::Arc<PlaybackView>>,
-    queue_window_revision: u64,
 }
 
 impl AndroidPlaybackSubscription {
@@ -250,8 +242,6 @@ impl AndroidPlaybackSubscription {
                 catalog: products.source.catalog_changes(),
                 intents: intents.subscribe(),
                 current_facts: None,
-                queue_view: None,
-                queue_window_revision: 0,
             }),
             settings: products.settings.clone(),
             database: products.library.clone(),
@@ -292,21 +282,10 @@ impl AndroidPlaybackSubscription {
             changes.current_facts = None;
         }
         changes.catalog.borrow_and_update();
-        if catalog_changed
-            || changes
-                .queue_view
-                .as_ref()
-                .map(|previous| &previous.queue_window)
-                != view.as_ref().map(|current| &current.queue_window)
-        {
-            changes.queue_window_revision += 1;
-        }
-        changes.queue_view = view.clone();
         let mut state = view.as_ref().map_or_else(
             || AndroidPlaybackState::idle(&self.settings.load()),
             |view| AndroidPlaybackState::from(view.as_ref()),
         );
-        state.queue_window_revision = changes.queue_window_revision;
         state.artwork_revision = self.artwork.cache_revision();
         state.operation_failures = notices
             .into_iter()

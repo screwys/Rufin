@@ -30,6 +30,7 @@ impl AndroidBrowseQuery {
         &self,
         index: u64,
         media_uri: String,
+        track_key: Option<i64>,
         placement: rufin_core::playback::QueuePlacement,
         shuffled: bool,
         context_title: Option<Arc<library::QueueContextTitle>>,
@@ -44,12 +45,15 @@ impl AndroidBrowseQuery {
                 .with_context(self.context_id())
                 .with_context_title(context_title)
                 .shuffled(shuffled);
-        if let Some(key) = self
-            .database
-            .track_key_by_uri(&media_uri, &ReadCancellation::new())
-            .await
-            .map_err(error)?
-        {
+        let key = match track_key {
+            Some(key) => Some(library::TrackKey::from_raw(key)),
+            None => self
+                .database
+                .track_key_by_uri(&media_uri, &ReadCancellation::new())
+                .await
+                .map_err(error)?,
+        };
+        if let Some(key) = key {
             request = request.with_anchor(key, None);
         }
         self.playback.play_selection(request);
@@ -121,6 +125,8 @@ impl AndroidBrowseQuery {
         });
         AndroidBrowseRow {
             track_key: None,
+            album_key: None,
+            album_media_uri: None,
             kind: "folder".into(),
             playback_context_id: None,
             key: id,

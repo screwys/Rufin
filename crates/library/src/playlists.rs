@@ -1,8 +1,7 @@
 //! Owns Playlist identity, exact duplicate occurrences, ordering, filtering, and edits.
 //! Entries keep song references; song metadata belongs to the shared library.
 
-use sqlx::sqlite::SqliteRow;
-use sqlx::{Connection, FromRow, QueryBuilder, Row, Sqlite, SqliteConnection};
+use sqlx::{Connection, FromRow, QueryBuilder, Sqlite, SqliteConnection};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 
 use crate::{
@@ -131,7 +130,7 @@ pub enum PlaylistSort {
     Duration,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, FromRow)]
 pub struct PlaylistRow {
     pub playlist_key: PlaylistKey,
     pub source_key: Option<SourceKey>,
@@ -145,7 +144,9 @@ pub struct PlaylistRow {
     pub track_count: i64,
     pub duration_millis: i64,
     pub downloaded_count: i64,
+    #[sqlx(skip)]
     pub representative_artwork: Vec<Vec<u8>>,
+    #[sqlx(skip)]
     pub genres: Vec<PlaylistGenreLink>,
 }
 
@@ -153,27 +154,6 @@ pub struct PlaylistRow {
 pub struct PlaylistGenreLink {
     pub genre_key: crate::GenreKey,
     pub name: String,
-}
-
-impl<'row> FromRow<'row, SqliteRow> for PlaylistRow {
-    fn from_row(row: &'row SqliteRow) -> Result<Self, sqlx::Error> {
-        Ok(Self {
-            playlist_key: row.try_get("playlist_key")?,
-            source_key: row.try_get("source_key")?,
-            source_id: row.try_get("source_id")?,
-            source_owned: row.try_get("source_owned")?,
-            object_id: row.try_get("object_id")?,
-            name: row.try_get("name")?,
-            writable: row.try_get("writable")?,
-            metadata_writable: row.try_get("metadata_writable")?,
-            artwork_binding: row.try_get("artwork_binding")?,
-            track_count: row.try_get("track_count")?,
-            duration_millis: row.try_get("duration_millis")?,
-            downloaded_count: row.try_get("downloaded_count")?,
-            representative_artwork: Vec::new(),
-            genres: Vec::new(),
-        })
-    }
 }
 
 #[derive(Clone, Debug, FromRow, PartialEq)]
@@ -199,9 +179,9 @@ pub struct PlaylistEntryRow {
     pub artist: String,
     pub album: String,
     pub album_media_uri: Option<String>,
-    #[sqlx(skip)]
+    #[sqlx(json)]
     pub artists: Vec<crate::TrackArtistLink>,
-    #[sqlx(skip)]
+    #[sqlx(json)]
     pub album_artists: Vec<crate::TrackArtistLink>,
     pub album_display_artist: Option<String>,
     pub artwork_binding: Option<Vec<u8>>,
@@ -1117,18 +1097,11 @@ pub(crate) async fn load_playlist_entry_rows(
                LEFT JOIN albums album ON album.album_key=track.album_key
                ORDER BY entry.ordinal"), plays=crate::tracks::displayed_stat("play_count"), last=crate::tracks::displayed_stat("last_played")));
     query
-        .build()
+        .build_query_as::<PlaylistEntryRow>()
         .persistent(false)
         .fetch_all(&mut **transaction)
-        .await?
-        .iter()
-        .map(|row| {
-            let mut entry = PlaylistEntryRow::from_row(row)?;
-            entry.artists = serde_json::from_str(row.try_get("artists")?)?;
-            entry.album_artists = serde_json::from_str(row.try_get("album_artists")?)?;
-            Ok(entry)
-        })
-        .collect()
+        .await
+        .map_err(Into::into)
 }
 
 pub(crate) async fn create_playlist_identity(

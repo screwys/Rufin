@@ -532,162 +532,175 @@ impl AndroidPlayer {
             .map_err(error)?
     }
 
-    pub fn current_lyrics(&self) -> AndroidLyricsState {
+    pub fn current_lyrics(&self, source: Arc<AndroidLyricsSource>) -> AndroidLyricsState {
         use rufin_core::lyrics::{CurrentLyrics, CurrentLyricsContent};
-        let current = self.products.lyrics.current().borrow().clone();
-        let mut state = project_lyrics(current.clone(), &self.products.lyrics);
-        state.current_media_token = self.products.playback.updates.current().and_then(|view| {
-            view.transport
-                .current
-                .as_ref()
-                .map(|media| media_token(&media.id))
-        });
+        let media = self
+            .products
+            .playback
+            .updates
+            .current()
+            .and_then(|view| view.transport.current.clone());
         let stored = self.products.settings.load();
         let settings = stored.lyrics;
-        if let CurrentLyrics::Ready { origin, .. } = &current {
-            if let Some(media) = self
-                .products
-                .playback
-                .updates
-                .current()
-                .and_then(|view| view.transport.current.clone())
-            {
-                state.clearable = settings.can_suppress_auto_lyrics(
-                    stored.private_mode,
-                    &media.media_uri,
-                    *origin,
-                );
-            }
-        }
         if !settings.preferences.show_furigana && !settings.preferences.show_romanization {
             lyrics::release_japanese_reader();
         }
-        if let CurrentLyrics::Ready {
-            content:
-                Some(CurrentLyricsContent::Document {
-                    document,
-                    pronunciation,
-                }),
-            ..
-        } = current
-        {
-            let readings = document.is_japanese_for_readings();
-            if readings
-                && (settings.preferences.show_furigana || settings.preferences.show_romanization)
-            {
-                if let lyrics::JapaneseDictionaryStatus::Ready(path) =
-                    self.products.lyrics.japanese_dictionary(false)
-                {
-                    lyrics::prepare_japanese_reader(&path);
-                }
+        let mut state = AndroidLyricsState {
+            snapshot: None,
+            current_media_token: media.as_ref().map(|media| media_token(&media.id)),
+            media_uri: None,
+            media_run: None,
+            media_token: None,
+            writable: false,
+            clearable: false,
+            loading: matches!(source.current, CurrentLyrics::Loading { .. }),
+            instrumental: false,
+            document: None,
+        };
+        let (media_id, content) = match &source.current {
+            CurrentLyrics::Cleared => return state,
+            CurrentLyrics::Loading { media_id } => (media_id, None),
+            CurrentLyrics::Ready {
+                media_id,
+                content,
+                origin,
+            } => {
+                state.writable = self.products.lyrics.current_writable(media_id);
+                state.clearable = media.as_ref().is_some_and(|media| {
+                    settings.can_suppress_auto_lyrics(
+                        stored.private_mode,
+                        &media.media_uri,
+                        *origin,
+                    )
+                });
+                (media_id, content.as_ref())
             }
-            if let Some(projected) = &mut state.document {
-                let mut reading_timings: Vec<Vec<_>> = if settings.preferences.karaoke_mode {
-                    document.lines.iter().map(|_| Vec::new()).collect()
-                } else {
-                    Vec::new()
-                };
-                for (index, line) in document.lines.iter().enumerate() {
-                    let supplied = lyrics::pronunciation_line_for(line, pronunciation.as_deref());
-                    let output = &mut projected.lines[index];
-                    output.pronunciation = supplied.map(|line| line.text.clone());
-                    if readings {
-                        output.reading = reading_for(
-                            &line.text,
-                            document.language.as_deref(),
-                            supplied.map(|line| line.text.as_str()),
-                            &settings,
-                        )
-                        .map(Into::into);
-                    }
-                    for (cue_index, cue_line) in line.cue_lines.iter().enumerate() {
-                        let supplied = if line.cue_lines.len() == 1 {
-                            supplied.map(|line| line.text.as_str())
-                        } else {
-                            None
-                        };
-                        if readings {
-                            let reading = reading_for(
-                                &cue_line.text,
-                                document.language.as_deref(),
-                                supplied,
-                                &settings,
-                            );
-                            if let Some(reading) = reading {
-                                if settings.preferences.karaoke_mode {
-                                    let cues: Vec<_> = cue_line
-                                        .cues
-                                        .iter()
-                                        .enumerate()
-                                        .map(|(cue_index, cue)| {
-                                            (
-                                                cue,
-                                                lyrics::effective_cue_end(
-                                                    &document.lines,
-                                                    index,
-                                                    cue_line,
-                                                    cue_index,
-                                                ),
-                                            )
-                                        })
-                                        .collect();
-                                    let mut add_timing = |range: std::ops::Range<usize>, target| {
-                                        let timings: Vec<_> = cues
-                                            .iter()
-                                            .filter_map(|(cue, end)| {
-                                                lyrics::KaraokeTiming::for_text_range(
-                                                    &cue_line.text,
-                                                    range.clone(),
-                                                    cue,
-                                                    *end,
-                                                )
-                                            })
-                                            .collect();
-                                        if !timings.is_empty() {
-                                            reading_timings[index].push(ReadingCueTiming {
-                                                cue_line: cue_index,
-                                                target,
-                                                timings,
-                                            });
-                                        }
-                                    };
-                                    let mut cursor = 0;
-                                    for (segment_index, segment) in
-                                        reading.segments.iter().enumerate()
-                                    {
-                                        let range = cursor..cursor + segment.surface.len();
-                                        cursor = range.end;
-                                        if segment.furigana.is_some() {
-                                            add_timing(
-                                                range,
-                                                AndroidLyricsHighlightTarget::Furigana {
-                                                    index: segment_index as u32,
-                                                },
-                                            );
-                                        }
-                                    }
-                                    for (span_index, (range, _)) in
-                                        reading.romanization_spans.iter().enumerate()
-                                    {
-                                        add_timing(
-                                            range.clone(),
-                                            AndroidLyricsHighlightTarget::Romanization {
-                                                index: span_index as u32,
-                                            },
-                                        );
-                                    }
-                                }
-                                output.cue_lines[cue_index].reading = Some(reading.into());
-                            }
-                        }
-                    }
-                }
-                state.snapshot = Some(Arc::new(AndroidLyricsSnapshot {
-                    document: Arc::clone(&document),
-                    reading_timings,
-                }));
+        };
+        state.media_run = media_id.run.map(playback::RunId::get);
+        state.media_token = Some(media_token(media_id));
+        state.media_uri = Some(media_id.media_uri.to_string());
+        state.instrumental = matches!(content, Some(CurrentLyricsContent::Instrumental));
+        let Some(CurrentLyricsContent::Document {
+            document,
+            pronunciation,
+        }) = content
+        else {
+            return state;
+        };
+        let readings = document.is_japanese_for_readings();
+        if readings
+            && (settings.preferences.show_furigana || settings.preferences.show_romanization)
+        {
+            if let lyrics::JapaneseDictionaryStatus::Ready(path) =
+                self.products.lyrics.japanese_dictionary(false)
+            {
+                lyrics::prepare_japanese_reader(&path);
             }
         }
+        let mut projected = AndroidLyricsDocument::from(document.as_ref());
+        let mut reading_timings: Vec<Vec<_>> = if settings.preferences.karaoke_mode {
+            document.lines.iter().map(|_| Vec::new()).collect()
+        } else {
+            Vec::new()
+        };
+        for (index, line) in document.lines.iter().enumerate() {
+            let supplied = lyrics::pronunciation_line_for(line, pronunciation.as_deref());
+            let output = &mut projected.lines[index];
+            output.pronunciation = supplied.map(|line| line.text.clone());
+            if readings {
+                output.reading = reading_for(
+                    &line.text,
+                    document.language.as_deref(),
+                    supplied.map(|line| line.text.as_str()),
+                    &settings,
+                )
+                .map(Into::into);
+            }
+            for (cue_index, cue_line) in line.cue_lines.iter().enumerate() {
+                let supplied = if line.cue_lines.len() == 1 {
+                    supplied.map(|line| line.text.as_str())
+                } else {
+                    None
+                };
+                if readings {
+                    let reading = reading_for(
+                        &cue_line.text,
+                        document.language.as_deref(),
+                        supplied,
+                        &settings,
+                    );
+                    if let Some(reading) = reading {
+                        if settings.preferences.karaoke_mode {
+                            let cues: Vec<_> = cue_line
+                                .cues
+                                .iter()
+                                .enumerate()
+                                .map(|(cue_index, cue)| {
+                                    (
+                                        cue,
+                                        lyrics::effective_cue_end(
+                                            &document.lines,
+                                            index,
+                                            cue_line,
+                                            cue_index,
+                                        ),
+                                    )
+                                })
+                                .collect();
+                            let mut add_timing = |range: std::ops::Range<usize>, target| {
+                                let timings: Vec<_> = cues
+                                    .iter()
+                                    .filter_map(|(cue, end)| {
+                                        lyrics::KaraokeTiming::for_text_range(
+                                            &cue_line.text,
+                                            range.clone(),
+                                            cue,
+                                            *end,
+                                        )
+                                    })
+                                    .collect();
+                                if !timings.is_empty() {
+                                    reading_timings[index].push(ReadingCueTiming {
+                                        cue_line: cue_index,
+                                        target,
+                                        timings,
+                                    });
+                                }
+                            };
+                            let mut cursor = 0;
+                            for (segment_index, segment) in reading.segments.iter().enumerate() {
+                                let range = cursor..cursor + segment.surface.len();
+                                cursor = range.end;
+                                if segment.furigana.is_some() {
+                                    add_timing(
+                                        range,
+                                        AndroidLyricsHighlightTarget::Furigana {
+                                            index: segment_index as u32,
+                                        },
+                                    );
+                                }
+                            }
+                            for (span_index, (range, _)) in
+                                reading.romanization_spans.iter().enumerate()
+                            {
+                                add_timing(
+                                    range.clone(),
+                                    AndroidLyricsHighlightTarget::Romanization {
+                                        index: span_index as u32,
+                                    },
+                                );
+                            }
+                        }
+                        output.cue_lines[cue_index].reading = Some(reading.into());
+                    }
+                }
+            }
+        }
+        state.snapshot = Some(Arc::new(AndroidLyricsSnapshot {
+            document: Arc::clone(document),
+            reading_timings,
+        }));
+        state.document = Some(projected);
         state
     }
 
@@ -1530,7 +1543,6 @@ pub struct AndroidLyricsState {
     pub loading: bool,
     pub instrumental: bool,
     pub document: Option<AndroidLyricsDocument>,
-    pub pronunciation: Option<AndroidLyricsDocument>,
 }
 
 #[derive(uniffi::Object)]
@@ -1544,72 +1556,48 @@ pub struct AndroidLyricsSubscription {
 
 #[uniffi::export]
 impl AndroidLyricsSubscription {
-    pub async fn next(&self) -> Result<AndroidLyricsState, AndroidError> {
+    pub async fn next(&self) -> Result<Arc<AndroidLyricsSource>, AndroidError> {
         let mut current = self.current.lock().await;
         if current.1 {
             current.1 = false;
         } else {
             current.0.changed().await.map_err(error)?;
         }
-        let lyrics = current.0.borrow_and_update().clone();
+        let snapshot = current.0.borrow_and_update().clone();
         self.lyrics.load_current();
-        let state = project_lyrics(lyrics, &self.lyrics);
-        Ok(state)
+        Ok(Arc::new(AndroidLyricsSource { current: snapshot }))
     }
 }
 
-fn project_lyrics(
+#[derive(uniffi::Object)]
+pub struct AndroidLyricsSource {
     current: rufin_core::lyrics::CurrentLyrics,
-    handle: &rufin_core::lyrics::LyricsHandle,
-) -> AndroidLyricsState {
-    use rufin_core::lyrics::{CurrentLyrics, CurrentLyricsContent};
-    let lyrics = current;
-    let mut state = AndroidLyricsState {
-        snapshot: None,
-        current_media_token: None,
-        media_uri: None,
-        media_run: None,
-        media_token: None,
-        writable: false,
-        clearable: false,
-        loading: false,
-        instrumental: false,
-        document: None,
-        pronunciation: None,
-    };
-    match lyrics {
-        CurrentLyrics::Cleared => {}
-        CurrentLyrics::Loading { media_id } => {
-            state.media_run = media_id.run.map(playback::RunId::get);
-            state.media_token = Some(media_token(&media_id));
-            state.media_uri = Some(media_id.media_uri.to_string());
-            state.loading = true;
-        }
-        CurrentLyrics::Ready {
-            media_id, content, ..
-        } => {
-            state.media_run = media_id.run.map(playback::RunId::get);
-            state.media_token = Some(media_token(&media_id));
-            state.writable = handle.current_writable(&media_id);
-            state.media_uri = Some(media_id.media_uri.to_string());
-            match content {
-                Some(CurrentLyricsContent::Instrumental) => state.instrumental = true,
-                Some(CurrentLyricsContent::Document {
-                    document,
-                    pronunciation,
-                }) => {
-                    state.snapshot = Some(Arc::new(AndroidLyricsSnapshot {
-                        document: Arc::clone(&document),
-                        reading_timings: Vec::new(),
-                    }));
-                    state.document = Some(document.as_ref().into());
-                    state.pronunciation = pronunciation.as_deref().map(Into::into);
-                }
-                None => {}
-            }
+}
+
+impl AndroidLyricsSource {
+    fn document(&self) -> (Option<&str>, Option<&Arc<lyrics::LyricsDocument>>) {
+        use rufin_core::lyrics::{CurrentLyrics, CurrentLyricsContent};
+        match &self.current {
+            CurrentLyrics::Cleared => (None, None),
+            CurrentLyrics::Loading { media_id } => (Some(&media_id.media_uri), None),
+            CurrentLyrics::Ready {
+                media_id, content, ..
+            } => (
+                Some(&media_id.media_uri),
+                match content {
+                    Some(CurrentLyricsContent::Document { document, .. }) => Some(document),
+                    _ => None,
+                },
+            ),
         }
     }
-    state
+}
+
+#[uniffi::export]
+impl AndroidLyricsSource {
+    pub fn document_changed(&self, previous: Option<Arc<AndroidLyricsSource>>) -> bool {
+        self.document() != previous.as_deref().map(Self::document).unwrap_or_default()
+    }
 }
 
 #[derive(uniffi::Record)]

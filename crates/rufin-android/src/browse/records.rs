@@ -171,6 +171,8 @@ pub struct AndroidPinPage {
 #[derive(Clone, uniffi::Record)]
 pub struct AndroidBrowseRow {
     pub track_key: Option<i64>,
+    pub album_key: Option<i64>,
+    pub album_media_uri: Option<String>,
     pub kind: String,
     pub key: String,
     pub media_uri: String,
@@ -206,6 +208,8 @@ impl From<library::SmartPlaylistRow> for AndroidBrowseRow {
         };
         Self {
             track_key: None,
+            album_key: None,
+            album_media_uri: None,
             kind: "smart_playlist".into(),
             playback_context_id: Some(format!("smart-playlist:{}", row.smart_playlist_key)),
             fields: Vec::new(),
@@ -247,6 +251,8 @@ impl From<library::PlaylistRow> for AndroidBrowseRow {
         };
         Self {
             track_key: None,
+            album_key: None,
+            album_media_uri: None,
             kind: "playlist".into(),
             playback_context_id: Some(format!("playlist:{}", row.playlist_key)),
             fields: Vec::new(),
@@ -286,6 +292,8 @@ impl From<library::GenreRow> for AndroidBrowseRow {
         };
         Self {
             track_key: None,
+            album_key: None,
+            album_media_uri: None,
             kind: "genre".into(),
             playback_context_id: Some(format!("genre:{}", row.genre_key)),
             fields: Vec::new(),
@@ -321,6 +329,8 @@ impl From<library::MoodRow> for AndroidBrowseRow {
     fn from(row: library::MoodRow) -> Self {
         Self {
             track_key: None,
+            album_key: None,
+            album_media_uri: None,
             kind: "mood".into(),
             playback_context_id: Some(format!("mood:{}", row.mood_key)),
             key: row.mood_key.to_string(),
@@ -360,6 +370,8 @@ impl From<library::AlbumRow> for AndroidBrowseRow {
         });
         Self {
             track_key: None,
+            album_key: None,
+            album_media_uri: None,
             kind: "album".into(),
             playback_context_id: Some(format!("album:{}", row.media_uri)),
             fields: Vec::new(),
@@ -411,6 +423,8 @@ impl From<library::TrackRow> for AndroidBrowseRow {
     fn from(row: library::TrackRow) -> Self {
         Self {
             track_key: Some(row.track_key.raw()),
+            album_key: None,
+            album_media_uri: None,
             kind: "track".into(),
             playback_context_id: None,
             fields: Vec::new(),

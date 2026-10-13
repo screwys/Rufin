@@ -207,6 +207,8 @@ fn artist_row(row: library::ArtistRow, album_artist: bool) -> AndroidBrowseRow {
     });
     AndroidBrowseRow {
         track_key: None,
+        album_key: None,
+        album_media_uri: None,
         kind: "artist".into(),
         playback_context_id: Some(format!(
             "{}:{}",
@@ -264,7 +266,7 @@ pub struct AndroidBrowseQuery {
     favorites_only: bool,
     downloaded_only: bool,
     home_variations: (i64, i64),
-    home_snapshot: tokio::sync::OnceCell<Vec<AndroidBrowseRow>>,
+    home_snapshot: tokio::sync::OnceCell<Vec<(AndroidBrowseRow, SongSelection)>>,
     display: LibraryListSettings,
     album_tracks: LibraryListSettings,
     artist_tracks: LibraryListSettings,

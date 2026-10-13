@@ -1,8 +1,7 @@
 //! Owns complete Track orders, bounded final rows, and details.
 //! Each bounded row query includes its ordered artist and genre links.
 
-use sqlx::sqlite::SqliteRow;
-use sqlx::{Connection, FromRow, QueryBuilder, Row, Sqlite, SqliteConnection};
+use sqlx::{Connection, FromRow, QueryBuilder, Sqlite, SqliteConnection};
 
 use crate::{
     AlbumKey, ArtistKey, Database, FolderKey, GenreKey, LibraryError, LibraryResult,
@@ -191,7 +190,7 @@ impl<'row> sqlx::Decode<'row, Sqlite> for AudioProperties {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, FromRow)]
 pub struct TrackRow {
     pub audio_properties: AudioProperties,
     pub source_path: Option<String>,
@@ -221,6 +220,7 @@ pub struct TrackRow {
     pub cue_path: Option<String>,
     pub cue_start_millis: Option<i64>,
     pub cue_end_millis: Option<i64>,
+    #[sqlx(try_from = "Vec<u8>")]
     pub loudness_analysis_key: [u8; 32],
     pub artwork_binding: Option<Vec<u8>>,
     pub favorite: bool,
@@ -232,68 +232,12 @@ pub struct TrackRow {
     pub musicbrainz_album_id: Option<String>,
     pub musicbrainz_release_group_id: Option<String>,
     pub primary_artist_musicbrainz_id: Option<String>,
+    #[sqlx(json)]
     pub artists: Vec<TrackArtistLink>,
+    #[sqlx(json)]
     pub album_artists: Vec<TrackArtistLink>,
+    #[sqlx(json)]
     pub genres: Vec<TrackGenreLink>,
-}
-
-impl<'row> FromRow<'row, SqliteRow> for TrackRow {
-    fn from_row(row: &'row SqliteRow) -> Result<Self, sqlx::Error> {
-        let loudness_analysis_key = row
-            .try_get::<Vec<u8>, _>("loudness_analysis_key")?
-            .try_into()
-            .map_err(|_| {
-                sqlx::Error::Decode("Track loudness analysis key is not 32 bytes".into())
-            })?;
-        Ok(Self {
-            audio_properties: serde_json::from_str(row.try_get("audio_properties")?)
-                .map_err(|error| sqlx::Error::Decode(Box::new(error)))?,
-            source_path: row.try_get("source_path")?,
-            source_name: row.try_get("source_name")?,
-            track_key: row.try_get("track_key")?,
-            source_key: row.try_get("source_key")?,
-            source_id: row.try_get("source_id")?,
-            object_id: row.try_get("object_id")?,
-            album_key: row.try_get("album_key")?,
-            album_media_uri: row.try_get("album_media_uri")?,
-            title: row.try_get("title")?,
-            album: row.try_get("album")?,
-            artist: row.try_get("artist")?,
-            album_display_artist: row.try_get("album_display_artist")?,
-            duration_millis: row.try_get("duration_millis")?,
-            disc_number: row.try_get("disc_number")?,
-            track_number: row.try_get("track_number")?,
-            year: row.try_get("year")?,
-            release_date: row.try_get("release_date")?,
-            date_added: row.try_get("date_added")?,
-            media_uri: row.try_get("media_uri")?,
-            source_format: row.try_get("source_format")?,
-            comment: row.try_get("comment")?,
-            bpm: row.try_get("bpm")?,
-            musicbrainz_recording_id: row.try_get("musicbrainz_recording_id")?,
-            musicbrainz_release_track_id: row.try_get("musicbrainz_release_track_id")?,
-            cue_path: row.try_get("cue_path")?,
-            cue_start_millis: row.try_get("cue_start_millis")?,
-            cue_end_millis: row.try_get("cue_end_millis")?,
-            loudness_analysis_key,
-            artwork_binding: row.try_get("artwork_binding")?,
-            favorite: row.try_get("favorite")?,
-            rating: row.try_get("rating")?,
-            last_played: row.try_get("last_played")?,
-            play_count: row.try_get("play_count")?,
-            skip_count: row.try_get("skip_count")?,
-            is_downloaded: row.try_get("is_downloaded")?,
-            musicbrainz_album_id: row.try_get("musicbrainz_album_id")?,
-            musicbrainz_release_group_id: row.try_get("musicbrainz_release_group_id")?,
-            primary_artist_musicbrainz_id: row.try_get("primary_artist_musicbrainz_id")?,
-            artists: serde_json::from_str(row.try_get("artists")?)
-                .map_err(|error| sqlx::Error::Decode(error.into()))?,
-            album_artists: serde_json::from_str(row.try_get("album_artists")?)
-                .map_err(|error| sqlx::Error::Decode(error.into()))?,
-            genres: serde_json::from_str(row.try_get("genres")?)
-                .map_err(|error| sqlx::Error::Decode(error.into()))?,
-        })
-    }
 }
 
 #[derive(Clone, Debug)]

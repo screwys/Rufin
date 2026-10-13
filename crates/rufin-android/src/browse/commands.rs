@@ -75,23 +75,30 @@ impl AndroidLibrary {
         media_uri: String,
         remove: bool,
     ) -> Result<(), AndroidError> {
-        let uris = match route.as_deref() {
-            Some(route) => self.resolve_target_uris(route).await?,
-            None => vec![media_uri],
-        };
-        if remove {
-            self.source.remove_download_media(uris);
-        } else {
-            self.source.download_media(
-                downloads::DownloadSubject::for_media_uris(
-                    route.as_deref().unwrap_or("track"),
-                    None,
-                    &uris,
-                ),
-                uris,
-            );
-        }
-        Ok(())
+        let query = route
+            .as_deref()
+            .map(|route| self.target_query(route))
+            .transpose()?;
+        let source = self.source.clone();
+        self.runtime
+            .spawn(async move {
+                let selection = match query {
+                    Some(query) => query.target_selection().await?,
+                    None => SongSelection::Uris(vec![media_uri].into()),
+                };
+                let result = if remove {
+                    source.remove_download_selection(selection)
+                } else {
+                    source.download_selection(
+                        selection,
+                        route.unwrap_or_else(|| "track".into()),
+                        None,
+                    )
+                };
+                result.recv().await.map_err(error)?.map_err(error)
+            })
+            .await
+            .map_err(error)?
     }
 }
 
@@ -171,20 +178,6 @@ impl AndroidLibrary {
             false,
             None,
         )
-    }
-    async fn resolve_target_uris(&self, route: &str) -> Result<Vec<String>, AndroidError> {
-        let query = self.target_query(route)?;
-        self.runtime
-            .spawn(async move {
-                let selection = query.target_selection().await?;
-                query
-                    .database
-                    .selected_track_uris(&selection, None, &ReadCancellation::new())
-                    .await
-                    .map_err(error)
-            })
-            .await
-            .map_err(error)?
     }
 }
 

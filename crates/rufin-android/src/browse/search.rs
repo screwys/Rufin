@@ -35,6 +35,8 @@ impl AndroidLibrary {
                     .map(|(source, _, _)| source.to_string());
                 AndroidBrowseRow {
                     track_key: None,
+                    album_key: None,
+                    album_media_uri: None,
                     kind: kind.into(),
                     playback_context_id,
                     key: result.media_uri.clone(),

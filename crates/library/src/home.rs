@@ -103,6 +103,7 @@ pub struct HomeGenreRow {
     pub artwork_binding: Option<Vec<u8>>,
     pub album_count: i64,
     pub track_count: i64,
+    pub downloaded_count: i64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -307,7 +308,7 @@ impl Database {
         let genres = if blocks.contains(&HomeBlockKind::Genres) {
             sqlx::query_as::<_, HomeGenreRow>(
                 "SELECT genre.genre_key,genre.object_id,genre.name,genre.artwork_binding,
-                    genre.album_count,genre.track_count FROM genres genre
+                    genre.album_count,genre.track_count,genre.downloaded_count FROM genres genre
                  WHERE genre.indexed=1 AND genre.source_key=?1 AND (?2 IS NULL OR genre.genre_key IN (
                     SELECT genre_key FROM track_folders scope CROSS JOIN tracks track USING(track_key)
                     JOIN track_genres USING(track_key) WHERE track.indexed=1 AND scope.folder_key=?2

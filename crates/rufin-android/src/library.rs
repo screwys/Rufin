@@ -71,6 +71,8 @@ impl AndroidLibrary {
                     > 0;
                 Ok(Some(crate::browse::AndroidBrowseRow {
                     track_key: None,
+                    album_key: None,
+                    album_media_uri: None,
                     kind: "track".into(),
                     playback_context_id: None,
                     key: media_uri.clone(),

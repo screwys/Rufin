@@ -6,7 +6,6 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::sync::Arc;
 
-use sqlx::sqlite::SqliteRow;
 use sqlx::{Connection, FromRow, Row, Sqlite, SqliteConnection};
 
 use crate::{Database, LibraryError, LibraryResult, ReadCancellation, SourceId, SourceKey};
@@ -50,7 +49,7 @@ pub enum QueueRepeatMode {
     All,
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, FromRow)]
 pub struct QueueItem {
     pub media_uri: String,
     pub title: String,
@@ -103,31 +102,6 @@ impl QueueItem {
             musicbrainz_release_group_id: None,
             primary_artist_musicbrainz_id: None,
         }
-    }
-}
-
-impl<'row> FromRow<'row, SqliteRow> for QueueItem {
-    fn from_row(row: &'row SqliteRow) -> Result<Self, sqlx::Error> {
-        Ok(Self {
-            media_uri: row.try_get("media_uri")?,
-            title: row.try_get("title")?,
-            artist: row.try_get("artist")?,
-            album: row.try_get("album")?,
-            album_display_artist: row.try_get("album_display_artist")?,
-            artwork_binding: row.try_get("artwork_binding")?,
-            duration_millis: row.try_get("duration_millis")?,
-            disc_number: row.try_get("disc_number")?,
-            track_number: row.try_get("track_number")?,
-            year: row.try_get("year")?,
-            release_date: row.try_get("release_date")?,
-            source_format: row.try_get("source_format")?,
-            audio_properties: row.try_get("audio_properties")?,
-            musicbrainz_recording_id: row.try_get("musicbrainz_recording_id")?,
-            musicbrainz_release_track_id: row.try_get("musicbrainz_release_track_id")?,
-            musicbrainz_album_id: row.try_get("musicbrainz_album_id")?,
-            musicbrainz_release_group_id: row.try_get("musicbrainz_release_group_id")?,
-            primary_artist_musicbrainz_id: row.try_get("primary_artist_musicbrainz_id")?,
-        })
     }
 }
 

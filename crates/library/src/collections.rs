@@ -3,8 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use sqlx::sqlite::SqliteRow;
-use sqlx::{Connection, FromRow, QueryBuilder, Row, Sqlite, SqliteConnection};
+use sqlx::{Connection, FromRow, QueryBuilder, Sqlite, SqliteConnection};
 
 use crate::{
     AlbumKey, ArtistKey, Database, FolderKey, GenreKey, LibraryError, LibraryResult, MoodKey,
@@ -194,7 +193,7 @@ pub enum AlbumReleaseClass {
     Other,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, FromRow)]
 pub struct AlbumRow {
     pub album_key: AlbumKey,
     pub source_key: SourceKey,
@@ -217,43 +216,12 @@ pub struct AlbumRow {
     pub track_count: i64,
     pub duration_millis: i64,
     pub downloaded_count: i64,
+    #[sqlx(json)]
     pub album_artists: Vec<AlbumArtistLink>,
+    #[sqlx(json)]
     pub genres: Vec<AlbumGenreLink>,
+    #[sqlx(json)]
     pub release_types: Vec<String>,
-}
-
-impl<'row> FromRow<'row, SqliteRow> for AlbumRow {
-    fn from_row(row: &'row SqliteRow) -> Result<Self, sqlx::Error> {
-        Ok(Self {
-            album_key: row.try_get("album_key")?,
-            source_key: row.try_get("source_key")?,
-            object_id: row.try_get("object_id")?,
-            media_uri: row.try_get("media_uri")?,
-            title: row.try_get("title")?,
-            display_artist: row.try_get("display_artist")?,
-            year: row.try_get("year")?,
-            release_date: row.try_get("release_date")?,
-            date_added: row.try_get("date_added")?,
-            musicbrainz_release_id: row.try_get("musicbrainz_release_id")?,
-            musicbrainz_release_group_id: row.try_get("musicbrainz_release_group_id")?,
-            is_compilation: row.try_get("is_compilation")?,
-            release_lookup_identity: row.try_get("release_lookup_identity")?,
-            artwork_binding: row.try_get("artwork_binding")?,
-            favorite: row.try_get("favorite")?,
-            rating: row.try_get("rating")?,
-            play_count: row.try_get("play_count")?,
-            last_played: row.try_get("last_played")?,
-            track_count: row.try_get("track_count")?,
-            duration_millis: row.try_get("duration_millis")?,
-            downloaded_count: row.try_get("downloaded_count")?,
-            album_artists: serde_json::from_str(row.try_get("album_artists")?)
-                .map_err(|error| sqlx::Error::Decode(Box::new(error)))?,
-            genres: serde_json::from_str(row.try_get("genres")?)
-                .map_err(|error| sqlx::Error::Decode(Box::new(error)))?,
-            release_types: serde_json::from_str(row.try_get("release_types")?)
-                .map_err(|error| sqlx::Error::Decode(Box::new(error)))?,
-        })
-    }
 }
 
 #[derive(Clone, Debug, FromRow, PartialEq)]
@@ -275,7 +243,7 @@ pub struct ArtistRow {
     pub downloaded_count: i64,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, FromRow)]
 pub struct GenreRow {
     pub genre_key: GenreKey,
     pub source_key: SourceKey,
@@ -287,28 +255,11 @@ pub struct GenreRow {
     pub track_count: i64,
     pub duration_millis: i64,
     pub downloaded_count: i64,
+    #[sqlx(skip)]
     pub representative_artwork: Vec<Vec<u8>>,
 }
 
-impl<'row> FromRow<'row, SqliteRow> for GenreRow {
-    fn from_row(row: &'row SqliteRow) -> Result<Self, sqlx::Error> {
-        Ok(Self {
-            genre_key: row.try_get("genre_key")?,
-            source_key: row.try_get("source_key")?,
-            source_id: row.try_get("source_id")?,
-            object_id: row.try_get("object_id")?,
-            name: row.try_get("name")?,
-            artwork_binding: row.try_get("artwork_binding")?,
-            album_count: row.try_get("album_count")?,
-            track_count: row.try_get("track_count")?,
-            duration_millis: row.try_get("duration_millis")?,
-            downloaded_count: row.try_get("downloaded_count")?,
-            representative_artwork: Vec::new(),
-        })
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, FromRow)]
 pub struct MoodRow {
     pub mood_key: MoodKey,
     pub source_key: SourceKey,
@@ -316,21 +267,8 @@ pub struct MoodRow {
     pub track_count: i64,
     pub duration_millis: i64,
     pub downloaded_count: i64,
+    #[sqlx(skip)]
     pub representative_artwork: Vec<Vec<u8>>,
-}
-
-impl<'row> FromRow<'row, SqliteRow> for MoodRow {
-    fn from_row(row: &'row SqliteRow) -> Result<Self, sqlx::Error> {
-        Ok(Self {
-            mood_key: row.try_get("mood_key")?,
-            source_key: row.try_get("source_key")?,
-            name: row.try_get("name")?,
-            track_count: row.try_get("track_count")?,
-            duration_millis: row.try_get("duration_millis")?,
-            downloaded_count: row.try_get("downloaded_count")?,
-            representative_artwork: Vec::new(),
-        })
-    }
 }
 
 #[derive(Clone, Debug, FromRow, PartialEq)]

@@ -46,29 +46,33 @@ async fn playlist_selection(
                 )
             })
     };
-    let mut parameters = HashMap::new();
-    if let Some(source) = source {
-        parameters.insert("source".into(), source);
-    }
-    if let Some(folder) = folder {
-        parameters.insert("folder".into(), folder);
-    }
-    let (kind, id) = match selection {
-        MediaSelection::Album { id } => ("album", id.to_string()),
-        MediaSelection::Artist { id, album_artists } => {
-            parameters.insert("album_artists".into(), album_artists.to_string());
-            ("artist", id.to_string())
+    let (source, folder) = match source.as_deref() {
+        Some(source)
+            if folder.is_some() || matches!(selection, MediaSelection::SmartPlaylist { .. }) =>
+        {
+            let (source, folder) = catalog::scope(products, source, folder.as_deref()).await?;
+            (Some(source), folder)
         }
-        MediaSelection::Playlist { id } => ("playlist", id.to_string()),
-        MediaSelection::Genre { id } => ("genre", id.to_string()),
-        MediaSelection::SmartPlaylist { id } => ("smart-playlist", id.to_string()),
+        _ => (None, None),
     };
-    parameters.insert("id".into(), id);
-    let mut query = catalog::song_query(products, &parameters, kind).await?;
-    if !matches!(query.scope, library::SongScope::Smart { .. }) {
-        query.folder = None;
+    let scope = match selection {
+        MediaSelection::Album { id } => library::SongScope::Album(id),
+        MediaSelection::Artist { id, album_artists } => library::SongScope::Artist {
+            key: id,
+            album_artist: album_artists,
+        },
+        MediaSelection::Playlist { id } => library::SongScope::Playlist(id),
+        MediaSelection::Genre { id } => library::SongScope::Genre(id),
+        MediaSelection::SmartPlaylist { id } => library::SongScope::Smart {
+            key: id,
+            source,
+            now: catalog::now(),
+        },
+    };
+    let mut query = library::SongQuery::new(scope);
+    if matches!(query.scope, library::SongScope::Smart { .. }) {
+        query.folder = folder;
     }
-    query.sort = None;
     Ok(query.selection())
 }
 
@@ -334,7 +338,12 @@ pub(super) async fn list_data(
 ) -> Result<Value, Error> {
     let cancellation = library::ReadCancellation::new();
     let (source, folder) = if parameters.contains_key("source") {
-        let (source, folder) = catalog::scope(products, parameters).await?;
+        let (source, folder) = catalog::scope(
+            products,
+            required(parameters, "source")?,
+            parameters.get("folder").map(String::as_str),
+        )
+        .await?;
         (Some(source), folder)
     } else {
         (None, None)
@@ -352,7 +361,7 @@ pub(super) async fn list_data(
     };
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 100)?.min(128);
-    let rows = library::CollectionQuery {
+    let query = library::CollectionQuery {
         kind: library::CollectionKind::Playlists {
             source: (source).into(),
             sort: sort,
@@ -361,12 +370,13 @@ pub(super) async fn list_data(
         filter: (parameters.get("q").map(String::as_str).unwrap_or("")).to_string(),
         descending: boolean(parameters, "descending")?,
         favorites_only: false,
-    }
-    .rows(&products.library, offset, limit, &cancellation)
-    .await
-    .map(|rows| rows.playlists())
-    .map_err(internal)?;
-    let total = catalog::page_total(products, parameters, "playlists").await?;
+    };
+    let rows = query
+        .rows(&products.library, offset, limit, &cancellation)
+        .await
+        .map(|rows| rows.playlists())
+        .map_err(internal)?;
+    let total = catalog::page_total(products, parameters, &query).await?;
     Ok(
         json!({"total":total,"offset":offset,"limit":limit,"playlists":rows.iter().map(|row| json!({"id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"metadata_writable":row.metadata_writable,"can_remove_unavailable":rufin_core::playlists::can_remove_unavailable(&products.source, row),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":rufin_core::playlists::playlist_artwork_bindings(row).len()})).collect::<Vec<_>>()}),
     )

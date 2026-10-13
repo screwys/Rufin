@@ -133,32 +133,14 @@ impl AndroidBrowseQuery {
         let runtime = self.runtime.clone();
         runtime
             .spawn(async move {
-                let rows = self.home_rows().await.map_err(error)?;
-                let mut selections = Vec::new();
-                for row in rows.iter().filter(|row| row.section_id == section_id) {
-                    if let Some(key) = row.track_key {
-                        selections.push(SongSelection::Tracks(Arc::from([
-                            library::TrackKey::from_raw(key),
-                        ])));
-                    } else if row.kind == "album" {
-                        if let Some(album) = self
-                            .database
-                            .album_row_by_media_uri(&row.media_uri, &ReadCancellation::new())
-                            .await
-                            .map_err(error)?
-                        {
-                            selections.push(
-                                SongQuery::new(SongScope::Album(album.album_key)).selection(),
-                            );
-                        }
-                    } else if let Some(route) = row.detail_route.as_deref() {
-                        if let Route::GenreDetail(key) =
-                            serde_json::from_str(route).map_err(error)?
-                        {
-                            selections.push(SongQuery::new(SongScope::Genre(key)).selection());
-                        }
-                    }
-                }
+                let selections = self
+                    .home_rows()
+                    .await
+                    .map_err(error)?
+                    .iter()
+                    .filter(|(row, _)| row.section_id == section_id)
+                    .map(|(_, selection)| selection.clone())
+                    .collect();
                 self.playback.play_selection(
                     rufin_core::playback::PlayRequest::captured(
                         SongSelection::Concat(selections),
@@ -265,28 +247,12 @@ impl AndroidBrowseQuery {
         let runtime = self.runtime.clone();
         runtime
             .spawn(async move {
-                let mut rows = self
-                    .rows(
-                        usize::try_from(offset).map_err(error)?,
-                        limit.min(256) as usize,
-                    )
-                    .await
-                    .map_err(error)?;
-                if matches!(self.route, Route::History) {
-                    let uris = rows
-                        .iter()
-                        .map(|row| row.media_uri.clone())
-                        .collect::<Vec<_>>();
-                    let downloaded = self
-                        .database
-                        .downloaded_media_uris(&uris, &ReadCancellation::new())
-                        .await
-                        .map_err(error)?;
-                    for row in &mut rows {
-                        row.downloaded = downloaded.contains(&row.media_uri);
-                    }
-                }
-                Ok(rows)
+                self.rows(
+                    usize::try_from(offset).map_err(error)?,
+                    limit.min(256) as usize,
+                )
+                .await
+                .map_err(error)
             })
             .await
             .map_err(error)?
@@ -296,6 +262,11 @@ impl AndroidBrowseQuery {
         self: Arc<Self>,
         index: u64,
         media_uri: String,
+        track_key: Option<i64>,
+        row_key: String,
+        album_key: Option<i64>,
+        album_media_uri: Option<String>,
+        album_title: String,
         placement: String,
         shuffled: bool,
         context_title: Option<String>,
@@ -307,27 +278,37 @@ impl AndroidBrowseQuery {
             .spawn(async move {
                 if matches!(self.route, Route::Folders { .. }) {
                     return self
-                        .folder_play(index, media_uri, placement, shuffled, context_title)
+                        .folder_play(
+                            index,
+                            media_uri,
+                            track_key,
+                            placement,
+                            shuffled,
+                            context_title,
+                        )
                         .await;
                 }
                 let index = usize::try_from(index).map_err(error)?;
                 let cancel = ReadCancellation::new();
-                let track = self
-                    .database
-                    .track_row_by_uri(&media_uri, &cancel)
-                    .await
-                    .map_err(error)?
-                    .ok_or_else(|| error("Track is no longer available"))?;
+                let track_key = match track_key {
+                    Some(key) => library::TrackKey::from_raw(key),
+                    None => self
+                        .database
+                        .track_key_by_uri(&media_uri, &cancel)
+                        .await
+                        .map_err(error)?
+                        .ok_or_else(|| error("Track is no longer available"))?,
+                };
                 let (selection, anchor, entry, title, context) = if self.album_detail_layout() {
-                    let album = track
-                        .album_key
+                    let album = album_key
+                        .map(library::AlbumKey::from_raw)
                         .ok_or_else(|| error("Album is no longer available"))?;
                     let mut query = SongQuery::new(SongScope::Album(album));
                     query.sort = Some(self.album_tracks.sort_key.track_sort());
                     query.descending = self.album_tracks.descending;
                     let title = Some(Arc::new(library::QueueContextTitle {
                         kind: Some("Album".into()),
-                        title: track.album.clone().into(),
+                        title: album_title.into(),
                     }));
                     (
                         query.selection(),
@@ -336,7 +317,7 @@ impl AndroidBrowseQuery {
                         title,
                         format!(
                             "album:{}|query=|sort={:?}|descending={}",
-                            track.album_media_uri.as_deref().unwrap_or_default(),
+                            album_media_uri.as_deref().unwrap_or_default(),
                             self.album_tracks.sort_key,
                             self.album_tracks.descending
                         )
@@ -344,12 +325,7 @@ impl AndroidBrowseQuery {
                     )
                 } else if let Some(query) = self.song_query().await.map_err(error)? {
                     let entry = if matches!(query.scope, SongScope::Playlist(_)) {
-                        self.database
-                            .song_playlist_rows(query, index, 1, &cancel)
-                            .await
-                            .map_err(error)?
-                            .first()
-                            .map(|row| row.playlist_entry_key)
+                        Some(serde_json::from_str(&row_key).map_err(error)?)
                     } else {
                         None
                     };
@@ -369,7 +345,7 @@ impl AndroidBrowseQuery {
                         .collect::<Vec<_>>();
                     let anchor = keys
                         .iter()
-                        .position(|key| *key == track.track_key)
+                        .position(|key| *key == track_key)
                         .ok_or_else(|| error("Track is no longer in this route"))?;
                     (
                         SongSelection::Tracks(keys.into()),
@@ -384,7 +360,7 @@ impl AndroidBrowseQuery {
                         selection, anchor, placement, false,
                     )
                     .with_context(context)
-                    .with_anchor(track.track_key, entry)
+                    .with_anchor(track_key, entry)
                     .with_context_title(title)
                     .shuffled(shuffled),
                 );

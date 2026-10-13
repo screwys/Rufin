@@ -32,8 +32,6 @@ class RufinPlayerTest {
         artworkRevision = 0UL,
         favorite = false,
         queueRevision = 1UL,
-        queueWindowCount = 1UL,
-        queueWindowRevision = 1UL,
         queueTotal = 1UL,
         queueIndex = 0UL,
         title = "Track",

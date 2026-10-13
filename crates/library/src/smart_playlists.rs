@@ -3,7 +3,6 @@
 
 use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
-use sqlx::sqlite::SqliteRow;
 use sqlx::{AssertSqlSafe, Connection, FromRow, Row, Sqlite, SqliteConnection};
 
 use crate::{
@@ -366,18 +365,22 @@ fn default_smart_playlists() -> [(&'static str, &'static str, SmartPlaylistDefin
     ]
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, FromRow)]
 pub struct SmartPlaylistRow {
     pub smart_playlist_key: SmartPlaylistKey,
     pub object_id: String,
     pub name: String,
+    #[sqlx(rename = "definition_json", json)]
     pub definition: SmartPlaylistDefinition,
     pub position: i64,
     pub track_count: i64,
     pub duration_millis: i64,
     pub downloaded_count: i64,
+    #[sqlx(skip)]
     pub artwork_bindings: Vec<Vec<u8>>,
+    #[sqlx(skip)]
     pub artwork_binding: Option<Vec<u8>>,
+    #[sqlx(skip)]
     pub representative_artwork: Vec<Vec<u8>>,
 }
 
@@ -385,38 +388,6 @@ pub struct SmartPlaylistRow {
 pub struct SmartPlaylistValueSuggestions {
     pub genres: Vec<String>,
     pub moods: Vec<String>,
-}
-
-impl<'row> FromRow<'row, SqliteRow> for SmartPlaylistRow {
-    fn from_row(row: &'row SqliteRow) -> Result<Self, sqlx::Error> {
-        let definition = row.try_get::<String, _>("definition_json")?;
-        let object_id: String = row.try_get("object_id")?;
-        let artwork_binding =
-            row.try_get::<Option<String>, _>("artwork_revision")?
-                .map(|revision| {
-                    serde_json::to_vec(&crate::PlaylistArtworkBinding {
-                        smart: true,
-                        source_id: None,
-                        object_id: object_id.clone(),
-                        revision,
-                    })
-                    .expect("playlist artwork binding")
-                });
-        Ok(Self {
-            smart_playlist_key: row.try_get("smart_playlist_key")?,
-            object_id,
-            name: row.try_get("name")?,
-            definition: serde_json::from_str(&definition)
-                .map_err(|error| sqlx::Error::Decode(Box::new(error)))?,
-            position: row.try_get("position")?,
-            track_count: row.try_get("track_count")?,
-            duration_millis: row.try_get("duration_millis")?,
-            downloaded_count: 0,
-            artwork_bindings: artwork_binding.iter().cloned().collect(),
-            artwork_binding,
-            representative_artwork: Vec::new(),
-        })
-    }
 }
 
 fn smart_list_order(sort: SmartPlaylistListSort, descending: bool) -> Option<&'static str> {
@@ -485,7 +456,18 @@ pub(crate) async fn load_smart_playlist_rows(
         if ordinal != Some(current) {
             let mut row = SmartPlaylistRow::from_row(&record)?;
             normalize_definition(&mut row.definition)?;
-            row.downloaded_count = record.try_get("downloaded_count")?;
+            row.artwork_binding = record
+                .try_get::<Option<String>, _>("artwork_revision")?
+                .map(|revision| {
+                    serde_json::to_vec(&crate::PlaylistArtworkBinding {
+                        smart: true,
+                        source_id: None,
+                        object_id: row.object_id.clone(),
+                        revision,
+                    })
+                    .expect("playlist artwork binding")
+                });
+            row.artwork_bindings = row.artwork_binding.iter().cloned().collect();
             result.push(row);
             ordinal = Some(current);
         }

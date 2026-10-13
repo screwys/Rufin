@@ -34,6 +34,8 @@ impl AndroidBrowseQuery {
                     .collect();
                 AndroidBrowseRow {
                     track_key: Some(row.track_key.raw()),
+                    album_key: None,
+                    album_media_uri: None,
                     kind: "track".into(),
                     playback_context_id: None,
                     key: row.media_uri.clone(),
@@ -57,7 +59,7 @@ impl AndroidBrowseQuery {
                     source_name: row.source_name.unwrap_or_default(),
                     last_played: row.last_played,
                     writable: false,
-                    downloaded: false,
+                    downloaded: row.is_downloaded,
                     artwork_identity: row.artwork_binding,
                 }
             })
@@ -86,11 +88,21 @@ impl AndroidBrowseQuery {
             .collect()
     }
 
-    pub(super) fn track_row(&self, track: library::TrackRow, index: usize) -> AndroidBrowseRow {
+    pub(super) fn track_row(&self, mut track: library::TrackRow, index: usize) -> AndroidBrowseRow {
         let fields = self.track_field_values(index, |field| {
             rufin_core::settings::presentation::track_field(&track, field)
         });
+        let (album_key, album_media_uri) = if self.album_detail_layout() {
+            (
+                track.album_key.map(library::AlbumKey::raw),
+                track.album_media_uri.take(),
+            )
+        } else {
+            (None, None)
+        };
         let mut row: AndroidBrowseRow = track.into();
+        row.album_key = album_key;
+        row.album_media_uri = album_media_uri;
         row.fields = fields;
         row
     }
@@ -103,7 +115,9 @@ impl AndroidBrowseQuery {
         }
     }
 
-    pub(super) async fn home_rows(&self) -> Result<&Vec<AndroidBrowseRow>, library::LibraryError> {
+    pub(super) async fn home_rows(
+        &self,
+    ) -> library::LibraryResult<&Vec<(AndroidBrowseRow, SongSelection)>> {
         self.home_snapshot
             .get_or_try_init(|| async {
                 let db = &self.database;
@@ -123,14 +137,18 @@ impl AndroidBrowseQuery {
                     .await?;
                 let mut rows = Vec::new();
                 if let Some(row) = home.showcase {
+                    let selection =
+                        SongQuery::new(SongScope::Album(row.album.album_key)).selection();
                     let mut row: AndroidBrowseRow = row.into();
                     home_section(&mut row, library::HomeBlockKind::Showcase);
-                    rows.push(row);
+                    rows.push((row, selection));
                 }
                 for row in home.explore {
+                    let selection =
+                        SongQuery::new(SongScope::Album(row.album.album_key)).selection();
                     let mut row: AndroidBrowseRow = row.into();
                     home_section(&mut row, library::HomeBlockKind::Explore);
-                    rows.push(row);
+                    rows.push((row, selection));
                 }
                 for (block, section) in [
                     (library::HomeBlockKind::MostPlayed, home.most_played),
@@ -142,14 +160,17 @@ impl AndroidBrowseQuery {
                     ),
                 ] {
                     for row in section.tracks {
+                        let selection = SongSelection::Tracks(Arc::from([row.track.track_key]));
                         let mut row: AndroidBrowseRow = row.into();
                         home_section(&mut row, block);
-                        rows.push(row);
+                        rows.push((row, selection));
                     }
                     for row in section.albums {
+                        let selection =
+                            SongQuery::new(SongScope::Album(row.album.album_key)).selection();
                         let mut row: AndroidBrowseRow = row.into();
                         home_section(&mut row, block);
-                        rows.push(row);
+                        rows.push((row, selection));
                     }
                 }
                 for section in home.provider_sections {
@@ -159,80 +180,64 @@ impl AndroidBrowseQuery {
                         section.title.as_deref(),
                     );
                     for row in section.rows.tracks {
+                        let selection = SongSelection::Tracks(Arc::from([row.track.track_key]));
                         let mut row: AndroidBrowseRow = row.into();
                         row.section = title.clone();
                         row.section_id = id.clone();
                         row.section_kind = "section".into();
-                        rows.push(row);
+                        rows.push((row, selection));
                     }
                     for row in section.rows.albums {
+                        let selection =
+                            SongQuery::new(SongScope::Album(row.album.album_key)).selection();
                         let mut row: AndroidBrowseRow = row.into();
                         row.section = title.clone();
                         row.section_id = id.clone();
                         row.section_kind = "section".into();
-                        rows.push(row);
-                    }
-                }
-                let keys = home
-                    .genres
-                    .iter()
-                    .map(|row| row.genre_key)
-                    .collect::<Vec<_>>();
-                let mut genre_downloads = std::collections::HashMap::new();
-                for keys in keys.chunks(128) {
-                    let facts = self
-                        .database
-                        .genre_rows(
-                            self.selected().source_key,
-                            keys,
-                            self.selected().music_folder_key,
-                            &ReadCancellation::new(),
-                        )
-                        .await?;
-                    for fact in facts {
-                        genre_downloads.insert(
-                            fact.genre_key,
-                            fact.track_count > 0 && fact.downloaded_count == fact.track_count,
-                        );
+                        rows.push((row, selection));
                     }
                 }
                 for row in home.genres {
-                    rows.push(AndroidBrowseRow {
-                        track_key: None,
-                        kind: "genre".into(),
-                        playback_context_id: Some(format!("genre:{}", row.genre_key)),
-                        fields: Vec::new(),
-                        artist: String::new(),
-                        album: String::new(),
-                        key: row.object_id,
-                        media_uri: String::new(),
-                        title: row.name,
-                        subtitle: String::new(),
-                        favorite: false,
-                        duration_millis: 0,
-                        detail_route: Some(route_json(Route::GenreDetail(row.genre_key))),
-                        pin: None,
-                        section: localization::tr("Featured genres"),
-                        section_id: "Genres".into(),
-                        section_kind: "genres".into(),
-                        section_refreshable: false,
-                        year: None,
-                        track_count: row.track_count.max(0) as u64,
-                        source_id: None,
-                        source_name: String::new(),
-                        last_played: None,
-                        writable: false,
-                        downloaded: genre_downloads
-                            .get(&row.genre_key)
-                            .copied()
-                            .unwrap_or(false),
-                        artwork_identity: row.artwork_binding,
-                    });
+                    let selection = SongQuery::new(SongScope::Genre(row.genre_key)).selection();
+                    rows.push((
+                        AndroidBrowseRow {
+                            track_key: None,
+                            album_key: None,
+                            album_media_uri: None,
+                            kind: "genre".into(),
+                            playback_context_id: Some(format!("genre:{}", row.genre_key)),
+                            fields: Vec::new(),
+                            artist: String::new(),
+                            album: String::new(),
+                            key: row.object_id,
+                            media_uri: String::new(),
+                            title: row.name,
+                            subtitle: String::new(),
+                            favorite: false,
+                            duration_millis: 0,
+                            detail_route: Some(route_json(Route::GenreDetail(row.genre_key))),
+                            pin: None,
+                            section: localization::tr("Featured genres"),
+                            section_id: "Genres".into(),
+                            section_kind: "genres".into(),
+                            section_refreshable: false,
+                            year: None,
+                            track_count: row.track_count.max(0) as u64,
+                            source_id: None,
+                            source_name: String::new(),
+                            last_played: None,
+                            writable: false,
+                            downloaded: row.track_count > 0
+                                && row.downloaded_count == row.track_count,
+                            artwork_identity: row.artwork_binding,
+                        },
+                        selection,
+                    ));
                 }
                 let provider = rows
                     .iter()
-                    .any(|row| row.section_id.starts_with("provider:"));
-                rows.sort_by_key(|row| {
+                    .any(|(row, _)| row.section_id.starts_with("provider:"));
+                rows.sort_by_key(|(row, _)| {
                     if provider && row.section_id == "Showcase" {
                         return 0;
                     }
@@ -252,7 +257,7 @@ impl AndroidBrowseQuery {
                 let filter = filter.to_lowercase();
                 Ok(rows
                     .into_iter()
-                    .filter(|row| {
+                    .filter(|(row, _)| {
                         format!("{} {}", row.title, row.subtitle)
                             .to_lowercase()
                             .contains(&filter)
@@ -287,6 +292,8 @@ impl AndroidBrowseQuery {
                         });
                         AndroidBrowseRow {
                             track_key: Some(row.track_key.raw()),
+                            album_key: None,
+                            album_media_uri: None,
                             kind: "track".into(),
                             playback_context_id: None,
                             fields,
@@ -384,7 +391,7 @@ impl AndroidBrowseQuery {
                 .iter()
                 .skip(offset)
                 .take(limit)
-                .cloned()
+                .map(|(row, _)| row.clone())
                 .collect()),
             _ if matches!(self.route, Route::Search) => Ok(search_rows(
                 self.database
