@@ -1,7 +1,6 @@
 //! File association and synchronization for authored playlists.
 use std::{
     future::Future,
-    io::BufReader,
     path::{Path, PathBuf},
 };
 
@@ -519,62 +518,6 @@ async fn revision(owner: &SourceOwner, link: &PlaylistFileLink) -> Result<String
     }
 }
 
-pub(crate) async fn import_source_on(
-    owner: &SourceOwner,
-    source: &SourceId,
-    path: &str,
-    target: Option<PlaylistKey>,
-) -> Result<library::PlaylistImportReport, String> {
-    let source = owner.client(source)?;
-    if let Some(path) = source.local_playlist_path(path) {
-        import_local_on(owner, &path, target, None).await
-    } else {
-        source
-            .import_playlist_file(&owner.shared.database, path, target)
-            .await
-            .map_err(string_error)
-    }
-}
-
-pub(crate) async fn import_local_on(
-    owner: &SourceOwner,
-    path: &Path,
-    target: Option<PlaylistKey>,
-    current: Option<&sources::SourceConfiguration>,
-) -> Result<library::PlaylistImportReport, String> {
-    let (_, _, access) = local_location(owner, path);
-    let (document, access, rejected) = tokio::task::spawn_blocking(move || {
-        let mut document = library::PlaylistFile::read(
-            BufReader::new(std::fs::File::open(&access).map_err(string_error)?),
-            &access,
-        )
-        .map_err(string_error)?;
-        if target.is_none() {
-            document.identity = None;
-        }
-        let before = document.entries.len();
-        document.entries.retain(|entry| {
-            library::playlist_locator(&entry.locator, access.parent().unwrap_or(Path::new(".")))
-                .and_then(|uri| library::file_media_path(&uri))
-                .is_none_or(|path| !sources::playlist_file_is_non_audio(&path))
-        });
-        let rejected = before - document.entries.len();
-        Ok::<_, String>((document, access, rejected))
-    })
-    .await
-    .map_err(string_error)??;
-    let mut report = owner
-        .shared
-        .database
-        .import_playlist_document(document, &access, target, |locator| {
-            current.and_then(|source| source.recognize_media_locator(locator))
-        })
-        .await
-        .map_err(string_error)?;
-    report.skipped += rejected as u64;
-    Ok(report)
-}
-
 pub(crate) async fn remember(
     owner: &SourceOwner,
     playlist: PlaylistKey,
@@ -626,9 +569,21 @@ async fn reload_on(
     }
     let before = revision(owner, link).await?;
     let report = if let Some(source) = &link.source_id {
-        import_source_on(owner, source, &link.path, Some(link.playlist)).await?
+        owner
+            .client(source)?
+            .import_playlist_file(&owner.shared.database, &link.path, Some(link.playlist))
+            .await
+            .map_err(string_error)?
     } else {
-        import_local_on(owner, Path::new(&link.path), Some(link.playlist), None).await?
+        let (_, _, access) = local_location(owner, Path::new(&link.path));
+        sources::import_local_playlist_file(
+            &owner.shared.database,
+            &access,
+            Some(link.playlist),
+            |_| None,
+        )
+        .await
+        .map_err(string_error)?
     };
     owner
         .shared
@@ -870,7 +825,11 @@ pub(crate) async fn discover(
                 continue;
             }
             let result = async {
-                let report = import_source_on(owner, source_id, &path, None).await?;
+                let report = owner
+                    .client(source_id)?
+                    .import_playlist_file(&owner.shared.database, &path, None)
+                    .await
+                    .map_err(string_error)?;
                 remember(
                     owner,
                     report.playlist,

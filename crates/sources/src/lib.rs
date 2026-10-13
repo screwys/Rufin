@@ -51,7 +51,9 @@ pub use file::documents::{
 pub use file::documents::{read_document_prefix, read_document_queue_item};
 pub use file::local::media::{local_media_identity_path, read_local_queue_item};
 pub use file::metadata::read_embedded_lyrics;
-pub use file::playlist::{playlist_file_is_non_audio, playlist_file_revision};
+pub use file::playlist::{
+    import_local_playlist_file, playlist_file_is_non_audio, playlist_file_revision,
+};
 pub use file::remote::smb::list_smb_shares;
 pub use file::remote::webdav::nextcloud::authorize_nextcloud;
 pub use file::remote::{

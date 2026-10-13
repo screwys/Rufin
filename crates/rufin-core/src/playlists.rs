@@ -61,9 +61,18 @@ pub fn import_playlist(
             let target =
                 crate::playlist_files::import_target(&owner, source_id.as_ref(), &location, linked)
                     .await?;
-            let report =
-                crate::playlist_files::import_local_on(&owner, &access, target, current.as_ref())
-                    .await?;
+            let report = sources::import_local_playlist_file(
+                &owner.shared.database,
+                &access,
+                target,
+                |locator| {
+                    current
+                        .as_ref()
+                        .and_then(|source| source.recognize_media_locator(locator))
+                },
+            )
+            .await
+            .map_err(string_error)?;
             if linked {
                 crate::playlist_files::remember(&owner, report.playlist, source_id, location, None)
                     .await?;
@@ -102,8 +111,11 @@ pub fn import_source_playlist(
             let target =
                 crate::playlist_files::import_target(&owner, Some(&source_id), &path, linked)
                     .await?;
-            let report =
-                crate::playlist_files::import_source_on(&owner, &source_id, &path, target).await?;
+            let report = owner
+                .client(&source_id)?
+                .import_playlist_file(&owner.shared.database, &path, target)
+                .await
+                .map_err(string_error)?;
             if linked {
                 crate::playlist_files::remember(
                     &owner,
@@ -1179,13 +1191,26 @@ async fn enrich_imported_playlist(
             break;
         }
         after = page.last().unwrap().0.clone();
-        if page.iter().any(|(uri, cue)| {
-            cue.as_ref()
+        for (uri, cue) in page {
+            let path = cue
                 .map(PathBuf::from)
-                .or_else(|| library::file_media_path(uri))
-                .is_some_and(|path| path.is_file())
-        }) {
-            readable = true;
+                .or_else(|| library::file_media_path(&uri));
+            readable = path.is_some_and(|path| path.is_file());
+            if !readable {
+                readable = owner
+                    .shared
+                    .database
+                    .playback_access(&uri)
+                    .await
+                    .map_err(string_error)?
+                    .and_then(|(uri, _)| library::file_media_path(&uri))
+                    .is_some_and(|path| path.is_file());
+            }
+            if readable {
+                break;
+            }
+        }
+        if readable {
             break;
         }
     }

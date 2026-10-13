@@ -2975,12 +2975,7 @@ impl Source {
                 let path = self
                     .local_playlist_path(path)
                     .ok_or(SourceError::NotFound)?;
-                let input = std::fs::File::open(&path)
-                    .map_err(|error| SourceError::Other(error.to_string()))?;
-                database
-                    .import_playlist_file(std::io::BufReader::new(input), &path, target, |_| None)
-                    .await
-                    .map_err(Into::into)
+                crate::import_local_playlist_file(database, &path, target, |_| None).await
             }
             _ => Err(SourceError::InvalidRequest(
                 "This source does not store playlist files",

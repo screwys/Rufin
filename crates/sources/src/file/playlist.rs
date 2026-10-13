@@ -3,6 +3,79 @@ use std::path::Path;
 
 use super::{local, media};
 
+pub async fn import_local_playlist_file(
+    database: &library::Database,
+    path: &Path,
+    target: Option<library::PlaylistKey>,
+    recognize: impl Fn(&str) -> Option<String>,
+) -> crate::SourceResult<library::PlaylistImportReport> {
+    let path = path.to_owned();
+    let (document, path, locators) = tokio::task::spawn_blocking(move || {
+        let input = std::fs::File::open(&path)
+            .map_err(|error| crate::SourceError::Other(error.to_string()))?;
+        let mut document = library::PlaylistFile::read(std::io::BufReader::new(input), &path)?;
+        if target.is_none() {
+            document.identity = None;
+        }
+        let mut worker = media::Worker::default();
+        let mut locators = Vec::new();
+        let before = document.entries.len();
+        document.entries.retain_mut(|entry| {
+            let Some(uri) =
+                library::playlist_locator(&entry.locator, path.parent().unwrap_or(Path::new(".")))
+            else {
+                return true;
+            };
+            let Some(access) = library::file_media_path(&uri).filter(|path| path.is_file()) else {
+                return true;
+            };
+            match local::media::read_media(&mut worker, access.clone(), None) {
+                media::MediaRead::Accepted(track) => {
+                    let canonical = track.track.media_uri.expect("local media identity");
+                    let access = std::fs::canonicalize(&access).unwrap_or(access);
+                    let access_uri = url::Url::from_file_path(&access)
+                        .expect("absolute local media path")
+                        .to_string();
+                    if canonical != access_uri {
+                        locators.push(library::LocalLocatorWrite {
+                            source_id: None,
+                            media_uri: canonical.clone(),
+                            origin: "import".into(),
+                            path: access.to_string_lossy().into_owned(),
+                            root: access
+                                .parent()
+                                .unwrap_or(Path::new("."))
+                                .to_string_lossy()
+                                .into_owned(),
+                            relative_path: access
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .into_owned(),
+                            access_uri,
+                        });
+                    }
+                    entry.locator = canonical;
+                    true
+                }
+                media::MediaRead::Rejected => false,
+                media::MediaRead::Unreadable => true,
+            }
+        });
+        document.skipped += (before - document.entries.len()) as u64;
+        Ok::<_, crate::SourceError>((document, path, locators))
+    })
+    .await
+    .map_err(|error| crate::SourceError::Other(error.to_string()))??;
+    for locator in locators {
+        database.upsert_local_locator(&locator).await?;
+    }
+    database
+        .import_playlist_document(document, &path, target, recognize)
+        .await
+        .map_err(Into::into)
+}
+
 pub fn playlist_file_revision(path: &Path) -> std::io::Result<String> {
     let metadata = std::fs::metadata(path)?;
     let modified = metadata

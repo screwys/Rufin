@@ -1731,7 +1731,8 @@ mod tests {
     #[tokio::test]
     async fn imported_local_files_survive_rescan_and_leave_catalog_after_last_playlist_reference() {
         let directory = tempfile::tempdir().unwrap();
-        let audio = directory.path().join("Jóga #1.wav");
+        let root = directory.path().canonicalize().unwrap();
+        let audio = root.join("Jóga #1.wav");
         fs::write(&audio, silent_wav()).unwrap();
         let database = library::Database::open(directory.path().join("library.db"))
             .await
@@ -1751,13 +1752,17 @@ mod tests {
             .finish()
             .await
             .unwrap();
-        let playlist = database
-            .import_playlist_file(
-                std::io::Cursor::new("Jóga #1.wav\nJóga #1.wav\n"),
-                &directory.path().join("mix.m3u8"),
-                None,
-                |_| None,
-            )
+        let imported_path = root.join("Jóga #1.wav");
+        #[cfg(unix)]
+        let imported_path = {
+            let alias = root.join("alias.wav");
+            std::os::unix::fs::symlink(&imported_path, &alias).unwrap();
+            alias
+        };
+        let path = root.join("mix.m3u8");
+        let contents = format!("{0}\n{0}\n", imported_path.display());
+        fs::write(&path, &contents).unwrap();
+        let playlist = crate::import_local_playlist_file(&database, &path, None, |_| None)
             .await
             .unwrap();
         source
@@ -1765,6 +1770,47 @@ mod tests {
             .await
             .unwrap();
         let uri = url::Url::from_file_path(&audio).unwrap().to_string();
+        let entries = database
+            .playlist_entry_uri_page(playlist.playlist, -1)
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().all(|(_, _, value)| value == &uri));
+        fs::write(&path, format!("#EXTM3U\n{contents}")).unwrap();
+        let reloaded =
+            crate::import_local_playlist_file(&database, &path, Some(playlist.playlist), |_| None)
+                .await
+                .unwrap();
+        assert!(!reloaded.changed);
+        assert_eq!(
+            database
+                .playlist_entry_uri_page(playlist.playlist, -1)
+                .await
+                .unwrap(),
+            entries
+        );
+        #[cfg(unix)]
+        {
+            let other = root.join("other.wav");
+            fs::write(&other, silent_wav()).unwrap();
+            fs::remove_file(&imported_path).unwrap();
+            std::os::unix::fs::symlink(&other, &imported_path).unwrap();
+            crate::import_local_playlist_file(&database, &path, Some(playlist.playlist), |_| None)
+                .await
+                .unwrap();
+            let other_uri = url::Url::from_file_path(&other).unwrap().to_string();
+            let retargeted = database
+                .playlist_entry_uri_page(playlist.playlist, -1)
+                .await
+                .unwrap();
+            assert_eq!(retargeted.len(), 2);
+            assert!(retargeted.iter().all(|(_, _, value)| value == &other_uri));
+            fs::remove_file(&imported_path).unwrap();
+            std::os::unix::fs::symlink(&audio, &imported_path).unwrap();
+            crate::import_local_playlist_file(&database, &path, Some(playlist.playlist), |_| None)
+                .await
+                .unwrap();
+        }
         assert!(
             database
                 .track_row_by_uri(&uri, &library::ReadCancellation::new())
