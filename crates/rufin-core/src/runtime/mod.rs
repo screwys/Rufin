@@ -27,8 +27,7 @@ pub use scrobbling::{
     LastFmPreferences, LibreFmPreferences, ListenBrainzPreferences, ScrobblingConnection,
     ScrobblingConnectionEvent, ScrobblingHandle, ScrobblingPreferences,
 };
-pub use source::LibraryRefreshTrigger;
-pub use source::{SelectedSourceHandle, SourceHandle};
+pub use source::SourceHandle;
 pub use waveform::WaveformProjection;
 
 #[derive(Clone)]

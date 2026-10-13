@@ -101,6 +101,8 @@ impl AlbumDetailModel {
 
 impl AlbumCollectionModels {
     pub fn new(
+        library: &Arc<library::Database>,
+        runtime: &tokio::runtime::Handle,
         selected: &rufin_core::runtime::SelectedLibrary,
         count: usize,
         first_row_position: usize,
@@ -113,7 +115,7 @@ impl AlbumCollectionModels {
         let source = selected.source_key;
         let folder = selected.music_folder_key;
         if layout == LibraryLayout::Detail {
-            let database = Arc::clone(&selected.database);
+            let database = Arc::clone(library);
             let load = Rc::new(
                 move |_: Vec<AlbumDetailKey>,
                       range: std::ops::Range<usize>,
@@ -143,12 +145,8 @@ impl AlbumCollectionModels {
                         as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
                 },
             );
-            let sparse = SparseRouteModel::new(
-                SparseSource::Query { count },
-                24,
-                selected.runtime.clone(),
-                load,
-            );
+            let sparse =
+                SparseRouteModel::new(SparseSource::Query { count }, 24, runtime.clone(), load);
             sparse.seed_matching_at(first_row_position, first_detail_rows, detail_key);
             return Self {
                 rows: None,
@@ -157,7 +155,7 @@ impl AlbumCollectionModels {
                 },
             };
         }
-        let database = Arc::clone(&selected.database);
+        let database = Arc::clone(library);
         let load: gtk_widgets::media_drag::CollectionRowsLoad<
             crate::routes::CollectionReadRequest,
             AlbumRow,
@@ -188,19 +186,14 @@ impl AlbumCollectionModels {
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
             },
         );
-        let sparse = SparseRouteModel::new(
-            SparseSource::Query { count },
-            32,
-            selected.runtime.clone(),
-            {
-                let load = Arc::clone(&load);
-                let request = Rc::clone(&request);
-                Rc::new(move |_, range, cancellation| {
-                    let request = request.borrow().clone();
-                    load(request, range, cancellation)
-                })
-            },
-        );
+        let sparse = SparseRouteModel::new(SparseSource::Query { count }, 32, runtime.clone(), {
+            let load = Arc::clone(&load);
+            let request = Rc::clone(&request);
+            Rc::new(move |_, range, cancellation| {
+                let request = request.borrow().clone();
+                load(request, range, cancellation)
+            })
+        });
         gtk_widgets::media_drag::install_collection_selection(&sparse, request, load, |row| {
             gtk_widgets::selection::collection_play_request(library::SongScope::Album(
                 row.album_key,

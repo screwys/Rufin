@@ -214,11 +214,12 @@ impl AndroidLibrary {
     }
 
     pub async fn set_music_folder(&self, id: Option<String>) -> Result<(), AndroidError> {
-        self.source
+        let selected = self
+            .source
             .selected_library()
-            .ok_or_else(|| error("No source selected"))?
-            .operations
-            .set_music_folder(id)
+            .ok_or_else(|| error("No source selected"))?;
+        self.source
+            .set_music_folder(selected.source_id, id)
             .recv()
             .await
             .map_err(error)?
@@ -441,9 +442,8 @@ impl AndroidLibrary {
             .source
             .selected_library()
             .ok_or_else(|| error("No source selected"))?;
-        selected
-            .operations
-            .refresh_home(kind)
+        self.source
+            .refresh_home(selected.source_id, kind)
             .recv()
             .await
             .map_err(error)?
@@ -574,12 +574,10 @@ impl AndroidLibrary {
             .source
             .selected_library()
             .ok_or_else(|| error("No source selected"))?;
-        selected
-            .runtime
-            .clone()
+        let database = self.database.clone();
+        self.runtime
             .spawn(async move {
-                let genre = selected
-                    .database
+                let genre = database
                     .genre_rows(
                         selected.source_key,
                         &[key],
@@ -607,9 +605,8 @@ impl AndroidLibrary {
         let Some(selected) = self.source.selected_library() else {
             return Ok(localization::tr("Any genre"));
         };
-        selected
-            .runtime
-            .clone()
+        let database = self.database.clone();
+        self.runtime
             .spawn(async move {
                 let Some(object_id) = settings.selected_genre_id(
                     &selected.source_id,
@@ -617,16 +614,14 @@ impl AndroidLibrary {
                 ) else {
                     return Ok(localization::tr("Any genre"));
                 };
-                let Some(key) = selected
-                    .database
+                let Some(key) = database
                     .genre_key_by_object(selected.source_key, object_id, &ReadCancellation::new())
                     .await
                     .map_err(error)?
                 else {
                     return Ok(localization::tr("Any genre"));
                 };
-                Ok(selected
-                    .database
+                Ok(database
                     .genre_rows(
                         selected.source_key,
                         &[key],
@@ -658,16 +653,14 @@ impl AndroidLibrary {
         current.random_play = settings.clone();
         self.settings.save(&current).map_err(error)?;
         let queue = self.playback.clone();
-        selected
-            .runtime
-            .clone()
+        let database = self.database.clone();
+        self.runtime
             .spawn(async move {
                 let genre = if let Some(object) = settings.selected_genre_id(
                     &selected.source_id,
                     selected.music_folder_object_id.as_deref(),
                 ) {
-                    selected
-                        .database
+                    database
                         .genre_key_by_object(selected.source_key, object, &ReadCancellation::new())
                         .await
                         .map_err(error)?
@@ -675,7 +668,7 @@ impl AndroidLibrary {
                     None
                 };
                 rufin_core::radio::queue_random(
-                    &selected.database,
+                    &database,
                     selected.source_key,
                     selected.music_folder_key,
                     rufin_core::radio::random_play_request(&settings, genre, placement),
@@ -744,8 +737,22 @@ impl AndroidLibrary {
             .source
             .selected_library()
             .ok_or_else(|| error("No source selected"))?;
-        rufin_core::source::search::acquire_search(&selected, text, 60, ReadCancellation::new())
+        let source = self.source.clone();
+        let database = self.database.clone();
+        self.runtime
+            .spawn(async move {
+                rufin_core::source::search::acquire_search(
+                    &source,
+                    &database,
+                    &selected,
+                    text,
+                    60,
+                    ReadCancellation::new(),
+                )
+                .await
+            })
             .await
+            .map_err(error)?
             .map(search_rows)
             .map_err(error)
     }

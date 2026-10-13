@@ -29,6 +29,9 @@ pub const SEARCH_PREVIEW_LIMIT: usize = 30;
 
 /// One current query shared by the header and the Search route.
 pub struct SearchSession {
+    source: rufin_core::runtime::SourceHandle,
+    database: Arc<library::Database>,
+    runtime: tokio::runtime::Handle,
     selected: RefCell<Option<SelectedLibrary>>,
     query: RefCell<String>,
     pub(super) items: RefCell<[Vec<SearchItem>; 3]>,
@@ -41,9 +44,16 @@ pub struct SearchSession {
     pub(super) category: Cell<CollectionCategory>,
 }
 
-impl Default for SearchSession {
-    fn default() -> Self {
+impl SearchSession {
+    pub fn new(
+        source: rufin_core::runtime::SourceHandle,
+        database: Arc<library::Database>,
+        runtime: tokio::runtime::Handle,
+    ) -> Self {
         Self {
+            source,
+            database,
+            runtime,
             selected: RefCell::new(None),
             query: RefCell::new(String::new()),
             items: RefCell::new(Default::default()),
@@ -228,8 +238,25 @@ impl SearchSession {
         self.cancellation.replace(Some(cancellation.clone()));
         let query = self.query();
         let weak = Rc::downgrade(self);
+        let source = self.source.clone();
+        let database = self.database.clone();
+        let task = self.runtime.spawn(async move {
+            rufin_core::source::search::acquire_search(
+                &source,
+                &database,
+                &selected,
+                query,
+                60,
+                cancellation,
+            )
+            .await
+        });
         glib::spawn_future_local(async move {
-            let result = acquire_search(&selected, query, cancellation).await;
+            let result = task
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|rows| rows)
+                .map(cached_items);
             let Some(session) = weak.upgrade() else {
                 return;
             };

@@ -262,6 +262,8 @@ impl CatalogUi {
             settings: settings.clone(),
         }));
         let models = AlbumCollectionModels::new(
+            &self.library,
+            &self.runtime,
             &selected,
             order,
             first_row_position,
@@ -326,6 +328,8 @@ impl CatalogUi {
                                 != (settings.layout == LibraryLayout::Detail);
                             if replace_model {
                                 models.replace(AlbumCollectionModels::new(
+                                    &shell.library,
+                                    &shell.runtime,
                                     &selected,
                                     order,
                                     first_row_position,
@@ -358,7 +362,7 @@ impl CatalogUi {
                 },
             )
         };
-        let database = Arc::clone(&selected.database);
+        let database = Arc::clone(&self.library);
         let source = selected.source_key;
         let folder = selected.music_folder_key;
         let load = Arc::new(
@@ -393,7 +397,7 @@ impl CatalogUi {
             },
         );
         let read = LatestMountedRouteRead::new_with_request(
-            selected.runtime.clone(),
+            self.runtime.clone(),
             apply,
             load,
             "mounted Albums route",
@@ -681,7 +685,7 @@ impl CatalogUi {
         } else {
             LibraryListKey::Artists
         };
-        let database = Arc::clone(&selected.database);
+        let database = Arc::clone(&self.library);
         let source = selected.source_key;
         let folder = selected.music_folder_key;
         let applied = Rc::new(RefCell::new(CollectionReadRequest {
@@ -727,7 +731,7 @@ impl CatalogUi {
         let sparse = gtk_widgets::sparse_model::SparseRouteModel::new(
             gtk_widgets::sparse_model::SparseSource::Query { count },
             32,
-            selected.runtime.clone(),
+            self.runtime.clone(),
             {
                 let row_load = Arc::clone(&row_load);
                 Rc::new(move |_, range, cancellation| {
@@ -839,7 +843,7 @@ impl CatalogUi {
             },
         );
         let read = LatestMountedRouteRead::new_with_request(
-            selected.runtime.clone(),
+            self.runtime.clone(),
             apply,
             load,
             "mounted Artist route",

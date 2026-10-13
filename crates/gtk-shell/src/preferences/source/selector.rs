@@ -291,8 +291,11 @@ fn select_music_folder(shell: &Shell, folder_id: Option<String>) {
     if selected_folder_id.as_ref() == folder_id.as_ref() {
         return;
     }
-    if let Some(source) = shell.selected_source_operations() {
-        source.set_music_folder(folder_id);
+    if let Some(selected) = shell.selected_library() {
+        shell
+            .products
+            .source
+            .set_music_folder(selected.source_id.clone(), folder_id);
     }
 }
 

@@ -547,12 +547,14 @@ impl PlaybackOwner {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .clone();
+        let selected = source.upgrade().and_then(|owner| owner.selected_library());
         let request = request.clone();
         self.runtime.spawn(async move {
             let result = async {
                 let candidates = crate::radio::radio_candidates(
                     &receiver.database,
                     source,
+                    selected,
                     request.seed,
                     20,
                     &ReadCancellation::new(),
@@ -584,8 +586,7 @@ impl PlaybackOwner {
         };
         let Some(selected) = self
             .source_owner()
-            .and_then(|source| source.current_session())
-            .and_then(|session| session.resolve())
+            .and_then(|source| source.selected_library())
         else {
             return true;
         };
@@ -596,7 +597,7 @@ impl PlaybackOwner {
         let request = request.clone();
         self.runtime.spawn(async move {
             let result = async {
-                let candidates = selected
+                let candidates = receiver
                     .database
                     .random_candidates(
                         selected.source_key,

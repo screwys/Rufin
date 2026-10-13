@@ -50,18 +50,31 @@ impl FolderProjection {
 }
 
 pub async fn resolve_folder(
+    owner: &super::SourceOwner,
+    database: &library::Database,
     selected: &SelectedLibrary,
     folder_object_id: Option<&str>,
     cancellation: &ReadCancellation,
 ) -> LibraryResult<FolderProjection> {
-    let live = selected.operations.folder(
-        folder_object_id.map(str::to_owned),
-        selected.music_folder_object_id.clone(),
-    );
-    match live.recv().await {
-        Ok(Ok(page)) => {
-            let known = selected
-                .database
+    let live = async {
+        let source = owner
+            .cached_client(&selected.source_id)
+            .ok_or(sources::SourceError::NotFound)?;
+        source
+            .browse_folder(
+                database,
+                folder_object_id,
+                selected.music_folder_object_id.as_deref(),
+            )
+            .await
+    };
+    let live = tokio::select! {
+        result = live => result,
+        () = cancellation.cancelled() => return Err(LibraryError::ReadCancelled),
+    };
+    match live {
+        Ok(page) => {
+            let known = database
                 .track_object_count(selected.source_key, &page.tracks, cancellation)
                 .await?;
             if known as usize == page.tracks.len() {
@@ -74,17 +87,13 @@ pub async fn resolve_folder(
             }
             tracing::debug!("live Folder is newer than its accepted cache; using fallback");
         }
-        Ok(Err(error)) => {
-            tracing::debug!(%error, "live Folder unavailable; using exact cached Folder");
-        }
         Err(error) => {
-            tracing::debug!(%error, "live Folder ended; using exact cached Folder");
+            tracing::debug!(%error, "live Folder unavailable; using exact cached Folder");
         }
     }
     let resolved = match folder_object_id {
         Some(object) => {
-            selected
-                .database
+            database
                 .folder_key_by_object(selected.source_key, object, cancellation)
                 .await?
         }

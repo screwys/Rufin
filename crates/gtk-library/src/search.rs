@@ -1235,16 +1235,6 @@ fn search_favorite_column(shell: &Rc<CatalogUi>) -> gtk::ColumnViewColumn {
     gtk_widgets::recycled_cells::row_actions_column(&factory)
 }
 
-async fn acquire_search(
-    selected: &SelectedLibrary,
-    query: String,
-    cancellation: ReadCancellation,
-) -> Result<[Vec<SearchItem>; 3], String> {
-    rufin_core::source::search::acquire_search(selected, query, 60, cancellation)
-        .await
-        .map(cached_items)
-}
-
 fn cached_items(results: SearchResults) -> [Vec<SearchItem>; 3] {
     [
         results.tracks.into_iter().map(SearchItem::Track).collect(),

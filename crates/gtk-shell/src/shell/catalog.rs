@@ -9,9 +9,8 @@ impl Shell {
         source_id: Option<&sources::SourceId>,
     ) -> Rc<gtk_library::CatalogUi> {
         let selected = self.selected_library().as_deref().cloned();
-        let operations = selected
-            .as_ref()
-            .map(|selected| selected.operations.clone());
+        let selected_source_id = selected.as_ref().map(|selected| selected.source_id.clone());
+        let source = self.products.source.clone();
         let history_source_name = {
             let configured = self.source.configured.borrow();
             let source = configured
@@ -63,7 +62,7 @@ impl Shell {
                 .map(|session| Rc::clone(&session.favorites)),
             window: self.chrome.window.downgrade(),
             global_search: self.chrome.topbar.search.clone(),
-            search_session: Rc::clone(&self.chrome.topbar.search_session),
+            search_session: Rc::clone(&self.search_session),
             current: RefCell::new(None),
             current_track_selections: RefCell::new(Vec::new()),
             media_playing_cells: RefCell::new(Vec::new()),
@@ -118,14 +117,8 @@ impl Shell {
 
             refresh_home_section: {
                 Rc::new(move |kind| {
-                    if let Some(operations) = &operations {
-                        if kind == rufin_core::settings::HomeSectionKind::NewlyAdded {
-                            operations.refresh_library(
-                                rufin_core::runtime::LibraryRefreshTrigger::NewlyAdded,
-                            );
-                        } else {
-                            operations.refresh_home(kind);
-                        }
+                    if let Some(source_id) = &selected_source_id {
+                        source.refresh_home(source_id.clone(), kind);
                     }
                 })
             },

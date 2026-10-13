@@ -125,12 +125,6 @@ pub enum SourceOperation {
     },
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LibraryRefreshTrigger {
-    GlobalAction,
-    NewlyAdded,
-}
-
 impl SourceOperation {
     pub fn blocks_library(&self) -> bool {
         matches!(self, Self::Adding { .. } | Self::Switching { .. })
@@ -253,7 +247,6 @@ pub type SourceHandle = Arc<crate::source::SourceOwner>;
 ///
 /// Rufin embeds this handle in the corresponding [`SelectedLibrary`](super::SelectedLibrary), so
 /// callers cannot pair an operation with a different source or session.
-pub type SelectedSourceHandle = Arc<crate::source::ActiveSource>;
 
 #[cfg(test)]
 mod tests {

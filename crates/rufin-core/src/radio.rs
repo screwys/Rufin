@@ -13,7 +13,8 @@ use crate::playback::{
     random_u64,
     state::{AutoDjRequest, MaterializationReservation},
 };
-use crate::source::{SourceOwner, WeakActiveSource};
+use crate::runtime::SelectedLibrary;
+use crate::source::SourceOwner;
 
 const MANUAL_RADIO_COUNT: usize = 20;
 
@@ -74,10 +75,14 @@ pub(crate) fn request_auto_dj(
     playback: Playback,
     request: AutoDjRequest,
 ) {
+    let selected = source_owner
+        .upgrade()
+        .and_then(|owner| owner.selected_library());
     runtime.spawn(async move {
         let candidates = radio_candidates(
             &database,
             source_owner,
+            selected,
             RadioSeed::Track(request.seed_media_uri.clone()),
             request.requested_count,
             &ReadCancellation::new(),
@@ -115,11 +120,15 @@ pub(crate) fn play_radio(
     request: RadioPlayRequest,
 ) -> Option<tokio::task::JoinHandle<()>> {
     let placement = request.placement;
+    let selected = source_owner
+        .upgrade()
+        .and_then(|owner| owner.selected_library());
     let reservation = playback.reserve_materialization(placement).ok()?;
     Some(runtime.spawn(async move {
         let candidates = radio_candidates(
             &database,
             source_owner,
+            selected,
             request.seed,
             MANUAL_RADIO_COUNT,
             &ReadCancellation::new(),
@@ -138,12 +147,12 @@ pub(crate) fn play_radio(
 
 pub(crate) fn play_random(
     runtime: tokio::runtime::Handle,
-    selected: WeakActiveSource,
+    database: Arc<Database>,
+    selected: SelectedLibrary,
     playback: Playback,
     request: RandomPlayRequest,
 ) -> Option<tokio::task::JoinHandle<()>> {
     let placement = request.placement;
-    let current = selected.upgrade()?.resolve()?;
     let reservation = playback.reserve_materialization(placement).ok()?;
     Some(runtime.spawn(async move {
         let excluded = reservation
@@ -151,11 +160,10 @@ pub(crate) fn play_random(
             .iter()
             .cloned()
             .collect::<Vec<_>>();
-        let candidates = current
-            .database
+        let candidates = database
             .random_candidates(
-                current.source_key,
-                current.music_folder_key,
+                selected.source_key,
+                selected.music_folder_key,
                 &request.criteria,
                 &excluded,
                 request.requested,
@@ -177,16 +185,13 @@ pub(crate) fn play_random(
 pub(crate) async fn radio_candidates(
     database: &Database,
     source_owner: Weak<SourceOwner>,
+    selected: Option<SelectedLibrary>,
     seed: RadioSeed,
     requested: usize,
     cancellation: &ReadCancellation,
 ) -> Result<Vec<String>, String> {
     let requested = requested.min(library::QUEUE_CONTEXT_LIMIT);
     let owner = source_owner.upgrade();
-    let selected = owner
-        .as_ref()
-        .and_then(|owner| owner.current_session())
-        .and_then(|session| session.resolve());
     let seed_source = database
         .radio_source(&seed, cancellation)
         .await
@@ -195,7 +200,8 @@ pub(crate) async fn radio_candidates(
     let seed_source_key = seed_source.as_ref().map(|(key, _, _)| *key);
     let mut fallback_sources = Vec::new();
     if let Some((source_key, source_id, object_id)) = seed_source {
-        let source = tokio::task::spawn_blocking(move || owner?.client(&source_id).ok())
+        let seed_owner = owner.clone();
+        let source = tokio::task::spawn_blocking(move || seed_owner?.client(&source_id).ok())
             .await
             .map_err(|error| error.to_string())?;
         let native_seed = source_seed(source.as_deref(), &seed, object_id);
@@ -214,7 +220,11 @@ pub(crate) async fn radio_candidates(
     if let Some(selected) = selected
         && Some(selected.source_key) != seed_source_key
     {
-        fallback_sources.push((selected.source_key, selected.source.is_none()));
+        let source_key = selected.source_key;
+        let source = tokio::task::spawn_blocking(move || owner?.client(&selected.source_id).ok())
+            .await
+            .map_err(|error| error.to_string())?;
+        fallback_sources.push((source_key, source.is_none()));
     }
     candidates.truncate(requested);
     for (source_key, require_media) in fallback_sources {

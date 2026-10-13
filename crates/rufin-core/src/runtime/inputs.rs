@@ -1,8 +1,8 @@
 use crate::SettingsHandle;
-use library::{Database, FolderKey, FolderRow, PlaylistKey, SourceKey};
+use library::{FolderKey, FolderRow, PlaylistKey, SourceKey};
 use std::sync::Arc;
 
-use super::source::{ConfiguredSources, SelectedSourceHandle, SourceOperation, SourceProgress};
+use super::source::{ConfiguredSources, SourceOperation, SourceProgress};
 use super::{DiagnosticsHandle, ProductHandles, ProductReceivers};
 
 #[derive(Clone)]
@@ -12,9 +12,8 @@ pub struct SelectedLibrary {
     pub music_folder_key: Option<FolderKey>,
     pub music_folder_object_id: Option<String>,
     pub music_folders: Arc<[FolderRow]>,
-    pub database: Arc<Database>,
-    pub runtime: tokio::runtime::Handle,
-    pub operations: SelectedSourceHandle,
+    pub(crate) artwork_digest: [u8; 32],
+    pub(crate) local_access_status: super::source::LocalAccessStatus,
 }
 
 pub enum SourceEvent {

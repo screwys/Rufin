@@ -73,6 +73,8 @@ impl AndroidBrowseQuery {
                     unreachable!("Folder route")
                 };
                 rufin_core::source::folders::resolve_folder(
+                    &self.source,
+                    &self.database,
                     self.selected(),
                     path.last().map(|item| item.id.as_str()),
                     &ReadCancellation::new(),

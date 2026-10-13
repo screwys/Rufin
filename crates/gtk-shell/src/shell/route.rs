@@ -268,7 +268,7 @@ impl Shell {
         let source_id = selected.source_id.clone();
         let window = self.route_seed_window(&route);
         let (generation, cancellation) = self.begin_root_order_read();
-        let task = selected.runtime.spawn(load(window, cancellation));
+        let task = self.products.runtime.spawn(load(window, cancellation));
         let shell = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let result = task.await;
@@ -310,7 +310,7 @@ impl Shell {
         route: Route,
         render_started: RouteTiming,
     ) {
-        let database = Arc::clone(&selected.database);
+        let database = Arc::clone(&self.products.library);
         let source = selected.source_key;
         let folder = selected.music_folder_key;
         let (showcase_variation, explore_variation) = self.products.source.home_variations();
@@ -343,13 +343,13 @@ impl Shell {
         let Some(selected) = self.selected_library().as_deref().cloned() else {
             return;
         };
-        let database = Arc::clone(&selected.database);
+        let database = Arc::clone(&self.products.library);
         let source = selected.source_key;
         let folder = selected.music_folder_key;
         let (showcase_variation, explore_variation) = self.products.source.home_variations();
         let blocks = self.settings.current.borrow().home_blocks.clone();
         let (generation, cancellation) = self.begin_root_order_read();
-        let task = selected.runtime.spawn(async move {
+        let task = self.products.runtime.spawn(async move {
             database
                 .home_page(
                     source,
@@ -693,6 +693,8 @@ impl Shell {
                     .current
                     .borrow()
                     .library_list(library_list_key(&route, CollectionCategory::Tracks));
+                let source = self.products.source.clone();
+                let database = self.products.library.clone();
                 let load_selected = selected.clone();
                 let load_path = path.clone();
                 self.queue_prepared_route(
@@ -703,6 +705,8 @@ impl Shell {
                     move |window, cancellation| async move {
                         Ok::<_, std::convert::Infallible>(
                             gtk_library::folders::prepare_folder_route(
+                                &source,
+                                &database,
                                 &load_selected,
                                 &load_path,
                                 &settings,
@@ -809,7 +813,7 @@ impl Shell {
         settings: LibraryListSettings,
         render_started: RouteTiming,
     ) {
-        let database = Arc::clone(&selected.database);
+        let database = Arc::clone(&self.products.library);
         let source_key = selected.source_key;
         let folder = selected.music_folder_key;
         let build_route = route.clone();
@@ -878,7 +882,7 @@ impl Shell {
         favorites_only: bool,
         render_started: RouteTiming,
     ) {
-        let database = Arc::clone(&selected.database);
+        let database = Arc::clone(&self.products.library);
         let source_key = selected.source_key;
         let folder = selected.music_folder_key;
         self.queue_prepared_route(
@@ -930,7 +934,7 @@ impl Shell {
         favorites_only: bool,
         render_started: RouteTiming,
     ) {
-        let database = Arc::clone(&selected.database);
+        let database = Arc::clone(&self.products.library);
         let source_key = selected.source_key;
         let folder = selected.music_folder_key;
         self.queue_prepared_route(
@@ -1286,7 +1290,7 @@ impl Shell {
         settings: LibraryListSettings,
         render_started: RouteTiming,
     ) {
-        let database = Arc::clone(&selected.database);
+        let database = Arc::clone(&self.products.library);
         let source_key = selected.source_key;
         let folder = selected.music_folder_key;
         self.queue_prepared_route(
@@ -1322,7 +1326,7 @@ impl Shell {
         settings: LibraryListSettings,
         render_started: RouteTiming,
     ) {
-        let database = Arc::clone(&selected.database);
+        let database = Arc::clone(&self.products.library);
         let source_key = selected.source_key;
         let folder = selected.music_folder_key;
         self.queue_prepared_route(

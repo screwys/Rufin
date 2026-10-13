@@ -1019,6 +1019,10 @@ impl PlaybackOwner {
         let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return false;
         };
+        let selected = plex
+            .source_owner
+            .upgrade()
+            .and_then(|owner| owner.selected_library());
         let request = request.clone();
         self.runtime.spawn(async move {
             let result = async {
@@ -1035,6 +1039,7 @@ impl PlaybackOwner {
                 let candidates = crate::radio::radio_candidates(
                     &plex.database,
                     plex.source_owner.clone(),
+                    selected,
                     library::RadioSeed::Track(request.seed_media_uri.clone()),
                     request.requested_count,
                     &library::ReadCancellation::new(),
@@ -1079,12 +1084,17 @@ impl PlaybackOwner {
         let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return false;
         };
+        let selected = plex
+            .source_owner
+            .upgrade()
+            .and_then(|owner| owner.selected_library());
         let request = request.clone();
         self.runtime.spawn(async move {
             let result = async {
                 let candidates = crate::radio::radio_candidates(
                     &plex.database,
                     plex.source_owner.clone(),
+                    selected,
                     request.seed,
                     20,
                     &library::ReadCancellation::new(),
@@ -1112,15 +1122,14 @@ impl PlaybackOwner {
         };
         let Some(selected) = self
             .source_owner()
-            .and_then(|owner| owner.current_session())
-            .and_then(|session| session.resolve())
+            .and_then(|owner| owner.selected_library())
         else {
             return true;
         };
         let request = request.clone();
         self.runtime.spawn(async move {
             let result = async {
-                let candidates = selected
+                let candidates = plex
                     .database
                     .random_candidates(
                         selected.source_key,

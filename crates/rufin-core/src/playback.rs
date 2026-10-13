@@ -512,10 +512,12 @@ impl PlaybackOwner {
             settings.loudness_normalization,
             settings.loudness_normalization_scope,
             settings.write_ebu_r128_tags,
-            self.source_owner()
-                .and_then(|source| source.current_session()),
+            self.source_owner(),
         );
         self.send(Command::UpdateSettings(settings));
+    }
+    pub(crate) fn cancel_loudness_analysis(&self) {
+        self.loudness.cancel();
     }
     pub(crate) fn cast_proxy_setting_changed(&self, enabled: bool) {
         self.cast.set_proxy_media(enabled);
@@ -548,8 +550,7 @@ impl PlaybackOwner {
                 playback.loudness_normalization,
                 playback.loudness_normalization_scope,
                 playback.write_ebu_r128_tags,
-                self.source_owner()
-                    .and_then(|source| source.current_session()),
+                self.source_owner(),
             );
         }
     }
@@ -819,8 +820,17 @@ impl PlaybackOwner {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .clone();
+        let selected = source.upgrade().and_then(|owner| owner.selected_library());
         async move {
-            crate::radio::radio_candidates(&database, source, seed, requested, &cancellation).await
+            crate::radio::radio_candidates(
+                &database,
+                source,
+                selected,
+                seed,
+                requested,
+                &cancellation,
+            )
+            .await
         }
     }
 
@@ -834,11 +844,12 @@ impl PlaybackOwner {
         if let (Some(active), Some(selected)) = (
             self.active(),
             self.source_owner()
-                .and_then(|source| source.current_session()),
+                .and_then(|owner| owner.selected_library()),
         ) {
             let _ = crate::radio::play_random(
                 self.runtime.clone(),
-                selected.downgrade(),
+                Arc::clone(&self.database),
+                selected,
                 active,
                 request,
             );

@@ -120,8 +120,10 @@ impl Shell {
         self.startup.route_revealed.set(true);
         self.cancel_startup_route_reveal();
         self.chrome.startup_loading_host.set_visible(false);
-        if let Some(source) = self.selected_source_operations() {
-            source.selected_library_revealed();
+        if let Some(selected) = self.selected_library() {
+            self.products
+                .source
+                .selected_library_revealed(selected.source_id.clone());
         }
     }
 

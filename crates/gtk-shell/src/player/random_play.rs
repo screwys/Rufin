@@ -35,11 +35,11 @@ pub(super) fn present_random_play_dialog(shell: &Rc<Shell>) {
     let Some(selected) = shell.selected_library().as_deref().cloned() else {
         return;
     };
-    let database = Arc::clone(&selected.database);
+    let database = Arc::clone(&shell.products.library);
     let source = selected.source_key;
     let folder = selected.music_folder_key;
     let cancellation = ReadCancellation::new();
-    let runtime = selected.runtime.clone();
+    let runtime = shell.products.runtime.clone();
     let task =
         runtime.spawn(async move { database.genre_choices(source, folder, &cancellation).await });
     let shell = Rc::downgrade(shell);
@@ -304,7 +304,7 @@ pub(crate) fn play_saved_random(shell: &Rc<Shell>, placement: QueuePlacement) {
         return;
     };
     let settings = shell.settings.current.borrow().random_play.clone();
-    let database = Arc::clone(&selected.database);
+    let database = Arc::clone(&shell.products.library);
     let source = selected.source_key;
     let genre_object_id = settings
         .selected_genre_id(
@@ -312,7 +312,7 @@ pub(crate) fn play_saved_random(shell: &Rc<Shell>, placement: QueuePlacement) {
             selected.music_folder_object_id.as_deref(),
         )
         .map(str::to_owned);
-    let runtime = selected.runtime.clone();
+    let runtime = shell.products.runtime.clone();
     let queue = shell.products.playback.clone();
     let task = runtime.spawn(async move {
         let cancellation = ReadCancellation::new();
@@ -336,7 +336,7 @@ pub(crate) fn play_saved_random(shell: &Rc<Shell>, placement: QueuePlacement) {
                 variation: random_variation(),
             },
         };
-        execute_random_task(selected, request, queue).await
+        execute_random_task(database, selected, request, queue).await
     });
     report_random_result(shell, task);
 }
@@ -355,9 +355,10 @@ fn execute_random(
     selected: rufin_core::runtime::SelectedLibrary,
     request: RandomPlayRequest,
 ) {
-    let runtime = selected.runtime.clone();
+    let runtime = shell.products.runtime.clone();
     let queue = shell.products.playback.clone();
-    let task = runtime.spawn(execute_random_task(selected, request, queue));
+    let database = shell.products.library.clone();
+    let task = runtime.spawn(execute_random_task(database, selected, request, queue));
     report_random_result(shell, task);
 }
 
@@ -375,12 +376,13 @@ fn report_random_result(shell: &Shell, task: tokio::task::JoinHandle<bool>) {
 }
 
 async fn execute_random_task(
+    database: Arc<library::Database>,
     selected: rufin_core::runtime::SelectedLibrary,
     request: RandomPlayRequest,
     queue: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
 ) -> bool {
     match rufin_core::radio::queue_random(
-        &selected.database,
+        &database,
         selected.source_key,
         selected.music_folder_key,
         request,

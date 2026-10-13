@@ -113,7 +113,7 @@ impl SearchPopup {
             shell: Rc::downgrade(shell),
             entry: shell.chrome.topbar.search.clone(),
             host: host.clone(),
-            session: Rc::clone(&shell.chrome.topbar.search_session),
+            session: Rc::clone(&shell.search_session),
             popover,
             scroller,
             list,

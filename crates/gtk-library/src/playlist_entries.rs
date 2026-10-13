@@ -757,9 +757,6 @@ fn install_playlist_entry_drag(
         let Some(shell) = move_shell.upgrade() else {
             return false;
         };
-        let Some(selected) = shell.selected_library().as_deref().cloned() else {
-            return false;
-        };
         let after = drop
             .widget()
             .is_some_and(|widget| gtk_widgets::media_drag::order_drop_after(&widget, x, y));
@@ -771,8 +768,8 @@ fn install_playlist_entry_drag(
         let after = after
             != (settings.descending
                 && settings.sort_key.track_sort() == library::TrackSort::Position);
-        let database = Arc::clone(&selected.database);
-        let task = selected.runtime.spawn(async move {
+        let database = Arc::clone(&shell.library);
+        let task = shell.runtime.spawn(async move {
             database
                 .playlist_entry_rows(&[entry], &library::ReadCancellation::new())
                 .await

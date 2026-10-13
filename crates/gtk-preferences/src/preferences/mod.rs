@@ -1097,13 +1097,15 @@ fn general_page(
             })
             .is_some()
         {
-            if let Some(source) = distinct_track_covers_shell
+            if let Some(selected) = distinct_track_covers_shell
                 .products
                 .source
                 .selected_library()
-                .map(|selected| selected.operations)
             {
-                source.refresh_library(rufin_core::runtime::LibraryRefreshTrigger::GlobalAction);
+                distinct_track_covers_shell
+                    .products
+                    .source
+                    .refresh_source(selected.source_id);
             }
         }
     });

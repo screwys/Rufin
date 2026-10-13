@@ -456,6 +456,11 @@ pub async fn build(
         });
 
         Shell {
+            search_session: Rc::new(gtk_library::SearchSession::new(
+                products.source.clone(),
+                products.library.clone(),
+                products.runtime.clone(),
+            )),
             web_controller,
             media_menus: super::media_menus::build(weak, &products, Rc::clone(&settings_state)),
             quitting,

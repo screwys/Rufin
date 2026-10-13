@@ -116,6 +116,8 @@ impl CatalogUi {
 }
 
 pub async fn prepare_folder_route(
+    owner: &rufin_core::source::SourceOwner,
+    database: &library::Database,
     selected: &rufin_core::runtime::SelectedLibrary,
     path: &[FolderPathItem],
     settings: &crate::LibraryListSettings,
@@ -123,6 +125,8 @@ pub async fn prepare_folder_route(
     cancellation: &ReadCancellation,
 ) -> Result<PreparedFolderRoute, String> {
     let source = rufin_core::source::folders::resolve_folder(
+        owner,
+        database,
         selected,
         path.last().map(|item| item.id.as_str()),
         cancellation,
@@ -140,14 +144,14 @@ pub async fn prepare_folder_route(
         settings,
         8,
     )
-    .resolve(&selected.database, Some(&source), cancellation)
+    .resolve(database, Some(&source), cancellation)
     .await
     .map_err(|error| error.to_string())?
     .songs()
     .expect("folder song route")
     .clone();
     let page = load_folder_page(
-        &selected.database,
+        database,
         selected.source_key,
         &source,
         query,
@@ -262,7 +266,7 @@ fn folder_page(
         first_tracks,
     } = page;
     let applied_query = Rc::new(RefCell::new(query.clone()));
-    let database = Arc::clone(&selected.database);
+    let database = Arc::clone(&shell.library);
     let source_key = selected.source_key;
     let folder_source = source.clone();
     let folder_query = Rc::clone(&applied_query);
@@ -296,7 +300,7 @@ fn folder_page(
             count: folder_count,
         },
         48,
-        selected.runtime.clone(),
+        shell.runtime.clone(),
         folder_load,
     );
     folder_sparse.seed_matching_at(
@@ -315,7 +319,7 @@ fn folder_page(
         .current
         .borrow()
         .library_list(LibraryListKey::Folders);
-    let row_database = Arc::clone(&selected.database);
+    let row_database = Arc::clone(&shell.library);
     let load_input = Rc::clone(&applied_query);
     let track_load = Rc::new(
         move |_: Vec<library::TrackKey>,
@@ -338,7 +342,7 @@ fn folder_page(
     let track_sparse = gtk_widgets::sparse_model::SparseRouteModel::new(
         SparseSource::Query { count: track_count },
         48,
-        selected.runtime.clone(),
+        shell.runtime.clone(),
         track_load,
     );
     track_sparse.seed_matching_at(
@@ -434,7 +438,7 @@ fn folder_page(
             },
         )
     };
-    let database = Arc::clone(&selected.database);
+    let database = Arc::clone(&shell.library);
     let load = Arc::new(
         move |(query, window): (library::SongQuery, library::RouteSeedWindow),
               cancellation: ReadCancellation| {
@@ -446,7 +450,7 @@ fn folder_page(
         },
     );
     let read = LatestMountedRouteRead::new_with_request(
-        selected.runtime.clone(),
+        shell.runtime.clone(),
         apply,
         load,
         "mounted Folder route",

@@ -691,8 +691,11 @@ fn set_transition_mode_shortcut(shell: &Rc<Shell>, mode: PlaybackTransitionMode)
 }
 
 fn refresh_selected_library(shell: &Shell) {
-    if let Some(source) = shell.selected_source_operations() {
-        source.refresh_library(rufin_core::runtime::LibraryRefreshTrigger::GlobalAction);
+    if let Some(selected) = shell.selected_library() {
+        shell
+            .products
+            .source
+            .refresh_source(selected.source_id.clone());
     }
 }
 

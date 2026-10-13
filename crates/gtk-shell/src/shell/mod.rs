@@ -21,7 +21,7 @@ use gtk_widgets::feedback::ControlFeedbackState;
 use gtk_widgets::settings::SettingsState;
 use layout::ShellLayoutState;
 use navigation::{NavigationState, NavigationWidgets};
-use rufin_core::runtime::{DiagnosticsHandle, ProductHandles, SelectedSourceHandle};
+use rufin_core::runtime::{DiagnosticsHandle, ProductHandles};
 use startup::StartupState;
 
 pub(crate) mod actions;
@@ -35,15 +35,8 @@ mod window_state;
 use route::RouteViewport;
 use selected_ui::SelectedUiState;
 
-impl Shell {
-    pub(crate) fn selected_source_operations(&self) -> Option<SelectedSourceHandle> {
-        self.selected_library()
-            .as_deref()
-            .map(|selected| selected.operations.clone())
-    }
-}
-
 pub(crate) struct Shell {
+    pub(crate) search_session: Rc<gtk_library::SearchSession>,
     activity: std::cell::RefCell<Option<Rc<activity::ActivityView>>>,
     pub(crate) quitting: Rc<Cell<bool>>,
     pub(crate) diagnostics: DiagnosticsHandle,

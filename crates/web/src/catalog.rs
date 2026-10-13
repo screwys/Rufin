@@ -264,7 +264,12 @@ async fn refresh_home(
         Some(selected) => selected,
         None => completion(products.source.select_source(input.source)).await?,
     };
-    completion(selected.operations.refresh_home(input.block)).await?;
+    completion(
+        products
+            .source
+            .refresh_home(selected.source_id, input.block),
+    )
+    .await?;
     Ok(accepted())
 }
 
@@ -698,12 +703,15 @@ async fn live_folders(
     let products = &products;
     let parameters = &parameters;
     let source_id = sources::SourceId::new(required(parameters, "source")?);
-    let page = completion(products.source.browse_folder(
-        source_id,
-        parameters.get("parent").cloned(),
-        parameters.get("folder").cloned(),
-    ))
-    .await?;
+    let page = products
+        .source
+        .browse_folder(
+            source_id,
+            parameters.get("parent").cloned(),
+            parameters.get("folder").cloned(),
+        )
+        .await
+        .map_err(internal)?;
     Ok(json_response(
         StatusCode::OK,
         json!({"folders":page.folders.iter().map(|folder| json!({"id":folder.object_id,"name":folder.name})).collect::<Vec<_>>(),"track_ids":page.tracks}),

@@ -158,7 +158,7 @@ fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
 }
 
 fn release_selected_source(shell: &Rc<Shell>) {
-    shell.chrome.topbar.search_session.set_selected(None);
+    shell.search_session.set_selected(None);
     shell.clear_mounted_routes();
     shell.release_selected_navigation();
     let released = shell.selected_ui.take();
@@ -202,14 +202,6 @@ fn finish_source_assignment(
         .as_ref()
         .map(|selected| selected.source_key);
     let next_source_id = next.selected.as_ref().map(|selected| selected.source_key);
-    let previous_loaded = previous
-        .selected
-        .as_ref()
-        .map(|selected| Arc::clone(&selected.database));
-    let next_loaded = next
-        .selected
-        .as_ref()
-        .map(|selected| Arc::clone(&selected.database));
     let previous_scope = previous.selected.as_ref().map(|selected| {
         (
             selected.music_folder_key,
@@ -223,15 +215,10 @@ fn finish_source_assignment(
         )
     });
     let source_changed = previous_source_id != next_source_id;
-    let library_changed = match (&previous_loaded, &next_loaded) {
-        (Some(previous), Some(next)) => !Arc::ptr_eq(previous, next),
-        (None, None) => false,
-        _ => true,
-    };
     let scope_changed = previous_scope != next_scope;
     refresh_context_playlist_picker(shell);
     shell.import_remote_playlist_pins_once();
-    let rebuild_sidebar = source_changed || library_changed || scope_changed;
+    let rebuild_sidebar = source_changed || scope_changed;
 
     if next.selected.is_none() {
         if rebuild_sidebar {
@@ -253,7 +240,7 @@ fn finish_source_assignment(
         } else {
             shell.reset_navigation_to_home();
         }
-    } else if library_changed || scope_changed {
+    } else if scope_changed {
         // A mounted Home owns its current snapshot for the duration of the
         // visit. Other routes keep their current page until its replacement
         // projection is ready.
@@ -284,11 +271,7 @@ fn apply_selected_source(
     shell
         .selected_ui
         .install(super::selected_ui::SelectedUiSession::new(selected.clone()));
-    shell
-        .chrome
-        .topbar
-        .search_session
-        .set_selected(Some(selected));
+    shell.search_session.set_selected(Some(selected));
 
     finish_source_assignment(shell, previous_source, next_source);
 }
@@ -312,11 +295,7 @@ fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication)
             session.library.music_folder_object_id = selected.music_folder_object_id.clone();
             session.library.music_folders = Arc::clone(&selected.music_folders);
         }
-        shell
-            .chrome
-            .topbar
-            .search_session
-            .set_selected(Some(selected));
+        shell.search_session.set_selected(Some(selected));
     }
     if matches!(
         publication.change,

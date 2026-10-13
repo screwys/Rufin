@@ -113,7 +113,12 @@ pub(super) async fn select_library(
         Some(selected) => selected,
         None => completion(products.source.select_source(input.source)).await?,
     };
-    completion(selected.operations.set_music_folder(input.library)).await?;
+    completion(
+        products
+            .source
+            .set_music_folder(selected.source_id, input.library),
+    )
+    .await?;
     Ok(accepted())
 }
 

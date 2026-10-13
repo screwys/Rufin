@@ -1281,8 +1281,8 @@ pub fn install_playlist_reorder(
             let Some(selected) = shell.selected_library().as_deref().cloned() else {
                 return;
             };
-            let database = Arc::clone(&selected.database);
-            let task = selected.runtime.spawn(async move {
+            let database = Arc::clone(&shell.library);
+            let task = shell.runtime.spawn(async move {
                 database
                     .move_playlist(
                         selected.source_key,

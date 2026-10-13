@@ -75,7 +75,7 @@ impl CatalogUi {
     ) -> MountedRoute {
         let source = selected.source_key;
         let folder = selected.music_folder_key;
-        let rows_database = Arc::clone(&selected.database);
+        let rows_database = Arc::clone(&self.library);
         let row_load = Arc::new(
             move |request: NamedReadRequest,
                   range: std::ops::Range<usize>,
@@ -102,7 +102,7 @@ impl CatalogUi {
                 }) as Pin<Box<dyn Future<Output = _> + Send>>
             },
         );
-        let order_database = Arc::clone(&selected.database);
+        let order_database = Arc::clone(&self.library);
         let order_load: NamedPageLoad<GenreRow> = Arc::new(move |request, cancellation| {
             let database = Arc::clone(&order_database);
             Box::pin(async move {
@@ -146,7 +146,7 @@ impl CatalogUi {
     ) -> MountedRoute {
         let source = selected.source_key;
         let folder = selected.music_folder_key;
-        let rows_database = Arc::clone(&selected.database);
+        let rows_database = Arc::clone(&self.library);
         let row_load = Arc::new(
             move |request: NamedReadRequest,
                   range: std::ops::Range<usize>,
@@ -173,7 +173,7 @@ impl CatalogUi {
                 }) as Pin<Box<dyn Future<Output = _> + Send>>
             },
         );
-        let order_database = Arc::clone(&selected.database);
+        let order_database = Arc::clone(&self.library);
         let order_load: NamedPageLoad<MoodRow> = Arc::new(move |request, cancellation| {
             let database = Arc::clone(&order_database);
             Box::pin(async move {

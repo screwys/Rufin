@@ -51,7 +51,7 @@ impl ReadCancellation {
         self.0.cancelled.load(Ordering::Acquire)
     }
 
-    pub(crate) async fn cancelled(&self) {
+    pub async fn cancelled(&self) {
         loop {
             let notified = self.0.notify.notified();
             if self.is_cancelled() {
