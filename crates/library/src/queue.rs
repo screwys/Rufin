@@ -519,7 +519,7 @@ impl Database {
         offset: u64,
         limit: u32,
     ) -> LibraryResult<(Vec<usize>, u64)> {
-        let mut reader = self.acquire_reader().await?;
+        let (_permit, mut reader) = self.acquire_general(&ReadCancellation::new()).await?;
         let mut transaction = reader.begin().await?;
         let filter = filter.trim().to_lowercase();
         let mut positions = Vec::new();

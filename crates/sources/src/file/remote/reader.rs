@@ -1,6 +1,7 @@
 //! Bounded synchronous reads for the existing tag parser, driven from its blocking worker.
 
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, BufReader, Read, Seek, SeekFrom};
+use std::sync::Arc;
 
 use futures_util::TryStreamExt;
 use playback::ResolvedStream;
@@ -10,17 +11,20 @@ use reqwest::{
 };
 use tokio::io::AsyncReadExt;
 
+use super::input::{FileInput, FileInputServer};
+use crate::file::documents::DocumentReader;
 use crate::{SourceError, SourceResult};
 
 const READ_BYTES: u64 = 64 * 1024;
 
 pub(crate) struct FileReader {
     input: Input,
-    _stream: ResolvedStream,
+    stream: ResolvedStream,
     failed: bool,
 }
 
 enum Input {
+    Document(BufReader<DocumentReader>),
     File(std::fs::File),
     Http(HttpFile),
 }
@@ -37,7 +41,28 @@ struct HttpFile {
 }
 
 impl FileReader {
-    pub async fn open(stream: ResolvedStream) -> SourceResult<Self> {
+    pub async fn open(
+        server: &Arc<FileInputServer>,
+        path: &str,
+        revision: &str,
+        media_uri: &str,
+    ) -> SourceResult<Self> {
+        if let FileInput::Documents(access) = server.input() {
+            let access = Arc::clone(access);
+            let document_path = path.to_owned();
+            let lease = tokio::task::spawn_blocking(move || access.open(&document_path))
+                .await
+                .map_err(|error| SourceError::Other(error.to_string()))??;
+            return Ok(Self {
+                input: Input::Document(BufReader::with_capacity(
+                    READ_BYTES as usize,
+                    DocumentReader::new(lease),
+                )),
+                stream: server.stream(path, media_uri),
+                failed: false,
+            });
+        }
+        let stream = server.playback_stream(path, revision, media_uri).await?;
         let uri = url::Url::parse(stream.uri()).map_err(|e| SourceError::Other(e.to_string()))?;
         let input = if uri.scheme() == "file" {
             let path = uri
@@ -70,13 +95,17 @@ impl FileReader {
         };
         Ok(Self {
             input,
-            _stream: stream,
+            stream,
             failed: false,
         })
     }
 
     pub fn failed(&self) -> bool {
         self.failed
+    }
+
+    pub fn uri(&self) -> &str {
+        self.stream.uri()
     }
 }
 
@@ -91,6 +120,7 @@ impl Read for FileReader {
 impl FileReader {
     fn read_input(&mut self, output: &mut [u8]) -> io::Result<usize> {
         let input = match &mut self.input {
+            Input::Document(reader) => return reader.read(output),
             Input::File(file) => return file.read(output),
             Input::Http(input) => input,
         };
@@ -136,6 +166,22 @@ impl FileReader {
 impl Seek for FileReader {
     fn seek(&mut self, seek: SeekFrom) -> io::Result<u64> {
         match &mut self.input {
+            Input::Document(reader) => {
+                let offset = match seek {
+                    SeekFrom::Start(position) => {
+                        i64::try_from(i128::from(position) - i128::from(reader.stream_position()?))
+                            .ok()
+                    }
+                    SeekFrom::Current(offset) => Some(offset),
+                    SeekFrom::End(_) => None,
+                };
+                if let Some(offset) = offset {
+                    reader.seek_relative(offset)?;
+                    reader.stream_position()
+                } else {
+                    reader.seek(seek)
+                }
+            }
             Input::File(file) => file.seek(seek),
             Input::Http(input) => {
                 let position = match seek {
@@ -247,7 +293,19 @@ mod tests {
             })
             .mount(&server)
             .await;
-        let mut reader = FileReader::open(ResolvedStream::new(server.uri()))
+        let input = FileInputServer::start(FileInput::WebDav(Arc::new(
+            super::super::webdav::client::WebDavClient::new(
+                url::Url::parse(&server.uri()).unwrap(),
+                super::super::webdav::client::Authentication::Anonymous,
+                reqwest::header::HeaderMap::new(),
+                false,
+                None,
+            )
+            .unwrap(),
+        )))
+        .await
+        .unwrap();
+        let mut reader = FileReader::open(&input, "audio", "", "audio")
             .await
             .unwrap();
         tokio::task::spawn_blocking(move || {
@@ -276,11 +334,11 @@ mod tests {
         .await
         .unwrap();
         let requests = server.received_requests().await.unwrap();
-        assert_eq!(requests.len(), 4);
+        assert_eq!(requests.len(), 5);
         assert!(
             requests
                 .iter()
-                .skip(1)
+                .skip(2)
                 .all(|r| r.headers[header::IF_RANGE] == "\"v1\"")
         );
     }

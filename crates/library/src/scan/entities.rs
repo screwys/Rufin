@@ -16,121 +16,145 @@ impl Scan {
     ) -> LibraryResult<usize> {
         let mut written = 0;
         for page in records.chunks(128) {
-            let mut albums: HashMap<&str, &AlbumInput> = HashMap::new();
-            let mut artists: HashMap<&str, &ArtistInput> = HashMap::new();
-            let mut genres: HashMap<&str, &GenreInput> = HashMap::new();
-            let mut moods: HashMap<&str, &MoodInput> = HashMap::new();
-            let mut album_artist_links = Vec::new();
-            let mut album_genre_links = Vec::new();
-            let mut release_type_links = Vec::new();
-            let mut track_artist_links = Vec::new();
-            let mut track_genre_links = Vec::new();
-            let mut track_mood_links = Vec::new();
-            for &(track, album) in page {
-                let track_id = track.object_id.as_str();
-                if let Some(album) = album
-                    && albums.insert(album.object_id.as_str(), album) != Some(album)
-                {
-                    self.write_album_row(album).await?;
-                }
-                written += usize::from(self.write_track_row(track).await?);
-                let album_relations = album.and_then(|album| album.relations.as_ref());
-                let track_relations = track.relations.as_ref();
-                let album_credits = album_relations
-                    .map(|relations| {
-                        if relations.album_artists.is_empty() {
-                            relations.artists.as_slice()
-                        } else {
-                            relations.album_artists.as_slice()
-                        }
-                    })
-                    .unwrap_or_default();
-                let track_credits = track_relations
-                    .map(|relations| relations.artists.as_slice())
-                    .unwrap_or_default();
-                let track_album_credits = track_relations
-                    .map(|relations| relations.album_artists.as_slice())
-                    .unwrap_or_default();
-                for credits in [album_credits, track_credits, track_album_credits] {
-                    for artist in credits {
-                        if artists.insert(artist.object_id.as_str(), artist) != Some(artist) {
-                            self.write_artist(artist).await?;
-                        }
+            let owns_batch = self.batch_writer.is_none();
+            if owns_batch {
+                self.begin_batch().await?;
+            }
+            let result = self.write_track_page(page).await;
+            if result.is_err() {
+                self.failed = true;
+            }
+            if owns_batch {
+                self.finish_batch().await?;
+            }
+            written += result?;
+        }
+        Ok(written)
+    }
+
+    async fn write_track_page(
+        &mut self,
+        page: &[(&TrackInput, Option<&AlbumInput>)],
+    ) -> LibraryResult<usize> {
+        let mut first = self
+            .observe_tracks(
+                &page
+                    .iter()
+                    .map(|(track, _)| track.object_id.as_str())
+                    .collect::<Vec<_>>(),
+            )
+            .await?;
+        let mut written = 0;
+        let mut albums: HashMap<&str, &AlbumInput> = HashMap::new();
+        let mut artists: HashMap<&str, &ArtistInput> = HashMap::new();
+        let mut genres: HashMap<&str, &GenreInput> = HashMap::new();
+        let mut moods: HashMap<&str, &MoodInput> = HashMap::new();
+        let mut album_artist_links = Vec::new();
+        let mut album_genre_links = Vec::new();
+        let mut release_type_links = Vec::new();
+        let mut track_artist_links = Vec::new();
+        let mut track_genre_links = Vec::new();
+        let mut track_mood_links = Vec::new();
+        for &(track, album) in page {
+            let track_id = track.object_id.as_str();
+            if let Some(album) = album
+                && albums.insert(album.object_id.as_str(), album) != Some(album)
+            {
+                self.write_album_row(album).await?;
+            }
+            written += usize::from(self.write_track_row(track, first.remove(track_id)).await?);
+            let album_relations = album.and_then(|album| album.relations.as_ref());
+            let track_relations = track.relations.as_ref();
+            let album_credits = album_relations
+                .map(|relations| {
+                    if relations.album_artists.is_empty() {
+                        relations.artists.as_slice()
+                    } else {
+                        relations.album_artists.as_slice()
+                    }
+                })
+                .unwrap_or_default();
+            let track_credits = track_relations
+                .map(|relations| relations.artists.as_slice())
+                .unwrap_or_default();
+            let track_album_credits = track_relations
+                .map(|relations| relations.album_artists.as_slice())
+                .unwrap_or_default();
+            for credits in [album_credits, track_credits, track_album_credits] {
+                for artist in credits {
+                    if artists.insert(artist.object_id.as_str(), artist) != Some(artist) {
+                        self.write_artist(artist).await?;
                     }
                 }
-                let album_genres = album_relations
-                    .map(|relations| relations.genres.as_slice())
-                    .unwrap_or_default();
-                let track_genres = track_relations
-                    .map(|relations| relations.genres.as_slice())
-                    .unwrap_or_default();
-                for entries in [album_genres, track_genres] {
-                    for genre in entries {
-                        if genres.insert(genre.object_id.as_str(), genre) != Some(genre) {
-                            self.write_genre(genre).await?;
-                        }
+            }
+            let album_genres = album_relations
+                .map(|relations| relations.genres.as_slice())
+                .unwrap_or_default();
+            let track_genres = track_relations
+                .map(|relations| relations.genres.as_slice())
+                .unwrap_or_default();
+            for entries in [album_genres, track_genres] {
+                for genre in entries {
+                    if genres.insert(genre.object_id.as_str(), genre) != Some(genre) {
+                        self.write_genre(genre).await?;
                     }
                 }
-                if let Some(album) = album {
-                    let album_id = album.object_id.as_str();
-                    album_artist_links.extend(
-                        album_credits
-                            .iter()
-                            .map(|artist| (album_id, artist.object_id.as_str())),
-                    );
-                    if let Some(relations) = album_relations {
-                        album_genre_links.extend(
-                            relations
-                                .genres
-                                .iter()
-                                .map(|genre| (album_id, genre.object_id.as_str())),
-                        );
-                        release_type_links.extend(
-                            relations
-                                .release_types
-                                .iter()
-                                .map(|kind| (album_id, kind.as_str())),
-                        );
-                    }
-                }
-                if let Some(relations) = track_relations {
-                    for mood in &relations.moods {
-                        if moods.insert(mood.object_id.as_str(), mood) != Some(mood) {
-                            self.write_mood(mood).await?;
-                        }
-                    }
-                    track_artist_links.extend(
-                        relations
-                            .artists
-                            .iter()
-                            .map(|artist| (track_id, artist.object_id.as_str())),
-                    );
-                    track_genre_links.extend(
+            }
+            if let Some(album) = album {
+                let album_id = album.object_id.as_str();
+                album_artist_links.extend(
+                    album_credits
+                        .iter()
+                        .map(|artist| (album_id, artist.object_id.as_str())),
+                );
+                if let Some(relations) = album_relations {
+                    album_genre_links.extend(
                         relations
                             .genres
                             .iter()
-                            .map(|genre| (track_id, genre.object_id.as_str())),
+                            .map(|genre| (album_id, genre.object_id.as_str())),
                     );
-                    track_mood_links.extend(
+                    release_type_links.extend(
                         relations
-                            .moods
+                            .release_types
                             .iter()
-                            .map(|mood| (track_id, mood.object_id.as_str())),
+                            .map(|kind| (album_id, kind.as_str())),
                     );
                 }
-                self.write_track_folder_membership(track).await?;
             }
-            self.write_source_loudness(&page.iter().map(|(track, _)| *track).collect::<Vec<_>>())
-                .await?;
-            self.write_album_relations(
-                &album_artist_links,
-                &album_genre_links,
-                &release_type_links,
-            )
-            .await?;
-            self.write_track_relations(&track_artist_links, &track_genre_links, &track_mood_links)
-                .await?;
+            if let Some(relations) = track_relations {
+                for mood in &relations.moods {
+                    if moods.insert(mood.object_id.as_str(), mood) != Some(mood) {
+                        self.write_mood(mood).await?;
+                    }
+                }
+                track_artist_links.extend(
+                    relations
+                        .artists
+                        .iter()
+                        .map(|artist| (track_id, artist.object_id.as_str())),
+                );
+                track_genre_links.extend(
+                    relations
+                        .genres
+                        .iter()
+                        .map(|genre| (track_id, genre.object_id.as_str())),
+                );
+                track_mood_links.extend(
+                    relations
+                        .moods
+                        .iter()
+                        .map(|mood| (track_id, mood.object_id.as_str())),
+                );
+            }
+            self.write_track_folder_membership(track).await?;
         }
+        self.write_source_loudness(&page.iter().map(|(track, _)| *track).collect::<Vec<_>>())
+            .await?;
+        self.write_album_relations(&album_artist_links, &album_genre_links, &release_type_links)
+            .await?;
+        self.write_track_relations(&track_artist_links, &track_genre_links, &track_mood_links)
+            .await?;
         Ok(written)
     }
 
@@ -237,7 +261,11 @@ impl Scan {
         Ok(())
     }
 
-    async fn write_track_row(&mut self, input: &TrackInput) -> LibraryResult<bool> {
+    async fn write_track_row(
+        &mut self,
+        input: &TrackInput,
+        first: Option<bool>,
+    ) -> LibraryResult<bool> {
         let object_id = input.object_id.as_str();
         let album_object_id = input.album_object_id.as_deref();
         let title = input.title.as_str();
@@ -266,10 +294,6 @@ impl Scan {
             (Some(uri), None, None) => uri,
             _ => source_entity_uri(&SourceId::new(&self.source_id), "track", object_id),
         };
-        let rating = input
-            .rating
-            .filter(|rating| (0..=10).contains(rating))
-            .map(|rating| rating * 10);
         if let Some(album_id) = album_object_id {
             self.require_id("album", album_id)?;
         }
@@ -315,10 +339,13 @@ impl Scan {
             input.artwork_binding.as_deref().unwrap_or_default(),
             input.loudness_analysis_key.as_slice(),
         ])?;
-        let existed = self.contains_entity("track", object_id, true).await?;
-        if !self.observe("track", object_id).await? {
+        let Some(existed) = first else {
             return Ok(false);
-        }
+        };
+        let rating = input
+            .rating
+            .filter(|rating| (0..=10).contains(rating))
+            .map(|rating| rating * 10);
         self.changes.metadata |= self
             .execute_result(
                 sqlx::query(

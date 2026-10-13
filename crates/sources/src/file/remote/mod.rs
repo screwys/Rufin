@@ -758,11 +758,14 @@ impl FileSource {
                 content_type: crate::file::artwork::content_type(std::path::Path::new(&relative)),
             }),
             crate::LocalImageRef::Embedded { picture_index, .. } => {
-                let stream = input
-                    .playback_stream(&self.input_path(input.input(), &relative)?, revision, path)
-                    .await?;
-                let uri = stream.uri().to_string();
-                let mut reader = crate::file::remote::reader::FileReader::open(stream).await?;
+                let mut reader = crate::file::remote::reader::FileReader::open(
+                    &input,
+                    &self.input_path(input.input(), &relative)?,
+                    revision,
+                    path,
+                )
+                .await?;
+                let uri = reader.uri().to_owned();
                 tokio::task::spawn_blocking(move || {
                     crate::file::artwork::read_image_input(
                         &mut crate::file::discovery::Reader::network(),

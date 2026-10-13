@@ -202,7 +202,9 @@ impl FileSource {
                     "Selected file source path is not a directory".into(),
                 ));
             }
+            scan.begin_batch().await?;
             scan.write_local_files(&[(root, vec![])]).await?;
+            scan.finish_batch().await?;
         }
         let mut after = None;
         loop {
@@ -503,10 +505,12 @@ impl FileSource {
             .await;
         match result {
             Ok(Some(_)) if !changed => {
+                scan.begin_batch().await?;
                 scan.retain_file_directory_children(path).await?;
                 file.state = LocalFileState::Accepted;
                 file.parse_version = Some(self.directory_version);
                 scan.write_local_files(&[(file, vec![])]).await?;
+                scan.finish_batch().await?;
                 Ok(true)
             }
             Ok(_)
@@ -529,15 +533,14 @@ impl FileSource {
         }
         let input = self.input().await?;
         let path = self.input_path(input.input(), &relative)?;
-        let stream = input
-            .playback_stream(
-                &path,
-                file.revision.as_deref().unwrap_or_default(),
-                &file.path,
-            )
-            .await?;
-        let uri = stream.uri().to_string();
-        let mut reader = FileReader::open(stream).await?;
+        let mut reader = FileReader::open(
+            &input,
+            &path,
+            file.revision.as_deref().unwrap_or_default(),
+            &file.path,
+        )
+        .await?;
+        let uri = reader.uri().to_owned();
         let source_id = self.source_id.clone();
         let artwork_path = file.path.clone();
         let revision = file.revision.clone().unwrap_or_default();
@@ -698,11 +701,17 @@ impl FileSource {
                 }
                 batch.push((file, vec![]));
                 if batch.len() == 128 {
+                    scan.begin_batch().await?;
                     scan.write_local_files(&batch).await?;
+                    scan.finish_batch().await?;
                     batch.clear();
                 }
             }
-            scan.write_local_files(&batch).await?;
+            if !batch.is_empty() {
+                scan.begin_batch().await?;
+                scan.write_local_files(&batch).await?;
+                scan.finish_batch().await?;
+            }
             Ok::<_, SourceError>(())
         };
         tokio::try_join!(listing, staging)?;
@@ -713,7 +722,9 @@ impl FileSource {
         {
             directory.state = LocalFileState::Accepted;
             directory.parse_version = Some(self.directory_version);
+            scan.begin_batch().await?;
             scan.write_local_files(&[(directory, vec![])]).await?;
+            scan.finish_batch().await?;
         }
         Ok(())
     }

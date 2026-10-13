@@ -1431,27 +1431,26 @@ impl PlaybackOwner {
         filter: String,
     ) -> Result<PreparedQueuePage, PlaybackError> {
         let runtime = self.runtime.clone();
-        runtime
-            .spawn(async move {
-                let revision = self.updates.current().map_or(0, |view| view.queue.revision);
-                let page = self
-                    .receiver_queue_page(offset, limit, filter)
-                    .await
-                    .map_err(PlaybackError::Message)?;
-                let rows = self
-                    .database
-                    .prepared_queue_page(&page.rows)
-                    .await
-                    .map_err(|error| PlaybackError::Message(error.to_string()))?;
-                Ok(PreparedQueuePage {
-                    revision,
-                    rows,
-                    total: page.total,
-                    window_offset: page.window_offset,
-                })
+        tokio_util::task::AbortOnDropHandle::new(runtime.spawn(async move {
+            let revision = self.updates.current().map_or(0, |view| view.queue.revision);
+            let page = self
+                .receiver_queue_page(offset, limit, filter)
+                .await
+                .map_err(PlaybackError::Message)?;
+            let rows = self
+                .database
+                .prepared_queue_page(&page.rows)
+                .await
+                .map_err(|error| PlaybackError::Message(error.to_string()))?;
+            Ok(PreparedQueuePage {
+                revision,
+                rows,
+                total: page.total,
+                window_offset: page.window_offset,
             })
-            .await
-            .map_err(|error| PlaybackError::Message(error.to_string()))?
+        }))
+        .await
+        .map_err(|error| PlaybackError::Message(error.to_string()))?
     }
 
     pub async fn remote_outputs(

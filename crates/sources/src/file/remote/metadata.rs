@@ -705,14 +705,13 @@ impl FileSource {
         if track.cue_path.is_some() {
             return Ok(None);
         }
-        let stream = input
-            .playback_stream(
-                &self.input_path(input.input(), &relative)?,
-                file.revision.as_deref().unwrap_or_default(),
-                media_uri,
-            )
-            .await?;
-        let reader = crate::file::remote::reader::FileReader::open(stream).await?;
+        let reader = crate::file::remote::reader::FileReader::open(
+            &input,
+            &self.input_path(input.input(), &relative)?,
+            file.revision.as_deref().unwrap_or_default(),
+            media_uri,
+        )
+        .await?;
         tokio::task::spawn_blocking(move || {
             crate::file::metadata::read_embedded_lyrics_input(reader)
         })

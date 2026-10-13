@@ -196,19 +196,8 @@ impl Scan {
     }
 
     async fn observe(&mut self, kind: &str, object_id: &str) -> LibraryResult<bool> {
-        if kind == "track" {
-            self.execute(sqlx::query("INSERT OR IGNORE INTO temp.scan_affected_albums SELECT album_key FROM tracks WHERE source_key=?1 AND object_id=?2 AND album_key IS NOT NULL").bind(self.source).bind(object_id)).await?;
-        }
         let first = self.execute_result(sqlx::query("INSERT INTO temp.scan_seen(kind,object_id,written) VALUES(?1,?2,1) ON CONFLICT(kind,object_id) DO UPDATE SET written=1 WHERE written=0").bind(kind).bind(object_id)).await?.rows_affected()>0;
-        if first && kind == "track" && !self.point_update {
-            self.execute(
-                sqlx::query("INSERT OR IGNORE INTO temp.scan_removals VALUES('track-folders',?1)")
-                    .bind(object_id),
-            )
-            .await?;
-        }
         let table = match kind {
-            "track" => "tracks",
             "album" => "albums",
             "artist" => "artists",
             "genre" => "genres",
@@ -229,9 +218,70 @@ impl Scan {
             self.changes.playlists |= changed;
         } else {
             self.changes.metadata |= changed;
-            self.changes.tracks_added |= kind == "track" && changed;
         }
         Ok(first)
+    }
+
+    async fn observe_tracks(
+        &mut self,
+        object_ids: &[&str],
+    ) -> LibraryResult<std::collections::HashMap<String, bool>> {
+        let ids = serde_json::to_string(object_ids)?;
+        self.execute(
+            sqlx::query(
+                "INSERT OR IGNORE INTO temp.scan_affected_albums
+             SELECT album_key FROM tracks WHERE source_key=?1
+               AND object_id IN (SELECT value FROM json_each(?2)) AND album_key IS NOT NULL",
+            )
+            .bind(self.source)
+            .bind(&ids),
+        )
+        .await?;
+        let first = sqlx::query_as::<_, (String, bool)>(
+            "INSERT INTO temp.scan_seen(kind,object_id,written)
+             SELECT 'track',value,1 FROM json_each(?2) WHERE true
+             ON CONFLICT(kind,object_id) DO UPDATE SET written=1 WHERE written=0
+             RETURNING object_id,EXISTS(SELECT 1 FROM tracks
+               WHERE source_key=?1 AND tracks.object_id=scan_seen.object_id AND indexed)",
+        )
+        .bind(self.source)
+        .bind(&ids)
+        .fetch_all(
+            self.batch_writer
+                .as_mut()
+                .unwrap()
+                .as_mut()
+                .ok_or(LibraryError::WriterUnavailable)?,
+        )
+        .await?;
+        if !self.point_update && !first.is_empty() {
+            let first_ids = serde_json::to_string(
+                &first.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(),
+            )?;
+            self.execute(
+                sqlx::query(
+                    "INSERT OR IGNORE INTO temp.scan_removals
+                 SELECT 'track-folders',value FROM json_each(?1)",
+                )
+                .bind(first_ids),
+            )
+            .await?;
+        }
+        let changed = self
+            .execute_result(
+                sqlx::query(
+                    "UPDATE tracks SET indexed=1 WHERE source_key=?1 AND indexed=0
+               AND object_id IN (SELECT value FROM json_each(?2))",
+                )
+                .bind(self.source)
+                .bind(ids),
+            )
+            .await?
+            .rows_affected()
+            > 0;
+        self.changes.metadata |= changed;
+        self.changes.tracks_added |= changed;
+        Ok(first.into_iter().collect())
     }
 
     /// Checks whether the saved catalog matches the cheap freshness fact.

@@ -22,32 +22,44 @@ async fn publication_keeps_tracks_and_known_credits_beside_missing_related_objec
     })
     .await
     .unwrap();
-    for (object_id, title) in [("track-one", "One"), ("track-two", "Two")] {
-        scan.write_tracks(&[(
-            &library::TrackInput {
-                object_id: object_id.into(),
-                album_object_id: Some("album-one".into()),
-                title: title.into(),
-                sort_text: title.to_lowercase(),
-                album_loudness: Some(library::LoudnessInput {
-                    replay_gain_db: Some(-6.0),
-                    ..Default::default()
-                }),
-                relations: Some(library::TrackRelationsInput {
-                    artists: vec![library::ArtistInput {
-                        object_id: "artist-one".into(),
-                        name: "Known Artist".into(),
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                }),
+    let mut tracks = [
+        ("track-one", "One"),
+        ("track-two", "Two"),
+        ("track-one", "Duplicate"),
+    ]
+    .into_iter()
+    .map(|(object_id, title)| library::TrackInput {
+        object_id: object_id.into(),
+        album_object_id: Some("album-one".into()),
+        title: title.into(),
+        sort_text: title.to_lowercase(),
+        album_loudness: Some(library::LoudnessInput {
+            replay_gain_db: Some(-6.0),
+            ..Default::default()
+        }),
+        relations: Some(library::TrackRelationsInput {
+            artists: vec![library::ArtistInput {
+                object_id: "artist-one".into(),
+                name: "Known Artist".into(),
                 ..Default::default()
-            },
-            None,
-        )])
-        .await
-        .unwrap();
-    }
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    })
+    .collect::<Vec<_>>();
+    tracks[0].relations = None;
+    tracks[2].source_loudness = Some(library::LoudnessInput {
+        replay_gain_db: Some(-4.0),
+        ..Default::default()
+    });
+    assert_eq!(
+        scan.write_tracks(&tracks.iter().map(|track| (track, None)).collect::<Vec<_>>())
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(scan.write_tracks(&[(&tracks[2], None)]).await.unwrap(), 0);
     scan.write_track_relations(&[("track-one", "missing-artist")], &[], &[])
         .await
         .unwrap();
@@ -60,6 +72,16 @@ async fn publication_keeps_tracks_and_known_credits_beside_missing_related_objec
     let update = updates.try_recv().unwrap();
     assert!(update.metadata);
     let mut raw = connection(&path).await;
+    assert_eq!(
+        sqlx::query_as::<_, (String, f64)>(
+            "SELECT title,gain_db FROM tracks JOIN replay_gain_measurements
+             ON entity_kind='track' AND entity_key=track_key WHERE object_id='track-one'",
+        )
+        .fetch_one(&mut raw)
+        .await
+        .unwrap(),
+        ("One".into(), -4.0)
+    );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM tracks")
             .fetch_one(&mut raw)
@@ -1571,6 +1593,47 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
     });
     oversized.finish().await.expect("finish oversized scan");
     assert!(updates.try_recv().is_err());
+
+    let mut paged = Scan::begin(&database, "source-three", "Three", "three", None)
+        .await
+        .expect("begin paged scan");
+    let mut tracks = (0..130)
+        .map(|index| library::TrackInput {
+            object_id: format!("page-{index}"),
+            title: format!("Track {index}"),
+            ..Default::default()
+        })
+        .collect::<Vec<_>>();
+    tracks[129].source_play_count = Some(-1);
+    paged
+        .write_tracks(&tracks.iter().map(|track| (track, None)).collect::<Vec<_>>())
+        .await
+        .expect_err("invalid activity rolls back its page");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM tracks WHERE source_key=?1")
+            .bind(paged.source())
+            .fetch_one(&mut outside)
+            .await
+            .unwrap(),
+        128
+    );
+    tracks[129].source_play_count = Some(1);
+    assert_eq!(
+        paged
+            .write_tracks(&[(&tracks[128], None), (&tracks[129], None)])
+            .await
+            .expect("rolled-back observations remain writable"),
+        2
+    );
+    paged.finish().await.expect("publish accepted pages");
+    assert!(
+        !database
+            .cached_source("source-three", &ReadCancellation::new())
+            .await
+            .unwrap()
+            .unwrap()
+            .catalog_complete
+    );
 
     let mut invalid = Scan::begin(&database, "source-four", "Four", "four", None)
         .await

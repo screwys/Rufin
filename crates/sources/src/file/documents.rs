@@ -381,9 +381,9 @@ pub fn resolve_document_relative(
 }
 
 pub async fn read_document_queue_item(uri: &str) -> SourceResult<Option<library::QueueItem>> {
-    let stream = resolve_document_stream(uri).await?;
-    let playback_uri = stream.uri().to_owned();
-    let mut input = crate::file::remote::reader::FileReader::open(stream).await?;
+    let server = document_input(uri).await?;
+    let mut input = crate::file::remote::reader::FileReader::open(&server, "", "", uri).await?;
+    let playback_uri = input.uri().to_owned();
     let uri = uri.to_owned();
     tokio::task::spawn_blocking(move || {
         let entry = stat_document(&uri)?;
@@ -407,24 +407,35 @@ pub async fn read_document_queue_item(uri: &str) -> SourceResult<Option<library:
 }
 
 pub async fn resolve_document_stream(uri: &str) -> SourceResult<playback::ResolvedStream> {
+    document_input(uri)
+        .await?
+        .playback_stream("", "", uri)
+        .await
+}
+
+async fn document_input(
+    uri: &str,
+) -> SourceResult<Arc<crate::file::remote::input::FileInputServer>> {
     let access = Arc::new(DocumentAccess::new(DocumentRoot::new(uri, "")?));
-    let input = crate::file::remote::input::FileInputServer::start(
+    crate::file::remote::input::FileInputServer::start(
         crate::file::remote::input::FileInput::Documents(access),
     )
-    .await?;
-    input.playback_stream("", "", uri).await
+    .await
 }
 
 pub struct DocumentReader {
-    lease: DocumentLease,
+    lease: Arc<DocumentLease>,
     position: u64,
 }
 
 pub fn open_document_input(uri: &str) -> SourceResult<DocumentReader> {
-    Ok(DocumentReader {
-        lease: DocumentLease::open(uri)?,
-        position: 0,
-    })
+    Ok(DocumentReader::new(Arc::new(DocumentLease::open(uri)?)))
+}
+
+impl DocumentReader {
+    pub(crate) fn new(lease: Arc<DocumentLease>) -> Self {
+        Self { lease, position: 0 }
+    }
 }
 
 impl Read for DocumentReader {
@@ -439,6 +450,12 @@ impl Read for DocumentReader {
             .lease
             .read(self.position, size)
             .map_err(std::io::Error::other)?;
+        if bytes.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Document ended before its reported length",
+            ));
+        }
         let size = bytes.len();
         buffer[..size].copy_from_slice(&bytes);
         self.position += size as u64;
