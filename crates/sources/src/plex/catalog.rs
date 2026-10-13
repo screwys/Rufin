@@ -4,7 +4,7 @@ use crate::policy::raw_item_id;
 use crate::remote_json::{field, id, items};
 use crate::source::{SourceReadProgress, SourceReadStage};
 use crate::{SourceError, SourceHomeSection, SourceResult};
-use library::{FolderInput, HomeEntryInput, HomeEntryKind, RecordInput, Scan};
+use library::{FolderInput, HomeEntryInput, HomeEntryKind, Scan};
 use serde_json::Value;
 
 const PAGE: usize = 512;
@@ -24,15 +24,13 @@ impl PlexSource {
             let Some(section_id) = id(&section["key"]) else {
                 continue;
             };
-            let folder = plex_id("music-folder", &section_id);
             let title = section["title"].as_str().unwrap_or(&section_id);
-            let section_record = RecordInput::Folder(FolderInput {
-                object_id: folder.clone(),
+            let mut section_record = FolderInput {
+                object_id: plex_id("music-folder", &section_id),
                 name: Some(title.to_owned()),
                 ..Default::default()
-            });
-            scan.write_records(std::slice::from_ref(&section_record))
-                .await?;
+            };
+            scan.write_folders(&[&section_record]).await?;
             for (kind, stage) in [
                 ("8", SourceReadStage::Artists),
                 ("9", SourceReadStage::Albums),
@@ -77,32 +75,24 @@ impl PlexSource {
                         Value::Null
                     };
                     let mut page_records = Vec::new();
-                    let mut folder_tracks = Vec::new();
                     for item in items(&details["MediaContainer"]["Metadata"])
                         .iter()
                         .chain(rows)
                     {
                         page_records.extend(records(scan.source_id(), item)?);
                     }
-                    for item in rows {
-                        if kind == "10"
-                            && let Some(raw) = id(&item["ratingKey"])
-                        {
-                            folder_tracks.push(plex_id("track", &raw));
-                        }
-                    }
+                    section_record.tracks = if kind == "10" {
+                        rows.iter()
+                            .filter_map(|item| id(&item["ratingKey"]))
+                            .map(|raw| plex_id("track", &raw))
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
                     scan.begin_batch().await?;
                     scan.write_records(&page_records).await?;
-                    scan.write_track_folders(
-                        &folder_tracks
-                            .iter()
-                            .map(|track| library::ScanLink::new(track, &folder, 0))
-                            .collect::<Vec<_>>(),
-                    )
-                    .await?;
                     // The section response owns its display name, not a track's optional copy.
-                    scan.write_records(std::slice::from_ref(&section_record))
-                        .await?;
+                    scan.write_folders(&[&section_record]).await?;
                     scan.finish_batch().await?;
                     offset += rows.len();
                     progress(SourceReadProgress {

@@ -1448,7 +1448,7 @@ mod tests {
         assert_eq!(track.title, "Playable");
         assert_eq!(track.duration_millis, 42_000);
         assert_eq!(track.year, Some(2024));
-        assert_eq!(track.relations.as_ref().unwrap().artists.len(), 1);
+        assert_eq!(track.artists.len(), 1);
         assert_eq!(
             track.source_loudness.and_then(|value| value.replay_gain_db),
             Some(-4.25)
@@ -1720,10 +1720,10 @@ mod tests {
                 .unwrap()
                 .expect("OpenSubsonic song without optional metadata");
 
-            assert!(song.relations.as_ref().unwrap().artists.is_empty());
-            assert!(song.relations.as_ref().unwrap().album_artists.is_empty());
-            assert!(song.relations.as_ref().unwrap().genres.is_empty());
-            assert!(song.relations.as_ref().unwrap().moods.is_empty());
+            assert!(song.artists.is_empty());
+            assert!(song.album_artists.is_empty());
+            assert!(song.genres.is_empty());
+            assert!(song.moods.is_empty());
             assert!(
                 song.source_loudness
                     .and_then(|value| value.replay_gain_db)

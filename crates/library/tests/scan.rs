@@ -37,18 +37,15 @@ async fn publication_keeps_tracks_and_known_credits_beside_missing_related_objec
             replay_gain_db: Some(-6.0),
             ..Default::default()
         }),
-        relations: Some(library::TrackRelationsInput {
-            artists: vec![library::ArtistInput {
-                object_id: "artist-one".into(),
-                name: "Known Artist".into(),
-                ..Default::default()
-            }],
+        artists: vec![library::ArtistInput {
+            object_id: "artist-one".into(),
+            name: "Known Artist".into(),
             ..Default::default()
-        }),
+        }],
         ..Default::default()
     })
     .collect::<Vec<_>>();
-    tracks[0].relations = None;
+    tracks[0].artists.clear();
     tracks[2].source_loudness = Some(library::LoudnessInput {
         replay_gain_db: Some(-4.0),
         ..Default::default()
@@ -60,9 +57,6 @@ async fn publication_keeps_tracks_and_known_credits_beside_missing_related_objec
         2
     );
     assert_eq!(scan.write_tracks(&[(&tracks[2], None)]).await.unwrap(), 0);
-    scan.write_track_relations(&[("track-one", "missing-artist")], &[], &[])
-        .await
-        .unwrap();
     let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
     database.observe_catalog(move |update| {
         let _ = updates_tx.send(update);
@@ -562,6 +556,17 @@ async fn write_small_catalog(
             display_artist: "Artist One".into(),
             sort_text: "album one".into(),
             first_seen_at: Some(10),
+            artists: vec![library::ArtistInput {
+                object_id: "artist-one".into(),
+                name: "Artist One".into(),
+                ..Default::default()
+            }],
+            genres: vec![library::GenreInput {
+                object_id: "genre-one".into(),
+                name: "Genre One".into(),
+                ..Default::default()
+            }],
+            release_types: vec!["Album".into()],
             ..Default::default()
         },
         &library::AlbumInput {
@@ -644,13 +649,6 @@ async fn write_small_catalog(
     scan.write_playlist_page("playlist-one", 0, &entries, true)
         .await
         .expect("write completed playlist");
-    scan.write_album_relations(
-        &[("album-one", "artist-one")],
-        &[("album-one", "genre-one")],
-        &[("album-one", "Album")],
-    )
-    .await
-    .expect("stage album relations");
     scan.finish().await.expect("finish scan");
     updates.try_recv().expect("catalog update")
 }
@@ -688,25 +686,43 @@ async fn write_track(scan: &mut Scan, object_id: &str, title: &str, position: i6
             source_skip_count: Some(position),
             source_last_played: Some(1_700_000_000 + position),
             loudness_analysis_key: [position as u8 + 1; 32],
+            artists: vec![library::ArtistInput {
+                object_id: "artist-one".into(),
+                name: "Artist One".into(),
+                sort_text: Some("artist one".into()),
+                musicbrainz_artist_id: Some("artist-mbid-one".into()),
+                ..Default::default()
+            }],
+            genres: vec![library::GenreInput {
+                object_id: "genre-one".into(),
+                name: "Genre One".into(),
+                ..Default::default()
+            }],
+            moods: vec![library::MoodInput {
+                object_id: "mood-one".into(),
+                name: "Mood One".into(),
+                sort_text: "mood one".into(),
+            }],
+            folders: Some(vec!["folder-one".into(), "folder-one".into()]),
             ..Default::default()
         },
-        None,
+        Some(&library::AlbumInput {
+            object_id: "album-one".into(),
+            title: "Album One".into(),
+            display_artist: "Artist One".into(),
+            sort_text: "album one".into(),
+            album_artists: vec![library::ArtistInput {
+                object_id: "artist-one".into(),
+                name: "Artist One".into(),
+                sort_text: Some("one, artist".into()),
+                musicbrainz_artist_id: Some("artist-mbid-one".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
     )])
     .await
     .expect("stage track");
-    scan.write_track_relations(
-        &[(object_id, "artist-one")],
-        &[(object_id, "genre-one")],
-        &[(object_id, "mood-one")],
-    )
-    .await
-    .expect("stage track relations");
-    scan.write_track_folders(&[library::ScanLink::new(object_id, "folder-one", 0)])
-        .await
-        .expect("stage track folder");
-    scan.write_track_folders(&[library::ScanLink::new(object_id, "folder-one", 0)])
-        .await
-        .expect("coalesce repeated track folder");
 }
 
 #[tokio::test]
@@ -1038,16 +1054,19 @@ async fn point_album_artwork_updates_cached_members_without_replacing_distinct_c
                     favorite: Some(false),
                     rating: Some(7),
                     first_seen_at: Some(10),
+                    artists: vec![library::ArtistInput {
+                        object_id: "artist-one".into(),
+                        name: "Artist One".into(),
+                        ..Default::default()
+                    }],
+                    genres: vec![library::GenreInput {
+                        object_id: "genre-one".into(),
+                        name: "Genre One".into(),
+                        ..Default::default()
+                    }],
+                    release_types: vec!["Album".into()],
                     ..Default::default()
                 }])
-                .await
-                .unwrap();
-            point
-                .write_album_relations(
-                    &[("album-one", "artist-one")],
-                    &[("album-one", "genre-one")],
-                    &[("album-one", "Album")],
-                )
                 .await
                 .unwrap();
             let previous = sqlx::query_scalar::<_, Vec<u8>>(
@@ -1707,14 +1726,16 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
             title: "Album One".into(),
             display_artist: "Artist One".into(),
             sort_text: "album one".into(),
+            genres: vec![library::GenreInput {
+                object_id: "new-genre".into(),
+                name: "New genre".into(),
+                ..Default::default()
+            }],
+            release_types: vec!["Live".into()],
             ..Default::default()
         }])
         .await
         .expect("read the first file of an album without its dates");
-    interleaved
-        .write_album_relations(&[], &[("album-one", "new-genre")], &[("album-one", "Live")])
-        .await
-        .expect("read one file's album credits");
     interleaved.incomplete();
     let favorite = library::FavoriteTarget::Track(library::source_entity_uri(
         &library::SourceId::new("source-one"),

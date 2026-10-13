@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use super::{
-    AlbumInput, ArtistInput, FolderInput, GenreInput, MoodInput, RecordInput, Scan, ScanLink,
-    TrackInput,
+    AlbumInput, ArtistInput, FolderInput, GenreInput, MoodInput, RecordInput, Scan, TrackInput,
 };
 use crate::{
     LibraryError, LibraryResult, SourceId, cue_media_uri, normalize_direct_media_uri,
@@ -45,22 +44,9 @@ impl Scan {
             )
             .await?;
         let mut tracks = Vec::new();
-        let mut albums = Vec::new();
-        let mut artists = Vec::new();
-        let mut genres = Vec::new();
-        let mut moods = Vec::new();
         let mut folders = HashMap::new();
-        let mut album_artist_links = Vec::new();
-        let mut album_genre_links = Vec::new();
-        let mut release_type_links = Vec::new();
-        let mut track_artist_links = Vec::new();
-        let mut track_genre_links = Vec::new();
-        let mut track_mood_links = Vec::new();
-        for &(track, album) in page {
+        for &(track, _) in page {
             let track_id = track.object_id.as_str();
-            if let Some(album) = album {
-                albums.push(album);
-            }
             let (media_uri, normalized_search, audio_properties) = self.track_context(track)?;
             if let Some(existed) = first.remove(track_id) {
                 tracks.push((
@@ -71,94 +57,17 @@ impl Scan {
                     existed,
                 ));
             }
-            let album_relations = album.and_then(|album| album.relations.as_ref());
-            let track_relations = track.relations.as_ref();
-            let album_credits = album_relations
-                .map(|relations| {
-                    if relations.album_artists.is_empty() {
-                        relations.artists.as_slice()
-                    } else {
-                        relations.album_artists.as_slice()
-                    }
-                })
-                .unwrap_or_default();
-            let track_credits = track_relations
-                .map(|relations| relations.artists.as_slice())
-                .unwrap_or_default();
-            let track_album_credits = track_relations
-                .map(|relations| relations.album_artists.as_slice())
-                .unwrap_or_default();
-            for credits in [album_credits, track_credits, track_album_credits] {
-                artists.extend(credits);
-            }
-            let album_genres = album_relations
-                .map(|relations| relations.genres.as_slice())
-                .unwrap_or_default();
-            let track_genres = track_relations
-                .map(|relations| relations.genres.as_slice())
-                .unwrap_or_default();
-            for entries in [album_genres, track_genres] {
-                genres.extend(entries);
-            }
-            if let Some(album) = album {
-                let album_id = album.object_id.as_str();
-                album_artist_links.extend(
-                    album_credits
-                        .iter()
-                        .map(|artist| (album_id, artist.object_id.as_str())),
-                );
-                if let Some(relations) = album_relations {
-                    album_genre_links.extend(
-                        relations
-                            .genres
-                            .iter()
-                            .map(|genre| (album_id, genre.object_id.as_str())),
-                    );
-                    release_type_links.extend(
-                        relations
-                            .release_types
-                            .iter()
-                            .map(|kind| (album_id, kind.as_str())),
-                    );
-                }
-            }
-            if let Some(relations) = track_relations {
-                moods.extend(&relations.moods);
-                track_artist_links.extend(
-                    relations
-                        .artists
-                        .iter()
-                        .map(|artist| (track_id, artist.object_id.as_str())),
-                );
-                track_genre_links.extend(
-                    relations
-                        .genres
-                        .iter()
-                        .map(|genre| (track_id, genre.object_id.as_str())),
-                );
-                track_mood_links.extend(
-                    relations
-                        .moods
-                        .iter()
-                        .map(|mood| (track_id, mood.object_id.as_str())),
-                );
-            }
             if let Some(entries) = &track.folders {
                 folders.insert(track_id, entries);
             }
         }
-        albums.sort_by(|left, right| left.object_id.cmp(&right.object_id));
-        albums.dedup();
-        artists.sort_by(|left, right| left.object_id.cmp(&right.object_id));
-        artists.dedup();
-        genres.sort_by(|left, right| left.object_id.cmp(&right.object_id));
-        genres.dedup();
-        moods.sort_by(|left, right| left.object_id.cmp(&right.object_id));
-        moods.dedup();
-        self.write_album_rows(&albums).await?;
-        self.write_artists(&artists).await?;
-        self.write_genres(&genres).await?;
-        self.write_moods(&moods).await?;
+        self.write_album_rows(
+            &page
+                .iter()
+                .filter_map(|(_, album)| *album)
+                .collect::<Vec<_>>(),
+        )
+        .await?;
         if !tracks.is_empty() {
             let source = self.source;
             let facts = || {
@@ -254,20 +163,13 @@ impl Scan {
             &folders.keys().copied().collect::<Vec<_>>(),
             &folders
                 .iter()
-                .flat_map(|(id, entries)| {
-                    entries
-                        .iter()
-                        .enumerate()
-                        .map(|(position, folder)| ScanLink::new(id, folder, position as i64))
-                })
+                .flat_map(|(id, entries)| entries.iter().map(|folder| (*id, folder.as_str())))
                 .collect::<Vec<_>>(),
         )
         .await?;
         self.write_source_loudness(&page.iter().map(|(track, _)| *track).collect::<Vec<_>>())
             .await?;
-        self.write_album_relations(&album_artist_links, &album_genre_links, &release_type_links)
-            .await?;
-        self.write_track_relations(&track_artist_links, &track_genre_links, &track_mood_links)
+        self.write_credits(page.iter().map(|(track, album)| (Some(*track), *album)))
             .await?;
         Ok(tracks.len())
     }
@@ -320,51 +222,93 @@ impl Scan {
     pub async fn write_albums(&mut self, inputs: &[&AlbumInput]) -> LibraryResult<()> {
         for page in inputs.chunks(128) {
             self.write_album_rows(page).await?;
-            let mut artists = Vec::new();
-            let mut genres = Vec::new();
-            let mut artist_links = Vec::new();
-            let mut genre_links = Vec::new();
-            let mut release_types = Vec::new();
-            for input in page {
-                let id = input.object_id.as_str();
-                if let Some(relations) = &input.relations {
-                    let credits = if relations.album_artists.is_empty() {
-                        &relations.artists
-                    } else {
-                        &relations.album_artists
-                    };
-                    artists.extend(credits);
-                    genres.extend(&relations.genres);
-                    artist_links
-                        .extend(credits.iter().map(|artist| (id, artist.object_id.as_str())));
-                    genre_links.extend(
-                        relations
-                            .genres
-                            .iter()
-                            .map(|genre| (id, genre.object_id.as_str())),
-                    );
-                    release_types.extend(
-                        relations
-                            .release_types
-                            .iter()
-                            .map(|kind| (id, kind.as_str())),
-                    );
-                }
-            }
-            artists.sort_by(|left, right| left.object_id.cmp(&right.object_id));
-            artists.dedup();
-            genres.sort_by(|left, right| left.object_id.cmp(&right.object_id));
-            genres.dedup();
-            self.write_artists(&artists).await?;
-            self.write_genres(&genres).await?;
-            self.write_album_relations(&artist_links, &genre_links, &release_types)
+            self.write_credits(page.iter().map(|album| (None, Some(*album))))
                 .await?;
+        }
+        Ok(())
+    }
+
+    async fn write_credits<'a>(
+        &mut self,
+        inputs: impl IntoIterator<Item = (Option<&'a TrackInput>, Option<&'a AlbumInput>)>,
+    ) -> LibraryResult<()> {
+        let mut artists = Vec::new();
+        let mut genres = Vec::new();
+        let mut moods = Vec::new();
+        let mut album_artists = Vec::new();
+        let mut album_genres = Vec::new();
+        let mut release_types = Vec::new();
+        let mut track_artists = Vec::new();
+        let mut track_genres = Vec::new();
+        let mut track_moods = Vec::new();
+        for (track, album) in inputs {
+            if let Some(album) = album {
+                let id = album.object_id.as_str();
+                let credits = if album.album_artists.is_empty() {
+                    &album.artists
+                } else {
+                    &album.album_artists
+                };
+                artists.extend(credits);
+                genres.extend(&album.genres);
+                album_artists.extend(credits.iter().map(|artist| (id, artist.object_id.as_str())));
+                album_genres.extend(
+                    album
+                        .genres
+                        .iter()
+                        .map(|genre| (id, genre.object_id.as_str())),
+                );
+                release_types.extend(album.release_types.iter().map(|kind| (id, kind.as_str())));
+            }
+            if let Some(track) = track {
+                let id = track.object_id.as_str();
+                artists.extend(&track.artists);
+                artists.extend(&track.album_artists);
+                genres.extend(&track.genres);
+                moods.extend(&track.moods);
+                track_artists.extend(
+                    track
+                        .artists
+                        .iter()
+                        .map(|artist| (id, artist.object_id.as_str())),
+                );
+                track_genres.extend(
+                    track
+                        .genres
+                        .iter()
+                        .map(|genre| (id, genre.object_id.as_str())),
+                );
+                track_moods.extend(track.moods.iter().map(|mood| (id, mood.object_id.as_str())));
+            }
+        }
+        artists.sort_by(|left, right| left.object_id.cmp(&right.object_id));
+        artists.dedup();
+        genres.sort_by(|left, right| left.object_id.cmp(&right.object_id));
+        genres.dedup();
+        moods.sort_by(|left, right| left.object_id.cmp(&right.object_id));
+        moods.dedup();
+        self.write_artists(&artists).await?;
+        self.write_genres(&genres).await?;
+        self.write_moods(&moods).await?;
+        for (owner, target, links) in [
+            ("album", "artist", &album_artists),
+            ("album", "genre", &album_genres),
+            ("album", "release_type", &release_types),
+            ("track", "artist", &track_artists),
+            ("track", "genre", &track_genres),
+            ("track", "mood", &track_moods),
+        ] {
+            self.write_relations(owner, target, links).await?;
         }
         Ok(())
     }
 
     async fn write_album_rows(&mut self, inputs: &[&AlbumInput]) -> LibraryResult<()> {
         for page in inputs.chunks(128) {
+            let mut unique = page.to_vec();
+            unique.sort_by(|left, right| left.object_id.cmp(&right.object_id));
+            unique.dedup();
+            let page = unique.as_slice();
             for input in page {
                 self.require_id("album", &input.object_id)?;
                 self.require_row_bytes(&[
@@ -860,6 +804,20 @@ impl Scan {
             }));
             self.changes.metadata |=
                 self.execute_result(metadata.build()).await?.rows_affected() > 0;
+            self.write_relations(
+                "track",
+                "folder",
+                &page
+                    .iter()
+                    .flat_map(|folder| {
+                        folder
+                            .tracks
+                            .iter()
+                            .map(|track| (track.as_str(), folder.object_id.as_str()))
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .await?;
             self.remember_artworks(
                 "folder",
                 &page

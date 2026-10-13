@@ -54,12 +54,9 @@ pub(super) fn album_from_item(
             .transpose()?,
         musicbrainz_release_id: source_id(&item["ProviderIds"], "MusicBrainzAlbum"),
         musicbrainz_release_group_id: source_id(&item["ProviderIds"], "MusicBrainzReleaseGroup"),
-        relations: Some(library::AlbumRelationsInput {
-            album_artists,
-            artists: artist_credits_from_pairs(server, &item["ArtistItems"]),
-            genres: genre_credits_from_pairs(server, &item["GenreItems"]),
-            ..Default::default()
-        }),
+        album_artists,
+        artists: artist_credits_from_pairs(server, &item["ArtistItems"]),
+        genres: genre_credits_from_pairs(server, &item["GenreItems"]),
         ..Default::default()
     }))
 }
@@ -153,12 +150,9 @@ pub(super) fn track_from_item(
             bit_depth: stream.and_then(|stream| field(stream, "BitDepth")),
             channels: stream.and_then(|stream| field(stream, "Channels")),
         },
-        relations: Some(library::TrackRelationsInput {
-            artists,
-            album_artists: artist_credits_from_pairs(server, &item["AlbumArtists"]),
-            genres: genre_credits_from_pairs(server, &item["GenreItems"]),
-            ..Default::default()
-        }),
+        artists,
+        album_artists: artist_credits_from_pairs(server, &item["AlbumArtists"]),
+        genres: genre_credits_from_pairs(server, &item["GenreItems"]),
         ..Default::default()
     }))
 }

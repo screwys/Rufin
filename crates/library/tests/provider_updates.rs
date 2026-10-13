@@ -1,4 +1,4 @@
-use library::{Database, Freshness, ReadCancellation, Scan, ScanLink};
+use library::{Database, Freshness, ReadCancellation, Scan};
 
 async fn track(scan: &mut Scan, favorite: Option<bool>, play_count: Option<i64>) {
     scan.write_tracks(&[(
@@ -71,13 +71,11 @@ async fn fixture() -> (tempfile::TempDir, Database) {
         object_id: "folder".into(),
         name: Some("Folder".into()),
         sort_text: Some("folder".into()),
+        tracks: vec!["track".into()],
         ..Default::default()
     }])
     .await
     .unwrap();
-    scan.write_track_folders(&[ScanLink::new("track", "folder", 0)])
-        .await
-        .unwrap();
     scan.finish().await.unwrap();
     (directory, database)
 }

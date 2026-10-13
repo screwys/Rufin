@@ -1198,15 +1198,19 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         musicbrainz_release_group_id: Some("group-a2".into()),
         is_compilation: Some(true),
         favorite: Some(false),
+        artists: vec![library::ArtistInput {
+            object_id: "artist-a".into(),
+            name: "Artist A".into(),
+            ..Default::default()
+        }],
+        genres: vec![library::GenreInput {
+            object_id: "genre".into(),
+            name: "Rock".into(),
+            ..Default::default()
+        }],
+        release_types: vec!["Album".into()],
         ..Default::default()
     }])
-    .await
-    .unwrap();
-    scan.write_album_relations(
-        &[("album-a", "artist-a")],
-        &[("album-a", "genre")],
-        &[("album-a", "Album")],
-    )
     .await
     .unwrap();
     let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
@@ -1659,19 +1663,27 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
                 favorite: Some(false),
                 rating: Some(5),
                 loudness_analysis_key: [1; 32],
+                artists: vec![library::ArtistInput {
+                    object_id: "artist-a".into(),
+                    name: "Edited Artist".into(),
+                    ..Default::default()
+                }],
+                genres: vec![library::GenreInput {
+                    object_id: "genre".into(),
+                    name: "Rock".into(),
+                    ..Default::default()
+                }],
+                moods: vec![library::MoodInput {
+                    object_id: "mood".into(),
+                    name: "Energetic".into(),
+                    sort_text: "energetic".into(),
+                }],
                 ..Default::default()
             },
             None,
         )])
         .await
         .expect("refresh Track metadata");
-        scan.write_track_relations(
-            &[("track-0", "artist-a")],
-            &[("track-0", "genre")],
-            &[("track-0", "mood")],
-        )
-        .await
-        .unwrap();
         scan.write_albums(&[&library::AlbumInput {
             object_id: "album-a".into(),
             title: "Edited Album".into(),
@@ -1680,17 +1692,21 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
             year: Some(2025),
             is_compilation: Some(true),
             favorite: Some(false),
+            artists: vec![library::ArtistInput {
+                object_id: "artist-a".into(),
+                name: "Edited Artist".into(),
+                ..Default::default()
+            }],
+            genres: vec![library::GenreInput {
+                object_id: "genre".into(),
+                name: "Rock".into(),
+                ..Default::default()
+            }],
+            release_types: vec!["Album".into()],
             ..Default::default()
         }])
         .await
         .expect("refresh Album metadata");
-        scan.write_album_relations(
-            &[("album-a", "artist-a")],
-            &[("album-a", "genre")],
-            &[("album-a", "Album")],
-        )
-        .await
-        .unwrap();
         scan.write_artists(&[&library::ArtistInput {
             object_id: "artist-a".into(),
             name: "Edited Artist".into(),

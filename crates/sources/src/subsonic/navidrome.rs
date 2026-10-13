@@ -561,12 +561,9 @@ fn album_from_navidrome(
         is_compilation: Some(boolean(&album["compilation"]).unwrap_or_default()),
         musicbrainz_release_id: clean_optional(field(album, "mbzAlbumId")),
         musicbrainz_release_group_id: clean_optional(field(album, "mbzReleaseGroupId")),
-        relations: Some(library::AlbumRelationsInput {
-            album_artists,
-            genres: genre_credits(source, &album["genres"]),
-            release_types: normalize_release_types(tag_values(&album["tags"], "releasetype")),
-            ..Default::default()
-        }),
+        album_artists,
+        genres: genre_credits(source, &album["genres"]),
+        release_types: normalize_release_types(tag_values(&album["tags"], "releasetype")),
         ..Default::default()
     })
 }
@@ -692,12 +689,10 @@ fn track_from_navidrome(
                 .into_iter()
                 .collect(),
         ),
-        relations: Some(library::TrackRelationsInput {
-            artists,
-            album_artists,
-            genres: genre_credits(source, &track["genres"]),
-            moods: super::moods_from_item(source, tag_values(&track["tags"], "mood")),
-        }),
+        artists,
+        album_artists,
+        genres: genre_credits(source, &track["genres"]),
+        moods: super::moods_from_item(source, tag_values(&track["tags"], "mood")),
         ..Default::default()
     }
 }
@@ -860,9 +855,7 @@ mod tests {
         assert_eq!(album.title, "The Album");
         assert_eq!(album.sort_text, "album, the");
         assert_eq!(
-            album.relations.as_ref().unwrap().album_artists[0]
-                .sort_text
-                .as_deref(),
+            album.album_artists[0].sort_text.as_deref(),
             Some("artist, the")
         );
         let track = track_from_navidrome(
@@ -872,12 +865,7 @@ mod tests {
         );
         assert_eq!(track.title, "The Song");
         assert_eq!(track.sort_text, "song, the");
-        assert_eq!(
-            track.relations.as_ref().unwrap().artists[0]
-                .sort_text
-                .as_deref(),
-            Some("artist, the")
-        );
+        assert_eq!(track.artists[0].sort_text.as_deref(), Some("artist, the"));
         let artist = artist_from_navidrome(
             &source,
             "source",
@@ -895,9 +883,7 @@ mod tests {
         assert_eq!(album.title, "The Name");
         assert_eq!(album.sort_text, "name, the");
         assert_eq!(
-            album.relations.as_ref().unwrap().album_artists[0]
-                .sort_text
-                .as_deref(),
+            album.album_artists[0].sort_text.as_deref(),
             Some("artist, the")
         );
         let track = super::super::item::track_from_json(&source, "source", &value)
@@ -1025,17 +1011,12 @@ mod tests {
             Some("22222222-2222-2222-2222-222222222222")
         );
         assert_eq!(
-            album.relations.as_ref().unwrap().album_artists[0]
-                .musicbrainz_artist_id
-                .as_deref(),
+            album.album_artists[0].musicbrainz_artist_id.as_deref(),
             Some("33333333-3333-3333-3333-333333333333")
         );
         assert_eq!(album.release_date.as_deref(), Some("2025-04-03"));
-        assert_eq!(
-            album.relations.as_ref().unwrap().release_types,
-            ["album", "live"]
-        );
-        assert!(album.relations.as_ref().unwrap().artists.is_empty());
+        assert_eq!(album.release_types, ["album", "live"]);
+        assert!(album.artists.is_empty());
         let binding: crate::NativeArtworkBinding =
             serde_json::from_slice(album.artwork_binding.as_deref().unwrap()).unwrap();
         assert_eq!(binding.source_id, crate::SourceId::new("source"));

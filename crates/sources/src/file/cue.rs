@@ -297,7 +297,7 @@ pub(crate) fn cue_track(
         .into_iter()
         .map(|name| media::artist_credit(name, None))
         .collect::<Vec<_>>();
-    track.relations.get_or_insert_default().artists = media::split_names(&track.display_artist)
+    track.artists = media::split_names(&track.display_artist)
         .into_iter()
         .map(|name| media::artist_credit(name, None))
         .collect();
@@ -307,7 +307,7 @@ pub(crate) fn cue_track(
         album.musicbrainz_release_id.as_deref(),
         Some(cue_path),
     );
-    album.relations.get_or_insert_default().album_artists = album_artists;
+    album.album_artists = album_artists;
     track.album_object_id = Some(album.object_id.clone());
     track.title = cue
         .title

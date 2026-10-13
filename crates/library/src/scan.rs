@@ -15,8 +15,8 @@ mod loudness;
 mod playlists;
 mod relations;
 pub use input::{
-    AlbumInput, AlbumRelationsInput, ArtistInput, FolderInput, GenreInput, LoudnessInput,
-    MoodInput, PlaylistEntryInput, PlaylistInput, RecordInput, TrackInput, TrackRelationsInput,
+    AlbumInput, ArtistInput, FolderInput, GenreInput, LoudnessInput, MoodInput, PlaylistEntryInput,
+    PlaylistInput, RecordInput, TrackInput,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -76,24 +76,6 @@ pub struct CachedSource {
     pub display_name: String,
     pub artwork_digest: Vec<u8>,
     pub catalog_complete: bool,
-}
-
-/// One relation fact in a bounded Scan page.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ScanLink<'a> {
-    pub owner_id: &'a str,
-    pub related_id: &'a str,
-    pub position: i64,
-}
-
-impl<'a> ScanLink<'a> {
-    pub const fn new(owner_id: &'a str, related_id: &'a str, position: i64) -> Self {
-        Self {
-            owner_id,
-            related_id,
-            position,
-        }
-    }
 }
 
 /// One acquisition and its identifier and inventory working set.

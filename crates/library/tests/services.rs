@@ -250,16 +250,24 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     input.cue_end_millis = Some(181_000);
     input.loudness_analysis_key = [99; 32];
     input.source_loudness = None;
+    input.artists = vec![library::ArtistInput {
+        object_id: "artist-a".into(),
+        name: "Artist A".into(),
+        ..Default::default()
+    }];
+    input.genres = vec![library::GenreInput {
+        object_id: "genre".into(),
+        name: "Rock".into(),
+        ..Default::default()
+    }];
+    input.moods = vec![library::MoodInput {
+        object_id: "mood".into(),
+        name: "Energetic".into(),
+        sort_text: "energetic".into(),
+    }];
     scan.write_tracks(&[(&input, None)])
         .await
         .expect("refresh Track CUE identity");
-    scan.write_track_relations(
-        &[("track-0", "artist-a")],
-        &[("track-0", "genre")],
-        &[("track-0", "mood")],
-    )
-    .await
-    .unwrap();
     let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
     fixture.database.observe_catalog(move |update| {
         let _ = updates_tx.send(update);

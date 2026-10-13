@@ -328,14 +328,10 @@ impl SubsonicSource {
                     SourceError::Other("OpenSubsonic track offset overflowed".to_string())
                 })?;
                 let mut tracks = Vec::with_capacity(page.len());
-                let mut folder_links = Vec::new();
                 for song in page {
                     let Some(track) = track_from_json(self, scan.source_id(), song)? else {
                         continue;
                     };
-                    if let Some(folder) = folder {
-                        folder_links.push((track.object_id.clone(), folder.object_id.clone()));
-                    }
                     tracks.push(track);
                 }
                 drop(body);
@@ -343,13 +339,14 @@ impl SubsonicSource {
                 emitted += scan
                     .write_tracks(&tracks.iter().map(|track| (track, None)).collect::<Vec<_>>())
                     .await?;
-                scan.write_track_folders(
-                    &folder_links
-                        .iter()
-                        .map(|(track, folder)| library::ScanLink::new(track, folder, 0))
-                        .collect::<Vec<_>>(),
-                )
-                .await?;
+                if let Some(folder) = folder {
+                    scan.write_folders(&[&library::FolderInput {
+                        object_id: folder.object_id.clone(),
+                        tracks: tracks.iter().map(|track| track.object_id.clone()).collect(),
+                        ..Default::default()
+                    }])
+                    .await?;
+                }
                 scan.finish_batch().await?;
                 progress(stage(SourceReadStage::Tracks, emitted));
             }

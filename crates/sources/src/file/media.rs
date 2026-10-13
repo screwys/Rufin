@@ -141,8 +141,9 @@ pub(crate) fn queue_item(scanned: ScannedTrack, uri: String) -> library::QueueIt
     item.musicbrainz_album_id = album.musicbrainz_release_id;
     item.musicbrainz_release_group_id = album.musicbrainz_release_group_id;
     item.primary_artist_musicbrainz_id = track
-        .relations
-        .and_then(|relations| relations.artists.into_iter().next())
+        .artists
+        .into_iter()
+        .next()
         .and_then(|artist| artist.musicbrainz_artist_id);
     item
 }
@@ -620,12 +621,9 @@ fn scanned_track(path: &Path, metadata: AudioMetadata) -> ScannedTrack {
             favorite: Some(false),
             rating: user_rating.map(i64::from),
             audio_properties,
-            relations: Some(library::TrackRelationsInput {
-                artists,
-                genres: genres.clone(),
-                moods,
-                ..Default::default()
-            }),
+            artists,
+            genres: genres.clone(),
+            moods,
             source_loudness: (track_r128_lufs.is_some() || replay_gain_track_db.is_some())
                 .then_some(library::LoudnessInput {
                     integrated_lufs: track_r128_lufs,
@@ -653,12 +651,9 @@ fn scanned_track(path: &Path, metadata: AudioMetadata) -> ScannedTrack {
             musicbrainz_release_group_id,
             is_compilation,
             favorite: Some(false),
-            relations: Some(library::AlbumRelationsInput {
-                album_artists,
-                genres,
-                release_types,
-                ..Default::default()
-            }),
+            album_artists,
+            genres,
+            release_types,
             ..Default::default()
         },
         local_artwork,
@@ -1006,22 +1001,14 @@ mod tests {
             assert_eq!(track.track.sort_text, "a song", "{name}");
             assert_eq!(track.album.title, "The Album", "{name}");
             assert_eq!(track.album.sort_text, "album, the", "{name}");
+            assert_eq!(track.track.artists[0].name, "The Cure", "{name}");
             assert_eq!(
-                track.track.relations.as_ref().unwrap().artists[0].name,
-                "The Cure",
-                "{name}"
-            );
-            assert_eq!(
-                track.track.relations.as_ref().unwrap().artists[0]
-                    .sort_text
-                    .as_deref(),
+                track.track.artists[0].sort_text.as_deref(),
                 Some("cure, the"),
                 "{name}"
             );
             assert_eq!(
-                track.album.relations.as_ref().unwrap().album_artists[0]
-                    .sort_text
-                    .as_deref(),
+                track.album.album_artists[0].sort_text.as_deref(),
                 Some("cure, the"),
                 "{name}"
             );

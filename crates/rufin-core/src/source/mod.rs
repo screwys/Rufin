@@ -4405,17 +4405,11 @@ mod artwork_preparation_tests {
                     track_number: 1,
                     favorite: Some(false),
                     loudness_analysis_key: [0; 32],
+                    folders: Some(vec!["new-folder".into()]),
                     ..Default::default()
                 },
                 None,
             )])
-            .await
-            .unwrap();
-            scan.write_track_folders(&[library::ScanLink {
-                owner_id: "new-track",
-                related_id: "new-folder",
-                position: 0,
-            }])
             .await
             .unwrap();
             scan.finish().await.unwrap();

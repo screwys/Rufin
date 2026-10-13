@@ -98,6 +98,22 @@ pub async fn fixture() -> Fixture {
             ),
             is_compilation: Some(id == "album-a"),
             favorite: Some(false),
+            artists: vec![library::ArtistInput {
+                object_id: (if id == "album-a" {
+                    "artist-a"
+                } else {
+                    "artist-b"
+                })
+                .into(),
+                name: artist.to_owned(),
+                ..Default::default()
+            }],
+            genres: vec![library::GenreInput {
+                object_id: "genre".into(),
+                name: "Rock".into(),
+                ..Default::default()
+            }],
+            release_types: vec![(if id == "album-a" { "Album" } else { "EP" }).into()],
             ..Default::default()
         }])
         .await
@@ -173,26 +189,34 @@ pub async fn fixture() -> Fixture {
                 favorite: Some(favorite),
                 rating: Some(5 + index),
                 loudness_analysis_key: [index as u8 + 1; 32],
+                artists: vec![library::ArtistInput {
+                    object_id: artist.into(),
+                    name: (if artist == "artist-a" {
+                        "Artist A"
+                    } else {
+                        "Artist B"
+                    })
+                    .into(),
+                    ..Default::default()
+                }],
+                genres: vec![library::GenreInput {
+                    object_id: "genre".into(),
+                    name: "Rock".into(),
+                    ..Default::default()
+                }],
+                moods: vec![library::MoodInput {
+                    object_id: "mood".into(),
+                    name: "Energetic".into(),
+                    sort_text: "energetic".into(),
+                }],
+                folders: Some(vec!["folder".into()]),
                 ..Default::default()
             },
             None,
         )])
         .await
         .expect("stage Track");
-        scan.write_track_relations(&[(&id, artist)], &[(&id, "genre")], &[(&id, "mood")])
-            .await
-            .expect("stage Track relations");
-        scan.write_track_folders(&[library::ScanLink::new(&id, "folder", 0)])
-            .await
-            .expect("stage Track Folder");
     }
-    scan.write_album_relations(
-        &[("album-a", "artist-a"), ("album-b", "artist-b")],
-        &[("album-a", "genre"), ("album-b", "genre")],
-        &[("album-a", "Album"), ("album-b", "EP")],
-    )
-    .await
-    .expect("stage Album relations");
     scan.replace_home_section(
         "featured",
         None,

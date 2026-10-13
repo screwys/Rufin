@@ -1385,6 +1385,11 @@ mod tests {
             sort_text: "album".into(),
             artwork_binding: Some(art.to_vec()),
             favorite: Some(false),
+            artists: vec![crate::ArtistInput {
+                object_id: "artist".into(),
+                name: "Artist".into(),
+                ..Default::default()
+            }],
             ..Default::default()
         }])
         .await
@@ -1412,18 +1417,17 @@ mod tests {
                 artwork_binding: Some(art.to_vec()),
                 favorite: Some(false),
                 loudness_analysis_key: [1; 32],
+                artists: vec![crate::ArtistInput {
+                    object_id: "artist".into(),
+                    name: "Artist".into(),
+                    ..Default::default()
+                }],
                 ..Default::default()
             },
             None,
         )])
         .await
         .unwrap();
-        scan.write_track_relations(&[("track", "artist")], &[], &[])
-            .await
-            .unwrap();
-        scan.write_album_relations(&[("album", "artist")], &[], &[])
-            .await
-            .unwrap();
         scan.finish().await.unwrap();
         let uri = crate::source_entity_uri(&crate::SourceId::new("server"), "track", "track");
         source

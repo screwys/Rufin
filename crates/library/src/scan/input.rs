@@ -125,7 +125,10 @@ record_input! {
         pub source_play_count: Option<i64>,
         pub source_skip_count: Option<i64>,
         pub source_last_played: Option<i64>,
-        pub relations: Option<TrackRelationsInput>,
+        pub artists: Vec<ArtistInput>,
+        pub album_artists: Vec<ArtistInput>,
+        pub genres: Vec<GenreInput>,
+        pub moods: Vec<MoodInput>,
         pub source_loudness: Option<LoudnessInput>,
         pub album_loudness: Option<LoudnessInput>,
         pub folders: Option<Vec<String>>,
@@ -162,7 +165,10 @@ macro_rules! album_input {
                 pub artwork_binding: Option<Vec<u8>>,
                 pub favorite: Option<bool>,
                 pub rating: Option<i64>,
-                pub relations: Option<AlbumRelationsInput>,
+                pub artists: Vec<ArtistInput>,
+                pub album_artists: Vec<ArtistInput>,
+                pub genres: Vec<GenreInput>,
+                pub release_types: Vec<String>,
             }
         }
 
@@ -280,14 +286,6 @@ record_input! {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TrackRelationsInput {
-    pub artists: Vec<ArtistInput>,
-    pub album_artists: Vec<ArtistInput>,
-    pub genres: Vec<GenreInput>,
-    pub moods: Vec<MoodInput>,
-}
-
 record_input! {
     #[derive(Eq)]
     MoodInput<'a>(input; source: i64, normalized_name: String);
@@ -325,6 +323,7 @@ record_input! {
     }
     extra {
         pub artwork_binding: Option<Vec<u8>>,
+        pub tracks: Vec<String>,
     }
 }
 
@@ -352,14 +351,6 @@ pub enum RecordInput {
     Genre(GenreInput),
     Folder(FolderInput),
     Playlist(PlaylistInput),
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct AlbumRelationsInput {
-    pub artists: Vec<ArtistInput>,
-    pub album_artists: Vec<ArtistInput>,
-    pub genres: Vec<GenreInput>,
-    pub release_types: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

@@ -88,11 +88,8 @@ pub(super) fn records(
                     favorite: Some(false),
                     rating,
                     first_seen_at: added,
-                    relations: Some(library::AlbumRelationsInput {
-                        artists,
-                        genres: std::mem::take(&mut genres),
-                        ..Default::default()
-                    }),
+                    artists,
+                    genres: std::mem::take(&mut genres),
                     ..Default::default()
                 };
                 RecordInput::Album(input)
@@ -200,12 +197,9 @@ pub(super) fn records(
                     audio_properties,
                     source_loudness,
                     album_loudness,
-                    relations: Some(library::TrackRelationsInput {
-                        artists,
-                        genres: std::mem::take(&mut genres),
-                        moods: moods(item),
-                        ..Default::default()
-                    }),
+                    artists,
+                    genres: std::mem::take(&mut genres),
+                    moods: moods(item),
                     folders,
                     ..Default::default()
                 };

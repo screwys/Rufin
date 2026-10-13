@@ -158,12 +158,9 @@ pub(super) fn album_from_json(
         is_compilation: json::boolean(&album["isCompilation"]),
         musicbrainz_release_id: clean_optional(json::field(album, "musicBrainzId")),
         musicbrainz_release_group_id: None,
-        relations: Some(library::AlbumRelationsInput {
-            album_artists,
-            genres: genre_credits_from_item(source, album),
-            release_types: normalize_release_types(json::strings(&album["releaseTypes"])),
-            ..Default::default()
-        }),
+        album_artists,
+        genres: genre_credits_from_item(source, album),
+        release_types: normalize_release_types(json::strings(&album["releaseTypes"])),
         ..Default::default()
     }))
 }
@@ -253,12 +250,10 @@ pub(super) fn track_from_json(
                 ..Default::default()
             }
         }),
-        relations: Some(library::TrackRelationsInput {
-            artists: artist_credits,
-            album_artists: artist_credits_from_item(source, &song["albumArtists"]),
-            genres: genre_credits_from_item(source, song),
-            moods: moods_from_item(source, json::strings(&song["moods"])),
-        }),
+        artists: artist_credits,
+        album_artists: artist_credits_from_item(source, &song["albumArtists"]),
+        genres: genre_credits_from_item(source, song),
+        moods: moods_from_item(source, json::strings(&song["moods"])),
         ..Default::default()
     }))
 }

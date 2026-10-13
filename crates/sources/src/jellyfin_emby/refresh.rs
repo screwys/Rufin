@@ -284,8 +284,8 @@ impl JellyfinEmbySource {
         }
 
         let folders = self.stage_music_folders(scan, cancelled).await?;
-        for (folder_position, folder_id) in folders.iter().enumerate() {
-            self.stage_music_folder_memberships(scan, folder_id, folder_position as i64, cancelled)
+        for folder_id in &folders {
+            self.stage_music_folder_memberships(scan, folder_id, cancelled)
                 .await?;
         }
 
@@ -449,7 +449,6 @@ impl JellyfinEmbySource {
         &self,
         scan: &mut Scan,
         folder_id: &str,
-        folder_position: i64,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let raw_folder_id = raw_item_id(folder_id).to_string();
@@ -470,16 +469,16 @@ impl JellyfinEmbySource {
             let count = items(&page["Items"]).len();
             let finished = pages.advance(count, field(&page, "TotalRecordCount"))?;
             scan.begin_batch().await?;
-            let track_ids = items(&page["Items"])
-                .into_iter()
-                .filter_map(|item| id(&item["Id"]).map(|raw| self.kind.object_id("track", &raw)))
-                .collect::<Vec<_>>();
-            scan.write_track_folders(
-                &track_ids
+            scan.write_folders(&[&library::FolderInput {
+                object_id: folder_id.to_owned(),
+                tracks: items(&page["Items"])
                     .iter()
-                    .map(|track_id| library::ScanLink::new(track_id, folder_id, folder_position))
-                    .collect::<Vec<_>>(),
-            )
+                    .filter_map(|item| {
+                        id(&item["Id"]).map(|raw| self.kind.object_id("track", &raw))
+                    })
+                    .collect(),
+                ..Default::default()
+            }])
             .await?;
             scan.finish_batch().await?;
             if finished {
