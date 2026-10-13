@@ -152,7 +152,16 @@ async fn point_metadata_preserves_folders_and_complete_memberships_can_clear_the
         let mut scan = Scan::begin_items(&database, "source").await.unwrap();
         track(&mut scan, None, None).await;
         if replace {
-            scan.replace_track_folders(&["track"], &[]).await.unwrap();
+            scan.write_tracks(&[(
+                &library::TrackInput {
+                    object_id: "track".into(),
+                    folders: Some(Vec::new()),
+                    ..Default::default()
+                },
+                None,
+            )])
+            .await
+            .unwrap();
             track(&mut scan, None, None).await;
         }
         let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();

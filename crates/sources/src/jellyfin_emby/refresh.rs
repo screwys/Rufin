@@ -50,7 +50,6 @@ impl JellyfinEmbySource {
     ) -> SourceResult<()> {
         for page in upserts.chunks(crate::source::LIVE_CHANGE_LIMIT) {
             let mut records = Vec::new();
-            let mut track_folders = std::collections::HashMap::new();
             let result: SourceResult<()> = async {
                 for raw_id in page {
                     let mut url = self.item_url(raw_id)?;
@@ -71,7 +70,7 @@ impl JellyfinEmbySource {
                     let item_type = field::<String>(&item, "Type").unwrap_or_default();
                     if item_type.eq_ignore_ascii_case("Audio") {
                         let album_id = id(&item["AlbumId"]);
-                        let track = track_from_item(self.kind, scan.source_id(), &item)?;
+                        let mut track = track_from_item(self.kind, scan.source_id(), &item)?;
                         drop(item);
                         if let Some(album_id) = album_id {
                             let mut album_url = self.item_url(&album_id)?;
@@ -101,13 +100,14 @@ impl JellyfinEmbySource {
                                 }
                             }
                         {
-                            track_folders.insert(
-                                self.kind.object_id("track", raw_id),
-                                folders
-                                    .iter()
-                                    .map(|folder| folder.object_id.clone())
-                                    .collect::<Vec<_>>(),
-                            );
+                            if let Some(track) = &mut track {
+                                track.folders = Some(
+                                    folders
+                                        .iter()
+                                        .map(|folder| folder.object_id.clone())
+                                        .collect(),
+                                );
+                            }
                             records.extend(folders.into_iter().map(library::RecordInput::Folder));
                         }
                         if let Some(track) = track {
@@ -119,19 +119,6 @@ impl JellyfinEmbySource {
                         }
                         drop(item);
                         scan.write_records(&std::mem::take(&mut records)).await?;
-                        let track_folders = std::mem::take(&mut track_folders);
-                        scan.replace_track_folders(
-                            &track_folders.keys().map(String::as_str).collect::<Vec<_>>(),
-                            &track_folders
-                                .iter()
-                                .flat_map(|(track, folders)| {
-                                    folders.iter().enumerate().map(move |(position, folder)| {
-                                        library::ScanLink::new(track, folder, position as i64)
-                                    })
-                                })
-                                .collect::<Vec<_>>(),
-                        )
-                        .await?;
                         self.stage_collection_contents(
                             scan,
                             &crate::SourceCollection::Album(self.kind.object_id("album", raw_id)),
@@ -164,19 +151,6 @@ impl JellyfinEmbySource {
                             ..Default::default()
                         }));
                         scan.write_records(&std::mem::take(&mut records)).await?;
-                        let track_folders = std::mem::take(&mut track_folders);
-                        scan.replace_track_folders(
-                            &track_folders.keys().map(String::as_str).collect::<Vec<_>>(),
-                            &track_folders
-                                .iter()
-                                .flat_map(|(track, folders)| {
-                                    folders.iter().enumerate().map(move |(position, folder)| {
-                                        library::ScanLink::new(track, folder, position as i64)
-                                    })
-                                })
-                                .collect::<Vec<_>>(),
-                        )
-                        .await?;
                         self.stage_playlist_entries(scan, &playlist.id).await?;
                     }
                 }
@@ -184,18 +158,6 @@ impl JellyfinEmbySource {
             }
             .await;
             scan.write_records(&records).await?;
-            scan.replace_track_folders(
-                &track_folders.keys().map(String::as_str).collect::<Vec<_>>(),
-                &track_folders
-                    .iter()
-                    .flat_map(|(track, folders)| {
-                        folders.iter().enumerate().map(move |(position, folder)| {
-                            library::ScanLink::new(track, folder, position as i64)
-                        })
-                    })
-                    .collect::<Vec<_>>(),
-            )
-            .await?;
             result?;
         }
         scan.begin_batch().await?;

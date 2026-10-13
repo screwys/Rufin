@@ -56,11 +56,12 @@ macro_rules! record_input {
                         $((record_input!(@column $field $(, $column)?), record_input!(@value $field $(, $value)?)),)*
                         $((stringify!($derived), $derived_value.to_string()),)*
                     ];
-                    (format!("WITH incoming({}) AS (", parameters.join(",")),
+                    (format!("WITH incoming(ordinal,{}) AS (", parameters.join(",")),
                      format!(") {}", upsert_sql($table, $conflict, &fields, $from)))
                 });
                 let mut query = sqlx::QueryBuilder::new(&SQL.0);
-                query.push_values(rows, |mut row, ($input, $($argument),*)| {
+                query.push_values(rows.into_iter().enumerate(), |mut row, (ordinal, ($input, $($argument),*))| {
+                    row.push_bind(ordinal as i64);
                     $(row.push_bind(record_input!(@binding $input, $field $(, $binding)?));)*
                     $(row.push_bind($parameter);)*
                 });
@@ -143,13 +144,14 @@ macro_rules! album_input {
             context { source, media_uri, normalized_title, first, }
             table "albums", conflict "source_key,object_id", from "FROM incoming LEFT JOIN albums previous
                 ON previous.source_key=incoming.source AND previous.object_id=incoming.object_id
-                JOIN temp.scan_seen seen ON seen.kind='album' AND seen.object_id=incoming.object_id WHERE true";
+                JOIN temp.scan_seen seen ON seen.kind='album' AND seen.object_id=incoming.object_id
+                WHERE incoming.ordinal IN (SELECT MIN(ordinal) FROM incoming GROUP BY object_id)";
             fields {
                 object_id: String,
                 $($first: $first_type; concat!("CASE WHEN incoming.first THEN incoming.", stringify!($first), " ELSE previous.", stringify!($first), " END"),)*
-                $($field: $ty; concat!("CASE WHEN seen.supplied & ", stringify!($bit), "=0 THEN COALESCE(incoming.", stringify!($field), ",previous.", stringify!($field), ") ELSE previous.", stringify!($field), " END"),)*
+                $($field: $ty; concat!("CASE WHEN seen.supplied & ", stringify!($bit), "=0 THEN COALESCE((SELECT candidate.", stringify!($field), " FROM incoming candidate WHERE candidate.object_id=incoming.object_id AND candidate.", stringify!($field), " IS NOT NULL ORDER BY candidate.ordinal LIMIT 1),previous.", stringify!($field), ") ELSE previous.", stringify!($field), " END"),)*
                 is_compilation: Option<bool>; "CASE WHEN previous.album_key IS NULL THEN incoming.is_compilation ELSE previous.is_compilation END",
-                first_seen_at: Option<i64>; "COALESCE(previous.first_seen_at,incoming.first_seen_at)",
+                first_seen_at: Option<i64>; "COALESCE(previous.first_seen_at,(SELECT candidate.first_seen_at FROM incoming candidate WHERE candidate.object_id=incoming.object_id AND candidate.first_seen_at IS NOT NULL ORDER BY candidate.ordinal LIMIT 1))",
             }
             derived {
                 source_key: "incoming.source",
@@ -166,18 +168,6 @@ macro_rules! album_input {
 
         impl AlbumInput {
             pub(super) const RATING: i64 = $rating;
-
-            pub(super) fn merge(&mut self, later: &Self) {
-                $(if self.$field.is_none() { self.$field.clone_from(&later.$field); })*
-                self.first_seen_at = self.first_seen_at.or(later.first_seen_at);
-                self.favorite = later.favorite.or(self.favorite);
-                self.rating = self.rating.filter(|rating| (0..=10).contains(rating))
-                    .or(later.rating.filter(|rating| (0..=10).contains(rating)));
-                if later.artwork_binding.is_some() {
-                    self.artwork_binding.clone_from(&later.artwork_binding);
-                }
-            }
-
 
             pub(super) fn supplied(&self, rating: Option<i64>) -> i64 {
                 $(i64::from(self.$field.is_some()) * $bit |)*
@@ -230,21 +220,32 @@ album_input! {
     rating 128;
 }
 
-const CREDIT_NAME: &str = "CASE WHEN incoming.sort_text IS NULL AND previous.normalized_name=incoming.normalized_name THEN previous.name ELSE incoming.name END";
-const CREDIT_SORT: &str =
-    "COALESCE(incoming.sort_text,previous.sort_text,incoming.normalized_name)";
+const CREDIT_NAME: &str = "COALESCE(
+    (SELECT candidate.name FROM incoming candidate WHERE candidate.object_id=incoming.object_id
+        AND candidate.normalized_name=incoming.normalized_name AND candidate.sort_text IS NOT NULL ORDER BY candidate.ordinal DESC LIMIT 1),
+    CASE WHEN previous.normalized_name=incoming.normalized_name THEN previous.name END,
+    (SELECT candidate.name FROM incoming candidate WHERE candidate.object_id=incoming.object_id
+        AND candidate.normalized_name=incoming.normalized_name ORDER BY candidate.ordinal LIMIT 1))";
+const CREDIT_SORT: &str = "COALESCE((SELECT candidate.sort_text FROM incoming candidate
+    WHERE candidate.object_id=incoming.object_id AND candidate.sort_text IS NOT NULL ORDER BY candidate.ordinal DESC LIMIT 1),
+    previous.sort_text,incoming.normalized_name)";
 
 record_input! {
     #[derive(Eq)]
     ArtistInput<'a>(input; source: i64, media_uri: String, normalized_name: String);
     context { source, media_uri, normalized_name, }
     table "artists", conflict "source_key,object_id", from "FROM incoming LEFT JOIN artists previous
-        ON previous.source_key=incoming.source AND previous.object_id=incoming.object_id WHERE true";
+        ON previous.source_key=incoming.source AND previous.object_id=incoming.object_id
+        WHERE incoming.ordinal IN (SELECT MAX(ordinal) FROM incoming GROUP BY object_id)";
     fields {
         object_id: String,
         name: String; CREDIT_NAME,
         sort_text: Option<String>; CREDIT_SORT,
-        musicbrainz_artist_id: Option<String>; "CASE WHEN incoming.sort_text IS NOT NULL THEN incoming.musicbrainz_artist_id ELSE COALESCE(incoming.musicbrainz_artist_id,previous.musicbrainz_artist_id) END",
+        musicbrainz_artist_id: Option<String>; "CASE WHEN EXISTS(SELECT 1 FROM incoming candidate WHERE candidate.object_id=incoming.object_id
+            AND (candidate.sort_text IS NOT NULL OR candidate.musicbrainz_artist_id IS NOT NULL))
+            THEN (SELECT candidate.musicbrainz_artist_id FROM incoming candidate WHERE candidate.object_id=incoming.object_id
+                AND (candidate.sort_text IS NOT NULL OR candidate.musicbrainz_artist_id IS NOT NULL) ORDER BY candidate.ordinal DESC LIMIT 1)
+            ELSE previous.musicbrainz_artist_id END",
     }
     derived {
         source_key: "incoming.source",
@@ -263,7 +264,8 @@ record_input! {
     GenreInput<'a>(input; source: i64, normalized_name: String);
     context { source, normalized_name, }
     table "genres", conflict "source_key,object_id", from "FROM incoming LEFT JOIN genres previous
-        ON previous.source_key=incoming.source AND previous.object_id=incoming.object_id WHERE true";
+        ON previous.source_key=incoming.source AND previous.object_id=incoming.object_id
+        WHERE incoming.ordinal IN (SELECT MAX(ordinal) FROM incoming GROUP BY object_id)";
     fields {
         object_id: String,
         name: String; CREDIT_NAME,
@@ -286,19 +288,44 @@ pub struct TrackRelationsInput {
     pub moods: Vec<MoodInput>,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct MoodInput {
-    pub object_id: String,
-    pub name: String,
-    pub sort_text: String,
+record_input! {
+    #[derive(Eq)]
+    MoodInput<'a>(input; source: i64, normalized_name: String);
+    context { source, normalized_name, }
+    table "moods", conflict "source_key,object_id", from "FROM incoming
+        WHERE incoming.ordinal IN (SELECT MAX(ordinal) FROM incoming GROUP BY object_id)";
+    fields {
+        object_id: String,
+        name: String,
+        sort_text: String,
+    }
+    derived {
+        source_key: "incoming.source",
+        normalized_name: "incoming.normalized_name",
+    }
+    extra {}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct FolderInput {
-    pub object_id: String,
-    pub name: Option<String>,
-    pub sort_text: Option<String>,
-    pub artwork_binding: Option<Vec<u8>>,
+record_input! {
+    #[derive(Eq)]
+    FolderInput<'a>(input; source: i64, normalized_name: Option<String>);
+    context { source, normalized_name, }
+    table "folders", conflict "source_key,object_id", from "FROM incoming LEFT JOIN folders previous
+        ON previous.source_key=incoming.source AND previous.object_id=incoming.object_id
+        WHERE incoming.ordinal IN (SELECT COALESCE(MAX(CASE WHEN name IS NOT NULL THEN ordinal END),MAX(ordinal)) FROM incoming GROUP BY object_id)";
+    fields {
+        object_id: String,
+        name: Option<String>; "COALESCE(incoming.name,previous.name,incoming.object_id)",
+        sort_text: Option<String>; "CASE WHEN incoming.name IS NOT NULL THEN COALESCE(incoming.sort_text,incoming.normalized_name) ELSE COALESCE(previous.sort_text,incoming.object_id) END",
+    }
+    derived {
+        source_key: "incoming.source",
+        normalized_name: "COALESCE(incoming.normalized_name,previous.normalized_name,incoming.object_id)",
+        indexed: "1",
+    }
+    extra {
+        pub artwork_binding: Option<Vec<u8>>,
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

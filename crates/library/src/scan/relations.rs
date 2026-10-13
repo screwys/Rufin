@@ -44,7 +44,7 @@ impl Scan {
         .await
     }
 
-    pub async fn replace_track_folders(
+    pub(super) async fn replace_track_folders(
         &mut self,
         object_ids: &[&str],
         links: &[ScanLink<'_>],

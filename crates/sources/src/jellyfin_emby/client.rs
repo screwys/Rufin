@@ -177,6 +177,12 @@ impl JellyfinEmbySource {
                                         .await?,
                                 );
                             }
+                            track.folders = album_folders[owner].as_ref().map(|folders| {
+                                folders
+                                    .iter()
+                                    .map(|folder| folder.object_id.clone())
+                                    .collect()
+                            });
                             tracks.push(track);
                         }
                     } else if item["Type"]
@@ -206,30 +212,6 @@ impl JellyfinEmbySource {
             scan.begin_batch().await?;
             scan.write_tracks(&tracks.iter().map(|track| (track, None)).collect::<Vec<_>>())
                 .await?;
-            let track_folders = tracks
-                .iter()
-                .filter_map(|track| {
-                    let owner = track.album_object_id.as_deref().unwrap_or(&track.object_id);
-                    album_folders[owner]
-                        .as_ref()
-                        .map(|folders| (track.object_id.as_str(), folders))
-                })
-                .collect::<Vec<_>>();
-            scan.replace_track_folders(
-                &track_folders
-                    .iter()
-                    .map(|(track, _)| *track)
-                    .collect::<Vec<_>>(),
-                &track_folders
-                    .iter()
-                    .flat_map(|(track, folders)| {
-                        folders.iter().enumerate().map(move |(position, folder)| {
-                            library::ScanLink::new(track, &folder.object_id, position as i64)
-                        })
-                    })
-                    .collect::<Vec<_>>(),
-            )
-            .await?;
             scan.finish_batch().await?;
             if finished {
                 break;

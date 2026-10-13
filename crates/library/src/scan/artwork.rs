@@ -11,16 +11,24 @@ impl Scan {
     ) -> LibraryResult<()> {
         for page in rows.chunks(128) {
             let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
-                "WITH input(kind,object_id,binding,first) AS (",
+                "WITH raw(ordinal,kind,object_id,binding,first) AS (",
             );
-            query.push_values(page, |mut row, (id, binding, first)| {
-                row.push_bind(kind)
-                    .push_bind(*id)
-                    .push_bind(*binding)
-                    .push_bind(*first);
-            });
+            query.push_values(
+                page.iter().enumerate(),
+                |mut row, (ordinal, (id, binding, first))| {
+                    row.push_bind(ordinal as i64)
+                        .push_bind(kind)
+                        .push_bind(*id)
+                        .push_bind(*binding)
+                        .push_bind(*first);
+                },
+            );
             query.push(
-                ") INSERT INTO temp.scan_artwork(kind,object_id,source,binding)
+                "), input AS (SELECT kind,object_id,first,
+                    (SELECT candidate.binding FROM raw candidate WHERE candidate.object_id=raw.object_id
+                        AND candidate.binding IS NOT NULL ORDER BY candidate.ordinal DESC LIMIT 1) binding
+                    FROM raw WHERE ordinal IN (SELECT MIN(ordinal) FROM raw GROUP BY object_id))
+                INSERT INTO temp.scan_artwork(kind,object_id,source,binding)
                 SELECT kind,object_id,binding,binding FROM input WHERE true
                 ON CONFLICT(kind,object_id) DO UPDATE SET
                   source=CASE WHEN (SELECT first FROM input WHERE object_id=excluded.object_id)

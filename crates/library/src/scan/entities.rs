@@ -147,6 +147,14 @@ impl Scan {
                 folders.insert(track_id, entries);
             }
         }
+        albums.sort_by(|left, right| left.object_id.cmp(&right.object_id));
+        albums.dedup();
+        artists.sort_by(|left, right| left.object_id.cmp(&right.object_id));
+        artists.dedup();
+        genres.sort_by(|left, right| left.object_id.cmp(&right.object_id));
+        genres.dedup();
+        moods.sort_by(|left, right| left.object_id.cmp(&right.object_id));
+        moods.dedup();
         self.write_album_rows(&albums).await?;
         self.write_artists(&artists).await?;
         self.write_genres(&genres).await?;
@@ -246,7 +254,12 @@ impl Scan {
             &folders.keys().copied().collect::<Vec<_>>(),
             &folders
                 .iter()
-                .flat_map(|(id, entries)| entries.iter().map(|folder| ScanLink::new(id, folder, 0)))
+                .flat_map(|(id, entries)| {
+                    entries
+                        .iter()
+                        .enumerate()
+                        .map(|(position, folder)| ScanLink::new(id, folder, position as i64))
+                })
                 .collect::<Vec<_>>(),
         )
         .await?;
@@ -338,6 +351,10 @@ impl Scan {
                     );
                 }
             }
+            artists.sort_by(|left, right| left.object_id.cmp(&right.object_id));
+            artists.dedup();
+            genres.sort_by(|left, right| left.object_id.cmp(&right.object_id));
+            genres.dedup();
             self.write_artists(&artists).await?;
             self.write_genres(&genres).await?;
             self.write_album_relations(&artist_links, &genre_links, &release_types)
@@ -348,8 +365,6 @@ impl Scan {
 
     async fn write_album_rows(&mut self, inputs: &[&AlbumInput]) -> LibraryResult<()> {
         for page in inputs.chunks(128) {
-            let mut rows: Vec<AlbumInput> = Vec::new();
-            let mut positions = HashMap::new();
             for input in page {
                 self.require_id("album", &input.object_id)?;
                 self.require_row_bytes(&[
@@ -372,30 +387,19 @@ impl Scan {
                         .as_bytes(),
                     input.artwork_binding.as_deref().unwrap_or_default(),
                 ])?;
-                let (position, supplied) = positions
-                    .entry(input.object_id.as_str())
-                    .or_insert((rows.len(), 0));
-                *supplied |=
-                    input.supplied(input.rating.filter(|rating| (0..=10).contains(rating)));
-                let position = *position;
-                if position == rows.len() {
-                    rows.push((*input).clone());
-                } else {
-                    rows[position].merge(input);
-                }
             }
             let first = self
                 .observe_entities(
                     "album",
-                    &rows
+                    &page
                         .iter()
                         .map(|row| row.object_id.as_str())
                         .collect::<Vec<_>>(),
                 )
                 .await?;
-            let mut metadata = AlbumInput::write_rows(rows.iter().map(|input| {
+            let mut metadata = AlbumInput::write_rows(page.iter().map(|input| {
                 (
-                    input,
+                    *input,
                     self.source,
                     source_entity_uri(&SourceId::new(&self.source_id), "album", &input.object_id),
                     input.title.to_lowercase(),
@@ -407,24 +411,29 @@ impl Scan {
             let source = self.source;
             let facts = || {
                 let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
-                    "WITH input(source,object_id,favorite,rating,supplied) AS (",
+                    "WITH raw(ordinal,source,object_id,favorite,rating,supplied) AS (",
                 );
-                query.push_values(&rows, |mut row, input| {
+                query.push_values(page.iter().enumerate(), |mut row, (ordinal, input)| {
                     let rating = input
                         .rating
                         .filter(|rating| (0..=10).contains(rating))
                         .map(|rating| rating * 10);
-                    row.push_bind(source)
+                    row.push_bind(ordinal as i64)
+                        .push_bind(source)
                         .push_bind(&input.object_id)
                         .push_bind(input.favorite)
                         .push_bind(rating)
-                        .push_bind(positions[input.object_id.as_str()].1);
+                        .push_bind(input.supplied(rating));
                 });
                 query.push(") ");
                 query
             };
             let mut state = facts();
-            state.push("UPDATE albums AS album SET source_favorite=COALESCE(input.favorite,album.source_favorite),
+            state.push(", input AS (SELECT source,object_id,
+                (SELECT candidate.favorite FROM raw candidate WHERE candidate.object_id=raw.object_id AND candidate.favorite IS NOT NULL ORDER BY candidate.ordinal DESC LIMIT 1) favorite,
+                (SELECT candidate.rating FROM raw candidate WHERE candidate.object_id=raw.object_id AND candidate.rating IS NOT NULL ORDER BY candidate.ordinal LIMIT 1) rating
+                FROM raw WHERE ordinal IN (SELECT MIN(ordinal) FROM raw GROUP BY object_id))
+                UPDATE albums AS album SET source_favorite=COALESCE(input.favorite,album.source_favorite),
                 source_rating=CASE WHEN seen.supplied & ").push_bind(AlbumInput::RATING)
                 .push("=0 THEN COALESCE(input.rating,album.source_rating) ELSE album.source_rating END
                 FROM input JOIN temp.scan_seen seen ON seen.kind='album' AND seen.object_id=input.object_id
@@ -435,13 +444,15 @@ impl Scan {
             self.changes.user_data |= self.execute_result(state.build()).await?.rows_affected() > 0;
             let mut supplied = facts();
             supplied.push(
-                "UPDATE temp.scan_seen SET supplied=scan_seen.supplied | input.supplied
-                FROM input WHERE scan_seen.kind='album' AND scan_seen.object_id=input.object_id",
+                "INSERT INTO temp.scan_seen(kind,object_id,supplied)
+                SELECT 'album',object_id,supplied FROM raw WHERE true
+                ON CONFLICT(kind,object_id) DO UPDATE SET supplied=scan_seen.supplied | excluded.supplied
+                WHERE scan_seen.supplied | excluded.supplied <> scan_seen.supplied",
             );
             self.execute(supplied.build()).await?;
             self.remember_artworks(
                 "album",
-                &rows
+                &page
                     .iter()
                     .map(|input| {
                         (
@@ -610,8 +621,6 @@ impl Scan {
     /// Sparse credits leave it absent so they retain the existing artist sort name.
     pub async fn write_artists(&mut self, inputs: &[&ArtistInput]) -> LibraryResult<()> {
         for page in inputs.chunks(128) {
-            let mut rows: Vec<ArtistInput> = Vec::new();
-            let mut positions = HashMap::new();
             for input in page {
                 self.require_id("artist", &input.object_id)?;
                 self.require_row_bytes(&[
@@ -626,51 +635,19 @@ impl Scan {
                         .as_bytes(),
                     input.artwork_binding.as_deref().unwrap_or_default(),
                 ])?;
-                let position = *positions
-                    .entry(input.object_id.as_str())
-                    .or_insert(rows.len());
-                if position == rows.len() {
-                    rows.push((*input).clone());
-                } else {
-                    let row = &mut rows[position];
-                    if input.sort_text.is_some()
-                        || row.name.to_lowercase() != input.name.to_lowercase()
-                    {
-                        row.name.clone_from(&input.name);
-                    }
-                    if input.sort_text.is_some() {
-                        row.sort_text.clone_from(&input.sort_text);
-                        row.musicbrainz_artist_id
-                            .clone_from(&input.musicbrainz_artist_id);
-                        row.rating = input.rating;
-                    } else {
-                        if input.musicbrainz_artist_id.is_some() {
-                            row.musicbrainz_artist_id
-                                .clone_from(&input.musicbrainz_artist_id);
-                        }
-                        row.rating = input
-                            .rating
-                            .filter(|rating| (0..=10).contains(rating))
-                            .or(row.rating);
-                    }
-                    row.favorite = input.favorite.or(row.favorite);
-                    if input.artwork_binding.is_some() {
-                        row.artwork_binding.clone_from(&input.artwork_binding);
-                    }
-                }
             }
             let first = self
                 .observe_entities(
                     "artist",
-                    &rows
+                    &page
                         .iter()
                         .map(|row| row.object_id.as_str())
                         .collect::<Vec<_>>(),
                 )
                 .await?;
-            let mut metadata = ArtistInput::write_rows(rows.iter().map(|input| {
+            let mut metadata = ArtistInput::write_rows(page.iter().map(|input| {
                 (
-                    input,
+                    *input,
                     self.source,
                     source_entity_uri(&SourceId::new(&self.source_id), "artist", &input.object_id),
                     input.name.to_lowercase(),
@@ -681,10 +658,11 @@ impl Scan {
             let source = self.source;
             let facts = || {
                 let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
-                    "WITH input(source,object_id,favorite,rating,full,first) AS (",
+                    "WITH raw(ordinal,source,object_id,favorite,rating,complete,first) AS (",
                 );
-                query.push_values(&rows, |mut row, input| {
-                    row.push_bind(source)
+                query.push_values(page.iter().enumerate(), |mut row, (ordinal, input)| {
+                    row.push_bind(ordinal as i64)
+                        .push_bind(source)
                         .push_bind(&input.object_id)
                         .push_bind(input.favorite)
                         .push_bind(
@@ -700,27 +678,32 @@ impl Scan {
                 query
             };
             let mut state = facts();
-            state.push("UPDATE artists SET source_favorite=COALESCE(input.favorite,source_favorite),
-                source_rating=CASE WHEN input.full THEN input.rating ELSE COALESCE(input.rating,source_rating) END
+            state.push(", input AS (SELECT source,object_id,
+                (SELECT candidate.favorite FROM raw candidate WHERE candidate.object_id=raw.object_id AND candidate.favorite IS NOT NULL ORDER BY candidate.ordinal DESC LIMIT 1) favorite,
+                (SELECT candidate.rating FROM raw candidate WHERE candidate.object_id=raw.object_id AND (candidate.complete OR candidate.rating IS NOT NULL) ORDER BY candidate.ordinal DESC LIMIT 1) rating,
+                EXISTS(SELECT 1 FROM raw candidate WHERE candidate.object_id=raw.object_id AND candidate.complete) AS complete
+                FROM raw WHERE ordinal IN (SELECT MAX(ordinal) FROM raw GROUP BY object_id))
+                UPDATE artists SET source_favorite=COALESCE(input.favorite,source_favorite),
+                source_rating=CASE WHEN input.complete THEN input.rating ELSE COALESCE(input.rating,source_rating) END
                 FROM input WHERE artists.source_key=input.source AND artists.object_id=input.object_id
                   AND ((input.favorite IS NOT NULL AND source_favorite IS NOT input.favorite)
-                    OR ((input.full OR input.rating IS NOT NULL) AND source_rating IS NOT input.rating))");
+                    OR ((input.complete OR input.rating IS NOT NULL) AND source_rating IS NOT input.rating))");
             self.changes.user_data |= self.execute_result(state.build()).await?.rows_affected() > 0;
             let mut unresolved = facts();
             unresolved.push(
                 "INSERT OR IGNORE INTO temp.scan_unresolved_artists
-                SELECT object_id FROM input WHERE first AND favorite IS NULL",
+                SELECT object_id FROM raw WHERE first AND favorite IS NULL",
             );
             self.execute(unresolved.build()).await?;
             let mut resolved = facts();
             resolved.push(
                 "DELETE FROM temp.scan_unresolved_artists WHERE object_id IN
-                (SELECT object_id FROM input WHERE favorite IS NOT NULL)",
+                (SELECT object_id FROM raw WHERE favorite IS NOT NULL)",
             );
             self.execute(resolved.build()).await?;
             self.remember_artworks(
                 "artist",
-                &rows
+                &page
                     .iter()
                     .map(|input| {
                         (
@@ -759,8 +742,6 @@ impl Scan {
 
     pub async fn write_genres(&mut self, inputs: &[&GenreInput]) -> LibraryResult<()> {
         for page in inputs.chunks(128) {
-            let mut rows: Vec<GenreInput> = Vec::new();
-            let mut positions = HashMap::new();
             for input in page {
                 self.require_id("genre", &input.object_id)?;
                 self.require_row_bytes(&[
@@ -770,44 +751,25 @@ impl Scan {
                     input.sort_text.as_deref().unwrap_or_default().as_bytes(),
                     input.artwork_binding.as_deref().unwrap_or_default(),
                 ])?;
-                let position = *positions
-                    .entry(input.object_id.as_str())
-                    .or_insert(rows.len());
-                if position == rows.len() {
-                    rows.push((*input).clone());
-                } else {
-                    let row = &mut rows[position];
-                    if input.sort_text.is_some()
-                        || row.name.to_lowercase() != input.name.to_lowercase()
-                    {
-                        row.name.clone_from(&input.name);
-                    }
-                    if input.sort_text.is_some() {
-                        row.sort_text.clone_from(&input.sort_text);
-                    }
-                    if input.artwork_binding.is_some() {
-                        row.artwork_binding.clone_from(&input.artwork_binding);
-                    }
-                }
             }
             let first = self
                 .observe_entities(
                     "genre",
-                    &rows
+                    &page
                         .iter()
                         .map(|row| row.object_id.as_str())
                         .collect::<Vec<_>>(),
                 )
                 .await?;
             let mut metadata = GenreInput::write_rows(
-                rows.iter()
-                    .map(|input| (input, self.source, input.name.to_lowercase())),
+                page.iter()
+                    .map(|input| (*input, self.source, input.name.to_lowercase())),
             );
             self.changes.metadata |=
                 self.execute_result(metadata.build()).await?.rows_affected() > 0;
             self.remember_artworks(
                 "genre",
-                &rows
+                &page
                     .iter()
                     .map(|input| {
                         (
@@ -825,7 +787,6 @@ impl Scan {
 
     pub async fn write_moods(&mut self, inputs: &[&MoodInput]) -> LibraryResult<()> {
         for page in inputs.chunks(128) {
-            let mut rows = HashMap::new();
             for input in page {
                 self.require_id("mood", &input.object_id)?;
                 self.require_row_bytes(&[
@@ -834,24 +795,19 @@ impl Scan {
                     input.name.to_lowercase().as_bytes(),
                     input.sort_text.as_bytes(),
                 ])?;
-                rows.insert(input.object_id.as_str(), *input);
             }
-            self.observe_entities("mood", &rows.keys().copied().collect::<Vec<_>>())
-                .await?;
-            let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
-                "INSERT INTO moods(source_key,object_id,name,normalized_name,sort_text) ",
+            self.observe_entities(
+                "mood",
+                &page
+                    .iter()
+                    .map(|input| input.object_id.as_str())
+                    .collect::<Vec<_>>(),
+            )
+            .await?;
+            let mut query = MoodInput::write_rows(
+                page.iter()
+                    .map(|input| (*input, self.source, input.name.to_lowercase())),
             );
-            query.push_values(rows.values(), |mut row, input| {
-                row.push_bind(self.source)
-                    .push_bind(&input.object_id)
-                    .push_bind(&input.name)
-                    .push_bind(input.name.to_lowercase())
-                    .push_bind(&input.sort_text);
-            });
-            query.push(" ON CONFLICT(source_key,object_id) DO UPDATE SET
-                name=excluded.name,normalized_name=excluded.normalized_name,sort_text=excluded.sort_text
-                WHERE (moods.name,moods.normalized_name,moods.sort_text)
-                    IS NOT (excluded.name,excluded.normalized_name,excluded.sort_text)");
             self.changes.metadata |= self.execute_result(query.build()).await?.rows_affected() > 0;
         }
         Ok(())
@@ -859,8 +815,6 @@ impl Scan {
 
     pub async fn write_folders(&mut self, inputs: &[&FolderInput]) -> LibraryResult<()> {
         for page in inputs.chunks(128) {
-            let mut rows: Vec<FolderInput> = Vec::new();
-            let mut positions = HashMap::new();
             for input in page {
                 self.require_id("folder", &input.object_id)?;
                 if let Some(name) = &input.name {
@@ -877,27 +831,11 @@ impl Scan {
                         input.artwork_binding.as_deref().unwrap_or_default(),
                     ])?;
                 }
-                let position = *positions
-                    .entry(input.object_id.as_str())
-                    .or_insert(rows.len());
-                if position == rows.len() {
-                    rows.push((*input).clone());
-                } else if input.name.is_some() {
-                    let row = &mut rows[position];
-                    if row.name.is_none() {
-                        row.artwork_binding = None;
-                    }
-                    row.name.clone_from(&input.name);
-                    row.sort_text.clone_from(&input.sort_text);
-                    if input.artwork_binding.is_some() {
-                        row.artwork_binding.clone_from(&input.artwork_binding);
-                    }
-                }
             }
             let first = self
                 .observe_entities(
                     "folder",
-                    &rows
+                    &page
                         .iter()
                         .filter(|row| row.name.is_some())
                         .map(|row| row.object_id.as_str())
@@ -907,41 +845,24 @@ impl Scan {
             let mut references = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
                 "INSERT OR IGNORE INTO temp.scan_seen(kind,object_id,written) ",
             );
-            references.push_values(&rows, |mut row, input| {
+            references.push_values(page, |mut row, input| {
                 row.push_bind("folder")
                     .push_bind(&input.object_id)
                     .push_bind(false);
             });
             self.execute(references.build()).await?;
-            let mut metadata = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
-                "WITH input(source,object_id,name,normalized_name,sort_text) AS (",
-            );
-            metadata.push_values(&rows, |mut row, input| {
-                let normalized = input
-                    .name
-                    .as_deref()
-                    .unwrap_or(&input.object_id)
-                    .to_lowercase();
-                row.push_bind(self.source)
-                    .push_bind(&input.object_id)
-                    .push_bind(&input.name)
-                    .push_bind(normalized.clone())
-                    .push_bind(input.sort_text.clone().unwrap_or(normalized));
-            });
-            metadata.push(") INSERT INTO folders(source_key,object_id,name,normalized_name,sort_text)
-                SELECT source,object_id,COALESCE(name,object_id),CASE WHEN name IS NULL THEN object_id ELSE normalized_name END,
-                    CASE WHEN name IS NULL THEN object_id ELSE sort_text END FROM input WHERE true
-                ON CONFLICT(source_key,object_id) DO UPDATE SET indexed=1,
-                    name=CASE WHEN (SELECT name FROM input WHERE object_id=excluded.object_id) IS NULL THEN folders.name ELSE excluded.name END,
-                    normalized_name=CASE WHEN (SELECT name FROM input WHERE object_id=excluded.object_id) IS NULL THEN folders.normalized_name ELSE excluded.normalized_name END,
-                    sort_text=CASE WHEN (SELECT name FROM input WHERE object_id=excluded.object_id) IS NULL THEN folders.sort_text ELSE excluded.sort_text END
-                WHERE folders.indexed=0 OR ((SELECT name FROM input WHERE object_id=excluded.object_id) IS NOT NULL
-                    AND (folders.name,folders.normalized_name,folders.sort_text) IS NOT (excluded.name,excluded.normalized_name,excluded.sort_text))");
+            let mut metadata = FolderInput::write_rows(page.iter().map(|input| {
+                (
+                    *input,
+                    self.source,
+                    input.name.as_ref().map(|name| name.to_lowercase()),
+                )
+            }));
             self.changes.metadata |=
                 self.execute_result(metadata.build()).await?.rows_affected() > 0;
             self.remember_artworks(
                 "folder",
-                &rows
+                &page
                     .iter()
                     .filter(|input| input.name.is_some())
                     .map(|input| {
